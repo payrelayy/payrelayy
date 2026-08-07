@@ -1,0 +1,17 @@
+{
+  "name": "@payreplayy/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@payreplayy/config": "workspace:*",
+    "@payreplayy/domain": "workspace:*",
+    "fastify": "^5.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run --passWithNoTests"
+  }
+}

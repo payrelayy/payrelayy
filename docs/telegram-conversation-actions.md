@@ -43,10 +43,10 @@ Only the future stateful procedure may write this object. Callers receive an opa
 Before the bot renders an actionable button, a future server-side menu operation must create a
 private, one-time `app.bot_action_capabilities` record. It is bound to the customer identity,
 conversation, controlled action kind, platform, expected conversation version, and a short server
-expiry. It contains only a keyed fingerprint of a random callback secret, never the secret or raw
+expiry. It contains only a keyed fingerprint of an unpredictable HMAC-derived callback secret, never the secret or raw
 callback payload. The capability key is separate from the Telegram transport secret and all
 semantic-input keys. The menu operation itself must be a reviewed consumer of a prior inbound event;
-the bot may only display an opaque value such as `prc1.<capability-id>.<random-secret>`.
+the bot may only display an opaque value such as `prc1.<capability-id>.<hmac-derived-token>`.
 
 For an exact root-menu retry, the API deterministically derives the canonical capability ID and
 opaque callback token from the recorded inbound-event ID with its dedicated capability key. It

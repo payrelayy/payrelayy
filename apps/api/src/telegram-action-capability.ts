@@ -11,7 +11,51 @@ const HMAC_VALUE_PATTERN = /^hmac-sha256-v[1-9][0-9]*:[0-9a-f]{64}$/;
 const COMPACT_PART_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 
 export type TelegramActionSemanticConsumer =
-  'issue_player_registration_capability' | 'start_player_registration';
+  | 'issue_player_registration_capability'
+  | 'start_player_registration'
+  | 'submit_player_registration_input'
+  | 'expire_player_registration_action';
+
+type CapabilityBoundSemanticInput = {
+  readonly consumer: 'issue_player_registration_capability' | 'start_player_registration';
+  readonly originInboundEventId: string;
+  readonly capabilityId: string;
+  readonly tokenFingerprint: string;
+  readonly semanticHmacSecret: string;
+};
+
+export type TelegramConversationVersion = string | number | bigint;
+
+/**
+ * This context must come only from a trusted database result after the future action starts. It
+ * must never be reconstructed from Telegram callback or text content.
+ */
+export interface PlayerRegistrationActionContext {
+  readonly actionId: string;
+  readonly capabilityId: string;
+  readonly expectedConversationVersion: TelegramConversationVersion;
+}
+
+type PlayerIdSubmissionSemanticInput = PlayerRegistrationActionContext & {
+  readonly consumer: 'submit_player_registration_input';
+  readonly originInboundEventId: string;
+  /**
+   * Raw trusted-memory input only. The future private wrapper receives it for independent
+   * database normalization/validation; it must never enter a generic log, audit record, or
+   * callback payload.
+   */
+  readonly playerId: string;
+  readonly semanticHmacSecret: string;
+};
+
+type PlayerIdExpirySemanticInput = PlayerRegistrationActionContext & {
+  readonly consumer: 'expire_player_registration_action';
+  readonly originInboundEventId: string;
+  readonly semanticHmacSecret: string;
+};
+
+export type TelegramActionSemanticHmacInput =
+  CapabilityBoundSemanticInput | PlayerIdSubmissionSemanticInput | PlayerIdExpirySemanticInput;
 
 export interface TelegramActionCapabilityKeys {
   /** API-only 32-byte hexadecimal key; never send it to the bot or database. */
@@ -51,6 +95,55 @@ function requiredHmacValue(value: string, label: string): string {
     throw new Error(`${label} must be a canonical versioned HMAC value.`);
   }
   return value;
+}
+
+function canonicalPlayerIdForSemanticHmac(value: string): string {
+  if (typeof value !== 'string') {
+    throw new Error('The Player ID must be text.');
+  }
+
+  // Match PostgreSQL btrim's default ordinary-space behavior only. Do not lowercase, normalize
+  // Unicode, strip zeros, or validate content here; the future database wrapper remains the
+  // authority that re-normalizes and validates the submitted value.
+  return value.replace(/^ +| +$/g, '');
+}
+
+function canonicalConversationVersion(value: TelegramConversationVersion): string {
+  const maximum = 9_223_372_036_854_775_807n;
+  let parsed: bigint;
+
+  if (typeof value === 'bigint') {
+    parsed = value;
+  } else if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) {
+      throw new Error('The expected conversation version must be a safe integer.');
+    }
+    parsed = BigInt(value);
+  } else if (/^(0|[1-9][0-9]*)$/.test(value)) {
+    parsed = BigInt(value);
+  } else {
+    throw new Error('The expected conversation version must be a canonical nonnegative integer.');
+  }
+
+  if (parsed < 0n || parsed > maximum) {
+    throw new Error('The expected conversation version is outside PostgreSQL bigint range.');
+  }
+
+  return parsed.toString();
+}
+
+function canonicalPlayerRegistrationActionContext(input: PlayerRegistrationActionContext): {
+  readonly actionId: string;
+  readonly capabilityId: string;
+  readonly expectedConversationVersion: string;
+  readonly platformCode: 'kemerbet';
+} {
+  return {
+    actionId: canonicalUuid(input.actionId, 'The Player ID action ID'),
+    capabilityId: canonicalUuid(input.capabilityId, 'The capability ID'),
+    expectedConversationVersion: canonicalConversationVersion(input.expectedConversationVersion),
+    platformCode: 'kemerbet',
+  };
 }
 
 function hmacHex(secret: Buffer, domain: string, value: string): string {
@@ -145,20 +238,42 @@ export function fingerprintTelegramCapabilityToken(
   )}`;
 }
 
-export function createTelegramActionSemanticHmac(input: {
-  readonly consumer: TelegramActionSemanticConsumer;
-  readonly originInboundEventId: string;
-  readonly capabilityId: string;
-  readonly tokenFingerprint: string;
-  readonly semanticHmacSecret: string;
-}): string {
-  const canonicalPayload = JSON.stringify({
+export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHmacInput): string {
+  const basePayload = {
     v: 1,
     consumer: input.consumer,
     originInboundEventId: canonicalUuid(input.originInboundEventId, 'The origin inbound event ID'),
-    capabilityId: canonicalUuid(input.capabilityId, 'The capability ID'),
-    tokenFingerprint: requiredHmacValue(input.tokenFingerprint, 'The capability token fingerprint'),
-  });
+  };
+  let canonicalPayload: string;
+
+  switch (input.consumer) {
+    case 'issue_player_registration_capability':
+    case 'start_player_registration':
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        capabilityId: canonicalUuid(input.capabilityId, 'The capability ID'),
+        tokenFingerprint: requiredHmacValue(
+          input.tokenFingerprint,
+          'The capability token fingerprint',
+        ),
+      });
+      break;
+    case 'submit_player_registration_input':
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        ...canonicalPlayerRegistrationActionContext(input),
+        normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
+      });
+      break;
+    case 'expire_player_registration_action':
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        ...canonicalPlayerRegistrationActionContext(input),
+      });
+      break;
+    default:
+      throw new Error('The Telegram action semantic consumer is invalid.');
+  }
 
   return `hmac-sha256-v1:${hmacHex(
     requiredHmacSecret(input.semanticHmacSecret, 'The action semantic HMAC secret'),

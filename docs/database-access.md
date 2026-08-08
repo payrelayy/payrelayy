@@ -7,10 +7,20 @@ dashboard, and customer device must call the PayReplayy API; none may query `app
 ## Planned server access
 
 The API and worker will use direct PostgreSQL connections from the DigitalOcean VM. Before they
-are enabled, a separate reviewed deployment migration must create least-privilege database roles
-for those services and grant only the operations each service needs. That migration must include
-the applicable RLS policies. Until then, the core schema intentionally has no runtime database
-role with access.
+are enabled, a reviewed migration creates two NOLOGIN group roles: `payreplayy_api` and
+`payreplayy_worker`. Each gets only the current operations it needs and its own RLS policies. The
+worker cannot change configuration, identity, conversations, or audit records. The current API
+role also cannot bootstrap Owners, read the audit log, or change configuration; those capabilities
+will require a separate, reviewed admin role and dashboard boundary.
+
+The API role receives only safe receiver-account display columns. The worker alone can read the
+encrypted receiver/verification references required for authoritative verification. Both roles use
+column-level grants and purpose-specific RLS policies; neither can delete any current `app` table.
+
+Before a service starts, an operator will create a separate login role for that service, grant it
+membership in exactly one group role, and configure the process to assume that group role after
+connecting. This is done outside Git and without sharing a password in chat. Application code
+must never connect as `postgres`, `service_role`, `anon`, or `authenticated`.
 
 The direct connection URL is a server secret. It belongs only in the runtime secret store for the
 API and worker containers. It must never be committed, placed in a shared package, given to the

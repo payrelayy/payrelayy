@@ -91,6 +91,12 @@ constructed by API startup, the runtime login remains `NOLOGIN`, and Telegram in
 disabled. A later reviewed activation stage must reserve the nonce in a committed operation before
 calling the inbox recorder, so recorder failure cannot roll back replay protection.
 
+Stage 13C adds an unconnected API-only adapter for
+`app.record_telegram_private_inbound_event(...)`. It sends only the authenticated private-update
+DTO and the API-generated payload HMAC to that existing procedure, validates the safe result shape,
+and maps database uncertainty to a generic unavailable error. It neither creates a pool nor loads a
+credential, and it must never be called by startup, health, readiness, preflight, or live tests.
+
 Supabase service-role keys are not part of the PayReplayy runtime design and must never be stored
 in this workspace, a bot, a browser profile, or application configuration. A future private
 Storage ingestion/download boundary will be reviewed independently; it must not gain app-schema

@@ -8,11 +8,11 @@ to `false`:
 - `TELEGRAM_BOT_ENABLED` controls long polling in the bot process.
 - `INTERNAL_TELEGRAM_INGRESS_ENABLED` controls registration of the internal API route.
 
-The current application has no direct PostgreSQL runtime login and no database-backed inbox
-recorder. Stage 13B provides a private durable nonce-reservation schema and an unconnected API
-adapter, but no server startup code constructs it. The API therefore refuses to start the ingress
-route in production with its test-only in-memory nonce store, and refuses it in every environment
-unless a recorder is explicitly supplied. Do not enable either setting in a deployed environment.
+The current application has no direct PostgreSQL runtime login. Stages 13B and 13C provide private
+durable nonce-reservation and inbox-recorder adapters, but no server startup code constructs either
+one. The API therefore refuses to start the ingress route in production with its test-only
+in-memory nonce store, and refuses it in every environment unless a recorder is explicitly
+supplied. Do not enable either setting in a deployed environment.
 
 No payment, KemerBet, Player-ID validation, receipt, attachment, or withdrawal action is reachable
 through this transport.
@@ -53,9 +53,10 @@ The API must reserve each accepted nonce atomically through its expiry in a dura
 before recording the event. Stage 13B reserves only a domain-separated SHA-256 digest of the nonce;
 it stores no raw nonce, Telegram event, customer, payment, or credential data. The adapter is
 present but deliberately unconnected. An in-memory implementation exists only for tests and local
-scaffolding; it is rejected in production. The later recorder must call
+scaffolding; it is rejected in production. The unconnected recorder adapter invokes only
 `app.record_telegram_private_inbound_event(...)` with an API-generated, versioned payload HMAC.
-The database update ID remains the durable idempotency key.
+It never reads or writes a base table directly. The database update ID remains the durable
+idempotency key.
 
 With the current 60-second timestamp skew limit, the adapter accepts a reservation window no
 longer than 120 seconds. The database permits up to three minutes only to tolerate normal API and
@@ -87,8 +88,8 @@ production launch blocker.
 
 ## Remaining launch gates
 
-1. Provision the API runtime login and a narrow recorder implementation for the private inbox
-   procedure.
+1. Provision the API runtime login and wire the reviewed narrow recorder adapter to the private
+   inbox procedure.
 2. Wire the reviewed durable, cross-replica atomic nonce reservation adapter only alongside that
    reviewed recorder and a private deployment boundary.
 3. Add a durable bot outbox before relying on automatic delivery beyond the two immediate attempts.

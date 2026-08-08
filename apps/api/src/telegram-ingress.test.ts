@@ -283,6 +283,31 @@ describe('private Telegram ingress', () => {
     await app.close();
   });
 
+  it('waits for nonce reservation to complete before it calls the inbox recorder', async () => {
+    const callOrder: string[] = [];
+    const app = buildApp(enabledApiConfig(), {
+      now: () => fixedNow,
+      telegramIngressNonceStore: {
+        durable: true,
+        reserve: async () => {
+          callOrder.push('reserve-start');
+          await Promise.resolve();
+          callOrder.push('reserve-end');
+          return true;
+        },
+      },
+      telegramPrivateInboundRecorder: {
+        record: async () => {
+          callOrder.push('record');
+        },
+      },
+    });
+
+    expect((await app.inject(signedIngressRequest())).statusCode).toBe(204);
+    expect(callOrder).toEqual(['reserve-start', 'reserve-end', 'record']);
+    await app.close();
+  });
+
   it('rejects duplicate authentication headers before parsing or reserving a nonce', async () => {
     const rawBody = Buffer.from(JSON.stringify(event), 'utf8');
     const signature = createTelegramIngressSignatureForTest(

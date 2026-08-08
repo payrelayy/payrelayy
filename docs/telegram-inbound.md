@@ -46,18 +46,19 @@ delivery retry.
 
 The signed private bot-to-API transport scaffold now exists. It forwards only the allowlisted
 metadata above, authenticates exact request bytes before parsing, and is disabled by default. A
-private durable nonce-reservation schema and API adapter now exist but are not wired to server
-startup; they retain only a short-lived nonce digest and have no inbox side effect. The transport
-cannot be enabled in production until a narrow database recorder and reviewed private deployment
-boundary exist. See [telegram-transport.md](telegram-transport.md) for the precise boundary,
-secrets, retry behavior, and key-rotation limitation.
+private durable nonce-reservation schema and an API-only inbox-recorder adapter now exist but are
+not wired to server startup. The nonce layer retains only a short-lived digest; the recorder can
+call only this procedure with allowlisted metadata and never reads a base table. The transport
+cannot be enabled in production until a reviewed runtime credential, private deployment boundary,
+and durable outbox exist. See [telegram-transport.md](telegram-transport.md) for the precise
+boundary, secrets, retry behavior, and key-rotation limitation.
 
 The remaining gates are:
 
 1. Configure a separate API runtime login and a separate bot runtime secret set; neither may
    receive the other service's credentials.
-2. Wire the reviewed durable cross-replica nonce guard only with a narrow recorder that calls this
-   inbox procedure.
+2. Wire the reviewed durable cross-replica nonce guard and recorder only together, with separate
+   committed database operations in that order.
 3. Add a shared, conversation-aware inbound-action/CAS boundary before interpreting customer
    actions. It must become the global exactly-once receipt, not restore generic table DML. See
    [telegram-conversation-actions.md](telegram-conversation-actions.md).

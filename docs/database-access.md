@@ -36,13 +36,45 @@ conversations, or audit events; later procedures must handle conversation compar
 inbound-event completion without restoring broad DML grants.
 
 Before a service starts, an operator will create a separate login role for that service, grant it
-membership in exactly one group role, and configure the process to assume that group role after
-connecting. This is done outside Git and without sharing a password in chat. Application code
-must never connect as `postgres`, `service_role`, `anon`, or `authenticated`.
+membership in exactly one group role, and let it inherit only that group role's approved
+privileges. The runtime login must not be able to `SET ROLE`. This is done outside Git and without
+sharing a password in chat. Application code must never connect as `postgres`, `service_role`,
+`anon`, or `authenticated`.
 
 The direct connection URL is a server secret. It belongs only in the runtime secret store for the
 API and worker containers. It must never be committed, placed in a shared package, given to the
 bot or executor, or displayed in logs.
+
+## Stage 13A API connection preflight
+
+The current database connection code is deliberately a manual, read-only preflight only. It does
+not run when the API server starts and it does not change `/readyz`, Telegram ingress, polling,
+Player-ID processing, payment verification, or financial actions.
+
+The database migration creates `payreplayy_api_runtime` as a `NOLOGIN` role without a password.
+It inherits only the existing `payreplayy_api` group privileges, cannot administer or switch roles,
+and is unusable until a separate deployment procedure enables a generated login credential. That
+credential belongs exclusively in the API container secret environment.
+
+When a dedicated API runtime login has been provisioned, an operator may explicitly run:
+
+```text
+pnpm --filter @payreplayy/api db:preflight
+```
+
+only with `INTERNAL_POSTGRES_RUNTIME_ENABLED=true` and an API-only TLS database URL. The command
+opens a short `READ ONLY` transaction, sets local timeouts and a `pg_catalog` search path, checks
+only boolean capability facts, rolls the transaction back, and closes its pool. It verifies that
+the connection resolved to the designated non-admin runtime login, has exactly the expected
+non-switchable API-group membership, can execute the inbox recorder, has no direct privilege of
+any kind on identity, inbox, conversation, or audit tables, and still cannot execute any Player-ID
+action wrapper. It never logs a connection URL, database username, SQL text, or database error
+detail.
+
+For the DigitalOcean VM, use the current direct PostgreSQL connection when its supported network
+path is available; otherwise use the Supabase session pooler for the long-lived API process. Take
+the exact dedicated-login URL from the project Connect panel rather than constructing it by hand.
+The transaction pooler is not the default for this persistent process.
 
 Supabase service-role keys are not part of the PayReplayy runtime design and must never be stored
 in this workspace, a bot, a browser profile, or application configuration. A future private

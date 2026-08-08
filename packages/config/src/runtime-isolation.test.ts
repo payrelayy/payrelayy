@@ -150,6 +150,103 @@ describe('runtime configuration isolation', () => {
     expect(loadBotConfig(environment).telegram).toEqual({ enabled: false, token: undefined });
   });
 
+  it('does not read the database URL when the API database preflight is disabled', () => {
+    const environment = new Proxy(
+      { NODE_ENV: 'test', INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false' },
+      {
+        get(target, property, receiver) {
+          if (property === 'DATABASE_URL') {
+            throw new Error('disabled database preflight must not read DATABASE_URL');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(loadApiConfig(environment).postgresRuntime).toEqual({
+      enabled: false,
+      connection: undefined,
+      tlsMode: undefined,
+    });
+  });
+
+  it('loads a TLS-protected dedicated API runtime URL only when explicitly enabled', () => {
+    const connectionString =
+      'postgresql://payreplayy_api_runtime:example-only@db.example.test/postgres?sslmode=verify-full';
+    const config = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+      DATABASE_URL: connectionString,
+    });
+
+    expect(config.postgresRuntime).toEqual({
+      enabled: true,
+      connection: {
+        database: 'postgres',
+        host: 'db.example.test',
+        password: 'example-only',
+        port: 5432,
+        user: 'payreplayy_api_runtime',
+      },
+      tlsMode: 'verify-full',
+    });
+    expect(JSON.stringify(redactedApiConfigForLog(config))).not.toContain(connectionString);
+    expect(redactedApiConfigForLog(config).postgresRuntime).toEqual({
+      enabled: true,
+      connectionConfigured: true,
+      tlsMode: 'verify-full',
+    });
+  });
+
+  it('accepts only the recognized Supavisor session-pooler login form', () => {
+    const config = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+      DATABASE_URL:
+        'postgresql://payreplayy_api_runtime.abcdefghijklmnopqrst:example-only@aws-0-us-east-1.pooler.supabase.com/postgres?sslmode=verify-full',
+    });
+
+    expect(config.postgresRuntime).toMatchObject({
+      enabled: true,
+      connection: {
+        host: 'aws-0-us-east-1.pooler.supabase.com',
+        user: 'payreplayy_api_runtime.abcdefghijklmnopqrst',
+      },
+    });
+  });
+
+  it('rejects missing, untrusted, or elevated API database connection URLs', () => {
+    expect(() =>
+      loadApiConfig({ NODE_ENV: 'test', INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true' }),
+    ).toThrow('DATABASE_URL is required');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL: 'postgresql://payreplayy_api_runtime:example@db.example.test/postgres',
+      }),
+    ).toThrow('only sslmode=verify-full');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL:
+          'postgresql://%70ostgres:example@db.example.test/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('dedicated PayReplayy API runtime login');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL:
+          'postgresql://payreplayy_api_runtime:example@db.example.test/postgres?sslmode=verify-full&user=postgres',
+      }),
+    ).toThrow('only sslmode=verify-full');
+  });
+
   it('requires a token before an enabled bot can start', () => {
     expect(() => loadBotConfig({ NODE_ENV: 'test', TELEGRAM_BOT_ENABLED: 'true' })).toThrow(
       'TELEGRAM_BOT_TOKEN is required',

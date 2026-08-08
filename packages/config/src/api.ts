@@ -36,12 +36,35 @@ export type ApiTelegramActionCapabilityConfig =
       readonly semanticHmacSecret: string;
     };
 
+/**
+ * This is an explicit operator-only gate for the API database preflight. Enabling it never
+ * enables a Fastify route, Telegram polling, Player-ID processing, or financial action.
+ */
+export type ApiPostgresRuntimeConfig =
+  | {
+      readonly enabled: false;
+      readonly connection: undefined;
+      readonly tlsMode: undefined;
+    }
+  | {
+      readonly enabled: true;
+      readonly connection: {
+        readonly database: 'postgres';
+        readonly host: string;
+        readonly password: string;
+        readonly port: 5432;
+        readonly user: string;
+      };
+      readonly tlsMode: 'verify-full';
+    };
+
 export interface ApiConfig extends RuntimeConfig {
   readonly financialActionsMode: FinancialActionsMode;
   readonly api: {
     readonly host: string;
     readonly port: number;
   };
+  readonly postgresRuntime: ApiPostgresRuntimeConfig;
   readonly telegramIngress: ApiTelegramIngressConfig;
   readonly telegramActionCapability: ApiTelegramActionCapabilityConfig;
 }
@@ -53,6 +76,111 @@ function portFromEnv(value: string | undefined): number {
     throw new Error(`API_PORT must be an integer from 1 to 65535, received '${value}'.`);
   }
   return parsed;
+}
+
+const API_DATABASE_RUNTIME_ROLE = 'payreplayy_api_runtime';
+const SUPABASE_PROJECT_REFERENCE_PATTERN = /^[a-z0-9]{20}$/;
+
+function decodeDatabaseUrlComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new Error('DATABASE_URL must contain valid percent-encoded connection components.');
+  }
+}
+
+function resolveApiDatabaseRuntimeUser(connectionUrl: URL): string {
+  const user = decodeDatabaseUrlComponent(connectionUrl.username);
+  if (user === API_DATABASE_RUNTIME_ROLE) {
+    return user;
+  }
+
+  const sessionPoolerPrefix = `${API_DATABASE_RUNTIME_ROLE}.`;
+  const sessionPoolerProjectReference = user.startsWith(sessionPoolerPrefix)
+    ? user.slice(sessionPoolerPrefix.length)
+    : undefined;
+  if (
+    connectionUrl.hostname.endsWith('.pooler.supabase.com') &&
+    sessionPoolerProjectReference !== undefined &&
+    SUPABASE_PROJECT_REFERENCE_PATTERN.test(sessionPoolerProjectReference)
+  ) {
+    return user;
+  }
+
+  throw new Error('DATABASE_URL must use the dedicated PayReplayy API runtime login.');
+}
+
+function loadApiPostgresRuntimeConfig(environment: NodeJS.ProcessEnv): ApiPostgresRuntimeConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_POSTGRES_RUNTIME_ENABLED,
+    false,
+    'INTERNAL_POSTGRES_RUNTIME_ENABLED',
+  );
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      connection: undefined,
+      tlsMode: undefined,
+    };
+  }
+
+  const connectionString = environment.DATABASE_URL;
+  if (connectionString === undefined || connectionString === '') {
+    throw new Error('DATABASE_URL is required when INTERNAL_POSTGRES_RUNTIME_ENABLED=true.');
+  }
+
+  let connectionUrl: URL;
+  try {
+    connectionUrl = new URL(connectionString);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL.');
+  }
+
+  if (connectionUrl.protocol !== 'postgres:' && connectionUrl.protocol !== 'postgresql:') {
+    throw new Error('DATABASE_URL must use the postgres or postgresql protocol.');
+  }
+
+  if (
+    connectionUrl.hostname === '' ||
+    connectionUrl.username === '' ||
+    connectionUrl.password === ''
+  ) {
+    throw new Error('DATABASE_URL must include a host and a dedicated runtime login password.');
+  }
+
+  if (connectionUrl.port !== '' && connectionUrl.port !== '5432') {
+    throw new Error(
+      'DATABASE_URL must use port 5432 for a direct or Supavisor session connection.',
+    );
+  }
+
+  const queryKeys = Array.from(connectionUrl.searchParams.keys());
+  if (
+    queryKeys.length !== 1 ||
+    queryKeys[0] !== 'sslmode' ||
+    connectionUrl.searchParams.get('sslmode') !== 'verify-full' ||
+    connectionUrl.hash !== ''
+  ) {
+    throw new Error('DATABASE_URL must contain only sslmode=verify-full.');
+  }
+
+  const database = decodeDatabaseUrlComponent(connectionUrl.pathname.slice(1));
+  if (database !== 'postgres') {
+    throw new Error('DATABASE_URL must target the PayReplayy PostgreSQL database.');
+  }
+
+  return {
+    enabled: true,
+    connection: {
+      database: 'postgres',
+      host: connectionUrl.hostname,
+      password: decodeDatabaseUrlComponent(connectionUrl.password),
+      port: 5432,
+      user: resolveApiDatabaseRuntimeUser(connectionUrl),
+    },
+    tlsMode: 'verify-full',
+  };
 }
 
 function loadApiTelegramIngressConfig(environment: NodeJS.ProcessEnv): ApiTelegramIngressConfig {
@@ -144,6 +272,7 @@ function assertDistinctApiTelegramHmacSecrets(
 }
 
 export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
+  const postgresRuntime = loadApiPostgresRuntimeConfig(environment);
   const telegramIngress = loadApiTelegramIngressConfig(environment);
   const telegramActionCapability = loadApiTelegramActionCapabilityConfig(environment);
   assertDistinctApiTelegramHmacSecrets(telegramIngress, telegramActionCapability);
@@ -155,6 +284,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       host: environment.API_HOST ?? '127.0.0.1',
       port: portFromEnv(environment.API_PORT),
     },
+    postgresRuntime,
     telegramIngress,
     telegramActionCapability,
   };
@@ -162,8 +292,13 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
 
 export function redactedApiConfigForLog(config: ApiConfig): Omit<
   ApiConfig,
-  'telegramIngress' | 'telegramActionCapability'
+  'postgresRuntime' | 'telegramIngress' | 'telegramActionCapability'
 > & {
+  readonly postgresRuntime: {
+    readonly enabled: boolean;
+    readonly connectionConfigured: boolean;
+    readonly tlsMode: 'verify-full' | undefined;
+  };
   readonly telegramIngress: { readonly enabled: boolean; readonly secretsConfigured: boolean };
   readonly telegramActionCapability: {
     readonly enabled: boolean;
@@ -175,6 +310,11 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     logLevel: config.logLevel,
     financialActionsMode: config.financialActionsMode,
     api: config.api,
+    postgresRuntime: {
+      enabled: config.postgresRuntime.enabled,
+      connectionConfigured: config.postgresRuntime.enabled,
+      tlsMode: config.postgresRuntime.tlsMode,
+    },
     telegramIngress: {
       enabled: config.telegramIngress.enabled,
       secretsConfigured: config.telegramIngress.enabled,

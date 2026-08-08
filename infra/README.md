@@ -2,10 +2,10 @@
 
 ## Current state
 
-The London VM is intentionally not a PayReplayy server yet. It exposes only SSH, has no deployed
-PayReplayy repository or service, and has no public HTTP(S) listener. Stage 14A adds a local,
-inspectable API container contract only; it does not create a VM directory, run a container, load a
-credential, or enable Telegram, database access, KemerBet, or financial behavior.
+The London VM is intentionally not a PayReplayy runtime server yet. It exposes only SSH and has no
+running PayReplayy service or public HTTP(S) listener. It may hold a sealed source release and a
+locally built inactive API image solely for build validation. Stage 14A does not run a container,
+load a credential, or enable Telegram, database access, KemerBet, or financial behavior.
 
 The repository provides:
 
@@ -20,6 +20,10 @@ The repository provides:
 The API container is deliberately read-only, has all Linux capabilities dropped, uses a small
 temporary filesystem, and uses `/healthz` only. `/readyz` remains a deliberate `503` until database
 readiness is separately implemented.
+
+[`operations/inactive-vm-runbook.md`](operations/inactive-vm-runbook.md) records the required
+inactive-state evidence, backup acceptance criteria, incident-stop boundary, and the go/no-go
+checklist for any later private staging proposal.
 
 ## Validation only
 

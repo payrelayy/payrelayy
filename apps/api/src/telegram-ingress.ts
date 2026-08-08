@@ -9,6 +9,7 @@ import {
   TELEGRAM_PRIVATE_INGRESS_MAX_TIMESTAMP_SKEW_SECONDS,
   TELEGRAM_PRIVATE_INGRESS_PATH,
   telegramPrivateIngressSignatureInput,
+  type TelegramInboundLocale,
   type TelegramPrivateInboundEvent,
 } from '@payreplayy/contracts';
 
@@ -146,6 +147,14 @@ function validUsername(value: unknown): string | null | undefined {
   return value;
 }
 
+/**
+ * `am` is accepted only while older bot instances may still send the prior wire value. It is
+ * normalized before the event is recorded or included in its HMAC; it is not a supported locale.
+ */
+function normalizedInboundLocale(value: unknown): TelegramInboundLocale | undefined {
+  return value === 'en' || value === 'am' ? 'en' : undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -170,10 +179,7 @@ function parseTelegramPrivateInboundEvent(
   const firstName = validProfileText(parsed.firstName, true);
   const lastName = validProfileText(parsed.lastName, false);
   const username = validUsername(parsed.username);
-  const preferredLocale =
-    parsed.preferredLocale === 'en' || parsed.preferredLocale === 'am'
-      ? parsed.preferredLocale
-      : undefined;
+  const preferredLocale = normalizedInboundLocale(parsed.preferredLocale);
 
   if (
     parsed.version !== 1 ||

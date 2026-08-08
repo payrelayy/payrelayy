@@ -48,7 +48,7 @@ environment file.
 | `packages/domain`    | Money rules, state machines, limits, idempotency reason codes                 |
 | `packages/contracts` | Provider, executor, notifier, and storage interfaces                          |
 | `packages/config`    | Safe environment parsing and feature switches                                 |
-| `packages/i18n`      | Shared English and Amharic message keys                                       |
+| `packages/i18n`      | Shared English message keys and safe locale normalization                     |
 
 ## Local development
 

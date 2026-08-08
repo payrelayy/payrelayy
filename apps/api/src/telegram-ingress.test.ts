@@ -95,6 +95,48 @@ describe('private Telegram ingress', () => {
     await app.close();
   });
 
+  it('accepts only the legacy exact am wire value and normalizes it to English before recording', async () => {
+    const recorded: TelegramPrivateInboundRecord[] = [];
+    const app = buildApp(enabledApiConfig(), {
+      now: () => fixedNow,
+      telegramPrivateInboundRecorder: {
+        record: async (input) => {
+          recorded.push(input);
+        },
+      },
+    });
+    const rawBody = Buffer.from(JSON.stringify({ ...event, preferredLocale: 'am' }), 'utf8');
+
+    expect((await app.inject(signedIngressRequest(rawBody))).statusCode).toBe(204);
+    expect(recorded).toEqual([
+      {
+        event,
+        payloadHmac: expect.stringMatching(/^hmac-sha256-v1:[0-9a-f]{64}$/),
+      },
+    ]);
+    await app.close();
+  });
+
+  it.each(['am-ET', 'fr', ''])(
+    'rejects a signed non-English locale (%j) before calling the recorder',
+    async (preferredLocale) => {
+      const recorded: TelegramPrivateInboundRecord[] = [];
+      const app = buildApp(enabledApiConfig(), {
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
+        },
+      });
+      const rawBody = Buffer.from(JSON.stringify({ ...event, preferredLocale }), 'utf8');
+
+      expect((await app.inject(signedIngressRequest(rawBody))).statusCode).toBe(401);
+      expect(recorded).toEqual([]);
+      await app.close();
+    },
+  );
+
   it('rejects a replayed nonce before calling the recorder a second time', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
     const app = buildApp(enabledApiConfig(), {

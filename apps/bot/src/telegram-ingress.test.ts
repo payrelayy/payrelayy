@@ -28,7 +28,7 @@ const validMetadata = {
 } satisfies TelegramPrivateMessageMetadata;
 
 describe('Telegram private message reducer', () => {
-  it('keeps only allowlisted private-chat metadata', () => {
+  it('keeps only allowlisted private-chat metadata and falls back to English', () => {
     expect(toTelegramPrivateInboundEvent(validMetadata)).toEqual({
       version: 1,
       updateId: '123456',
@@ -37,9 +37,21 @@ describe('Telegram private message reducer', () => {
       firstName: 'Example',
       lastName: null,
       username: 'example_user',
-      preferredLocale: 'am',
+      preferredLocale: 'en',
     });
   });
+
+  it.each([undefined, 'en', 'en-US', 'am-ET', 'fr', ''])(
+    'uses English for Telegram language code %j',
+    (languageCode) => {
+      expect(
+        toTelegramPrivateInboundEvent({
+          ...validMetadata,
+          from: { ...validMetadata.from, languageCode },
+        }),
+      ).toMatchObject({ preferredLocale: 'en' });
+    },
+  );
 
   const invalidMetadata: readonly TelegramPrivateMessageMetadata[] = [
     {

@@ -1,21 +1,29 @@
-export type Locale = 'en' | 'am';
+/** PayReplayy currently communicates with customers in English only. */
+export type Locale = 'en';
+
+export const DEFAULT_LOCALE: Locale = 'en';
+
+/**
+ * Telegram may provide any BCP 47 language code, but the product has one supported locale.
+ * Keep this normalization at the transport boundary so unsupported codes can never enter the
+ * signed bot-to-API payload as a customer-facing locale.
+ */
+export function normalizeLocale(_languageCode: string | undefined): Locale {
+  return DEFAULT_LOCALE;
+}
 
 export const messages = {
   welcome: {
     en: 'Welcome to PayReplayy. Choose Deposit or Withdrawal to continue.',
-    am: 'እንኳን ወደ PayReplayy በደህና መጡ። ለመቀጠል ገቢ ወይም ወጪ ይምረጡ።',
   },
   privateChatOnly: {
     en: 'For your privacy, please use PayReplayy in a private chat with the bot.',
-    am: 'ለግላዊነትዎ PayReplayyን በቦቱ የግል ውይይት ውስጥ ብቻ ይጠቀሙ።',
   },
   stageZero: {
     en: 'PayReplayy is being prepared. Financial actions are not available yet.',
-    am: 'PayReplayy በዝግጅት ላይ ነው። የገንዘብ እንቅስቃሴዎች እስካሁን አይገኙም።',
   },
   inboxUnavailable: {
     en: 'PayReplayy cannot receive requests right now. Please try again shortly.',
-    am: 'PayReplayy በአሁኑ ጊዜ ጥያቄዎን መቀበል አልቻለም። እባክዎ ትንሽ ቆይተው እንደገና ይሞክሩ።',
   },
 } as const satisfies Record<string, Record<Locale, string>>;
 

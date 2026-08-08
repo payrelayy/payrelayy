@@ -23,7 +23,7 @@ The bot is a private-chat transport only. It reduces a grammY message to this ex
 - Telegram update ID;
 - Telegram user ID and matching private-chat ID;
 - first name, optional last name, optional username; and
-- normalized `en` or `am` locale.
+- the fixed English (`en`) locale, regardless of Telegram's language code.
 
 It never forwards a Telegram `Update`, message text, captions, callback data, media, file IDs,
 payment references, or customer-entered financial data. The reducer rejects non-private chats,

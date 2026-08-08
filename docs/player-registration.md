@@ -121,7 +121,7 @@ claim that the customer owns the account.
   The registration helper remains ungranted; only the later conversation-aware wrapper may be
   granted execution to `payreplayy_api`.
 - The bot never receives database credentials and never invokes KemerBet directly.
-- Display reason-code translations in English and Amharic rather than database errors.
+- Display English reason-code translations rather than database errors.
 
 ## Customer flow after the later transport/action work
 

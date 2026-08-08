@@ -8,6 +8,7 @@ import {
   telegramPrivateIngressSignatureInput,
   type TelegramPrivateInboundEvent,
 } from '@payreplayy/contracts';
+import { normalizeLocale } from '@payreplayy/i18n';
 
 export interface TelegramPrivateMessageMetadata {
   readonly updateId: number;
@@ -60,10 +61,6 @@ function isSafeTelegramIdentifier(value: number, permitsZero: boolean): boolean 
   );
 }
 
-function preferredLocale(languageCode: string | undefined): 'en' | 'am' {
-  return languageCode?.toLowerCase().startsWith('am') ? 'am' : 'en';
-}
-
 /**
  * Reduce a grammY message context to the exact metadata allowed across the process boundary.
  * Message text, captions, media, files, and callbacks are intentionally not part of this input.
@@ -94,7 +91,7 @@ export function toTelegramPrivateInboundEvent(
     firstName: from.firstName,
     lastName: from.lastName ?? null,
     username: from.username ?? null,
-    preferredLocale: preferredLocale(from.languageCode),
+    preferredLocale: normalizeLocale(from.languageCode),
   };
 }
 

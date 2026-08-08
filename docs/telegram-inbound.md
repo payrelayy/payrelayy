@@ -23,7 +23,7 @@ chat. The database cannot prove Telegram chat type by itself.
 Only the API sends these allowlisted values to the procedure:
 
 - Telegram update ID, user ID, and private-chat ID;
-- bounded Telegram profile metadata and normalized `en` or `am` locale; and
+- bounded Telegram profile metadata and the fixed English (`en`) locale; and
 - an API-generated value shaped as `hmac-sha256-v<version>:<64 lowercase hex>`.
 
 The HMAC covers canonical, allowlisted update metadata. It is an integrity and idempotency check;

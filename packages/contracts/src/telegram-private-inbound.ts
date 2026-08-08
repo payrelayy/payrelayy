@@ -14,7 +14,8 @@ export interface TelegramPrivateInboundEvent {
   readonly preferredLocale: TelegramInboundLocale;
 }
 
-export type TelegramInboundLocale = 'en' | 'am';
+/** Telegram ingress carries the product's fixed customer-facing locale, English. */
+export type TelegramInboundLocale = 'en';
 
 export const TELEGRAM_PRIVATE_INGRESS_PATH = '/internal/v1/telegram/private-inbound';
 export const TELEGRAM_PRIVATE_INGRESS_CONTENT_TYPE =

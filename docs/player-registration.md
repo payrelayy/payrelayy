@@ -16,13 +16,13 @@ to submit a Player ID could permanently prevent another person from submitting t
 Player-ID existence does not prove that the Telegram customer controls that KemerBet account.
 Registration must therefore record a customer request, not an ownership claim.
 
-## Proposed private records
+## Applied private records
 
 ### `app.player_registration_requests`
 
 Each row means: "this customer asked PayReplayy to validate this Player ID for this platform."
 
-Suggested immutable identity fields:
+The applied immutable identity fields are:
 
 - `id` UUID primary key;
 - `customer_id` and `platform_id` foreign keys;
@@ -54,9 +54,9 @@ This private event link makes the Telegram action idempotent:
 The link lets the system distinguish a retry of the same Telegram update from a different update
 that repeats the same Player ID. It must not store raw message text.
 
-## Future API-only procedure
+## Current internal helper (ungranted)
 
-The future procedure should be shaped like:
+The applied internal helper is shaped like:
 
 ```text
 app.request_telegram_player_registration(
@@ -79,14 +79,17 @@ Its safe response should contain only:
 The API already has the submitted Player ID, so the procedure does not need to return it. It looks
 up the canonical platform internally from its code; callers must not select arbitrary platform UUIDs.
 
-The initial migration deliberately grants this helper to no runtime role. It remains internal even
+The applied migration deliberately grants this helper to no runtime role. It remains internal even
 after the future conversation-action boundary exists. Only a later composed procedure that proves
-the customer selected the "Add Player ID" flow and that the inbound event is unconsumed may call
-the helper and receive a narrowly scoped API execution grant.
+the customer selected a valid, server-issued "Add Player ID" capability and that the inbound event
+is unconsumed may receive a narrowly scoped API execution grant. Because the current helper owns a
+local event link and updates `inbound_events.processed_at`, that later migration must first split or
+replace it with an ungranted request-create/reuse primitive. The composed wrapper, not this current
+helper, must own global event consumption and the final request-event link.
 
 ## Transaction and lock order
 
-The procedure must use one transaction and this stable order:
+The applied helper uses one transaction and this stable order:
 
 ```text
 inbound event -> Telegram identity/customer -> platform ->
@@ -106,9 +109,9 @@ It must:
 7. reuse an existing request for the same customer/platform/ID, or create a new one; and
 8. create the unique event link and an append-only customer audit event atomically.
 
-The audit event contains request/platform IDs and a reason code only. It must not include the raw
-Player ID, message text, KemerBet response, credentials, or a claim that the customer owns the
-account.
+The audit event contains request/platform IDs and controlled platform-code/status/reuse metadata
+only. It must not include the raw Player ID, message text, KemerBet response, credentials, or a
+claim that the customer owns the account.
 
 ## Access and privacy
 
@@ -122,11 +125,12 @@ account.
 
 ## Customer flow after the later transport/action work
 
-1. A private-chat user selects "Add Player ID."
-2. The future action boundary moves that private conversation to an expiring, server-issued
-   `awaiting_player_id` state.
-3. A later single transaction validates that state, records a non-claiming request, consumes the
-   inbound event, and clears or advances the conversation.
+1. A private-chat user presses an "Add Player ID" button carrying a valid, expiring,
+   server-issued capability.
+2. The future action boundary validates that capability and moves the private conversation to an
+   expiring `awaiting_player_id` state.
+3. A later single transaction validates that state and the new inbound event, records a
+   non-claiming request, consumes the event globally, and clears or advances the conversation.
 4. The bot replies: "Player ID saved - pending validation. It cannot be used for a deposit yet."
 5. A future controlled adapter reports only `exists`, `not_found`, or `review_required`.
 6. Only a separately designed proof/association model may ever promote an ID into a deposit-usable

@@ -1,0 +1,162 @@
+# Telegram conversation actions
+
+## Status: design only
+
+This is the next prerequisite after the inert Player-ID request schema. It must be reviewed before a Telegram callback or text message can start a Player-ID flow. It does not enable the bot, add a database credential, call KemerBet, validate a Player ID, open a deposit, or make a payment.
+
+## Why a shared action boundary is required
+
+One Telegram update must have one durable meaning. The inbox records that a private update arrived, but deliberately does not interpret it or change a conversation. The existing deposit procedures each have their own idempotency record. Without a shared receipt, a future buggy API could use one inbound event for more than one action.
+
+The shared boundary must become the sole consumer of an inbound event before any customer-facing action is enabled. It must also stop a stale button from overwriting a newer conversation state. An inbound-event ID by itself is never proof that the customer selected a particular action.
+
+## First action and state
+
+The only proposed initial action is `begin_player_registration` for KemerBet:
+
+```text
+empty conversation, version N
+  -> awaiting_player_id for KemerBet, version N + 1
+```
+
+The database creates the state, expiry, and opaque action ID. Callers must never provide arbitrary conversation JSON, customer IDs, platform UUIDs, validation results, or expiry timestamps. The current `{}` state is treated as a legacy idle projection; the action migration may convert only that shape to one canonical server-owned idle shape and must reject any unknown non-empty legacy state.
+
+```json
+{
+  "v": 1,
+  "kind": "awaiting_player_id",
+  "platform_code": "kemerbet",
+  "action_id": "opaque UUID",
+  "expires_at": "UTC timestamp"
+}
+```
+
+Only the future stateful procedure may write this object. Callers receive an opaque result, current version, and expiry; they never receive a general conversation-state read.
+
+## Pre-issued action capability
+
+Before the bot renders an actionable button, a future server-side menu operation must create a
+private, one-time `app.telegram_action_capabilities` record. It is bound to the customer identity,
+conversation, controlled action kind, platform, expected conversation version, and a short server
+expiry. It contains only a keyed fingerprint of a random callback secret, never the secret or raw
+callback payload. The capability key is separate from the Telegram transport secret and all
+semantic-input keys. The menu operation itself must be a reviewed consumer of a prior inbound event;
+the bot may only display an opaque value such as `prc1.<capability-id>.<random-secret>`.
+
+When Telegram returns the callback, the API first validates that fixed format in trusted memory and
+computes the capability-token fingerprint. It passes only the opaque capability ID and fingerprint
+to PostgreSQL. The database must lock the capability, prove it belongs to the inbox-derived
+customer/conversation/action/version, reject an expired, revoked, or already-consumed capability,
+and consume it in the same transaction as the action outcome, including a durable
+`active_action_exists` result. A UUID or an inbound-event ID alone is not a valid capability.
+
+The initial start procedure therefore needs this narrow shape:
+
+```text
+app.start_telegram_player_registration_action(
+  origin_inbound_event_id uuid,
+  capability_id uuid,
+  capability_token_fingerprint text
+)
+```
+
+It still does not accept a generic action code, platform, expected version, state object, or action
+ID from Telegram or the API. An exact delivery retry must match the stored consumption receipt; a
+new event that presents a consumed capability is rejected.
+
+## Future private receipt
+
+`app.inbound_event_consumptions` will be an append-only global exactly-once receipt. Its primary key is `origin_inbound_event_id`, linked to `app.inbound_events`.
+
+Each row contains only customer and conversation IDs proven from the inbox identity, controlled
+consumer/action codes, a capability ID/fingerprint where applicable, expected/before/after versions,
+a versioned semantic-input HMAC where applicable, a terminal outcome, opaque flow details for
+success, and safe reason codes/timestamps. It cannot contain raw callback data, a Player ID,
+message text, payment references, or an arbitrary JSON request. The semantic-input HMAC uses a
+dedicated versioned key, separate from the capability and transport keys; an old key version must
+remain usable for exact-retry comparison throughout inbound-event retention.
+
+`app.bot_conversation_actions` will be the durable source of truth for a flow. It will contain an action ID, conversation ID, controlled kind/status, platform ID, expected input kind, origin event, server-generated ten-minute expiry, and terminal timestamps. A partial unique index allows only one `awaiting_input` action per conversation. The conversation JSON is merely its safe projection.
+
+Neither table may store raw callback data, message text, Player IDs, payment references, or arbitrary
+state JSON. RLS stays enabled and forced, with no direct table access for the bot, API, worker, or
+browser clients.
+
+The V1 start procedure resolves KemerBet internally after it has validated the capability's
+controlled platform binding. Future platforms require their own reviewed, allowlisted entry point.
+
+Required lock order:
+
+```text
+inbound event -> customer identity -> customer -> Telegram identity -> active platform -> bot conversation -> action capability -> active action and consumption receipt -> conversation CAS update
+```
+
+Capability issue, revoke, expiry, and consume paths must observe the same conversation-then-
+capability ordering whenever they lock both rows.
+
+After locking the inbound event and its identity, the procedure first looks up the global
+consumption receipt. An exact retry returns its saved opaque result before capability or expiry
+checks see the already-advanced state. A fresh start request while another flow is active becomes
+the durable `active_action_exists` outcome; it must never overwrite the existing flow. A stale or
+expired action is handled lazily under the conversation lock. Missing identity, an invalid
+capability, or internal inconsistency rolls back without consuming the event.
+
+The compare-and-set operation is inside the same transaction:
+
+```text
+UPDATE bot_conversations
+WHERE id = resolved_conversation_id
+  AND version = previous_server_version
+```
+
+On success it writes the consumption receipt, increments the version, marks the inbound event processed, and adds an ID-only audit event. No generic API update grant is allowed.
+
+## Capability and text input
+
+The future bot transport may pass a decoded, tightly allowlisted callback action only after the API
+verifies the opaque server-issued capability described above. The capability is bound to the
+Telegram customer, conversation, action, expiry, and expected version. It is not a database
+credential or raw platform ID.
+
+After the action succeeds, the text-input path uses a _new_ Telegram update and must be one
+transaction. It locks that inbound event and the active action/conversation, proves
+`awaiting_player_id`, expiry, and that the inbound event was received no earlier than the active
+action's server-created timestamp. This prevents a delayed older message from being accepted by a
+later reopened flow. It then sends the Player ID only to a narrow wrapper. That wrapper
+must normalize and validate the Player ID again in PostgreSQL, not rely only on API memory. Its
+global consumption receipt binds an HMAC of the controlled operation, action ID, capability/context,
+expected conversation version, platform, and normalized Player ID. The HMAC is an opaque retry
+discriminator; the database independently compares the normalized ID with the linked registration
+request before returning an exact retry.
+
+The API must never receive direct `EXECUTE` permission for
+`app.request_telegram_player_registration`. The current helper owns a local event link and updates
+`inbound_events.processed_at`, so a later migration must split or replace it with an ungranted
+request-create/reuse primitive that does **not** consume an inbound event. The conversation-aware
+wrapper will own global consumption, the request event link, the audit event, action completion,
+and the conversation CAS in one transaction before any activation.
+
+## Compatibility work before activation
+
+Before any action procedure receives `EXECUTE`, every Telegram-originated procedure must join the
+shared consumption rule. `open_telegram_deposit_intent` and
+`capture_telegram_deposit_reference` currently have API execution grants but each protects only a
+local event link; the action migration must revoke those direct grants before it introduces the
+shared receipt. The current Player-ID helper is already ungranted but also protects only a local
+event link. All three procedures must be refactored and regression-tested before any replacement
+wrapper is granted execution, even though payment verification remains disabled.
+
+The first menu/root-navigation operation must itself become a reviewed receipt consumer that issues
+an action capability. There is no free-text or static callback fallback while such an issuer is
+missing.
+
+Required tests include duplicate delivery, missing/mismatched/revoked/expired capability, changed
+action/HMAC/version, two actions racing for one event, a stale button, an expired flow, arbitrary
+events that never selected "Add Player ID", changed Player-ID input on a retried event, concurrent
+Player-ID messages, and two customers submitting the same Player ID.
+
+## Explicit non-goals
+
+- No polling, webhooks, callbacks, or free-text parsing.
+- No generic API access to inbox or conversation tables.
+- No Player-ID validation, KemerBet action, payment verification, or deposit execution.

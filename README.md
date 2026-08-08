@@ -80,4 +80,6 @@ database-access, provider-verification, and reference-protection boundaries. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and
 [docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.
 See [docs/player-registration.md](docs/player-registration.md) for the forthcoming non-claiming
-Player-ID registration model.
+Player-ID registration model and
+[docs/telegram-conversation-actions.md](docs/telegram-conversation-actions.md) for the required
+conversation/action gate.

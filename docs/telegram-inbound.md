@@ -55,8 +55,10 @@ The remaining gates are:
 1. Configure a separate API runtime login and a separate bot runtime secret set; neither may
    receive the other service's credentials.
 2. Add a durable cross-replica nonce guard and a narrow recorder that calls this inbox procedure.
-3. Add narrow procedures for marking an inbound event processed or failed and for advancing a
-   conversation with an expected version. Do not restore generic table DML.
-4. Add a reviewed, non-claiming Player-ID registration request before any KemerBet validation.
+3. Add a shared, conversation-aware inbound-action/CAS boundary before interpreting customer
+   actions. It must become the global exactly-once receipt, not restore generic table DML. See
+   [telegram-conversation-actions.md](telegram-conversation-actions.md).
+4. Keep the applied, non-claiming Player-ID request helper ungranted until that conversation-aware
+   boundary can invoke it safely before any KemerBet validation.
 5. Keep payment verification, receipt upload, provider lookup, KemerBet execution, and payouts
    disabled until their separate launch gates are satisfied.

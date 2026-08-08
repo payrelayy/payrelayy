@@ -1,0 +1,34 @@
+# Repository and local configuration
+.git
+.github
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Dependencies and generated output
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+.turbo
+.pnpm-store
+
+# Runtime data and developer tooling
+logs
+**/logs
+tmp
+**/tmp
+storage
+**/storage
+playwright
+**/playwright
+.idea
+.vscode
+*.log
+**/*.log
+*.pem
+**/*.pem
+*.key
+**/*.key

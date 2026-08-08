@@ -45,3 +45,14 @@ export function booleanFromEnv(
   if (value === 'false') return false;
   throw new Error(`Expected ${variableName} to be true or false, received '${value}'.`);
 }
+
+/**
+ * HMAC keys are passed as exactly 32 random bytes encoded as lowercase hexadecimal. The value is
+ * intentionally not included in configuration errors or logs.
+ */
+export function requiredHexHmacSecret(value: string | undefined, variableName: string): string {
+  if (!value || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`${variableName} must be a 32-byte lowercase hexadecimal secret.`);
+  }
+  return value;
+}

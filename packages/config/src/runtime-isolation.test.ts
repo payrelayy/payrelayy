@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadApiConfig } from './api.js';
+import { loadApiConfig, redactedApiConfigForLog } from './api.js';
 import { loadBotConfig, redactedBotConfigForLog } from './bot.js';
 import { loadExecutorConfig } from './executor.js';
 import { loadWorkerConfig } from './worker.js';
@@ -13,7 +13,13 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
     },
     {
       get(target, property, receiver) {
-        if (property === 'TELEGRAM_BOT_ENABLED' || property === 'TELEGRAM_BOT_TOKEN') {
+        if (
+          property === 'TELEGRAM_BOT_ENABLED' ||
+          property === 'TELEGRAM_BOT_TOKEN' ||
+          property === 'BOT_TO_API_INGRESS_BASE_URL' ||
+          property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
+          property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET'
+        ) {
           throw new Error(`unexpected Telegram environment read: ${String(property)}`);
         }
         return Reflect.get(target, property, receiver);
@@ -50,19 +56,67 @@ describe('runtime configuration isolation', () => {
 
   it('loads a Telegram token only for an enabled bot and never logs it', () => {
     const token = '123456:example-token-for-test-only';
+    const transportHmacSecret = 'a'.repeat(64);
     const config = loadBotConfig({
       NODE_ENV: 'test',
       TELEGRAM_BOT_ENABLED: 'true',
       TELEGRAM_BOT_TOKEN: token,
+      BOT_TO_API_INGRESS_BASE_URL: 'http://api:3000',
+      BOT_TO_API_INGRESS_HMAC_SECRET: transportHmacSecret,
     });
 
     expect(config.telegram).toEqual({ enabled: true, token });
+    expect(config.apiIngress).toEqual({
+      enabled: true,
+      baseUrl: 'http://api:3000/',
+      transportHmacSecret,
+    });
     expect(redactedBotConfigForLog(config)).toEqual({
       nodeEnv: 'test',
       logLevel: 'info',
       telegram: { enabled: true, tokenConfigured: true },
+      apiIngress: { enabled: true, secretsConfigured: true },
     });
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(token);
+    expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(transportHmacSecret);
+  });
+
+  it('does not read the API-only payload HMAC when the bot is enabled', () => {
+    const environment = new Proxy(
+      {
+        NODE_ENV: 'test',
+        TELEGRAM_BOT_ENABLED: 'true',
+        TELEGRAM_BOT_TOKEN: '123456:test-token',
+        BOT_TO_API_INGRESS_BASE_URL: 'http://api:3000',
+        BOT_TO_API_INGRESS_HMAC_SECRET: 'a'.repeat(64),
+      },
+      {
+        get(target, property, receiver) {
+          if (property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET') {
+            throw new Error('bot must not read the API-only payload HMAC secret');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(loadBotConfig(environment).telegram.enabled).toBe(true);
+  });
+
+  it('restricts the production bot ingress to the private Docker API origin', () => {
+    const common = {
+      NODE_ENV: 'production',
+      TELEGRAM_BOT_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: '123456:test-token',
+      BOT_TO_API_INGRESS_HMAC_SECRET: 'a'.repeat(64),
+    };
+
+    expect(() =>
+      loadBotConfig({ ...common, BOT_TO_API_INGRESS_BASE_URL: 'https://api.example.test/' }),
+    ).toThrow('private Docker API origin');
+    expect(
+      loadBotConfig({ ...common, BOT_TO_API_INGRESS_BASE_URL: 'http://api:3000/' }).apiIngress,
+    ).toMatchObject({ enabled: true, baseUrl: 'http://api:3000/' });
   });
 
   it('does not read a Telegram token when bot polling is disabled', () => {
@@ -71,7 +125,14 @@ describe('runtime configuration isolation', () => {
       {
         get(target, property, receiver) {
           if (property === 'TELEGRAM_BOT_TOKEN') {
-            throw new Error('disabled bot must not read TELEGRAM_BOT_TOKEN');
+            throw new Error('disabled bot must not read a bot-only secret');
+          }
+          if (
+            property === 'BOT_TO_API_INGRESS_BASE_URL' ||
+            property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET'
+          ) {
+            throw new Error('disabled bot must not read an ingress secret');
           }
           return Reflect.get(target, property, receiver);
         },
@@ -85,5 +146,30 @@ describe('runtime configuration isolation', () => {
     expect(() => loadBotConfig({ NODE_ENV: 'test', TELEGRAM_BOT_ENABLED: 'true' })).toThrow(
       'TELEGRAM_BOT_TOKEN is required',
     );
+  });
+
+  it('loads API-only Telegram HMAC keys only when the internal route is explicitly enabled', () => {
+    const transportHmacSecret = 'b'.repeat(64);
+    const payloadHmacSecret = 'c'.repeat(64);
+    const config = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
+      BOT_TO_API_INGRESS_HMAC_SECRET: transportHmacSecret,
+      API_TELEGRAM_PAYLOAD_HMAC_SECRET: payloadHmacSecret,
+    });
+
+    expect(config.telegramIngress).toEqual({
+      enabled: true,
+      transportHmacSecret,
+      payloadHmacSecret,
+    });
+    expect(JSON.stringify(redactedApiConfigForLog(config))).not.toContain(transportHmacSecret);
+    expect(JSON.stringify(redactedApiConfigForLog(config))).not.toContain(payloadHmacSecret);
+  });
+
+  it('requires both API ingress HMAC keys when its route is enabled', () => {
+    expect(() =>
+      loadApiConfig({ NODE_ENV: 'test', INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true' }),
+    ).toThrow('BOT_TO_API_INGRESS_HMAC_SECRET');
   });
 });

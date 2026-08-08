@@ -42,12 +42,19 @@ delivery retry.
 - Customer display names are set only at first registration. Later Telegram profile refreshes
   update only Telegram-owned profile fields.
 
-## Required next gates
+## Transport status and next gates
+
+The signed private bot-to-API transport scaffold now exists. It forwards only the allowlisted
+metadata above, authenticates exact request bytes before parsing, and is disabled by default. It
+cannot be enabled in production until a durable cross-replica nonce guard and the narrow database
+recorder exist. See [telegram-transport.md](telegram-transport.md) for the precise boundary,
+secrets, retry behavior, and key-rotation limitation.
+
+The remaining gates are:
 
 1. Configure a separate API runtime login and a separate bot runtime secret set; neither may
    receive the other service's credentials.
-2. Add a signed, private bot-to-API transport that validates timestamp, nonce, and exact request
-   bytes before parsing an update.
+2. Add a durable cross-replica nonce guard and a narrow recorder that calls this inbox procedure.
 3. Add narrow procedures for marking an inbound event processed or failed and for advancing a
    conversation with an expected version. Do not restore generic table DML.
 4. Add a reviewed, non-claiming Player-ID registration request before any KemerBet validation.

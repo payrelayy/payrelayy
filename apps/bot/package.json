@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@payreplayy/config": "workspace:*",
+    "@payreplayy/contracts": "workspace:*",
     "@payreplayy/i18n": "workspace:*",
     "grammy": "^1.35.0"
   },

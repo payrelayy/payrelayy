@@ -13,6 +13,10 @@ export const messages = {
     en: 'PayReplayy is being prepared. Financial actions are not available yet.',
     am: 'PayReplayy በዝግጅት ላይ ነው። የገንዘብ እንቅስቃሴዎች እስካሁን አይገኙም።',
   },
+  inboxUnavailable: {
+    en: 'PayReplayy cannot receive requests right now. Please try again shortly.',
+    am: 'PayReplayy በአሁኑ ጊዜ ጥያቄዎን መቀበል አልቻለም። እባክዎ ትንሽ ቆይተው እንደገና ይሞክሩ።',
+  },
 } as const satisfies Record<string, Record<Locale, string>>;
 
 export type MessageKey = keyof typeof messages;

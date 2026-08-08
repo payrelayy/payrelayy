@@ -28,6 +28,9 @@ importers:
       '@payreplayy/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@payreplayy/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@payreplayy/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -40,6 +43,9 @@ importers:
       '@payreplayy/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@payreplayy/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@payreplayy/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n

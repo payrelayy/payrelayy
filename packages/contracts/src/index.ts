@@ -1,5 +1,7 @@
 import type { EtbAmount, VerificationReasonCode } from '@payreplayy/domain';
 
+export * from './telegram-private-inbound.js';
+
 /**
  * Values are validated against database-backed registries. They are strings here so a newly
  * enabled platform or payment provider does not require a core-library deployment.

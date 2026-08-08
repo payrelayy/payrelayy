@@ -22,6 +22,8 @@ The current foundation is deliberately safe:
 - a separate private Telegram inbox procedure records only authenticated, allowlisted update metadata
   plus a keyed integrity value; it does not start bot polling, a customer workflow, player
   validation, verification, or any financial action.
+- a signed bot-to-API transport scaffold is disabled by default and is not launchable in production
+  until a durable nonce store and the narrow inbox recorder are deployed.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API and
 worker. Their future DATABASE_URL belongs in the VM runtime secrets, never Git or the bot,
@@ -73,4 +75,5 @@ See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See
-[docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary.
+[docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and
+[docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.

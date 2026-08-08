@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@payreplayy/config": "workspace:*",
+    "@payreplayy/contracts": "workspace:*",
     "@payreplayy/domain": "workspace:*",
     "fastify": "^5.0.0"
   },

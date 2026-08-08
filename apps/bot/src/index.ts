@@ -1,19 +1,15 @@
-import { loadConfig, redactedConfigForLog } from '@payreplayy/config';
+import { loadBotConfig, redactedBotConfigForLog } from '@payreplayy/config/bot';
 import { message, type Locale } from '@payreplayy/i18n';
 import { Bot } from 'grammy';
 
-const config = loadConfig();
+const config = loadBotConfig();
 
 if (!config.telegram.enabled) {
   console.info(
-    { config: redactedConfigForLog(config) },
+    { config: redactedBotConfigForLog(config) },
     'Telegram bot is disabled; no polling will start in Stage 0.',
   );
   process.exit(0);
-}
-
-if (!config.telegram.token) {
-  throw new Error('TELEGRAM_BOT_TOKEN is required when TELEGRAM_BOT_ENABLED=true.');
 }
 
 const bot = new Bot(config.telegram.token);

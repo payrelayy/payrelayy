@@ -19,11 +19,19 @@ The current foundation is deliberately safe:
 - the only current ledger procedures for the API are live-gated: one opens an unverified intent
   and returns frozen display-safe payment instructions, while the other records an already-encrypted
   customer transaction reference without verifying it or exposing ledger tables.
+- a separate private Telegram inbox procedure records only authenticated, allowlisted update metadata
+  plus a keyed integrity value; it does not start bot polling, a customer workflow, player
+  validation, verification, or any financial action.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API and
 worker. Their future DATABASE_URL belongs in the VM runtime secrets, never Git or the bot,
 executor, dashboard, browser profile, or logs. PayReplayy does not place a Supabase service-role
 key in application configuration.
+
+Each runtime has a dedicated configuration entry point. The API, worker, and executor do not
+read or receive `TELEGRAM_BOT_TOKEN`; only the bot runtime reads it, and only when polling is
+explicitly enabled. Deploy with separate per-process secret sets rather than a shared production
+environment file.
 
 ## Planned services
 
@@ -64,4 +72,5 @@ See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs
 [docs/deposit-ledger.md](docs/deposit-ledger.md), and
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
-database-access, provider-verification, and reference-protection boundaries.
+database-access, provider-verification, and reference-protection boundaries. See
+[docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary.

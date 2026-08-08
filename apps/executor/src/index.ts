@@ -1,9 +1,9 @@
-import { loadConfig, redactedConfigForLog } from '@payreplayy/config';
+import { loadExecutorConfig, redactedExecutorConfigForLog } from '@payreplayy/config/executor';
 
-const config = loadConfig();
+const config = loadExecutorConfig();
 const finalActionAllowed = false;
 
 console.info(
-  { config: redactedConfigForLog(config), finalActionAllowed },
+  { config: redactedExecutorConfigForLog(config), finalActionAllowed },
   'KemerBet executor scaffold is ready. It will not open a browser or perform a transfer in Stage 0.',
 );

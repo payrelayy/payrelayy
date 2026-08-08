@@ -27,6 +27,14 @@ Both procedures run only when the payment-verification switch is explicitly live
 configuration procedure still deliberately refuses live, so both remain dormant until a later
 launch review.
 
+The API also has a non-financial app.record_telegram_private_inbound_event procedure. It accepts
+only allowlisted private-Update metadata and an API-generated, versioned payload HMAC; it creates
+or finds the customer Telegram identity, an empty conversation, and an idempotent inbox record.
+It never receives raw Telegram JSON, message text, transaction IDs, files, credentials, or payment
+instructions. The API no longer has direct table access to customer identities, inbound events,
+conversations, or audit events; later procedures must handle conversation compare-and-set and
+inbound-event completion without restoring broad DML grants.
+
 Before a service starts, an operator will create a separate login role for that service, grant it
 membership in exactly one group role, and configure the process to assume that group role after
 connecting. This is done outside Git and without sharing a password in chat. Application code
@@ -55,6 +63,8 @@ separate deployment-only procedure after their Supabase Auth user has been verif
   withdrawal codes, payout destinations, credentials, tokens, or full provider responses.
 - A bot conversation stores only flow state, locale, expiration, and IDs. It must not store a raw
   transaction ID, withdrawal code, payout account, or attachment content.
+- A Telegram inbound record stores an API-generated HMAC and safe update metadata only. It must
+  never store raw message text, callback data, full Telegram JSON, transaction IDs, or file data.
 - Customer submissions and provider results use dedicated private ledger tables with a documented
   retention policy. Receipt uploads remain deferred until a reviewed API-to-private-Storage
   ingestion boundary can validate the object and authorize a download without exposing it.

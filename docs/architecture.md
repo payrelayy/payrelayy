@@ -28,7 +28,7 @@ and database constraints are the source of truth.
 layer is introduced, only the API and worker will receive an isolated direct PostgreSQL runtime
 credential. The bot and executor communicate with the API, not the database.
 
-## Deposit flow
+## Planned deposit flow
 
 1. The bot validates the requested KemerBet Player ID.
 2. It displays the configured TeleBirr or CBE Birr receiver account and records an intake
@@ -41,6 +41,14 @@ credential. The bot and executor communicate with the API, not the database.
    single execution lease. Uncertainty goes to manual review.
 6. Only a confirmed record may be sent to the KemerBet executor. The executor reconciles
    before any retry. Stage 0 cannot perform the final KemerBet transfer.
+
+## Current implementation boundary
+
+The current code stops before Player-ID validation and deposit intake. A private, API-only
+Telegram inbox boundary can create or find a customer identity, empty conversation, and
+idempotent update record using only allowlisted metadata plus an API-generated keyed HMAC.
+It does not receive raw Telegram messages or files, call KemerBet, validate a Player ID,
+show receiver instructions, verify a payment, or change a financial state.
 
 ## Withdrawal boundary
 

@@ -1,10 +1,10 @@
-import { loadConfig, redactedConfigForLog } from '@payreplayy/config';
+import { loadApiConfig, redactedApiConfigForLog } from '@payreplayy/config/api';
 
 import { buildApp } from './app.js';
 
-const config = loadConfig();
+const config = loadApiConfig();
 const app = buildApp(config);
 
-app.log.info({ config: redactedConfigForLog(config) }, 'PayReplayy API starting');
+app.log.info({ config: redactedApiConfigForLog(config) }, 'PayReplayy API starting');
 
 await app.listen({ host: config.api.host, port: config.api.port });

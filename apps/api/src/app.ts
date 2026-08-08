@@ -1,7 +1,7 @@
-import { loadConfig, type AppConfig } from '@payreplayy/config';
+import { loadApiConfig, type ApiConfig } from '@payreplayy/config/api';
 import Fastify from 'fastify';
 
-export function buildApp(config: AppConfig = loadConfig()) {
+export function buildApp(config: ApiConfig = loadApiConfig()) {
   const app = Fastify({
     logger: {
       level: config.logLevel,

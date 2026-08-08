@@ -14,6 +14,11 @@ This repository begins in a deliberately safe state:
 - no provider credential, Supabase key, account number, or customer evidence belongs in Git;
 - the database schema and RLS policies will be added only through reviewed SQL migrations.
 
+The private `app` database schema will use direct PostgreSQL connections only from the API and
+worker. Their future `DATABASE_URL` belongs in the VM runtime secrets, never Git or the bot,
+executor, dashboard, browser profile, or logs. A Supabase service-role key is not an `app` schema
+credential; if later needed for private Storage/Auth administration, it remains API/worker-only.
+
 ## Planned services
 
 | Service              | Responsibility                                                                |
@@ -49,4 +54,5 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
 4. The executor must reconcile wallet/history before retrying an uncertain collection.
 5. External withdrawal payout remains manual in version 1.
 
-See [docs/architecture.md](docs/architecture.md) for the current implementation boundary.
+See [docs/architecture.md](docs/architecture.md) and [docs/database-access.md](docs/database-access.md)
+for the current implementation and database-access boundaries.

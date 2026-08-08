@@ -23,13 +23,11 @@ function preferredLocale(languageCode: string | undefined): Locale {
 }
 
 bot.on('message', async (context) => {
-  const locale = preferredLocale(context.from?.language_code);
-
   if (context.chat.type !== 'private') {
-    await context.reply(message(locale, 'privateChatOnly'));
     return;
   }
 
+  const locale = preferredLocale(context.from?.language_code);
   await context.reply(message(locale, 'stageZero'));
 });
 

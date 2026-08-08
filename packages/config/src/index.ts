@@ -8,11 +8,6 @@ export interface AppConfig {
     readonly host: string;
     readonly port: number;
   };
-  readonly supabase: {
-    readonly url: string | undefined;
-    readonly anonKey: string | undefined;
-    readonly serviceRoleKey: string | undefined;
-  };
   readonly telegram: {
     readonly enabled: boolean;
     readonly token: string | undefined;
@@ -55,6 +50,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       `FINANCIAL_ACTIONS_MODE must be dry_run or live; received '${financialActionsMode}'.`,
     );
   }
+  if (financialActionsMode === 'live' && nodeEnv !== 'production') {
+    throw new Error('FINANCIAL_ACTIONS_MODE=live is allowed only when NODE_ENV=production.');
+  }
 
   return {
     nodeEnv,
@@ -63,11 +61,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     api: {
       host: environment.API_HOST ?? '127.0.0.1',
       port: portFromEnv(environment.API_PORT),
-    },
-    supabase: {
-      url: optional(environment.SUPABASE_URL),
-      anonKey: optional(environment.SUPABASE_ANON_KEY),
-      serviceRoleKey: optional(environment.SUPABASE_SERVICE_ROLE_KEY),
     },
     telegram: {
       enabled: booleanFromEnv(environment.TELEGRAM_BOT_ENABLED, false),
@@ -80,16 +73,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   };
 }
 
-export function redactedConfigForLog(config: AppConfig): Omit<
-  AppConfig,
-  'supabase' | 'telegram'
-> & {
-  readonly supabase: { readonly configured: boolean };
+export function redactedConfigForLog(config: AppConfig): Omit<AppConfig, 'telegram'> & {
   readonly telegram: { readonly enabled: boolean; readonly tokenConfigured: boolean };
 } {
   return {
     ...config,
-    supabase: { configured: Boolean(config.supabase.url) },
     telegram: { enabled: config.telegram.enabled, tokenConfigured: Boolean(config.telegram.token) },
   };
 }

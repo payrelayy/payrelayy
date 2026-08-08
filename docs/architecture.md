@@ -24,6 +24,10 @@ Owner/Admin dashboard ───────────────> API
 The bot, worker, dashboard, and executor do not own independent financial state. The API
 and database constraints are the source of truth.
 
+`app` is a private PostgreSQL schema rather than a Supabase Data API schema. When the database
+layer is introduced, only the API and worker will receive an isolated direct PostgreSQL runtime
+credential. The bot and executor communicate with the API, not the database.
+
 ## Deposit flow
 
 1. The bot validates the requested KemerBet Player ID.
@@ -54,7 +58,8 @@ version 1.
 - Locks/leases prevent duplicate verification and execution jobs.
 - Reconciliation precedes retries after timeout, session change, CAPTCHA, or UI ambiguity.
 - Owner/Admin configuration, receipt files, and user data live in private Supabase resources
-  protected by row-level security and audit events.
+  protected by a private-schema boundary, least-privilege server roles, row-level security, and
+  audit events.
 - Logs redact tokens, passwords, authorization headers, and provider identifiers.
 
 ## Deployment path

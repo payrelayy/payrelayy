@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   assertFinancialActionsEnabled,
   FinancialActionsDisabledError,
-  mayPerformFinalKemerBetAction,
 } from './financial-actions.js';
 
 describe('financial action guard', () => {
@@ -13,9 +12,7 @@ describe('financial action guard', () => {
     );
   });
 
-  it('requires both live mode and the explicit final-action feature switch', () => {
-    expect(mayPerformFinalKemerBetAction('dry_run', true)).toBe(false);
-    expect(mayPerformFinalKemerBetAction('live', false)).toBe(false);
-    expect(mayPerformFinalKemerBetAction('live', true)).toBe(true);
+  it('allows only the general future-action guard in live mode', () => {
+    expect(() => assertFinancialActionsEnabled('live', 'future.adapter.action')).not.toThrow();
   });
 });

@@ -24,11 +24,13 @@ export function buildApp(config: AppConfig = loadConfig()) {
     financialActionsMode: config.financialActionsMode,
   }));
 
-  app.get('/readyz', async () => ({
-    ready: true,
-    stage: 'stage-0',
-    databaseConfigured: Boolean(config.supabase.url),
-  }));
+  app.get('/readyz', async (_request, reply) =>
+    reply.code(503).send({
+      ready: false,
+      stage: 'stage-0',
+      reason: 'database_not_initialized',
+    }),
+  );
 
   return app;
 }

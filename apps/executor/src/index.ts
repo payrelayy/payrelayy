@@ -1,11 +1,7 @@
 import { loadConfig, redactedConfigForLog } from '@payreplayy/config';
-import { mayPerformFinalKemerBetAction } from '@payreplayy/domain';
 
 const config = loadConfig();
-const finalActionAllowed = mayPerformFinalKemerBetAction(
-  config.financialActionsMode,
-  config.kemerBet.finalActionFeatureEnabled,
-);
+const finalActionAllowed = false;
 
 console.info(
   { config: redactedConfigForLog(config), finalActionAllowed },

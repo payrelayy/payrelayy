@@ -17,10 +17,3 @@ export function assertFinancialActionsEnabled(mode: FinancialActionsMode, operat
     throw new FinancialActionsDisabledError(operation);
   }
 }
-
-export function mayPerformFinalKemerBetAction(
-  mode: FinancialActionsMode,
-  finalActionFeatureEnabled: boolean,
-): boolean {
-  return mode === 'live' && finalActionFeatureEnabled;
-}

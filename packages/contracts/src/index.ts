@@ -1,22 +1,34 @@
 import type { EtbAmount, VerificationReasonCode } from '@payreplayy/domain';
 
-export type PaymentMethod = 'telebirr' | 'cbe_birr';
+/**
+ * Values are validated against database-backed registries. They are strings here so a newly
+ * enabled platform or payment provider does not require a core-library deployment.
+ */
+export type PaymentMethodCode = string;
+export type PlatformCode = string;
+
+export interface SubmittedAttachmentReference {
+  readonly attachmentId: string;
+}
 
 export interface PaymentVerificationInput {
   readonly depositId: string;
-  readonly paymentMethod: PaymentMethod;
+  readonly paymentMethodCode: PaymentMethodCode;
   readonly submittedTransactionId?: string;
-  readonly configuredReceiverReference: string;
+  readonly expectedAmount: EtbAmount;
+  readonly receiverAccountId: string;
+  readonly receiverAccountVersion: number;
+  readonly depositExpiresAt: Date;
   readonly submittedAt: Date;
-  readonly attachmentObjectKeys: readonly string[];
+  readonly attachments: readonly SubmittedAttachmentReference[];
 }
 
 export interface AuthoritativePaymentEvidence {
+  readonly evidenceId: string;
   readonly canonicalReference: string;
   readonly amount: EtbAmount;
-  readonly receiverReference: string;
+  readonly receiverMatchToken: string;
   readonly occurredAt: Date;
-  readonly evidenceLocator: string;
 }
 
 export type PaymentVerificationResult =
@@ -29,22 +41,23 @@ export type PaymentVerificationResult =
   | { readonly outcome: 'manual_review'; readonly reason: VerificationReasonCode };
 
 export interface PaymentProviderVerifier {
-  readonly paymentMethod: PaymentMethod;
+  readonly paymentMethodCode: PaymentMethodCode;
   verify(input: PaymentVerificationInput): Promise<PaymentVerificationResult>;
 }
 
-export interface KemerBetDepositRequest {
+export interface PlatformDepositRequest {
   readonly executionAttemptId: string;
+  readonly platformCode: PlatformCode;
   readonly playerId: string;
   readonly amount: EtbAmount;
 }
 
-export type KemerBetDepositResult =
+export type PlatformDepositResult =
   | { readonly outcome: 'completed'; readonly platformReference: string }
   | { readonly outcome: 'rejected'; readonly reason: string }
   | { readonly outcome: 'uncertain'; readonly reason: string };
 
 export interface PlatformDepositExecutor {
-  readonly platform: 'kemerbet';
-  deposit(request: KemerBetDepositRequest): Promise<KemerBetDepositResult>;
+  readonly platformCode: PlatformCode;
+  deposit(request: PlatformDepositRequest): Promise<PlatformDepositResult>;
 }

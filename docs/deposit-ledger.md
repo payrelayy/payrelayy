@@ -59,9 +59,11 @@ is rejected or routed to `verification_review`; it cannot reach execution.
 
 - Transaction IDs and canonical provider references are encrypted before storage. Their keyed
   fingerprints are used for uniqueness and duplicate detection; no raw reference belongs in logs
-  or audit metadata.
-- Screenshot/PDF object keys are stored in the database; the files remain private in
-  `payment-evidence` and expire after 90 days.
+  or audit metadata. The current API capture function records a transaction ID only as an
+  encrypted, untrusted submission.
+- Screenshot/PDF object-key metadata is modeled in the database, but the runtime upload path is
+  deferred until the API can validate private-storage ingestion. When enabled, the files will stay
+  private in payment-evidence and expire after 90 days.
 - Audit metadata allows IDs, versions, and reason codes only. It never carries raw receipts,
   withdrawal codes, account references, provider payloads, or credentials.
 - Customer-bot flow state holds deposit IDs and expiry only, never a transaction ID or file body.
@@ -88,10 +90,12 @@ transfer until its reconciliation safeguards are proven.
 
 The bot calls the API only. The API uses the limited `payreplayy_api` database role, while the
 verification worker will use `payreplayy_worker` through reviewed database procedures. The current
-ledger grants neither role direct table access. The API can call only
-`app.open_telegram_deposit_intent`, which is idempotent by inbound Telegram event and returns the
-frozen display-safe receiver snapshot for the exact intent. That procedure is live-gated and cannot
-submit payment evidence, verify a payment, create a claim, or start KemerBet execution. The claim
-procedure remains ungranted. The browser executor will receive a separate, stricter role when it
-is introduced. No browser, Telegram client, or public Supabase Data API role can query the private
-ledger.
+ledger grants neither role direct table access. The API can call
+app.open_telegram_deposit_intent, which is idempotent by inbound Telegram event and returns the
+frozen display-safe receiver snapshot for the exact intent, and
+app.capture_telegram_deposit_reference, which idempotently records a protected customer reference
+against that intent. The capture procedure leaves the intent at intake_received; it cannot upload
+a file, enqueue verification, create evidence, verify a payment, create a claim, or start KemerBet
+execution. The claim procedure remains ungranted. The browser executor will receive a separate,
+stricter role when it is introduced. No browser, Telegram client, or public Supabase Data API role
+can query the private ledger.

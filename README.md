@@ -16,13 +16,14 @@ The current foundation is deliberately safe:
   duplicate-payment claims, expiry, manual-review, retention, and queue foundations;
 - the current API and worker database roles have no direct ledger access until narrow procedures
   and runtime login roles are reviewed; and
-- the only current ledger procedure for the API is live-gated, opens an unverified intent only,
-  and returns its frozen display-safe payment instructions without exposing ledger tables.
+- the only current ledger procedures for the API are live-gated: one opens an unverified intent
+  and returns frozen display-safe payment instructions, while the other records an already-encrypted
+  customer transaction reference without verifying it or exposing ledger tables.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API and
-worker. Their future `DATABASE_URL` belongs in the VM runtime secrets, never Git or the bot,
-executor, dashboard, browser profile, or logs. A Supabase service-role key is not an `app` schema
-credential; if later needed for private Storage/Auth administration, it remains API/worker-only.
+worker. Their future DATABASE_URL belongs in the VM runtime secrets, never Git or the bot,
+executor, dashboard, browser profile, or logs. PayReplayy does not place a Supabase service-role
+key in application configuration.
 
 ## Planned services
 
@@ -61,5 +62,6 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
 
 See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs/database-access.md),
 [docs/deposit-ledger.md](docs/deposit-ledger.md), and
-[docs/provider-verification.md](docs/provider-verification.md) for the current implementation,
-database-access, and provider-verification boundaries.
+[docs/provider-verification.md](docs/provider-verification.md), and
+[docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
+database-access, provider-verification, and reference-protection boundaries.

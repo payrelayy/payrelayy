@@ -88,6 +88,10 @@ transfer until its reconciliation safeguards are proven.
 
 The bot calls the API only. The API uses the limited `payreplayy_api` database role, while the
 verification worker will use `payreplayy_worker` through reviewed database procedures. The current
-ledger grants neither role direct access yet. The browser executor will receive a separate,
-stricter role when it is introduced. No browser, Telegram client, or public Supabase Data API role
-can query the private ledger.
+ledger grants neither role direct table access. The API can call only
+`app.open_telegram_deposit_intent`, which is idempotent by inbound Telegram event and returns the
+frozen display-safe receiver snapshot for the exact intent. That procedure is live-gated and cannot
+submit payment evidence, verify a payment, create a claim, or start KemerBet execution. The claim
+procedure remains ungranted. The browser executor will receive a separate, stricter role when it
+is introduced. No browser, Telegram client, or public Supabase Data API role can query the private
+ledger.

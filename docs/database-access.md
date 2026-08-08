@@ -17,6 +17,14 @@ The API role receives only safe receiver-account display columns. The worker alo
 encrypted receiver/verification references required for authoritative verification. Both roles use
 column-level grants and purpose-specific RLS policies; neither can delete any current `app` table.
 
+The API now has one narrow financial procedure: `app.open_telegram_deposit_intent`. It accepts
+only a Telegram inbound-event ID, a previously validated Player-account ID, a provider ID, and an
+ETB minor-unit amount. It returns the newly frozen receiver display snapshot and deadline so the
+API never needs a ledger-table `SELECT` grant. It cannot receive a transaction ID, enqueue
+verification, create provider evidence, claim a payment, or invoke KemerBet. It runs only when the
+payment-verification switch is explicitly `live`; the current Owner configuration procedure still
+deliberately refuses `live`, so this boundary remains dormant until a later launch review.
+
 Before a service starts, an operator will create a separate login role for that service, grant it
 membership in exactly one group role, and configure the process to assume that group role after
 connecting. This is done outside Git and without sharing a password in chat. Application code
@@ -54,7 +62,8 @@ separate deployment-only procedure after their Supabase Auth user has been verif
 
 The core and ledger migrations provide private deposit intake, untrusted receipt metadata,
 authoritative provider-evidence records, exact one-to-one payment claims, expiry, review, and
-queue foundations. They grant neither runtime role direct ledger access, create no KemerBet
-execution record, and provide no wallet/bank payout capability. All live feature switches are
-rejected by the database procedure, and the executor is physically incapable of a final KemerBet
-transfer in this release.
+queue foundations. They grant neither runtime role direct ledger-table access, create no KemerBet
+execution record, and provide no wallet/bank payout capability. The API has only the narrow,
+live-gated intake procedure described above; the payment-claim function remains ungranted to every
+runtime role. All live feature switches are still rejected by the Owner configuration procedure,
+and the executor is physically incapable of a final KemerBet transfer in this release.

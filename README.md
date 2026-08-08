@@ -15,7 +15,9 @@ The current foundation is deliberately safe:
 - reviewed private-schema migrations provide immutable deposit intents, provider evidence,
   duplicate-payment claims, expiry, manual-review, retention, and queue foundations;
 - the current API and worker database roles have no direct ledger access until narrow procedures
-  and runtime login roles are reviewed.
+  and runtime login roles are reviewed; and
+- the only current ledger procedure for the API is live-gated, opens an unverified intent only,
+  and returns its frozen display-safe payment instructions without exposing ledger tables.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API and
 worker. Their future `DATABASE_URL` belongs in the VM runtime secrets, never Git or the bot,

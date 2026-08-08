@@ -126,3 +126,7 @@ response goes to review rather than being parsed optimistically.
 - Roll out each adapter in this order: fixture tests, dry-run/shadow verification with no claim,
   explicit feature enablement, then monitored production. Disable the adapter on parser or issuer
   anomalies rather than guessing.
+- A database `dry_run` mode must not issue real Telegram payment instructions or create a verified
+  claim. The current intake and claim procedures require `live`, and the current Owner setting
+  procedure intentionally refuses `live` until a separate launch review proves the full adapter,
+  worker, reconciliation, and execution boundaries.

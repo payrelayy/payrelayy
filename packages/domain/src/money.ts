@@ -1,4 +1,9 @@
 export const ETB_SCALE = 100;
+/**
+ * KemerBet's provider-confirmed amount range for one deposit transaction. These constants are not
+ * a per-customer, daily, lifetime, or frequency quota: customers may create unlimited distinct
+ * deposits when each individual deposit is within this range.
+ */
 export const DEPOSIT_MINIMUM_MINOR = 25 * ETB_SCALE;
 export const DEPOSIT_MAXIMUM_MINOR = 25_000 * ETB_SCALE;
 

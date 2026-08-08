@@ -9,6 +9,9 @@ database-backed so later adapters do not require a financial-core rewrite.
 - A customer may register multiple Player IDs for a platform.
 - A deposit intent snapshots its payment provider, receiver-account revision, policy, expected
   amount, and one-hour expiry at intake time.
+- KemerBet permits 25–25,000 ETB for each individual deposit. Customers may create unlimited
+  distinct deposits; there is no PayReplayy customer, daily, lifetime, or frequency financial
+  quota. Technical abuse and capacity controls remain allowed.
 - Transaction IDs, screenshots, and PDFs are inputs for verification. Only authoritative provider
   evidence can approve a payment.
 - An authoritative payment can fund exactly one deposit request, enforced by a provider-specific
@@ -23,7 +26,7 @@ database-backed so later adapters do not require a financial-core rewrite.
 | ------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `customer_platform_players`     | A customer's validated Player ID for a platform           | A platform Player ID belongs to only one customer.                                                |
 | `player_validation_attempts`    | Append-only KemerBet Player ID validation results         | A Player ID cannot become valid without its latest immutable successful attempt.                  |
-| `deposit_intents`               | The customer intent and immutable receipt/policy snapshot | Amount is 25–25,000 ETB and expiry is fixed at creation.                                          |
+| `deposit_intents`               | The customer intent and immutable receipt/policy snapshot | Each KemerBet deposit is 25–25,000 ETB; no customer transaction-count cap exists.                 |
 | `deposit_submissions`           | A submitted transaction ID and its attempt number         | The raw ID is encrypted; a keyed fingerprint supports duplicate detection.                        |
 | `deposit_submission_files`      | Private receipt image/PDF metadata                        | Object key only; private Storage bucket; exactly 90-day retention.                                |
 | `provider_payment_evidence`     | Normalized official-provider facts                        | Only provider API, receipt lookup, or account activity sources are allowed; OCR cannot create it. |

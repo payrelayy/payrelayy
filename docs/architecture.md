@@ -32,7 +32,9 @@ credential. The bot and executor communicate with the API, not the database.
 
 1. The bot validates the requested KemerBet Player ID.
 2. It displays the configured TeleBirr or CBE Birr receiver account and records an intake
-   request with a 25–25,000 ETB accepted deposit range.
+   request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
+   Customers may create unlimited separate deposits; PayReplayy has no customer, daily, or
+   lifetime deposit-count quota.
 3. The customer submits a transaction ID and optional screenshot/PDF. Attachments assist
    extraction, but are never the sole approval evidence.
 4. A provider adapter retrieves authoritative evidence and normalizes a canonical reference,

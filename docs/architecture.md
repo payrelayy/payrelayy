@@ -5,8 +5,8 @@
 PayReplayy is independent from QHash. QHash may be used as a product reference only; its
 database, authentication, receipts, workers, and code are not a PayReplayy dependency.
 
-Version 1 uses a private Telegram bot for customers, a private Owner/Admin dashboard, and
-a single KemerBet platform adapter. The first payment-verification adapters are TeleBirr
+Version 1 uses a private Telegram bot for customers, a private English-only Owner/Admin dashboard,
+and a single KemerBet platform adapter. The first payment-verification adapters are TeleBirr
 and CBE Birr. CBE bank support remains a later adapter.
 
 ## Component boundary

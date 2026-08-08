@@ -52,6 +52,9 @@ separate deployment-only procedure after their Supabase Auth user has been verif
 
 ## Current safety state
 
-The core migration creates no deposit request, verification, provider evidence, KemerBet
-execution, or payout table. All live feature switches are rejected by the database procedure, and
-the executor is physically incapable of a final KemerBet transfer in this release.
+The core and ledger migrations provide private deposit intake, untrusted receipt metadata,
+authoritative provider-evidence records, exact one-to-one payment claims, expiry, review, and
+queue foundations. They grant neither runtime role direct ledger access, create no KemerBet
+execution record, and provide no wallet/bank payout capability. All live feature switches are
+rejected by the database procedure, and the executor is physically incapable of a final KemerBet
+transfer in this release.

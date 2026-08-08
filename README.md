@@ -72,6 +72,12 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
 4. The executor must reconcile wallet/history before retrying an uncertain collection.
 5. External withdrawal payout remains manual in version 1.
 
+## Language policy
+
+PayReplayy-created customer, Owner/Admin, documentation, PDF, and exported-file content is English
+only in version 1. Payment evidence and names may remain in the source language because they are
+data, not interface copy. See [docs/language-policy.md](docs/language-policy.md).
+
 See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs/database-access.md),
 [docs/deposit-ledger.md](docs/deposit-ledger.md), and
 [docs/provider-verification.md](docs/provider-verification.md), and

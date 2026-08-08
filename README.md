@@ -4,15 +4,18 @@ PayReplayy is a Telegram-first payment-verification and betting-agent automation
 Version 1 starts with KemerBet deposits through TeleBirr and CBE Birr. It is designed so
 other payment providers and platforms can be added without changing the financial core.
 
-## Stage 0 status
+## Current safety status
 
-This repository begins in a deliberately safe state:
+The current foundation is deliberately safe:
 
 - all financial actions default to `dry_run`;
 - the KemerBet executor cannot perform a final transfer action;
 - Telegram polling is off until the bot is configured;
 - no provider credential, Supabase key, account number, or customer evidence belongs in Git;
-- the database schema and RLS policies will be added only through reviewed SQL migrations.
+- reviewed private-schema migrations provide immutable deposit intents, provider evidence,
+  duplicate-payment claims, expiry, manual-review, retention, and queue foundations;
+- the current API and worker database roles have no direct ledger access until narrow procedures
+  and runtime login roles are reviewed.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API and
 worker. Their future `DATABASE_URL` belongs in the VM runtime secrets, never Git or the bot,
@@ -54,5 +57,7 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
 4. The executor must reconcile wallet/history before retrying an uncertain collection.
 5. External withdrawal payout remains manual in version 1.
 
-See [docs/architecture.md](docs/architecture.md) and [docs/database-access.md](docs/database-access.md)
-for the current implementation and database-access boundaries.
+See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs/database-access.md),
+[docs/deposit-ledger.md](docs/deposit-ledger.md), and
+[docs/provider-verification.md](docs/provider-verification.md) for the current implementation,
+database-access, and provider-verification boundaries.

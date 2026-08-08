@@ -6,6 +6,8 @@ import type { EtbAmount, VerificationReasonCode } from '@payreplayy/domain';
  */
 export type PaymentMethodCode = string;
 export type PlatformCode = string;
+export type ProviderEvidenceSource =
+  'provider_api' | 'provider_receipt_lookup' | 'provider_account_activity';
 
 export interface SubmittedAttachmentReference {
   readonly attachmentId: string;
@@ -18,17 +20,28 @@ export interface PaymentVerificationInput {
   readonly expectedAmount: EtbAmount;
   readonly receiverAccountId: string;
   readonly receiverAccountVersion: number;
-  readonly depositExpiresAt: Date;
+  readonly depositOpenedAt: Date;
+  readonly paymentDeadlineAt: Date;
   readonly submittedAt: Date;
   readonly attachments: readonly SubmittedAttachmentReference[];
 }
 
 export interface AuthoritativePaymentEvidence {
-  readonly evidenceId: string;
+  /**
+   * Sensitive adapter-only value. It is encrypted and fingerprinted before persistence and must
+   * never be placed in logs, bot state, audit metadata, or customer-facing messages.
+   */
   readonly canonicalReference: string;
   readonly amount: EtbAmount;
-  readonly receiverMatchToken: string;
+  readonly matchedReceiverAccountId: string;
+  readonly matchedReceiverAccountVersion: number;
   readonly occurredAt: Date;
+  readonly retrievedAt: Date;
+  readonly evidenceSource: ProviderEvidenceSource;
+  readonly providerFinalStatus: 'completed';
+  readonly adapterVersion: string;
+  readonly normalizationVersion: string;
+  readonly evidenceDigest: string;
 }
 
 export type PaymentVerificationResult =
@@ -38,7 +51,11 @@ export type PaymentVerificationResult =
       readonly reason: VerificationReasonCode;
       readonly evidence?: AuthoritativePaymentEvidence;
     }
-  | { readonly outcome: 'manual_review'; readonly reason: VerificationReasonCode };
+  | {
+      readonly outcome: 'manual_review';
+      readonly reason: VerificationReasonCode;
+      readonly evidence?: AuthoritativePaymentEvidence;
+    };
 
 export interface PaymentProviderVerifier {
   readonly paymentMethodCode: PaymentMethodCode;

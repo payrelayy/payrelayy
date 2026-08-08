@@ -25,6 +25,12 @@ export const messages = {
   inboxUnavailable: {
     en: 'PayReplayy cannot receive requests right now. Please try again shortly.',
   },
+  playerRegistrationMenu: {
+    en: 'Add your KemerBet Player ID to PayReplayy.',
+  },
+  addKemerBetPlayerId: {
+    en: 'Add KemerBet Player ID',
+  },
 } as const satisfies Record<string, Record<Locale, string>>;
 
 export type MessageKey = keyof typeof messages;

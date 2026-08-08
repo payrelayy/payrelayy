@@ -20,6 +20,22 @@ export type ApiTelegramIngressConfig =
       readonly payloadHmacSecret: string;
     };
 
+/**
+ * This controls only API-side capability-contract keys. It does not enable a Telegram route,
+ * database action, bot polling, Player-ID validation, or any financial capability.
+ */
+export type ApiTelegramActionCapabilityConfig =
+  | {
+      readonly enabled: false;
+      readonly capabilityHmacSecret: undefined;
+      readonly semanticHmacSecret: undefined;
+    }
+  | {
+      readonly enabled: true;
+      readonly capabilityHmacSecret: string;
+      readonly semanticHmacSecret: string;
+    };
+
 export interface ApiConfig extends RuntimeConfig {
   readonly financialActionsMode: FinancialActionsMode;
   readonly api: {
@@ -27,6 +43,7 @@ export interface ApiConfig extends RuntimeConfig {
     readonly port: number;
   };
   readonly telegramIngress: ApiTelegramIngressConfig;
+  readonly telegramActionCapability: ApiTelegramActionCapabilityConfig;
 }
 
 function portFromEnv(value: string | undefined): number {
@@ -66,7 +83,71 @@ function loadApiTelegramIngressConfig(environment: NodeJS.ProcessEnv): ApiTelegr
   };
 }
 
+function loadApiTelegramActionCapabilityConfig(
+  environment: NodeJS.ProcessEnv,
+): ApiTelegramActionCapabilityConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED,
+    false,
+    'INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED',
+  );
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      capabilityHmacSecret: undefined,
+      semanticHmacSecret: undefined,
+    };
+  }
+
+  return {
+    enabled: true,
+    capabilityHmacSecret: requiredHexHmacSecret(
+      environment.API_TELEGRAM_CAPABILITY_HMAC_SECRET,
+      'API_TELEGRAM_CAPABILITY_HMAC_SECRET',
+    ),
+    semanticHmacSecret: requiredHexHmacSecret(
+      environment.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET,
+      'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET',
+    ),
+  };
+}
+
+function assertDistinctApiTelegramHmacSecrets(
+  telegramIngress: ApiTelegramIngressConfig,
+  telegramActionCapability: ApiTelegramActionCapabilityConfig,
+): void {
+  if (!telegramActionCapability.enabled) return;
+
+  const namedSecrets: (readonly [string, string])[] = [
+    ['API_TELEGRAM_CAPABILITY_HMAC_SECRET', telegramActionCapability.capabilityHmacSecret],
+    ['API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET', telegramActionCapability.semanticHmacSecret],
+  ];
+
+  if (telegramIngress.enabled) {
+    namedSecrets.push(
+      ['BOT_TO_API_INGRESS_HMAC_SECRET', telegramIngress.transportHmacSecret],
+      ['API_TELEGRAM_PAYLOAD_HMAC_SECRET', telegramIngress.payloadHmacSecret],
+    );
+  }
+
+  for (let left = 0; left < namedSecrets.length; left += 1) {
+    for (let right = left + 1; right < namedSecrets.length; right += 1) {
+      const leftSecret = namedSecrets[left];
+      const rightSecret = namedSecrets[right];
+      if (leftSecret === undefined || rightSecret === undefined) continue;
+      if (leftSecret[1] === rightSecret[1]) {
+        throw new Error(`${leftSecret[0]} must be distinct from ${rightSecret[0]}.`);
+      }
+    }
+  }
+}
+
 export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
+  const telegramIngress = loadApiTelegramIngressConfig(environment);
+  const telegramActionCapability = loadApiTelegramActionCapabilityConfig(environment);
+  assertDistinctApiTelegramHmacSecrets(telegramIngress, telegramActionCapability);
+
   return {
     ...loadRuntimeConfig(environment),
     financialActionsMode: loadFinancialActionsMode(environment),
@@ -74,12 +155,20 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       host: environment.API_HOST ?? '127.0.0.1',
       port: portFromEnv(environment.API_PORT),
     },
-    telegramIngress: loadApiTelegramIngressConfig(environment),
+    telegramIngress,
+    telegramActionCapability,
   };
 }
 
-export function redactedApiConfigForLog(config: ApiConfig): Omit<ApiConfig, 'telegramIngress'> & {
+export function redactedApiConfigForLog(config: ApiConfig): Omit<
+  ApiConfig,
+  'telegramIngress' | 'telegramActionCapability'
+> & {
   readonly telegramIngress: { readonly enabled: boolean; readonly secretsConfigured: boolean };
+  readonly telegramActionCapability: {
+    readonly enabled: boolean;
+    readonly secretsConfigured: boolean;
+  };
 } {
   return {
     nodeEnv: config.nodeEnv,
@@ -89,6 +178,10 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<ApiConfig, 'tel
     telegramIngress: {
       enabled: config.telegramIngress.enabled,
       secretsConfigured: config.telegramIngress.enabled,
+    },
+    telegramActionCapability: {
+      enabled: config.telegramActionCapability.enabled,
+      secretsConfigured: config.telegramActionCapability.enabled,
     },
   };
 }

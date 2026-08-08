@@ -1,6 +1,7 @@
 import type { EtbAmount, VerificationReasonCode } from '@payreplayy/domain';
 
 export * from './telegram-private-inbound.js';
+export * from './telegram-action-capability.js';
 
 /**
  * Values are validated against database-backed registries. They are strings here so a newly

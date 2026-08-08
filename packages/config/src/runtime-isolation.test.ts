@@ -18,7 +18,9 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
           property === 'TELEGRAM_BOT_TOKEN' ||
           property === 'BOT_TO_API_INGRESS_BASE_URL' ||
           property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
-          property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET'
+          property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
+          property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
+          property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
         ) {
           throw new Error(`unexpected Telegram environment read: ${String(property)}`);
         }
@@ -92,8 +94,12 @@ describe('runtime configuration isolation', () => {
       },
       {
         get(target, property, receiver) {
-          if (property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET') {
-            throw new Error('bot must not read the API-only payload HMAC secret');
+          if (
+            property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
+          ) {
+            throw new Error('bot must not read an API-only Telegram HMAC secret');
           }
           return Reflect.get(target, property, receiver);
         },
@@ -130,7 +136,9 @@ describe('runtime configuration isolation', () => {
           if (
             property === 'BOT_TO_API_INGRESS_BASE_URL' ||
             property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
-            property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET'
+            property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
           ) {
             throw new Error('disabled bot must not read an ingress secret');
           }
@@ -171,5 +179,89 @@ describe('runtime configuration isolation', () => {
     expect(() =>
       loadApiConfig({ NODE_ENV: 'test', INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true' }),
     ).toThrow('BOT_TO_API_INGRESS_HMAC_SECRET');
+  });
+
+  it('loads API-only capability keys only when the inactive contract is explicitly enabled', () => {
+    const capabilityHmacSecret = 'd'.repeat(64);
+    const semanticHmacSecret = 'e'.repeat(64);
+    const config = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+      API_TELEGRAM_CAPABILITY_HMAC_SECRET: capabilityHmacSecret,
+      API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: semanticHmacSecret,
+    });
+
+    expect(config.telegramActionCapability).toEqual({
+      enabled: true,
+      capabilityHmacSecret,
+      semanticHmacSecret,
+    });
+    const redacted = JSON.stringify(redactedApiConfigForLog(config));
+    expect(redacted).not.toContain(capabilityHmacSecret);
+    expect(redacted).not.toContain(semanticHmacSecret);
+  });
+
+  it('does not read API-only capability keys when the inactive contract is disabled', () => {
+    const environment = new Proxy(
+      { NODE_ENV: 'test', INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false' },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
+          ) {
+            throw new Error('disabled capability contract must not read an API-only secret');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(loadApiConfig(environment).telegramActionCapability).toEqual({
+      enabled: false,
+      capabilityHmacSecret: undefined,
+      semanticHmacSecret: undefined,
+    });
+  });
+
+  it('requires both API-only capability keys when its inactive contract is enabled', () => {
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+      }),
+    ).toThrow('API_TELEGRAM_CAPABILITY_HMAC_SECRET');
+  });
+
+  it('requires the capability and semantic keys to be distinct', () => {
+    const duplicatedSecret = 'd'.repeat(64);
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+        API_TELEGRAM_CAPABILITY_HMAC_SECRET: duplicatedSecret,
+        API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: duplicatedSecret,
+      }),
+    ).toThrow('API_TELEGRAM_CAPABILITY_HMAC_SECRET must be distinct');
+  });
+
+  it('keeps capability-contract keys distinct from enabled ingress keys', () => {
+    const ingressTransportSecret = 'a'.repeat(64);
+    const ingressPayloadSecret = 'b'.repeat(64);
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
+        BOT_TO_API_INGRESS_HMAC_SECRET: ingressTransportSecret,
+        API_TELEGRAM_PAYLOAD_HMAC_SECRET: ingressPayloadSecret,
+        INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+        API_TELEGRAM_CAPABILITY_HMAC_SECRET: ingressTransportSecret,
+        API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
+      }),
+    ).toThrow(
+      'API_TELEGRAM_CAPABILITY_HMAC_SECRET must be distinct from BOT_TO_API_INGRESS_HMAC_SECRET',
+    );
   });
 });

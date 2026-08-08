@@ -41,12 +41,18 @@ Only the future stateful procedure may write this object. Callers receive an opa
 ## Pre-issued action capability
 
 Before the bot renders an actionable button, a future server-side menu operation must create a
-private, one-time `app.telegram_action_capabilities` record. It is bound to the customer identity,
+private, one-time `app.bot_action_capabilities` record. It is bound to the customer identity,
 conversation, controlled action kind, platform, expected conversation version, and a short server
 expiry. It contains only a keyed fingerprint of a random callback secret, never the secret or raw
 callback payload. The capability key is separate from the Telegram transport secret and all
 semantic-input keys. The menu operation itself must be a reviewed consumer of a prior inbound event;
 the bot may only display an opaque value such as `prc1.<capability-id>.<random-secret>`.
+
+For an exact root-menu retry, the API deterministically derives the canonical capability ID and
+opaque callback token from the recorded inbound-event ID with its dedicated capability key. It
+passes that ID, the token fingerprint, and the separate semantic-input HMAC to the future database
+issuer in one transaction. PostgreSQL persists only the canonical ID and blinded values; it never
+receives the raw callback token or either key.
 
 When Telegram returns the callback, the API first validates that fixed format in trusted memory and
 computes the capability-token fingerprint. It passes only the opaque capability ID and fingerprint
@@ -61,7 +67,8 @@ The initial start procedure therefore needs this narrow shape:
 app.start_telegram_player_registration_action(
   origin_inbound_event_id uuid,
   capability_id uuid,
-  capability_token_fingerprint text
+  capability_token_fingerprint text,
+  semantic_input_hmac text
 )
 ```
 
@@ -151,6 +158,20 @@ replacement is the ungranted `app.create_or_reuse_player_registration_request` p
 does **not** consume an inbound event. The future conversation-aware wrapper will own global
 consumption, the request event link, the audit event, action completion, and the conversation CAS
 in one transaction before any activation.
+
+## Terminal capability attempts
+
+A new Telegram update can legitimately present a button whose capability was already consumed,
+expired, or revoked. That new update must receive its own durable rejected result; it cannot reuse
+or overwrite the terminal capability row. Before the start procedure is implemented, a private
+append-only capability-rejection record must link that inbound event, the terminal capability, and
+its global consumption receipt. This preserves one-update/one-action semantics without changing
+the history of the original capability.
+
+The API-side capability presentation is also deliberately compact: Telegram permits only 1–64 bytes
+of inline callback data. The future opaque presentation is `prc1.<22-char-id>.<22-char-token>`
+(50 ASCII bytes). The bot only renders this API-supplied value; it never derives IDs, tokens,
+fingerprints, or semantic HMACs.
 
 ## Compatibility work before activation
 

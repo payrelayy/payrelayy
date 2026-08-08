@@ -12,5 +12,6 @@ describe('English-only locale support', () => {
 
   it('contains only the English message copy', () => {
     expect(message(DEFAULT_LOCALE, 'stageZero')).toMatch(/not available yet/i);
+    expect(message(DEFAULT_LOCALE, 'addKemerBetPlayerId')).toBe('Add KemerBet Player ID');
   });
 });

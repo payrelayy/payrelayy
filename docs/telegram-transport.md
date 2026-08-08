@@ -8,10 +8,11 @@ to `false`:
 - `TELEGRAM_BOT_ENABLED` controls long polling in the bot process.
 - `INTERNAL_TELEGRAM_INGRESS_ENABLED` controls registration of the internal API route.
 
-The current application has no direct PostgreSQL runtime login, no durable nonce store, and no
-database-backed inbox recorder. The API therefore refuses to start the ingress route in production
-with its test-only in-memory nonce store, and refuses it in every environment unless a recorder is
-explicitly supplied. Do not enable either setting in a deployed environment.
+The current application has no direct PostgreSQL runtime login and no database-backed inbox
+recorder. Stage 13B provides a private durable nonce-reservation schema and an unconnected API
+adapter, but no server startup code constructs it. The API therefore refuses to start the ingress
+route in production with its test-only in-memory nonce store, and refuses it in every environment
+unless a recorder is explicitly supplied. Do not enable either setting in a deployed environment.
 
 No payment, KemerBet, Player-ID validation, receipt, attachment, or withdrawal action is reachable
 through this transport.
@@ -49,10 +50,16 @@ nonce/signature, changed bytes, or fields outside the DTO allowlist. It authenti
 parsing and does not log the body.
 
 The API must reserve each accepted nonce atomically through its expiry in a durable shared store
-before recording the event. An in-memory implementation exists only for tests and local scaffolding;
-it is rejected in production. The later recorder must call
+before recording the event. Stage 13B reserves only a domain-separated SHA-256 digest of the nonce;
+it stores no raw nonce, Telegram event, customer, payment, or credential data. The adapter is
+present but deliberately unconnected. An in-memory implementation exists only for tests and local
+scaffolding; it is rejected in production. The later recorder must call
 `app.record_telegram_private_inbound_event(...)` with an API-generated, versioned payload HMAC.
 The database update ID remains the durable idempotency key.
+
+With the current 60-second timestamp skew limit, the adapter accepts a reservation window no
+longer than 120 seconds. The database permits up to three minutes only to tolerate normal API and
+database clock differences; it does not make a nonce valid for longer than the transport protocol.
 
 The bot makes at most two attempts for a retryable transport failure (timeout, 408, 429, or 5xx),
 using a new nonce for every attempt. If both attempts fail, it tells the customer that PayReplayy
@@ -82,7 +89,8 @@ production launch blocker.
 
 1. Provision the API runtime login and a narrow recorder implementation for the private inbox
    procedure.
-2. Add a durable, cross-replica atomic nonce reservation implementation.
+2. Wire the reviewed durable, cross-replica atomic nonce reservation adapter only alongside that
+   reviewed recorder and a private deployment boundary.
 3. Add a durable bot outbox before relying on automatic delivery beyond the two immediate attempts.
 4. Deploy bot and API on a private Docker network; use long polling in exactly one bot replica and
    do not mix it with Telegram webhooks.

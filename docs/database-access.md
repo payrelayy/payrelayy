@@ -66,15 +66,30 @@ only with `INTERNAL_POSTGRES_RUNTIME_ENABLED=true` and an API-only TLS database 
 opens a short `READ ONLY` transaction, sets local timeouts and a `pg_catalog` search path, checks
 only boolean capability facts, rolls the transaction back, and closes its pool. It verifies that
 the connection resolved to the designated non-admin runtime login, has exactly the expected
-non-switchable API-group membership, can execute the inbox recorder, has no direct privilege of
-any kind on identity, inbox, conversation, or audit tables, and still cannot execute any Player-ID
-action wrapper. It never logs a connection URL, database username, SQL text, or database error
-detail.
+non-switchable API-group membership, can execute the inbox recorder and nonce-reservation
+procedure, proves the nonce procedure remains inaccessible to broad database roles, has no direct
+privilege of any kind on identity, inbox, conversation, audit, or nonce tables, and still cannot
+execute any Player-ID action wrapper. It never logs a connection URL, database username, SQL text,
+or database error detail.
 
 For the DigitalOcean VM, use the current direct PostgreSQL connection when its supported network
 path is available; otherwise use the Supabase session pooler for the long-lived API process. Take
 the exact dedicated-login URL from the project Connect panel rather than constructing it by hand.
 The transaction pooler is not the default for this persistent process.
+
+## Stage 13B private Telegram nonce reservation
+
+Stage 13B adds a private, forced-RLS table for short-lived one-way digests of authenticated
+Telegram ingress nonces. The only operation granted to the API group is a fixed-search-path
+procedure that atomically inserts a digest once; a duplicate returns `false` and never extends its
+expiry. The table has no direct runtime privileges, and its unassigned cleanup helper has no
+runtime grant.
+
+This is replay protection only. It does not create an inbox event, customer, conversation, action,
+audit event, payment, KemerBet request, or database credential. The TypeScript adapter is not
+constructed by API startup, the runtime login remains `NOLOGIN`, and Telegram ingress remains
+disabled. A later reviewed activation stage must reserve the nonce in a committed operation before
+calling the inbox recorder, so recorder failure cannot roll back replay protection.
 
 Supabase service-role keys are not part of the PayReplayy runtime design and must never be stored
 in this workspace, a bot, a browser profile, or application configuration. A future private

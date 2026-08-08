@@ -28,6 +28,8 @@ const passingRow = {
   app_schema_usage_allowed: true,
   app_schema_create_denied: true,
   inbox_recorder_execute_allowed: true,
+  nonce_reservation_execute_allowed: true,
+  nonce_reservation_execution_is_private: true,
   private_telegram_boundary_table_access_denied: true,
   issue_player_registration_capability_denied: true,
   start_player_registration_action_denied: true,
@@ -86,6 +88,8 @@ describe('API database preflight', () => {
 
     expect(result.passed).toBe(true);
     expect(result.inboxRecorderExecuteAllowed).toBe(true);
+    expect(result.nonceReservationExecuteAllowed).toBe(true);
+    expect(result.nonceReservationExecutionIsPrivate).toBe(true);
     expect(result.privateTelegramBoundaryTableAccessDenied).toBe(true);
     expect(result.submitPlayerRegistrationInputDenied).toBe(true);
     expect(fake.queries[0]).toBe('begin transaction read only');
@@ -112,6 +116,28 @@ describe('API database preflight', () => {
     expect(fake.queries.at(-1)).toBe('rollback');
     expect(fake.released()).toBe(true);
     expect(fake.ended()).toBe(true);
+  });
+
+  it('reports a missing nonce-reservation grant without treating the preflight as successful', async () => {
+    const fake = createFakePool({
+      row: { ...passingRow, nonce_reservation_execute_allowed: false },
+    });
+
+    const result = await runApiDatabasePreflight(enabledDatabaseConfig, { pool: fake.pool });
+
+    expect(result.passed).toBe(false);
+    expect(result.nonceReservationExecuteAllowed).toBe(false);
+  });
+
+  it('reports broad nonce-reservation execution without treating the preflight as successful', async () => {
+    const fake = createFakePool({
+      row: { ...passingRow, nonce_reservation_execution_is_private: false },
+    });
+
+    const result = await runApiDatabasePreflight(enabledDatabaseConfig, { pool: fake.pool });
+
+    expect(result.passed).toBe(false);
+    expect(result.nonceReservationExecutionIsPrivate).toBe(false);
   });
 
   it('fails when the connection does not resolve to the dedicated runtime login', async () => {

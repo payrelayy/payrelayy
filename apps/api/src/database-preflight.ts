@@ -59,6 +59,26 @@ const API_DATABASE_PREFLIGHT_SQL = `
       'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)',
       'EXECUTE'
     ) as inbox_recorder_execute_allowed,
+    pg_catalog.has_function_privilege(
+      current_user,
+      'app.reserve_telegram_private_ingress_nonce(text,timestamptz)',
+      'EXECUTE'
+    ) as nonce_reservation_execute_allowed,
+    not exists (
+      select 1
+      from unnest(array[
+        'public',
+        'anon',
+        'authenticated',
+        'service_role',
+        'payreplayy_worker'
+      ]) as broad_role(role_name)
+      where pg_catalog.has_function_privilege(
+        broad_role.role_name,
+        'app.reserve_telegram_private_ingress_nonce(text,timestamptz)',
+        'EXECUTE'
+      )
+    ) as nonce_reservation_execution_is_private,
     not exists (
       select 1
       from (
@@ -68,7 +88,8 @@ const API_DATABASE_PREFLIGHT_SQL = `
           ('app.telegram_identities'::text),
           ('app.inbound_events'::text),
           ('app.bot_conversations'::text),
-          ('app.audit_events'::text)
+          ('app.audit_events'::text),
+          ('app.telegram_private_ingress_nonce_reservations'::text)
       ) as protected_table(table_name)
       cross join (
         values
@@ -118,6 +139,8 @@ interface ApiDatabasePreflightRow {
   readonly app_schema_usage_allowed: boolean;
   readonly app_schema_create_denied: boolean;
   readonly inbox_recorder_execute_allowed: boolean;
+  readonly nonce_reservation_execute_allowed: boolean;
+  readonly nonce_reservation_execution_is_private: boolean;
   readonly private_telegram_boundary_table_access_denied: boolean;
   readonly issue_player_registration_capability_denied: boolean;
   readonly start_player_registration_action_denied: boolean;
@@ -136,6 +159,8 @@ export interface ApiDatabasePreflightResult {
   readonly appSchemaUsageAllowed: boolean;
   readonly appSchemaCreateDenied: boolean;
   readonly inboxRecorderExecuteAllowed: boolean;
+  readonly nonceReservationExecuteAllowed: boolean;
+  readonly nonceReservationExecutionIsPrivate: boolean;
   readonly privateTelegramBoundaryTableAccessDenied: boolean;
   readonly issuePlayerRegistrationCapabilityDenied: boolean;
   readonly startPlayerRegistrationActionDenied: boolean;
@@ -176,6 +201,8 @@ function toPreflightResult(row: ApiDatabasePreflightRow): ApiDatabasePreflightRe
     appSchemaUsageAllowed: asBoolean(row, 'app_schema_usage_allowed'),
     appSchemaCreateDenied: asBoolean(row, 'app_schema_create_denied'),
     inboxRecorderExecuteAllowed: asBoolean(row, 'inbox_recorder_execute_allowed'),
+    nonceReservationExecuteAllowed: asBoolean(row, 'nonce_reservation_execute_allowed'),
+    nonceReservationExecutionIsPrivate: asBoolean(row, 'nonce_reservation_execution_is_private'),
     privateTelegramBoundaryTableAccessDenied: asBoolean(
       row,
       'private_telegram_boundary_table_access_denied',

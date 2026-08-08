@@ -16,6 +16,7 @@ import {
   type TelegramPrivateInboundRecord,
   verifyTelegramIngressRequest,
 } from './telegram-ingress.js';
+import { TelegramIngressNonceStoreUnavailableError } from './postgres-telegram-ingress-nonce-store.js';
 
 const transportHmacSecret = 'a'.repeat(64);
 const payloadHmacSecret = 'b'.repeat(64);
@@ -228,6 +229,28 @@ describe('private Telegram ingress', () => {
     });
 
     expect((await app.inject(signedIngressRequest())).statusCode).toBe(503);
+    await app.close();
+  });
+
+  it('returns a retryable response when durable nonce storage is unavailable', async () => {
+    const recorded: TelegramPrivateInboundRecord[] = [];
+    const app = buildApp(enabledApiConfig(), {
+      now: () => fixedNow,
+      telegramIngressNonceStore: {
+        durable: true,
+        reserve: async () => {
+          throw new TelegramIngressNonceStoreUnavailableError();
+        },
+      },
+      telegramPrivateInboundRecorder: {
+        record: async (input) => {
+          recorded.push(input);
+        },
+      },
+    });
+
+    expect((await app.inject(signedIngressRequest())).statusCode).toBe(503);
+    expect(recorded).toEqual([]);
     await app.close();
   });
 

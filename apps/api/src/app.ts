@@ -9,9 +9,11 @@ import Fastify from 'fastify';
 import {
   InMemoryTelegramIngressNonceStore,
   type TelegramIngressNonceStore,
+  type TelegramPrivateInboundRecord,
   type TelegramPrivateInboundRecorder,
   verifyTelegramIngressRequest,
 } from './telegram-ingress.js';
+import { TelegramIngressNonceStoreUnavailableError } from './postgres-telegram-ingress-nonce-store.js';
 
 export interface ApiDependencies {
   readonly now?: () => Date;
@@ -65,21 +67,30 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
       TELEGRAM_PRIVATE_INGRESS_PATH,
       { bodyLimit: TELEGRAM_PRIVATE_INGRESS_MAX_BODY_BYTES },
       async (request, reply) => {
-        const inbound = await verifyTelegramIngressRequest(
-          {
-            headers: request.headers,
-            rawHeaders: request.raw.rawHeaders,
-            method: request.method,
-            url: request.raw.url,
-          },
-          request.body,
-          {
-            transportHmacSecret: telegramIngress.transportHmacSecret,
-            payloadHmacSecret: telegramIngress.payloadHmacSecret,
-            now: dependencies.now?.() ?? new Date(),
-            nonceStore,
-          },
-        );
+        let inbound: TelegramPrivateInboundRecord | undefined;
+        try {
+          inbound = await verifyTelegramIngressRequest(
+            {
+              headers: request.headers,
+              rawHeaders: request.raw.rawHeaders,
+              method: request.method,
+              url: request.raw.url,
+            },
+            request.body,
+            {
+              transportHmacSecret: telegramIngress.transportHmacSecret,
+              payloadHmacSecret: telegramIngress.payloadHmacSecret,
+              now: dependencies.now?.() ?? new Date(),
+              nonceStore,
+            },
+          );
+        } catch (error) {
+          if (error instanceof TelegramIngressNonceStoreUnavailableError) {
+            request.log.warn('Private Telegram ingress nonce store is unavailable.');
+            return reply.code(503).send({ error: 'inbound_unavailable' });
+          }
+          throw error;
+        }
 
         if (!inbound) {
           return reply.code(401).send({ error: 'unauthorized' });

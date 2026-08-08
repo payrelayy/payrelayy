@@ -1,8 +1,10 @@
 # Telegram conversation actions
 
-## Status: design only
+## Status: inert database foundation applied; not user-facing
 
-This is the next prerequisite after the inert Player-ID request schema. It must be reviewed before a Telegram callback or text message can start a Player-ID flow. It does not enable the bot, add a database credential, call KemerBet, validate a Player ID, open a deposit, or make a payment.
+The private Stage 7–9 schema is applied after the inert Player-ID request schema. It adds no
+customer-facing action procedure or runtime `EXECUTE` grant. It does not enable the bot, add a
+database credential, call KemerBet, validate a Player ID, open a deposit, or make a payment.
 
 ## Why a shared action boundary is required
 
@@ -64,19 +66,20 @@ It still does not accept a generic action code, platform, expected version, stat
 ID from Telegram or the API. An exact delivery retry must match the stored consumption receipt; a
 new event that presents a consumed capability is rejected.
 
-## Future private receipt
+## Private receipt and action records
 
-`app.inbound_event_consumptions` will be an append-only global exactly-once receipt. Its primary key is `origin_inbound_event_id`, linked to `app.inbound_events`.
+`app.inbound_event_consumptions` is an append-only global exactly-once receipt. Its primary key is `origin_inbound_event_id`, linked to `app.inbound_events`.
 
 Each row contains only customer and conversation IDs proven from the inbox identity, controlled
-consumer/action codes, a capability ID/fingerprint where applicable, expected/before/after versions,
-a versioned semantic-input HMAC where applicable, a terminal outcome, opaque flow details for
-success, and safe reason codes/timestamps. It cannot contain raw callback data, a Player ID,
-message text, payment references, or an arbitrary JSON request. The semantic-input HMAC uses a
+consumer/action codes, expected/before/after versions, a versioned semantic-input HMAC, a terminal
+outcome, and safe reason codes/timestamps. Capability, action, and request relationships live in
+their own constrained tables rather than as arbitrary receipt payload. It cannot contain raw
+callback data, a Player ID, message text, payment references, or an arbitrary JSON request. The
+semantic-input HMAC uses a
 dedicated versioned key, separate from the capability and transport keys; an old key version must
 remain usable for exact-retry comparison throughout inbound-event retention.
 
-`app.bot_conversation_actions` will be the durable source of truth for a flow. It will contain an action ID, conversation ID, controlled kind/status, platform ID, expected input kind, origin event, server-generated ten-minute expiry, and terminal timestamps. A partial unique index allows only one `awaiting_input` action per conversation. The conversation JSON is merely its safe projection.
+`app.bot_conversation_actions` is the durable source of truth for a flow. It contains an action ID, conversation ID, controlled kind/status, platform ID, expected input kind, origin event, server-generated ten-minute expiry, and terminal timestamps. A partial unique index allows only one `awaiting_input` action per conversation. The conversation JSON is merely its safe projection.
 
 Neither table may store raw callback data, message text, Player IDs, payment references, or arbitrary
 state JSON. RLS stays enabled and forced, with no direct table access for the bot, API, worker, or
@@ -88,18 +91,29 @@ controlled platform binding. Future platforms require their own reviewed, allowl
 Required lock order:
 
 ```text
-inbound event -> customer identity -> customer -> Telegram identity -> active platform -> bot conversation -> action capability -> active action and consumption receipt -> conversation CAS update
+Telegram user/private-chat advisory scope -> inbound event -> customer identity -> customer -> Telegram identity -> active platform -> bot conversation -> action capability -> active action and consumption receipt -> conversation CAS update
 ```
 
-Capability issue, revoke, expiry, and consume paths must observe the same conversation-then-
-capability ordering whenever they lock both rows.
+Every Stage 7 action path takes the per-user/private-chat advisory scope before row locks.
+Before any action procedure is granted `EXECUTE`, a forward migration must update the Stage 5 inbox
+recorder to take that same scope before its existing-event lookup and to replace its joined identity
+locks with the sequential order above. Capability issue, revoke, expiry, and consume paths must
+also pre-lock their target capability/action records in this order before updating them; a trigger
+cannot rearrange PostgreSQL's implicit target-row lock.
 
 After locking the inbound event and its identity, the procedure first looks up the global
 consumption receipt. An exact retry returns its saved opaque result before capability or expiry
 checks see the already-advanced state. A fresh start request while another flow is active becomes
 the durable `active_action_exists` outcome; it must never overwrite the existing flow. A stale or
 expired action is handled lazily under the conversation lock. Missing identity, an invalid
-capability, or internal inconsistency rolls back without consuming the event.
+capability, or internal inconsistency rolls back without consuming the event. A stale capability is
+durably rejected only when it is tied to its own revocation record; malformed Player-ID input is
+durably rejected only while a matching active action remains unchanged.
+
+If the active Player-ID action has expired, the next private interaction may only use the dedicated
+`expire_player_registration_action` consumer to mark that old action expired and return the
+conversation to idle. It must not also interpret that same update as a menu click, callback, or
+Player-ID submission. The bot tells the user to start again with a new update.
 
 The compare-and-set operation is inside the same transaction:
 
@@ -121,8 +135,9 @@ credential or raw platform ID.
 After the action succeeds, the text-input path uses a _new_ Telegram update and must be one
 transaction. It locks that inbound event and the active action/conversation, proves
 `awaiting_player_id`, expiry, and that the inbound event was received no earlier than the active
-action's server-created timestamp. This prevents a delayed older message from being accepted by a
-later reopened flow. It then sends the Player ID only to a narrow wrapper. That wrapper
+action's server-created timestamp. It also requires the persisted numeric Telegram update ID to be
+strictly later than the action-start update ID. This prevents a delayed older message from being
+accepted by a later reopened flow. It then sends the Player ID only to a narrow wrapper. That wrapper
 must normalize and validate the Player ID again in PostgreSQL, not rely only on API memory. Its
 global consumption receipt binds an HMAC of the controlled operation, action ID, capability/context,
 expected conversation version, platform, and normalized Player ID. The HMAC is an opaque retry

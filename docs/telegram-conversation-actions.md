@@ -2,9 +2,12 @@
 
 ## Status: inert database foundation applied; not user-facing
 
-The private Stage 7–9 schema is applied after the inert Player-ID request schema. It adds no
-customer-facing action procedure or runtime `EXECUTE` grant. It does not enable the bot, add a
-database credential, call KemerBet, validate a Player ID, open a deposit, or make a payment.
+The private Stage 7–11 schema is applied after the inert Player-ID request schema. Stage 11
+aligns the inbox recorder with the shared lock order, makes the Telegram user/chat binding
+immutable, and retires the old Player-ID event consumer in favor of an ungranted non-claiming
+request primitive. It adds no customer-facing action procedure or runtime `EXECUTE` grant. It does
+not enable the bot, add a database credential, call KemerBet, validate a Player ID, open a deposit,
+or make a payment.
 
 ## Why a shared action boundary is required
 
@@ -94,12 +97,10 @@ Required lock order:
 Telegram user/private-chat advisory scope -> inbound event -> customer identity -> customer -> Telegram identity -> active platform -> bot conversation -> action capability -> active action and consumption receipt -> conversation CAS update
 ```
 
-Every Stage 7 action path takes the per-user/private-chat advisory scope before row locks.
-Before any action procedure is granted `EXECUTE`, a forward migration must update the Stage 5 inbox
-recorder to take that same scope before its existing-event lookup and to replace its joined identity
-locks with the sequential order above. Capability issue, revoke, expiry, and consume paths must
-also pre-lock their target capability/action records in this order before updating them; a trigger
-cannot rearrange PostgreSQL's implicit target-row lock.
+Stage 11 updates the Stage 5 inbox recorder to take the per-user/private-chat advisory scope before
+its existing-event lookup and to use the sequential row-lock order above. Capability issue, revoke,
+expiry, and consume paths must also pre-lock their target capability/action records in this order
+before updating them; a trigger cannot rearrange PostgreSQL's implicit target-row lock.
 
 After locking the inbound event and its identity, the procedure first looks up the global
 consumption receipt. An exact retry returns its saved opaque result before capability or expiry
@@ -145,21 +146,20 @@ discriminator; the database independently compares the normalized ID with the li
 request before returning an exact retry.
 
 The API must never receive direct `EXECUTE` permission for
-`app.request_telegram_player_registration`. The current helper owns a local event link and updates
-`inbound_events.processed_at`, so a later migration must split or replace it with an ungranted
-request-create/reuse primitive that does **not** consume an inbound event. The conversation-aware
-wrapper will own global consumption, the request event link, the audit event, action completion,
-and the conversation CAS in one transaction before any activation.
+`app.request_telegram_player_registration`; Stage 11 retires that legacy consumer. The only
+replacement is the ungranted `app.create_or_reuse_player_registration_request` primitive, which
+does **not** consume an inbound event. The future conversation-aware wrapper will own global
+consumption, the request event link, the audit event, action completion, and the conversation CAS
+in one transaction before any activation.
 
 ## Compatibility work before activation
 
 Before any action procedure receives `EXECUTE`, every Telegram-originated procedure must join the
-shared consumption rule. `open_telegram_deposit_intent` and
-`capture_telegram_deposit_reference` currently have API execution grants but each protects only a
-local event link; the action migration must revoke those direct grants before it introduces the
-shared receipt. The current Player-ID helper is already ungranted but also protects only a local
-event link. All three procedures must be refactored and regression-tested before any replacement
-wrapper is granted execution, even though payment verification remains disabled.
+shared consumption rule. Stage 7 and Stage 11 revoke direct execution for
+`open_telegram_deposit_intent` and `capture_telegram_deposit_reference`; both still require
+conversation-aware replacements. The retired Player-ID consumer is also ungranted. All three
+paths must be refactored and regression-tested before any replacement wrapper is granted
+execution, even though payment verification remains disabled.
 
 The first menu/root-navigation operation must itself become a reviewed receipt consumer that issues
 an action capability. There is no free-text or static callback fallback while such an issuer is

@@ -55,6 +55,10 @@ type AdmissionReceiptRow = {
   readonly received_at: Date;
 };
 
+type NonceReservationRow = {
+  readonly reserved: boolean;
+};
+
 type AdmissionWriteSnapshot = {
   readonly active_invites: number;
   readonly audit_events: number;
@@ -73,11 +77,16 @@ const betaInviteRedemptionProcedure =
   'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)';
 const admittedPrivateInboundRecorder =
   'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)';
+const betaAdmissionNonceReservationProcedure =
+  'app.reserve_telegram_beta_invite_admission_nonce(text,timestamptz)';
+const betaAdmissionNoncePurgeProcedure =
+  'app.purge_expired_telegram_beta_invite_admission_nonce_reservations(integer)';
 const betaInviteAdmissionMigrationName =
   '20260809195620_private_telegram_beta_invite_admission.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
+const nonceDigest = (hexCharacter: string): string => hexCharacter.repeat(64);
 
 async function queryAsRole<T extends QueryResultRow>(
   role: 'payreplayy_api' | 'payreplayy_beta_admission',
@@ -120,6 +129,16 @@ async function readAdmissionWriteSnapshot(): Promise<AdmissionWriteSnapshot> {
 
   expect(result.rows).toHaveLength(1);
   return result.rows[0]!;
+}
+
+async function readBetaAdmissionNonceReservationCount(): Promise<number> {
+  const result = await client.query<{ readonly reservations: number }>(`
+    select count(*)::integer as reservations
+    from app.telegram_beta_invite_admission_nonce_reservations
+  `);
+
+  expect(result.rows).toHaveLength(1);
+  return result.rows[0]!.reservations;
 }
 
 let environment: SqlIntegrationEnvironment;
@@ -543,6 +562,281 @@ describe('disposable SQL migration baseline', () => {
     expect(legacyRecorder.rows).toEqual([
       { api_execute_allowed: false, exists: true, runtime_execute_allowed: false },
     ]);
+  });
+
+  it('keeps beta-admission nonce reservation private, forced-RLS, and narrowly executable', async () => {
+    const nonceFunctions = await client.query<{
+      readonly beta_admission_execute_allowed: boolean;
+      readonly beta_admission_runtime_direct_execute_allowed: boolean;
+      readonly beta_admission_runtime_effective_execute_allowed: boolean;
+      readonly generic_api_execute_allowed: boolean;
+      readonly generic_api_runtime_execute_allowed: boolean;
+      readonly is_security_definer: boolean;
+      readonly nonce_retention_execute_allowed: boolean;
+      readonly nonce_retention_runtime_execute_allowed: boolean;
+      readonly procedure_name: string;
+      readonly public_execute_allowed: boolean;
+      readonly safe_search_path: boolean;
+      readonly worker_execute_allowed: boolean;
+    }>(`
+      select
+        procedure.proname as procedure_name,
+        procedure.prosecdef as is_security_definer,
+        coalesce(procedure.proconfig, array[]::text[])
+          @> array['search_path=pg_catalog, app, pg_temp']::text[] as safe_search_path,
+        has_function_privilege('payreplayy_beta_admission', procedure.oid, 'EXECUTE')
+          as beta_admission_execute_allowed,
+        has_function_privilege('payreplayy_beta_admission_runtime', procedure.oid, 'EXECUTE')
+          as beta_admission_runtime_effective_execute_allowed,
+        exists (
+          select 1
+          from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) as privilege
+          where privilege.grantee = 'payreplayy_beta_admission_runtime'::regrole
+            and privilege.privilege_type = 'EXECUTE'
+        ) as beta_admission_runtime_direct_execute_allowed,
+        has_function_privilege('payreplayy_api', procedure.oid, 'EXECUTE')
+          as generic_api_execute_allowed,
+        has_function_privilege('payreplayy_api_runtime', procedure.oid, 'EXECUTE')
+          as generic_api_runtime_execute_allowed,
+        has_function_privilege('payreplayy_worker', procedure.oid, 'EXECUTE')
+          as worker_execute_allowed,
+        has_function_privilege('payreplayy_nonce_retention', procedure.oid, 'EXECUTE')
+          as nonce_retention_execute_allowed,
+        has_function_privilege('payreplayy_nonce_retention_runtime', procedure.oid, 'EXECUTE')
+          as nonce_retention_runtime_execute_allowed,
+        exists (
+          select 1
+          from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) as privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        ) as public_execute_allowed
+      from pg_proc as procedure
+      where procedure.oid in (
+        '${betaAdmissionNonceReservationProcedure}'::regprocedure,
+        '${betaAdmissionNoncePurgeProcedure}'::regprocedure
+      )
+      order by procedure_name
+    `);
+    const nonceReservationTable = await client.query<{
+      readonly policies: number;
+      readonly public_table_access: boolean;
+      readonly relforcerowsecurity: boolean;
+      readonly relrowsecurity: boolean;
+    }>(`
+      select
+        class.relrowsecurity,
+        class.relforcerowsecurity,
+        (
+          select count(*)::integer
+          from pg_policy as policy
+          where policy.polrelid = class.oid
+        ) as policies,
+        exists (
+          select 1
+          from aclexplode(coalesce(class.relacl, acldefault('r', class.relowner))) as privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+        ) as public_table_access
+      from pg_class as class
+      where class.oid = 'app.telegram_beta_invite_admission_nonce_reservations'::regclass
+    `);
+    const nonceReservationTablePrivileges = await client.query<{
+      readonly allowed: boolean;
+      readonly role_name: string;
+    }>(`
+      select
+        role_name,
+        has_table_privilege(
+          role_name,
+          'app.telegram_beta_invite_admission_nonce_reservations',
+          'SELECT'
+        )
+          or has_table_privilege(
+            role_name,
+            'app.telegram_beta_invite_admission_nonce_reservations',
+            'INSERT'
+          )
+          or has_table_privilege(
+            role_name,
+            'app.telegram_beta_invite_admission_nonce_reservations',
+            'UPDATE'
+          )
+          or has_table_privilege(
+            role_name,
+            'app.telegram_beta_invite_admission_nonce_reservations',
+            'DELETE'
+          ) as allowed
+      from unnest(array[
+        'anon',
+        'authenticated',
+        'service_role',
+        'payreplayy_api',
+        'payreplayy_api_runtime',
+        'payreplayy_beta_admission',
+        'payreplayy_beta_admission_runtime',
+        'payreplayy_nonce_retention',
+        'payreplayy_nonce_retention_runtime',
+        'payreplayy_worker'
+      ]) as candidate(role_name)
+      order by role_name
+    `);
+
+    expect(nonceFunctions.rows.map((procedure) => procedure.procedure_name)).toEqual([
+      'purge_expired_telegram_beta_invite_admission_nonce_reservations',
+      'reserve_telegram_beta_invite_admission_nonce',
+    ]);
+    const reserveProcedure = nonceFunctions.rows.find(
+      (procedure) => procedure.procedure_name === 'reserve_telegram_beta_invite_admission_nonce',
+    );
+    const purgeProcedure = nonceFunctions.rows.find(
+      (procedure) =>
+        procedure.procedure_name ===
+        'purge_expired_telegram_beta_invite_admission_nonce_reservations',
+    );
+
+    expect(reserveProcedure).toMatchObject({
+      beta_admission_execute_allowed: true,
+      beta_admission_runtime_direct_execute_allowed: false,
+      beta_admission_runtime_effective_execute_allowed: true,
+      generic_api_execute_allowed: false,
+      generic_api_runtime_execute_allowed: false,
+      is_security_definer: true,
+      nonce_retention_execute_allowed: false,
+      nonce_retention_runtime_execute_allowed: false,
+      public_execute_allowed: false,
+      safe_search_path: true,
+      worker_execute_allowed: false,
+    });
+    expect(purgeProcedure).toMatchObject({
+      beta_admission_execute_allowed: false,
+      beta_admission_runtime_direct_execute_allowed: false,
+      beta_admission_runtime_effective_execute_allowed: false,
+      generic_api_execute_allowed: false,
+      generic_api_runtime_execute_allowed: false,
+      is_security_definer: true,
+      nonce_retention_execute_allowed: false,
+      nonce_retention_runtime_execute_allowed: false,
+      public_execute_allowed: false,
+      safe_search_path: true,
+      worker_execute_allowed: false,
+    });
+    expect(nonceReservationTable.rows).toEqual([
+      {
+        policies: 0,
+        public_table_access: false,
+        relforcerowsecurity: true,
+        relrowsecurity: true,
+      },
+    ]);
+    expect(nonceReservationTablePrivileges.rows.every((privilege) => !privilege.allowed)).toBe(
+      true,
+    );
+  });
+
+  it('atomically reserves only valid beta-admission nonce digests', async () => {
+    const acceptedDigest = nonceDigest('a');
+    const reserveStatement = `
+      select app.reserve_telegram_beta_invite_admission_nonce(
+        $1::text,
+        clock_timestamp() + interval '2 minutes'
+      ) as reserved
+    `;
+    const beforeReservation = await readBetaAdmissionNonceReservationCount();
+    const leftSession = createSqlIntegrationClient(environment);
+    const rightSession = createSqlIntegrationClient(environment);
+
+    await Promise.all([leftSession.connect(), rightSession.connect()]);
+    try {
+      await Promise.all([leftSession.query('begin'), rightSession.query('begin')]);
+      await Promise.all([
+        leftSession.query('set local role payreplayy_beta_admission'),
+        rightSession.query('set local role payreplayy_beta_admission'),
+      ]);
+
+      const leftReservation = leftSession.query<NonceReservationRow>(reserveStatement, [
+        acceptedDigest,
+      ]);
+      const rightReservation = rightSession.query<NonceReservationRow>(reserveStatement, [
+        acceptedDigest,
+      ]);
+      const firstCompletedReservation = await Promise.race([
+        leftReservation.then((result) => ({ result, session: leftSession })),
+        rightReservation.then((result) => ({ result, session: rightSession })),
+      ]);
+
+      expect(firstCompletedReservation.result.rows).toEqual([{ reserved: true }]);
+      await firstCompletedReservation.session.query('commit');
+
+      const reservationOutcomes = await Promise.allSettled([leftReservation, rightReservation]);
+      expect(reservationOutcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(true);
+      const reservationResults = reservationOutcomes.map((outcome) => {
+        if (outcome.status !== 'fulfilled') {
+          throw outcome.reason;
+        }
+
+        return outcome.value.rows[0]?.reserved;
+      });
+      expect(reservationResults).toContain(true);
+      expect(reservationResults).toContain(false);
+    } finally {
+      await Promise.allSettled([leftSession.query('rollback'), rightSession.query('rollback')]);
+      await Promise.allSettled([leftSession.end(), rightSession.end()]);
+    }
+
+    expect(await readBetaAdmissionNonceReservationCount()).toBe(beforeReservation + 1);
+
+    await expect(
+      queryAsRole<NonceReservationRow>('payreplayy_api', reserveStatement, [nonceDigest('b')]),
+    ).rejects.toThrow();
+    expect(await readBetaAdmissionNonceReservationCount()).toBe(beforeReservation + 1);
+
+    await expect(
+      queryAsRole<NonceReservationRow>('payreplayy_beta_admission', reserveStatement, [
+        nonceDigest('g'),
+      ]),
+    ).rejects.toThrow('The Telegram beta admission nonce digest is invalid.');
+    await expect(
+      queryAsRole<NonceReservationRow>('payreplayy_beta_admission', reserveStatement, [
+        `sha256-v1:${nonceDigest('c')}`,
+      ]),
+    ).rejects.toThrow('The Telegram beta admission nonce digest is invalid.');
+    await expect(
+      queryAsRole<NonceReservationRow>(
+        'payreplayy_beta_admission',
+        `
+          select app.reserve_telegram_beta_invite_admission_nonce(
+            $1::text,
+            clock_timestamp() - interval '1 second'
+          ) as reserved
+        `,
+        [nonceDigest('d')],
+      ),
+    ).rejects.toThrow('The Telegram beta admission nonce expiry is invalid.');
+    await expect(
+      queryAsRole<NonceReservationRow>(
+        'payreplayy_beta_admission',
+        `
+          select app.reserve_telegram_beta_invite_admission_nonce(
+            $1::text,
+            clock_timestamp() + interval '4 minutes'
+          ) as reserved
+        `,
+        [nonceDigest('e')],
+      ),
+    ).rejects.toThrow('The Telegram beta admission nonce expiry is invalid.');
+    expect(await readBetaAdmissionNonceReservationCount()).toBe(beforeReservation + 1);
+
+    await expect(
+      queryAsRole(
+        'payreplayy_beta_admission',
+        `
+          select app.purge_expired_telegram_beta_invite_admission_nonce_reservations(
+            $1::integer
+          )
+        `,
+        [1],
+      ),
+    ).rejects.toThrow();
   });
 
   it('keeps the legacy auto-registration recorder inaccessible to the API role', async () => {

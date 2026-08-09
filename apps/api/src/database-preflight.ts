@@ -69,6 +69,11 @@ const API_DATABASE_PREFLIGHT_SQL = `
       'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)',
       'EXECUTE'
     ) as admitted_inbox_recorder_execute_denied,
+    not pg_catalog.has_function_privilege(
+      current_user,
+      'app.reserve_telegram_beta_invite_admission_nonce(text,timestamptz)',
+      'EXECUTE'
+    ) as beta_admission_nonce_reservation_execute_denied,
     pg_catalog.has_function_privilege(
       current_user,
       'app.reserve_telegram_private_ingress_nonce(text,timestamptz)',
@@ -110,6 +115,7 @@ const API_DATABASE_PREFLIGHT_SQL = `
           ('app.bot_conversations'::text),
           ('app.audit_events'::text),
           ('app.telegram_beta_invites'::text),
+          ('app.telegram_beta_invite_admission_nonce_reservations'::text),
           ('app.telegram_private_ingress_nonce_reservations'::text)
       ) as protected_table(table_name)
       cross join (
@@ -162,6 +168,7 @@ interface ApiDatabasePreflightRow {
   readonly legacy_inbox_recorder_execute_denied: boolean;
   readonly beta_invite_redemption_execute_denied: boolean;
   readonly admitted_inbox_recorder_execute_denied: boolean;
+  readonly beta_admission_nonce_reservation_execute_denied: boolean;
   readonly nonce_reservation_execute_allowed: boolean;
   readonly nonce_reservation_execution_is_private: boolean;
   readonly private_telegram_boundary_table_access_denied: boolean;
@@ -184,6 +191,7 @@ export interface ApiDatabasePreflightResult {
   readonly legacyInboxRecorderExecuteDenied: boolean;
   readonly betaInviteRedemptionExecuteDenied: boolean;
   readonly admittedInboxRecorderExecuteDenied: boolean;
+  readonly betaAdmissionNonceReservationExecuteDenied: boolean;
   readonly nonceReservationExecuteAllowed: boolean;
   readonly nonceReservationExecutionIsPrivate: boolean;
   readonly privateTelegramBoundaryTableAccessDenied: boolean;
@@ -228,6 +236,10 @@ function toPreflightResult(row: ApiDatabasePreflightRow): ApiDatabasePreflightRe
     legacyInboxRecorderExecuteDenied: asBoolean(row, 'legacy_inbox_recorder_execute_denied'),
     betaInviteRedemptionExecuteDenied: asBoolean(row, 'beta_invite_redemption_execute_denied'),
     admittedInboxRecorderExecuteDenied: asBoolean(row, 'admitted_inbox_recorder_execute_denied'),
+    betaAdmissionNonceReservationExecuteDenied: asBoolean(
+      row,
+      'beta_admission_nonce_reservation_execute_denied',
+    ),
     nonceReservationExecuteAllowed: asBoolean(row, 'nonce_reservation_execute_allowed'),
     nonceReservationExecutionIsPrivate: asBoolean(row, 'nonce_reservation_execution_is_private'),
     privateTelegramBoundaryTableAccessDenied: asBoolean(

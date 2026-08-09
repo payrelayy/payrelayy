@@ -24,11 +24,16 @@ RUN install --directory --owner=root --group=root --mode=0755 /usr/local/share/p
   && chmod 0444 /usr/local/share/payreplayy/sql-integration-runner
 
 COPY --from=dependencies /workspace/node_modules ./node_modules
+COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/sql-integration-tests ./packages/sql-integration-tests
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
-COPY package.json pnpm-workspace.yaml ./
-COPY packages/sql-integration-tests ./packages/sql-integration-tests
 COPY supabase/migrations ./supabase/migrations
+
+# Vite creates a transient bundled config here. Keep all test source and
+# migration input root-owned; only this disposable scratch directory is writable.
+RUN install --directory --owner=node --group=node --mode=0700 \
+  /workspace/packages/sql-integration-tests/node_modules/.vite-temp
 
 USER node
 

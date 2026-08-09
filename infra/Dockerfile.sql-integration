@@ -35,6 +35,8 @@ COPY supabase/migrations ./supabase/migrations
 RUN install --directory --owner=node --group=node --mode=0700 \
   /workspace/packages/sql-integration-tests/node_modules/.vite-temp
 
+WORKDIR /workspace/packages/sql-integration-tests
+
 USER node
 
-CMD ["./packages/sql-integration-tests/node_modules/.bin/vitest", "run", "--config", "packages/sql-integration-tests/vitest.config.ts"]
+CMD ["./node_modules/.bin/vitest", "run", "--config", "vitest.config.ts"]

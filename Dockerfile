@@ -17,6 +17,10 @@ RUN pnpm --filter @payreplayy/api... run build
 
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS api
 
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="payreplayy-api" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
 RUN groupadd --gid 10001 payreplayy \
   && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin payreplayy
 

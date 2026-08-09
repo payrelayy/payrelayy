@@ -31,7 +31,8 @@ When Docker is available, these commands validate the artifact; they do not prov
 enable a customer-facing service:
 
 ```powershell
-docker build --target api --tag payreplayy-api:inactive .
+docker build --target api --build-arg VCS_REF=<reviewed-commit> `
+  --tag payreplayy-api:inactive-<short-commit> .
 docker compose -f infra/compose.inactive.yaml config
 ```
 

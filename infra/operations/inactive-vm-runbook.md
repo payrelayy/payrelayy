@@ -78,6 +78,11 @@ The repository deploy identity must remain outside the `docker` and `sudo`
 groups. A separately approved administrator path performs a one-time image
 build; it does not give the deploy identity Docker access.
 
+Pass the full reviewed commit as Docker build argument `VCS_REF` and tag the
+image `payreplayy-api:inactive-<first-7-commit-characters>`. The final image
+records the full commit in the OCI revision label; the verifier rejects an
+image whose tag or revision label does not match the sealed release.
+
 ## Backup acceptance
 
 Enabling DigitalOcean backups is not sufficient for staging eligibility. Record
@@ -127,3 +132,23 @@ All items below must be true before proposing a private staging deployment:
 
 Until every item is checked, the only allowed PayReplayy actions are source
 inspection and build-only validation under the inactive contract.
+
+## Repeatable evidence drill
+
+[`verify-inactive-vm.sh`](verify-inactive-vm.sh) automates the local checks in
+this runbook. It is intentionally fail-closed and read-only: it neither starts
+nor pulls a container, reads a secret, changes a system service, or changes the
+firewall.
+
+Run it only as root against a sealed, reviewed release:
+
+```bash
+/srv/payreplayy/releases/<reviewed-commit>/infra/operations/verify-inactive-vm.sh \
+  --commit <reviewed-commit> \
+  --release-dir /srv/payreplayy/releases/<reviewed-commit> \
+  --image payreplayy-api:inactive-<short-commit>
+```
+
+It prints only a pass marker, the reviewed commit, and the local image tag.
+Any drift produces a nonzero exit status and a generic check failure; do not
+work around a failure by starting, rebuilding, or changing the VM.

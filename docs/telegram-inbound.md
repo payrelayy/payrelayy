@@ -1,71 +1,88 @@
-# Private Telegram inbox boundary
+# Private Telegram invite-admission and inbox boundary
 
 ## Current scope
 
-`app.record_telegram_private_inbound_event` is the database boundary for a Telegram update
-that has already been authenticated and classified as a private chat by the PayReplayy API. It:
+PayReplayy beta admission is **invite-only**. An unknown Telegram user must not become a customer
+merely by opening, messaging, or calling the bot. The historic generic
+`app.record_telegram_private_inbound_event(...)` procedure therefore is not an admission path: the
+invite-admission migration revokes its runtime grant and makes it fail closed.
 
-- creates or finds the immutable Telegram customer identity;
-- creates an empty bot conversation without changing its state;
-- writes one inbox record per Telegram update ID; and
-- returns safe internal IDs, statuses, locale, and whether the update was already recorded.
+The only customer-creation path is the reviewed
+`app.redeem_telegram_beta_invite(...)` procedure, called after an exact private
+`/start <single-use-invite>` interaction has passed the separately signed transport boundary. It
+may create the immutable customer identity, Telegram identity, and empty conversation exactly
+once. It stores a domain-separated SHA-256 invite-token digest only; raw invite links and tokens
+are never persisted, logged, or returned.
 
-It does not start polling, receive full Telegram JSON, save message text or callback data, accept
-payment proof, validate a Player ID, open a deposit, contact a provider, invoke KemerBet, or pay
-anyone. The bot and private-ingress runtime gates remain disabled by default; no runtime database
-login is enabled or deployed.
+After successful admission, only
+`app.record_admitted_telegram_private_inbound_event(...)` may record an allowlisted private update
+for that already-active Telegram identity. It must never create a customer, identity, or
+conversation. Both procedures remain unavailable until their independent runtime, credential, and
+activation review; no bot polling, API route, or database login is enabled by this documentation.
 
 ## Trust boundary
 
-The Telegram bot is transport only. Before the procedure can ever be invoked, the API must verify
-that the update came from PayReplayy's bot transport, has a real sender, and belongs to a private
-chat. The database cannot prove Telegram chat type by itself.
+The Telegram bot is transport only. Before an admission or admitted-inbox procedure can ever be
+invoked, the API must verify that an update came from PayReplayy's bot transport, has a real
+non-bot sender, and belongs to a private chat. The database cannot prove Telegram chat type by
+itself.
 
-Only the API sends these allowlisted values to the procedure:
+The proposed beta admission transport sends only these allowlisted values to the procedure:
 
 - Telegram update ID, user ID, and private-chat ID;
-- bounded Telegram profile metadata and the fixed English (`en`) locale; and
-- an API-generated value shaped as `hmac-sha256-v<version>:<64 lowercase hex>`.
+- the fixed English (`en`) locale;
+- a domain-separated SHA-256 invite-token digest shaped as
+  `sha256-v<version>:<64 lowercase hex>`; and
+- an API-generated payload HMAC shaped as `hmac-sha256-v<version>:<64 lowercase hex>`.
+
+It deliberately excludes first name, last name, username, Telegram language metadata, raw invite
+tokens, raw message text, callback data, attachments, and all payment or Player-ID material.
 
 The HMAC covers canonical, allowlisted update metadata. It is an integrity and idempotency check;
 it is not raw Telegram JSON, a plain body hash, a transaction reference, or a secret stored in the
-database. The API must retain each HMAC key version long enough to calculate the same value for a
+database. Admission transport authentication uses a distinct key domain from later admitted-inbox
+transport. The API must retain each HMAC key version long enough to calculate the same value for a
 delivery retry.
 
 ## Database safeguards
 
-- The procedure serializes each update ID before creating any identity records.
+- Invalid, expired, revoked, used, malformed, or cross-user invites make **zero** customer,
+  identity, conversation, inbox, or audit writes.
+- The migration refuses the cutover if historical Telegram identities, conversations, or inbound
+  events already exist. It locks those tables for the check rather than silently converting a
+  legacy generic-inbox population into invite admission.
+- The accepted invite redemption is serialized by its token digest and Telegram private scope; an
+  exact replay for the same user/chat is idempotent, but it cannot be redeemed by a different user
+  or chat.
 - Telegram user and private-chat bindings are immutable and checked on every replay.
-- A replay with a changed identity or HMAC is rejected rather than silently attached elsewhere.
+- A replay with a changed identity, token binding, or HMAC is rejected rather than silently
+  attached elsewhere.
 - The API has procedure execution only: it cannot directly read or mutate customer, identity,
-  inbox, conversation, or audit tables.
+  inbox, conversation, invite, or audit tables.
 - RLS remains enabled and forced on those private tables.
-- Customer display names are set only at first registration. Later Telegram profile refreshes
-  update only Telegram-owned profile fields.
+- No Telegram profile value crosses the admission database boundary, so redemption cannot create a
+  customer profile from Telegram-supplied display data.
 
 ## Transport status and next gates
 
-The signed private bot-to-API transport scaffold now exists. It forwards only the allowlisted
-metadata above, authenticates exact request bytes before parsing, and is disabled by default. The
-durable nonce-reservation schema and API-only inbox-recorder adapter are composed only when
-`INTERNAL_POSTGRES_RUNTIME_ENABLED`, `INTERNAL_TELEGRAM_INGRESS_ENABLED`, and
-`INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED` are all true. The nonce layer retains only a
-short-lived digest; the recorder can call only this procedure with allowlisted metadata and never
-reads a base table. The transport cannot be enabled in production until a reviewed runtime
-credential, private deployment boundary, and durable outbox exist. See
-[telegram-transport.md](telegram-transport.md) for the precise boundary, secrets, retry behavior,
-and key-rotation limitation.
+The historic generic private-inbox transport remains disabled and must not be enabled for the
+invite-only beta. It is superseded by a separately signed admission transport and, after
+admission, a separately signed admitted-inbox transport. Each requires an independently reviewed
+runtime credential, private deployment boundary, nonce/idempotency design, durable outbox, and
+BotFather-token rotation before activation. See [telegram-transport.md](telegram-transport.md) for
+the transport separation and key-management requirements.
 
 The remaining gates are:
 
-1. Configure a separate API runtime login and a separate bot runtime secret set; neither may
-   receive the other service's credentials.
-2. Wire the reviewed durable cross-replica nonce guard and recorder only together, with separate
-   committed database operations in that order.
-3. Add a shared, conversation-aware inbound-action/CAS boundary before interpreting customer
-   actions. It must become the global exactly-once receipt, not restore generic table DML. See
-   [telegram-conversation-actions.md](telegram-conversation-actions.md).
-4. Keep the applied, non-claiming Player-ID request helper ungranted until that conversation-aware
-   boundary can invoke it safely before any KemerBet validation.
-5. Keep payment verification, receipt upload, provider lookup, KemerBet execution, and payouts
+1. Independently review the invite-admission migration in a disposable database before any remote
+   database change.
+2. Configure only the dedicated `payreplayy_beta_admission` group and its
+   `payreplayy_beta_admission_runtime` login scaffold for admission; the generic API group and
+   runtime must not execute either admission procedure. Keep its bot secret set separate.
+3. Rotate the exposed BotFather token before polling is ever enabled.
+4. Wire exact `/start <invite>` handling with durable cross-replica replay protection. Ordinary
+   messages, callbacks, Player IDs, attachments, and payments must remain ignored at beta entry.
+5. Keep the applied, non-claiming Player-ID request helper ungranted until a conversation-aware
+   action boundary can invoke it safely after admission.
+6. Keep payment verification, receipt upload, provider lookup, KemerBet execution, and payouts
    disabled until their separate launch gates are satisfied.

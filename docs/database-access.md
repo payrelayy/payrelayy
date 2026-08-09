@@ -32,13 +32,21 @@ Both procedures run only when the payment-verification switch is explicitly live
 configuration procedure still deliberately refuses live, so both remain dormant until a later
 launch review.
 
-The API also has a non-financial app.record_telegram_private_inbound_event procedure. It accepts
-only allowlisted private-Update metadata and an API-generated, versioned payload HMAC; it creates
-or finds the customer Telegram identity, an empty conversation, and an idempotent inbox record.
-It never receives raw Telegram JSON, message text, transaction IDs, files, credentials, or payment
-instructions. The API no longer has direct table access to customer identities, inbound events,
-conversations, or audit events; later procedures must handle conversation compare-and-set and
-inbound-event completion without restoring broad DML grants.
+The historic non-financial `app.record_telegram_private_inbound_event` procedure accepted
+allowlisted private-update metadata and an API-generated, versioned payload HMAC, but it could
+create an identity for an unknown Telegram user. It is incompatible with the invite-only beta.
+The beta-admission migration revokes its API grant and makes the legacy entry point fail closed.
+Only `app.redeem_telegram_beta_invite` may create an identity, and only
+`app.record_admitted_telegram_private_inbound_event` may record a later update for an
+already-admitted identity. Neither grants the API direct table access to customer identities,
+inbound events, conversations, invite records, or audit events.
+
+Invite admission has its own NOLOGIN `payreplayy_beta_admission` group and
+`payreplayy_beta_admission_runtime` scaffold. The admission group alone receives schema usage and
+execution on the two admission procedures; the generic `payreplayy_api` group and its runtime
+scaffold must not execute them. A future real login can inherit only the dedicated admission group,
+cannot `SET ROLE`, and must have a separately mounted TLS database credential. It is not provisioned
+or enabled by this repository.
 
 Before a service starts, an operator will create a separate login role for that service, grant it
 membership in exactly one group role, and let it inherit only that group role's approved
@@ -71,13 +79,14 @@ pnpm --filter @payreplayy/api db:preflight
 
 only with `INTERNAL_POSTGRES_RUNTIME_ENABLED=true` and an API-only TLS database URL. The command
 opens a short `READ ONLY` transaction, sets local timeouts and a `pg_catalog` search path, checks
-only boolean capability facts, rolls the transaction back, and closes its pool. It verifies that
-the connection resolved to the designated non-admin runtime login, has exactly the expected
-non-switchable API-group membership, can execute the inbox recorder and nonce-reservation
-procedure, proves the nonce procedure remains inaccessible to broad database roles, has no direct
-privilege of any kind on identity, inbox, conversation, audit, or nonce tables, and still cannot
-execute any Player-ID action wrapper. It never logs a connection URL, database username, SQL text,
-or database error detail.
+only boolean capability facts, rolls the transaction back, and closes its pool. The existing generic
+API preflight must verify that its connection resolved to the designated non-admin runtime login,
+has exactly the expected non-switchable group membership, and **cannot** execute the retired generic
+inbox recorder or either beta-admission procedure. It must prove nonce and admission procedures
+remain inaccessible to broad database roles, has no direct privilege of any kind on identity, inbox,
+conversation, invite, audit, or nonce tables, and still cannot execute any Player-ID action wrapper.
+A separate, later beta-admission preflight must verify the dedicated role's two procedure grants;
+neither command logs a connection URL, database username, SQL text, or database error detail.
 
 For the DigitalOcean VM, use the current direct PostgreSQL connection when its supported network
 path is available; otherwise use the Supabase session pooler for the long-lived API process. The
@@ -103,15 +112,19 @@ has separately been provisioned, and an authenticated request reaches the privat
 reviewed activation stage must reserve the nonce in a committed operation before calling the inbox
 recorder, so recorder failure cannot roll back replay protection.
 
-Stage 13C adds an API-only adapter for `app.record_telegram_private_inbound_event(...)`. It sends
-only the authenticated private-update DTO and the API-generated payload HMAC to that existing
-procedure, validates the safe result shape, and maps database uncertainty to a generic unavailable
-error. It neither creates a pool nor loads a credential itself; Stage 15A composes it only behind
-all three explicit runtime gates. It is never called by health, readiness, or preflight.
+## Stage 13C historical private Telegram inbox recorder
 
-## Stage 15A private Telegram ingress runtime composition
+Stage 13C added an API-only adapter for the historic
+`app.record_telegram_private_inbound_event(...)` routine. It must remain uncomposed and disabled.
+The invite-only beta replaces its creation behavior with a dedicated invite-redemption procedure;
+the generic recorder is unavailable to every runtime login. A later admitted-inbox adapter may
+record only an already-admitted identity. Neither adapter may create a pool or load a credential
+by itself, and neither is called by health, readiness, or preflight.
 
-The reviewed nonce and recorder adapters are now composed only when all three API gates are true:
+## Stage 15A historical private Telegram ingress runtime composition
+
+The reviewed historical nonce and generic-recorder adapters are technically composed only when all
+three API gates are true:
 
 1. `INTERNAL_POSTGRES_RUNTIME_ENABLED=true` with the dedicated, TLS-verified API runtime URL;
 2. `INTERNAL_TELEGRAM_INGRESS_ENABLED=true` with both API-side transport HMAC secrets; and
@@ -119,12 +132,11 @@ The reviewed nonce and recorder adapters are now composed only when all three AP
 
 The third gate defaults to `false` and rejects configuration unless the first two prerequisites are
 already valid. `INTERNAL_POSTGRES_RUNTIME_ENABLED` therefore remains preflight-only when the third
-gate is false. When all three are true, the API constructs only one bounded two-connection pool
-from decomposed configuration fields, with certificate verification and short timeouts. The nonce
-reservation and inbox recorder call `Pool.query` separately: no shared transaction can roll back a
-successful replay reservation if recording fails. Fastify closes that pool on shutdown. This does
-not enable bot polling, public ingress, Player-ID handling, payment verification, or financial
-actions. The inactive Compose contract sets all three gates to `false`.
+gate is false. Even when all three are true, this historical path is not approved for the
+invite-only beta and must not be activated. The beta needs its own separate admission runtime
+login, signed transport, replay guard, and database procedures. This does not enable bot polling,
+public ingress, Player-ID handling, payment verification, or financial actions. The inactive
+Compose contract sets all existing gates to `false`.
 
 ## Stage 14B nonce-retention maintenance scaffold
 

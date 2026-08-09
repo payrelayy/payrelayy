@@ -27,8 +27,9 @@ const passingRow = {
   no_other_direct_role_memberships: true,
   app_schema_usage_allowed: true,
   app_schema_create_denied: true,
-  inbox_recorder_execute_allowed: true,
-  inbox_recorder_execution_is_private: true,
+  legacy_inbox_recorder_execute_denied: true,
+  beta_invite_redemption_execute_denied: true,
+  admitted_inbox_recorder_execute_denied: true,
   nonce_reservation_execute_allowed: true,
   nonce_reservation_execution_is_private: true,
   private_telegram_boundary_table_access_denied: true,
@@ -88,8 +89,9 @@ describe('API database preflight', () => {
     const result = await runApiDatabasePreflight(enabledDatabaseConfig, { pool: fake.pool });
 
     expect(result.passed).toBe(true);
-    expect(result.inboxRecorderExecuteAllowed).toBe(true);
-    expect(result.inboxRecorderExecutionIsPrivate).toBe(true);
+    expect(result.legacyInboxRecorderExecuteDenied).toBe(true);
+    expect(result.betaInviteRedemptionExecuteDenied).toBe(true);
+    expect(result.admittedInboxRecorderExecuteDenied).toBe(true);
     expect(result.nonceReservationExecuteAllowed).toBe(true);
     expect(result.nonceReservationExecutionIsPrivate).toBe(true);
     expect(result.privateTelegramBoundaryTableAccessDenied).toBe(true);
@@ -134,15 +136,26 @@ describe('API database preflight', () => {
     expect(result.nonceReservationExecuteAllowed).toBe(false);
   });
 
-  it('reports broad inbox-recorder execution without treating the preflight as successful', async () => {
+  it('reports accidental beta-invite-redemption execution without treating the preflight as successful', async () => {
     const fake = createFakePool({
-      row: { ...passingRow, inbox_recorder_execution_is_private: false },
+      row: { ...passingRow, beta_invite_redemption_execute_denied: false },
     });
 
     const result = await runApiDatabasePreflight(enabledDatabaseConfig, { pool: fake.pool });
 
     expect(result.passed).toBe(false);
-    expect(result.inboxRecorderExecutionIsPrivate).toBe(false);
+    expect(result.betaInviteRedemptionExecuteDenied).toBe(false);
+  });
+
+  it('reports accidental admitted-inbox execution without treating the preflight as successful', async () => {
+    const fake = createFakePool({
+      row: { ...passingRow, admitted_inbox_recorder_execute_denied: false },
+    });
+
+    const result = await runApiDatabasePreflight(enabledDatabaseConfig, { pool: fake.pool });
+
+    expect(result.passed).toBe(false);
+    expect(result.admittedInboxRecorderExecuteDenied).toBe(false);
   });
 
   it('reports broad nonce-reservation execution without treating the preflight as successful', async () => {

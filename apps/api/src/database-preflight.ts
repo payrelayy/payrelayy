@@ -54,36 +54,21 @@ const API_DATABASE_PREFLIGHT_SQL = `
       as app_schema_usage_allowed,
     not pg_catalog.has_schema_privilege(current_user, 'app', 'CREATE')
       as app_schema_create_denied,
-    pg_catalog.has_function_privilege(
+    not pg_catalog.has_function_privilege(
       current_user,
       'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)',
       'EXECUTE'
-    ) as inbox_recorder_execute_allowed,
-    not exists (
-      select 1
-      from unnest(array[
-        'anon',
-        'authenticated',
-        'service_role',
-        'payreplayy_worker'
-      ]) as broad_role(role_name)
-      where pg_catalog.has_function_privilege(
-        broad_role.role_name,
-        'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)',
-        'EXECUTE'
-      )
-    )
-    and not exists (
-      select 1
-      from pg_catalog.pg_proc as routine
-      cross join lateral pg_catalog.aclexplode(
-        coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
-      ) as privilege
-      where routine.oid =
-        'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)'::regprocedure
-        and privilege.grantee = 0
-        and privilege.privilege_type = 'EXECUTE'
-    ) as inbox_recorder_execution_is_private,
+    ) as legacy_inbox_recorder_execute_denied,
+    not pg_catalog.has_function_privilege(
+      current_user,
+      'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)',
+      'EXECUTE'
+    ) as beta_invite_redemption_execute_denied,
+    not pg_catalog.has_function_privilege(
+      current_user,
+      'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)',
+      'EXECUTE'
+    ) as admitted_inbox_recorder_execute_denied,
     pg_catalog.has_function_privilege(
       current_user,
       'app.reserve_telegram_private_ingress_nonce(text,timestamptz)',
@@ -124,6 +109,7 @@ const API_DATABASE_PREFLIGHT_SQL = `
           ('app.inbound_events'::text),
           ('app.bot_conversations'::text),
           ('app.audit_events'::text),
+          ('app.telegram_beta_invites'::text),
           ('app.telegram_private_ingress_nonce_reservations'::text)
       ) as protected_table(table_name)
       cross join (
@@ -173,8 +159,9 @@ interface ApiDatabasePreflightRow {
   readonly no_other_direct_role_memberships: boolean;
   readonly app_schema_usage_allowed: boolean;
   readonly app_schema_create_denied: boolean;
-  readonly inbox_recorder_execute_allowed: boolean;
-  readonly inbox_recorder_execution_is_private: boolean;
+  readonly legacy_inbox_recorder_execute_denied: boolean;
+  readonly beta_invite_redemption_execute_denied: boolean;
+  readonly admitted_inbox_recorder_execute_denied: boolean;
   readonly nonce_reservation_execute_allowed: boolean;
   readonly nonce_reservation_execution_is_private: boolean;
   readonly private_telegram_boundary_table_access_denied: boolean;
@@ -194,8 +181,9 @@ export interface ApiDatabasePreflightResult {
   readonly noOtherDirectRoleMemberships: boolean;
   readonly appSchemaUsageAllowed: boolean;
   readonly appSchemaCreateDenied: boolean;
-  readonly inboxRecorderExecuteAllowed: boolean;
-  readonly inboxRecorderExecutionIsPrivate: boolean;
+  readonly legacyInboxRecorderExecuteDenied: boolean;
+  readonly betaInviteRedemptionExecuteDenied: boolean;
+  readonly admittedInboxRecorderExecuteDenied: boolean;
   readonly nonceReservationExecuteAllowed: boolean;
   readonly nonceReservationExecutionIsPrivate: boolean;
   readonly privateTelegramBoundaryTableAccessDenied: boolean;
@@ -237,8 +225,9 @@ function toPreflightResult(row: ApiDatabasePreflightRow): ApiDatabasePreflightRe
     noOtherDirectRoleMemberships: asBoolean(row, 'no_other_direct_role_memberships'),
     appSchemaUsageAllowed: asBoolean(row, 'app_schema_usage_allowed'),
     appSchemaCreateDenied: asBoolean(row, 'app_schema_create_denied'),
-    inboxRecorderExecuteAllowed: asBoolean(row, 'inbox_recorder_execute_allowed'),
-    inboxRecorderExecutionIsPrivate: asBoolean(row, 'inbox_recorder_execution_is_private'),
+    legacyInboxRecorderExecuteDenied: asBoolean(row, 'legacy_inbox_recorder_execute_denied'),
+    betaInviteRedemptionExecuteDenied: asBoolean(row, 'beta_invite_redemption_execute_denied'),
+    admittedInboxRecorderExecuteDenied: asBoolean(row, 'admitted_inbox_recorder_execute_denied'),
     nonceReservationExecuteAllowed: asBoolean(row, 'nonce_reservation_execute_allowed'),
     nonceReservationExecutionIsPrivate: asBoolean(row, 'nonce_reservation_execution_is_private'),
     privateTelegramBoundaryTableAccessDenied: asBoolean(

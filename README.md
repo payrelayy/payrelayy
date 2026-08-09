@@ -21,20 +21,20 @@ The current foundation is deliberately safe:
 - the only current ledger procedures for the API are live-gated: one opens an unverified intent
   and returns frozen display-safe payment instructions, while the other records an already-encrypted
   customer transaction reference without verifying it or exposing ledger tables.
-- a separate private Telegram inbox procedure records only authenticated, allowlisted update metadata
-  plus a keyed integrity value; it does not start bot polling, a customer workflow, player
-  validation, verification, or any financial action.
+- the staged migration retires the historical generic private Telegram inbox procedure. Its staged
+  beta boundary is English-only and invite-only: only a separately reviewed invite redemption may
+  create an identity, and it remains inactive until its dedicated admission runtime is provisioned.
 - a signed bot-to-API transport scaffold is disabled by default and is not launchable in production
-  until a durable nonce store and the narrow inbox recorder are deployed.
+  until the dedicated invite-admission transport, durable nonce store, and runtime are reviewed.
 - an inert, non-claiming Player-ID request schema is in place, but it is not wired to Telegram,
   KemerBet, deposit intake, or a validator.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
-and a separately reviewed nonce-retention maintenance process. Each future credential belongs in its
-own VM runtime secret set, never Git or the bot, executor, dashboard, browser profile, or logs. The
-maintenance identity is limited to a future bounded nonce-digest purge and must never be reused by
-the API or worker. PayReplayy does not place a Supabase service-role key in application
-configuration.
+a separately reviewed beta-admission runtime, and a nonce-retention maintenance process. Each future
+credential belongs in its own VM runtime secret set, never Git or the bot, executor, dashboard,
+browser profile, or logs. The maintenance identity is limited to a future bounded nonce-digest purge
+and must never be reused by the API or worker. PayReplayy does not place a Supabase service-role key
+in application configuration.
 
 Each runtime has a dedicated configuration entry point. The API, worker, and executor do not
 read or receive `TELEGRAM_BOT_TOKEN`; only the bot runtime reads it, and only when polling is

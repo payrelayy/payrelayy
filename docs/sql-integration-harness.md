@@ -21,8 +21,16 @@ teardown with anonymous data cleanup. The test process also requires a root-owne
 the runner image before it opens a PostgreSQL connection, so a direct host invocation fails before
 synthetic bootstrap can modify anything. The current baseline verifies lexical migration application,
 private-schema ACLs, no-login runtime roles, forced RLS, default function-execution hardening, exact
-role memberships, and the absence of API-runtime grants for Player-ID action procedures. A signal
-requests teardown rather than leaving the disposable Compose project running.
+role memberships, and the absence of API-runtime grants for Player-ID action procedures. Invite-only
+admission coverage additionally verifies that the retired generic inbox recorder is inaccessible,
+the historical-Telegram-data cutover guard fails closed, invalid/expired/revoked/used/cross-user
+invite attempts make zero writes, a valid redemption is idempotent for its bound user/chat, and
+only an admitted identity can record a later inbound event. It also verifies that malformed stored
+inbound rows cannot be adopted, and that exact stored receipts remain replayable after an
+administrator deactivates their customer or identity; new updates remain rejected. Two independent
+database sessions racing to redeem the same invite for different private Telegram users must settle
+with exactly one admitted graph and one generic rejection.
+A signal requests teardown rather than leaving the disposable Compose project running.
 
 Do not add an external hostname, a published port, a mounted filesystem, an environment file,
 secrets, or a Docker socket to this harness. Future invite/action integration coverage must remain

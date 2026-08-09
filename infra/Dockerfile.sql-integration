@@ -1,0 +1,35 @@
+# Isolated test runner for the disposable SQL integration harness.
+# It contains only the test package and checked-in migration source; it never receives a
+# production credential, an environment file, a host socket, or any runtime application code.
+FROM --platform=linux/amd64 node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS dependencies
+
+WORKDIR /workspace
+
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/sql-integration-tests/package.json ./packages/sql-integration-tests/package.json
+
+RUN pnpm install --frozen-lockfile --filter @payreplayy/sql-integration-tests...
+
+FROM --platform=linux/amd64 node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS runner
+
+WORKDIR /workspace
+
+ENV CI=true
+ENV SQL_INTEGRATION_RUNNER_SENTINEL=payreplayy-sql-integration-image-v1
+
+RUN install --directory --owner=root --group=root --mode=0755 /usr/local/share/payreplayy \
+  && printf '%s\\n' "$SQL_INTEGRATION_RUNNER_SENTINEL" > /usr/local/share/payreplayy/sql-integration-runner \
+  && chmod 0444 /usr/local/share/payreplayy/sql-integration-runner
+
+COPY --from=dependencies /workspace/node_modules ./node_modules
+COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
+  ./packages/sql-integration-tests/node_modules
+COPY package.json pnpm-workspace.yaml ./
+COPY packages/sql-integration-tests ./packages/sql-integration-tests
+COPY supabase/migrations ./supabase/migrations
+
+USER node
+
+CMD ["./packages/sql-integration-tests/node_modules/.bin/vitest", "run", "--config", "packages/sql-integration-tests/vitest.config.ts"]

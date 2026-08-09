@@ -19,6 +19,8 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
           property === 'TELEGRAM_BOT_TOKEN' ||
           property === 'BOT_TO_API_INGRESS_BASE_URL' ||
           property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
+          property === 'BOT_TO_API_ACTION_BASE_URL' ||
+          property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
           property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
           property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
           property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
@@ -79,6 +81,7 @@ describe('runtime configuration isolation', () => {
       logLevel: 'info',
       telegram: { enabled: true, tokenConfigured: true },
       apiIngress: { enabled: true, secretsConfigured: true },
+      telegramActionChannel: { enabled: false, secretsConfigured: false },
     });
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(token);
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(transportHmacSecret);
@@ -98,7 +101,9 @@ describe('runtime configuration isolation', () => {
           if (
             property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
             property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
-            property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
+            property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET' ||
+            property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
+            property === 'BOT_TO_API_ACTION_BASE_URL'
           ) {
             throw new Error('bot must not read an API-only Telegram HMAC secret');
           }
@@ -137,6 +142,8 @@ describe('runtime configuration isolation', () => {
           if (
             property === 'BOT_TO_API_INGRESS_BASE_URL' ||
             property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
+            property === 'BOT_TO_API_ACTION_BASE_URL' ||
+            property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
             property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
             property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
             property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
@@ -178,6 +185,66 @@ describe('runtime configuration isolation', () => {
     expect(redactedApiConfigForLog(config).telegramPrivateIngressRuntime).toEqual({
       enabled: false,
     });
+  });
+
+  it('keeps the private Telegram action-channel gate disabled by default', () => {
+    const config = loadApiConfig({ NODE_ENV: 'test' });
+
+    expect(config.telegramActionChannel).toEqual({
+      enabled: false,
+      transportHmacSecret: undefined,
+    });
+    expect(redactedApiConfigForLog(config).telegramActionChannel).toEqual({
+      enabled: false,
+      secretsConfigured: false,
+    });
+    expect(loadBotConfig({ NODE_ENV: 'test' }).telegramActionChannel).toEqual({
+      enabled: false,
+      baseUrl: undefined,
+      transportHmacSecret: undefined,
+    });
+  });
+
+  it('does not read action-channel credentials or URL when the action gate is disabled', () => {
+    const apiEnvironment = new Proxy(
+      { INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false', NODE_ENV: 'test' },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
+            property === 'BOT_TO_API_ACTION_BASE_URL'
+          ) {
+            throw new Error(
+              'disabled API action channel must not read an action credential or URL',
+            );
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+    const botEnvironment = new Proxy(
+      {
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false',
+        NODE_ENV: 'test',
+        TELEGRAM_BOT_ENABLED: 'false',
+      },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
+            property === 'BOT_TO_API_ACTION_BASE_URL'
+          ) {
+            throw new Error(
+              'disabled bot action channel must not read an action credential or URL',
+            );
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(loadApiConfig(apiEnvironment).telegramActionChannel.enabled).toBe(false);
+    expect(loadBotConfig(botEnvironment).telegramActionChannel.enabled).toBe(false);
   });
 
   it('keeps the maintenance gate and credential out of API, bot, worker, and executor configuration', () => {
@@ -498,6 +565,79 @@ describe('runtime configuration isolation', () => {
     expect(redacted).not.toContain(semanticHmacSecret);
   });
 
+  it('loads the separate action-channel key only when its gate is explicitly enabled', () => {
+    const actionTransportHmacSecret = 'f'.repeat(64);
+    const api = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+      BOT_TO_API_ACTION_HMAC_SECRET: actionTransportHmacSecret,
+    });
+    const bot = loadBotConfig({
+      NODE_ENV: 'test',
+      TELEGRAM_BOT_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: '123456:test-token',
+      BOT_TO_API_INGRESS_BASE_URL: 'http://api:3000/',
+      BOT_TO_API_INGRESS_HMAC_SECRET: 'a'.repeat(64),
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+      BOT_TO_API_ACTION_BASE_URL: 'http://api:3000/',
+      BOT_TO_API_ACTION_HMAC_SECRET: actionTransportHmacSecret,
+    });
+
+    expect(api.telegramActionChannel).toEqual({
+      enabled: true,
+      transportHmacSecret: actionTransportHmacSecret,
+    });
+    expect(bot.telegramActionChannel).toEqual({
+      enabled: true,
+      baseUrl: 'http://api:3000/',
+      transportHmacSecret: actionTransportHmacSecret,
+    });
+    const apiRedacted = JSON.stringify(redactedApiConfigForLog(api));
+    const botRedacted = JSON.stringify(redactedBotConfigForLog(bot));
+    expect(apiRedacted).not.toContain(actionTransportHmacSecret);
+    expect(botRedacted).not.toContain(actionTransportHmacSecret);
+  });
+
+  it('requires bot polling configuration before the action-channel key or URL can be loaded', () => {
+    const environment = new Proxy(
+      {
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+        NODE_ENV: 'test',
+        TELEGRAM_BOT_ENABLED: 'false',
+      },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
+            property === 'BOT_TO_API_ACTION_BASE_URL'
+          ) {
+            throw new Error('disabled bot must not read action-channel credentials');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(() => loadBotConfig(environment)).toThrow('requires TELEGRAM_BOT_ENABLED=true');
+  });
+
+  it('keeps the bot action-channel HMAC distinct from the bot inbox transport HMAC', () => {
+    const sharedSecret = 'f'.repeat(64);
+
+    expect(() =>
+      loadBotConfig({
+        NODE_ENV: 'test',
+        TELEGRAM_BOT_ENABLED: 'true',
+        TELEGRAM_BOT_TOKEN: '123456:test-token',
+        BOT_TO_API_INGRESS_BASE_URL: 'http://api:3000/',
+        BOT_TO_API_INGRESS_HMAC_SECRET: sharedSecret,
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+        BOT_TO_API_ACTION_BASE_URL: 'http://api:3000/',
+        BOT_TO_API_ACTION_HMAC_SECRET: sharedSecret,
+      }),
+    ).toThrow('BOT_TO_API_ACTION_HMAC_SECRET must be distinct from BOT_TO_API_INGRESS_HMAC_SECRET');
+  });
+
   it('does not read API-only capability keys when the inactive contract is disabled', () => {
     const environment = new Proxy(
       { NODE_ENV: 'test', INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false' },
@@ -559,6 +699,23 @@ describe('runtime configuration isolation', () => {
       }),
     ).toThrow(
       'API_TELEGRAM_CAPABILITY_HMAC_SECRET must be distinct from BOT_TO_API_INGRESS_HMAC_SECRET',
+    );
+  });
+
+  it('keeps the action-channel key distinct from every enabled Telegram HMAC key', () => {
+    const sharedSecret = 'f'.repeat(64);
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+        BOT_TO_API_ACTION_HMAC_SECRET: sharedSecret,
+        INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+        API_TELEGRAM_CAPABILITY_HMAC_SECRET: sharedSecret,
+        API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'e'.repeat(64),
+      }),
+    ).toThrow(
+      'API_TELEGRAM_CAPABILITY_HMAC_SECRET must be distinct from BOT_TO_API_ACTION_HMAC_SECRET',
     );
   });
 });

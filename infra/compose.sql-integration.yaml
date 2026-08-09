@@ -1,0 +1,40 @@
+# Disposable, test-only PostgreSQL integration harness.
+#
+# This file intentionally has no published ports, mounted filesystems, environment-file loading,
+# secrets, or Docker socket access. Its database hostname is resolvable only on the internal
+# Compose network and the entire project is removed by scripts/run-sql-integration.mjs.
+services:
+  postgres:
+    image: postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready --dbname=postgres --username=postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+    networks:
+      - sql_integration
+
+  sql-integration:
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.sql-integration
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      SQL_INTEGRATION_MODE: local-disposable
+      SQL_INTEGRATION_POSTGRES_HOST: postgres
+      SQL_INTEGRATION_MIGRATIONS_DIRECTORY: /workspace/supabase/migrations
+    networks:
+      - sql_integration
+
+networks:
+  sql_integration:
+    internal: true

@@ -14,7 +14,7 @@ export function normalizeLocale(_languageCode: string | undefined): Locale {
 
 export const messages = {
   welcome: {
-    en: 'Welcome to PayReplayy. Choose Deposit or Withdrawal to continue.',
+    en: 'Welcome to PayReplayy. Secure account setup is being prepared.',
   },
   privateChatOnly: {
     en: 'For your privacy, please use PayReplayy in a private chat with the bot.',

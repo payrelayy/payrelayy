@@ -20,7 +20,7 @@ ENV CI=true
 ENV SQL_INTEGRATION_RUNNER_SENTINEL=payreplayy-sql-integration-image-v1
 
 RUN install --directory --owner=root --group=root --mode=0755 /usr/local/share/payreplayy \
-  && printf '%s\\n' "$SQL_INTEGRATION_RUNNER_SENTINEL" > /usr/local/share/payreplayy/sql-integration-runner \
+  && printf '%s\n' "$SQL_INTEGRATION_RUNNER_SENTINEL" > /usr/local/share/payreplayy/sql-integration-runner \
   && chmod 0444 /usr/local/share/payreplayy/sql-integration-runner
 
 COPY --from=dependencies /workspace/node_modules ./node_modules

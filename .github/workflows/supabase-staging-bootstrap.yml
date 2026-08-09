@@ -1,0 +1,178 @@
+name: Supabase staging bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan the canonical migrations or explicitly apply them to staging
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref to confirm the target
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-staging-bootstrap
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  SUPABASE_CLI_VERSION: 2.113.0
+
+jobs:
+  validate-target:
+    name: Validate staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      REQUESTED_MODE: ${{ inputs.mode }}
+      CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+    steps:
+      - name: Require main and the exact staging ref
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo '::error::This workflow may run only from the main branch.'
+            exit 1
+          fi
+
+          if [[ "$REQUESTED_MODE" != 'plan' && "$REQUESTED_MODE" != 'apply' ]]; then
+            echo '::error::The requested mode must be plan or apply.'
+            exit 1
+          fi
+
+          if [[ "$STAGING_PROJECT_REF" == "$PRODUCTION_PROJECT_REF" ]]; then
+            echo '::error::The configured staging and production refs must be different.'
+            exit 1
+          fi
+
+          if [[ "$CONFIRMED_STAGING_PROJECT_REF" != "$STAGING_PROJECT_REF" ]]; then
+            echo '::error::The staging project confirmation does not match the configured staging ref.'
+            exit 1
+          fi
+
+          if [[ "$CONFIRMED_STAGING_PROJECT_REF" == "$PRODUCTION_PROJECT_REF" ]]; then
+            echo '::error::The production project is never an allowed target.'
+            exit 1
+          fi
+
+  staging-migrations:
+    name: Plan or apply staging migrations
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up the pinned Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.113.0
+
+      - name: Verify tooling and staging credentials
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/payreplayy-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$(supabase --version)" != "$SUPABASE_CLI_VERSION" ]]; then
+            echo '::error::The installed Supabase CLI version does not match the pinned version.'
+            exit 1
+          fi
+
+          if [[ -z "$SUPABASE_ACCESS_TOKEN" || -z "$SUPABASE_DB_PASSWORD" ]]; then
+            echo '::error::The staging environment is missing a required Supabase credential.'
+            exit 1
+          fi
+
+      - name: Initialize the local Supabase project if needed
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/payreplayy-supabase-home
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f 'supabase/config.toml' && ! -f 'supabase/config.json' ]]; then
+            supabase init
+          fi
+
+      - name: Link only the staging project
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/payreplayy-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          supabase link --project-ref "$STAGING_PROJECT_REF"
+
+      - name: Verify the linked ref and plan canonical migrations
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/payreplayy-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f 'supabase/.temp/project-ref' ]]; then
+            echo '::error::The pinned Supabase CLI did not create its linked-project state file.'
+            exit 1
+          fi
+
+          linked_project_ref="$(tr -d '\r\n' < 'supabase/.temp/project-ref')"
+
+          if [[ "$linked_project_ref" != "$STAGING_PROJECT_REF" ]]; then
+            echo '::error::The linked Supabase project is not the configured staging project.'
+            exit 1
+          fi
+
+          if [[ "$linked_project_ref" == "$PRODUCTION_PROJECT_REF" ]]; then
+            echo '::error::The production project is never an allowed target.'
+            exit 1
+          fi
+
+          supabase migration list --linked
+          supabase db push --linked --dry-run
+
+      - name: Apply canonical migrations to staging
+        if: inputs.mode == 'apply'
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/payreplayy-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          linked_project_ref="$(tr -d '\r\n' < 'supabase/.temp/project-ref')"
+
+          if [[ "$linked_project_ref" != "$STAGING_PROJECT_REF" || "$linked_project_ref" == "$PRODUCTION_PROJECT_REF" ]]; then
+            echo '::error::The linked-project guard rejected the migration target.'
+            exit 1
+          fi
+
+          supabase db push --linked --yes
+          supabase migration list --linked

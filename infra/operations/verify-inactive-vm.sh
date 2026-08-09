@@ -270,9 +270,21 @@ if any(project.get("Name") == project_name for project in projects):
 if ! printf '%s' "$compose_projects_json" | env -i PATH="$SAFE_PATH" HOME='/' python3 -I -c "$COMPOSE_PROJECTS_CHECK" "$PROJECT_NAME"; then
   die 'a PayReplayy Compose project exists or the Compose project inventory is malformed'
 fi
-systemd_units="$(systemctl list-unit-files --no-legend 'payreplayy*')"
+if systemd_units="$(systemctl list-unit-files --no-legend 'payreplayy*' 2>&1)"; then
+  :
+else
+  systemd_unit_files_status=$?
+  [[ $systemd_unit_files_status -eq 1 && -z "$systemd_units" ]] || die 'could not inspect PayReplayy systemd unit files'
+  systemd_units=''
+fi
 [[ -z "$systemd_units" ]] || die 'a PayReplayy systemd unit exists'
-active_systemd_units="$(systemctl list-units --all --no-legend 'payreplayy*')"
+if active_systemd_units="$(systemctl list-units --all --no-legend 'payreplayy*' 2>&1)"; then
+  :
+else
+  active_systemd_units_status=$?
+  [[ $active_systemd_units_status -eq 1 && -z "$active_systemd_units" ]] || die 'could not inspect active or transient PayReplayy systemd units'
+  active_systemd_units=''
+fi
 [[ -z "$active_systemd_units" ]] || die 'an active or transient PayReplayy systemd unit exists'
 
 if ! non_loopback_tcp_listeners="$(

@@ -9,7 +9,7 @@ import {
 } from '@payreplayy/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { buildApp } from './app.js';
+import { buildApp, type ApiDependencies } from './app.js';
 import {
   createTelegramIngressSignatureForTest,
   InMemoryTelegramIngressNonceStore,
@@ -37,10 +37,21 @@ const event: TelegramPrivateInboundEvent = {
 function enabledApiConfig(nodeEnv: 'test' | 'production' = 'test') {
   return loadApiConfig({
     NODE_ENV: nodeEnv,
+    INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+    DATABASE_URL:
+      'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
     INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
     BOT_TO_API_INGRESS_HMAC_SECRET: transportHmacSecret,
     API_TELEGRAM_PAYLOAD_HMAC_SECRET: payloadHmacSecret,
+    INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'true',
   });
+}
+
+function testIngressDependencies(dependencies: ApiDependencies): ApiDependencies {
+  return {
+    telegramIngressNonceStore: new InMemoryTelegramIngressNonceStore(),
+    ...dependencies,
+  };
 }
 
 function signedIngressRequest(rawBody = Buffer.from(JSON.stringify(event), 'utf8')) {
@@ -75,14 +86,17 @@ describe('private Telegram ingress', () => {
 
   it('authenticates exact raw bytes and forwards only a safe event plus API-only payload HMAC', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async (input) => {
-          recorded.push(input);
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
         },
-      },
-    });
+      }),
+    );
 
     const response = await app.inject(signedIngressRequest());
 
@@ -98,14 +112,17 @@ describe('private Telegram ingress', () => {
 
   it('accepts only the legacy exact am wire value and normalizes it to English before recording', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async (input) => {
-          recorded.push(input);
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
         },
-      },
-    });
+      }),
+    );
     const rawBody = Buffer.from(JSON.stringify({ ...event, preferredLocale: 'am' }), 'utf8');
 
     expect((await app.inject(signedIngressRequest(rawBody))).statusCode).toBe(204);
@@ -122,14 +139,17 @@ describe('private Telegram ingress', () => {
     'rejects a signed non-English locale (%j) before calling the recorder',
     async (preferredLocale) => {
       const recorded: TelegramPrivateInboundRecord[] = [];
-      const app = buildApp(enabledApiConfig(), {
-        now: () => fixedNow,
-        telegramPrivateInboundRecorder: {
-          record: async (input) => {
-            recorded.push(input);
+      const app = buildApp(
+        enabledApiConfig(),
+        testIngressDependencies({
+          now: () => fixedNow,
+          telegramPrivateInboundRecorder: {
+            record: async (input) => {
+              recorded.push(input);
+            },
           },
-        },
-      });
+        }),
+      );
       const rawBody = Buffer.from(JSON.stringify({ ...event, preferredLocale }), 'utf8');
 
       expect((await app.inject(signedIngressRequest(rawBody))).statusCode).toBe(401);
@@ -140,14 +160,17 @@ describe('private Telegram ingress', () => {
 
   it('rejects a replayed nonce before calling the recorder a second time', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async (input) => {
-          recorded.push(input);
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
         },
-      },
-    });
+      }),
+    );
     const request = signedIngressRequest();
 
     expect((await app.inject(request)).statusCode).toBe(204);
@@ -158,14 +181,17 @@ describe('private Telegram ingress', () => {
 
   it('does not parse or record an unsigned malformed body', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async (input) => {
-          recorded.push(input);
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
         },
-      },
-    });
+      }),
+    );
     const request = signedIngressRequest(Buffer.from('{not JSON', 'utf8'));
     request.headers[TELEGRAM_PRIVATE_INGRESS_HEADERS.signature] = 'v1.invalid';
 
@@ -178,14 +204,17 @@ describe('private Telegram ingress', () => {
 
   it('fails closed when the signed body is changed or contains fields outside the allowlist', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async (input) => {
-          recorded.push(input);
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
         },
-      },
-    });
+      }),
+    );
     const tampered = signedIngressRequest(Buffer.from(JSON.stringify(event), 'utf8'));
     tampered.payload = Buffer.from(`${tampered.payload.toString('utf8')} `, 'utf8');
 
@@ -203,14 +232,17 @@ describe('private Telegram ingress', () => {
 
   it('rejects an oversized body before invoking the inbox recorder', async () => {
     const recorded: TelegramPrivateInboundRecord[] = [];
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async (input) => {
-          recorded.push(input);
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async (input) => {
+            recorded.push(input);
+          },
         },
-      },
-    });
+      }),
+    );
 
     const oversized = Buffer.alloc(TELEGRAM_PRIVATE_INGRESS_MAX_BODY_BYTES + 1, 0x20);
     expect((await app.inject(signedIngressRequest(oversized))).statusCode).toBe(413);
@@ -219,14 +251,17 @@ describe('private Telegram ingress', () => {
   });
 
   it('returns a retryable response when the inbox recorder is unavailable', async () => {
-    const app = buildApp(enabledApiConfig(), {
-      now: () => fixedNow,
-      telegramPrivateInboundRecorder: {
-        record: async () => {
-          throw new Error('simulated recorder failure');
+    const app = buildApp(
+      enabledApiConfig(),
+      testIngressDependencies({
+        now: () => fixedNow,
+        telegramPrivateInboundRecorder: {
+          record: async () => {
+            throw new Error('simulated recorder failure');
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect((await app.inject(signedIngressRequest())).statusCode).toBe(503);
     await app.close();

@@ -1,13 +1,13 @@
 # Provider-verification specification
 
-This is PayReplayy's independent verification contract for the first two payment methods:
-TeleBirr and CBE Birr wallet. It is a design and test boundary, not a live integration. No
-provider verifier is enabled, no provider credential is configured, and no payment can yet reach
-KemerBet execution.
+This is PayReplayy's independent verification contract. The current launch-preparation scope is
+**CBE Birr only**, using strictly local redacted fixtures and advisory dry-run outcomes. It is not
+a live integration: no provider verifier is enabled, no provider credential is configured, and no
+payment can reach a claim or KemerBet execution. TeleBirr and CBE bank are deferred.
 
 QHash is reference research only. PayReplayy does not use QHash code, databases, workers,
-credentials, accounts, or runtime services. CBE bank is a later, separate adapter; it must not
-reuse CBE Birr lookup or parsing assumptions.
+credentials, accounts, or runtime services. TeleBirr and CBE bank are later, separate adapters;
+neither may reuse CBE Birr lookup or parsing assumptions.
 
 ## Trust boundary
 
@@ -110,6 +110,12 @@ The configurable account-holder name is a display and diagnostic aid only. Name 
 language, and formatting can vary, so name text never authorizes a payment. The lookup contract
 must be proven by PayReplayy regression tests for every supported receipt type; an unfamiliar
 response goes to review rather than being parsed optimistically.
+
+The only implemented CBE Birr code at this stage is the redacted fixture package. Its strict parser
+and injected in-memory lookups can emit only `would_verify`, `would_reject`, or `would_review`.
+The package has no HTTP client, provider URL, filesystem evidence reader, database access, Telegram
+integration, or KemerBet integration; it does not log or return raw receipt, canonical-reference,
+or receiver values.
 
 ## Privacy, operations, and rollout
 

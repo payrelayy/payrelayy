@@ -21,6 +21,19 @@ export type ApiTelegramIngressConfig =
     };
 
 /**
+ * This is the final, explicit API runtime gate for the private Telegram ingress database
+ * composition. It cannot enable PostgreSQL, the transport route, bot polling, Player-ID actions,
+ * payment verification, or financial actions by itself.
+ */
+export type ApiTelegramPrivateIngressRuntimeConfig =
+  | {
+      readonly enabled: false;
+    }
+  | {
+      readonly enabled: true;
+    };
+
+/**
  * This controls only API-side capability-contract keys. It does not enable a Telegram route,
  * database action, bot polling, Player-ID validation, or any financial capability.
  */
@@ -37,8 +50,9 @@ export type ApiTelegramActionCapabilityConfig =
     };
 
 /**
- * This is an explicit operator-only gate for the API database preflight. Enabling it never
- * enables a Fastify route, Telegram polling, Player-ID processing, or financial action.
+ * This is an explicit operator-only gate for the API database preflight. By itself, enabling it
+ * never enables a Fastify route, Telegram polling, Player-ID processing, or financial action.
+ * The separate private Telegram ingress runtime gate must also be enabled before composition.
  */
 export type ApiPostgresRuntimeConfig =
   | {
@@ -66,6 +80,7 @@ export interface ApiConfig extends RuntimeConfig {
   };
   readonly postgresRuntime: ApiPostgresRuntimeConfig;
   readonly telegramIngress: ApiTelegramIngressConfig;
+  readonly telegramPrivateIngressRuntime: ApiTelegramPrivateIngressRuntimeConfig;
   readonly telegramActionCapability: ApiTelegramActionCapabilityConfig;
 }
 
@@ -79,7 +94,10 @@ function portFromEnv(value: string | undefined): number {
 }
 
 const API_DATABASE_RUNTIME_ROLE = 'payreplayy_api_runtime';
-const SUPABASE_PROJECT_REFERENCE_PATTERN = /^[a-z0-9]{20}$/;
+const PAYREPLAYY_SUPABASE_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr';
+const API_DATABASE_DIRECT_HOST = `db.${PAYREPLAYY_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
+const API_DATABASE_SESSION_POOLER_HOST = 'aws-0-eu-west-1.pooler.supabase.com';
+const API_DATABASE_SESSION_POOLER_USER = `${API_DATABASE_RUNTIME_ROLE}.${PAYREPLAYY_SUPABASE_PROJECT_REFERENCE}`;
 
 function decodeDatabaseUrlComponent(value: string): string {
   try {
@@ -91,23 +109,20 @@ function decodeDatabaseUrlComponent(value: string): string {
 
 function resolveApiDatabaseRuntimeUser(connectionUrl: URL): string {
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
-  if (user === API_DATABASE_RUNTIME_ROLE) {
+  if (connectionUrl.hostname === API_DATABASE_DIRECT_HOST && user === API_DATABASE_RUNTIME_ROLE) {
     return user;
   }
 
-  const sessionPoolerPrefix = `${API_DATABASE_RUNTIME_ROLE}.`;
-  const sessionPoolerProjectReference = user.startsWith(sessionPoolerPrefix)
-    ? user.slice(sessionPoolerPrefix.length)
-    : undefined;
   if (
-    connectionUrl.hostname.endsWith('.pooler.supabase.com') &&
-    sessionPoolerProjectReference !== undefined &&
-    SUPABASE_PROJECT_REFERENCE_PATTERN.test(sessionPoolerProjectReference)
+    connectionUrl.hostname === API_DATABASE_SESSION_POOLER_HOST &&
+    user === API_DATABASE_SESSION_POOLER_USER
   ) {
     return user;
   }
 
-  throw new Error('DATABASE_URL must use the dedicated PayReplayy API runtime login.');
+  throw new Error(
+    'DATABASE_URL must use the dedicated PayReplayy API runtime login and approved project host.',
+  );
 }
 
 function loadApiPostgresRuntimeConfig(environment: NodeJS.ProcessEnv): ApiPostgresRuntimeConfig {
@@ -211,6 +226,33 @@ function loadApiTelegramIngressConfig(environment: NodeJS.ProcessEnv): ApiTelegr
   };
 }
 
+function loadApiTelegramPrivateIngressRuntimeConfig(
+  environment: NodeJS.ProcessEnv,
+  postgresRuntime: ApiPostgresRuntimeConfig,
+  telegramIngress: ApiTelegramIngressConfig,
+): ApiTelegramPrivateIngressRuntimeConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED,
+    false,
+    'INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED',
+  );
+
+  if (!enabled) return { enabled: false };
+
+  if (!postgresRuntime.enabled) {
+    throw new Error(
+      'INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED requires INTERNAL_POSTGRES_RUNTIME_ENABLED=true.',
+    );
+  }
+  if (!telegramIngress.enabled) {
+    throw new Error(
+      'INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED requires INTERNAL_TELEGRAM_INGRESS_ENABLED=true.',
+    );
+  }
+
+  return { enabled: true };
+}
+
 function loadApiTelegramActionCapabilityConfig(
   environment: NodeJS.ProcessEnv,
 ): ApiTelegramActionCapabilityConfig {
@@ -274,6 +316,11 @@ function assertDistinctApiTelegramHmacSecrets(
 export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
   const postgresRuntime = loadApiPostgresRuntimeConfig(environment);
   const telegramIngress = loadApiTelegramIngressConfig(environment);
+  const telegramPrivateIngressRuntime = loadApiTelegramPrivateIngressRuntimeConfig(
+    environment,
+    postgresRuntime,
+    telegramIngress,
+  );
   const telegramActionCapability = loadApiTelegramActionCapabilityConfig(environment);
   assertDistinctApiTelegramHmacSecrets(telegramIngress, telegramActionCapability);
 
@@ -286,13 +333,17 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     },
     postgresRuntime,
     telegramIngress,
+    telegramPrivateIngressRuntime,
     telegramActionCapability,
   };
 }
 
 export function redactedApiConfigForLog(config: ApiConfig): Omit<
   ApiConfig,
-  'postgresRuntime' | 'telegramIngress' | 'telegramActionCapability'
+  | 'postgresRuntime'
+  | 'telegramIngress'
+  | 'telegramPrivateIngressRuntime'
+  | 'telegramActionCapability'
 > & {
   readonly postgresRuntime: {
     readonly enabled: boolean;
@@ -300,6 +351,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly tlsMode: 'verify-full' | undefined;
   };
   readonly telegramIngress: { readonly enabled: boolean; readonly secretsConfigured: boolean };
+  readonly telegramPrivateIngressRuntime: { readonly enabled: boolean };
   readonly telegramActionCapability: {
     readonly enabled: boolean;
     readonly secretsConfigured: boolean;
@@ -318,6 +370,9 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     telegramIngress: {
       enabled: config.telegramIngress.enabled,
       secretsConfigured: config.telegramIngress.enabled,
+    },
+    telegramPrivateIngressRuntime: {
+      enabled: config.telegramPrivateIngressRuntime.enabled,
     },
     telegramActionCapability: {
       enabled: config.telegramActionCapability.enabled,

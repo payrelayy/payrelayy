@@ -7,18 +7,27 @@ import {
 import Fastify from 'fastify';
 
 import {
-  InMemoryTelegramIngressNonceStore,
   type TelegramIngressNonceStore,
   type TelegramPrivateInboundRecord,
   type TelegramPrivateInboundRecorder,
   verifyTelegramIngressRequest,
 } from './telegram-ingress.js';
 import { TelegramIngressNonceStoreUnavailableError } from './postgres-telegram-ingress-nonce-store.js';
+import {
+  createPostgresTelegramIngressRuntime,
+  isPostgresTelegramIngressRuntimeEnabled,
+  type PostgresTelegramIngressRuntime,
+  type PostgresTelegramIngressRuntimeFactory,
+} from './postgres-telegram-ingress-runtime.js';
 
 export interface ApiDependencies {
   readonly now?: () => Date;
   readonly telegramIngressNonceStore?: TelegramIngressNonceStore;
   readonly telegramPrivateInboundRecorder?: TelegramPrivateInboundRecorder;
+  /** Test seam for the dual-gated database runtime; production startup uses the default factory. */
+  readonly createPostgresTelegramIngressRuntime?: PostgresTelegramIngressRuntimeFactory;
+  /** Test seam for a complete dual-gated database runtime; Fastify owns its shutdown lifecycle. */
+  readonly postgresTelegramIngressRuntime?: PostgresTelegramIngressRuntime;
 }
 
 export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiDependencies = {}) {
@@ -42,17 +51,29 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
     },
   });
 
-  if (config.telegramIngress.enabled) {
+  if (isPostgresTelegramIngressRuntimeEnabled(config)) {
     const telegramIngress = config.telegramIngress;
-    const recorder = dependencies.telegramPrivateInboundRecorder;
-    if (!recorder) {
+    const hasNonceStore = dependencies.telegramIngressNonceStore !== undefined;
+    const hasRecorder = dependencies.telegramPrivateInboundRecorder !== undefined;
+    if (hasNonceStore !== hasRecorder) {
       throw new Error(
-        'INTERNAL_TELEGRAM_INGRESS_ENABLED requires a reviewed private Telegram inbox recorder.',
+        'Dual-gated Telegram ingress test dependencies must provide both nonce storage and an inbox recorder.',
       );
     }
 
-    const nonceStore =
-      dependencies.telegramIngressNonceStore ?? new InMemoryTelegramIngressNonceStore();
+    const postgresRuntime = !hasNonceStore
+      ? (dependencies.postgresTelegramIngressRuntime ??
+        (dependencies.createPostgresTelegramIngressRuntime ?? createPostgresTelegramIngressRuntime)(
+          config,
+        ))
+      : undefined;
+    const recorder = dependencies.telegramPrivateInboundRecorder ?? postgresRuntime?.recorder;
+    const nonceStore = dependencies.telegramIngressNonceStore ?? postgresRuntime?.nonceStore;
+    if (!recorder || !nonceStore) {
+      throw new Error(
+        'Dual-gated Telegram ingress requires a reviewed private Telegram inbox recorder.',
+      );
+    }
     if (config.nodeEnv === 'production' && !nonceStore.durable) {
       throw new Error('Production Telegram ingress requires a durable, cross-replica nonce store.');
     }
@@ -99,16 +120,19 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
         try {
           await recorder.record(inbound);
         } catch {
-          request.log.warn(
-            { updateId: inbound.event.updateId },
-            'Private Telegram inbound recorder is unavailable.',
-          );
+          request.log.warn('Private Telegram inbound recorder is unavailable.');
           return reply.code(503).send({ error: 'inbound_unavailable' });
         }
 
         return reply.code(204).send();
       },
     );
+
+    if (postgresRuntime) {
+      app.addHook('onClose', async () => {
+        await postgresRuntime.close();
+      });
+    }
   }
 
   app.get('/healthz', async () => ({

@@ -12,7 +12,8 @@ that has already been authenticated and classified as a private chat by the PayR
 
 It does not start polling, receive full Telegram JSON, save message text or callback data, accept
 payment proof, validate a Player ID, open a deposit, contact a provider, invoke KemerBet, or pay
-anyone. The bot remains disabled by default and no runtime database login exists yet.
+anyone. The bot and private-ingress runtime gates remain disabled by default; no runtime database
+login is enabled or deployed.
 
 ## Trust boundary
 
@@ -45,13 +46,15 @@ delivery retry.
 ## Transport status and next gates
 
 The signed private bot-to-API transport scaffold now exists. It forwards only the allowlisted
-metadata above, authenticates exact request bytes before parsing, and is disabled by default. A
-private durable nonce-reservation schema and an API-only inbox-recorder adapter now exist but are
-not wired to server startup. The nonce layer retains only a short-lived digest; the recorder can
-call only this procedure with allowlisted metadata and never reads a base table. The transport
-cannot be enabled in production until a reviewed runtime credential, private deployment boundary,
-and durable outbox exist. See [telegram-transport.md](telegram-transport.md) for the precise
-boundary, secrets, retry behavior, and key-rotation limitation.
+metadata above, authenticates exact request bytes before parsing, and is disabled by default. The
+durable nonce-reservation schema and API-only inbox-recorder adapter are composed only when
+`INTERNAL_POSTGRES_RUNTIME_ENABLED`, `INTERNAL_TELEGRAM_INGRESS_ENABLED`, and
+`INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED` are all true. The nonce layer retains only a
+short-lived digest; the recorder can call only this procedure with allowlisted metadata and never
+reads a base table. The transport cannot be enabled in production until a reviewed runtime
+credential, private deployment boundary, and durable outbox exist. See
+[telegram-transport.md](telegram-transport.md) for the precise boundary, secrets, retry behavior,
+and key-rotation limitation.
 
 The remaining gates are:
 

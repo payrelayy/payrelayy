@@ -101,9 +101,9 @@ function hasSafeReceiptShape(rows: readonly unknown[]): boolean {
 }
 
 /**
- * An unconnected adapter for the existing private inbox procedure. Stage 13C does not create a
- * pool, load a database credential, or construct this class in server startup. Future wiring must
- * reserve the nonce in a separate committed operation before calling this recorder.
+ * Adapter for the existing private inbox procedure. Stage 15A composes it only after all three
+ * explicit ingress gates are enabled; the adapter neither creates a pool nor loads a credential.
+ * Its caller must reserve the nonce in a separate committed operation before recording.
  */
 export class PostgresTelegramPrivateInboundRecorder implements TelegramPrivateInboundRecorder {
   constructor(private readonly database: TelegramPrivateInboundRecordingDatabase) {}

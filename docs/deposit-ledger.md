@@ -1,8 +1,9 @@
 # Deposit ledger design
 
-This is the design boundary for PayReplayy's first automated-deposit workflow. It applies to
-KemerBet with TeleBirr and CBE Birr, but all platform and provider identifiers remain
-database-backed so later adapters do not require a financial-core rewrite.
+This is the longer-term design boundary for PayReplayy's automated-deposit workflow. It does not
+expand the current launch-preparation scope: the only implemented verification code is the CBE
+Birr redacted-fixture dry run. TeleBirr and CBE bank remain deferred. All platform and provider
+identifiers stay database-backed so later approved adapters do not require a financial-core rewrite.
 
 ## Scope and safety boundary
 

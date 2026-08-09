@@ -56,8 +56,8 @@ function reservationResult(rows: readonly unknown[]): boolean {
 }
 
 /**
- * Durable, cross-replica nonce store for a future API runtime connection. This class is not wired
- * into server startup in Stage 13B; it receives a future long-lived, least-privilege query client.
+ * Durable, cross-replica nonce store composed only by the Stage 15A API runtime after all three
+ * explicit ingress gates are enabled. It receives a bounded, least-privilege query client.
  */
 export class PostgresTelegramIngressNonceStore implements TelegramIngressNonceStore {
   readonly durable = true;

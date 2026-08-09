@@ -6,8 +6,9 @@ PayReplayy is independent from QHash. QHash may be used as a product reference o
 database, authentication, receipts, workers, and code are not a PayReplayy dependency.
 
 Version 1 uses a private Telegram bot for customers, a private English-only Owner/Admin dashboard,
-and a single KemerBet platform adapter. The first payment-verification adapters are TeleBirr
-and CBE Birr. CBE bank support remains a later adapter.
+and a single KemerBet platform adapter. The current launch-preparation verification scope is CBE
+Birr-only redacted fixture dry-run assessment. TeleBirr and CBE bank are deferred; neither has an
+enabled adapter, provider credential, or runtime integration.
 
 ## Component boundary
 
@@ -33,7 +34,7 @@ and executor communicate with the API, not the database.
 ## Planned deposit flow
 
 1. The bot validates the requested KemerBet Player ID.
-2. It displays the configured TeleBirr or CBE Birr receiver account and records an intake
+2. A future approved CBE Birr flow displays its configured receiver account and records an intake
    request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
    Customers may create unlimited separate deposits; PayReplayy has no customer, daily, or
    lifetime deposit-count quota.

@@ -1,8 +1,10 @@
 # PayReplayy
 
 PayReplayy is a Telegram-first payment-verification and betting-agent automation service.
-Version 1 starts with KemerBet deposits through TeleBirr and CBE Birr. It is designed so
-other payment providers and platforms can be added without changing the financial core.
+The current launch-preparation scope is an English-only, invite-only CBE Birr **fixture-only
+dry run**. It has no provider call, credential, database claim, Telegram payment instruction, or
+KemerBet execution. TeleBirr and CBE bank are deferred until separately authorized, authoritative
+adapters pass their own evidence, safety, and rollout gates.
 
 ## Current safety status
 
@@ -41,17 +43,18 @@ environment file.
 
 ## Planned services
 
-| Service              | Responsibility                                                                      |
-| -------------------- | ----------------------------------------------------------------------------------- |
-| `apps/api`           | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
-| `apps/bot`           | Private Telegram chat transport only                                                |
-| `apps/worker`        | Durable verification, alert, and reconciliation jobs                                |
-| `apps/maintenance`   | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
-| `apps/executor`      | Isolated, supervised KemerBet browser adapter; dry-run first                        |
-| `packages/domain`    | Money rules, state machines, limits, idempotency reason codes                       |
-| `packages/contracts` | Provider, executor, notifier, and storage interfaces                                |
-| `packages/config`    | Safe environment parsing and feature switches                                       |
-| `packages/i18n`      | Shared English message keys and safe locale normalization                           |
+| Service                      | Responsibility                                                                      |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| `apps/api`                   | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
+| `apps/bot`                   | Private Telegram chat transport only                                                |
+| `apps/worker`                | Durable verification, alert, and reconciliation jobs                                |
+| `apps/maintenance`           | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
+| `apps/executor`              | Isolated, supervised KemerBet browser adapter; dry-run first                        |
+| `packages/domain`            | Money rules, state machines, limits, idempotency reason codes                       |
+| `packages/cbe-birr-fixtures` | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
+| `packages/contracts`         | Provider, executor, notifier, and storage interfaces                                |
+| `packages/config`            | Safe environment parsing and feature switches                                       |
+| `packages/i18n`              | Shared English message keys and safe locale normalization                           |
 
 ## Local development
 
@@ -86,6 +89,8 @@ See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See
+[docs/cbe-birr-fixture-dry-run.md](docs/cbe-birr-fixture-dry-run.md) for the current CBE Birr-only
+fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and
 [docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.
 See [docs/player-registration.md](docs/player-registration.md) for the forthcoming non-claiming

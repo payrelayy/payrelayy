@@ -171,6 +171,15 @@ describe('runtime configuration isolation', () => {
     });
   });
 
+  it('keeps the private Telegram ingress runtime gate disabled by default', () => {
+    const config = loadApiConfig({ NODE_ENV: 'test' });
+
+    expect(config.telegramPrivateIngressRuntime).toEqual({ enabled: false });
+    expect(redactedApiConfigForLog(config).telegramPrivateIngressRuntime).toEqual({
+      enabled: false,
+    });
+  });
+
   it('keeps the maintenance gate and credential out of API, bot, worker, and executor configuration', () => {
     const environment = new Proxy(
       { FINANCIAL_ACTIONS_MODE: 'dry_run', NODE_ENV: 'test' },
@@ -300,7 +309,7 @@ describe('runtime configuration isolation', () => {
 
   it('loads a TLS-protected dedicated API runtime URL only when explicitly enabled', () => {
     const connectionString =
-      'postgresql://payreplayy_api_runtime:example-only@db.example.test/postgres?sslmode=verify-full';
+      'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full';
     const config = loadApiConfig({
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
@@ -311,7 +320,7 @@ describe('runtime configuration isolation', () => {
       enabled: true,
       connection: {
         database: 'postgres',
-        host: 'db.example.test',
+        host: 'db.xzztugbgtulptnbpoelr.supabase.co',
         password: 'example-only',
         port: 5432,
         user: 'payreplayy_api_runtime',
@@ -331,14 +340,14 @@ describe('runtime configuration isolation', () => {
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
       DATABASE_URL:
-        'postgresql://payreplayy_api_runtime.abcdefghijklmnopqrst:example-only@aws-0-us-east-1.pooler.supabase.com/postgres?sslmode=verify-full',
+        'postgresql://payreplayy_api_runtime.xzztugbgtulptnbpoelr:example-only@aws-0-eu-west-1.pooler.supabase.com/postgres?sslmode=verify-full',
     });
 
     expect(config.postgresRuntime).toMatchObject({
       enabled: true,
       connection: {
-        host: 'aws-0-us-east-1.pooler.supabase.com',
-        user: 'payreplayy_api_runtime.abcdefghijklmnopqrst',
+        host: 'aws-0-eu-west-1.pooler.supabase.com',
+        user: 'payreplayy_api_runtime.xzztugbgtulptnbpoelr',
       },
     });
   });
@@ -352,7 +361,8 @@ describe('runtime configuration isolation', () => {
       loadApiConfig({
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
-        DATABASE_URL: 'postgresql://payreplayy_api_runtime:example@db.example.test/postgres',
+        DATABASE_URL:
+          'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres',
       }),
     ).toThrow('only sslmode=verify-full');
 
@@ -361,7 +371,7 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://%70ostgres:example@db.example.test/postgres?sslmode=verify-full',
+          'postgresql://%70ostgres:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
       }),
     ).toThrow('dedicated PayReplayy API runtime login');
 
@@ -370,9 +380,36 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime:example@db.example.test/postgres?sslmode=verify-full&user=postgres',
+          'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full&user=postgres',
       }),
     ).toThrow('only sslmode=verify-full');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL:
+          'postgresql://payreplayy_api_runtime:example@db.abcdefghijklmnopqrst.supabase.co/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('approved project host');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL:
+          'postgresql://payreplayy_api_runtime.xzztugbgtulptnbpoelr:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('approved project host');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL:
+          'postgresql://payreplayy_api_runtime.abcdefghijklmnopqrst:example@aws-0-eu-west-1.pooler.supabase.com/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('approved project host');
   });
 
   it('requires a token before an enabled bot can start', () => {
@@ -404,6 +441,41 @@ describe('runtime configuration isolation', () => {
     expect(() =>
       loadApiConfig({ NODE_ENV: 'test', INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true' }),
     ).toThrow('BOT_TO_API_INGRESS_HMAC_SECRET');
+  });
+
+  it('requires both existing API ingress prerequisites before the private runtime gate can be true', () => {
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'true',
+      }),
+    ).toThrow('requires INTERNAL_POSTGRES_RUNTIME_ENABLED=true');
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+        DATABASE_URL:
+          'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+        INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'true',
+      }),
+    ).toThrow('requires INTERNAL_TELEGRAM_INGRESS_ENABLED=true');
+
+    const config = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
+      DATABASE_URL:
+        'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
+      BOT_TO_API_INGRESS_HMAC_SECRET: 'b'.repeat(64),
+      API_TELEGRAM_PAYLOAD_HMAC_SECRET: 'c'.repeat(64),
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'true',
+    });
+
+    expect(config.telegramPrivateIngressRuntime).toEqual({ enabled: true });
+    expect(redactedApiConfigForLog(config).telegramPrivateIngressRuntime).toEqual({
+      enabled: true,
+    });
   });
 
   it('loads API-only capability keys only when the inactive contract is explicitly enabled', () => {

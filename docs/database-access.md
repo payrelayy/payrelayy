@@ -52,9 +52,11 @@ bot or executor, or displayed in logs.
 
 ## Stage 13A API connection preflight
 
-The current database connection code is deliberately a manual, read-only preflight only. It does
-not run when the API server starts and it does not change `/readyz`, Telegram ingress, polling,
-Player-ID processing, payment verification, or financial actions.
+`INTERNAL_POSTGRES_RUNTIME_ENABLED` is deliberately a manual, read-only preflight gate by itself.
+It does not run a database pool when the API server starts and it does not change `/readyz`,
+Telegram ingress, polling, Player-ID processing, payment verification, or financial actions. The
+only exception is the separately default-false Stage 15A private-ingress runtime gate, which also
+requires the Telegram transport gate and is described below.
 
 The database migration creates `payreplayy_api_runtime` as a `NOLOGIN` role without a password.
 It inherits only the existing `payreplayy_api` group privileges, cannot administer or switch roles,
@@ -78,9 +80,13 @@ execute any Player-ID action wrapper. It never logs a connection URL, database u
 or database error detail.
 
 For the DigitalOcean VM, use the current direct PostgreSQL connection when its supported network
-path is available; otherwise use the Supabase session pooler for the long-lived API process. Take
-the exact dedicated-login URL from the project Connect panel rather than constructing it by hand.
-The transaction pooler is not the default for this persistent process.
+path is available; otherwise use the Supabase session pooler for the long-lived API process. The
+API parser accepts only `db.xzztugbgtulptnbpoelr.supabase.co` with the bare
+`payreplayy_api_runtime` login, or `aws-0-eu-west-1.pooler.supabase.com` with
+`payreplayy_api_runtime.xzztugbgtulptnbpoelr`. Both forms require port `5432`, database
+`postgres`, and exactly `sslmode=verify-full`. Take the exact dedicated-login URL from the project
+Connect panel rather than constructing it by hand. The transaction pooler is not the default for
+this persistent process.
 
 ## Stage 13B private Telegram nonce reservation
 
@@ -91,16 +97,34 @@ expiry. The table has no direct runtime privileges, and its unassigned cleanup h
 runtime grant.
 
 This is replay protection only. It does not create an inbox event, customer, conversation, action,
-audit event, payment, KemerBet request, or database credential. The TypeScript adapter is not
-constructed by API startup, the runtime login remains `NOLOGIN`, and Telegram ingress remains
-disabled. A later reviewed activation stage must reserve the nonce in a committed operation before
-calling the inbox recorder, so recorder failure cannot roll back replay protection.
+audit event, payment, KemerBet request, or database credential. The TypeScript adapter has no
+connection until all three Stage 15A configuration gates are explicitly enabled, the runtime login
+has separately been provisioned, and an authenticated request reaches the private route. A later
+reviewed activation stage must reserve the nonce in a committed operation before calling the inbox
+recorder, so recorder failure cannot roll back replay protection.
 
-Stage 13C adds an unconnected API-only adapter for
-`app.record_telegram_private_inbound_event(...)`. It sends only the authenticated private-update
-DTO and the API-generated payload HMAC to that existing procedure, validates the safe result shape,
-and maps database uncertainty to a generic unavailable error. It neither creates a pool nor loads a
-credential, and it must never be called by startup, health, readiness, preflight, or live tests.
+Stage 13C adds an API-only adapter for `app.record_telegram_private_inbound_event(...)`. It sends
+only the authenticated private-update DTO and the API-generated payload HMAC to that existing
+procedure, validates the safe result shape, and maps database uncertainty to a generic unavailable
+error. It neither creates a pool nor loads a credential itself; Stage 15A composes it only behind
+all three explicit runtime gates. It is never called by health, readiness, or preflight.
+
+## Stage 15A private Telegram ingress runtime composition
+
+The reviewed nonce and recorder adapters are now composed only when all three API gates are true:
+
+1. `INTERNAL_POSTGRES_RUNTIME_ENABLED=true` with the dedicated, TLS-verified API runtime URL;
+2. `INTERNAL_TELEGRAM_INGRESS_ENABLED=true` with both API-side transport HMAC secrets; and
+3. `INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED=true`.
+
+The third gate defaults to `false` and rejects configuration unless the first two prerequisites are
+already valid. `INTERNAL_POSTGRES_RUNTIME_ENABLED` therefore remains preflight-only when the third
+gate is false. When all three are true, the API constructs only one bounded two-connection pool
+from decomposed configuration fields, with certificate verification and short timeouts. The nonce
+reservation and inbox recorder call `Pool.query` separately: no shared transaction can roll back a
+successful replay reservation if recording fails. Fastify closes that pool on shutdown. This does
+not enable bot polling, public ingress, Player-ID handling, payment verification, or financial
+actions. The inactive Compose contract sets all three gates to `false`.
 
 ## Stage 14B nonce-retention maintenance scaffold
 

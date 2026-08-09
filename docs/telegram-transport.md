@@ -2,17 +2,22 @@
 
 ## Status: scaffolded and disabled
 
-The bot-to-API path is intentionally not a production service yet. Both of these settings default
-to `false`:
+The bot-to-API path is intentionally not a production service yet. These settings all default to
+`false`:
 
 - `TELEGRAM_BOT_ENABLED` controls long polling in the bot process.
-- `INTERNAL_TELEGRAM_INGRESS_ENABLED` controls registration of the internal API route.
+- `INTERNAL_POSTGRES_RUNTIME_ENABLED` alone permits only the manual read-only API preflight.
+- `INTERNAL_TELEGRAM_INGRESS_ENABLED` loads the API-side transport HMAC keys, but does not create
+  a route or a pool by itself.
+- `INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED` is the final API composition gate. It is
+  valid only when both preceding API gates are valid.
 
-The current application has no direct PostgreSQL runtime login. Stages 13B and 13C provide private
-durable nonce-reservation and inbox-recorder adapters, but no server startup code constructs either
-one. The API therefore refuses to start the ingress route in production with its test-only
-in-memory nonce store, and refuses it in every environment unless a recorder is explicitly
-supplied. Do not enable either setting in a deployed environment.
+Stages 13B and 13C provide the private durable nonce-reservation and inbox-recorder adapters.
+Stage 15A composes them only when the two existing API gates and the final private-ingress runtime
+gate are all true. The bounded TLS-verified pool opens no connection during construction and does
+not enable bot polling. A test-only in-memory nonce store is rejected in production. Do not enable
+any of these settings in a deployed environment without the separately approved credential,
+private-network, reconciliation, and launch procedure.
 
 No payment, KemerBet, Player-ID validation, receipt, attachment, or withdrawal action is reachable
 through this transport.
@@ -51,12 +56,12 @@ parsing and does not log the body.
 
 The API must reserve each accepted nonce atomically through its expiry in a durable shared store
 before recording the event. Stage 13B reserves only a domain-separated SHA-256 digest of the nonce;
-it stores no raw nonce, Telegram event, customer, payment, or credential data. The adapter is
-present but deliberately unconnected. An in-memory implementation exists only for tests and local
-scaffolding; it is rejected in production. The unconnected recorder adapter invokes only
-`app.record_telegram_private_inbound_event(...)` with an API-generated, versioned payload HMAC.
-It never reads or writes a base table directly. The database update ID remains the durable
-idempotency key.
+it stores no raw nonce, Telegram event, customer, payment, or credential data. The nonce and
+recorder adapters are composed only when all three API ingress gates are true. An in-memory
+implementation exists only for tests and local scaffolding; it is rejected in production. The
+recorder invokes only `app.record_telegram_private_inbound_event(...)` with an API-generated,
+versioned payload HMAC. It never reads or writes a base table directly. The database update ID
+remains the durable idempotency key.
 
 With the current 60-second timestamp skew limit, the adapter accepts a reservation window no
 longer than 120 seconds. The database permits up to three minutes only to tolerate normal API and

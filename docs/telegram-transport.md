@@ -62,9 +62,11 @@ With the current 60-second timestamp skew limit, the adapter accepts a reservati
 longer than 120 seconds. The database permits up to three minutes only to tolerate normal API and
 database clock differences; it does not make a nonce valid for longer than the transport protocol.
 Expired nonce digests require a separate maintenance-only cleanup identity. The inactive
-`payreplayy_nonce_retention` scaffold has no credential or schedule yet; it can run only the
-bounded purge helper once a later deployment review explicitly provisions it. The API and worker
-must never receive that cleanup credential or execute permission.
+`payreplayy_nonce_retention` scaffold has no credential or schedule yet. A standalone manual
+preflight can inspect its least-privilege catalog boundary, but it has no purge command and does
+not connect during normal application startup. The bounded purge helper can run only after a later
+deployment review explicitly provisions that separate identity. The API and worker must never
+receive the cleanup credential or execute permission.
 
 The bot makes at most two attempts for a retryable transport failure (timeout, 408, 429, or 5xx),
 using a new nonce for every attempt. If both attempts fail, it tells the customer that PayReplayy

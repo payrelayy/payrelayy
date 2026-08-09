@@ -98,6 +98,9 @@ describe('API database preflight', () => {
     expect(fake.queries).toContain("set local statement_timeout = '5s'");
     expect(fake.queries).toContain("set local lock_timeout = '1s'");
     expect(fake.queries).toContain('set local search_path = pg_catalog');
+    const catalogQuery = fake.queries.find((query) => query.includes('from pg_catalog.pg_roles'));
+    expect(catalogQuery).toContain('pg_catalog.aclexplode');
+    expect(catalogQuery).not.toMatch(/has_function_privilege\(\s*'public'/);
     expect(fake.queries.at(-1)).toBe('rollback');
     expect(
       fake.queries.filter((query) => /^(insert|update|delete|truncate)\b/i.test(query.trim())),

@@ -25,8 +25,10 @@ The bot, worker, dashboard, and executor do not own independent financial state.
 and database constraints are the source of truth.
 
 `app` is a private PostgreSQL schema rather than a Supabase Data API schema. When the database
-layer is introduced, only the API and worker will receive an isolated direct PostgreSQL runtime
-credential. The bot and executor communicate with the API, not the database.
+layer is introduced, the API and worker will receive isolated direct PostgreSQL runtime credentials.
+A separately reviewed maintenance-only identity is the sole narrow exception: it may eventually
+invoke the bounded expired-nonce purge, but it must never be shared with the API or worker. The bot
+and executor communicate with the API, not the database.
 
 ## Planned deposit flow
 

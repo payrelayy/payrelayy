@@ -69,6 +69,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/domain
 
+  apps/maintenance:
+    dependencies:
+      '@payreplayy/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   apps/worker:
     dependencies:
       '@payreplayy/config':

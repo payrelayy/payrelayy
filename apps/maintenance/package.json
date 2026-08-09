@@ -1,0 +1,18 @@
+{
+  "name": "@payreplayy/maintenance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@payreplayy/config": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:preflight": "tsx src/database-preflight-cli.ts",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/pg": "8.21.0"
+  }
+}

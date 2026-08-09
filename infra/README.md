@@ -46,12 +46,12 @@ Production secrets must be supplied by the VM outside this repository, using dis
 or service-owned files with restrictive permissions. The current Compose file intentionally does
 not reference any of them.
 
-| Future process | May receive                                                                      | Must never receive                                                                  |
-| -------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| API            | dedicated non-admin PostgreSQL URL, API ingress/payload/capability HMAC keys     | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
-| Bot            | Telegram bot token and bot-to-API transport HMAC                                 | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
-| Maintenance    | a future narrowly scoped nonce-retention credential only                         | bot token, API database credential, financial/provider credentials                  |
-| Executor       | its separately reviewed browser profile and least-privilege platform credentials | bot token, API database credential, Supabase service-role key                       |
+| Future process | May receive                                                                          | Must never receive                                                                  |
+| -------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| API            | dedicated non-admin PostgreSQL URL, API ingress/payload/capability HMAC keys         | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
+| Bot            | Telegram bot token and bot-to-API transport HMAC                                     | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
+| Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight | bot token, API database credential, financial/provider credentials                  |
+| Executor       | its separately reviewed browser profile and least-privilege platform credentials     | bot token, API database credential, Supabase service-role key                       |
 
 No container may mount the Docker socket. Do not use a shared production `.env` file, browser
 profile, Git secret, or chat transcript as a secret store.

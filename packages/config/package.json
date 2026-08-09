@@ -19,6 +19,10 @@
     "./executor": {
       "types": "./dist/executor.d.ts",
       "default": "./dist/executor.js"
+    },
+    "./maintenance": {
+      "types": "./dist/maintenance.d.ts",
+      "default": "./dist/maintenance.js"
     }
   },
   "dependencies": {

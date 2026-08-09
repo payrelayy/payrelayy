@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { loadApiConfig, redactedApiConfigForLog } from './api.js';
 import { loadBotConfig, redactedBotConfigForLog } from './bot.js';
 import { loadExecutorConfig } from './executor.js';
+import { loadMaintenanceConfig, redactedMaintenanceConfigForLog } from './maintenance.js';
 import { loadWorkerConfig } from './worker.js';
 
 function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
@@ -168,6 +169,133 @@ describe('runtime configuration isolation', () => {
       connection: undefined,
       tlsMode: undefined,
     });
+  });
+
+  it('keeps the maintenance gate and credential out of API, bot, worker, and executor configuration', () => {
+    const environment = new Proxy(
+      { FINANCIAL_ACTIONS_MODE: 'dry_run', NODE_ENV: 'test' },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED' ||
+            property === 'NONCE_RETENTION_DATABASE_URL'
+          ) {
+            throw new Error(`unexpected maintenance environment read: ${String(property)}`);
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(loadApiConfig(environment).postgresRuntime.enabled).toBe(false);
+    expect(loadBotConfig(environment).telegram.enabled).toBe(false);
+    expect(loadWorkerConfig(environment)).toMatchObject({ nodeEnv: 'test' });
+    expect(loadExecutorConfig(environment).financialActionsMode).toBe('dry_run');
+  });
+
+  it('does not read a maintenance URL when its manual preflight gate is disabled', () => {
+    const environment = new Proxy(
+      { INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false', NODE_ENV: 'test' },
+      {
+        get(target, property, receiver) {
+          if (property === 'NONCE_RETENTION_DATABASE_URL') {
+            throw new Error('disabled maintenance preflight must not read its database URL');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    expect(loadMaintenanceConfig(environment).nonceRetentionRuntime).toEqual({
+      enabled: false,
+      connection: undefined,
+      tlsMode: undefined,
+    });
+  });
+
+  it('loads only a dedicated TLS-protected nonce-retention maintenance URL', () => {
+    const connectionString =
+      'postgresql://payreplayy_nonce_retention_runtime:example-only@db.example.test/postgres?sslmode=verify-full';
+    const environment = new Proxy(
+      {
+        INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'test',
+        NONCE_RETENTION_DATABASE_URL: connectionString,
+      },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'DATABASE_URL' ||
+            property === 'TELEGRAM_BOT_TOKEN' ||
+            property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
+            property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET' ||
+            property === 'KEMERBET_EXECUTOR_ENABLED' ||
+            property === 'KEMERBET_FINAL_ACTION_ENABLED'
+          ) {
+            throw new Error(
+              `maintenance must not read another process secret: ${String(property)}`,
+            );
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    const config = loadMaintenanceConfig(environment);
+    expect(config.nonceRetentionRuntime).toEqual({
+      enabled: true,
+      connection: {
+        database: 'postgres',
+        host: 'db.example.test',
+        password: 'example-only',
+        port: 5432,
+        user: 'payreplayy_nonce_retention_runtime',
+      },
+      tlsMode: 'verify-full',
+    });
+    expect(JSON.stringify(redactedMaintenanceConfigForLog(config))).not.toContain(connectionString);
+    expect(JSON.stringify(redactedMaintenanceConfigForLog(config))).not.toContain('example-only');
+  });
+
+  it('accepts only the dedicated Supavisor maintenance login form and rejects unsafe URLs', () => {
+    const config = loadMaintenanceConfig({
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
+      NODE_ENV: 'test',
+      NONCE_RETENTION_DATABASE_URL:
+        'postgresql://payreplayy_nonce_retention_runtime.abcdefghijklmnopqrst:example-only@aws-0-us-east-1.pooler.supabase.com/postgres?sslmode=verify-full',
+    });
+    expect(config.nonceRetentionRuntime).toMatchObject({
+      enabled: true,
+      connection: {
+        host: 'aws-0-us-east-1.pooler.supabase.com',
+        user: 'payreplayy_nonce_retention_runtime.abcdefghijklmnopqrst',
+      },
+    });
+
+    expect(() =>
+      loadMaintenanceConfig({
+        INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'test',
+      }),
+    ).toThrow('NONCE_RETENTION_DATABASE_URL is required');
+    expect(() =>
+      loadMaintenanceConfig({
+        INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'test',
+        NONCE_RETENTION_DATABASE_URL:
+          'postgresql://%70ostgres:example@db.example.test/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('dedicated PayReplayy nonce-retention runtime login');
+    expect(() =>
+      loadMaintenanceConfig({
+        INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'test',
+        NONCE_RETENTION_DATABASE_URL:
+          'postgresql://payreplayy_nonce_retention_runtime:example@db.example.test/postgres?sslmode=verify-full&user=postgres',
+      }),
+    ).toThrow('only sslmode=verify-full');
   });
 
   it('loads a TLS-protected dedicated API runtime URL only when explicitly enabled', () => {

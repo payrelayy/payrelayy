@@ -13,6 +13,11 @@ worker cannot change configuration, identity, conversations, or audit records. T
 role also cannot bootstrap Owners, read the audit log, or change configuration; those capabilities
 will require a separate, reviewed admin role and dashboard boundary.
 
+The only planned direct-connection exception is a distinct nonce-retention maintenance identity.
+It has its own non-shared credential boundary and can receive only the bounded expired-nonce purge
+procedure after a separate deployment review. It must never be used by the API or worker, and it
+has no direct table, sequence, inbox, audit, payment, configuration, or customer-data access.
+
 The API role receives only safe receiver-account display columns. The worker alone can read the
 encrypted receiver/verification references required for authoritative verification. Both roles use
 column-level grants and purpose-specific RLS policies; neither can delete any current `app` table.
@@ -111,12 +116,13 @@ database. Each new routine must receive an explicit reviewed execution grant; an
 function is not an acceptable private-schema boundary.
 
 This is not a running cleanup service. It creates no password, database connection, scheduler,
-container, feature-switch change, API wiring, or Telegram activation. Before ingress can be enabled,
-a separately reviewed maintenance-only deployment must provision a unique TLS database credential
-outside Git, run a capability preflight, invoke the purge with a bounded limit of no more than
-1,000 rows per call, retain
-safe count-only telemetry, and have an explicit alert and stop procedure. The API and worker must
-never receive this cleanup grant or credential.
+container, feature-switch change, API wiring, or Telegram activation. Stage 14C adds only a
+standalone, manual, catalog-only preflight command. It always uses a read-only transaction, never
+invokes the purge, and is not part of the API, worker, Docker, or Telegram processes. Before ingress
+can be enabled, a separately reviewed maintenance-only deployment must provision a unique TLS
+database credential outside Git, run that preflight, invoke the purge with a bounded limit of no
+more than 1,000 rows per call, retain safe count-only telemetry, and have an explicit alert and stop
+procedure. The API and worker must never receive this cleanup grant or credential.
 
 Supabase service-role keys are not part of the PayReplayy runtime design and must never be stored
 in this workspace, a bot, a browser profile, or application configuration. A future private

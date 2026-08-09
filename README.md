@@ -27,10 +27,12 @@ The current foundation is deliberately safe:
 - an inert, non-claiming Player-ID request schema is in place, but it is not wired to Telegram,
   KemerBet, deposit intake, or a validator.
 
-The private `app` database schema will use direct PostgreSQL connections only from the API and
-worker. Their future DATABASE_URL belongs in the VM runtime secrets, never Git or the bot,
-executor, dashboard, browser profile, or logs. PayReplayy does not place a Supabase service-role
-key in application configuration.
+The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
+and a separately reviewed nonce-retention maintenance process. Each future credential belongs in its
+own VM runtime secret set, never Git or the bot, executor, dashboard, browser profile, or logs. The
+maintenance identity is limited to a future bounded nonce-digest purge and must never be reused by
+the API or worker. PayReplayy does not place a Supabase service-role key in application
+configuration.
 
 Each runtime has a dedicated configuration entry point. The API, worker, and executor do not
 read or receive `TELEGRAM_BOT_TOKEN`; only the bot runtime reads it, and only when polling is
@@ -39,16 +41,17 @@ environment file.
 
 ## Planned services
 
-| Service              | Responsibility                                                                |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `apps/api`           | Transaction orchestration, validation, dashboard-facing API, audit boundaries |
-| `apps/bot`           | Private Telegram chat transport only                                          |
-| `apps/worker`        | Durable verification, retention, alert, and reconciliation jobs               |
-| `apps/executor`      | Isolated, supervised KemerBet browser adapter; dry-run first                  |
-| `packages/domain`    | Money rules, state machines, limits, idempotency reason codes                 |
-| `packages/contracts` | Provider, executor, notifier, and storage interfaces                          |
-| `packages/config`    | Safe environment parsing and feature switches                                 |
-| `packages/i18n`      | Shared English message keys and safe locale normalization                     |
+| Service              | Responsibility                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `apps/api`           | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
+| `apps/bot`           | Private Telegram chat transport only                                                |
+| `apps/worker`        | Durable verification, alert, and reconciliation jobs                                |
+| `apps/maintenance`   | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
+| `apps/executor`      | Isolated, supervised KemerBet browser adapter; dry-run first                        |
+| `packages/domain`    | Money rules, state machines, limits, idempotency reason codes                       |
+| `packages/contracts` | Provider, executor, notifier, and storage interfaces                                |
+| `packages/config`    | Safe environment parsing and feature switches                                       |
+| `packages/i18n`      | Shared English message keys and safe locale normalization                           |
 
 ## Local development
 

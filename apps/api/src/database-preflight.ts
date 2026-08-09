@@ -62,7 +62,6 @@ const API_DATABASE_PREFLIGHT_SQL = `
     not exists (
       select 1
       from unnest(array[
-        'public',
         'anon',
         'authenticated',
         'service_role',
@@ -73,6 +72,17 @@ const API_DATABASE_PREFLIGHT_SQL = `
         'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)',
         'EXECUTE'
       )
+    )
+    and not exists (
+      select 1
+      from pg_catalog.pg_proc as routine
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+      ) as privilege
+      where routine.oid =
+        'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)'::regprocedure
+        and privilege.grantee = 0
+        and privilege.privilege_type = 'EXECUTE'
     ) as inbox_recorder_execution_is_private,
     pg_catalog.has_function_privilege(
       current_user,
@@ -82,7 +92,6 @@ const API_DATABASE_PREFLIGHT_SQL = `
     not exists (
       select 1
       from unnest(array[
-        'public',
         'anon',
         'authenticated',
         'service_role',
@@ -93,6 +102,17 @@ const API_DATABASE_PREFLIGHT_SQL = `
         'app.reserve_telegram_private_ingress_nonce(text,timestamptz)',
         'EXECUTE'
       )
+    )
+    and not exists (
+      select 1
+      from pg_catalog.pg_proc as routine
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+      ) as privilege
+      where routine.oid =
+        'app.reserve_telegram_private_ingress_nonce(text,timestamptz)'::regprocedure
+        and privilege.grantee = 0
+        and privilege.privilege_type = 'EXECUTE'
     ) as nonce_reservation_execution_is_private,
     not exists (
       select 1

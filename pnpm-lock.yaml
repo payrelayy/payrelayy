@@ -45,6 +45,8 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  apps/beta-admission: {}
+
   apps/bot:
     dependencies:
       '@payreplayy/config':

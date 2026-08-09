@@ -42,11 +42,12 @@ already-admitted identity. Neither grants the API direct table access to custome
 inbound events, conversations, invite records, or audit events.
 
 Invite admission has its own NOLOGIN `payreplayy_beta_admission` group and
-`payreplayy_beta_admission_runtime` scaffold. The admission group alone receives schema usage and
-execution on the two admission procedures; the generic `payreplayy_api` group and its runtime
-scaffold must not execute them. A future real login can inherit only the dedicated admission group,
-cannot `SET ROLE`, and must have a separately mounted TLS database credential. It is not provisioned
-or enabled by this repository.
+`payreplayy_beta_admission_runtime` scaffold. The group retains only schema usage plus invite
+redemption and beta-admission nonce-reservation execution. The admitted-inbox recorder is
+intentionally ungranted to both beta roles, and the generic `payreplayy_api` group and its runtime
+scaffold must not execute any beta-admission procedure. A future real login can inherit only the
+dedicated admission group, cannot `SET ROLE`, and must have a separately mounted TLS database
+credential. It is not provisioned or enabled by this repository.
 
 Before a service starts, an operator will create a separate login role for that service, grant it
 membership in exactly one group role, and let it inherit only that group role's approved
@@ -85,8 +86,9 @@ has exactly the expected non-switchable group membership, and **cannot** execute
 inbox recorder or either beta-admission procedure. It must prove nonce and admission procedures
 remain inaccessible to broad database roles, has no direct privilege of any kind on identity, inbox,
 conversation, invite, audit, or nonce tables, and still cannot execute any Player-ID action wrapper.
-A separate, later beta-admission preflight must verify the dedicated role's two procedure grants;
-neither command logs a connection URL, database username, SQL text, or database error detail.
+A separate, later beta-admission preflight must verify the dedicated role's redemption and nonce
+reservation grants while proving both inbox recorders remain denied; neither command logs a
+connection URL, database username, SQL text, or database error detail.
 
 For the DigitalOcean VM, use the current direct PostgreSQL connection when its supported network
 path is available; otherwise use the Supabase session pooler for the long-lived API process. The

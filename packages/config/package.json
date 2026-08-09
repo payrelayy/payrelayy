@@ -23,6 +23,10 @@
     "./maintenance": {
       "types": "./dist/maintenance.d.ts",
       "default": "./dist/maintenance.js"
+    },
+    "./beta-admission": {
+      "types": "./dist/beta-admission.d.ts",
+      "default": "./dist/beta-admission.js"
     }
   },
   "dependencies": {

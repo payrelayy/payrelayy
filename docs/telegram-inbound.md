@@ -14,11 +14,10 @@ may create the immutable customer identity, Telegram identity, and empty convers
 once. It stores a domain-separated SHA-256 invite-token digest only; raw invite links and tokens
 are never persisted, logged, or returned.
 
-After successful admission, only
-`app.record_admitted_telegram_private_inbound_event(...)` may record an allowlisted private update
-for that already-active Telegram identity. It must never create a customer, identity, or
-conversation. Both procedures remain unavailable until their independent runtime, credential, and
-activation review; no bot polling, API route, or database login is enabled by this documentation.
+`app.record_admitted_telegram_private_inbound_event(...)` remains a reserved procedure for a later
+reviewed admitted-inbox boundary. It must never create a customer, identity, or conversation, and
+is intentionally ungranted to both beta-admission roles in this stage. No bot polling, API route,
+database login, or later inbox path is enabled by this documentation.
 
 ## Trust boundary
 

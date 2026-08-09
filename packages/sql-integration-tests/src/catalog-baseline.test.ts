@@ -541,20 +541,35 @@ describe('disposable SQL migration baseline', () => {
       admittedPrivateInboundRecorder,
       betaInviteRedemptionProcedure,
     ]);
-    expect(
-      admissionFunctions.rows.every(
-        (procedure) =>
-          procedure.is_security_definer &&
-          procedure.safe_search_path &&
-          procedure.beta_admission_execute_allowed &&
-          procedure.beta_admission_runtime_effective_execute_allowed &&
-          !procedure.beta_admission_runtime_direct_execute_allowed &&
-          !procedure.generic_api_execute_allowed &&
-          !procedure.generic_api_runtime_execute_allowed &&
-          !procedure.worker_execute_allowed &&
-          !procedure.public_execute_allowed,
-      ),
-    ).toBe(true);
+    const redemptionProcedure = admissionFunctions.rows.find(
+      (procedure) => procedure.signature === betaInviteRedemptionProcedure,
+    );
+    const admittedInboxRecorder = admissionFunctions.rows.find(
+      (procedure) => procedure.signature === admittedPrivateInboundRecorder,
+    );
+
+    expect(redemptionProcedure).toMatchObject({
+      beta_admission_execute_allowed: true,
+      beta_admission_runtime_direct_execute_allowed: false,
+      beta_admission_runtime_effective_execute_allowed: true,
+      generic_api_execute_allowed: false,
+      generic_api_runtime_execute_allowed: false,
+      is_security_definer: true,
+      public_execute_allowed: false,
+      safe_search_path: true,
+      worker_execute_allowed: false,
+    });
+    expect(admittedInboxRecorder).toMatchObject({
+      beta_admission_execute_allowed: false,
+      beta_admission_runtime_direct_execute_allowed: false,
+      beta_admission_runtime_effective_execute_allowed: false,
+      generic_api_execute_allowed: false,
+      generic_api_runtime_execute_allowed: false,
+      is_security_definer: true,
+      public_execute_allowed: false,
+      safe_search_path: true,
+      worker_execute_allowed: false,
+    });
     expect(inviteTable.rows).toEqual([
       { policies: 0, relforcerowsecurity: true, relrowsecurity: true },
     ]);
@@ -861,6 +876,25 @@ describe('disposable SQL migration baseline', () => {
     ).rejects.toThrow();
   });
 
+  it('keeps the admitted-inbox recorder inaccessible to the beta-admission role', async () => {
+    await expect(
+      queryAsRole(
+        'payreplayy_beta_admission',
+        `
+          select *
+          from app.record_admitted_telegram_private_inbound_event(
+            $1::bigint,
+            $2::bigint,
+            $3::bigint,
+            $4::text,
+            $5::text
+          )
+        `,
+        [9_100_000_011, 9_100_000_011, 9_100_000_011, payloadHmac('c'), 'en'],
+      ),
+    ).rejects.toThrow();
+  });
+
   it('keeps the retired legacy recorder fail-closed even for the database owner', async () => {
     const beforeLegacyCall = await readAdmissionWriteSnapshot();
 
@@ -924,9 +958,10 @@ describe('disposable SQL migration baseline', () => {
       userId: number,
       chatId: number,
       hmacCharacter: string,
-    ): Promise<readonly AdmissionReceiptRow[]> =>
-      queryAsRole<AdmissionReceiptRow>(
-        'payreplayy_beta_admission',
+    ): Promise<readonly AdmissionReceiptRow[]> => {
+      // The beta group is deliberately ungranted from this reserved recorder. Retain the owner
+      // behavior checks here so the procedure remains fail-closed while it awaits later review.
+      const result = await client.query<AdmissionReceiptRow>(
         `
           select *
           from app.record_admitted_telegram_private_inbound_event(
@@ -939,6 +974,9 @@ describe('disposable SQL migration baseline', () => {
         `,
         [updateId, userId, chatId, payloadHmac(hmacCharacter), 'en'],
       );
+
+      return result.rows;
+    };
 
     await client.query(
       `

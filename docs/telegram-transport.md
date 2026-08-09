@@ -120,8 +120,9 @@ production launch blocker.
 
 1. Validate the invite-admission migration in the disposable SQL harness, then review it
    independently before any remote database change.
-2. Provision a unique login inheriting only `payreplayy_beta_admission`; verify that neither generic
-   API role can execute admission procedures.
+2. Provision a unique login inheriting only `payreplayy_beta_admission`; verify that it can execute
+   only invite redemption and beta-nonce reservation, while both generic API roles and the
+   admitted-inbox recorder remain denied.
 3. Wire exact private `/start <invite>` handling to a separately signed, durable replay-protected
    admission route; ordinary messages, callbacks, Player IDs, attachments, and payments stay
    ignored.

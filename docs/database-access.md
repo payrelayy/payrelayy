@@ -106,6 +106,10 @@ The future runtime can inherit only the group role's schema usage and one
 `app.purge_expired_telegram_private_ingress_nonce_reservations(integer)` execution grant; it cannot
 `SET ROLE` or administer membership.
 
+The database owner also has no default `PUBLIC EXECUTE` grant for future functions anywhere in this
+database. Each new routine must receive an explicit reviewed execution grant; an implicit callable
+function is not an acceptable private-schema boundary.
+
 This is not a running cleanup service. It creates no password, database connection, scheduler,
 container, feature-switch change, API wiring, or Telegram activation. Before ingress can be enabled,
 a separately reviewed maintenance-only deployment must provision a unique TLS database credential

@@ -352,7 +352,7 @@ security definer
 set search_path = pg_catalog, app, pg_temp
 as $$
 declare
-  external_event_id text;
+  resolved_external_event_id text;
   requested_locale text;
   event_lock_key bigint;
   invite_lock_key bigint;
@@ -403,12 +403,12 @@ begin
     raise exception 'The Telegram beta admission is not accepted.';
   end if;
 
-  external_event_id := 'update:' || p_telegram_update_id::text;
+  resolved_external_event_id := 'update:' || p_telegram_update_id::text;
 
   perform app.lock_telegram_private_scope(p_telegram_user_id, p_private_chat_id);
 
   event_lock_key := pg_catalog.hashtextextended(
-    'payreplayy:telegram-update:v1:' || external_event_id,
+    'payreplayy:telegram-update:v1:' || resolved_external_event_id,
     0::bigint
   );
   perform pg_catalog.pg_advisory_xact_lock(event_lock_key);
@@ -429,7 +429,7 @@ begin
          existing_received_at
     from app.inbound_events inbound_event
    where inbound_event.channel = 'telegram'
-     and inbound_event.external_event_id = external_event_id
+     and inbound_event.external_event_id = resolved_external_event_id
    for update;
 
   if found then
@@ -611,7 +611,7 @@ begin
   values (resolved_customer_identity_id)
   returning id into resolved_conversation_id;
 
-  insert into app.inbound_events (
+  insert into app.inbound_events as inbound_event (
     channel,
     external_event_id,
     customer_identity_id,
@@ -620,13 +620,14 @@ begin
   )
   values (
     'telegram',
-    external_event_id,
+    resolved_external_event_id,
     resolved_customer_identity_id,
     p_payload_hmac,
     clock_timestamp()
   )
   on conflict (channel, external_event_id) do nothing
-  returning id, received_at into inserted_event_id, inserted_received_at;
+  returning inbound_event.id, inbound_event.received_at
+    into inserted_event_id, inserted_received_at;
 
   if inserted_event_id is null then
     raise exception 'The Telegram beta admission is not accepted.';
@@ -694,7 +695,7 @@ security definer
 set search_path = pg_catalog, app, pg_temp
 as $$
 declare
-  external_event_id text;
+  resolved_external_event_id text;
   requested_locale text;
   event_lock_key bigint;
   resolved_invite_customer_id uuid;
@@ -732,12 +733,12 @@ begin
     raise exception 'The Telegram beta admission is not active.';
   end if;
 
-  external_event_id := 'update:' || p_telegram_update_id::text;
+  resolved_external_event_id := 'update:' || p_telegram_update_id::text;
 
   perform app.lock_telegram_private_scope(p_telegram_user_id, p_private_chat_id);
 
   event_lock_key := pg_catalog.hashtextextended(
-    'payreplayy:telegram-update:v1:' || external_event_id,
+    'payreplayy:telegram-update:v1:' || resolved_external_event_id,
     0::bigint
   );
   perform pg_catalog.pg_advisory_xact_lock(event_lock_key);
@@ -752,7 +753,7 @@ begin
          existing_received_at
     from app.inbound_events inbound_event
    where inbound_event.channel = 'telegram'
-     and inbound_event.external_event_id = external_event_id
+     and inbound_event.external_event_id = resolved_external_event_id
    for update;
 
   if found then
@@ -907,7 +908,7 @@ begin
     raise exception 'The Telegram beta admission is not active.';
   end if;
 
-  insert into app.inbound_events (
+  insert into app.inbound_events as inbound_event (
     channel,
     external_event_id,
     customer_identity_id,
@@ -916,13 +917,14 @@ begin
   )
   values (
     'telegram',
-    external_event_id,
+    resolved_external_event_id,
     resolved_invite_customer_identity_id,
     p_payload_hmac,
     clock_timestamp()
   )
   on conflict (channel, external_event_id) do nothing
-  returning id, received_at into inserted_event_id, inserted_received_at;
+  returning inbound_event.id, inbound_event.received_at
+    into inserted_event_id, inserted_received_at;
 
   if inserted_event_id is null then
     raise exception 'The Telegram beta admission is not active.';

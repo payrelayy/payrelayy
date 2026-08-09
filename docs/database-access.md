@@ -97,6 +97,23 @@ DTO and the API-generated payload HMAC to that existing procedure, validates the
 and maps database uncertainty to a generic unavailable error. It neither creates a pool nor loads a
 credential, and it must never be called by startup, health, readiness, preflight, or live tests.
 
+## Stage 14B nonce-retention maintenance scaffold
+
+Stage 14B assigns the existing bounded purge helper only to a dedicated `payreplayy_nonce_retention`
+group role and creates its separate `NOLOGIN` runtime scaffold. Neither role can access a base table,
+identity, inbox, audit record, payment record, configuration object, or any other `app` function.
+The future runtime can inherit only the group role's schema usage and one
+`app.purge_expired_telegram_private_ingress_nonce_reservations(integer)` execution grant; it cannot
+`SET ROLE` or administer membership.
+
+This is not a running cleanup service. It creates no password, database connection, scheduler,
+container, feature-switch change, API wiring, or Telegram activation. Before ingress can be enabled,
+a separately reviewed maintenance-only deployment must provision a unique TLS database credential
+outside Git, run a capability preflight, invoke the purge with a bounded limit of no more than
+1,000 rows per call, retain
+safe count-only telemetry, and have an explicit alert and stop procedure. The API and worker must
+never receive this cleanup grant or credential.
+
 Supabase service-role keys are not part of the PayReplayy runtime design and must never be stored
 in this workspace, a bot, a browser profile, or application configuration. A future private
 Storage ingestion/download boundary will be reviewed independently; it must not gain app-schema

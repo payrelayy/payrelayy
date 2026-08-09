@@ -61,6 +61,10 @@ idempotency key.
 With the current 60-second timestamp skew limit, the adapter accepts a reservation window no
 longer than 120 seconds. The database permits up to three minutes only to tolerate normal API and
 database clock differences; it does not make a nonce valid for longer than the transport protocol.
+Expired nonce digests require a separate maintenance-only cleanup identity. The inactive
+`payreplayy_nonce_retention` scaffold has no credential or schedule yet; it can run only the
+bounded purge helper once a later deployment review explicitly provisions it. The API and worker
+must never receive that cleanup credential or execute permission.
 
 The bot makes at most two attempts for a retryable transport failure (timeout, 408, 429, or 5xx),
 using a new nonce for every attempt. If both attempts fail, it tells the customer that PayReplayy
@@ -92,9 +96,11 @@ production launch blocker.
    inbox procedure.
 2. Wire the reviewed durable, cross-replica atomic nonce reservation adapter only alongside that
    reviewed recorder and a private deployment boundary.
-3. Add a durable bot outbox before relying on automatic delivery beyond the two immediate attempts.
-4. Deploy bot and API on a private Docker network; use long polling in exactly one bot replica and
+3. Provision and test the dedicated bounded nonce-retention maintenance path before any ingress is
+   enabled; it must remain separate from the API and worker credentials.
+4. Add a durable bot outbox before relying on automatic delivery beyond the two immediate attempts.
+5. Deploy bot and API on a private Docker network; use long polling in exactly one bot replica and
    do not mix it with Telegram webhooks.
-5. Add reviewed conversation/inbound completion procedures before interpreting customer commands.
-6. Keep Player-ID registration, payment verification, provider access, KemerBet execution, and all
+6. Add reviewed conversation/inbound completion procedures before interpreting customer commands.
+7. Keep Player-ID registration, payment verification, provider access, KemerBet execution, and all
    financial actions behind their separate reviewed launch gates.

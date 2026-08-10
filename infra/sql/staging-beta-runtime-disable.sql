@@ -30,6 +30,8 @@ begin
 
   raise notice 'Terminated % staging beta-admission runtime session(s).', terminated_session_count;
 
+  perform pg_catalog.pg_stat_clear_snapshot();
+
   if exists (
     select 1
     from pg_catalog.pg_stat_activity as activity

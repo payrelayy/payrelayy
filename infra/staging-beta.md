@@ -166,11 +166,14 @@ database passwords. It rejects root SSH and fails if the installed helper checks
 reviewed repository helper.
 
 Deployment gives the beta-admission and Owner-control roles 24-hour staging LOGIN credentials,
-installs service-separated `0400` files, starts the private Compose project without building on the
-VM, and checks readiness without submitting a payment or provider request. Failure disables both
-logins. `stop-and-disable` is the explicit cleanup mode and must be run before the 24-hour login
-expiry; credential expiry does not itself stop the containers. A successful deployment is a beta
-demo, not financial launch approval; all payment, provider, action, and KemerBet gates remain off.
+waits once for 125 seconds before any release transfer or container activation so the shared
+Supavisor credential cache can observe the rotated passwords, installs service-separated `0400`
+files, starts the private Compose project without building on the VM, and checks readiness without
+submitting a payment or provider request. It does not make rapid authentication retries during the
+propagation interval. Failure disables both logins. `stop-and-disable` is the explicit cleanup mode
+and must be run before the 24-hour login expiry; credential expiry does not itself stop the
+containers. A successful deployment is a beta demo, not financial launch approval; all payment,
+provider, action, and KemerBet gates remain off.
 
 ## Protected runtime preflight
 

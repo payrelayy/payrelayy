@@ -12,7 +12,7 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run build",
     "test": "pnpm build && pnpm -r --filter=!@payreplayy/sql-integration-tests run test",
-    "test:infra": "node infra/verify-staging-beta.mjs",
+    "test:infra": "node infra/verify-staging-beta.mjs && node infra/verify-staging-beta-runtime-preflight.mjs",
     "test:sql": "node scripts/run-sql-integration.mjs",
     "lint": "prettier --check .",
     "format": "prettier --write ."

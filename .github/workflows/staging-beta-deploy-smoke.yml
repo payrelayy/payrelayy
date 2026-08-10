@@ -243,6 +243,10 @@ jobs:
           echo 'attempted=true' >> "$GITHUB_OUTPUT"
           psql -X --file=infra/sql/staging-runtimes-provision-for-deploy.sql
 
+      - name: Wait once for staging runtime credential propagation
+        shell: bash
+        run: sleep 125
+
       - name: Transfer and install sealed release inputs
         shell: bash
         env:

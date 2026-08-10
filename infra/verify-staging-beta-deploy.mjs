@@ -53,6 +53,21 @@ assert.match(workflow, /org\.opencontainers\.image\.revision/);
 assert.match(workflow, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.match(workflow, /stop-and-disable/);
 assert.match(workflow, /infra\/sql\/staging-runtimes-disable\.sql/g);
+assert.match(workflow, /- name: Wait once for staging runtime credential propagation/);
+assert.equal(
+  (workflow.match(/run: sleep 125/g) ?? []).length,
+  1,
+  'Deployment must use exactly one bounded credential-propagation wait.',
+);
+assert.ok(
+  workflow.indexOf('Provision both narrow 24-hour staging logins') <
+    workflow.indexOf('Wait once for staging runtime credential propagation') &&
+    workflow.indexOf('Wait once for staging runtime credential propagation') <
+      workflow.indexOf('Transfer and install sealed release inputs') &&
+    workflow.indexOf('Transfer and install sealed release inputs') <
+      workflow.indexOf('Start the private staging profile and smoke readiness'),
+  'Credential propagation must complete after provisioning and before transfer or activation.',
+);
 assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
 assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
 assert.ok(

@@ -1620,7 +1620,7 @@ describe('disposable SQL migration baseline', () => {
       },
     ]);
 
-    const digest = inviteDigest('c');
+    const digest = inviteDigest('e');
     const issued = await queryAsRole<{
       readonly issued_expires_at: Date;
       readonly issued_invite_id: string;

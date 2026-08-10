@@ -195,6 +195,11 @@ jobs:
           echo 'attempted=true' >> "$GITHUB_OUTPUT"
           psql -X --file=infra/sql/staging-beta-runtime-provision.sql
 
+      - name: Allow one bounded Supavisor credential propagation interval
+        if: inputs.mode == 'provision-and-preflight'
+        shell: bash
+        run: sleep 125
+
       - name: Run the dedicated catalog-only preflight
         if: inputs.mode == 'provision-and-preflight'
         shell: bash

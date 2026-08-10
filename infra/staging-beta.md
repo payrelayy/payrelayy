@@ -196,10 +196,12 @@ guarded role alteration. The workflow does not read `SUPABASE_ACCESS_TOKEN` and 
 secret value.
 
 Run `inspect` first. The provision mode gives the dedicated login a one-hour password validity and
-runs the beta service's catalog-only read-only preflight through TLS `verify-full`. After every
-provisioning attempt, whether the preflight passes or fails, the workflow disables LOGIN and clears
-its password. An abruptly terminated runner still leaves the provisional password expiring within
-one hour. A later deployment workflow must provision the runtime credential atomically with the
-reviewed service deployment rather than leave an unused LOGIN enabled. Both modes require the
-operator to confirm the exact full `main` commit SHA. This workflow does not authorize starting the
-staging Compose profile.
+runs the beta service's catalog-only read-only preflight through TLS `verify-full`. It waits once for
+125 seconds after password rotation before making the single runtime authentication attempt. This
+bounded interval accommodates the shared Supavisor credential cache and circuit-breaker window
+without rapid authentication retries. After every provisioning attempt, whether the preflight
+passes or fails, the workflow disables LOGIN and clears its password. An abruptly terminated runner
+still leaves the provisional password expiring within one hour. A later deployment workflow must
+provision the runtime credential atomically with the reviewed service deployment rather than leave
+an unused LOGIN enabled. Both modes require the operator to confirm the exact full `main` commit
+SHA. This workflow does not authorize starting the staging Compose profile.

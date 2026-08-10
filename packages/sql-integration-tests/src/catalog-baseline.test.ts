@@ -89,7 +89,7 @@ const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter
 const nonceDigest = (hexCharacter: string): string => hexCharacter.repeat(64);
 
 async function queryAsRole<T extends QueryResultRow>(
-  role: 'payreplayy_api' | 'payreplayy_beta_admission',
+  role: 'payreplayy_api' | 'payreplayy_beta_admission' | 'payreplayy_owner_control',
   query: string,
   values: readonly (number | string | null)[] = [],
 ): Promise<readonly T[]> {
@@ -144,6 +144,8 @@ async function readBetaAdmissionNonceReservationCount(): Promise<number> {
 let environment: SqlIntegrationEnvironment;
 let client: ReturnType<typeof createSqlIntegrationClient>;
 let appliedMigrationNames: readonly string[];
+const ownerAuthUserId = '11111111-1111-4111-8111-111111111111';
+let ownerAdminId: string;
 
 beforeAll(async () => {
   environment = readSqlIntegrationEnvironment();
@@ -152,6 +154,15 @@ beforeAll(async () => {
   await client.connect();
   await applySyntheticSupabaseBootstrap(client);
   appliedMigrationNames = await applyMigrationsLexically(client, environment.migrationsDirectory);
+  await client.query(
+    `insert into auth.users (id, email) values ($1::uuid, 'owner@example.invalid')`,
+    [ownerAuthUserId],
+  );
+  const owner = await client.query<{ readonly admin_id: string }>(
+    `select app.bootstrap_first_owner($1::uuid, 'Test Owner') as admin_id`,
+    [ownerAuthUserId],
+  );
+  ownerAdminId = owner.rows[0]!.admin_id;
 });
 
 afterAll(async () => {
@@ -277,6 +288,8 @@ describe('disposable SQL migration baseline', () => {
       'payreplayy_beta_admission_runtime',
       'payreplayy_nonce_retention',
       'payreplayy_nonce_retention_runtime',
+      'payreplayy_owner_control',
+      'payreplayy_owner_control_runtime',
       'payreplayy_worker',
     ];
     const roles = await client.query<RoleRow>(
@@ -347,6 +360,13 @@ describe('disposable SQL migration baseline', () => {
         group_role: 'payreplayy_nonce_retention',
         inherit_option: true,
         member_role: 'payreplayy_nonce_retention_runtime',
+        set_option: false,
+      },
+      {
+        admin_option: false,
+        group_role: 'payreplayy_owner_control',
+        inherit_option: true,
+        member_role: 'payreplayy_owner_control_runtime',
         set_option: false,
       },
     ]);
@@ -1057,25 +1077,34 @@ describe('disposable SQL migration baseline', () => {
 
     await client.query(
       `
-        insert into app.telegram_beta_invites (token_digest, created_at, expires_at)
+        insert into app.telegram_beta_invites (
+          token_digest,
+          created_at,
+          expires_at,
+          issued_by_admin_id
+        )
         values
           (
             $1::text,
             clock_timestamp() - interval '2 hours',
-            clock_timestamp() - interval '1 hour'
+            clock_timestamp() - interval '1 hour',
+            $4::uuid
           ),
-          ($2::text, clock_timestamp(), clock_timestamp() + interval '1 hour'),
-          ($3::text, clock_timestamp(), clock_timestamp() + interval '1 hour')
+          ($2::text, clock_timestamp(), clock_timestamp() + interval '1 hour', $4::uuid),
+          ($3::text, clock_timestamp(), clock_timestamp() + interval '1 hour', $4::uuid)
       `,
-      [expiredDigest, revokedDigest, validDigest],
+      [expiredDigest, revokedDigest, validDigest, ownerAdminId],
     );
     await client.query(
       `
         update app.telegram_beta_invites
-        set status = 'revoked', revoked_at = clock_timestamp()
+        set status = 'revoked',
+            revoked_at = clock_timestamp(),
+            revoked_by_admin_id = $2::uuid,
+            revocation_reason_code = 'staging_reset'
         where token_digest = $1::text
       `,
-      [revokedDigest],
+      [revokedDigest, ownerAdminId],
     );
 
     const beforeRejectedAttempts = await readAdmissionWriteSnapshot();
@@ -1323,10 +1352,14 @@ describe('disposable SQL migration baseline', () => {
 
     await client.query(
       `
-        insert into app.telegram_beta_invites (token_digest, expires_at)
-        values ($1::text, clock_timestamp() + interval '1 hour')
+        insert into app.telegram_beta_invites (
+          token_digest,
+          expires_at,
+          issued_by_admin_id
+        )
+        values ($1::text, clock_timestamp() + interval '1 hour', $2::uuid)
       `,
-      [raceInviteDigest],
+      [raceInviteDigest, ownerAdminId],
     );
     const beforeRace = await readAdmissionWriteSnapshot();
     const leftSession = createSqlIntegrationClient(environment);
@@ -1452,5 +1485,225 @@ describe('disposable SQL migration baseline', () => {
         telegram_identities: 1,
       },
     ]);
+  });
+
+  it('isolates Owner invite control and records only safe audited identifiers', async () => {
+    const roleRows = await client.query<RoleRow & { readonly rolconnlimit: number }>(`
+      select rolname, rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole,
+             rolreplication, rolbypassrls, rolconnlimit
+      from pg_roles
+      where rolname in ('payreplayy_owner_control', 'payreplayy_owner_control_runtime')
+      order by rolname
+    `);
+    expect(roleRows.rows).toEqual([
+      {
+        rolbypassrls: false,
+        rolcanlogin: false,
+        rolconnlimit: 1,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolinherit: false,
+        rolname: 'payreplayy_owner_control',
+        rolreplication: false,
+        rolsuper: false,
+      },
+      {
+        rolbypassrls: false,
+        rolcanlogin: false,
+        rolconnlimit: 1,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolinherit: false,
+        rolname: 'payreplayy_owner_control_runtime',
+        rolreplication: false,
+        rolsuper: false,
+      },
+    ]);
+
+    const privileges = await client.query<{
+      readonly beta_execute_denied: boolean;
+      readonly broad_execution_denied: boolean;
+      readonly direct_table_access_denied: boolean;
+      readonly functions_are_hardened: boolean;
+      readonly issue_allowed: boolean;
+      readonly revoke_allowed: boolean;
+      readonly runtime_direct_execute_denied: boolean;
+      readonly runtime_effective_issue_allowed: boolean;
+    }>(`
+      select
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.issue_telegram_beta_invite(uuid,text,timestamptz)',
+          'execute'
+        ) as issue_allowed,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.revoke_telegram_beta_invite(uuid,uuid,text)',
+          'execute'
+        ) as revoke_allowed,
+        has_function_privilege(
+          'payreplayy_owner_control_runtime',
+          'app.issue_telegram_beta_invite(uuid,text,timestamptz)',
+          'execute'
+        ) as runtime_effective_issue_allowed,
+        not exists (
+          select 1
+          from pg_proc procedure
+          where procedure.oid in (
+            'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
+            'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure
+          )
+            and exists (
+              select 1
+              from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
+              where privilege.grantee = 'payreplayy_owner_control_runtime'::regrole
+                and privilege.privilege_type = 'EXECUTE'
+            )
+        ) as runtime_direct_execute_denied,
+        not exists (
+          select 1
+          from pg_proc procedure
+          where procedure.oid in (
+            'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
+            'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure
+          )
+            and (
+              not procedure.prosecdef
+              or procedure.proowner <> 'postgres'::regrole
+              or not (
+                coalesce(procedure.proconfig, array[]::text[])
+                  @> array['search_path=pg_catalog, app, pg_temp']::text[]
+              )
+            )
+        ) as functions_are_hardened,
+        not exists (
+          select 1
+          from (
+            values
+              ('anon'), ('authenticated'), ('service_role'),
+              ('payreplayy_api'), ('payreplayy_api_runtime'), ('payreplayy_worker'),
+              ('payreplayy_beta_admission'), ('payreplayy_beta_admission_runtime'),
+              ('payreplayy_nonce_retention'), ('payreplayy_nonce_retention_runtime')
+          ) denied_role(role_name)
+          cross join (
+            values
+              ('app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure),
+              ('app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure)
+          ) owner_function(procedure_oid)
+          where has_function_privilege(
+            denied_role.role_name,
+            owner_function.procedure_oid,
+            'EXECUTE'
+          )
+        ) as broad_execution_denied,
+        not has_function_privilege(
+          'payreplayy_owner_control',
+          'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)',
+          'execute'
+        ) as beta_execute_denied,
+        not has_table_privilege(
+          'payreplayy_owner_control',
+          'app.telegram_beta_invites',
+          'select,insert,update,delete,truncate,references,trigger'
+        ) as direct_table_access_denied
+    `);
+    expect(privileges.rows).toEqual([
+      {
+        beta_execute_denied: true,
+        broad_execution_denied: true,
+        direct_table_access_denied: true,
+        functions_are_hardened: true,
+        issue_allowed: true,
+        revoke_allowed: true,
+        runtime_direct_execute_denied: true,
+        runtime_effective_issue_allowed: true,
+      },
+    ]);
+
+    const digest = inviteDigest('e');
+    const issued = await queryAsRole<{
+      readonly issued_expires_at: Date;
+      readonly issued_invite_id: string;
+    }>(
+      'payreplayy_owner_control',
+      `
+        select *
+        from app.issue_telegram_beta_invite(
+          $1::uuid,
+          $2::text,
+          clock_timestamp() + interval '1 hour'
+        )
+      `,
+      [ownerAuthUserId, digest],
+    );
+    const issuedInviteId = issued[0]?.issued_invite_id;
+    expect(issuedInviteId).toEqual(expect.any(String));
+
+    const stored = await client.query<{
+      readonly issued_by_admin_id: string;
+      readonly metadata: unknown;
+      readonly token_digest: string;
+    }>(
+      `
+        select beta_invite.token_digest,
+               beta_invite.issued_by_admin_id,
+               audit_event.metadata
+        from app.telegram_beta_invites beta_invite
+        join app.audit_events audit_event
+          on audit_event.resource_id = beta_invite.invite_id
+         and audit_event.action = 'telegram.beta_invite_issued'
+        where beta_invite.invite_id = $1::uuid
+      `,
+      [issuedInviteId],
+    );
+    expect(stored.rows).toHaveLength(1);
+    expect(stored.rows[0]?.token_digest).toBe(digest);
+    expect(stored.rows[0]?.issued_by_admin_id).toBe(ownerAdminId);
+    expect(JSON.stringify(stored.rows[0]?.metadata)).not.toContain(digest);
+
+    await queryAsRole(
+      'payreplayy_owner_control',
+      `select * from app.revoke_telegram_beta_invite($1::uuid, $2::uuid, $3::text)`,
+      [ownerAuthUserId, issuedInviteId!, 'owner_cancelled'],
+    );
+    const revoked = await client.query<{
+      readonly reason: string;
+      readonly status: string;
+    }>(
+      `
+        select status, revocation_reason_code as reason
+        from app.telegram_beta_invites
+        where invite_id = $1::uuid
+      `,
+      [issuedInviteId],
+    );
+    expect(revoked.rows).toEqual([{ reason: 'owner_cancelled', status: 'revoked' }]);
+
+    const nonOwnerAuthUserId = '33333333-3333-4333-8333-333333333333';
+    await client.query(
+      `insert into auth.users (id, email) values ($1::uuid, 'administrator@example.invalid')`,
+      [nonOwnerAuthUserId],
+    );
+    await client.query(
+      `
+        insert into app.admin_users (auth_user_id, role, status)
+        values ($1::uuid, 'administrator', 'active')
+      `,
+      [nonOwnerAuthUserId],
+    );
+    await expect(
+      queryAsRole(
+        'payreplayy_owner_control',
+        `
+          select *
+          from app.issue_telegram_beta_invite(
+            $1::uuid,
+            $2::text,
+            clock_timestamp() + interval '1 hour'
+          )
+        `,
+        [nonOwnerAuthUserId, inviteDigest('d')],
+      ),
+    ).rejects.toThrow('Only an active Owner can issue a Telegram beta invite.');
   });
 });

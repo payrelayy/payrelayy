@@ -46,6 +46,7 @@ environment file.
 | Service                      | Responsibility                                                                      |
 | ---------------------------- | ----------------------------------------------------------------------------------- |
 | `apps/api`                   | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
+| `apps/admin`                 | Owner-authenticated beta invite issue/revoke boundary; no browser database grant    |
 | `apps/bot`                   | Private Telegram chat transport only                                                |
 | `apps/worker`                | Durable verification, alert, and reconciliation jobs                                |
 | `apps/maintenance`           | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |

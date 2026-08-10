@@ -45,6 +45,25 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  apps/admin:
+    dependencies:
+      '@payreplayy/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@payreplayy/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      fastify:
+        specifier: ^5.0.0
+        version: 5.11.2
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   apps/beta-admission:
     dependencies:
       '@payreplayy/config':

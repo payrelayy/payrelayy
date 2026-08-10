@@ -174,6 +174,14 @@ database procedure receives an audited actor ID only after that server-side chec
 bot clients never receive a database credential. The first Owner is provisioned once through a
 separate deployment-only procedure after their Supabase Auth user has been verified.
 
+The first implemented control-plane exception is narrower than the future dashboard. The dedicated
+Owner-control service verifies a bearer token with the exact Supabase Auth project, derives the
+Auth subject from that verified response, and calls only the beta invite issue/revoke procedures
+through its own NOLOGIN-by-default runtime scaffold. Its HTTP body has no actor/admin field.
+PostgreSQL maps the verified subject to the active Owner and stores only the invite digest, opaque
+invite ID, timestamps, and safe audit reason. The service has no table privilege and never receives
+a Supabase service-role key.
+
 ## Sensitive-data rules
 
 - `audit_events.metadata` contains only action-specific allowlisted fields such as IDs, versions,

@@ -1,0 +1,352 @@
+name: Staging beta deploy and smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build only, deploy and smoke, or stop staging and disable both logins
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - deploy-and-smoke
+          - stop-and-disable
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payreplayy-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_DROPLET_ID: '590666364'
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
+  OWNER_RUNTIME_ROLE: payreplayy_owner_control_runtime
+
+jobs:
+  validate-target:
+    name: Validate exact staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      REQUESTED_MODE: ${{ inputs.mode }}
+    steps:
+      - name: Reject every non-staging target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|deploy-and-smoke|stop-and-disable)$ ]]
+
+  build:
+    name: Build reviewed staging images
+    if: inputs.mode != 'stop-and-disable'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Verify the locked staging contract
+        run: node infra/verify-staging-beta.mjs
+
+      - name: Build commit-labelled images without runtime secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          docker build --pull=false --target admin \
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-owner-control:$tag" .
+          docker build --pull=false --target beta-admission \
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-beta-admission:$tag" .
+          docker build --pull=false --target bot \
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-bot:$tag" .
+          for image in owner-control beta-admission bot; do
+            test "$(docker image inspect "payreplayy-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
+          done
+
+      - name: Save sealed images for the deployment job
+        if: inputs.mode == 'deploy-and-smoke'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          docker save --output "$RUNNER_TEMP/payreplayy-staging-images.tar" \
+            "payreplayy-owner-control:$tag" \
+            "payreplayy-beta-admission:$tag" \
+            "payreplayy-bot:$tag"
+
+      - name: Upload sealed image bundle
+        if: inputs.mode == 'deploy-and-smoke'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: payreplayy-staging-images-${{ github.sha }}
+          path: ${{ runner.temp }}/payreplayy-staging-images.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    name: Deploy and smoke exact staging release
+    if: inputs.mode == 'deploy-and-smoke'
+    needs: [validate-target, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out deployment contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download sealed image bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: payreplayy-staging-images-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+
+      - name: Validate protected deploy inputs
+        id: protected
+        shell: bash
+        env:
+          BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
+          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+          STAGING_TELEGRAM_BOT_TOKEN: ${{ secrets.STAGING_TELEGRAM_BOT_TOKEN }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" != "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]
+          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" != "$OWNER_CONTROL_RUNTIME_PASSWORD" ]]
+          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" != "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" ]]
+          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" != "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]
+          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" != "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" ]]
+          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" != "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]
+          [[ "$STAGING_TELEGRAM_BOT_TOKEN" =~ ^[0-9]{6,12}:[A-Za-z0-9_-]{30,80}$ ]]
+          [[ -n "$SUPABASE_DB_PASSWORD" ]]
+          [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+          secret_dir="$RUNNER_TEMP/protected"
+          install -d -m 0700 "$secret_dir"
+          umask 077
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$secret_dir/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$secret_dir/supabase-ca.crt"
+          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$BETA_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+            > "$secret_dir/beta-database-url"
+          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$OWNER_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+            > "$secret_dir/owner-database-url"
+          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" > "$secret_dir/beta-transport-hmac"
+          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" > "$secret_dir/bot-transport-hmac"
+          printf '%s\n' "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" > "$secret_dir/beta-payload-hmac"
+          printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" > "$secret_dir/bot-token"
+          printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
+          chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
+          openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
+          helper_sha="$(sha256sum infra/operations/payreplayy-staging-deploy-helper.sh | awk '{print $1}')"
+          echo "secret_dir=$secret_dir" >> "$GITHUB_OUTPUT"
+          echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Stop any prior staging project and disable old logins
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          ssh=(ssh -F /dev/null -i '${{ steps.protected.outputs.secret_dir }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.protected.outputs.secret_dir }}/known-hosts')
+          remote_status=0
+          "${ssh[@]}" "payreplayy-admin@${{ steps.protected.outputs.vm_host }}" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop" || remote_status=$?
+          psql -X --file=infra/sql/staging-runtimes-disable.sql
+          if [[ "$remote_status" -ne 0 ]]; then
+            echo '::error::The prior staging containers could not be stopped; database logins were disabled.'
+            exit "$remote_status"
+          fi
+
+      - name: Provision both narrow 24-hour staging logins
+        id: provision
+        shell: bash
+        env:
+          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >> "$GITHUB_OUTPUT"
+          psql -X --file=infra/sql/staging-runtimes-provision-for-deploy.sql
+
+      - name: Transfer and install sealed release inputs
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          incoming="/tmp/payreplayy-$GITHUB_SHA"
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" "install -d -m 0700 '$incoming'"
+          scp "${ssh_opts[@]}" "$RUNNER_TEMP/release/payreplayy-staging-images.tar" \
+            infra/compose.staging-beta.yaml "$SECRET_DIR/supabase-ca.crt" \
+            "$SECRET_DIR/beta-database-url" "$SECRET_DIR/owner-database-url" \
+            "$SECRET_DIR/beta-transport-hmac" "$SECRET_DIR/bot-transport-hmac" \
+            "$SECRET_DIR/beta-payload-hmac" "$SECRET_DIR/bot-token" \
+            "$SECRET_DIR/publishable-key" "payreplayy-admin@$VM_HOST:$incoming/"
+          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
+
+      - name: Start the private staging profile and smoke readiness
+        id: activate
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
+            "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
+          echo 'started=true' >> "$GITHUB_OUTPUT"
+
+      - name: Roll back failed activation
+        if: failure() && steps.activate.outputs.started != 'true'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          vm_host='${{ steps.protected.outputs.vm_host }}'
+          if [[ -n "$secret_dir" && -n "$vm_host" ]]; then
+            ssh -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
+              "payreplayy-admin@$vm_host" \
+              "sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper discard '$GITHUB_SHA'" || true
+          fi
+          psql -X --file=infra/sql/staging-runtimes-disable.sql
+
+  stop:
+    name: Stop staging and disable runtime logins
+    if: inputs.mode == 'stop-and-disable'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out cleanup SQL
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Stop containers and disable both database logins
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ runner.temp }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$RUNNER_TEMP/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$PGSSLROOTCERT"
+          openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
+          helper_sha="$(sha256sum infra/operations/payreplayy-staging-deploy-helper.sh | awk '{print $1}')"
+          remote_status=0
+          ssh -F /dev/null -i "$RUNNER_TEMP/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
+            "payreplayy-admin@$STAGING_VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '$helper_sha' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper discard '$GITHUB_SHA'" || remote_status=$?
+          psql -X --file=infra/sql/staging-runtimes-disable.sql
+          if [[ "$remote_status" -ne 0 ]]; then
+            echo '::error::Database logins were disabled, but the VM cleanup requires operator review.'
+            exit "$remote_status"
+          fi

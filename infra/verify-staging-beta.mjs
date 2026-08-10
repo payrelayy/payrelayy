@@ -47,6 +47,7 @@ function sorted(values) {
 }
 
 const services = topLevelSection(compose, 'services');
+const ownerService = childBlock(services, 'owner-control');
 const betaService = childBlock(services, 'beta-admission');
 const botService = childBlock(services, 'bot');
 const networks = topLevelSection(compose, 'networks');
@@ -56,11 +57,12 @@ const secrets = topLevelSection(compose, 'secrets');
 const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gm)].map((match) => match[1]);
 assert.deepEqual(
   serviceNames,
-  ['beta-admission', 'bot'],
-  'only beta-admission and bot are allowed',
+  ['owner-control', 'beta-admission', 'bot'],
+  'only Owner control, beta-admission, and bot are allowed',
 );
 
 for (const [name, service] of [
+  ['owner-control', ownerService],
   ['beta-admission', betaService],
   ['bot', botService],
 ]) {
@@ -84,8 +86,30 @@ for (const [name, service] of [
   assert.match(service, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'/);
   assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/);
   assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/);
-  assert.match(service, /networks:\s*\r?\n\s+- staging_service/);
 }
+
+assert.match(ownerService, /target: admin/);
+assert.match(ownerService, /INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'/);
+assert.match(ownerService, /OWNER_CONTROL_HOST: 0\.0\.0\.0/);
+assert.match(ownerService, /OWNER_CONTROL_PORT: '3002'/);
+assert.match(
+  ownerService,
+  /OWNER_CONTROL_SUPABASE_URL: https:\/\/spzpiyxheappsfyswewl\.supabase\.co/,
+);
+assert.match(ownerService, /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/);
+assert.match(
+  ownerService,
+  /OWNER_CONTROL_DATABASE_URL_FILE: \/run\/secrets\/owner_control_database_url/,
+);
+assert.match(
+  ownerService,
+  /OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: \/run\/secrets\/owner_control_supabase_publishable_key/,
+);
+assert.match(ownerService, /ports:\s*\r?\n\s+- 127\.0\.0\.1:3002:3002/);
+assert.match(ownerService, /networks:\s*\r?\n\s+- owner_control_service/);
+assert.doesNotMatch(ownerService, /staging_service/);
+assert.match(ownerService, /http:\/\/127\.0\.0\.1:3002\/readyz/);
+assert.doesNotMatch(ownerService, /TELEGRAM_BOT_ENABLED: 'true'/);
 
 assert.match(betaService, /target: beta-admission/);
 assert.match(betaService, /INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'/);
@@ -108,6 +132,8 @@ assert.match(
 );
 assert.match(betaService, /healthcheck:/, 'only the beta service may have a healthcheck');
 assert.match(betaService, /http:\/\/127\.0\.0\.1:3001\/readyz/);
+assert.match(betaService, /networks:\s*\r?\n\s+- staging_service/);
+assert.doesNotMatch(betaService, /owner_control_service/);
 
 assert.match(botService, /target: bot/);
 assert.match(botService, /TELEGRAM_BOT_ENABLED: 'true'/);
@@ -120,15 +146,29 @@ assert.match(
 );
 assert.doesNotMatch(botService, /healthcheck:/, 'the bot must not define a healthcheck');
 assert.match(botService, /condition: service_healthy/);
+assert.match(botService, /networks:\s*\r?\n\s+- staging_service/);
+assert.doesNotMatch(botService, /owner_control_service/);
 
 const betaSecrets = servicePropertyBlock(betaService, 'secrets');
 const betaConfigs = servicePropertyBlock(betaService, 'configs');
+const ownerSecrets = servicePropertyBlock(ownerService, 'secrets');
+const ownerConfigs = servicePropertyBlock(ownerService, 'configs');
 const botSecrets = servicePropertyBlock(botService, 'secrets');
 const betaSecretSources = [...betaSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
   (match) => match[1],
 );
 const botSecretSources = [...botSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
   (match) => match[1],
+);
+assert.deepEqual(
+  [...ownerSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
+  ['owner_control_database_url', 'owner_control_supabase_publishable_key'],
+  'Owner control must receive only its database URL and public Auth client key',
+);
+assert.deepEqual(
+  [...ownerConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
+  ['supabase_ca_certificate'],
+  'Owner control must receive the verified staging Supabase CA',
 );
 assert.deepEqual(
   betaSecretSources,
@@ -154,16 +194,16 @@ assert.deepEqual(
 );
 assert.doesNotMatch(botService, /supabase_ca_certificate|NODE_EXTRA_CA_CERTS/);
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 5, 'every secret mount must be 0400');
-assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 1, 'the public CA mount must be 0444');
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 7, 'every secret mount must be 0400');
+assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 2, 'each public CA mount must be 0444');
 assert.equal(
   countMatches(compose, /^\s+uid: '10001'$/gm),
-  6,
+  9,
   'every mounted input must target UID 10001',
 );
 assert.equal(
   countMatches(compose, /^\s+gid: '10001'$/gm),
-  6,
+  9,
   'every mounted input must target GID 10001',
 );
 
@@ -173,6 +213,8 @@ const expectedSecrets = [
   'beta_admission_payload_hmac',
   'bot_beta_admission_transport_hmac',
   'telegram_bot_token',
+  'owner_control_database_url',
+  'owner_control_supabase_publishable_key',
 ];
 const declaredSecrets = [...secrets.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map(
   (match) => match[1],
@@ -199,6 +241,8 @@ for (const directSecretName of [
   'BOT_TO_BETA_ADMISSION_HMAC_SECRET',
   'BETA_ADMISSION_PAYLOAD_HMAC_SECRET',
   'TELEGRAM_BOT_TOKEN',
+  'OWNER_CONTROL_DATABASE_URL',
+  'OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY',
 ]) {
   assert.doesNotMatch(
     compose,
@@ -207,16 +251,21 @@ for (const directSecretName of [
   );
 }
 
-assert.match(networks, /^  staging_service:\s*$/m);
-assert.match(networks, /driver: bridge/);
-assert.match(
-  networks,
-  /internal: false/,
-  'the private bridge must retain outbound Internet access',
-);
-assert.match(networks, /attachable: false/);
+for (const networkName of ['owner_control_service', 'staging_service']) {
+  const network = childBlock(networks, networkName);
+  assert.match(network, /driver: bridge/);
+  assert.match(network, /internal: false/, `${networkName} must retain outbound Internet access`);
+  assert.match(network, /attachable: false/);
+}
 
-assert.doesNotMatch(compose, /^\s+(ports|expose|volumes|devices|privileged|network_mode):/m);
+assert.equal(
+  countMatches(compose, /^\s+ports:\s*$/gm),
+  1,
+  'only Owner control may bind one host-loopback port',
+);
+assert.doesNotMatch(compose, /^\s+(expose|volumes|devices|privileged|network_mode):/m);
+assert.doesNotMatch(betaService, /^\s+ports:/m);
+assert.doesNotMatch(botService, /^\s+ports:/m);
 assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker/i);
 assert.doesNotMatch(compose, /\b(?:nginx|caddy|traefik|haproxy)\b/i);
 assert.doesNotMatch(compose, /xzztugbgtulptnbpoelr/i, 'the production project ref is forbidden');
@@ -231,10 +280,13 @@ assert.equal(
 );
 assert.match(dockerfile, /pnpm --filter @payreplayy\/beta-admission\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @payreplayy\/bot\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @payreplayy\/admin\.\.\. run build/);
 assert.match(dockerfile, /FROM build-base AS beta-admission-build/);
 assert.match(dockerfile, /FROM build-base AS bot-build/);
+assert.match(dockerfile, /FROM build-base AS admin-build/);
 assert.match(dockerfile, /FROM runtime-base AS beta-admission/);
 assert.match(dockerfile, /FROM runtime-base AS bot/);
+assert.match(dockerfile, /FROM runtime-base AS admin/);
 assert.match(dockerfile, /USER 10001:10001/);
 
 const betaImage = dockerfile
@@ -242,14 +294,19 @@ const betaImage = dockerfile
   .split('FROM runtime-base AS bot')[0];
 const botImage = dockerfile
   .split('FROM runtime-base AS bot')[1]
+  .split('FROM runtime-base AS admin')[0];
+const adminImage = dockerfile
+  .split('FROM runtime-base AS admin')[1]
   .split('FROM runtime-base AS api')[0];
 assert.match(betaImage, /HEALTHCHECK .*127\.0\.0\.1:3001\/readyz/);
 assert.match(betaImage, /CMD \["node", "apps\/beta-admission\/dist\/index\.js"\]/);
 assert.doesNotMatch(botImage, /HEALTHCHECK/);
 assert.match(botImage, /CMD \["node", "apps\/bot\/dist\/index\.js"\]/);
+assert.match(adminImage, /127\.0\.0\.1:3002\/readyz/);
+assert.match(adminImage, /CMD \["node", "apps\/admin\/dist\/index\.js"\]/);
 const apiImage = dockerfile.split('FROM runtime-base AS api')[1];
 assert.match(apiImage, /USER payreplayy:payreplayy/);
 
 console.log(
-  'staging beta artifacts verified: two manual-profile services, isolated file secrets, no host ingress, and locked financial/provider gates',
+  'staging beta artifacts verified: three manual-profile services, isolated file inputs, loopback-only Owner access, and locked financial/provider gates',
 );

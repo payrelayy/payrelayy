@@ -27,6 +27,10 @@
     "./beta-admission": {
       "types": "./dist/beta-admission.d.ts",
       "default": "./dist/beta-admission.js"
+    },
+    "./owner-control": {
+      "types": "./dist/owner-control.d.ts",
+      "default": "./dist/owner-control.js"
     }
   },
   "dependencies": {

@@ -200,8 +200,10 @@ runs the beta service's catalog-only read-only preflight through TLS `verify-ful
 125 seconds after password rotation before making the single runtime authentication attempt. This
 bounded interval accommodates the shared Supavisor credential cache and circuit-breaker window
 without rapid authentication retries. After every provisioning attempt, whether the preflight
-passes or fails, the workflow disables LOGIN and clears its password. An abruptly terminated runner
-still leaves the provisional password expiring within one hour. A later deployment workflow must
-provision the runtime credential atomically with the reviewed service deployment rather than leave
-an unused LOGIN enabled. Both modes require the operator to confirm the exact full `main` commit
-SHA. This workflow does not authorize starting the staging Compose profile.
+passes or fails, the workflow disables LOGIN, clears its password, terminates runtime sessions, and
+clears PostgreSQL's cached statistics snapshot before asserting that no runtime session remains. An
+abruptly terminated runner still leaves the provisional password expiring within one hour. A later
+deployment workflow must provision the runtime credential atomically with the reviewed service
+deployment rather than leave an unused LOGIN enabled. Both modes require the operator to confirm
+the exact full `main` commit SHA. This workflow does not authorize starting the staging Compose
+profile.

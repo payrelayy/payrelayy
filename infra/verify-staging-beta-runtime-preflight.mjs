@@ -119,10 +119,18 @@ assert.doesNotMatch(getRoleAlterOptions(provisionSql), /\b(?:no)?superuser\b/i);
 assert.match(disableSql, /nologin/);
 assert.match(disableSql, /password null/);
 assert.match(disableSql, /pg_catalog\.pg_terminate_backend\(activity_pid, 5000\)/);
+assert.match(disableSql, /perform pg_catalog\.pg_stat_clear_snapshot\(\)/);
 assert.match(disableSql, /from pg_catalog\.pg_stat_activity as activity/g);
 assert.ok(
   disableSql.indexOf('nologin') < disableSql.indexOf('pg_catalog.pg_terminate_backend'),
   'The login must be disabled before existing runtime sessions are terminated.',
+);
+assert.ok(
+  disableSql.indexOf('pg_catalog.pg_terminate_backend') <
+    disableSql.indexOf('pg_catalog.pg_stat_clear_snapshot()') &&
+    disableSql.indexOf('pg_catalog.pg_stat_clear_snapshot()') <
+      disableSql.indexOf('if exists (', disableSql.indexOf('pg_catalog.pg_stat_clear_snapshot()')),
+  'The cached statistics snapshot must be cleared after termination and before the session check.',
 );
 assert.doesNotMatch(getRoleAlterOptions(disableSql), /\b(?:no)?superuser\b/i);
 assert.match(disableSql, /from pg_catalog\.pg_authid as role/);

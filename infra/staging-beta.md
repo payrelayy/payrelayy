@@ -48,7 +48,7 @@ beta service's copy and the beta service cannot read the bot's copy. The databas
 HMAC are beta-service-only; the Telegram token is bot-only.
 
 The database URL must use the staging project's IPv4 session pooler exactly:
-`aws-0-eu-west-1.pooler.supabase.com:5432`, database `postgres`, username
+`aws-1-eu-west-1.pooler.supabase.com:5432`, database `postgres`, username
 `payreplayy_beta_admission_runtime.spzpiyxheappsfyswewl`, and only
 `sslmode=verify-full`. The free project's direct database endpoint is IPv6-only and is deliberately
 rejected by this staging service. Download the staging project's CA from Supabase, verify its

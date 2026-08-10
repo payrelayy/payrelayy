@@ -214,25 +214,8 @@ jobs:
           pnpm --filter @payreplayy/beta-admission run build
           pnpm --filter @payreplayy/beta-admission run db:preflight
 
-      - name: Finalize the login only after a passing preflight
-        if: inputs.mode == 'provision-and-preflight' && success()
-        id: finalize
-        shell: bash
-        env:
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
-          PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
-          PGSSLMODE: verify-full
-          PGSSLROOTCERT: ${{ steps.protected-inputs.outputs.ca_file }}
-          PGCONNECT_TIMEOUT: '5'
-          PGSERVICEFILE: /dev/null
-          PGPASSFILE: /dev/null
-        run: psql -X --file=infra/sql/staging-beta-runtime-finalize.sql
-
-      - name: Disable and clear the login after any failed provisioning attempt
-        if: always() && steps.provision.outputs.attempted == 'true' && steps.finalize.outcome != 'success'
+      - name: Disable and clear the login after every preflight attempt
+        if: always() && steps.provision.outputs.attempted == 'true'
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

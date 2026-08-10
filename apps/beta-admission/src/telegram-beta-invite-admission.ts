@@ -83,15 +83,6 @@ export interface TelegramBetaInviteRedemptionDatabaseInput {
   readonly preferredLocale: 'en';
 }
 
-/** Planned input for the admitted-only generic private inbox procedure. */
-export interface AdmittedTelegramPrivateInboundDatabaseInput {
-  readonly updateId: string;
-  readonly telegramUserId: string;
-  readonly privateChatId: string;
-  readonly payloadHmac: string;
-  readonly preferredLocale: 'en';
-}
-
 export interface TelegramBetaInviteAdmissionDatabase {
   query(query: string, values: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
@@ -102,13 +93,19 @@ export interface TelegramBetaInviteRedemptionReceipt {
   readonly inboundEventAlreadyRecorded: boolean;
 }
 
-export type AdmittedTelegramPrivateInboundReceipt = TelegramBetaInviteRedemptionReceipt;
-
 /** Never expose database, request-body, or admission detail to a caller. */
 export class TelegramBetaInviteAdmissionUnavailableError extends Error {
   constructor() {
     super('The beta invite admission boundary is unavailable.');
     this.name = 'TelegramBetaInviteAdmissionUnavailableError';
+  }
+}
+
+/** A deliberately detail-free terminal rejection for an unknown, invalid, or spent invite. */
+export class TelegramBetaInviteAdmissionRejectedError extends Error {
+  constructor() {
+    super('The beta invite was not accepted.');
+    this.name = 'TelegramBetaInviteAdmissionRejectedError';
   }
 }
 
@@ -142,20 +139,6 @@ const REDEEM_TELEGRAM_BETA_INVITE_SQL = `
     $4::text,
     $5::text,
     $6::text
-  )
-`;
-
-const RECORD_ADMITTED_TELEGRAM_PRIVATE_INBOUND_EVENT_SQL = `
-  select
-    inbound_event_id,
-    received_at,
-    inbound_event_already_recorded
-  from app.record_admitted_telegram_private_inbound_event(
-    $1::bigint,
-    $2::bigint,
-    $3::bigint,
-    $4::text,
-    $5::text
   )
 `;
 
@@ -210,19 +193,6 @@ function validRedemptionDatabaseInput(input: TelegramBetaInviteRedemptionDatabas
     hasCanonicalTelegramIdentifier(input.privateChatId, false) &&
     input.telegramUserId === input.privateChatId &&
     INVITE_TOKEN_DIGEST_PATTERN.test(input.inviteTokenDigest) &&
-    PAYLOAD_HMAC_PATTERN.test(input.payloadHmac) &&
-    input.preferredLocale === 'en'
-  );
-}
-
-function validAdmittedInboundDatabaseInput(
-  input: AdmittedTelegramPrivateInboundDatabaseInput,
-): boolean {
-  return (
-    hasCanonicalTelegramIdentifier(input.updateId, true) &&
-    hasCanonicalTelegramIdentifier(input.telegramUserId, false) &&
-    hasCanonicalTelegramIdentifier(input.privateChatId, false) &&
-    input.telegramUserId === input.privateChatId &&
     PAYLOAD_HMAC_PATTERN.test(input.payloadHmac) &&
     input.preferredLocale === 'en'
   );
@@ -322,8 +292,8 @@ function transportSignature(
 }
 
 /**
- * Authenticate an inert admission request. There is no Fastify route, database pool, dispatch,
- * or application startup wiring for this function in the current stage.
+ * Authenticate an admission request before any invitation lookup. Durable nonce reservation is
+ * completed before the caller receives the parsed envelope.
  */
 export async function verifyTelegramBetaInviteAdmissionRequest(
   request: TelegramBetaInviteAdmissionRequest,
@@ -443,8 +413,8 @@ export function toTelegramBetaInviteRedemptionDatabaseInput(
 }
 
 /**
- * Local adapter for planned SECURITY DEFINER procedures. It owns no connection and cannot create
- * a pool. A later reviewed runtime must inject a dedicated database client and gate composition.
+ * Narrow adapter for the single reviewed invite-redemption SECURITY DEFINER function. The
+ * admitted-inbox recorder is intentionally absent from this type and cannot be called through it.
  */
 export class PostgresTelegramBetaInviteAdmissionAdapter {
   constructor(private readonly database: TelegramBetaInviteAdmissionDatabase) {}
@@ -469,31 +439,15 @@ export class PostgresTelegramBetaInviteAdmissionAdapter {
       if (!receipt) throw new TelegramBetaInviteAdmissionUnavailableError();
       return receipt;
     } catch (error) {
-      if (error instanceof TelegramBetaInviteAdmissionUnavailableError) throw error;
-      throw new TelegramBetaInviteAdmissionUnavailableError();
-    }
-  }
-
-  async recordAdmittedInbound(
-    input: AdmittedTelegramPrivateInboundDatabaseInput,
-  ): Promise<AdmittedTelegramPrivateInboundReceipt> {
-    if (!validAdmittedInboundDatabaseInput(input)) {
-      throw new TelegramBetaInviteAdmissionUnavailableError();
-    }
-
-    try {
-      const result = await this.database.query(RECORD_ADMITTED_TELEGRAM_PRIVATE_INBOUND_EVENT_SQL, [
-        input.updateId,
-        input.telegramUserId,
-        input.privateChatId,
-        input.payloadHmac,
-        input.preferredLocale,
-      ]);
-      const receipt = parseAdmissionReceipt(result.rows);
-      if (!receipt) throw new TelegramBetaInviteAdmissionUnavailableError();
-      return receipt;
-    } catch (error) {
-      if (error instanceof TelegramBetaInviteAdmissionUnavailableError) throw error;
+      if (
+        error instanceof TelegramBetaInviteAdmissionUnavailableError ||
+        error instanceof TelegramBetaInviteAdmissionRejectedError
+      ) {
+        throw error;
+      }
+      if (isRecord(error) && error.code === 'P0001') {
+        throw new TelegramBetaInviteAdmissionRejectedError();
+      }
       throw new TelegramBetaInviteAdmissionUnavailableError();
     }
   }

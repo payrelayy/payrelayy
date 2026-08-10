@@ -25,6 +25,12 @@ export const messages = {
   inboxUnavailable: {
     en: 'PayReplayy cannot receive requests right now. Please try again shortly.',
   },
+  betaAdmissionWelcome: {
+    en: 'Welcome to PayReplayy private beta. Your access is active. Payments are not enabled yet.',
+  },
+  betaAdmissionUnavailable: {
+    en: 'PayReplayy private beta is temporarily unavailable. Please try again shortly.',
+  },
   playerRegistrationMenu: {
     en: 'Add your KemerBet Player ID to PayReplayy.',
   },

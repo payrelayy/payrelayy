@@ -41,5 +41,20 @@ jobs:
       - name: Check formatting
         run: pnpm lint
 
+      - name: Verify staging beta infrastructure contract
+        shell: bash
+        run: |
+          pnpm test:infra
+          PAYREPLAYY_IMAGE_TAG=ci \
+          PAYREPLAYY_VCS_REF="${GITHUB_SHA}" \
+          PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE=/dev/null \
+          PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE=/dev/null \
+          PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE=/dev/null \
+          PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE=/dev/null \
+          PAYREPLAYY_STAGING_BOT_TOKEN_FILE=/dev/null \
+          PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE=/dev/null \
+            docker compose --env-file /dev/null --file infra/compose.staging-beta.yaml \
+              --profile staging-manual config --quiet
+
       - name: Build and test
         run: pnpm test

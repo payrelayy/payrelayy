@@ -12,6 +12,10 @@ const provision = readFileSync(
   'utf8',
 );
 const disable = readFileSync(resolve(root, 'infra/sql/staging-runtimes-disable.sql'), 'utf8');
+const diagnostics = readFileSync(
+  resolve(root, 'infra/sql/staging-runtime-session-diagnostics.sql'),
+  'utf8',
+);
 const helper = readFileSync(
   resolve(root, 'infra/operations/payreplayy-staging-deploy-helper.sh'),
   'utf8',
@@ -49,6 +53,13 @@ assert.match(workflow, /org\.opencontainers\.image\.revision/);
 assert.match(workflow, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.match(workflow, /stop-and-disable/);
 assert.match(workflow, /infra\/sql\/staging-runtimes-disable\.sql/g);
+assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
+assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
+assert.ok(
+  workflow.indexOf('Capture count-only runtime session diagnostics after failed activation') <
+    workflow.indexOf('Roll back failed activation'),
+  'Failure diagnostics must run before rollback removes the runtime state.',
+);
 assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD/);
 assert.match(workflow, /OWNER_CONTROL_RUNTIME_PASSWORD/);
 assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD" != "\$OWNER_CONTROL_RUNTIME_PASSWORD/);
@@ -67,6 +78,16 @@ for (const sql of [provision, disable]) {
 assert.match(provision, /interval '24 hours'/g);
 assert.match(disable, /nologin/g);
 assert.match(disable, /password null/g);
+assert.match(disable, /pg_catalog\.pg_terminate_backend\(activity_pid, 5000\)/);
+assert.match(disable, /from pg_catalog\.pg_stat_activity as activity/g);
+assert.ok(
+  disable.indexOf('nologin') < disable.indexOf('pg_catalog.pg_terminate_backend'),
+  'The logins must be disabled before existing runtime sessions are terminated.',
+);
+
+assert.match(diagnostics, /from pg_catalog\.pg_stat_activity as activity/);
+assert.match(diagnostics, /count\(\*\)::integer as session_count/);
+assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/i);
 
 assert.match(helper, /^#!\/usr\/bin\/env bash/);
 assert.match(helper, /EXPECTED_SUDO_USER='payreplayy-admin'/);

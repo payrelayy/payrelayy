@@ -10,8 +10,39 @@ alter role payreplayy_owner_control_runtime with
 
 do $payreplayy$
 declare
+  activity_pid integer;
   expected_role text;
+  terminated_session_count integer := 0;
 begin
+  for activity_pid in
+    select activity.pid
+    from pg_catalog.pg_stat_activity as activity
+    where activity.usename = any (array[
+      'payreplayy_beta_admission_runtime',
+      'payreplayy_owner_control_runtime'
+    ])
+      and activity.pid <> pg_catalog.pg_backend_pid()
+  loop
+    if not pg_catalog.pg_terminate_backend(activity_pid, 5000) then
+      raise exception 'A staging runtime session could not be terminated safely.';
+    end if;
+    terminated_session_count := terminated_session_count + 1;
+  end loop;
+
+  raise notice 'Terminated % staging runtime session(s).', terminated_session_count;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_stat_activity as activity
+    where activity.usename = any (array[
+      'payreplayy_beta_admission_runtime',
+      'payreplayy_owner_control_runtime'
+    ])
+      and activity.pid <> pg_catalog.pg_backend_pid()
+  ) then
+    raise exception 'A staging runtime session remains after disablement.';
+  end if;
+
   foreach expected_role in array array[
     'payreplayy_beta_admission_runtime',
     'payreplayy_owner_control_runtime'

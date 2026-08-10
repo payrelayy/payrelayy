@@ -109,3 +109,31 @@ env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 
 This renders configuration only. Do not use `docker compose up` without a new staging activation
 approval.
+
+## Protected runtime preflight
+
+The manual `Staging beta runtime preflight` GitHub workflow is the only reviewed provisioning path
+for the dedicated staging database login. It is restricted to `main`, the protected `staging`
+environment, the exact staging project reference, and the approved IPv4 session pooler. It never
+starts a container, contacts Telegram, enables a payment/provider feature, or targets production.
+
+The protected `staging` environment must contain these additional values before
+`provision-and-preflight` is selected:
+
+| Environment secret                   | Required shape                                |
+| ------------------------------------ | --------------------------------------------- |
+| `SUPABASE_CA_CERTIFICATE_PEM`        | verified, unexpired staging project CA in PEM |
+| `BETA_ADMISSION_RUNTIME_PASSWORD`    | independently generated 32-byte lowercase hex |
+| `BOT_TO_BETA_ADMISSION_HMAC_SECRET`  | independently generated 32-byte lowercase hex |
+| `BETA_ADMISSION_PAYLOAD_HMAC_SECRET` | distinct independently generated 32-byte hex  |
+
+`SUPABASE_DB_PASSWORD` remains the existing staging administrator credential used only for the
+guarded role alteration. The workflow does not read `SUPABASE_ACCESS_TOKEN` and never prints any
+secret value.
+
+Run `inspect` first. The provision mode gives the dedicated login a one-hour password validity,
+runs the beta service's catalog-only read-only preflight through TLS `verify-full`, and changes the
+validity to infinity only after every preflight check passes. A failed attempt disables LOGIN and
+clears its password; an abruptly terminated runner still leaves the provisional password expiring
+within one hour. Both modes require the operator to confirm the exact full `main` commit SHA. The
+workflow does not authorize starting the staging Compose profile.

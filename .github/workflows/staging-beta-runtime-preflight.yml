@@ -209,6 +209,7 @@ jobs:
           set -euo pipefail
 
           export BETA_ADMISSION_DATABASE_URL="postgresql://${BETA_RUNTIME_ROLE}.${STAGING_PROJECT_REF}:${BETA_ADMISSION_RUNTIME_PASSWORD}@${STAGING_POOLER_HOST}:5432/postgres?sslmode=verify-full"
+          pnpm --filter @payreplayy/domain run build
           pnpm --filter @payreplayy/config run build
           pnpm --filter @payreplayy/contracts run build
           pnpm --filter @payreplayy/beta-admission run build

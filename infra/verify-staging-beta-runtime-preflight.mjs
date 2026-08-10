@@ -46,6 +46,21 @@ assert.match(
   /BETA_ADMISSION_RUNTIME_PASSWORD: \$\{\{ secrets\.BETA_ADMISSION_RUNTIME_PASSWORD \}\}/,
 );
 assert.match(workflow, /pnpm --filter @payreplayy\/beta-admission run db:preflight/);
+const buildAndPreflightCommands = [
+  'pnpm --filter @payreplayy/domain run build',
+  'pnpm --filter @payreplayy/config run build',
+  'pnpm --filter @payreplayy/contracts run build',
+  'pnpm --filter @payreplayy/beta-admission run build',
+  'pnpm --filter @payreplayy/beta-admission run db:preflight',
+];
+const buildAndPreflightOffsets = buildAndPreflightCommands.map((command) =>
+  workflow.indexOf(command),
+);
+assert.ok(buildAndPreflightOffsets.every((offset) => offset >= 0));
+assert.deepEqual(
+  buildAndPreflightOffsets,
+  [...buildAndPreflightOffsets].sort((a, b) => a - b),
+);
 assert.match(workflow, /Disable and clear the login after every preflight attempt/);
 assert.match(workflow, /if: always\(\) && steps\.provision\.outputs\.attempted == 'true'/);
 assert.match(workflow, /run: psql -X --file=infra\/sql\/staging-beta-runtime-disable\.sql/);

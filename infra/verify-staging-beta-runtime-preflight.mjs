@@ -20,6 +20,10 @@ const disableSql = readFileSync(
   resolve(workspace, 'infra/sql/staging-beta-runtime-disable.sql'),
   'utf8',
 );
+const diagnosticsSql = readFileSync(
+  resolve(workspace, 'infra/sql/staging-runtime-session-diagnostics.sql'),
+  'utf8',
+);
 
 function getRoleAlterOptions(sql) {
   const match = sql.match(/alter role payreplayy_beta_admission_runtime with([\s\S]*?);/i);
@@ -62,6 +66,13 @@ assert.deepEqual(
   [...buildAndPreflightOffsets].sort((a, b) => a - b),
 );
 assert.match(workflow, /Disable and clear the login after every preflight attempt/);
+assert.match(workflow, /Capture count-only runtime session diagnostics after a failed preflight/);
+assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
+assert.ok(
+  workflow.indexOf('Capture count-only runtime session diagnostics after a failed preflight') <
+    workflow.indexOf('Disable and clear the login after every preflight attempt'),
+  'Failure diagnostics must run before session cleanup.',
+);
 assert.match(workflow, /if: always\(\) && steps\.provision\.outputs\.attempted == 'true'/);
 assert.match(workflow, /run: psql -X --file=infra\/sql\/staging-beta-runtime-disable\.sql/);
 assert.doesNotMatch(workflow, /steps\.finalize|staging-beta-runtime-finalize\.sql/);
@@ -93,9 +104,19 @@ assert.doesNotMatch(getRoleAlterOptions(provisionSql), /\b(?:no)?superuser\b/i);
 
 assert.match(disableSql, /nologin/);
 assert.match(disableSql, /password null/);
+assert.match(disableSql, /pg_catalog\.pg_terminate_backend\(activity_pid, 5000\)/);
+assert.match(disableSql, /from pg_catalog\.pg_stat_activity as activity/g);
+assert.ok(
+  disableSql.indexOf('nologin') < disableSql.indexOf('pg_catalog.pg_terminate_backend'),
+  'The login must be disabled before existing runtime sessions are terminated.',
+);
 assert.doesNotMatch(getRoleAlterOptions(disableSql), /\b(?:no)?superuser\b/i);
 assert.match(disableSql, /from pg_catalog\.pg_authid as role/);
 assert.match(disableSql, /not role\.rolcanlogin/);
 assert.match(disableSql, /role\.rolpassword is null/);
+
+assert.match(diagnosticsSql, /from pg_catalog\.pg_stat_activity as activity/);
+assert.match(diagnosticsSql, /count\(\*\)::integer as session_count/);
+assert.doesNotMatch(diagnosticsSql, /\bpid\b|client_addr|\bquery\b|password|secret/i);
 
 console.log('Staging beta runtime preflight contract verified.');

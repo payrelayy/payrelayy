@@ -12,7 +12,33 @@ alter role payreplayy_beta_admission_runtime with
   valid until 'infinity';
 
 do $payreplayy$
+declare
+  activity_pid integer;
+  terminated_session_count integer := 0;
 begin
+  for activity_pid in
+    select activity.pid
+    from pg_catalog.pg_stat_activity as activity
+    where activity.usename = 'payreplayy_beta_admission_runtime'
+      and activity.pid <> pg_catalog.pg_backend_pid()
+  loop
+    if not pg_catalog.pg_terminate_backend(activity_pid, 5000) then
+      raise exception 'A staging beta-admission runtime session could not be terminated safely.';
+    end if;
+    terminated_session_count := terminated_session_count + 1;
+  end loop;
+
+  raise notice 'Terminated % staging beta-admission runtime session(s).', terminated_session_count;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_stat_activity as activity
+    where activity.usename = 'payreplayy_beta_admission_runtime'
+      and activity.pid <> pg_catalog.pg_backend_pid()
+  ) then
+    raise exception 'A staging beta-admission runtime session remains after disablement.';
+  end if;
+
   if not exists (
     select 1
     from pg_catalog.pg_authid as role

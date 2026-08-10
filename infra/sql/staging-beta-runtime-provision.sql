@@ -47,7 +47,6 @@ $payreplayy$;
 alter role payreplayy_beta_admission_runtime with
   login
   noinherit
-  nosuperuser
   nocreatedb
   nocreaterole
   noreplication

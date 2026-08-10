@@ -3,7 +3,6 @@
 alter role payreplayy_beta_admission_runtime with
   nologin
   noinherit
-  nosuperuser
   nocreatedb
   nocreaterole
   noreplication

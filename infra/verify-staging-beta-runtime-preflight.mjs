@@ -21,6 +21,12 @@ const disableSql = readFileSync(
   'utf8',
 );
 
+function getRoleAlterOptions(sql) {
+  const match = sql.match(/alter role payreplayy_beta_admission_runtime with([\s\S]*?);/i);
+  assert.ok(match, 'Expected a beta-admission runtime ALTER ROLE statement.');
+  return match[1];
+}
+
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /pull_request:|push:|schedule:/);
 assert.match(workflow, /environment: staging/);
@@ -67,9 +73,12 @@ assert.match(provisionSql, /granted_role\.rolname <> 'payreplayy_beta_admission'
 assert.match(provisionSql, /password :'runtime_password'/);
 assert.match(provisionSql, /clock_timestamp\(\) \+ interval '1 hour'/);
 assert.doesNotMatch(provisionSql, /[0-9a-f]{64}/);
+assert.match(getRoleAlterOptions(provisionSql), /\blogin\b/i);
+assert.doesNotMatch(getRoleAlterOptions(provisionSql), /\b(?:no)?superuser\b/i);
 
 assert.match(disableSql, /nologin/);
 assert.match(disableSql, /password null/);
+assert.doesNotMatch(getRoleAlterOptions(disableSql), /\b(?:no)?superuser\b/i);
 assert.match(disableSql, /from pg_catalog\.pg_authid as role/);
 assert.match(disableSql, /not role\.rolcanlogin/);
 assert.match(disableSql, /role\.rolpassword is null/);

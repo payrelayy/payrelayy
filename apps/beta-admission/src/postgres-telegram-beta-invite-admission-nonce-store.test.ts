@@ -40,7 +40,7 @@ function createDatabase(result: { readonly rows: readonly unknown[] } | Error): 
   };
 }
 
-describe('Postgres Telegram beta invite admission nonce store', () => {
+describe('dedicated Postgres Telegram beta invite admission nonce store', () => {
   it('reserves the verifier bare lower-hex digest through the dedicated parameterized function', async () => {
     const fake = createDatabase({ rows: [{ reserved: true }] });
     const store: TelegramBetaInviteAdmissionNonceStore =

@@ -17,6 +17,11 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
         if (
           property === 'TELEGRAM_BOT_ENABLED' ||
           property === 'TELEGRAM_BOT_TOKEN' ||
+          property === 'TELEGRAM_BOT_TOKEN_FILE' ||
+          property === 'TELEGRAM_BETA_ADMISSION_ENABLED' ||
+          property === 'BOT_TO_BETA_ADMISSION_BASE_URL' ||
+          property === 'BOT_TO_BETA_ADMISSION_HMAC_SECRET' ||
+          property === 'BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE' ||
           property === 'BOT_TO_API_INGRESS_BASE_URL' ||
           property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
           property === 'BOT_TO_API_ACTION_BASE_URL' ||
@@ -81,6 +86,7 @@ describe('runtime configuration isolation', () => {
       logLevel: 'info',
       telegram: { enabled: true, tokenConfigured: true },
       apiIngress: { enabled: true, secretsConfigured: true },
+      telegramBetaAdmission: { enabled: false, secretsConfigured: false },
       telegramActionChannel: { enabled: false, secretsConfigured: false },
     });
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(token);
@@ -136,10 +142,13 @@ describe('runtime configuration isolation', () => {
       { NODE_ENV: 'test', TELEGRAM_BOT_ENABLED: 'false' },
       {
         get(target, property, receiver) {
-          if (property === 'TELEGRAM_BOT_TOKEN') {
+          if (property === 'TELEGRAM_BOT_TOKEN' || property === 'TELEGRAM_BOT_TOKEN_FILE') {
             throw new Error('disabled bot must not read a bot-only secret');
           }
           if (
+            property === 'BOT_TO_BETA_ADMISSION_BASE_URL' ||
+            property === 'BOT_TO_BETA_ADMISSION_HMAC_SECRET' ||
+            property === 'BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE' ||
             property === 'BOT_TO_API_INGRESS_BASE_URL' ||
             property === 'BOT_TO_API_INGRESS_HMAC_SECRET' ||
             property === 'BOT_TO_API_ACTION_BASE_URL' ||

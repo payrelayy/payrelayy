@@ -581,6 +581,8 @@ describe('disposable SQL migration baseline', () => {
 
   it('keeps beta-admission nonce reservation private, forced-RLS, and narrowly executable', async () => {
     const nonceFunctions = await client.query<{
+      readonly anon_execute_allowed: boolean;
+      readonly authenticated_execute_allowed: boolean;
       readonly beta_admission_execute_allowed: boolean;
       readonly beta_admission_runtime_direct_execute_allowed: boolean;
       readonly beta_admission_runtime_effective_execute_allowed: boolean;
@@ -592,6 +594,7 @@ describe('disposable SQL migration baseline', () => {
       readonly procedure_name: string;
       readonly public_execute_allowed: boolean;
       readonly safe_search_path: boolean;
+      readonly service_role_execute_allowed: boolean;
       readonly worker_execute_allowed: boolean;
     }>(`
       select
@@ -619,6 +622,12 @@ describe('disposable SQL migration baseline', () => {
           as nonce_retention_execute_allowed,
         has_function_privilege('payreplayy_nonce_retention_runtime', procedure.oid, 'EXECUTE')
           as nonce_retention_runtime_execute_allowed,
+        has_function_privilege('anon', procedure.oid, 'EXECUTE')
+          as anon_execute_allowed,
+        has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
+          as authenticated_execute_allowed,
+        has_function_privilege('service_role', procedure.oid, 'EXECUTE')
+          as service_role_execute_allowed,
         exists (
           select 1
           from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) as privilege
@@ -710,6 +719,8 @@ describe('disposable SQL migration baseline', () => {
     );
 
     expect(reserveProcedure).toMatchObject({
+      anon_execute_allowed: false,
+      authenticated_execute_allowed: false,
       beta_admission_execute_allowed: true,
       beta_admission_runtime_direct_execute_allowed: false,
       beta_admission_runtime_effective_execute_allowed: true,
@@ -720,9 +731,12 @@ describe('disposable SQL migration baseline', () => {
       nonce_retention_runtime_execute_allowed: false,
       public_execute_allowed: false,
       safe_search_path: true,
+      service_role_execute_allowed: false,
       worker_execute_allowed: false,
     });
     expect(purgeProcedure).toMatchObject({
+      anon_execute_allowed: false,
+      authenticated_execute_allowed: false,
       beta_admission_execute_allowed: false,
       beta_admission_runtime_direct_execute_allowed: false,
       beta_admission_runtime_effective_execute_allowed: false,
@@ -733,6 +747,7 @@ describe('disposable SQL migration baseline', () => {
       nonce_retention_runtime_execute_allowed: false,
       public_execute_allowed: false,
       safe_search_path: true,
+      service_role_execute_allowed: false,
       worker_execute_allowed: false,
     });
     expect(nonceReservationTable.rows).toEqual([
@@ -852,6 +867,68 @@ describe('disposable SQL migration baseline', () => {
         [1],
       ),
     ).rejects.toThrow();
+  });
+
+  it('opportunistically removes at most 64 expired nonces without changing conflict results', async () => {
+    await client.query(`
+      select app.purge_expired_telegram_beta_invite_admission_nonce_reservations(1000)
+    `);
+    const conflictingDigest = nonceDigest('f');
+    await client.query(
+      `
+        delete from app.telegram_beta_invite_admission_nonce_reservations
+        where nonce_digest = $1::text
+      `,
+      [conflictingDigest],
+    );
+    await client.query(
+      `
+        insert into app.telegram_beta_invite_admission_nonce_reservations (
+          nonce_digest,
+          expires_at
+        )
+        values ($1::text, clock_timestamp() + interval '2 minutes')
+      `,
+      [conflictingDigest],
+    );
+    await client.query(`
+      insert into app.telegram_beta_invite_admission_nonce_reservations (
+        nonce_digest,
+        expires_at,
+        created_at
+      )
+      select
+        lpad(to_hex(candidate), 64, '0'),
+        clock_timestamp() - interval '5 minutes',
+        clock_timestamp() - interval '6 minutes'
+      from generate_series(0, 64) as candidate
+    `);
+
+    const before = await client.query<{ readonly expired: number }>(`
+      select count(*)::integer as expired
+      from app.telegram_beta_invite_admission_nonce_reservations
+      where expires_at <= clock_timestamp()
+    `);
+    expect(before.rows).toEqual([{ expired: 65 }]);
+
+    const reservation = await queryAsRole<NonceReservationRow>(
+      'payreplayy_beta_admission',
+      `
+        select app.reserve_telegram_beta_invite_admission_nonce(
+          $1::text,
+          clock_timestamp() + interval '2 minutes'
+        ) as reserved
+      `,
+      [conflictingDigest],
+    );
+    expect(reservation).toEqual([{ reserved: false }]);
+
+    const after = await client.query<{ readonly expired: number }>(`
+      select count(*)::integer as expired
+      from app.telegram_beta_invite_admission_nonce_reservations
+      where expires_at <= clock_timestamp()
+    `);
+    expect(after.rows).toEqual([{ expired: 1 }]);
   });
 
   it('keeps the legacy auto-registration recorder inaccessible to the API role', async () => {

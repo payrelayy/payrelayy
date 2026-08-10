@@ -56,7 +56,7 @@ function reservationResult(rows: readonly unknown[]): boolean {
 
 /**
  * Durable, cross-replica nonce store for the beta-admission verifier. It intentionally receives
- * only the verifier's bare, domain-separated lower-hex digest and owns no connection, pool, API
+ * only the verifier's bare, domain-separated lower-hex digest and owns no connection, pool, route
  * route, bot transport, or runtime composition.
  */
 export class PostgresTelegramBetaInviteAdmissionNonceStore implements TelegramBetaInviteAdmissionNonceStore {

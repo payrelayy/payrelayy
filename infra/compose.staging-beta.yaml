@@ -1,0 +1,183 @@
+name: payreplayy-staging-beta
+
+# This file is an inert, manually selected beta-only staging contract. A plain
+# `docker compose up` starts nothing because every service is profile-gated.
+services:
+  beta-admission:
+    profiles: [staging-manual]
+    platform: linux/amd64
+    image: payreplayy-beta-admission:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: beta-admission
+      args:
+        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      BETA_ADMISSION_HOST: 0.0.0.0
+      BETA_ADMISSION_PORT: '3001'
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'
+      BETA_ADMISSION_DATABASE_URL_FILE: /run/secrets/beta_admission_database_url
+      BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/beta_admission_bot_transport_hmac
+      BETA_ADMISSION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/beta_admission_payload_hmac
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: beta_admission_database_url
+        target: beta_admission_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: beta_admission_bot_transport_hmac
+        target: beta_admission_bot_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: beta_admission_payload_hmac
+        target: beta_admission_payload_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - staging_service
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
+  bot:
+    profiles: [staging-manual]
+    platform: linux/amd64
+    image: payreplayy-bot:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: bot
+      args:
+        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      TELEGRAM_BOT_ENABLED: 'true'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'true'
+      BOT_TO_BETA_ADMISSION_BASE_URL: http://beta-admission:3001/
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/bot_beta_admission_transport_hmac
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: telegram_bot_token
+        target: telegram_bot_token
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: bot_beta_admission_transport_hmac
+        target: bot_beta_admission_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    networks:
+      - staging_service
+    depends_on:
+      beta-admission:
+        condition: service_healthy
+        restart: true
+
+networks:
+  staging_service:
+    driver: bridge
+    internal: false
+    attachable: false
+
+# This is the public CA downloaded for the staging Supabase project, verified out of band before
+# use. It is mounted only into beta-admission so Node extends (rather than replaces) its trust set.
+configs:
+  supabase_ca_certificate:
+    file: ${PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
+
+# Every source is an operator-owned file outside the repository. The two transport-HMAC files
+# contain the same value but remain separate mounts so neither service can read the other's file.
+secrets:
+  beta_admission_database_url:
+    file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE:?set an external beta database URL file}
+  beta_admission_bot_transport_hmac:
+    file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE:?set an external beta-service transport HMAC file}
+  beta_admission_payload_hmac:
+    file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE:?set an external beta payload HMAC file}
+  telegram_bot_token:
+    file: ${PAYREPLAYY_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
+  bot_beta_admission_transport_hmac:
+    file: ${PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE:?set an external bot transport HMAC file}

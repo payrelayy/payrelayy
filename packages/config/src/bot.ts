@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import {
   booleanFromEnv,
   loadRuntimeConfig,
@@ -28,6 +30,18 @@ export type BotApiIngressConfig =
       readonly transportHmacSecret: string;
     };
 
+export type BotTelegramBetaAdmissionConfig =
+  | {
+      readonly enabled: false;
+      readonly baseUrl: undefined;
+      readonly transportHmacSecret: undefined;
+    }
+  | {
+      readonly enabled: true;
+      readonly baseUrl: string;
+      readonly transportHmacSecret: string;
+    };
+
 /**
  * A reserved, independently authenticated action-channel transport. It is config-only in this
  * stage: no bot handler, polling, fetch client, or API route consumes it.
@@ -47,14 +61,61 @@ export type BotTelegramActionChannelConfig =
 export interface BotConfig extends RuntimeConfig {
   readonly telegram: TelegramConfig;
   readonly apiIngress: BotApiIngressConfig;
+  readonly telegramBetaAdmission: BotTelegramBetaAdmissionConfig;
   readonly telegramActionChannel: BotTelegramActionChannelConfig;
 }
 
-function requiredTelegramToken(value: string | undefined): string {
-  if (!value) {
-    throw new Error('TELEGRAM_BOT_TOKEN is required when TELEGRAM_BOT_ENABLED=true.');
+function secretFromEnvironmentOrFile(
+  value: string | undefined,
+  filePath: string | undefined,
+  valueVariableName: string,
+  fileVariableName: string,
+  nodeEnv: NodeEnvironment,
+  productionFilePath: string,
+): string | undefined {
+  const hasValue = value !== undefined && value !== '';
+  const hasFile = filePath !== undefined && filePath !== '';
+  if (hasValue && hasFile) {
+    throw new Error(`${valueVariableName} and ${fileVariableName} are mutually exclusive.`);
   }
-  return value;
+  if (hasValue) return value;
+  if (!hasFile) return undefined;
+
+  if (nodeEnv === 'production' && filePath !== productionFilePath) {
+    throw new Error(`${fileVariableName} must use the approved private runtime secret path.`);
+  }
+
+  let secret: string;
+  try {
+    secret = readFileSync(filePath, 'utf8').replace(/\r?\n$/u, '');
+  } catch {
+    throw new Error(`${fileVariableName} could not be read.`);
+  }
+  if (!secret || /[\r\n]/u.test(secret)) {
+    throw new Error(`${fileVariableName} must contain exactly one non-empty secret value.`);
+  }
+  return secret;
+}
+
+function requiredTelegramToken(
+  value: string | undefined,
+  filePath: string | undefined,
+  nodeEnv: NodeEnvironment,
+): string {
+  const token = secretFromEnvironmentOrFile(
+    value,
+    filePath,
+    'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_BOT_TOKEN_FILE',
+    nodeEnv,
+    '/run/secrets/telegram_bot_token',
+  );
+  if (!token) {
+    throw new Error(
+      'TELEGRAM_BOT_TOKEN is required when TELEGRAM_BOT_ENABLED=true; TELEGRAM_BOT_TOKEN_FILE may be used instead.',
+    );
+  }
+  return token;
 }
 
 function requiredInternalApiBaseUrl(value: string | undefined, nodeEnv: NodeEnvironment): string {
@@ -129,17 +190,97 @@ function requiredActionApiBaseUrl(value: string | undefined, nodeEnv: NodeEnviro
   return parsed.toString();
 }
 
+function requiredBetaAdmissionBaseUrl(value: string | undefined, nodeEnv: NodeEnvironment): string {
+  if (!value) {
+    throw new Error(
+      'BOT_TO_BETA_ADMISSION_BASE_URL is required when TELEGRAM_BETA_ADMISSION_ENABLED=true.',
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('BOT_TO_BETA_ADMISSION_BASE_URL must be a valid internal HTTP(S) base URL.');
+  }
+
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(
+      'BOT_TO_BETA_ADMISSION_BASE_URL must be an HTTP(S) origin without credentials.',
+    );
+  }
+
+  if (
+    nodeEnv === 'production' &&
+    (parsed.protocol !== 'http:' || parsed.hostname !== 'beta-admission' || parsed.port !== '3001')
+  ) {
+    throw new Error(
+      'Production BOT_TO_BETA_ADMISSION_BASE_URL must be the private Docker beta-admission origin http://beta-admission:3001/.',
+    );
+  }
+
+  return parsed.toString();
+}
+
+function loadBotTelegramBetaAdmissionConfig(
+  environment: NodeJS.ProcessEnv,
+  nodeEnv: NodeEnvironment,
+  telegramEnabled: boolean,
+  actionChannelEnabled: boolean,
+): BotTelegramBetaAdmissionConfig {
+  const enabled = booleanFromEnv(
+    environment.TELEGRAM_BETA_ADMISSION_ENABLED,
+    false,
+    'TELEGRAM_BETA_ADMISSION_ENABLED',
+  );
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      baseUrl: undefined,
+      transportHmacSecret: undefined,
+    };
+  }
+
+  if (!telegramEnabled) {
+    throw new Error('TELEGRAM_BETA_ADMISSION_ENABLED requires TELEGRAM_BOT_ENABLED=true.');
+  }
+  if (actionChannelEnabled) {
+    throw new Error(
+      'TELEGRAM_BETA_ADMISSION_ENABLED requires INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED=false.',
+    );
+  }
+
+  return {
+    enabled: true,
+    baseUrl: requiredBetaAdmissionBaseUrl(environment.BOT_TO_BETA_ADMISSION_BASE_URL, nodeEnv),
+    transportHmacSecret: requiredHexHmacSecret(
+      secretFromEnvironmentOrFile(
+        environment.BOT_TO_BETA_ADMISSION_HMAC_SECRET,
+        environment.BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE,
+        'BOT_TO_BETA_ADMISSION_HMAC_SECRET',
+        'BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE',
+        nodeEnv,
+        '/run/secrets/bot_beta_admission_transport_hmac',
+      ),
+      'BOT_TO_BETA_ADMISSION_HMAC_SECRET',
+    ),
+  };
+}
+
 function loadBotTelegramActionChannelConfig(
   environment: NodeJS.ProcessEnv,
   nodeEnv: NodeEnvironment,
   telegramEnabled: boolean,
+  enabled: boolean,
 ): BotTelegramActionChannelConfig {
-  const enabled = booleanFromEnv(
-    environment.INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED,
-    false,
-    'INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED',
-  );
-
   if (!enabled) {
     return {
       enabled: false,
@@ -178,10 +319,22 @@ function assertDistinctBotTelegramTransportHmacSecrets(
 export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): BotConfig {
   const runtime = loadRuntimeConfig(environment);
   const enabled = booleanFromEnv(environment.TELEGRAM_BOT_ENABLED, false, 'TELEGRAM_BOT_ENABLED');
+  const actionChannelEnabled = booleanFromEnv(
+    environment.INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED,
+    false,
+    'INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED',
+  );
+  const telegramBetaAdmission = loadBotTelegramBetaAdmissionConfig(
+    environment,
+    runtime.nodeEnv,
+    enabled,
+    actionChannelEnabled,
+  );
   const telegramActionChannel = loadBotTelegramActionChannelConfig(
     environment,
     runtime.nodeEnv,
     enabled,
+    actionChannelEnabled,
   );
 
   if (!enabled) {
@@ -196,38 +349,57 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
         baseUrl: undefined,
         transportHmacSecret: undefined,
       },
+      telegramBetaAdmission,
       telegramActionChannel,
     };
   }
 
   const telegram: TelegramConfig = {
     enabled: true,
-    token: requiredTelegramToken(environment.TELEGRAM_BOT_TOKEN),
-  };
-  const apiIngress: BotApiIngressConfig = {
-    enabled: true,
-    baseUrl: requiredInternalApiBaseUrl(environment.BOT_TO_API_INGRESS_BASE_URL, runtime.nodeEnv),
-    transportHmacSecret: requiredHexHmacSecret(
-      environment.BOT_TO_API_INGRESS_HMAC_SECRET,
-      'BOT_TO_API_INGRESS_HMAC_SECRET',
+    token: requiredTelegramToken(
+      environment.TELEGRAM_BOT_TOKEN,
+      environment.TELEGRAM_BOT_TOKEN_FILE,
+      runtime.nodeEnv,
     ),
   };
+  const apiIngress: BotApiIngressConfig = telegramBetaAdmission.enabled
+    ? {
+        enabled: false,
+        baseUrl: undefined,
+        transportHmacSecret: undefined,
+      }
+    : {
+        enabled: true,
+        baseUrl: requiredInternalApiBaseUrl(
+          environment.BOT_TO_API_INGRESS_BASE_URL,
+          runtime.nodeEnv,
+        ),
+        transportHmacSecret: requiredHexHmacSecret(
+          environment.BOT_TO_API_INGRESS_HMAC_SECRET,
+          'BOT_TO_API_INGRESS_HMAC_SECRET',
+        ),
+      };
   assertDistinctBotTelegramTransportHmacSecrets(apiIngress, telegramActionChannel);
 
   return {
     ...runtime,
     telegram,
     apiIngress,
+    telegramBetaAdmission,
     telegramActionChannel,
   };
 }
 
 export function redactedBotConfigForLog(config: BotConfig): Omit<
   BotConfig,
-  'telegram' | 'apiIngress' | 'telegramActionChannel'
+  'telegram' | 'apiIngress' | 'telegramBetaAdmission' | 'telegramActionChannel'
 > & {
   readonly telegram: { readonly enabled: boolean; readonly tokenConfigured: boolean };
   readonly apiIngress: { readonly enabled: boolean; readonly secretsConfigured: boolean };
+  readonly telegramBetaAdmission: {
+    readonly enabled: boolean;
+    readonly secretsConfigured: boolean;
+  };
   readonly telegramActionChannel: {
     readonly enabled: boolean;
     readonly secretsConfigured: boolean;
@@ -243,6 +415,10 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
     apiIngress: {
       enabled: config.apiIngress.enabled,
       secretsConfigured: config.apiIngress.enabled,
+    },
+    telegramBetaAdmission: {
+      enabled: config.telegramBetaAdmission.enabled,
+      secretsConfigured: config.telegramBetaAdmission.enabled,
     },
     telegramActionChannel: {
       enabled: config.telegramActionChannel.enabled,

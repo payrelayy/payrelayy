@@ -16,6 +16,12 @@ describe('English-only locale support', () => {
     );
     expect(message(DEFAULT_LOCALE, 'welcome')).not.toMatch(/deposit|withdrawal/i);
     expect(message(DEFAULT_LOCALE, 'stageZero')).toMatch(/not available yet/i);
+    expect(message(DEFAULT_LOCALE, 'betaAdmissionWelcome')).toBe(
+      'Welcome to PayReplayy private beta. Your access is active. Payments are not enabled yet.',
+    );
+    expect(message(DEFAULT_LOCALE, 'betaAdmissionUnavailable')).toBe(
+      'PayReplayy private beta is temporarily unavailable. Please try again shortly.',
+    );
     expect(message(DEFAULT_LOCALE, 'addKemerBetPlayerId')).toBe('Add KemerBet Player ID');
   });
 });

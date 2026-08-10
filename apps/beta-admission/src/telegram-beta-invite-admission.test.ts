@@ -1,6 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
 
-import { loadApiConfig } from '@payreplayy/config/api';
 import {
   TELEGRAM_BETA_INVITE_REDEMPTION_CONTENT_TYPE,
   TELEGRAM_BETA_INVITE_REDEMPTION_HEADERS,
@@ -10,7 +9,6 @@ import {
 } from '@payreplayy/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { buildApp } from './app.js';
 import {
   createTelegramBetaInviteAdmissionSignatureForTest,
   InMemoryTelegramBetaInviteAdmissionNonceStore,
@@ -247,33 +245,32 @@ describe('beta invite admission transport contract', () => {
     ).rejects.toMatchObject({
       name: 'TelegramBetaInviteAdmissionUnavailableError',
     });
-    await expect(
-      adapter.recordAdmittedInbound({
-        updateId: databaseInput.updateId,
-        telegramUserId: databaseInput.telegramUserId,
-        privateChatId: databaseInput.privateChatId,
-        payloadHmac: inviteToken,
-        preferredLocale: 'en',
-      } as const),
-    ).rejects.toMatchObject({
-      name: 'TelegramBetaInviteAdmissionUnavailableError',
-    });
     expect(queryCalls).toBe(0);
+    expect('recordAdmittedInbound' in adapter).toBe(false);
   });
 
-  it('does not add an admission route or database runtime while every existing gate is false', async () => {
-    const config = loadApiConfig({ NODE_ENV: 'test' });
-    const app = buildApp(config, {
-      createPostgresTelegramIngressRuntime: () => {
-        throw new Error('disabled admission must not create a database runtime');
+  it('separates terminal invite rejection from retryable database unavailability', async () => {
+    const databaseInput = toTelegramBetaInviteRedemptionDatabaseInput(redemption, {
+      payloadHmacSecret,
+    });
+    const rejected = new PostgresTelegramBetaInviteAdmissionAdapter({
+      query: async () => {
+        throw { code: 'P0001', message: 'must never escape' };
+      },
+    });
+    const unavailable = new PostgresTelegramBetaInviteAdmissionAdapter({
+      query: async () => {
+        throw { code: '08006', message: 'must never escape' };
       },
     });
 
-    expect(config.postgresRuntime.enabled).toBe(false);
-    expect(config.telegramPrivateIngressRuntime.enabled).toBe(false);
-    expect(
-      (await app.inject({ method: 'POST', url: TELEGRAM_BETA_INVITE_REDEMPTION_PATH })).statusCode,
-    ).toBe(404);
-    await app.close();
+    await expect(rejected.redeem(databaseInput)).rejects.toMatchObject({
+      name: 'TelegramBetaInviteAdmissionRejectedError',
+      message: 'The beta invite was not accepted.',
+    });
+    await expect(unavailable.redeem(databaseInput)).rejects.toMatchObject({
+      name: 'TelegramBetaInviteAdmissionUnavailableError',
+      message: 'The beta invite admission boundary is unavailable.',
+    });
   });
 });

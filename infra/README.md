@@ -9,13 +9,18 @@ load a credential, or enable Telegram, database access, KemerBet, or financial b
 
 The repository provides:
 
-- [`../Dockerfile`](../Dockerfile): a locked dependency build for the API and a non-root runtime
-  image with no secret copied into it. Its Linux/amd64 base image is pinned to a reviewed immutable
-  digest for the London VM and must be reverified before a real deployment;
+- [`../Dockerfile`](../Dockerfile): locked dependency builds and distinct non-root API,
+  beta-admission, and bot runtime targets with no secret copied into them. Their shared Linux/amd64
+  base image is pinned to a reviewed immutable digest for the London VM and must be reverified before
+  a real deployment;
 - [`compose.inactive.yaml`](compose.inactive.yaml): an API-only, explicitly `inactive` Compose
   profile on an internal Docker network, with neither an image-exposed nor published host port; and
 - [`.dockerignore`](../.dockerignore): excludes local configuration, Git metadata, credentials,
   runtime data, and generated output from the image context.
+
+The later, still-manual beta-only staging artifact is documented separately in
+[`staging-beta.md`](staging-beta.md). Its two services remain behind the `staging-manual` profile and
+do not change the inactive Stage 14A contract described here.
 
 The API container is deliberately read-only, has all Linux capabilities dropped, uses a small
 temporary filesystem, and uses `/healthz` only. `/readyz` remains a deliberate `503` until database
@@ -46,12 +51,13 @@ Production secrets must be supplied by the VM outside this repository, using dis
 or service-owned files with restrictive permissions. The current Compose file intentionally does
 not reference any of them.
 
-| Future process | May receive                                                                          | Must never receive                                                                  |
-| -------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| API            | dedicated non-admin PostgreSQL URL, API ingress/payload/capability HMAC keys         | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
-| Bot            | Telegram bot token and bot-to-API transport HMAC                                     | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
-| Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight | bot token, API database credential, financial/provider credentials                  |
-| Executor       | its separately reviewed browser profile and least-privilege platform credentials     | bot token, API database credential, Supabase service-role key                       |
+| Future process | May receive                                                                                                         | Must never receive                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Beta admission | dedicated staging PostgreSQL session-pooler URL, verified public Supabase CA, bot transport HMAC copy, payload HMAC | Telegram token, generic API/provider credentials, Supabase service-role key         |
+| API            | dedicated non-admin PostgreSQL URL, API ingress/payload/capability HMAC keys                                        | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
+| Bot            | Telegram bot token and exactly one reviewed transport HMAC for its mutually exclusive mode                          | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
+| Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight                                | bot token, API database credential, financial/provider credentials                  |
+| Executor       | its separately reviewed browser profile and least-privilege platform credentials                                    | bot token, API database credential, Supabase service-role key                       |
 
 No container may mount the Docker socket. Do not use a shared production `.env` file, browser
 profile, Git secret, or chat transcript as a secret store.
@@ -67,9 +73,11 @@ Before even a private staging deployment, complete and review all of the followi
 3. Keep the firewall SSH-only and no public Docker port until a reviewed HTTPS/domain/proxy stage.
 4. Give the browser executor either strict Docker resource limits or a small swap plan before it is
    introduced.
-5. Provision the dedicated API database login outside Git, run the read-only `db:preflight`, and
-   then separately review private network wiring, nonce-retention maintenance, and the durable bot
-   outbox.
+5. For the manual beta profile, provision the dedicated beta-admission staging login outside Git
+   through the exact staging IPv4 session pooler, mount the verified staging Supabase CA, and pass
+   the beta service's read-only `db:preflight` before container creation. The generic API login and
+   API runtime stay absent/disabled. Any later API deployment, nonce-retention maintenance, or
+   durable bot outbox requires a separate review.
 
 Staging remains `FINANCIAL_ACTIONS_MODE=dry_run`; no financial transaction may be enabled merely
 because a container can start.

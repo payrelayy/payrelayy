@@ -50,6 +50,20 @@ assert.match(
   /BETA_ADMISSION_RUNTIME_PASSWORD: \$\{\{ secrets\.BETA_ADMISSION_RUNTIME_PASSWORD \}\}/,
 );
 assert.match(workflow, /pnpm --filter @payreplayy\/beta-admission run db:preflight/);
+assert.match(workflow, /Allow one bounded Supavisor credential propagation interval/);
+const propagationStep = workflow.match(
+  /- name: Allow one bounded Supavisor credential propagation interval([\s\S]*?)(?=\n\s+- name:)/,
+);
+assert.ok(propagationStep, 'Expected one bounded Supavisor propagation step.');
+assert.match(propagationStep[1], /run: sleep 125/);
+assert.doesNotMatch(propagationStep[1], /\b(?:for|while|until)\b|db:preflight|psql/);
+assert.ok(
+  workflow.indexOf('Provision a one-hour staging login') <
+    workflow.indexOf('Allow one bounded Supavisor credential propagation interval') &&
+    workflow.indexOf('Allow one bounded Supavisor credential propagation interval') <
+      workflow.indexOf('Run the dedicated catalog-only preflight'),
+  'Supavisor credential propagation must happen once after provisioning and before preflight.',
+);
 const buildAndPreflightCommands = [
   'pnpm --filter @payreplayy/domain run build',
   'pnpm --filter @payreplayy/config run build',

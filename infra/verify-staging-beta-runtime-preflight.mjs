@@ -16,10 +16,6 @@ const provisionSql = readFileSync(
   resolve(workspace, 'infra/sql/staging-beta-runtime-provision.sql'),
   'utf8',
 );
-const finalizeSql = readFileSync(
-  resolve(workspace, 'infra/sql/staging-beta-runtime-finalize.sql'),
-  'utf8',
-);
 const disableSql = readFileSync(
   resolve(workspace, 'infra/sql/staging-beta-runtime-disable.sql'),
   'utf8',
@@ -44,13 +40,16 @@ assert.match(
   /BETA_ADMISSION_RUNTIME_PASSWORD: \$\{\{ secrets\.BETA_ADMISSION_RUNTIME_PASSWORD \}\}/,
 );
 assert.match(workflow, /pnpm --filter @payreplayy\/beta-admission run db:preflight/);
-assert.match(workflow, /steps\.finalize\.outcome != 'success'/);
+assert.match(workflow, /Disable and clear the login after every preflight attempt/);
+assert.match(workflow, /if: always\(\) && steps\.provision\.outputs\.attempted == 'true'/);
+assert.match(workflow, /run: psql -X --file=infra\/sql\/staging-beta-runtime-disable\.sql/);
+assert.doesNotMatch(workflow, /steps\.finalize|staging-beta-runtime-finalize\.sql/);
 assert.doesNotMatch(
   workflow,
   /TELEGRAM_BOT_TOKEN|docker compose|docker run|compose up|FINANCIAL_ACTIONS_MODE=live|xzztugbgtulptnbpoelr:\d/,
 );
 
-for (const sql of [inspectSql, provisionSql, finalizeSql, disableSql]) {
+for (const sql of [inspectSql, provisionSql, disableSql]) {
   assert.match(sql, /payreplayy_beta_admission_runtime/);
   assert.doesNotMatch(sql, /service_role|payreplayy_api_runtime|payreplayy_worker|kemerbet/i);
 }
@@ -69,9 +68,10 @@ assert.match(provisionSql, /password :'runtime_password'/);
 assert.match(provisionSql, /clock_timestamp\(\) \+ interval '1 hour'/);
 assert.doesNotMatch(provisionSql, /[0-9a-f]{64}/);
 
-assert.match(finalizeSql, /valid until 'infinity'/);
-assert.match(finalizeSql, /role\.rolcanlogin/);
 assert.match(disableSql, /nologin/);
 assert.match(disableSql, /password null/);
+assert.match(disableSql, /from pg_catalog\.pg_authid as role/);
+assert.match(disableSql, /not role\.rolcanlogin/);
+assert.match(disableSql, /role\.rolpassword is null/);
 
 console.log('Staging beta runtime preflight contract verified.');

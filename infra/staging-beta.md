@@ -131,9 +131,11 @@ The protected `staging` environment must contain these additional values before
 guarded role alteration. The workflow does not read `SUPABASE_ACCESS_TOKEN` and never prints any
 secret value.
 
-Run `inspect` first. The provision mode gives the dedicated login a one-hour password validity,
-runs the beta service's catalog-only read-only preflight through TLS `verify-full`, and changes the
-validity to infinity only after every preflight check passes. A failed attempt disables LOGIN and
-clears its password; an abruptly terminated runner still leaves the provisional password expiring
-within one hour. Both modes require the operator to confirm the exact full `main` commit SHA. The
-workflow does not authorize starting the staging Compose profile.
+Run `inspect` first. The provision mode gives the dedicated login a one-hour password validity and
+runs the beta service's catalog-only read-only preflight through TLS `verify-full`. After every
+provisioning attempt, whether the preflight passes or fails, the workflow disables LOGIN and clears
+its password. An abruptly terminated runner still leaves the provisional password expiring within
+one hour. A later deployment workflow must provision the runtime credential atomically with the
+reviewed service deployment rather than leave an unused LOGIN enabled. Both modes require the
+operator to confirm the exact full `main` commit SHA. This workflow does not authorize starting the
+staging Compose profile.

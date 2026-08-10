@@ -42,6 +42,7 @@ assert.match(workflow, /UserKnownHostsFile=/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper verify/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper install/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper start/g);
+assert.match(workflow, /payreplayy-staging-deploy-helper diagnose-owner-startup/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper stop/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper discard/g);
 assert.match(workflow, /sha256sum infra\/operations\/payreplayy-staging-deploy-helper\.sh/g);
@@ -69,11 +70,14 @@ assert.ok(
   'Credential propagation must complete after provisioning and before transfer or activation.',
 );
 assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
+assert.match(workflow, /Capture bounded Owner-control startup diagnostics/);
 assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
 assert.ok(
+  workflow.indexOf('Capture bounded Owner-control startup diagnostics') <
+    workflow.indexOf('Capture count-only runtime session diagnostics after failed activation') &&
   workflow.indexOf('Capture count-only runtime session diagnostics after failed activation') <
     workflow.indexOf('Roll back failed activation'),
-  'Failure diagnostics must run before rollback removes the runtime state.',
+  'Bounded startup and count-only database diagnostics must run before rollback removes the runtime state.',
 );
 assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD/);
 assert.match(workflow, /OWNER_CONTROL_RUNTIME_PASSWORD/);
@@ -95,9 +99,17 @@ assert.match(disable, /nologin/g);
 assert.match(disable, /password null/g);
 assert.match(disable, /pg_catalog\.pg_terminate_backend\(activity_pid, 5000\)/);
 assert.match(disable, /from pg_catalog\.pg_stat_activity as activity/g);
+assert.match(disable, /perform pg_catalog\.pg_stat_clear_snapshot\(\)/);
 assert.ok(
   disable.indexOf('nologin') < disable.indexOf('pg_catalog.pg_terminate_backend'),
   'The logins must be disabled before existing runtime sessions are terminated.',
+);
+assert.ok(
+  disable.indexOf('pg_catalog.pg_terminate_backend') <
+    disable.indexOf('perform pg_catalog.pg_stat_clear_snapshot()') &&
+    disable.indexOf('perform pg_catalog.pg_stat_clear_snapshot()') <
+      disable.lastIndexOf('from pg_catalog.pg_stat_activity as activity'),
+  'Cleanup must clear the statistics snapshot after termination and before verifying zero sessions.',
 );
 
 assert.match(diagnostics, /from pg_catalog\.pg_stat_activity as activity/);
@@ -113,6 +125,14 @@ assert.match(helper, /--env-file \/dev\/null/);
 assert.match(helper, /--project-name "\$PROJECT_NAME"/);
 assert.match(helper, /up -d --no-build --wait --wait-timeout 90/);
 assert.doesNotMatch(helper, /curl|wget|git |\.env|xzztugbgtulptnbpoelr/);
+
+const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
+assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');
+assert.match(ownerDiagnostic, /com\.docker\.compose\.project=\$PROJECT_NAME/);
+assert.match(ownerDiagnostic, /com\.docker\.compose\.service=owner-control/);
+assert.match(ownerDiagnostic, /org\.opencontainers\.image\.revision/);
+assert.match(ownerDiagnostic, /container logs --tail 80/);
+assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container logs .*bot/);
 
 console.log(
   'staging deploy workflow verified: manual exact-target guards, sealed images, checksummed root helper, bounded runtime credentials, and stop path',

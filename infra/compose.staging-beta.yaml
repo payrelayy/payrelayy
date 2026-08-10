@@ -3,6 +3,90 @@ name: payreplayy-staging-beta
 # This file is an inert, manually selected beta-only staging contract. A plain
 # `docker compose up` starts nothing because every service is profile-gated.
 services:
+  owner-control:
+    profiles: [staging-manual]
+    platform: linux/amd64
+    image: payreplayy-owner-control:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: admin
+      args:
+        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      OWNER_CONTROL_HOST: 0.0.0.0
+      OWNER_CONTROL_PORT: '3002'
+      OWNER_CONTROL_SUPABASE_URL: https://spzpiyxheappsfyswewl.supabase.co
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'
+      OWNER_CONTROL_DATABASE_URL_FILE: /run/secrets/owner_control_database_url
+      OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/owner_control_supabase_publishable_key
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    ports:
+      - 127.0.0.1:3002:3002
+    secrets:
+      - source: owner_control_database_url
+        target: owner_control_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: owner_control_supabase_publishable_key
+        target: owner_control_supabase_publishable_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - owner_control_service
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3002/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
   beta-admission:
     profiles: [staging-manual]
     platform: linux/amd64
@@ -157,13 +241,18 @@ services:
         restart: true
 
 networks:
+  owner_control_service:
+    driver: bridge
+    internal: false
+    attachable: false
   staging_service:
     driver: bridge
     internal: false
     attachable: false
 
 # This is the public CA downloaded for the staging Supabase project, verified out of band before
-# use. It is mounted only into beta-admission so Node extends (rather than replaces) its trust set.
+# use. It is mounted only into the two database clients so Node extends (rather than replaces) its
+# trust set.
 configs:
   supabase_ca_certificate:
     file: ${PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
@@ -171,6 +260,10 @@ configs:
 # Every source is an operator-owned file outside the repository. The two transport-HMAC files
 # contain the same value but remain separate mounts so neither service can read the other's file.
 secrets:
+  owner_control_database_url:
+    file: ${PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE:?set an external Owner-control database URL file}
+  owner_control_supabase_publishable_key:
+    file: ${PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:?set an external staging publishable-key file}
   beta_admission_database_url:
     file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE:?set an external beta database URL file}
   beta_admission_bot_transport_hmac:

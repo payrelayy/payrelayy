@@ -1,0 +1,21 @@
+{
+  "name": "@payreplayy/admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@payreplayy/config": "workspace:*",
+    "@payreplayy/contracts": "workspace:*",
+    "fastify": "^5.0.0",
+    "pg": "8.22.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/pg": "8.21.0"
+  }
+}

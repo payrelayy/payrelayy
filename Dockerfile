@@ -23,6 +23,10 @@ FROM build-base AS bot-build
 
 RUN pnpm --filter @payreplayy/bot... run build
 
+FROM build-base AS admin-build
+
+RUN pnpm --filter @payreplayy/admin... run build
+
 FROM build-base AS api-build
 
 RUN pnpm --filter @payreplayy/api... run build
@@ -63,6 +67,20 @@ COPY --from=bot-build --chown=10001:10001 /workspace/packages ./packages
 COPY --from=bot-build --chown=10001:10001 /workspace/apps/bot ./apps/bot
 
 CMD ["node", "apps/bot/dist/index.js"]
+
+FROM runtime-base AS admin
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="payreplayy-owner-control" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+COPY --from=admin-build --chown=10001:10001 /workspace/node_modules ./node_modules
+COPY --from=admin-build --chown=10001:10001 /workspace/packages ./packages
+COPY --from=admin-build --chown=10001:10001 /workspace/apps/admin ./apps/admin
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3002/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+
+CMD ["node", "apps/admin/dist/index.js"]
 
 FROM runtime-base AS api
 

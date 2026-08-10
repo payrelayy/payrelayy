@@ -32,7 +32,7 @@ assert.match(workflow, /GITHUB_REF" != 'refs\/heads\/main'/);
 assert.match(workflow, /CONFIRMED_MAIN_COMMIT_SHA" != "\$GITHUB_SHA"/);
 assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
-assert.match(workflow, /STAGING_POOLER_HOST: aws-0-eu-west-1\.pooler\.supabase\.com/);
+assert.match(workflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/);
 assert.match(workflow, /PGSSLMODE: verify-full/g);
 assert.match(workflow, /PGSSLROOTCERT: \$\{\{ steps\.protected-inputs\.outputs\.ca_file \}\}/g);
 assert.match(

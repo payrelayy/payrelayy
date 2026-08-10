@@ -11,7 +11,7 @@ import {
 export const PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 export const BETA_ADMISSION_DATABASE_RUNTIME_ROLE = 'payreplayy_beta_admission_runtime';
 
-const BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST = 'aws-0-eu-west-1.pooler.supabase.com';
+const BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
 const BETA_ADMISSION_DATABASE_SESSION_POOLER_USER = `${BETA_ADMISSION_DATABASE_RUNTIME_ROLE}.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}`;
 const PRODUCTION_SECRET_FILE_PATHS: Readonly<Record<string, string>> = {
   BETA_ADMISSION_DATABASE_URL: '/run/secrets/beta_admission_database_url',

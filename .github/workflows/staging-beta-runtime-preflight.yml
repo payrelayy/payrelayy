@@ -30,7 +30,7 @@ concurrency:
 env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
-  STAGING_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
 
 jobs:

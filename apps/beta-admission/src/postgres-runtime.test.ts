@@ -12,7 +12,7 @@ const config = {
   projectReference: 'spzpiyxheappsfyswewl',
   connection: {
     database: 'postgres',
-    host: 'aws-0-eu-west-1.pooler.supabase.com',
+    host: 'aws-1-eu-west-1.pooler.supabase.com',
     password: 'test-password',
     port: 5432,
     user: 'payreplayy_beta_admission_runtime.spzpiyxheappsfyswewl',

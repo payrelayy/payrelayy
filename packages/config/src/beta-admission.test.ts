@@ -6,7 +6,7 @@ import {
   redactedBetaAdmissionConfigForLog,
 } from './beta-admission.js';
 
-const sessionPoolerDatabaseUrl = `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`;
+const sessionPoolerDatabaseUrl = `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`;
 
 function enabledEnvironment(databaseUrl = sessionPoolerDatabaseUrl): NodeJS.ProcessEnv {
   return {
@@ -48,7 +48,7 @@ describe('beta-admission runtime configuration', () => {
       projectReference: PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
       connection: {
         database: 'postgres',
-        host: 'aws-0-eu-west-1.pooler.supabase.com',
+        host: 'aws-1-eu-west-1.pooler.supabase.com',
         port: 5432,
       },
       tlsMode: 'verify-full',
@@ -60,7 +60,8 @@ describe('beta-admission runtime configuration', () => {
       'postgresql://payreplayy_beta_admission_runtime:pw@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
       `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
       `postgresql://postgres:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
-      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
+      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
       `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=require`,
       `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full&application_name=unsafe`,
     ];

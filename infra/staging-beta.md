@@ -183,6 +183,21 @@ count-only database session diagnostic. Rollback clears PostgreSQL's statistics 
 terminating sessions so its final zero-session assertion observes the current catalog state rather
 than a transaction-local stale snapshot.
 
+## Private Owner page and first-Owner gate
+
+The Owner-control service serves `/owner` only on its existing VM-loopback binding. Use an approved
+SSH local-forward to `127.0.0.1:3002`; never publish that port, add a reverse proxy, or browse via the
+droplet's public address. The page has a fixed content-security policy, receives only the staging
+publishable key as public configuration, signs in against the exact staging Auth origin, and keeps
+the short-lived access token in memory only. Closing or refreshing the page discards the token and
+the one-time invite receipt.
+
+Before sign-in can authorize an invite, one confirmed staging Supabase Auth user must be converted
+to the first active Owner by the manual `Staging first Owner bootstrap` workflow. Create that Auth
+user privately in Supabase; only its UUID belongs in the workflow input. Run `inspect` before
+`bootstrap`, confirm the exact staging ref and `main` commit, and use the required one-time phrase.
+The workflow must not receive an email, password, display name, access token, or service-role key.
+
 ## Protected runtime preflight
 
 The manual `Staging beta runtime preflight` GitHub workflow is the read-only inspection path for the

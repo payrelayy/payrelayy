@@ -27,3 +27,20 @@ Run `plan` first. Every dispatch links and verifies the staging ref, lists migra
 migrations and listing the resulting migration state. The workflow never includes seed data,
 targets production, deploys an application, starts Telegram, or enables a payment flow. Review the
 staging project's security and performance advisors separately after the first successful apply.
+
+## First staging Owner
+
+The manual
+[`Staging first Owner bootstrap`](../.github/workflows/staging-first-owner-bootstrap.yml) workflow
+is the only repository path for converting one existing, confirmed staging Auth user into the first
+active Owner. It hard-rejects production, non-`main` source, a mismatched commit, malformed Auth
+UUIDs, and any database where an active Owner already exists. It first runs a serializable read-only
+inspection and requires the bootstrap procedure to remain private and security-definer.
+
+Create the Auth user privately in the staging Supabase dashboard with a password stored in the
+Owner's password manager and confirm the email. Never paste the email or password into GitHub,
+Codex, a repository file, or a workflow input. Only the non-secret Auth user UUID is accepted by the
+workflow. Run `inspect` first. Then select `bootstrap` and type
+`bootstrap-first-staging-owner`; the guarded SQL takes a transaction advisory lock, calls the
+deployment-only procedure with no display name, and verifies exactly one active Owner and its audit
+event before commit. The action is intentionally one-time and has no delete/reset mode.

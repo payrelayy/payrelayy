@@ -5,6 +5,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { buildOwnerControlApp } from './app.js';
+import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 
@@ -50,6 +51,48 @@ function verifiedAuthFetch(): typeof fetch {
 }
 
 describe('Owner-control HTTP boundary', () => {
+  it('serves a no-store, loopback-only Owner page with strict browser policy', async () => {
+    const app = buildOwnerControlApp(config(), { runtime: runtime() });
+    const response = await app.inject({ method: 'GET', url: '/owner' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store, max-age=0');
+    expect(response.headers['content-security-policy']).toContain("default-src 'none'");
+    expect(response.headers['content-security-policy']).toContain(
+      `connect-src 'self' https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
+    );
+    expect(response.headers['x-frame-options']).toBe('DENY');
+    expect(response.headers['permissions-policy']).toContain('payment=()');
+    expect(response.body).toContain('PayReplayy Owner');
+    expect(response.body).not.toContain('sb_publishable_');
+    await app.close();
+  });
+
+  it('returns only public staging Auth configuration to the private page', async () => {
+    const app = buildOwnerControlApp(config(), { runtime: runtime() });
+    const response = await app.inject({ method: 'GET', url: '/owner/config.json' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      publishableKey: 'sb_publishable_test_key_for_staging_only',
+      supabaseUrl: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
+    });
+    expect(response.body).not.toContain('password');
+    await app.close();
+  });
+
+  it('keeps the Owner access token in memory and never enables browser credential storage', async () => {
+    const app = buildOwnerControlApp(config(), { runtime: runtime() });
+    const response = await app.inject({ method: 'GET', url: '/owner/app.js' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('/auth/v1/token?grant_type=password');
+    expect(response.body).toContain("credentials: 'omit'");
+    expect(response.body).toContain("authorization: 'Bearer ' + accessToken");
+    expect(response.body).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/u);
+    expect(response.body).not.toContain('refresh_token');
+    expect(response.body).not.toContain('service_role');
+    expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
+    await app.close();
+  });
+
   it('rejects an expiry without the database clock and transport margin', async () => {
     const app = buildOwnerControlApp(config(), {
       fetch: async () => {

@@ -59,6 +59,13 @@ type NonceReservationRow = {
   readonly reserved: boolean;
 };
 
+type PlayerActionCapabilityRow = {
+  readonly capability_expires_at: Date;
+  readonly expected_conversation_version: string;
+  readonly origin_inbound_event_already_consumed: boolean;
+  readonly result_capability_id: string;
+};
+
 type AdmissionWriteSnapshot = {
   readonly active_invites: number;
   readonly audit_events: number;
@@ -560,6 +567,149 @@ describe('disposable SQL migration baseline', () => {
         [digest],
       ),
     ).resolves.toEqual([{ reserved: false }]);
+  });
+
+  it('commits a Player-ID menu capability through the narrow runtime role', async () => {
+    const tokenDigest = inviteDigest('f');
+    const telegramUserId = 9_200_000_001;
+    const capabilityId = '22222222-2222-4222-8222-222222222222';
+
+    await client.query(
+      `
+        insert into app.telegram_beta_invites (
+          token_digest,
+          expires_at,
+          issued_by_admin_id
+        )
+        values ($1::text, clock_timestamp() + interval '1 hour', $2::uuid)
+      `,
+      [tokenDigest, ownerAdminId],
+    );
+
+    await expect(
+      queryAsRole<AdmissionReceiptRow>(
+        'payreplayy_beta_admission',
+        `
+          select *
+          from app.redeem_telegram_beta_invite(
+            $1::bigint,
+            $2::bigint,
+            $3::bigint,
+            $4::text,
+            $5::text,
+            $6::text
+          )
+        `,
+        [9_200_000_001, telegramUserId, telegramUserId, tokenDigest, payloadHmac('1'), 'en'],
+      ),
+    ).resolves.toHaveLength(1);
+
+    const inbound = await queryAsRole<AdmissionReceiptRow>(
+      'payreplayy_player_actions',
+      `
+        select *
+        from app.record_admitted_telegram_private_inbound_event(
+          $1::bigint,
+          $2::bigint,
+          $3::bigint,
+          $4::text,
+          $5::text
+        )
+      `,
+      [9_200_000_002, telegramUserId, telegramUserId, payloadHmac('2'), 'en'],
+    );
+    expect(inbound).toHaveLength(1);
+
+    const capability = await queryAsRole<PlayerActionCapabilityRow>(
+      'payreplayy_player_actions',
+      `
+        select *
+        from app.issue_telegram_player_registration_capability(
+          $1::uuid,
+          $2::uuid,
+          $3::text,
+          $4::text
+        )
+      `,
+      [inbound[0]!.inbound_event_id, capabilityId, payloadHmac('3'), payloadHmac('4')],
+    );
+
+    expect(capability).toHaveLength(1);
+    expect(capability[0]).toMatchObject({
+      expected_conversation_version: '0',
+      origin_inbound_event_already_consumed: false,
+      result_capability_id: capabilityId,
+    });
+    expect(capability[0]!.capability_expires_at).toBeInstanceOf(Date);
+
+    const committedProjection = await client.query<{
+      readonly capabilities: number;
+      readonly receipts: number;
+    }>(
+      `
+        select
+          (
+            select count(*)::integer
+            from app.bot_action_capabilities
+            where id = $1::uuid
+              and issued_from_inbound_event_id = $2::uuid
+          ) as capabilities,
+          (
+            select count(*)::integer
+            from app.inbound_event_consumptions
+            where origin_inbound_event_id = $2::uuid
+              and consumer_kind = 'issue_player_registration_capability'
+              and outcome = 'completed'
+          ) as receipts
+      `,
+      [capabilityId, inbound[0]!.inbound_event_id],
+    );
+    expect(committedProjection.rows).toEqual([{ capabilities: 1, receipts: 1 }]);
+  });
+
+  it('keeps deferred Player-ID correspondence triggers owner-executed and private', async () => {
+    const deferredTriggers = await client.query<{
+      readonly fixed_search_path: boolean;
+      readonly owner_is_postgres: boolean;
+      readonly public_execute: boolean;
+      readonly security_definer: boolean;
+      readonly trigger_function: string;
+    }>(`
+      select
+        procedure.oid::regprocedure::text as trigger_function,
+        procedure.prosecdef as security_definer,
+        procedure.proowner = 'postgres'::regrole as owner_is_postgres,
+        procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+          as fixed_search_path,
+        exists (
+          select 1
+          from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        ) as public_execute
+      from pg_proc procedure
+      where procedure.oid in (
+        'app.require_inbound_event_consumption_causal_result()'::regprocedure,
+        'app.require_inbound_event_consumption_final_version()'::regprocedure,
+        'app.require_bot_action_capability_receipt_correspondence()'::regprocedure,
+        'app.require_bot_action_capability_terminal_rejection_correspondence()'::regprocedure,
+        'app.require_bot_conversation_action_final_projection()'::regprocedure,
+        'app.require_bot_conversation_action_receipt_correspondence()'::regprocedure,
+        'app.require_player_registration_request_event_receipt_correspondenc()'::regprocedure
+      )
+      order by trigger_function
+    `);
+
+    expect(deferredTriggers.rows).toHaveLength(7);
+    expect(
+      deferredTriggers.rows.every(
+        (trigger) =>
+          trigger.fixed_search_path &&
+          trigger.owner_is_postgres &&
+          !trigger.public_execute &&
+          trigger.security_definer,
+      ),
+    ).toBe(true);
   });
 
   it('keeps invite admission private, fixed-search-path, and narrowly executable', async () => {

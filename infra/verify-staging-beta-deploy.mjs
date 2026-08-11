@@ -48,6 +48,7 @@ assert.match(workflow, /payreplayy-staging-deploy-helper discard/g);
 assert.match(workflow, /sha256sum infra\/operations\/payreplayy-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
 assert.match(workflow, /docker build --pull=false --target admin/);
+assert.match(workflow, /docker build --pull=false --target api/);
 assert.match(workflow, /docker build --pull=false --target beta-admission/);
 assert.match(workflow, /docker build --pull=false --target bot/);
 assert.match(workflow, /org\.opencontainers\.image\.revision/);
@@ -61,7 +62,7 @@ assert.equal(
   'Deployment must use exactly one bounded credential-propagation wait.',
 );
 assert.ok(
-  workflow.indexOf('Provision both narrow 24-hour staging logins') <
+  workflow.indexOf('Provision three narrow 24-hour staging logins') <
     workflow.indexOf('Wait once for staging runtime credential propagation') &&
     workflow.indexOf('Wait once for staging runtime credential propagation') <
       workflow.indexOf('Transfer and install sealed release inputs') &&
@@ -81,9 +82,12 @@ assert.ok(
 );
 assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD/);
 assert.match(workflow, /OWNER_CONTROL_RUNTIME_PASSWORD/);
-assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD" != "\$OWNER_CONTROL_RUNTIME_PASSWORD/);
-assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD" != "\$BOT_TO_BETA_ADMISSION_HMAC_SECRET/);
-assert.match(workflow, /OWNER_CONTROL_RUNTIME_PASSWORD" != "\$BETA_ADMISSION_PAYLOAD_HMAC_SECRET/);
+assert.match(workflow, /PLAYER_ACTION_RUNTIME_PASSWORD/);
+assert.match(workflow, /BOT_TO_API_ACTION_HMAC_SECRET/);
+assert.match(workflow, /API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET/);
+assert.match(workflow, /API_TELEGRAM_CAPABILITY_HMAC_SECRET/);
+assert.match(workflow, /API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET/);
+assert.match(workflow, /distinct_count/);
 assert.match(workflow, /STAGING_TELEGRAM_BOT_TOKEN/);
 assert.match(workflow, /STAGING_SUPABASE_PUBLISHABLE_KEY/);
 assert.match(workflow, /SUPABASE_CA_CERTIFICATE_PEM/);
@@ -92,6 +96,7 @@ assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTI
 for (const sql of [provision, disable]) {
   assert.match(sql, /payreplayy_beta_admission_runtime/);
   assert.match(sql, /payreplayy_owner_control_runtime/);
+  assert.match(sql, /payreplayy_player_actions_runtime/);
   assert.doesNotMatch(sql, /payreplayy_api_runtime|payreplayy_worker|service_role|kemerbet/i);
 }
 assert.match(provision, /interval '24 hours'/g);
@@ -114,6 +119,7 @@ assert.ok(
 
 assert.match(diagnostics, /from pg_catalog\.pg_stat_activity as activity/);
 assert.match(diagnostics, /count\(\*\)::integer as session_count/);
+assert.match(diagnostics, /payreplayy_player_actions_runtime/);
 assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/i);
 
 assert.match(helper, /^#!\/usr\/bin\/env bash/);

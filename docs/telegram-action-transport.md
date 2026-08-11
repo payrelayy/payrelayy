@@ -50,12 +50,12 @@ It uses a separately configured `BOT_TO_API_ACTION_HMAC_SECRET`; that key must d
 private inbox transport/payload keys and the capability/semantic keys. The verifier authenticates
 the exact raw bytes before JSON parsing, rejects duplicate authentication headers, rejects stale
 timestamps, and passes only a domain-separated SHA-256 nonce digest to its test-only nonce store.
-A later durable action store must retain the same digest domain and must not use the inbox table or
+A durable action nonce store retains the same digest domain and does not use the inbox table or
 namespace.
 
-## Inactive configuration
+## Default-off configuration and staging exception
 
-All staging configuration keeps these values disabled:
+All ordinary environments keep these values disabled:
 
 ```dotenv
 INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED=false
@@ -63,9 +63,9 @@ BOT_TO_API_ACTION_BASE_URL=
 BOT_TO_API_ACTION_HMAC_SECRET=
 ```
 
-The bot and API load no action URL or HMAC while the gate is false. The inactive Compose contract
-and its root verifier require `INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED=false`. Setting the gate
-does not wire a route, pool, dispatcher, bot handler, or deployment. A later activation review
-would require separately scoped bot/API secret mounts, an invite-only admission boundary, a
-dedicated least-privilege action database identity, durable cross-replica nonce storage, a reviewed
-conversation-aware database procedure, and controlled end-to-end staging tests.
+The bot and API load no action URL or HMAC while the gate is false. The reviewed staging beta
+profile is the sole exception: it enables this channel with service-separated file mounts, an
+invite-only admission boundary, the dedicated `payreplayy_player_actions_runtime` identity,
+durable action-nonce storage, and the existing conversation-aware procedures. That profile can
+create only a pending Player-ID request. It cannot validate an ID, contact KemerBet, open a deposit
+or withdrawal, or perform a financial action.

@@ -21,16 +21,16 @@ The current foundation is deliberately safe:
 - the only current ledger procedures for the API are live-gated: one opens an unverified intent
   and returns frozen display-safe payment instructions, while the other records an already-encrypted
   customer transaction reference without verifying it or exposing ledger tables.
-- the staged migration retires the historical generic private Telegram inbox procedure. Its staged
-  beta boundary is English-only and invite-only: only a separately reviewed invite redemption may
-  create an identity, and it remains inactive until its dedicated admission runtime is provisioned.
-- a signed bot-to-API transport scaffold is disabled by default and is not launchable in production
-  until the dedicated invite-admission transport, durable nonce store, and runtime are reviewed.
-- an inert, non-claiming Player-ID request schema is in place, but it is not wired to Telegram,
-  KemerBet, deposit intake, or a validator.
+- the historical generic private Telegram inbox procedure is retired. The staging beta boundary is
+  English-only and invite-only: only a one-time Owner-issued invitation may create an identity.
+- the staging bot can now show an admitted-user menu and record a non-claiming KemerBet Player-ID
+  request as `pending` through a dedicated database role and durable action nonce store.
+- pending Player IDs are not validated, associated with a provider account, or usable for deposits;
+  no KemerBet, payment-provider, deposit, withdrawal, or financial action is enabled by this flow.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
-a separately reviewed beta-admission runtime, and a nonce-retention maintenance process. Each future
+a separately reviewed beta-admission runtime, a narrow Player-ID action runtime, and a
+nonce-retention maintenance process. Each future
 credential belongs in its own VM runtime secret set, never Git or the bot, executor, dashboard,
 browser profile, or logs. The maintenance identity is limited to a future bounded nonce-digest purge
 and must never be reused by the API or worker. PayReplayy does not place a Supabase service-role key

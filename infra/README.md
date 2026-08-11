@@ -2,15 +2,14 @@
 
 ## Current state
 
-The London VM is intentionally not a PayReplayy runtime server yet. It exposes only SSH and has no
-running PayReplayy service or public HTTP(S) listener. It may hold a sealed source release and a
-locally built inactive API image solely for build validation. Stage 14A does not run a container,
-load a credential, or enable Telegram, database access, KemerBet, or financial behavior.
+The Stage 14A contract remains inactive and exposes no public HTTP(S) listener. A separately
+guarded staging-beta release may run on the London VM with Owner control bound only to loopback and
+all other services on a private Docker bridge. It does not enable KemerBet or financial behavior.
 
 The repository provides:
 
 - [`../Dockerfile`](../Dockerfile): locked dependency builds and distinct non-root API,
-  Owner-control, beta-admission, and bot runtime targets with no secret copied into them. Their shared Linux/amd64
+  API, Owner-control, beta-admission, and bot runtime targets with no secret copied into them. Their shared Linux/amd64
   base image is pinned to a reviewed immutable digest for the London VM and must be reverified before
   a real deployment;
 - [`compose.inactive.yaml`](compose.inactive.yaml): an API-only, explicitly `inactive` Compose
@@ -22,12 +21,12 @@ The repository provides:
   sudo only this checksummed helper, never `bash`, Docker directly, or the Docker socket.
 
 The later, still-manual beta-only staging artifact is documented separately in
-[`staging-beta.md`](staging-beta.md). Its three services remain behind the `staging-manual` profile and
+[`staging-beta.md`](staging-beta.md). Its four services remain behind the `staging-manual` profile and
 do not change the inactive Stage 14A contract described here.
 
-The API container is deliberately read-only, has all Linux capabilities dropped, uses a small
-temporary filesystem, and uses `/healthz` only. `/readyz` remains a deliberate `503` until database
-readiness is separately implemented.
+The API container is deliberately read-only, has all Linux capabilities dropped, and uses a small
+temporary filesystem. Its default inactive image uses `/healthz`; the staging Player-ID profile
+overrides the healthcheck to `/readyz`, which passes only after the narrow database preflight.
 
 [`operations/inactive-vm-runbook.md`](operations/inactive-vm-runbook.md) records the required
 inactive-state evidence, backup acceptance criteria, incident-stop boundary, and the go/no-go
@@ -58,8 +57,8 @@ not reference any of them.
 | -------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Beta admission | dedicated staging PostgreSQL session-pooler URL, verified public Supabase CA, bot transport HMAC copy, payload HMAC | Telegram token, generic API/provider credentials, Supabase service-role key         |
 | Owner control  | dedicated staging PostgreSQL session-pooler URL, public Auth client key, verified public Supabase CA                | bot token, beta HMACs, generic API/provider credentials, Supabase service-role key  |
-| API            | dedicated non-admin PostgreSQL URL, API ingress/payload/capability HMAC keys                                        | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
-| Bot            | Telegram bot token and exactly one reviewed transport HMAC for its mutually exclusive mode                          | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
+| API            | dedicated Player-ID PostgreSQL URL and action transport/payload/capability/semantic HMAC keys                       | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
+| Bot            | Telegram bot token plus separately scoped beta-admission and Player-ID transport HMAC copies                        | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
 | Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight                                | bot token, API database credential, financial/provider credentials                  |
 | Executor       | its separately reviewed browser profile and least-privilege platform credentials                                    | bot token, API database credential, Supabase service-role key                       |
 
@@ -77,11 +76,11 @@ Before even a private staging deployment, complete and review all of the followi
 3. Keep the firewall SSH-only and no public Docker port until a reviewed HTTPS/domain/proxy stage.
 4. Give the browser executor either strict Docker resource limits or a small swap plan before it is
    introduced.
-5. For the manual beta profile, provision the dedicated beta-admission staging login outside Git
-   through the exact staging IPv4 session pooler, mount the verified staging Supabase CA, and pass
-   the beta service's read-only `db:preflight` before container creation. The generic API login and
-   API runtime stay absent/disabled. Any later API deployment, nonce-retention maintenance, or
-   durable bot outbox requires a separate review.
+5. For the manual beta profile, provision only the dedicated beta-admission, Owner-control, and
+   Player-ID action staging logins outside Git through the exact staging IPv4 session pooler. Mount
+   the verified staging Supabase CA and require each service `/readyz` preflight before the bot can
+   start. The generic API login/runtime remains absent and disabled. Pending Player-ID registration
+   does not authorize validation, nonce-retention maintenance, a durable bot outbox, or finance.
 
 Staging remains `FINANCIAL_ACTIONS_MODE=dry_run`; no financial transaction may be enabled merely
 because a container can start.

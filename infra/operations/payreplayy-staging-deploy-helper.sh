@@ -57,6 +57,12 @@ stop_project() {
     "$SECRET_ROOT/beta-transport-hmac" \
     "$SECRET_ROOT/bot-transport-hmac" \
     "$SECRET_ROOT/beta-payload-hmac" \
+    "$SECRET_ROOT/player-action-database-url" \
+    "$SECRET_ROOT/api-action-transport-hmac" \
+    "$SECRET_ROOT/api-action-payload-hmac" \
+    "$SECRET_ROOT/api-action-capability-hmac" \
+    "$SECRET_ROOT/api-action-semantic-hmac" \
+    "$SECRET_ROOT/bot-action-transport-hmac" \
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
 }
@@ -104,7 +110,10 @@ case "$command" in
       die 'the incoming directory ownership or mode is unsafe'
 
     expected_files="$({ printf '%s\n' \
+      api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
+      api-action-transport-hmac \
       beta-database-url beta-payload-hmac beta-transport-hmac bot-token bot-transport-hmac \
+      bot-action-transport-hmac player-action-database-url \
       compose.staging-beta.yaml owner-database-url payreplayy-staging-images.tar publishable-key \
       supabase-ca.crt; } | sort)"
     actual_files="$(find "$incoming" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
@@ -123,12 +132,18 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$incoming/beta-transport-hmac" "$SECRET_ROOT/beta-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-transport-hmac" "$SECRET_ROOT/bot-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/beta-payload-hmac" "$SECRET_ROOT/beta-payload-hmac"
+    install -o 10001 -g 10001 -m 0400 "$incoming/player-action-database-url" "$SECRET_ROOT/player-action-database-url"
+    install -o 10001 -g 10001 -m 0400 "$incoming/api-action-transport-hmac" "$SECRET_ROOT/api-action-transport-hmac"
+    install -o 10001 -g 10001 -m 0400 "$incoming/api-action-payload-hmac" "$SECRET_ROOT/api-action-payload-hmac"
+    install -o 10001 -g 10001 -m 0400 "$incoming/api-action-capability-hmac" "$SECRET_ROOT/api-action-capability-hmac"
+    install -o 10001 -g 10001 -m 0400 "$incoming/api-action-semantic-hmac" "$SECRET_ROOT/api-action-semantic-hmac"
+    install -o 10001 -g 10001 -m 0400 "$incoming/bot-action-transport-hmac" "$SECRET_ROOT/bot-action-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-token" "$SECRET_ROOT/bot-token"
     install -o 10001 -g 10001 -m 0400 "$incoming/publishable-key" "$SECRET_ROOT/publishable-key"
     install -o root -g root -m 0444 "$incoming/supabase-ca.crt" "$SECRET_ROOT/supabase-ca.crt"
 
     docker_local image load --input "$incoming/payreplayy-staging-images.tar" >/dev/null
-    for image in owner-control beta-admission bot; do
+    for image in owner-control api beta-admission bot; do
       [[ "$(docker_local image inspect "payreplayy-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'a loaded image revision does not match the reviewed commit'
     done
@@ -145,13 +160,15 @@ case "$command" in
       die 'the sealed Compose contract is absent or unsafe'
     for service_file in \
       owner-database-url publishable-key beta-database-url beta-transport-hmac \
-      bot-transport-hmac beta-payload-hmac bot-token; do
+      bot-transport-hmac beta-payload-hmac bot-token player-action-database-url \
+      api-action-transport-hmac api-action-payload-hmac api-action-capability-hmac \
+      api-action-semantic-hmac bot-action-transport-hmac; do
       require_service_file "$SECRET_ROOT/$service_file"
     done
     [[ ! -L "$SECRET_ROOT/supabase-ca.crt" && "$(stat --format='%U:%G:%a' "$SECRET_ROOT/supabase-ca.crt")" == 'root:root:444' ]] ||
       die 'the public Supabase CA ownership or mode is unsafe'
 
-    for image in owner-control beta-admission bot; do
+    for image in owner-control api beta-admission bot; do
       [[ "$(docker_local image inspect "payreplayy-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'an image revision does not match the reviewed commit'
     done
@@ -167,9 +184,15 @@ case "$command" in
       PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url" \
       PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac" \
       PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac" \
+      PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url" \
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac" \
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac" \
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac" \
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac" \
       PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt" \
       PAYREPLAYY_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token" \
       PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac" \
+      PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac" \
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null \
         --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file" \
         up -d --no-build --wait --wait-timeout 90

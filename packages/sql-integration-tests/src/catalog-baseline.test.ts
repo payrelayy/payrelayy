@@ -89,7 +89,11 @@ const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter
 const nonceDigest = (hexCharacter: string): string => hexCharacter.repeat(64);
 
 async function queryAsRole<T extends QueryResultRow>(
-  role: 'payreplayy_api' | 'payreplayy_beta_admission' | 'payreplayy_owner_control',
+  role:
+    | 'payreplayy_api'
+    | 'payreplayy_beta_admission'
+    | 'payreplayy_owner_control'
+    | 'payreplayy_player_actions',
   query: string,
   values: readonly (number | string | null)[] = [],
 ): Promise<readonly T[]> {
@@ -290,6 +294,8 @@ describe('disposable SQL migration baseline', () => {
       'payreplayy_nonce_retention_runtime',
       'payreplayy_owner_control',
       'payreplayy_owner_control_runtime',
+      'payreplayy_player_actions',
+      'payreplayy_player_actions_runtime',
       'payreplayy_worker',
     ];
     const roles = await client.query<RoleRow>(
@@ -367,6 +373,13 @@ describe('disposable SQL migration baseline', () => {
         group_role: 'payreplayy_owner_control',
         inherit_option: true,
         member_role: 'payreplayy_owner_control_runtime',
+        set_option: false,
+      },
+      {
+        admin_option: false,
+        group_role: 'payreplayy_player_actions',
+        inherit_option: true,
+        member_role: 'payreplayy_player_actions_runtime',
         set_option: false,
       },
     ]);
@@ -462,6 +475,91 @@ describe('disposable SQL migration baseline', () => {
     `);
 
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
+  });
+
+  it('gives the dedicated Player-ID runtime exactly six non-financial procedures', async () => {
+    const functions = await client.query<{
+      readonly group_allowed: boolean;
+      readonly hardened: boolean;
+      readonly public_allowed: boolean;
+      readonly runtime_direct: boolean;
+      readonly runtime_effective: boolean;
+      readonly signature: string;
+    }>(`
+      select
+        procedure.oid::regprocedure::text as signature,
+        procedure.prosecdef
+          and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+          and procedure.proowner = 'postgres'::regrole as hardened,
+        has_function_privilege('payreplayy_player_actions', procedure.oid, 'EXECUTE')
+          as group_allowed,
+        has_function_privilege('payreplayy_player_actions_runtime', procedure.oid, 'EXECUTE')
+          as runtime_effective,
+        exists (
+          select 1
+          from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
+          where privilege.grantee = 'payreplayy_player_actions_runtime'::regrole
+            and privilege.privilege_type = 'EXECUTE'
+        ) as runtime_direct,
+        exists (
+          select 1
+          from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
+          where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
+        ) as public_allowed
+      from pg_proc procedure
+      join pg_namespace namespace on namespace.oid = procedure.pronamespace
+      where namespace.nspname = 'app'
+        and has_function_privilege('payreplayy_player_actions_runtime', procedure.oid, 'EXECUTE')
+      order by signature
+    `);
+    expect(functions.rows.map((row) => row.signature)).toEqual([
+      'app.expire_telegram_player_registration_action(uuid,text)',
+      'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
+      admittedPrivateInboundRecorder,
+      'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
+      'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
+      'app.submit_telegram_player_registration_input(uuid,text,text)',
+    ]);
+    expect(
+      functions.rows.every(
+        (row) =>
+          row.group_allowed &&
+          row.hardened &&
+          !row.public_allowed &&
+          !row.runtime_direct &&
+          row.runtime_effective,
+      ),
+    ).toBe(true);
+
+    const nonceTable = await client.query<{
+      readonly policies: number;
+      readonly relforcerowsecurity: boolean;
+      readonly relrowsecurity: boolean;
+    }>(`
+      select relation.relrowsecurity, relation.relforcerowsecurity,
+        (select count(*)::integer from pg_policy where polrelid = relation.oid) as policies
+      from pg_class relation
+      where relation.oid = 'app.telegram_private_action_nonce_reservations'::regclass
+    `);
+    expect(nonceTable.rows).toEqual([
+      { policies: 0, relforcerowsecurity: true, relrowsecurity: true },
+    ]);
+
+    const digest = nonceDigest('9');
+    await expect(
+      queryAsRole<NonceReservationRow>(
+        'payreplayy_player_actions',
+        `select app.reserve_telegram_private_action_nonce($1::text, clock_timestamp() + interval '2 minutes') as reserved`,
+        [digest],
+      ),
+    ).resolves.toEqual([{ reserved: true }]);
+    await expect(
+      queryAsRole<NonceReservationRow>(
+        'payreplayy_player_actions',
+        `select app.reserve_telegram_private_action_nonce($1::text, clock_timestamp() + interval '2 minutes') as reserved`,
+        [digest],
+      ),
+    ).resolves.toEqual([{ reserved: false }]);
   });
 
   it('keeps invite admission private, fixed-search-path, and narrowly executable', async () => {

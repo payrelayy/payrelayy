@@ -8,6 +8,10 @@ alter role payreplayy_owner_control_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password null valid until 'infinity';
 
+alter role payreplayy_player_actions_runtime with
+  nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
+  connection limit 2 password null valid until 'infinity';
+
 do $payreplayy$
 declare
   activity_pid integer;
@@ -19,7 +23,8 @@ begin
     from pg_catalog.pg_stat_activity as activity
     where activity.usename = any (array[
       'payreplayy_beta_admission_runtime',
-      'payreplayy_owner_control_runtime'
+      'payreplayy_owner_control_runtime',
+      'payreplayy_player_actions_runtime'
     ])
       and activity.pid <> pg_catalog.pg_backend_pid()
   loop
@@ -38,7 +43,8 @@ begin
     from pg_catalog.pg_stat_activity as activity
     where activity.usename = any (array[
       'payreplayy_beta_admission_runtime',
-      'payreplayy_owner_control_runtime'
+      'payreplayy_owner_control_runtime',
+      'payreplayy_player_actions_runtime'
     ])
       and activity.pid <> pg_catalog.pg_backend_pid()
   ) then
@@ -47,7 +53,8 @@ begin
 
   foreach expected_role in array array[
     'payreplayy_beta_admission_runtime',
-    'payreplayy_owner_control_runtime'
+    'payreplayy_owner_control_runtime',
+    'payreplayy_player_actions_runtime'
   ]
   loop
     if not exists (
@@ -61,7 +68,10 @@ begin
         and not role.rolcreaterole
         and not role.rolreplication
         and not role.rolbypassrls
-        and role.rolconnlimit = 1
+        and role.rolconnlimit = case expected_role
+          when 'payreplayy_player_actions_runtime' then 2
+          else 1
+        end
         and role.rolpassword is null
     ) then
       raise exception 'A staging runtime login was not disabled safely.';

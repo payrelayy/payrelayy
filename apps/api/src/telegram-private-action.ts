@@ -28,12 +28,12 @@ export interface TelegramPrivateActionRequest {
  * a later approved runtime and must not share the private-inbox nonce table or digest namespace.
  */
 export interface TelegramPrivateActionNonceStore {
-  readonly durable: boolean;
+  readonly durable: true;
   reserve(nonceDigest: string, expiresAtMs: number, nowMs: number): Promise<boolean>;
 }
 
 /** Test-only replay store. It is intentionally not wired to application startup or Fastify. */
-export class InMemoryTelegramPrivateActionNonceStore implements TelegramPrivateActionNonceStore {
+export class InMemoryTelegramPrivateActionNonceStore {
   readonly durable = false;
   private readonly entries = new Map<string, number>();
 
@@ -275,6 +275,8 @@ export async function verifyTelegramPrivateActionRequest(
   rawBody: Buffer,
   options: TelegramPrivateActionVerificationOptions,
 ): Promise<TelegramPrivateActionEnvelope | undefined> {
+  if (options.nonceStore.durable !== true) return undefined;
+
   const requiredOrOptionalHeaders = [
     'content-type',
     'content-encoding',

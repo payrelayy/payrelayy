@@ -39,6 +39,17 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
 }
 
 describe('runtime configuration isolation', () => {
+  const playerActionEnvironment = {
+    NODE_ENV: 'test',
+    INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+    INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+    INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true',
+    BOT_TO_API_ACTION_HMAC_SECRET: 'a'.repeat(64),
+    API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
+    API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
+    API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
+  } as const;
+
   it('defaults API financial actions to dry-run mode', () => {
     expect(loadApiConfig({ NODE_ENV: 'test' }).financialActionsMode).toBe('dry_run');
   });
@@ -47,6 +58,50 @@ describe('runtime configuration isolation', () => {
     expect(() => loadApiConfig({ NODE_ENV: 'test', FINANCIAL_ACTIONS_MODE: 'live' })).toThrow(
       'only when NODE_ENV=production',
     );
+  });
+
+  it('pins the Player-ID action runtime to its dedicated staging login and TLS target', () => {
+    const config = loadApiConfig({
+      ...playerActionEnvironment,
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+    });
+    expect(config.telegramPlayerActionRuntime).toMatchObject({
+      enabled: true,
+      tlsMode: 'verify-full',
+      connection: {
+        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        user: 'payreplayy_player_actions_runtime',
+      },
+    });
+    const redacted = JSON.stringify(redactedApiConfigForLog(config));
+    expect(redacted).not.toContain('password');
+    expect(redacted).not.toContain('d'.repeat(64));
+  });
+
+  it('rejects a foreign project, a generic role, and shared Player-ID action HMACs', () => {
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://payreplayy_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('dedicated staging Player-ID action runtime login');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://payreplayy_api_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('dedicated staging Player-ID action runtime login');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'a'.repeat(64),
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('must be distinct');
   });
 
   it('keeps Telegram configuration out of the API process', () => {

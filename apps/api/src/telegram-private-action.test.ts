@@ -16,6 +16,7 @@ import {
   InMemoryTelegramPrivateActionDispatcher,
   InMemoryTelegramPrivateActionNonceStore,
   redactTelegramPrivateActionForLog,
+  type TelegramPrivateActionNonceStore,
   verifyAndDispatchTelegramPrivateActionForTest,
   verifyTelegramPrivateActionRequest,
 } from './telegram-private-action.js';
@@ -35,7 +36,16 @@ const callbackAction: TelegramPrivateActionEnvelope = {
   callbackData,
 };
 
-function verificationOptions(nonceStore = new InMemoryTelegramPrivateActionNonceStore()) {
+function durableNonceStore(
+  memoryStore = new InMemoryTelegramPrivateActionNonceStore(),
+): TelegramPrivateActionNonceStore {
+  return {
+    durable: true,
+    reserve: (nonceDigest, expiresAt, now) => memoryStore.reserve(nonceDigest, expiresAt, now),
+  };
+}
+
+function verificationOptions(nonceStore = durableNonceStore()) {
   return {
     transportHmacSecret,
     now: fixedNow,
@@ -122,7 +132,7 @@ describe('private Telegram action transport contract', () => {
       verifyTelegramPrivateActionRequest(stale.request, stale.rawBody, verificationOptions()),
     ).resolves.toBeUndefined();
 
-    const nonceStore = new InMemoryTelegramPrivateActionNonceStore();
+    const nonceStore = durableNonceStore();
     const current = signedRequest();
     await expect(
       verifyTelegramPrivateActionRequest(
@@ -143,7 +153,7 @@ describe('private Telegram action transport contract', () => {
   it('passes only a domain-separated nonce digest to the action store', async () => {
     let receivedDigest: string | undefined;
     const nonceStore = {
-      durable: false,
+      durable: true as const,
       reserve: async (nonceDigest: string) => {
         receivedDigest = nonceDigest;
         return true;
@@ -279,5 +289,54 @@ describe('private Telegram action transport contract', () => {
       (await app.inject({ method: 'POST', url: TELEGRAM_PRIVATE_ACTION_PATH })).statusCode,
     ).toBe(404);
     await app.close();
+  });
+
+  it('registers only the isolated action route when all Player-ID gates are explicit', async () => {
+    const config = loadApiConfig({
+      NODE_ENV: 'test',
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true',
+      BOT_TO_API_ACTION_HMAC_SECRET: transportHmacSecret,
+      API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
+      API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
+      API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+    });
+    let handled: TelegramPrivateActionEnvelope | undefined;
+    let closed = 0;
+    const app = buildApp(config, {
+      now: () => fixedNow,
+      postgresTelegramPlayerActionRuntime: {
+        nonceStore: {
+          durable: true,
+          reserve: async () => true,
+        },
+        async handle(action) {
+          handled = action;
+          return { version: 1, outcome: 'awaiting_player_id' };
+        },
+        async ready() {
+          return true;
+        },
+        async close() {
+          closed += 1;
+        },
+      },
+    });
+    const signed = signedRequest();
+    const response = await app.inject({
+      method: 'POST',
+      url: TELEGRAM_PRIVATE_ACTION_PATH,
+      headers: signed.request.headers as Record<string, string>,
+      payload: signed.rawBody,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ version: 1, outcome: 'awaiting_player_id' });
+    expect(handled).toEqual(callbackAction);
+    expect((await app.inject({ method: 'GET', url: '/readyz' })).statusCode).toBe(200);
+    await app.close();
+    expect(closed).toBe(1);
   });
 });

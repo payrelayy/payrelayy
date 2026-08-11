@@ -52,6 +52,26 @@ export type TelegramPrivateActionEnvelope =
       readonly playerId: string;
     });
 
+/** Safe bot-visible result. It never contains a database ID, Player ID, raw callback token, or state. */
+export type TelegramPrivateActionResult =
+  | {
+      readonly version: 1;
+      readonly outcome: 'menu';
+      readonly callbackData: string;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'awaiting_player_id';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'player_id_pending';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'invalid_player_id' | 'restart_required' | 'menu_required';
+    };
+
 export interface TelegramPrivateActionSignatureInput {
   readonly timestamp: string;
   readonly nonce: string;

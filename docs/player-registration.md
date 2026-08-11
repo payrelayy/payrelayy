@@ -118,18 +118,18 @@ claim that the customer owns the account.
 - Keep both records in the private `app` schema with RLS enabled and forced.
 - Grant no direct table or sequence access to browser clients, Telegram bot, worker, or API role.
 - Use fixed-search-path `SECURITY DEFINER` functions and revoke their default `PUBLIC` execution.
-  The registration helper remains ungranted; only the later conversation-aware wrapper may be
-  granted execution to `payreplayy_api`.
+  The registration helper remains ungranted. Staging grants only the conversation-aware wrapper to
+  the dedicated `payreplayy_player_actions` group; the generic API role remains denied.
 - The bot never receives database credentials and never invokes KemerBet directly.
 - Display English reason-code translations rather than database errors.
 
-## Customer flow after the later transport/action work
+## Staging customer flow
 
 1. A private-chat user presses an "Add Player ID" button carrying a valid, expiring,
    server-issued capability.
-2. The future action boundary validates that capability and moves the private conversation to an
+2. The action boundary validates that capability and moves the private conversation to an
    expiring `awaiting_player_id` state.
-3. A later single transaction validates that state and the new inbound event, records a
+3. A single transaction validates that state and the new inbound event, records a
    non-claiming request, consumes the event globally, and clears or advances the conversation.
 4. The bot replies: "Player ID saved - pending validation. It cannot be used for a deposit yet."
 5. A future controlled adapter reports only `exists`, `not_found`, or `review_required`.

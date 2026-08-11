@@ -14,12 +14,6 @@ const keys = {
   capabilityHmacSecret: 'a'.repeat(64),
   semanticHmacSecret: 'b'.repeat(64),
 } as const;
-const actionContext = {
-  actionId: '0a5fa0f3-c7b9-405c-a49c-84c5d8d4be18',
-  capabilityId: '9de75e42-a628-4f8f-9f9f-9f321dbf21b0',
-  expectedConversationVersion: '2',
-} as const;
-
 describe('Telegram Player ID capability protection', () => {
   it('derives one canonical opaque capability ID per recorded inbound event', () => {
     const first = deriveTelegramPlayerRegistrationCapabilityId(
@@ -120,26 +114,23 @@ describe('Telegram Player ID capability protection', () => {
     expect(startSemanticHmac).not.toBe(presentation.issueSemanticInputHmac);
   });
 
-  it('binds server-derived action context and HMAC-only Player ID normalization', () => {
+  it('binds the recorded origin, operation, platform, and HMAC-only Player ID normalization', () => {
     const first = createTelegramActionSemanticHmac({
       consumer: 'submit_player_registration_input',
       originInboundEventId,
       playerId: '  28379330  ',
       semanticHmacSecret: keys.semanticHmacSecret,
-      ...actionContext,
     });
     const retry = createTelegramActionSemanticHmac({
       consumer: 'submit_player_registration_input',
       originInboundEventId,
       playerId: '28379330',
       semanticHmacSecret: keys.semanticHmacSecret,
-      ...actionContext,
     });
     const expiry = createTelegramActionSemanticHmac({
       consumer: 'expire_player_registration_action',
       originInboundEventId,
       semanticHmacSecret: keys.semanticHmacSecret,
-      ...actionContext,
     });
 
     expect(first).toBe(retry);
@@ -151,53 +142,29 @@ describe('Telegram Player ID capability protection', () => {
         originInboundEventId,
         playerId: 'player id',
         semanticHmacSecret: keys.semanticHmacSecret,
-        ...actionContext,
       }),
     ).not.toBe(first);
 
-    const differentContext = createTelegramActionSemanticHmac({
+    const differentOrigin = createTelegramActionSemanticHmac({
       consumer: 'submit_player_registration_input',
-      originInboundEventId,
+      originInboundEventId: '58eeef22-21eb-4fe6-9f64-8637daed6874',
       playerId: '28379330',
       semanticHmacSecret: keys.semanticHmacSecret,
-      ...actionContext,
-      expectedConversationVersion: 3n,
     });
     const nonAsciiWhitespace = createTelegramActionSemanticHmac({
       consumer: 'submit_player_registration_input',
       originInboundEventId,
       playerId: '\u00a028379330\u00a0',
       semanticHmacSecret: keys.semanticHmacSecret,
-      ...actionContext,
-    });
-    const differentAction = createTelegramActionSemanticHmac({
-      consumer: 'submit_player_registration_input',
-      originInboundEventId,
-      playerId: '28379330',
-      semanticHmacSecret: keys.semanticHmacSecret,
-      ...actionContext,
-      actionId: '2474da35-7a28-4b38-8fd7-e7bf4c7243d8',
     });
 
-    expect(differentContext).not.toBe(first);
+    expect(differentOrigin).not.toBe(first);
     expect(nonAsciiWhitespace).not.toBe(first);
-    expect(differentAction).not.toBe(first);
     expect(() =>
       createTelegramActionSemanticHmac({
         consumer: 'expire_player_registration_action',
-        originInboundEventId,
+        originInboundEventId: originInboundEventId.toUpperCase(),
         semanticHmacSecret: keys.semanticHmacSecret,
-        ...actionContext,
-        expectedConversationVersion: '02',
-      }),
-    ).toThrow('canonical nonnegative integer');
-    expect(() =>
-      createTelegramActionSemanticHmac({
-        consumer: 'expire_player_registration_action',
-        originInboundEventId,
-        semanticHmacSecret: keys.semanticHmacSecret,
-        ...actionContext,
-        actionId: actionContext.actionId.toUpperCase(),
       }),
     ).toThrow('canonical lowercase UUID');
     expect(() =>

@@ -3,6 +3,10 @@ import {
   TELEGRAM_PRIVATE_INGRESS_CONTENT_TYPE,
   TELEGRAM_PRIVATE_INGRESS_MAX_BODY_BYTES,
   TELEGRAM_PRIVATE_INGRESS_PATH,
+  TELEGRAM_PRIVATE_ACTION_CONTENT_TYPE,
+  TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES,
+  TELEGRAM_PRIVATE_ACTION_PATH,
+  type TelegramPrivateActionEnvelope,
 } from '@payreplayy/contracts';
 import Fastify from 'fastify';
 
@@ -19,6 +23,14 @@ import {
   type PostgresTelegramIngressRuntime,
   type PostgresTelegramIngressRuntimeFactory,
 } from './postgres-telegram-ingress-runtime.js';
+import {
+  createPostgresTelegramPlayerActionRuntime,
+  isTelegramPlayerActionRuntimeEnabled,
+  TelegramPlayerActionRuntimeUnavailableError,
+  type PostgresTelegramPlayerActionRuntime,
+} from './postgres-telegram-player-action-runtime.js';
+import { TelegramPrivateActionNonceStoreUnavailableError } from './postgres-telegram-private-action-nonce-store.js';
+import { verifyTelegramPrivateActionRequest } from './telegram-private-action.js';
 
 export interface ApiDependencies {
   readonly now?: () => Date;
@@ -28,6 +40,7 @@ export interface ApiDependencies {
   readonly createPostgresTelegramIngressRuntime?: PostgresTelegramIngressRuntimeFactory;
   /** Test seam for a complete dual-gated database runtime; Fastify owns its shutdown lifecycle. */
   readonly postgresTelegramIngressRuntime?: PostgresTelegramIngressRuntime;
+  readonly postgresTelegramPlayerActionRuntime?: PostgresTelegramPlayerActionRuntime;
 }
 
 export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiDependencies = {}) {
@@ -43,6 +56,10 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
           'req.headers.x-payreplayy-nonce',
           'req.headers.x-payreplayy-signature',
           'req.headers.x-payreplayy-timestamp',
+          'req.headers.x-payreplayy-action-key-id',
+          'req.headers.x-payreplayy-action-nonce',
+          'req.headers.x-payreplayy-action-signature',
+          'req.headers.x-payreplayy-action-timestamp',
           '*.token',
           '*.password',
         ],
@@ -50,6 +67,68 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
       },
     },
   });
+
+  const playerActionEnabled = isTelegramPlayerActionRuntimeEnabled(config);
+  if (playerActionEnabled && isPostgresTelegramIngressRuntimeEnabled(config)) {
+    throw new Error('The isolated Player-ID action runtime cannot share the generic ingress mode.');
+  }
+  const playerActionRuntime = playerActionEnabled
+    ? (dependencies.postgresTelegramPlayerActionRuntime ??
+      createPostgresTelegramPlayerActionRuntime(config))
+    : undefined;
+
+  if (playerActionRuntime) {
+    if (!config.telegramActionChannel.enabled) {
+      throw new Error('The Player-ID action runtime requires its isolated action channel.');
+    }
+    const telegramActionChannel = config.telegramActionChannel;
+    app.addContentTypeParser(
+      TELEGRAM_PRIVATE_ACTION_CONTENT_TYPE,
+      { parseAs: 'buffer', bodyLimit: TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES },
+      (_request, rawBody, done) => done(null, rawBody),
+    );
+    app.post<{ Body: Buffer }>(
+      TELEGRAM_PRIVATE_ACTION_PATH,
+      { bodyLimit: TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES },
+      async (request, reply) => {
+        let action: TelegramPrivateActionEnvelope | undefined;
+        try {
+          action = await verifyTelegramPrivateActionRequest(
+            {
+              headers: request.headers,
+              rawHeaders: request.raw.rawHeaders,
+              method: request.method,
+              url: request.raw.url,
+            },
+            request.body,
+            {
+              transportHmacSecret: telegramActionChannel.transportHmacSecret,
+              now: dependencies.now?.() ?? new Date(),
+              nonceStore: playerActionRuntime.nonceStore,
+            },
+          );
+        } catch (error) {
+          if (error instanceof TelegramPrivateActionNonceStoreUnavailableError) {
+            request.log.warn('Telegram Player-ID action nonce storage is unavailable.');
+            return reply.code(503).send({ error: 'action_unavailable' });
+          }
+          throw error;
+        }
+        if (!action) return reply.code(401).send({ error: 'unauthorized' });
+
+        try {
+          return reply.code(200).send(await playerActionRuntime.handle(action, request.body));
+        } catch (error) {
+          if (error instanceof TelegramPlayerActionRuntimeUnavailableError) {
+            request.log.warn('Telegram Player-ID action processing is unavailable.');
+            return reply.code(503).send({ error: 'action_unavailable' });
+          }
+          throw error;
+        }
+      },
+    );
+    app.addHook('onClose', async () => playerActionRuntime.close());
+  }
 
   if (isPostgresTelegramIngressRuntimeEnabled(config)) {
     const telegramIngress = config.telegramIngress;
@@ -141,13 +220,16 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
     financialActionsMode: config.financialActionsMode,
   }));
 
-  app.get('/readyz', async (_request, reply) =>
-    reply.code(503).send({
+  app.get('/readyz', async (_request, reply) => {
+    if (playerActionRuntime && (await playerActionRuntime.ready())) {
+      return reply.code(200).send({ ready: true, service: 'payreplayy-player-actions' });
+    }
+    return reply.code(503).send({
       ready: false,
       stage: 'stage-0',
       reason: 'database_not_initialized',
-    }),
-  );
+    });
+  });
 
   return app;
 }

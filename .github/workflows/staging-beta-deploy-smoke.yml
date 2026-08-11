@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy and smoke, or stop staging and disable all narrow logins
+        description: Build, unban and check staging once, deploy and smoke, or stop staging
         required: true
         default: plan
         type: choice
         options:
           - plan
+          - unban-and-connectivity-check
           - deploy-and-smoke
           - stop-and-disable
       confirm_staging_project_ref:
@@ -37,6 +38,8 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '590666364'
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  STAGING_BANNED_IP: 2a05:d018:135e:1602:5210:739d:5667:fee4
+  SUPABASE_CLI_VERSION: 2.113.0
   BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
   OWNER_RUNTIME_ROLE: payreplayy_owner_control_runtime
   PLAYER_ACTION_RUNTIME_ROLE: payreplayy_player_actions_runtime
@@ -61,11 +64,11 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|deploy-and-smoke|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|unban-and-connectivity-check|deploy-and-smoke|stop-and-disable)$ ]]
 
   build:
     name: Build reviewed staging images
-    if: inputs.mode != 'stop-and-disable'
+    if: inputs.mode == 'plan' || inputs.mode == 'deploy-and-smoke'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -123,6 +126,63 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+
+  connectivity:
+    name: Unban exact staging IP and check connectivity once
+    if: inputs.mode == 'unban-and-connectivity-check'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Set up the pinned Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.113.0
+
+      - name: Remove only the approved staging network ban
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SUPABASE_ACCESS_TOKEN" ]]
+          supabase --version | grep -Fx "$SUPABASE_CLI_VERSION"
+          supabase network-bans remove --help >/dev/null
+          current_bans="$(supabase network-bans get \
+            --project-ref "$STAGING_PROJECT_REF" --experimental)"
+          if grep -Fq "$STAGING_BANNED_IP" <<<"$current_bans"; then
+            supabase network-bans remove --db-unban-ip "$STAGING_BANNED_IP" \
+              --project-ref "$STAGING_PROJECT_REF" --experimental
+          else
+            echo 'The approved staging IP is no longer banned; no ban was removed.'
+          fi
+
+      - name: Verify one protected admin connection without changing database state
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ runner.temp }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          umask 077
+          trap 'rm -f "$PGSSLROOTCERT"' EXIT
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$PGSSLROOTCERT"
+          openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
+          psql -X --set=ON_ERROR_STOP=1 \
+            --command='select 1 as staging_database_reachable;'
 
   deploy:
     name: Deploy and smoke exact staging release

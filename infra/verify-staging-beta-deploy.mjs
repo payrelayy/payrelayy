@@ -75,8 +75,8 @@ assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
 assert.ok(
   workflow.indexOf('Capture bounded Owner-control startup diagnostics') <
     workflow.indexOf('Capture count-only runtime session diagnostics after failed activation') &&
-  workflow.indexOf('Capture count-only runtime session diagnostics after failed activation') <
-    workflow.indexOf('Roll back failed activation'),
+    workflow.indexOf('Capture count-only runtime session diagnostics after failed activation') <
+      workflow.indexOf('Roll back failed activation'),
   'Bounded startup and count-only database diagnostics must run before rollback removes the runtime state.',
 );
 assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD/);
@@ -126,8 +126,7 @@ assert.match(helper, /--project-name "\$PROJECT_NAME"/);
 assert.match(helper, /up -d --no-build --wait --wait-timeout 90/);
 assert.doesNotMatch(helper, /curl|wget|git |\.env|xzztugbgtulptnbpoelr/);
 
-const ownerDiagnostic =
-  /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
+const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
 assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');
 assert.match(ownerDiagnostic, /com\.docker\.compose\.project=\$PROJECT_NAME/);
 assert.match(ownerDiagnostic, /com\.docker\.compose\.service=owner-control/);

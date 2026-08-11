@@ -1,9 +1,14 @@
 # Owner/Admin control service
 
-This package now contains the first narrow Owner-only backend operation: issue or revoke a
-Telegram beta invite. It is not a general dashboard and it has no browser database grant. The
-service verifies the caller's bearer token with the exact staging Supabase Auth project, derives
-the Auth user ID from that verified response, and passes it to private database procedures. The
+This package contains the first narrow Owner-only backend operation: issue or revoke a Telegram
+beta invite. It also serves a small private staging page at `/owner`; it is not a general dashboard
+and it has no browser database grant. The page signs in directly to the exact staging Supabase Auth
+project with the public publishable key, keeps the access token only in JavaScript memory, and sends
+that bearer token to the loopback-only Owner service. It never stores a password, refresh token,
+access token, service-role key, or database credential in browser storage.
+
+The service verifies the bearer token with the exact staging Supabase Auth project, derives the
+Auth user ID from that verified response, and passes it to private database procedures. The
 database independently requires that subject to map to the one active Owner.
 
 The raw 32-byte invite token is generated in process, returned once in a `Cache-Control: no-store`
@@ -12,9 +17,20 @@ audit metadata contains only the opaque invite ID, expiry, or allowlisted revoca
 service never receives a caller-supplied admin/actor ID and never uses a Supabase service-role key.
 
 The runtime remains disabled by default. Its staging container binds only to host loopback for an
-SSH-forwarded operator session; there is no public proxy or Internet-facing Owner endpoint. A
-future dashboard will remain private to the Owner and Administrators, is not a customer-facing PWA
-in version 1, and will keep English-only interface and validation copy.
+SSH-forwarded operator session; there is no public proxy or Internet-facing Owner endpoint. The
+current page remains private to the Owner, is not a customer-facing PWA, and keeps English-only
+interface and validation copy.
+
+After the reviewed page is deployed, open it only through an SSH local-forward from the approved
+operator workstation:
+
+```text
+ssh -N -L 3002:127.0.0.1:3002 codex-swift-reef-6a36
+```
+
+Then browse to `http://127.0.0.1:3002/owner`. The browser-to-Supabase sign-in request is HTTPS; the
+browser-to-VM Owner API path stays inside the encrypted SSH tunnel. Do not expose port 3002 on the
+VM firewall or add a public proxy.
 
 Do not add a locale preference or language selector to Owner/Admin accounts in version 1.
 `display_name` remains identity data and may use the administrator's own language; it is not

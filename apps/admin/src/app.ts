@@ -13,6 +13,13 @@ import {
   type BetaInviteRevocationReason,
 } from './owner-invites.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
+import {
+  OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
+  OWNER_DASHBOARD_CSS,
+  OWNER_DASHBOARD_HTML,
+  OWNER_DASHBOARD_JAVASCRIPT,
+  ownerDashboardPublicConfig,
+} from './owner-dashboard.js';
 
 export interface OwnerControlAppDependencies {
   readonly fetch?: typeof fetch;
@@ -62,6 +69,33 @@ export function buildOwnerControlApp(
     reply.header('cache-control', 'no-store, max-age=0').header('pragma', 'no-cache');
     return payload;
   });
+
+  const browserHeaders = {
+    'content-security-policy': OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
+    'cross-origin-opener-policy': 'same-origin',
+    'cross-origin-resource-policy': 'same-origin',
+    'permissions-policy':
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+  } as const;
+
+  app.get('/owner', async (_request, reply) =>
+    reply.headers(browserHeaders).type('text/html; charset=utf-8').send(OWNER_DASHBOARD_HTML),
+  );
+  app.get('/owner/app.js', async (_request, reply) =>
+    reply
+      .headers(browserHeaders)
+      .type('text/javascript; charset=utf-8')
+      .send(OWNER_DASHBOARD_JAVASCRIPT),
+  );
+  app.get('/owner/styles.css', async (_request, reply) =>
+    reply.headers(browserHeaders).type('text/css; charset=utf-8').send(OWNER_DASHBOARD_CSS),
+  );
+  app.get('/owner/config.json', async (_request, reply) =>
+    reply.headers(browserHeaders).send(ownerDashboardPublicConfig(runtimeConfig)),
+  );
   app.setErrorHandler((error, request, reply) => {
     const code = statusCode(error);
     if (code !== undefined && code >= 400 && code < 500) {

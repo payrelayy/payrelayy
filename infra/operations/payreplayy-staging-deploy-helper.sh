@@ -175,7 +175,27 @@ case "$command" in
         up -d --no-build --wait --wait-timeout 90
     ;;
 
+  diagnose-owner-startup)
+    [[ $# -eq 3 ]] || die 'diagnose-owner-startup requires a commit and image tag'
+    commit_sha="$2"
+    image_tag="$3"
+    validate_commit_and_tag "$commit_sha" "$image_tag"
+    owner_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=owner-control')"
+    [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die 'exactly one Owner-control container was not available for diagnostics'
+    [[ "$(docker_local container inspect "$owner_container" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+      die 'the Owner-control diagnostic target does not match the reviewed commit'
+
+    docker_local container inspect "$owner_container" \
+      --format 'owner-control status={{.State.Status}} exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}}'
+    printf '%s\n' 'owner-control bounded startup log follows:'
+    docker_local container logs --tail 80 "$owner_container"
+    ;;
+
   *)
-    die 'expected verify, stop, discard, install, or start'
+    die 'expected verify, stop, discard, install, start, or diagnose-owner-startup'
     ;;
 esac

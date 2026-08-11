@@ -175,6 +175,14 @@ and must be run before the 24-hour login expiry; credential expiry does not itse
 containers. A successful deployment is a beta demo, not financial launch approval; all payment,
 provider, action, and KemerBet gates remain off.
 
+If activation fails, the root-owned helper reports only the Owner-control container state and at
+most 80 startup-log lines for the exact reviewed image before rollback removes the container. The
+Owner-control logger redacts request headers, bodies, tokens, invite URLs, and passwords; this
+diagnostic must remain bounded to the loopback-only Owner-control service and must run before the
+count-only database session diagnostic. Rollback clears PostgreSQL's statistics snapshot after
+terminating sessions so its final zero-session assertion observes the current catalog state rather
+than a transaction-local stale snapshot.
+
 ## Protected runtime preflight
 
 The manual `Staging beta runtime preflight` GitHub workflow is the read-only inspection path for the

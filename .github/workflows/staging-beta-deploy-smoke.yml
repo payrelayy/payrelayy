@@ -281,6 +281,18 @@ jobs:
             "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
           echo 'started=true' >> "$GITHUB_OUTPUT"
 
+      - name: Capture bounded Owner-control startup diagnostics
+        if: failure() && steps.activate.outcome == 'failure'
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper diagnose-owner-startup '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+
       - name: Capture count-only runtime session diagnostics after failed activation
         if: failure() && steps.provision.outputs.attempted == 'true'
         shell: bash

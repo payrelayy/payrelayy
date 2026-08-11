@@ -12,6 +12,11 @@ import {
   OwnerInviteUnavailableError,
   type BetaInviteRevocationReason,
 } from './owner-invites.js';
+import {
+  OwnerPlayerRegistrationReviewRejectedError,
+  OwnerPlayerRegistrationReviewUnavailableError,
+  type OwnerPlayerRegistrationDecision,
+} from './owner-player-registration-reviews.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 import {
   OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
@@ -41,6 +46,12 @@ const REVOCATION_REASONS = new Set<BetaInviteRevocationReason>([
   'owner_cancelled',
   'security_rotation',
   'staging_reset',
+]);
+const PLAYER_REGISTRATION_DECISIONS = new Set<OwnerPlayerRegistrationDecision>([
+  'exists',
+  'not_found',
+  'review_required',
+  'cancelled',
 ]);
 
 function statusCode(error: unknown): number | undefined {
@@ -185,6 +196,71 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner beta-invite revocation is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/player-registration-requests',
+    async (request, reply) => {
+      try {
+        const queryKeys = Object.keys(request.query);
+        if (queryKeys.some((key) => key !== 'limit')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const rawLimit = request.query.limit;
+        const limit = rawLimit === undefined ? 25 : Number(rawLimit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const requests = await dependencies.runtime.playerRegistrations.list(authUserId, limit);
+        return reply.code(200).send({ requests });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPlayerRegistrationReviewRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner Player ID review queue is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { requestId: string } }>(
+    '/v1/owner/player-registration-requests/:requestId/review',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['decision']);
+        const decision = body?.decision;
+        if (
+          typeof decision !== 'string' ||
+          !PLAYER_REGISTRATION_DECISIONS.has(decision as OwnerPlayerRegistrationDecision)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receipt = await dependencies.runtime.playerRegistrations.review(
+          authUserId,
+          request.params.requestId,
+          decision as OwnerPlayerRegistrationDecision,
+        );
+        return reply.code(200).send(receipt);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPlayerRegistrationReviewRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerPlayerRegistrationReviewUnavailableError) {
+          request.log.warn('Owner Player ID review is unavailable.');
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        request.log.warn('Owner Player ID review is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

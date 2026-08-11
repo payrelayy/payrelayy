@@ -36,6 +36,15 @@ function runtime(
       }),
       revoke: async () => undefined,
     },
+    playerRegistrations: {
+      list: async () => [],
+      review: async (_actor, requestId, decision) => ({
+        alreadyRecorded: false,
+        requestId,
+        reviewedAt: '2026-08-11T12:10:00.000Z',
+        status: decision,
+      }),
+    },
     ready: async () => true,
     close: async () => undefined,
     ...overrides,
@@ -63,6 +72,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.headers['x-frame-options']).toBe('DENY');
     expect(response.headers['permissions-policy']).toContain('payment=()');
     expect(response.body).toContain('PayReplayy Owner');
+    expect(response.body).toContain('KemerBet Player ID requests');
+    expect(response.body).toContain('This does not prove ownership');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
   });
@@ -89,6 +100,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/u);
     expect(response.body).not.toContain('refresh_token');
     expect(response.body).not.toContain('service_role');
+    expect(response.body).toContain('/v1/owner/player-registration-requests?limit=25');
+    expect(response.body).toContain("reviewButton('Found on KemerBet'");
+    expect(response.body).not.toContain('innerHTML');
     expect(response.body).toContain("url.pathname !== '/payrelayybot'");
     expect(response.body).not.toContain('/PayReplayyBot');
     expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
@@ -176,6 +190,92 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(response.statusCode).toBe(204);
     expect(revoked).toEqual([authUserId, inviteId, 'owner_cancelled']);
+    await app.close();
+  });
+
+  it('returns a bounded authenticated KemerBet Player-ID review queue', async () => {
+    let observed: readonly (number | string)[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        playerRegistrations: {
+          list: async (actor, limit) => {
+            observed = [actor, limit ?? -1];
+            return [
+              {
+                createdAt: '2026-08-11T12:00:00.000Z',
+                playerId: 'STAGING-TEST-20260811-01',
+                platformCode: 'kemerbet',
+                requestId: inviteId,
+                status: 'pending_validation',
+                updatedAt: '2026-08-11T12:00:00.000Z',
+              },
+            ];
+          },
+          review: async () => {
+            throw new Error('not called');
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/player-registration-requests?limit=20',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      requests: [{ playerId: 'STAGING-TEST-20260811-01', status: 'pending_validation' }],
+    });
+    expect(observed).toEqual([authUserId, 20]);
+    await app.close();
+  });
+
+  it('records only an allowlisted non-claiming review decision', async () => {
+    let observed: readonly string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        playerRegistrations: {
+          list: async () => [],
+          review: async (actor, id, decision) => {
+            observed = [actor, id, decision];
+            return {
+              alreadyRecorded: false,
+              requestId: id,
+              reviewedAt: '2026-08-11T12:10:00.000Z',
+              status: decision,
+            };
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/player-registration-requests/${inviteId}/review`,
+      headers: { authorization: `Bearer ${bearer}` },
+      payload: { decision: 'review_required' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ requestId: inviteId, status: 'review_required' });
+    expect(observed).toEqual([authUserId, inviteId, 'review_required']);
+    await app.close();
+  });
+
+  it('rejects arbitrary Player-ID review notes and decisions before authentication', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: async () => {
+        throw new Error('authentication must not run');
+      },
+      runtime: runtime(),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/player-registration-requests/${inviteId}/review`,
+      payload: { decision: 'validated', note: 'raw evidence' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'invalid_request' });
     await app.close();
   });
 });

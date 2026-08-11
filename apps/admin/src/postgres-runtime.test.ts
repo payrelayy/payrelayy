@@ -2,6 +2,7 @@ import type { OwnerControlRuntimeConfig } from '@payreplayy/config/owner-control
 import { describe, expect, it } from 'vitest';
 
 import {
+  OWNER_CONTROL_PREFLIGHT_SQL,
   OwnerControlPostgresRuntimeUnavailableError,
   ownerControlPoolConfig,
 } from './postgres-runtime.js';
@@ -44,5 +45,16 @@ describe('Owner-control bounded PostgreSQL pool', () => {
         tlsMode: 'require',
       } as unknown as typeof config),
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
+  });
+
+  it('allows only invite and non-claiming Player-ID review procedures', () => {
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.list_owner_player_registration_requests(uuid,integer)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.review_owner_player_registration_request(uuid,uuid,text,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('all_other_app_functions_denied');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
   });
 });

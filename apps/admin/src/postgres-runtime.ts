@@ -2,9 +2,11 @@ import type { OwnerControlRuntimeConfig } from '@payreplayy/config/owner-control
 import { Pool, type PoolConfig } from 'pg';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
+import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
 
 export interface OwnerControlPostgresRuntime {
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
+  readonly playerRegistrations: Pick<PostgresOwnerPlayerRegistrationReviews, 'list' | 'review'>;
   close(): Promise<void>;
   ready(): Promise<boolean>;
 }
@@ -41,7 +43,7 @@ export function ownerControlPoolConfig(
   };
 }
 
-const PREFLIGHT_SQL = `
+export const OWNER_CONTROL_PREFLIGHT_SQL = `
   select
     current_user = 'payreplayy_owner_control_runtime' as exact_runtime,
     session_user = 'payreplayy_owner_control_runtime' as exact_session,
@@ -95,6 +97,8 @@ const PREFLIGHT_SQL = `
     ) as owner_group_members_are_private,
     has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute') as issue_allowed,
     has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute') as revoke_allowed,
+    has_function_privilege(current_user, 'app.list_owner_player_registration_requests(uuid,integer)', 'execute') as player_request_list_allowed,
+    has_function_privilege(current_user, 'app.review_owner_player_registration_request(uuid,uuid,text,text)', 'execute') as player_request_review_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -113,7 +117,9 @@ const PREFLIGHT_SQL = `
         and has_function_privilege(current_user, procedure.oid, 'execute')
         and procedure.oid not in (
           'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
-          'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure
+          'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure,
+          'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
+          'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -127,7 +133,7 @@ export async function createOwnerControlPostgresRuntime(
     poolHealthy = false;
   });
   try {
-    const result = await pool.query<Record<string, boolean>>(PREFLIGHT_SQL);
+    const result = await pool.query<Record<string, boolean>>(OWNER_CONTROL_PREFLIGHT_SQL);
     const row = result.rows.length === 1 ? result.rows[0] : undefined;
     if (!row || Object.values(row).some((value) => value !== true)) {
       throw new Error('preflight failed');
@@ -140,6 +146,9 @@ export async function createOwnerControlPostgresRuntime(
   let closed = false;
   return {
     invites: new PostgresOwnerInviteControl({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    playerRegistrations: new PostgresOwnerPlayerRegistrationReviews({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     ready: async () => {

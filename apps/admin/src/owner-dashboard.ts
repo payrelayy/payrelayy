@@ -71,6 +71,22 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
             <button class="danger" id="revoke-button" type="button">Revoke invite</button>
           </div>
         </div>
+
+        <section class="review-section" aria-labelledby="player-review-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Non-claiming review</p>
+              <h2 id="player-review-title">KemerBet Player ID requests</h2>
+            </div>
+            <button class="secondary" id="refresh-requests-button" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">
+            Record only whether the submitted ID was found. This does not prove ownership and
+            never enables deposits. Use found or not-found only after an independent manual
+            KemerBet lookup.
+          </p>
+          <div class="request-list" id="player-request-list"></div>
+        </section>
       </section>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
@@ -108,12 +124,20 @@ button.secondary { color: #e4e4e7; background: #27272a; }
 button.danger { color: #fecaca; background: #3f171b; }
 button:disabled { cursor: wait; opacity: 0.55; }
 .receipt { margin-top: 22px; border-top: 1px solid #30303a; padding-top: 20px; }
+.review-section { margin-top: 28px; border-top: 1px solid #30303a; padding-top: 24px; }
+.request-list { display: grid; gap: 14px; margin-top: 16px; }
+.request-card { border: 1px solid #30303a; border-radius: 12px; background: #141419; padding: 16px; }
+.request-card h3 { margin: 0 0 6px; font-size: 1rem; overflow-wrap: anywhere; }
+.request-meta { margin: 0; color: #a1a1aa; font-size: 0.82rem; }
+.review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
+.review-actions button { padding: 10px 12px; font-size: 0.83rem; }
+.empty-state { color: #a1a1aa; }
 output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #cffafe; background: #0c1d20; padding: 14px; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .notice { min-height: 24px; color: #fcd34d; font-weight: 700; }
 footer { margin-top: 30px; font-size: 0.85rem; }
 [hidden] { display: none !important; }
-@media (max-width: 640px) { .shell { padding-top: 36px; } .actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
+@media (max-width: 640px) { .shell { padding-top: 36px; } .actions, .review-actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
 `;
 
 export const OWNER_DASHBOARD_JAVASCRIPT = `const loginPanel = document.querySelector('#login-panel');
@@ -128,6 +152,8 @@ const inviteOutput = document.querySelector('#invite-url');
 const copyButton = document.querySelector('#copy-button');
 const openLink = document.querySelector('#open-link');
 const revokeButton = document.querySelector('#revoke-button');
+const refreshRequestsButton = document.querySelector('#refresh-requests-button');
+const playerRequestList = document.querySelector('#player-request-list');
 
 let accessToken;
 let currentInvite;
@@ -148,10 +174,15 @@ function clearInvite() {
   receipt.hidden = true;
 }
 
+function clearPlayerRequests() {
+  playerRequestList.replaceChildren();
+}
+
 function signOut(message = 'Signed out.') {
   accessToken = undefined;
   passwordInput.value = '';
   clearInvite();
+  clearPlayerRequests();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -191,6 +222,96 @@ async function ownerRequest(path, init) {
   return response;
 }
 
+function validPlayerRequest(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const requestId = typeof value.requestId === 'string' ? value.requestId : undefined;
+  const playerId = typeof value.playerId === 'string' ? value.playerId : undefined;
+  const status = value.status;
+  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
+      value.platformCode !== 'kemerbet' || !playerId || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(playerId) ||
+      (status !== 'pending_validation' && status !== 'review_required') ||
+      typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))) return undefined;
+  return { createdAt: value.createdAt, playerId, requestId, status };
+}
+
+async function recordPlayerReview(requestId, decision) {
+  if ((decision === 'exists' || decision === 'not_found') &&
+      !window.confirm('Confirm that you manually checked this exact Player ID on KemerBet. This records existence only and does not prove ownership.')) return;
+  setNotice('Recording Player ID review\u2026');
+  try {
+    const response = await ownerRequest('/v1/owner/player-registration-requests/' + encodeURIComponent(requestId) + '/review', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+    if (!response.ok) throw new Error('review');
+    setNotice('Player ID review recorded. Ownership and deposits remain disabled.');
+    await loadPlayerRequests();
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Player ID review failed. Refresh before trying again.');
+  }
+}
+
+function reviewButton(label, requestId, decision, className) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  if (className) button.className = className;
+  button.addEventListener('click', () => recordPlayerReview(requestId, decision));
+  return button;
+}
+
+function renderPlayerRequests(requests) {
+  clearPlayerRequests();
+  if (requests.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No pending KemerBet Player ID requests.';
+    playerRequestList.append(empty);
+    return;
+  }
+  for (const request of requests) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = request.playerId;
+    const metadata = document.createElement('p');
+    metadata.className = 'request-meta';
+    metadata.textContent = request.status.replaceAll('_', ' ') + ' \u00b7 submitted ' + new Date(request.createdAt).toLocaleString();
+    const actions = document.createElement('div');
+    actions.className = 'review-actions';
+    actions.append(
+      reviewButton('Found on KemerBet', request.requestId, 'exists'),
+      reviewButton('Not found', request.requestId, 'not_found'),
+      reviewButton('Needs more evidence', request.requestId, 'review_required', 'secondary'),
+      reviewButton('Cancel request', request.requestId, 'cancelled', 'danger'),
+    );
+    card.append(title, metadata, actions);
+    playerRequestList.append(card);
+  }
+}
+
+async function loadPlayerRequests() {
+  refreshRequestsButton.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/player-registration-requests?limit=25', {
+      method: 'GET',
+      headers: {},
+    });
+    if (!response.ok) throw new Error('queue');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.requests) || payload.requests.length > 25) throw new Error('queue');
+    const requests = payload.requests.map(validPlayerRequest);
+    if (requests.some((request) => !request)) throw new Error('queue');
+    renderPlayerRequests(requests);
+  } catch (error) {
+    clearPlayerRequests();
+    if (!isSignedOutError(error)) setNotice('Player ID review queue is unavailable.');
+  } finally {
+    refreshRequestsButton.disabled = false;
+  }
+}
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBusy(loginForm, true);
@@ -218,6 +339,7 @@ loginForm.addEventListener('submit', async (event) => {
     loginPanel.hidden = true;
     invitePanel.hidden = false;
     setNotice('Signed in. Create an invite when you are ready to send it.');
+    await loadPlayerRequests();
   } catch {
     passwordInput.value = '';
     accessToken = undefined;
@@ -284,6 +406,7 @@ revokeButton.addEventListener('click', async () => {
 });
 
 logoutButton.addEventListener('click', () => signOut());
+refreshRequestsButton.addEventListener('click', loadPlayerRequests);
 `;
 
 export function ownerDashboardPublicConfig(

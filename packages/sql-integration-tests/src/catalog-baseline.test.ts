@@ -1774,6 +1774,8 @@ describe('disposable SQL migration baseline', () => {
       readonly direct_table_access_denied: boolean;
       readonly functions_are_hardened: boolean;
       readonly issue_allowed: boolean;
+      readonly player_list_allowed: boolean;
+      readonly player_review_allowed: boolean;
       readonly revoke_allowed: boolean;
       readonly runtime_direct_execute_denied: boolean;
       readonly runtime_effective_issue_allowed: boolean;
@@ -1790,6 +1792,16 @@ describe('disposable SQL migration baseline', () => {
           'execute'
         ) as revoke_allowed,
         has_function_privilege(
+          'payreplayy_owner_control',
+          'app.list_owner_player_registration_requests(uuid,integer)',
+          'execute'
+        ) as player_list_allowed,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.review_owner_player_registration_request(uuid,uuid,text,text)',
+          'execute'
+        ) as player_review_allowed,
+        has_function_privilege(
           'payreplayy_owner_control_runtime',
           'app.issue_telegram_beta_invite(uuid,text,timestamptz)',
           'execute'
@@ -1799,7 +1811,9 @@ describe('disposable SQL migration baseline', () => {
           from pg_proc procedure
           where procedure.oid in (
             'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
-            'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure
+            'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure,
+            'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
+            'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure
           )
             and exists (
               select 1
@@ -1813,7 +1827,9 @@ describe('disposable SQL migration baseline', () => {
           from pg_proc procedure
           where procedure.oid in (
             'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
-            'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure
+            'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure,
+            'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
+            'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure
           )
             and (
               not procedure.prosecdef
@@ -1836,7 +1852,9 @@ describe('disposable SQL migration baseline', () => {
           cross join (
             values
               ('app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure),
-              ('app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure)
+              ('app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure),
+              ('app.list_owner_player_registration_requests(uuid,integer)'::regprocedure),
+              ('app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure)
           ) owner_function(procedure_oid)
           where has_function_privilege(
             denied_role.role_name,
@@ -1849,10 +1867,19 @@ describe('disposable SQL migration baseline', () => {
           'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)',
           'execute'
         ) as beta_execute_denied,
-        not has_table_privilege(
-          'payreplayy_owner_control',
-          'app.telegram_beta_invites',
-          'select,insert,update,delete,truncate,references,trigger'
+        not exists (
+          select 1
+          from (
+            values
+              ('app.telegram_beta_invites'),
+              ('app.player_registration_requests'),
+              ('app.player_registration_request_reviews')
+          ) protected_table(table_name)
+          where has_table_privilege(
+            'payreplayy_owner_control',
+            protected_table.table_name,
+            'select,insert,update,delete,truncate,references,trigger'
+          )
         ) as direct_table_access_denied
     `);
     expect(privileges.rows).toEqual([
@@ -1862,6 +1889,8 @@ describe('disposable SQL migration baseline', () => {
         direct_table_access_denied: true,
         functions_are_hardened: true,
         issue_allowed: true,
+        player_list_allowed: true,
+        player_review_allowed: true,
         revoke_allowed: true,
         runtime_direct_execute_denied: true,
         runtime_effective_issue_allowed: true,
@@ -1953,5 +1982,178 @@ describe('disposable SQL migration baseline', () => {
         [nonOwnerAuthUserId, inviteDigest('d')],
       ),
     ).rejects.toThrow('Only an active Owner can issue a Telegram beta invite.');
+  });
+
+  it('records non-claiming Owner Player-ID reviews without creating a deposit-usable binding', async () => {
+    const catalog = await client.query<{
+      readonly policies: number;
+      readonly relforcerowsecurity: boolean;
+      readonly relrowsecurity: boolean;
+    }>(`
+      select relation.relrowsecurity,
+             relation.relforcerowsecurity,
+             (
+               select count(*)::integer
+               from pg_policy policy
+               where policy.polrelid = relation.oid
+             ) as policies
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'app'
+        and relation.relname = 'player_registration_request_reviews'
+    `);
+    expect(catalog.rows).toEqual([
+      { policies: 0, relforcerowsecurity: true, relrowsecurity: true },
+    ]);
+
+    const customer = await client.query<{ readonly id: string }>(
+      `insert into app.customers default values returning id`,
+    );
+    const customerId = customer.rows[0]!.id;
+    const request = await client.query<{ readonly id: string }>(
+      `
+        insert into app.player_registration_requests (customer_id, platform_id, player_id)
+        select $1::uuid, platform.id, $2::text
+        from app.platforms platform
+        where platform.code = 'kemerbet'
+        returning id
+      `,
+      [customerId, 'STAGING-OWNER-REVIEW-01'],
+    );
+    const requestId = request.rows[0]!.id;
+
+    const listed = await queryAsRole<{
+      readonly platform_code: string;
+      readonly registration_request_id: string;
+      readonly request_status: string;
+      readonly submitted_player_id: string;
+    }>(
+      'payreplayy_owner_control',
+      `select * from app.list_owner_player_registration_requests($1::uuid, $2::integer)`,
+      [ownerAuthUserId, 50],
+    );
+    expect(listed).toContainEqual(
+      expect.objectContaining({
+        platform_code: 'kemerbet',
+        registration_request_id: requestId,
+        request_status: 'pending_validation',
+        submitted_player_id: 'STAGING-OWNER-REVIEW-01',
+      }),
+    );
+
+    const reviewed = await queryAsRole<{
+      readonly decision_already_recorded: boolean;
+      readonly reviewed_registration_request_id: string;
+      readonly reviewed_status: string;
+    }>(
+      'payreplayy_owner_control',
+      `
+        select *
+        from app.review_owner_player_registration_request(
+          $1::uuid,
+          $2::uuid,
+          'exists',
+          'owner_platform_lookup'
+        )
+      `,
+      [ownerAuthUserId, requestId],
+    );
+    expect(reviewed).toEqual([
+      expect.objectContaining({
+        decision_already_recorded: false,
+        reviewed_registration_request_id: requestId,
+        reviewed_status: 'exists',
+      }),
+    ]);
+
+    const replayed = await queryAsRole<{
+      readonly decision_already_recorded: boolean;
+    }>(
+      'payreplayy_owner_control',
+      `
+        select *
+        from app.review_owner_player_registration_request(
+          $1::uuid,
+          $2::uuid,
+          'exists',
+          'owner_platform_lookup'
+        )
+      `,
+      [ownerAuthUserId, requestId],
+    );
+    expect(replayed).toEqual([expect.objectContaining({ decision_already_recorded: true })]);
+
+    const persisted = await client.query<{
+      readonly audit_events: number;
+      readonly metadata: unknown;
+      readonly player_bindings: number;
+      readonly reviews: number;
+      readonly status: string;
+    }>(
+      `
+        select
+          registration_request.status::text as status,
+          (
+            select count(*)::integer
+            from app.player_registration_request_reviews review
+            where review.player_registration_request_id = registration_request.id
+          ) as reviews,
+          (
+            select count(*)::integer
+            from app.customer_platform_players player
+            where player.customer_id = registration_request.customer_id
+          ) as player_bindings,
+          (
+            select count(*)::integer
+            from app.audit_events audit_event
+            where audit_event.action = 'player_registration.owner_review_recorded'
+              and audit_event.resource_id = registration_request.id
+          ) as audit_events,
+          (
+            select audit_event.metadata
+            from app.audit_events audit_event
+            where audit_event.action = 'player_registration.owner_review_recorded'
+              and audit_event.resource_id = registration_request.id
+            limit 1
+          ) as metadata
+        from app.player_registration_requests registration_request
+        where registration_request.id = $1::uuid
+      `,
+      [requestId],
+    );
+    expect(persisted.rows).toEqual([
+      {
+        audit_events: 1,
+        metadata: { decision: 'exists', reason_code: 'owner_platform_lookup' },
+        player_bindings: 0,
+        reviews: 1,
+        status: 'exists',
+      },
+    ]);
+    expect(JSON.stringify(persisted.rows[0]?.metadata)).not.toContain('STAGING-OWNER-REVIEW-01');
+
+    await expect(
+      queryAsRole(
+        'payreplayy_owner_control',
+        `
+          select *
+          from app.review_owner_player_registration_request(
+            $1::uuid,
+            $2::uuid,
+            'not_found',
+            'owner_platform_lookup'
+          )
+        `,
+        [ownerAuthUserId, requestId],
+      ),
+    ).rejects.toThrow('no longer reviewable');
+
+    await expect(
+      queryAsRole(
+        'payreplayy_owner_control',
+        `update app.player_registration_requests set status = 'cancelled' where id = $1::uuid`,
+        [requestId],
+      ),
+    ).rejects.toThrow(/permission denied|row-level security/u);
   });
 });

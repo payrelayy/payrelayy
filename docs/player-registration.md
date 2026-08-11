@@ -1,11 +1,11 @@
 # Non-claiming Player-ID registration
 
-## Status: inert schema applied; not enabled
+## Status: staging request capture enabled; Owner existence review remains non-claiming
 
-This document defines the next safe foundation for KemerBet Player IDs. Its private database schema
-is applied, but no runtime role can invoke it. It does not call KemerBet and does not make an ID
-usable for deposits. A separate reviewed inbound-action/conversation boundary is required before a
-Telegram message can create a request.
+The private staging bot can now record a Player-ID registration request through the reviewed
+conversation-action boundary. The Owner-control service can list the bounded KemerBet review queue
+and record an existence result. Neither path calls KemerBet automatically, proves ownership, creates
+a `customer_platform_players` binding, or makes an ID usable for deposits.
 
 ## Why the existing player table is not an intake table
 
@@ -54,7 +54,20 @@ This private event link makes the Telegram action idempotent:
 The link lets the system distinguish a retry of the same Telegram update from a different update
 that repeats the same Player ID. It must not store raw message text.
 
-## Current internal helper (ungranted)
+### `app.player_registration_request_reviews`
+
+This append-only table records an authenticated Owner decision without copying the raw Player ID:
+
+- `exists` and `not_found` mean only that the Owner recorded a manual platform lookup;
+- `review_required` means provider evidence is still required; and
+- `cancelled` closes an invalid or abandoned request.
+
+The database allows `pending_validation` to move to any of those four outcomes. A
+`review_required` request may later move to `exists`, `not_found`, or `cancelled`. Existence,
+not-found, and cancelled outcomes are terminal. Exact retries return the original review receipt
+without writing a second review or audit event.
+
+## Request helper and staging wrapper
 
 The applied internal helper is shaped like:
 
@@ -79,13 +92,10 @@ Its safe response should contain only:
 The API already has the submitted Player ID, so the procedure does not need to return it. It looks
 up the canonical platform internally from its code; callers must not select arbitrary platform UUIDs.
 
-The applied migration deliberately grants this helper to no runtime role. It remains internal even
-after the future conversation-action boundary exists. Only a later composed procedure that proves
-the customer selected a valid, server-issued "Add Player ID" capability and that the inbound event
-is unconsumed may receive a narrowly scoped API execution grant. Because the current helper owns a
-local event link and updates `inbound_events.processed_at`, that later migration must first split or
-replace it with an ungranted request-create/reuse primitive. The composed wrapper, not this current
-helper, must own global event consumption and the final request-event link.
+The internal helper remains ungranted. The staging runtime invokes only
+`app.submit_telegram_player_registration_input`, which proves the customer selected a valid,
+server-issued "Add Player ID" capability and that the inbound event is unconsumed. That composed
+wrapper owns global event consumption and the final request-event link.
 
 ## Transaction and lock order
 
@@ -132,7 +142,8 @@ claim that the customer owns the account.
 3. A single transaction validates that state and the new inbound event, records a
    non-claiming request, consumes the event globally, and clears or advances the conversation.
 4. The bot replies: "Player ID saved - pending validation. It cannot be used for a deposit yet."
-5. A future controlled adapter reports only `exists`, `not_found`, or `review_required`.
+5. The private Owner page lists only pending or review-required KemerBet submissions and can record
+   `exists`, `not_found`, `review_required`, or `cancelled` with fixed reason codes.
 6. Only a separately designed proof/association model may ever promote an ID into a deposit-usable
    binding. Existence lookup alone is insufficient.
 
@@ -151,7 +162,7 @@ link safely only after the related inbound-event retention policy has been desig
 
 This stage must not:
 
-- validate a Player ID against KemerBet;
+- automate a KemerBet lookup or treat an Owner-recorded existence result as ownership;
 - launch a browser or bypass a CAPTCHA/session control;
 - open a deposit intent or display payment instructions;
 - make a payment-provider call or transfer funds;

@@ -1,7 +1,8 @@
 # Owner/Admin control service
 
-This package contains the first narrow Owner-only backend operation: issue or revoke a Telegram
-beta invite. It also serves a small private staging page at `/owner`; it is not a general dashboard
+This package contains narrow Owner-only backend operations: issue or revoke a Telegram beta invite,
+and record a non-claiming KemerBet Player-ID existence review. It also serves a small private
+staging page at `/owner`; it is not a general dashboard
 and it has no browser database grant. The page signs in directly to the exact staging Supabase Auth
 project with the public publishable key, keeps the access token only in JavaScript memory, and sends
 that bearer token to the loopback-only Owner service. It never stores a password, refresh token,
@@ -15,6 +16,11 @@ The raw 32-byte invite token is generated in process, returned once in a `Cache-
 Telegram deep link, and discarded. PostgreSQL stores only its domain-separated SHA-256 digest;
 audit metadata contains only the opaque invite ID, expiry, or allowlisted revocation reason. The
 service never receives a caller-supplied admin/actor ID and never uses a Supabase service-role key.
+
+The Player-ID queue is bounded and returns raw submitted IDs only to the authenticated Owner page
+inside the SSH tunnel. Review decisions use fixed reason codes and append-only audit records that
+never contain the raw Player ID. "Found" means existence only: it does not establish customer
+ownership, create a validated player binding, enable a deposit, or contact KemerBet automatically.
 
 The runtime remains disabled by default. Its staging container binds only to host loopback for an
 SSH-forwarded operator session; there is no public proxy or Internet-facing Owner endpoint. The

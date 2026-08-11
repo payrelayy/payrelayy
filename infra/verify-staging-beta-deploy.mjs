@@ -126,7 +126,8 @@ assert.match(helper, /--project-name "\$PROJECT_NAME"/);
 assert.match(helper, /up -d --no-build --wait --wait-timeout 90/);
 assert.doesNotMatch(helper, /curl|wget|git |\.env|xzztugbgtulptnbpoelr/);
 
-const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
+const ownerDiagnostic =
+  /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
 assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');
 assert.match(ownerDiagnostic, /com\.docker\.compose\.project=\$PROJECT_NAME/);
 assert.match(ownerDiagnostic, /com\.docker\.compose\.service=owner-control/);

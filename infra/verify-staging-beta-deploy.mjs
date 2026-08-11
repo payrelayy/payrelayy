@@ -16,6 +16,10 @@ const diagnostics = readFileSync(
   resolve(root, 'infra/sql/staging-runtime-session-diagnostics.sql'),
   'utf8',
 );
+const runtimeLoginPreflight = readFileSync(
+  resolve(root, 'infra/sql/staging-runtime-login-preflight.sql'),
+  'utf8',
+);
 const helper = readFileSync(
   resolve(root, 'infra/operations/payreplayy-staging-deploy-helper.sh'),
   'utf8',
@@ -56,6 +60,7 @@ assert.match(workflow, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.match(workflow, /stop-and-disable/);
 assert.match(workflow, /infra\/sql\/staging-runtimes-disable\.sql/g);
 assert.match(workflow, /- name: Wait once for staging runtime credential propagation/);
+assert.match(workflow, /- name: Preflight all three runtime logins before release transfer/);
 assert.equal(
   (workflow.match(/run: sleep 125/g) ?? []).length,
   1,
@@ -65,11 +70,34 @@ assert.ok(
   workflow.indexOf('Provision three narrow 24-hour staging logins') <
     workflow.indexOf('Wait once for staging runtime credential propagation') &&
     workflow.indexOf('Wait once for staging runtime credential propagation') <
+      workflow.indexOf('Preflight all three runtime logins before release transfer') &&
+    workflow.indexOf('Preflight all three runtime logins before release transfer') <
       workflow.indexOf('Transfer and install sealed release inputs') &&
     workflow.indexOf('Transfer and install sealed release inputs') <
       workflow.indexOf('Start the private staging profile and smoke readiness'),
   'Credential propagation must complete after provisioning and before transfer or activation.',
 );
+const runtimePreflightStep =
+  /- name: Preflight all three runtime logins before release transfer([\s\S]*?)\n\s+- name: Transfer and install sealed release inputs/u.exec(
+    workflow,
+  )?.[1];
+assert.ok(
+  runtimePreflightStep,
+  'The deployment must preflight every runtime login before transfer.',
+);
+assert.match(runtimePreflightStep, /PGSSLMODE: verify-full/);
+assert.match(runtimePreflightStep, /PGCONNECT_TIMEOUT: '5'/);
+assert.match(runtimePreflightStep, /staging-runtime-login-preflight\.sql/);
+assert.equal(
+  (
+    runtimePreflightStep.match(
+      /preflight_runtime_login "\$(?:BETA|OWNER|PLAYER_ACTION)_RUNTIME_ROLE"/g,
+    ) ?? []
+  ).length,
+  3,
+  'Each dedicated staging runtime login must receive one exact preflight.',
+);
+assert.doesNotMatch(runtimePreflightStep, /\b(?:for|while|until)\b|\bsleep\b/);
 assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
 assert.match(workflow, /Capture bounded Owner-control startup diagnostics/);
 assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
@@ -121,6 +149,21 @@ assert.match(diagnostics, /from pg_catalog\.pg_stat_activity as activity/);
 assert.match(diagnostics, /count\(\*\)::integer as session_count/);
 assert.match(diagnostics, /payreplayy_player_actions_runtime/);
 assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/i);
+
+assert.match(runtimeLoginPreflight, /begin transaction read only/);
+assert.match(runtimeLoginPreflight, /current_user = :'expected_runtime_role'/);
+assert.match(runtimeLoginPreflight, /session_user = :'expected_runtime_role'/);
+assert.match(runtimeLoginPreflight, /rollback/);
+assert.doesNotMatch(runtimeLoginPreflight, /\b(?:insert|update|delete|merge|call|grant|revoke)\b/i);
+
+const rollbackStep = /- name: Roll back failed activation([\s\S]*?)\n\s+stop:/u.exec(workflow)?.[1];
+assert.ok(rollbackStep, 'The failed-activation rollback must be present.');
+assert.match(rollbackStep, /for attempt in 1 2 3 4/);
+assert.match(rollbackStep, /sleep 15/);
+assert.match(rollbackStep, /cleanup_status/);
+assert.match(rollbackStep, /else\s+cleanup_status=\$\?\s+fi/);
+assert.match(rollbackStep, /exit "\$cleanup_status"/);
+assert.match(rollbackStep, /staging-runtimes-disable\.sql/);
 
 assert.match(helper, /^#!\/usr\/bin\/env bash/);
 assert.match(helper, /EXPECTED_SUDO_USER='payreplayy-admin'/);

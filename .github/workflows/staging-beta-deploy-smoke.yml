@@ -272,6 +272,34 @@ jobs:
         shell: bash
         run: sleep 125
 
+      - name: Preflight all three runtime logins before release transfer
+        shell: bash
+        env:
+          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          preflight_runtime_login() {
+            local runtime_role="$1"
+            local runtime_password="$2"
+            PGUSER="${runtime_role}.${STAGING_PROJECT_REF}" \
+              PGPASSWORD="$runtime_password" \
+              psql -X --set="expected_runtime_role=$runtime_role" \
+                --file=infra/sql/staging-runtime-login-preflight.sql
+          }
+          preflight_runtime_login "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD"
+          preflight_runtime_login "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD"
+          preflight_runtime_login "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD"
+
       - name: Transfer and install sealed release inputs
         shell: bash
         env:
@@ -361,7 +389,23 @@ jobs:
               "payreplayy-admin@$vm_host" \
               "sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper discard '$GITHUB_SHA'" || true
           fi
-          psql -X --file=infra/sql/staging-runtimes-disable.sql
+          cleanup_status=1
+          for attempt in 1 2 3 4; do
+            if psql -X --file=infra/sql/staging-runtimes-disable.sql; then
+              cleanup_status=0
+              break
+            else
+              cleanup_status=$?
+            fi
+            if [[ "$attempt" -lt 4 ]]; then
+              echo "::warning::Staging runtime cleanup connection failed on attempt $attempt of 4; waiting 15 seconds."
+              sleep 15
+            fi
+          done
+          if [[ "$cleanup_status" -ne 0 ]]; then
+            echo '::error::Staging runtime logins could not be disabled after four bounded attempts.'
+            exit "$cleanup_status"
+          fi
 
   stop:
     name: Stop staging and disable runtime logins

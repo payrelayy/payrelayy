@@ -187,17 +187,20 @@ reviewed `main` commit with the staging project ref and DigitalOcean droplet ID 
 only builds the four commit-labelled images. `deploy-and-smoke` additionally requires the
 protected `staging` environment, a dedicated `payreplayy-admin` SSH identity with noninteractive
 sudo access only to the root-owned `/usr/local/sbin/payreplayy-staging-deploy-helper`, pinned
-`known_hosts`, a rotated staging bot token, the public Supabase client key, and two distinct narrow
+`known_hosts`, a rotated staging bot token, the public Supabase client key, and three distinct narrow
 database passwords. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
 
 Deployment gives the beta-admission, Owner-control, and Player-ID action roles 24-hour staging
 LOGIN credentials,
 waits once for 125 seconds before any release transfer or container activation so the shared
-Supavisor credential cache can observe the rotated passwords, installs service-separated `0400`
-files, starts the private Compose project without building on the VM, and checks readiness without
-submitting a payment or provider request. It does not make rapid authentication retries during the
-propagation interval. Failure disables all three logins. `stop-and-disable` is the explicit cleanup mode
+Supavisor credential cache can observe the rotated passwords, makes one read-only identity preflight
+through each dedicated runtime login, installs service-separated `0400` files, starts the private
+Compose project without building on the VM, and checks readiness without submitting a payment or
+provider request. It does not make rapid runtime authentication retries during or after the
+propagation interval. Failure disables all three logins. If the administrator cleanup connection is
+temporarily refused after a failed activation, the workflow makes at most four cleanup attempts,
+15 seconds apart, and then fails visibly rather than claiming cleanup. `stop-and-disable` is the explicit cleanup mode
 and must be run before the 24-hour login expiry; credential expiry does not itself stop the
 containers. A successful deployment is a beta demo, not financial launch approval; all payment,
 provider, validation, deposit, withdrawal, and KemerBet execution gates remain off.

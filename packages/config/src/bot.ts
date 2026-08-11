@@ -233,7 +233,6 @@ function loadBotTelegramBetaAdmissionConfig(
   environment: NodeJS.ProcessEnv,
   nodeEnv: NodeEnvironment,
   telegramEnabled: boolean,
-  actionChannelEnabled: boolean,
 ): BotTelegramBetaAdmissionConfig {
   const enabled = booleanFromEnv(
     environment.TELEGRAM_BETA_ADMISSION_ENABLED,
@@ -252,12 +251,6 @@ function loadBotTelegramBetaAdmissionConfig(
   if (!telegramEnabled) {
     throw new Error('TELEGRAM_BETA_ADMISSION_ENABLED requires TELEGRAM_BOT_ENABLED=true.');
   }
-  if (actionChannelEnabled) {
-    throw new Error(
-      'TELEGRAM_BETA_ADMISSION_ENABLED requires INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED=false.',
-    );
-  }
-
   return {
     enabled: true,
     baseUrl: requiredBetaAdmissionBaseUrl(environment.BOT_TO_BETA_ADMISSION_BASE_URL, nodeEnv),
@@ -297,7 +290,14 @@ function loadBotTelegramActionChannelConfig(
     enabled: true,
     baseUrl: requiredActionApiBaseUrl(environment.BOT_TO_API_ACTION_BASE_URL, nodeEnv),
     transportHmacSecret: requiredHexHmacSecret(
-      environment.BOT_TO_API_ACTION_HMAC_SECRET,
+      secretFromEnvironmentOrFile(
+        environment.BOT_TO_API_ACTION_HMAC_SECRET,
+        environment.BOT_TO_API_ACTION_HMAC_SECRET_FILE,
+        'BOT_TO_API_ACTION_HMAC_SECRET',
+        'BOT_TO_API_ACTION_HMAC_SECRET_FILE',
+        nodeEnv,
+        '/run/secrets/bot_player_action_transport_hmac',
+      ),
       'BOT_TO_API_ACTION_HMAC_SECRET',
     ),
   };
@@ -328,7 +328,6 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     environment,
     runtime.nodeEnv,
     enabled,
-    actionChannelEnabled,
   );
   const telegramActionChannel = loadBotTelegramActionChannelConfig(
     environment,

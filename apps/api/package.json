@@ -13,6 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "db:preflight": "tsx src/database-preflight-cli.ts",
+    "db:player-actions-preflight": "tsx src/player-action-database-preflight-cli.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run --passWithNoTests"

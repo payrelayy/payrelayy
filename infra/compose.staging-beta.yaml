@@ -53,6 +53,7 @@ services:
       INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
     ports:
@@ -82,6 +83,105 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:3002/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
+  api:
+    profiles: [staging-manual]
+    platform: linux/amd64
+    image: payreplayy-api:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: api
+      args:
+        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      API_HOST: 0.0.0.0
+      API_PORT: '3000'
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'
+      PLAYER_ACTION_DATABASE_URL_FILE: /run/secrets/player_action_database_url
+      BOT_TO_API_ACTION_HMAC_SECRET_FILE: /run/secrets/api_player_action_transport_hmac
+      API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/api_player_action_payload_hmac
+      API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE: /run/secrets/api_player_action_capability_hmac
+      API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE: /run/secrets/api_player_action_semantic_hmac
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: player_action_database_url
+        target: player_action_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_transport_hmac
+        target: api_player_action_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_payload_hmac
+        target: api_player_action_payload_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_capability_hmac
+        target: api_player_action_capability_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_semantic_hmac
+        target: api_player_action_semantic_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - staging_service
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
       interval: 30s
       timeout: 3s
       start_period: 15s
@@ -137,6 +237,7 @@ services:
       INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
     secrets:
@@ -211,15 +312,18 @@ services:
       TELEGRAM_BOT_ENABLED: 'true'
       TELEGRAM_BETA_ADMISSION_ENABLED: 'true'
       BOT_TO_BETA_ADMISSION_BASE_URL: http://beta-admission:3001/
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
+      BOT_TO_API_ACTION_BASE_URL: http://api:3000/
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/bot_beta_admission_transport_hmac
+      BOT_TO_API_ACTION_HMAC_SECRET_FILE: /run/secrets/bot_player_action_transport_hmac
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
       INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
       INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
-      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
     secrets:
@@ -233,9 +337,17 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
+      - source: bot_player_action_transport_hmac
+        target: bot_player_action_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
     networks:
       - staging_service
     depends_on:
+      api:
+        condition: service_healthy
+        restart: true
       beta-admission:
         condition: service_healthy
         restart: true
@@ -251,7 +363,7 @@ networks:
     attachable: false
 
 # This is the public CA downloaded for the staging Supabase project, verified out of band before
-# use. It is mounted only into the two database clients so Node extends (rather than replaces) its
+# use. It is mounted only into the three database clients so Node extends (rather than replaces) its
 # trust set.
 configs:
   supabase_ca_certificate:
@@ -270,7 +382,19 @@ secrets:
     file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE:?set an external beta-service transport HMAC file}
   beta_admission_payload_hmac:
     file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE:?set an external beta payload HMAC file}
+  player_action_database_url:
+    file: ${PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE:?set an external Player-ID action database URL file}
+  api_player_action_transport_hmac:
+    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE:?set an external API Player-ID transport HMAC file}
+  api_player_action_payload_hmac:
+    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE:?set an external API Player-ID payload HMAC file}
+  api_player_action_capability_hmac:
+    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE:?set an external API Player-ID capability HMAC file}
+  api_player_action_semantic_hmac:
+    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE:?set an external API Player-ID semantic HMAC file}
   telegram_bot_token:
     file: ${PAYREPLAYY_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
   bot_beta_admission_transport_hmac:
     file: ${PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE:?set an external bot transport HMAC file}
+  bot_player_action_transport_hmac:
+    file: ${PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE:?set an external bot Player-ID transport HMAC file}

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import type { FinancialActionsMode } from '@payreplayy/domain';
 
 import {
@@ -64,6 +66,26 @@ export type ApiTelegramActionChannelConfig =
       readonly transportHmacSecret: string;
     };
 
+export type ApiTelegramPlayerActionRuntimeConfig =
+  | {
+      readonly enabled: false;
+      readonly connection: undefined;
+      readonly payloadHmacSecret: undefined;
+      readonly tlsMode: undefined;
+    }
+  | {
+      readonly enabled: true;
+      readonly connection: {
+        readonly database: 'postgres';
+        readonly host: string;
+        readonly password: string;
+        readonly port: 5432;
+        readonly user: string;
+      };
+      readonly payloadHmacSecret: string;
+      readonly tlsMode: 'verify-full';
+    };
+
 /**
  * This is an explicit operator-only gate for the API database preflight. By itself, enabling it
  * never enables a Fastify route, Telegram polling, Player-ID processing, or financial action.
@@ -98,6 +120,7 @@ export interface ApiConfig extends RuntimeConfig {
   readonly telegramPrivateIngressRuntime: ApiTelegramPrivateIngressRuntimeConfig;
   readonly telegramActionCapability: ApiTelegramActionCapabilityConfig;
   readonly telegramActionChannel: ApiTelegramActionChannelConfig;
+  readonly telegramPlayerActionRuntime: ApiTelegramPlayerActionRuntimeConfig;
 }
 
 function portFromEnv(value: string | undefined): number {
@@ -114,6 +137,42 @@ const PAYREPLAYY_SUPABASE_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr';
 const API_DATABASE_DIRECT_HOST = `db.${PAYREPLAYY_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
 const API_DATABASE_SESSION_POOLER_HOST = 'aws-0-eu-west-1.pooler.supabase.com';
 const API_DATABASE_SESSION_POOLER_USER = `${API_DATABASE_RUNTIME_ROLE}.${PAYREPLAYY_SUPABASE_PROJECT_REFERENCE}`;
+const PLAYER_ACTION_DATABASE_RUNTIME_ROLE = 'payreplayy_player_actions_runtime';
+const PLAYER_ACTION_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
+const PLAYER_ACTION_DATABASE_DIRECT_HOST = `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`;
+const PLAYER_ACTION_DATABASE_SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
+const PLAYER_ACTION_DATABASE_SESSION_POOLER_USER = `${PLAYER_ACTION_DATABASE_RUNTIME_ROLE}.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}`;
+
+function secretFromEnvironmentOrFile(
+  value: string | undefined,
+  filePath: string | undefined,
+  valueVariableName: string,
+  fileVariableName: string,
+  productionFilePath: string,
+  nodeEnv: ApiConfig['nodeEnv'],
+): string | undefined {
+  const hasValue = value !== undefined && value !== '';
+  const hasFile = filePath !== undefined && filePath !== '';
+  if (hasValue && hasFile) {
+    throw new Error(`${valueVariableName} and ${fileVariableName} are mutually exclusive.`);
+  }
+  if (hasValue) return value;
+  if (!hasFile) return undefined;
+  if (nodeEnv === 'production' && filePath !== productionFilePath) {
+    throw new Error(`${fileVariableName} must use the approved private runtime secret path.`);
+  }
+
+  let secret: string;
+  try {
+    secret = readFileSync(filePath, 'utf8').replace(/\r?\n$/u, '');
+  } catch {
+    throw new Error(`${fileVariableName} could not be read.`);
+  }
+  if (!secret || /[\r\n]/u.test(secret)) {
+    throw new Error(`${fileVariableName} must contain exactly one non-empty secret value.`);
+  }
+  return secret;
+}
 
 function decodeDatabaseUrlComponent(value: string): string {
   try {
@@ -271,6 +330,7 @@ function loadApiTelegramPrivateIngressRuntimeConfig(
 
 function loadApiTelegramActionCapabilityConfig(
   environment: NodeJS.ProcessEnv,
+  nodeEnv: ApiConfig['nodeEnv'],
 ): ApiTelegramActionCapabilityConfig {
   const enabled = booleanFromEnv(
     environment.INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED,
@@ -289,11 +349,25 @@ function loadApiTelegramActionCapabilityConfig(
   return {
     enabled: true,
     capabilityHmacSecret: requiredHexHmacSecret(
-      environment.API_TELEGRAM_CAPABILITY_HMAC_SECRET,
+      secretFromEnvironmentOrFile(
+        environment.API_TELEGRAM_CAPABILITY_HMAC_SECRET,
+        environment.API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE,
+        'API_TELEGRAM_CAPABILITY_HMAC_SECRET',
+        'API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE',
+        '/run/secrets/api_player_action_capability_hmac',
+        nodeEnv,
+      ),
       'API_TELEGRAM_CAPABILITY_HMAC_SECRET',
     ),
     semanticHmacSecret: requiredHexHmacSecret(
-      environment.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET,
+      secretFromEnvironmentOrFile(
+        environment.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET,
+        environment.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE,
+        'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET',
+        'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE',
+        '/run/secrets/api_player_action_semantic_hmac',
+        nodeEnv,
+      ),
       'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET',
     ),
   };
@@ -301,6 +375,7 @@ function loadApiTelegramActionCapabilityConfig(
 
 function loadApiTelegramActionChannelConfig(
   environment: NodeJS.ProcessEnv,
+  nodeEnv: ApiConfig['nodeEnv'],
 ): ApiTelegramActionChannelConfig {
   const enabled = booleanFromEnv(
     environment.INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED,
@@ -318,9 +393,124 @@ function loadApiTelegramActionChannelConfig(
   return {
     enabled: true,
     transportHmacSecret: requiredHexHmacSecret(
-      environment.BOT_TO_API_ACTION_HMAC_SECRET,
+      secretFromEnvironmentOrFile(
+        environment.BOT_TO_API_ACTION_HMAC_SECRET,
+        environment.BOT_TO_API_ACTION_HMAC_SECRET_FILE,
+        'BOT_TO_API_ACTION_HMAC_SECRET',
+        'BOT_TO_API_ACTION_HMAC_SECRET_FILE',
+        '/run/secrets/api_player_action_transport_hmac',
+        nodeEnv,
+      ),
       'BOT_TO_API_ACTION_HMAC_SECRET',
     ),
+  };
+}
+
+function resolvePlayerActionDatabaseRuntimeUser(connectionUrl: URL): string {
+  const user = decodeDatabaseUrlComponent(connectionUrl.username);
+  if (
+    connectionUrl.hostname === PLAYER_ACTION_DATABASE_DIRECT_HOST &&
+    user === PLAYER_ACTION_DATABASE_RUNTIME_ROLE
+  ) {
+    return user;
+  }
+  if (
+    connectionUrl.hostname === PLAYER_ACTION_DATABASE_SESSION_POOLER_HOST &&
+    user === PLAYER_ACTION_DATABASE_SESSION_POOLER_USER
+  ) {
+    return user;
+  }
+  throw new Error(
+    'PLAYER_ACTION_DATABASE_URL must use the dedicated staging Player-ID action runtime login and approved project host.',
+  );
+}
+
+function loadApiTelegramPlayerActionRuntimeConfig(
+  environment: NodeJS.ProcessEnv,
+  nodeEnv: ApiConfig['nodeEnv'],
+  actionChannel: ApiTelegramActionChannelConfig,
+  capability: ApiTelegramActionCapabilityConfig,
+): ApiTelegramPlayerActionRuntimeConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED,
+    false,
+    'INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED',
+  );
+  if (!enabled) {
+    return {
+      enabled: false,
+      connection: undefined,
+      payloadHmacSecret: undefined,
+      tlsMode: undefined,
+    };
+  }
+  if (!actionChannel.enabled || !capability.enabled) {
+    throw new Error(
+      'INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED requires the action channel and capability contract gates.',
+    );
+  }
+
+  const connectionString = secretFromEnvironmentOrFile(
+    environment.PLAYER_ACTION_DATABASE_URL,
+    environment.PLAYER_ACTION_DATABASE_URL_FILE,
+    'PLAYER_ACTION_DATABASE_URL',
+    'PLAYER_ACTION_DATABASE_URL_FILE',
+    '/run/secrets/player_action_database_url',
+    nodeEnv,
+  );
+  if (!connectionString) {
+    throw new Error(
+      'PLAYER_ACTION_DATABASE_URL is required when INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED=true.',
+    );
+  }
+
+  let connectionUrl: URL;
+  try {
+    connectionUrl = new URL(connectionString);
+  } catch {
+    throw new Error('PLAYER_ACTION_DATABASE_URL must be a valid PostgreSQL connection URL.');
+  }
+  if (
+    (connectionUrl.protocol !== 'postgres:' && connectionUrl.protocol !== 'postgresql:') ||
+    connectionUrl.hostname === '' ||
+    connectionUrl.username === '' ||
+    connectionUrl.password === '' ||
+    (connectionUrl.port !== '' && connectionUrl.port !== '5432') ||
+    decodeDatabaseUrlComponent(connectionUrl.pathname.slice(1)) !== 'postgres' ||
+    connectionUrl.hash !== ''
+  ) {
+    throw new Error('PLAYER_ACTION_DATABASE_URL must be a complete port-5432 PostgreSQL URL.');
+  }
+  const queryKeys = Array.from(connectionUrl.searchParams.keys());
+  if (
+    queryKeys.length !== 1 ||
+    queryKeys[0] !== 'sslmode' ||
+    connectionUrl.searchParams.get('sslmode') !== 'verify-full'
+  ) {
+    throw new Error('PLAYER_ACTION_DATABASE_URL must contain only sslmode=verify-full.');
+  }
+
+  return {
+    enabled: true,
+    connection: {
+      database: 'postgres',
+      host: connectionUrl.hostname,
+      password: decodeDatabaseUrlComponent(connectionUrl.password),
+      port: 5432,
+      user: resolvePlayerActionDatabaseRuntimeUser(connectionUrl),
+    },
+    payloadHmacSecret: requiredHexHmacSecret(
+      secretFromEnvironmentOrFile(
+        environment.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET,
+        environment.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE,
+        'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
+        'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE',
+        '/run/secrets/api_player_action_payload_hmac',
+        nodeEnv,
+      ),
+      'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
+    ),
+    tlsMode: 'verify-full',
   };
 }
 
@@ -328,8 +518,15 @@ function assertDistinctApiTelegramHmacSecrets(
   telegramIngress: ApiTelegramIngressConfig,
   telegramActionCapability: ApiTelegramActionCapabilityConfig,
   telegramActionChannel: ApiTelegramActionChannelConfig,
+  telegramPlayerActionRuntime: ApiTelegramPlayerActionRuntimeConfig,
 ): void {
-  if (!telegramActionCapability.enabled && !telegramActionChannel.enabled) return;
+  if (
+    !telegramActionCapability.enabled &&
+    !telegramActionChannel.enabled &&
+    !telegramPlayerActionRuntime.enabled
+  ) {
+    return;
+  }
 
   const namedSecrets: (readonly [string, string])[] = [];
 
@@ -342,6 +539,13 @@ function assertDistinctApiTelegramHmacSecrets(
 
   if (telegramActionChannel.enabled) {
     namedSecrets.push(['BOT_TO_API_ACTION_HMAC_SECRET', telegramActionChannel.transportHmacSecret]);
+  }
+
+  if (telegramPlayerActionRuntime.enabled) {
+    namedSecrets.push([
+      'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
+      telegramPlayerActionRuntime.payloadHmacSecret,
+    ]);
   }
 
   if (telegramIngress.enabled) {
@@ -364,6 +568,7 @@ function assertDistinctApiTelegramHmacSecrets(
 }
 
 export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
+  const runtime = loadRuntimeConfig(environment);
   const postgresRuntime = loadApiPostgresRuntimeConfig(environment);
   const telegramIngress = loadApiTelegramIngressConfig(environment);
   const telegramPrivateIngressRuntime = loadApiTelegramPrivateIngressRuntimeConfig(
@@ -371,16 +576,26 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     postgresRuntime,
     telegramIngress,
   );
-  const telegramActionCapability = loadApiTelegramActionCapabilityConfig(environment);
-  const telegramActionChannel = loadApiTelegramActionChannelConfig(environment);
+  const telegramActionCapability = loadApiTelegramActionCapabilityConfig(
+    environment,
+    runtime.nodeEnv,
+  );
+  const telegramActionChannel = loadApiTelegramActionChannelConfig(environment, runtime.nodeEnv);
+  const telegramPlayerActionRuntime = loadApiTelegramPlayerActionRuntimeConfig(
+    environment,
+    runtime.nodeEnv,
+    telegramActionChannel,
+    telegramActionCapability,
+  );
   assertDistinctApiTelegramHmacSecrets(
     telegramIngress,
     telegramActionCapability,
     telegramActionChannel,
+    telegramPlayerActionRuntime,
   );
 
   return {
-    ...loadRuntimeConfig(environment),
+    ...runtime,
     financialActionsMode: loadFinancialActionsMode(environment),
     api: {
       host: environment.API_HOST ?? '127.0.0.1',
@@ -391,6 +606,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     telegramPrivateIngressRuntime,
     telegramActionCapability,
     telegramActionChannel,
+    telegramPlayerActionRuntime,
   };
 }
 
@@ -401,6 +617,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
   | 'telegramPrivateIngressRuntime'
   | 'telegramActionCapability'
   | 'telegramActionChannel'
+  | 'telegramPlayerActionRuntime'
 > & {
   readonly postgresRuntime: {
     readonly enabled: boolean;
@@ -416,6 +633,12 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
   readonly telegramActionChannel: {
     readonly enabled: boolean;
     readonly secretsConfigured: boolean;
+  };
+  readonly telegramPlayerActionRuntime: {
+    readonly enabled: boolean;
+    readonly connectionConfigured: boolean;
+    readonly payloadHmacConfigured: boolean;
+    readonly tlsMode: 'verify-full' | undefined;
   };
 } {
   return {
@@ -442,6 +665,12 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     telegramActionChannel: {
       enabled: config.telegramActionChannel.enabled,
       secretsConfigured: config.telegramActionChannel.enabled,
+    },
+    telegramPlayerActionRuntime: {
+      enabled: config.telegramPlayerActionRuntime.enabled,
+      connectionConfigured: config.telegramPlayerActionRuntime.enabled,
+      payloadHmacConfigured: config.telegramPlayerActionRuntime.enabled,
+      tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },
   };
 }

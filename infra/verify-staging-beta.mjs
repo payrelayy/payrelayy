@@ -48,6 +48,7 @@ function sorted(values) {
 
 const services = topLevelSection(compose, 'services');
 const ownerService = childBlock(services, 'owner-control');
+const apiService = childBlock(services, 'api');
 const betaService = childBlock(services, 'beta-admission');
 const botService = childBlock(services, 'bot');
 const networks = topLevelSection(compose, 'networks');
@@ -57,12 +58,13 @@ const secrets = topLevelSection(compose, 'secrets');
 const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gm)].map((match) => match[1]);
 assert.deepEqual(
   serviceNames,
-  ['owner-control', 'beta-admission', 'bot'],
-  'only Owner control, beta-admission, and bot are allowed',
+  ['owner-control', 'api', 'beta-admission', 'bot'],
+  'only Owner control, the Player-ID API, beta-admission, and bot are allowed',
 );
 
 for (const [name, service] of [
   ['owner-control', ownerService],
+  ['api', apiService],
   ['beta-admission', betaService],
   ['bot', botService],
 ]) {
@@ -82,11 +84,16 @@ for (const [name, service] of [
   assert.match(service, /INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'/);
   assert.match(service, /INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'/);
   assert.match(service, /INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'/);
-  assert.match(service, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'/);
-  assert.match(service, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'/);
   assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/);
   assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/);
 }
+
+for (const service of [ownerService, betaService]) {
+  assert.match(service, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'/);
+  assert.match(service, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'/);
+}
+
+assert.doesNotMatch(ownerService, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/);
 
 assert.match(ownerService, /target: admin/);
 assert.match(ownerService, /INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'/);
@@ -110,6 +117,38 @@ assert.match(ownerService, /networks:\s*\r?\n\s+- owner_control_service/);
 assert.doesNotMatch(ownerService, /staging_service/);
 assert.match(ownerService, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.doesNotMatch(ownerService, /TELEGRAM_BOT_ENABLED: 'true'/);
+
+assert.match(apiService, /target: api/);
+assert.match(apiService, /API_HOST: 0\.0\.0\.0/);
+assert.match(apiService, /API_PORT: '3000'/);
+assert.match(apiService, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/);
+assert.match(apiService, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/);
+assert.match(apiService, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'/);
+assert.match(
+  apiService,
+  /PLAYER_ACTION_DATABASE_URL_FILE: \/run\/secrets\/player_action_database_url/,
+);
+assert.match(
+  apiService,
+  /BOT_TO_API_ACTION_HMAC_SECRET_FILE: \/run\/secrets\/api_player_action_transport_hmac/,
+);
+assert.match(
+  apiService,
+  /API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE: \/run\/secrets\/api_player_action_payload_hmac/,
+);
+assert.match(
+  apiService,
+  /API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE: \/run\/secrets\/api_player_action_capability_hmac/,
+);
+assert.match(
+  apiService,
+  /API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE: \/run\/secrets\/api_player_action_semantic_hmac/,
+);
+assert.match(apiService, /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/);
+assert.match(apiService, /http:\/\/127\.0\.0\.1:3000\/readyz/);
+assert.match(apiService, /networks:\s*\r?\n\s+- staging_service/);
+assert.doesNotMatch(apiService, /^\s+ports:/m);
+assert.doesNotMatch(apiService, /owner_control_service/);
 
 assert.match(betaService, /target: beta-admission/);
 assert.match(betaService, /INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'/);
@@ -138,11 +177,18 @@ assert.doesNotMatch(betaService, /owner_control_service/);
 assert.match(botService, /target: bot/);
 assert.match(botService, /TELEGRAM_BOT_ENABLED: 'true'/);
 assert.match(botService, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/);
+assert.match(botService, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/);
+assert.match(botService, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'/);
 assert.match(botService, /BOT_TO_BETA_ADMISSION_BASE_URL: http:\/\/beta-admission:3001\//);
+assert.match(botService, /BOT_TO_API_ACTION_BASE_URL: http:\/\/api:3000\//);
 assert.match(botService, /TELEGRAM_BOT_TOKEN_FILE: \/run\/secrets\/telegram_bot_token/);
 assert.match(
   botService,
   /BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: \/run\/secrets\/bot_beta_admission_transport_hmac/,
+);
+assert.match(
+  botService,
+  /BOT_TO_API_ACTION_HMAC_SECRET_FILE: \/run\/secrets\/bot_player_action_transport_hmac/,
 );
 assert.doesNotMatch(botService, /healthcheck:/, 'the bot must not define a healthcheck');
 assert.match(botService, /condition: service_healthy/);
@@ -151,6 +197,8 @@ assert.doesNotMatch(botService, /owner_control_service/);
 
 const betaSecrets = servicePropertyBlock(betaService, 'secrets');
 const betaConfigs = servicePropertyBlock(betaService, 'configs');
+const apiSecrets = servicePropertyBlock(apiService, 'secrets');
+const apiConfigs = servicePropertyBlock(apiService, 'configs');
 const ownerSecrets = servicePropertyBlock(ownerService, 'secrets');
 const ownerConfigs = servicePropertyBlock(ownerService, 'configs');
 const botSecrets = servicePropertyBlock(botService, 'secrets');
@@ -181,8 +229,24 @@ assert.deepEqual(
 );
 assert.deepEqual(
   botSecretSources,
-  ['telegram_bot_token', 'bot_beta_admission_transport_hmac'],
-  'the bot must receive only its two dedicated secrets',
+  ['telegram_bot_token', 'bot_beta_admission_transport_hmac', 'bot_player_action_transport_hmac'],
+  'the bot must receive only its three dedicated secrets',
+);
+assert.deepEqual(
+  [...apiSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
+  [
+    'player_action_database_url',
+    'api_player_action_transport_hmac',
+    'api_player_action_payload_hmac',
+    'api_player_action_capability_hmac',
+    'api_player_action_semantic_hmac',
+  ],
+  'the API must receive only its five dedicated Player-ID secrets',
+);
+assert.deepEqual(
+  [...apiConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
+  ['supabase_ca_certificate'],
+  'the API must receive the verified staging Supabase CA',
 );
 const betaConfigSources = [...betaConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
   (match) => match[1],
@@ -194,16 +258,16 @@ assert.deepEqual(
 );
 assert.doesNotMatch(botService, /supabase_ca_certificate|NODE_EXTRA_CA_CERTS/);
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 7, 'every secret mount must be 0400');
-assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 2, 'each public CA mount must be 0444');
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 13, 'every secret mount must be 0400');
+assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 3, 'each public CA mount must be 0444');
 assert.equal(
   countMatches(compose, /^\s+uid: '10001'$/gm),
-  9,
+  16,
   'every mounted input must target UID 10001',
 );
 assert.equal(
   countMatches(compose, /^\s+gid: '10001'$/gm),
-  9,
+  16,
   'every mounted input must target GID 10001',
 );
 
@@ -211,7 +275,13 @@ const expectedSecrets = [
   'beta_admission_bot_transport_hmac',
   'beta_admission_database_url',
   'beta_admission_payload_hmac',
+  'api_player_action_capability_hmac',
+  'api_player_action_payload_hmac',
+  'api_player_action_semantic_hmac',
+  'api_player_action_transport_hmac',
   'bot_beta_admission_transport_hmac',
+  'bot_player_action_transport_hmac',
+  'player_action_database_url',
   'telegram_bot_token',
   'owner_control_database_url',
   'owner_control_supabase_publishable_key',
@@ -243,6 +313,11 @@ for (const directSecretName of [
   'TELEGRAM_BOT_TOKEN',
   'OWNER_CONTROL_DATABASE_URL',
   'OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY',
+  'PLAYER_ACTION_DATABASE_URL',
+  'BOT_TO_API_ACTION_HMAC_SECRET',
+  'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
+  'API_TELEGRAM_CAPABILITY_HMAC_SECRET',
+  'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET',
 ]) {
   assert.doesNotMatch(
     compose,
@@ -265,11 +340,12 @@ assert.equal(
 );
 assert.doesNotMatch(compose, /^\s+(expose|volumes|devices|privileged|network_mode):/m);
 assert.doesNotMatch(betaService, /^\s+ports:/m);
+assert.doesNotMatch(apiService, /^\s+ports:/m);
 assert.doesNotMatch(botService, /^\s+ports:/m);
 assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker/i);
 assert.doesNotMatch(compose, /\b(?:nginx|caddy|traefik|haproxy)\b/i);
 assert.doesNotMatch(compose, /xzztugbgtulptnbpoelr/i, 'the production project ref is forbidden');
-assert.doesNotMatch(services, /^  (?:api|worker|executor|maintenance|proxy):\s*$/m);
+assert.doesNotMatch(services, /^  (?:worker|executor|maintenance|proxy):\s*$/m);
 
 const reviewedBase =
   'node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066';
@@ -281,6 +357,7 @@ assert.equal(
 assert.match(dockerfile, /pnpm --filter @payreplayy\/beta-admission\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @payreplayy\/bot\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @payreplayy\/admin\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @payreplayy\/api\.\.\. run build/);
 assert.match(dockerfile, /FROM build-base AS beta-admission-build/);
 assert.match(dockerfile, /FROM build-base AS bot-build/);
 assert.match(dockerfile, /FROM build-base AS admin-build/);
@@ -308,5 +385,5 @@ const apiImage = dockerfile.split('FROM runtime-base AS api')[1];
 assert.match(apiImage, /USER payreplayy:payreplayy/);
 
 console.log(
-  'staging beta artifacts verified: three manual-profile services, isolated file inputs, loopback-only Owner access, and locked financial/provider gates',
+  'staging beta artifacts verified: four manual-profile services, isolated Player-ID inputs, loopback-only Owner access, and locked financial/provider gates',
 );

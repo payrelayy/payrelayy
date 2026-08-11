@@ -100,7 +100,7 @@ describe('Telegram beta admission bot configuration', () => {
     expect(JSON.stringify(redacted)).not.toContain('123456:test-token');
   });
 
-  it('requires polling and rejects the action channel before reading beta credentials', () => {
+  it('requires polling and permits only the separate action channel alongside beta admission', () => {
     expect(() =>
       loadBotConfig({
         NODE_ENV: 'test',
@@ -109,34 +109,23 @@ describe('Telegram beta admission bot configuration', () => {
       }),
     ).toThrow('requires TELEGRAM_BOT_ENABLED=true');
 
-    const environment = new Proxy(
-      {
-        NODE_ENV: 'test',
-        TELEGRAM_BOT_ENABLED: 'true',
-        TELEGRAM_BETA_ADMISSION_ENABLED: 'true',
-        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
-      },
-      {
-        get(target, property, receiver) {
-          if (
-            property === 'TELEGRAM_BOT_TOKEN' ||
-            property === 'TELEGRAM_BOT_TOKEN_FILE' ||
-            property === 'BOT_TO_BETA_ADMISSION_BASE_URL' ||
-            property === 'BOT_TO_BETA_ADMISSION_HMAC_SECRET' ||
-            property === 'BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE' ||
-            property === 'BOT_TO_API_ACTION_BASE_URL' ||
-            property === 'BOT_TO_API_ACTION_HMAC_SECRET'
-          ) {
-            throw new Error(`unsafe credential read: ${String(property)}`);
-          }
-          return Reflect.get(target, property, receiver);
-        },
-      },
-    ) as NodeJS.ProcessEnv;
-
-    expect(() => loadBotConfig(environment)).toThrow(
-      'requires INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED=false',
-    );
+    const config = loadBotConfig({
+      NODE_ENV: 'test',
+      TELEGRAM_BOT_ENABLED: 'true',
+      TELEGRAM_BOT_TOKEN: '123456:test-token',
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'true',
+      BOT_TO_BETA_ADMISSION_BASE_URL: 'http://beta-admission:3001/',
+      BOT_TO_BETA_ADMISSION_HMAC_SECRET: 'a'.repeat(64),
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+      BOT_TO_API_ACTION_BASE_URL: 'http://api:3000/',
+      BOT_TO_API_ACTION_HMAC_SECRET: 'b'.repeat(64),
+    });
+    expect(config.apiIngress.enabled).toBe(false);
+    expect(config.telegramBetaAdmission.enabled).toBe(true);
+    expect(config.telegramActionChannel).toMatchObject({
+      enabled: true,
+      baseUrl: 'http://api:3000/',
+    });
   });
 
   it('pins the production admission service to its private container origin', () => {

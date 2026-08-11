@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy and smoke, or stop staging and disable both logins
+        description: Build only, deploy and smoke, or stop staging and disable all narrow logins
         required: true
         default: plan
         type: choice
@@ -39,6 +39,7 @@ env:
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
   OWNER_RUNTIME_ROLE: payreplayy_owner_control_runtime
+  PLAYER_ACTION_RUNTIME_ROLE: payreplayy_player_actions_runtime
 
 jobs:
   validate-target:
@@ -91,11 +92,13 @@ jobs:
           tag="${GITHUB_SHA:0:12}"
           docker build --pull=false --target admin \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-owner-control:$tag" .
+          docker build --pull=false --target api \
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-api:$tag" .
           docker build --pull=false --target beta-admission \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-beta-admission:$tag" .
           docker build --pull=false --target bot \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-bot:$tag" .
-          for image in owner-control beta-admission bot; do
+          for image in owner-control api beta-admission bot; do
             test "$(docker image inspect "payreplayy-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
           done
 
@@ -107,6 +110,7 @@ jobs:
           tag="${GITHUB_SHA:0:12}"
           docker save --output "$RUNNER_TEMP/payreplayy-staging-images.tar" \
             "payreplayy-owner-control:$tag" \
+            "payreplayy-api:$tag" \
             "payreplayy-beta-admission:$tag" \
             "payreplayy-bot:$tag"
 
@@ -147,8 +151,13 @@ jobs:
         env:
           BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
           BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          BOT_TO_API_ACTION_HMAC_SECRET: ${{ secrets.BOT_TO_API_ACTION_HMAC_SECRET }}
           BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
+          API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
+          API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
+          API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
           STAGING_TELEGRAM_BOT_TOKEN: ${{ secrets.STAGING_TELEGRAM_BOT_TOKEN }}
           STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
@@ -162,12 +171,19 @@ jobs:
           [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
           [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" != "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]
-          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" != "$OWNER_CONTROL_RUNTIME_PASSWORD" ]]
-          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" != "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" ]]
-          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" != "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]
-          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" != "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" ]]
-          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" != "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]
+          [[ "$PLAYER_ACTION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BOT_TO_API_ACTION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          distinct_count="$(printf '%s\n' \
+            "$BETA_ADMISSION_RUNTIME_PASSWORD" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
+            "$PLAYER_ACTION_RUNTIME_PASSWORD" "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" \
+            "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" "$BOT_TO_API_ACTION_HMAC_SECRET" \
+            "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" \
+            "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" \
+            "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" | sort -u | wc -l)"
+          [[ "$distinct_count" -eq 9 ]]
           [[ "$STAGING_TELEGRAM_BOT_TOKEN" =~ ^[0-9]{6,12}:[A-Za-z0-9_-]{30,80}$ ]]
           [[ -n "$SUPABASE_DB_PASSWORD" ]]
           [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
@@ -186,9 +202,17 @@ jobs:
           printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$OWNER_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
             > "$secret_dir/owner-database-url"
+          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$PLAYER_ACTION_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+            > "$secret_dir/player-action-database-url"
           printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" > "$secret_dir/beta-transport-hmac"
           printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" > "$secret_dir/bot-transport-hmac"
           printf '%s\n' "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" > "$secret_dir/beta-payload-hmac"
+          printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" > "$secret_dir/api-action-transport-hmac"
+          printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" > "$secret_dir/bot-action-transport-hmac"
+          printf '%s\n' "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" > "$secret_dir/api-action-payload-hmac"
+          printf '%s\n' "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" > "$secret_dir/api-action-capability-hmac"
+          printf '%s\n' "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" > "$secret_dir/api-action-semantic-hmac"
           printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" > "$secret_dir/bot-token"
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
@@ -223,12 +247,13 @@ jobs:
             exit "$remote_status"
           fi
 
-      - name: Provision both narrow 24-hour staging logins
+      - name: Provision three narrow 24-hour staging logins
         id: provision
         shell: bash
         env:
           BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.STAGING_POOLER_HOST }}
           PGPORT: '5432'
@@ -260,7 +285,11 @@ jobs:
           scp "${ssh_opts[@]}" "$RUNNER_TEMP/release/payreplayy-staging-images.tar" \
             infra/compose.staging-beta.yaml "$SECRET_DIR/supabase-ca.crt" \
             "$SECRET_DIR/beta-database-url" "$SECRET_DIR/owner-database-url" \
+            "$SECRET_DIR/player-action-database-url" \
             "$SECRET_DIR/beta-transport-hmac" "$SECRET_DIR/bot-transport-hmac" \
+            "$SECRET_DIR/api-action-transport-hmac" "$SECRET_DIR/bot-action-transport-hmac" \
+            "$SECRET_DIR/api-action-payload-hmac" "$SECRET_DIR/api-action-capability-hmac" \
+            "$SECRET_DIR/api-action-semantic-hmac" \
             "$SECRET_DIR/beta-payload-hmac" "$SECRET_DIR/bot-token" \
             "$SECRET_DIR/publishable-key" "payreplayy-admin@$VM_HOST:$incoming/"
           ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
@@ -348,7 +377,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Stop containers and disable both database logins
+      - name: Stop containers and disable all staging database logins
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

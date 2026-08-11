@@ -37,6 +37,24 @@ export const messages = {
   addKemerBetPlayerId: {
     en: 'Add KemerBet Player ID',
   },
+  enterKemerBetPlayerId: {
+    en: 'Send your KemerBet Player ID now. It will be saved as pending validation.',
+  },
+  playerIdPending: {
+    en: 'Player ID saved — pending validation. It cannot be used for a deposit yet.',
+  },
+  invalidPlayerId: {
+    en: 'That Player ID format is not accepted. Send one value without spaces, up to 64 characters.',
+  },
+  playerActionRestart: {
+    en: 'That action expired or is no longer available. Send /menu to start again.',
+  },
+  playerActionMenuRequired: {
+    en: 'Send /menu, then choose Add KemerBet Player ID.',
+  },
+  playerActionUnavailable: {
+    en: 'Player ID setup is temporarily unavailable. Please try again shortly.',
+  },
 } as const satisfies Record<string, Record<Locale, string>>;
 
 export type MessageKey = keyof typeof messages;

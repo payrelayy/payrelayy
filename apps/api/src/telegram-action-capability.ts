@@ -24,19 +24,7 @@ type CapabilityBoundSemanticInput = {
   readonly semanticHmacSecret: string;
 };
 
-export type TelegramConversationVersion = string | number | bigint;
-
-/**
- * This context must come only from a trusted database result after the future action starts. It
- * must never be reconstructed from Telegram callback or text content.
- */
-export interface PlayerRegistrationActionContext {
-  readonly actionId: string;
-  readonly capabilityId: string;
-  readonly expectedConversationVersion: TelegramConversationVersion;
-}
-
-type PlayerIdSubmissionSemanticInput = PlayerRegistrationActionContext & {
+type PlayerIdSubmissionSemanticInput = {
   readonly consumer: 'submit_player_registration_input';
   readonly originInboundEventId: string;
   /**
@@ -48,7 +36,7 @@ type PlayerIdSubmissionSemanticInput = PlayerRegistrationActionContext & {
   readonly semanticHmacSecret: string;
 };
 
-type PlayerIdExpirySemanticInput = PlayerRegistrationActionContext & {
+type PlayerIdExpirySemanticInput = {
   readonly consumer: 'expire_player_registration_action';
   readonly originInboundEventId: string;
   readonly semanticHmacSecret: string;
@@ -106,44 +94,6 @@ function canonicalPlayerIdForSemanticHmac(value: string): string {
   // Unicode, strip zeros, or validate content here; the future database wrapper remains the
   // authority that re-normalizes and validates the submitted value.
   return value.replace(/^ +| +$/g, '');
-}
-
-function canonicalConversationVersion(value: TelegramConversationVersion): string {
-  const maximum = 9_223_372_036_854_775_807n;
-  let parsed: bigint;
-
-  if (typeof value === 'bigint') {
-    parsed = value;
-  } else if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) {
-      throw new Error('The expected conversation version must be a safe integer.');
-    }
-    parsed = BigInt(value);
-  } else if (/^(0|[1-9][0-9]*)$/.test(value)) {
-    parsed = BigInt(value);
-  } else {
-    throw new Error('The expected conversation version must be a canonical nonnegative integer.');
-  }
-
-  if (parsed < 0n || parsed > maximum) {
-    throw new Error('The expected conversation version is outside PostgreSQL bigint range.');
-  }
-
-  return parsed.toString();
-}
-
-function canonicalPlayerRegistrationActionContext(input: PlayerRegistrationActionContext): {
-  readonly actionId: string;
-  readonly capabilityId: string;
-  readonly expectedConversationVersion: string;
-  readonly platformCode: 'kemerbet';
-} {
-  return {
-    actionId: canonicalUuid(input.actionId, 'The Player ID action ID'),
-    capabilityId: canonicalUuid(input.capabilityId, 'The capability ID'),
-    expectedConversationVersion: canonicalConversationVersion(input.expectedConversationVersion),
-    platformCode: 'kemerbet',
-  };
 }
 
 function hmacHex(secret: Buffer, domain: string, value: string): string {
@@ -261,14 +211,14 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
     case 'submit_player_registration_input':
       canonicalPayload = JSON.stringify({
         ...basePayload,
-        ...canonicalPlayerRegistrationActionContext(input),
+        platformCode: 'kemerbet',
         normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
       });
       break;
     case 'expire_player_registration_action':
       canonicalPayload = JSON.stringify({
         ...basePayload,
-        ...canonicalPlayerRegistrationActionContext(input),
+        platformCode: 'kemerbet',
       });
       break;
     default:

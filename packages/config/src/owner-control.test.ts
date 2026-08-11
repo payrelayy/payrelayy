@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
+  OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
   loadOwnerControlConfig,
   redactedOwnerControlConfigForLog,
 } from './owner-control.js';
@@ -36,9 +37,11 @@ describe('Owner-control configuration', () => {
       },
     ) as NodeJS.ProcessEnv;
     expect(loadOwnerControlConfig(environment)).toMatchObject({
+      botUsername: OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
       runtime: { enabled: false },
       server: { host: '127.0.0.1', port: 3002 },
     });
+    expect(OWNER_CONTROL_TELEGRAM_BOT_USERNAME).toBe('payrelayybot');
   });
 
   it('accepts only the exact staging project, role, pooler, and verify-full URL', () => {

@@ -5,6 +5,7 @@ import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.
 
 export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 export const OWNER_CONTROL_DATABASE_RUNTIME_ROLE = 'payreplayy_owner_control_runtime';
+export const OWNER_CONTROL_TELEGRAM_BOT_USERNAME = 'payrelayybot';
 
 const SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
 const SESSION_POOLER_USER = `${OWNER_CONTROL_DATABASE_RUNTIME_ROLE}.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}`;
@@ -43,7 +44,7 @@ export type OwnerControlRuntimeConfig =
     };
 
 export interface OwnerControlConfig extends RuntimeConfig {
-  readonly botUsername: 'PayReplayyBot';
+  readonly botUsername: typeof OWNER_CONTROL_TELEGRAM_BOT_USERNAME;
   readonly runtime: OwnerControlRuntimeConfig;
   readonly server: {
     readonly host: string;
@@ -145,9 +146,9 @@ export function loadOwnerControlConfig(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: OwnerControlConfigDependencies = {},
 ): OwnerControlConfig {
-  const common = {
+  const common: Omit<OwnerControlConfig, 'runtime'> = {
     ...loadRuntimeConfig(environment),
-    botUsername: 'PayReplayyBot' as const,
+    botUsername: OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
     server: {
       host: environment.OWNER_CONTROL_HOST ?? '127.0.0.1',
       port: parsePort(environment.OWNER_CONTROL_PORT),

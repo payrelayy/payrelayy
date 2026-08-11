@@ -1,4 +1,7 @@
-import type { OwnerControlRuntimeConfig } from '@payreplayy/config/owner-control';
+import {
+  OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
+  type OwnerControlRuntimeConfig,
+} from '@payreplayy/config/owner-control';
 
 const STAGING_SUPABASE_ORIGIN = 'https://spzpiyxheappsfyswewl.supabase.co';
 
@@ -163,7 +166,7 @@ function validInvite(value) {
   let url;
   try { url = new URL(inviteUrl); } catch { return undefined; }
   const start = url.searchParams.get('start');
-  if (url.protocol !== 'https:' || url.hostname !== 't.me' || url.pathname !== '/PayReplayyBot' ||
+  if (url.protocol !== 'https:' || url.hostname !== 't.me' || url.pathname !== '/${OWNER_CONTROL_TELEGRAM_BOT_USERNAME}' ||
       url.searchParams.size !== 1 || !start || !/^[A-Za-z0-9_-]{43}$/.test(start) || url.hash) return undefined;
   return { inviteId, inviteUrl: url.toString(), expiresAt };
 }

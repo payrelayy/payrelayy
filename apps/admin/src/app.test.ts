@@ -32,7 +32,7 @@ function runtime(
       issue: async () => ({
         expiresAt: '2026-08-11T12:00:00.000Z',
         inviteId,
-        inviteUrl: 'https://t.me/PayReplayyBot?start=raw-token-returned-once',
+        inviteUrl: 'https://t.me/payrelayybot?start=raw-token-returned-once',
       }),
       revoke: async () => undefined,
     },
@@ -89,6 +89,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/u);
     expect(response.body).not.toContain('refresh_token');
     expect(response.body).not.toContain('service_role');
+    expect(response.body).toContain("url.pathname !== '/payrelayybot'");
+    expect(response.body).not.toContain('/PayReplayyBot');
     expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
     await app.close();
   });

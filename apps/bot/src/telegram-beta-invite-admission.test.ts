@@ -56,7 +56,7 @@ describe('beta invite admission reducer', () => {
       '/start',
       `/start  ${inviteToken}`,
       `/start ${inviteToken} extra`,
-      `/start@PayReplayyBot ${inviteToken}`,
+      `/start@payrelayybot ${inviteToken}`,
       ` /start ${inviteToken}`,
       `/start ${inviteToken}\n`,
       `/menu ${inviteToken}`,

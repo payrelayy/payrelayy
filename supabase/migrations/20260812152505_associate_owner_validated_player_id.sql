@@ -142,15 +142,23 @@ begin
     raise exception 'Only an active Owner can associate Player IDs.';
   end if;
 
-  select registration_request_row, platform.code
-    into registration_request, resolved_platform_code
+  select registration_request_row.*
+    into registration_request
   from app.player_registration_requests registration_request_row
-  join app.platforms platform on platform.id = registration_request_row.platform_id
   where registration_request_row.id = p_registration_request_id
-  for update of registration_request_row, platform;
+  for update;
 
-  if registration_request.id is null
-    or registration_request.status <> 'exists'
+  if registration_request.id is null then
+    raise exception 'The Player ID request is not eligible for ownership association.';
+  end if;
+
+  select platform.code
+    into resolved_platform_code
+  from app.platforms platform
+  where platform.id = registration_request.platform_id
+  for key share;
+
+  if registration_request.status <> 'exists'
     or resolved_platform_code <> 'kemerbet'
     or not exists (
       select 1

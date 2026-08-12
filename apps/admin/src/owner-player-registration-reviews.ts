@@ -27,6 +27,20 @@ export interface OwnerPlayerRegistrationReviewReceipt {
   readonly status: OwnerPlayerRegistrationDecision;
 }
 
+export interface OwnerPlayerRegistrationAssociationCandidate {
+  readonly playerId: string;
+  readonly platformCode: 'kemerbet';
+  readonly requestId: string;
+  readonly reviewedAt: string;
+}
+
+export interface OwnerPlayerRegistrationAssociationReceipt {
+  readonly alreadyRecorded: boolean;
+  readonly associatedAt: string;
+  readonly playerAccountId: string;
+  readonly requestId: string;
+}
+
 export class OwnerPlayerRegistrationReviewRejectedError extends Error {
   constructor() {
     super('The Owner Player ID review operation was rejected.');
@@ -58,6 +72,20 @@ const REVIEW_SQL = `
          reviewed_at,
          decision_already_recorded
   from app.review_owner_player_registration_request($1::uuid, $2::uuid, $3::text, $4::text)
+`;
+const ASSOCIATION_CANDIDATES_SQL = `
+  select registration_request_id,
+         platform_code,
+         submitted_player_id,
+         reviewed_at
+  from app.list_owner_player_registration_association_candidates($1::uuid, $2::integer)
+`;
+const ASSOCIATE_SQL = `
+  select associated_registration_request_id,
+         associated_player_account_id,
+         associated_at,
+         association_already_recorded
+  from app.associate_owner_validated_player_registration_request($1::uuid, $2::uuid, $3::text)
 `;
 
 const REVIEW_REASONS: Readonly<
@@ -168,6 +196,81 @@ export class PostgresOwnerPlayerRegistrationReviews {
         requestId,
         reviewedAt: isoDate(row.reviewed_at),
         status: decision,
+      };
+    } catch (error) {
+      if (error instanceof OwnerPlayerRegistrationReviewUnavailableError) throw error;
+      if (databaseErrorCode(error) === 'P0001' || databaseErrorCode(error) === '23505') {
+        throw new OwnerPlayerRegistrationReviewRejectedError();
+      }
+      throw new OwnerPlayerRegistrationReviewUnavailableError();
+    }
+  }
+
+  async listAssociationCandidates(
+    authUserId: string,
+    limit = 25,
+  ): Promise<readonly OwnerPlayerRegistrationAssociationCandidate[]> {
+    if (!UUID_PATTERN.test(authUserId) || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      throw new OwnerPlayerRegistrationReviewRejectedError();
+    }
+    try {
+      const result = await this.database.query(ASSOCIATION_CANDIDATES_SQL, [authUserId, limit]);
+      if (result.rows.length > limit) throw new OwnerPlayerRegistrationReviewUnavailableError();
+      return result.rows.map((rawRow) => {
+        const row = rowObject(rawRow);
+        if (
+          typeof row.registration_request_id !== 'string' ||
+          !UUID_PATTERN.test(row.registration_request_id) ||
+          row.platform_code !== 'kemerbet' ||
+          typeof row.submitted_player_id !== 'string' ||
+          !PLAYER_ID_PATTERN.test(row.submitted_player_id)
+        ) {
+          throw new OwnerPlayerRegistrationReviewUnavailableError();
+        }
+        return {
+          playerId: row.submitted_player_id,
+          platformCode: 'kemerbet' as const,
+          requestId: row.registration_request_id,
+          reviewedAt: isoDate(row.reviewed_at),
+        };
+      });
+    } catch (error) {
+      if (error instanceof OwnerPlayerRegistrationReviewUnavailableError) throw error;
+      if (databaseErrorCode(error) === 'P0001') {
+        throw new OwnerPlayerRegistrationReviewRejectedError();
+      }
+      throw new OwnerPlayerRegistrationReviewUnavailableError();
+    }
+  }
+
+  async associate(
+    authUserId: string,
+    requestId: string,
+  ): Promise<OwnerPlayerRegistrationAssociationReceipt> {
+    if (!UUID_PATTERN.test(authUserId) || !UUID_PATTERN.test(requestId)) {
+      throw new OwnerPlayerRegistrationReviewRejectedError();
+    }
+    try {
+      const result = await this.database.query(ASSOCIATE_SQL, [
+        authUserId,
+        requestId,
+        'owner_verified_platform_ownership',
+      ]);
+      const row = result.rows.length === 1 ? rowObject(result.rows[0]) : undefined;
+      if (
+        !row ||
+        row.associated_registration_request_id !== requestId ||
+        typeof row.associated_player_account_id !== 'string' ||
+        !UUID_PATTERN.test(row.associated_player_account_id) ||
+        typeof row.association_already_recorded !== 'boolean'
+      ) {
+        throw new OwnerPlayerRegistrationReviewUnavailableError();
+      }
+      return {
+        alreadyRecorded: row.association_already_recorded,
+        associatedAt: isoDate(row.associated_at),
+        playerAccountId: row.associated_player_account_id,
+        requestId,
       };
     } catch (error) {
       if (error instanceof OwnerPlayerRegistrationReviewUnavailableError) throw error;

@@ -1774,6 +1774,8 @@ describe('disposable SQL migration baseline', () => {
       readonly direct_table_access_denied: boolean;
       readonly functions_are_hardened: boolean;
       readonly issue_allowed: boolean;
+      readonly player_association_allowed: boolean;
+      readonly player_association_list_allowed: boolean;
       readonly player_list_allowed: boolean;
       readonly player_review_allowed: boolean;
       readonly revoke_allowed: boolean;
@@ -1802,6 +1804,16 @@ describe('disposable SQL migration baseline', () => {
           'execute'
         ) as player_review_allowed,
         has_function_privilege(
+          'payreplayy_owner_control',
+          'app.list_owner_player_registration_association_candidates(uuid,integer)',
+          'execute'
+        ) as player_association_list_allowed,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.associate_owner_validated_player_registration_request(uuid,uuid,text)',
+          'execute'
+        ) as player_association_allowed,
+        has_function_privilege(
           'payreplayy_owner_control_runtime',
           'app.issue_telegram_beta_invite(uuid,text,timestamptz)',
           'execute'
@@ -1813,7 +1825,9 @@ describe('disposable SQL migration baseline', () => {
             'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
             'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure,
             'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
-            'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure
+            'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure,
+            'app.list_owner_player_registration_association_candidates(uuid,integer)'::regprocedure,
+            'app.associate_owner_validated_player_registration_request(uuid,uuid,text)'::regprocedure
           )
             and exists (
               select 1
@@ -1829,7 +1843,9 @@ describe('disposable SQL migration baseline', () => {
             'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
             'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure,
             'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
-            'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure
+            'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure,
+            'app.list_owner_player_registration_association_candidates(uuid,integer)'::regprocedure,
+            'app.associate_owner_validated_player_registration_request(uuid,uuid,text)'::regprocedure
           )
             and (
               not procedure.prosecdef
@@ -1854,7 +1870,9 @@ describe('disposable SQL migration baseline', () => {
               ('app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure),
               ('app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure),
               ('app.list_owner_player_registration_requests(uuid,integer)'::regprocedure),
-              ('app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure)
+              ('app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure),
+              ('app.list_owner_player_registration_association_candidates(uuid,integer)'::regprocedure),
+              ('app.associate_owner_validated_player_registration_request(uuid,uuid,text)'::regprocedure)
           ) owner_function(procedure_oid)
           where has_function_privilege(
             denied_role.role_name,
@@ -1873,7 +1891,10 @@ describe('disposable SQL migration baseline', () => {
             values
               ('app.telegram_beta_invites'),
               ('app.player_registration_requests'),
-              ('app.player_registration_request_reviews')
+              ('app.player_registration_request_reviews'),
+              ('app.player_registration_request_associations'),
+              ('app.customer_platform_players'),
+              ('app.player_validation_attempts')
           ) protected_table(table_name)
           where has_table_privilege(
             'payreplayy_owner_control',
@@ -1889,6 +1910,8 @@ describe('disposable SQL migration baseline', () => {
         direct_table_access_denied: true,
         functions_are_hardened: true,
         issue_allowed: true,
+        player_association_allowed: true,
+        player_association_list_allowed: true,
         player_list_allowed: true,
         player_review_allowed: true,
         revoke_allowed: true,
@@ -2131,6 +2154,92 @@ describe('disposable SQL migration baseline', () => {
       },
     ]);
     expect(JSON.stringify(persisted.rows[0]?.metadata)).not.toContain('STAGING-OWNER-REVIEW-01');
+
+    const associationCandidates = await queryAsRole<{
+      readonly registration_request_id: string;
+      readonly submitted_player_id: string;
+    }>(
+      'payreplayy_owner_control',
+      `select registration_request_id, submitted_player_id
+       from app.list_owner_player_registration_association_candidates($1::uuid, 25)`,
+      [ownerAuthUserId],
+    );
+    expect(associationCandidates).toContainEqual({
+      registration_request_id: requestId,
+      submitted_player_id: 'STAGING-OWNER-REVIEW-01',
+    });
+
+    const associated = await queryAsRole<{
+      readonly associated_player_account_id: string;
+      readonly associated_registration_request_id: string;
+      readonly association_already_recorded: boolean;
+    }>(
+      'payreplayy_owner_control',
+      `select * from app.associate_owner_validated_player_registration_request(
+         $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+       )`,
+      [ownerAuthUserId, requestId],
+    );
+    expect(associated).toEqual([
+      expect.objectContaining({
+        associated_registration_request_id: requestId,
+        association_already_recorded: false,
+      }),
+    ]);
+    const playerAccountId = associated[0]!.associated_player_account_id;
+    const associationGraph = await client.query<{
+      readonly association_audit_events: number;
+      readonly association_rows: number;
+      readonly last_validation_reason_code: string;
+      readonly validation_attempts: number;
+      readonly validation_status: string;
+    }>(
+      `select
+         player.validation_status::text as validation_status,
+         player.last_validation_reason_code,
+         (select count(*)::integer from app.player_validation_attempts attempt
+          where attempt.player_account_id = player.id) as validation_attempts,
+         (select count(*)::integer from app.player_registration_request_associations association
+          where association.player_account_id = player.id) as association_rows,
+         (select count(*)::integer from app.audit_events audit_event
+          where audit_event.action = 'player_registration.owner_association_recorded'
+            and audit_event.resource_id = player.id) as association_audit_events
+       from app.customer_platform_players player
+       where player.id = $1::uuid`,
+      [playerAccountId],
+    );
+    expect(associationGraph.rows).toEqual([
+      {
+        association_audit_events: 1,
+        association_rows: 1,
+        last_validation_reason_code: 'owner_verified_platform_ownership',
+        validation_attempts: 1,
+        validation_status: 'valid',
+      },
+    ]);
+
+    const associationReplay = await queryAsRole<{
+      readonly association_already_recorded: boolean;
+    }>(
+      'payreplayy_owner_control',
+      `select * from app.associate_owner_validated_player_registration_request(
+         $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+       )`,
+      [ownerAuthUserId, requestId],
+    );
+    expect(associationReplay).toEqual([
+      expect.objectContaining({ association_already_recorded: true }),
+    ]);
+
+    await expect(
+      queryAsRole(
+        'payreplayy_api',
+        `select * from app.associate_owner_validated_player_registration_request(
+           $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+         )`,
+        [ownerAuthUserId, requestId],
+      ),
+    ).rejects.toThrow(/permission denied/u);
 
     await expect(
       queryAsRole(

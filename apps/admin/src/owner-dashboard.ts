@@ -87,6 +87,21 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </p>
           <div class="request-list" id="player-request-list"></div>
         </section>
+
+        <section class="review-section" aria-labelledby="player-association-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Explicit ownership confirmation</p>
+              <h2 id="player-association-title">Deposit-eligible Player IDs</h2>
+            </div>
+          </div>
+          <p class="receipt-label">
+            Confirm only after independently verifying that this Telegram customer controls the
+            KemerBet account. This creates the validated association required by deposit intake,
+            but does not open a deposit or enable payments.
+          </p>
+          <div class="request-list" id="player-association-list"></div>
+        </section>
       </section>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
@@ -154,6 +169,7 @@ const openLink = document.querySelector('#open-link');
 const revokeButton = document.querySelector('#revoke-button');
 const refreshRequestsButton = document.querySelector('#refresh-requests-button');
 const playerRequestList = document.querySelector('#player-request-list');
+const playerAssociationList = document.querySelector('#player-association-list');
 
 let accessToken;
 let currentInvite;
@@ -178,11 +194,16 @@ function clearPlayerRequests() {
   playerRequestList.replaceChildren();
 }
 
+function clearAssociationCandidates() {
+  playerAssociationList.replaceChildren();
+}
+
 function signOut(message = 'Signed out.') {
   accessToken = undefined;
   passwordInput.value = '';
   clearInvite();
   clearPlayerRequests();
+  clearAssociationCandidates();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -246,9 +267,62 @@ async function recordPlayerReview(requestId, decision) {
     });
     if (!response.ok) throw new Error('review');
     setNotice('Player ID review recorded. Ownership and deposits remain disabled.');
-    await loadPlayerRequests();
+    await loadOwnerPlayerQueues();
   } catch (error) {
     if (!isSignedOutError(error)) setNotice('Player ID review failed. Refresh before trying again.');
+  }
+}
+
+function validAssociationCandidate(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const requestId = typeof value.requestId === 'string' ? value.requestId : undefined;
+  const playerId = typeof value.playerId === 'string' ? value.playerId : undefined;
+  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
+      value.platformCode !== 'kemerbet' || !playerId || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(playerId) ||
+      typeof value.reviewedAt !== 'string' || !Number.isFinite(Date.parse(value.reviewedAt))) return undefined;
+  return { playerId, requestId, reviewedAt: value.reviewedAt };
+}
+
+async function associatePlayerRequest(requestId) {
+  if (!window.confirm('Confirm that you independently verified this Telegram customer controls the exact KemerBet account. This creates a validated deposit-eligible association.')) return;
+  setNotice('Recording explicit Player ID ownership association\u2026');
+  try {
+    const response = await ownerRequest('/v1/owner/player-registration-requests/' + encodeURIComponent(requestId) + '/associate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'owner_verified_platform_ownership' }),
+    });
+    if (!response.ok) throw new Error('association');
+    setNotice('Player ID association recorded. It is eligible for deposit intake; payments remain disabled.');
+    await loadOwnerPlayerQueues();
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Player ID association failed. Refresh and verify before trying again.');
+  }
+}
+
+function renderAssociationCandidates(candidates) {
+  clearAssociationCandidates();
+  if (candidates.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No reviewed Player IDs awaiting ownership confirmation.';
+    playerAssociationList.append(empty);
+    return;
+  }
+  for (const candidate of candidates) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = candidate.playerId;
+    const metadata = document.createElement('p');
+    metadata.className = 'request-meta';
+    metadata.textContent = 'found on KemerBet \u00b7 reviewed ' + new Date(candidate.reviewedAt).toLocaleString();
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Confirm ownership and enable deposit intake';
+    button.addEventListener('click', () => associatePlayerRequest(candidate.requestId));
+    card.append(title, metadata, button);
+    playerAssociationList.append(card);
   }
 }
 
@@ -312,6 +386,33 @@ async function loadPlayerRequests() {
   }
 }
 
+async function loadAssociationCandidates() {
+  try {
+    const response = await ownerRequest('/v1/owner/player-registration-association-candidates?limit=25', {
+      method: 'GET',
+      headers: {},
+    });
+    if (!response.ok) throw new Error('association_queue');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.candidates) || payload.candidates.length > 25) throw new Error('association_queue');
+    const candidates = payload.candidates.map(validAssociationCandidate);
+    if (candidates.some((candidate) => !candidate)) throw new Error('association_queue');
+    renderAssociationCandidates(candidates);
+  } catch (error) {
+    clearAssociationCandidates();
+    if (!isSignedOutError(error)) setNotice('Player ID association queue is unavailable.');
+  }
+}
+
+async function loadOwnerPlayerQueues() {
+  refreshRequestsButton.disabled = true;
+  try {
+    await Promise.all([loadPlayerRequests(), loadAssociationCandidates()]);
+  } finally {
+    refreshRequestsButton.disabled = false;
+  }
+}
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBusy(loginForm, true);
@@ -339,7 +440,7 @@ loginForm.addEventListener('submit', async (event) => {
     loginPanel.hidden = true;
     invitePanel.hidden = false;
     setNotice('Signed in. Create an invite when you are ready to send it.');
-    await loadPlayerRequests();
+    await loadOwnerPlayerQueues();
   } catch {
     passwordInput.value = '';
     accessToken = undefined;
@@ -406,7 +507,7 @@ revokeButton.addEventListener('click', async () => {
 });
 
 logoutButton.addEventListener('click', () => signOut());
-refreshRequestsButton.addEventListener('click', loadPlayerRequests);
+refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
 `;
 
 export function ownerDashboardPublicConfig(

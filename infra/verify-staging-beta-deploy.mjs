@@ -152,21 +152,29 @@ assert.match(helper, /ip -6 route show default/);
 assert.match(helper, /getent ahostsv6 "\$STAGING_DIRECT_DATABASE_HOST" >\/dev\/null/);
 assert.match(
   helper,
-  /run --rm --no-deps owner-control node apps\/admin\/dist\/database-preflight-cli\.js/,
+  /run_bounded_database_preflight \\\s+owner-control apps\/admin\/dist\/database-preflight-cli\.js/,
 );
 assert.match(
   helper,
-  /run --rm --no-deps api node apps\/api\/dist\/player-action-database-preflight-cli\.js/,
+  /run_bounded_database_preflight \\\s+api apps\/api\/dist\/player-action-database-preflight-cli\.js/,
 );
 assert.match(
   helper,
-  /run --rm --no-deps beta-admission node apps\/beta-admission\/dist\/catalog-preflight-cli\.js/,
+  /run_bounded_database_preflight \\\s+beta-admission apps\/beta-admission\/dist\/catalog-preflight-cli\.js/,
 );
+const boundedPreflight = /run_bounded_database_preflight\(\)([\s\S]*?)\n\s*\}/u.exec(helper)?.[1];
+assert.ok(boundedPreflight, 'The helper must define the bounded database preflight runner.');
+assert.match(boundedPreflight, /for attempt in 1 2 3/);
+assert.match(boundedPreflight, /run --rm --no-deps "\$service" node "\$preflight_cli"/);
+assert.match(boundedPreflight, /if \[\[ "\$attempt" -lt 3 \]\]/);
+assert.match(boundedPreflight, /sleep 15/);
+assert.doesNotMatch(boundedPreflight, /up -d|password|secret|psql|curl|wget/);
 const longLivedStart = helper.indexOf('up -d --no-build --wait --wait-timeout 90');
 assert.ok(
-  helper.indexOf('run --rm --no-deps owner-control') < longLivedStart &&
-    helper.indexOf('run --rm --no-deps api') < longLivedStart &&
-    helper.indexOf('run --rm --no-deps beta-admission') < longLivedStart,
+  helper.indexOf('owner-control apps/admin/dist/database-preflight-cli.js') < longLivedStart &&
+    helper.indexOf('api apps/api/dist/player-action-database-preflight-cli.js') < longLivedStart &&
+    helper.indexOf('beta-admission apps/beta-admission/dist/catalog-preflight-cli.js') <
+      longLivedStart,
   'All three one-shot runtime preflights must pass before long-lived services start.',
 );
 assert.match(helper, /docker_local network rm \$networks/);

@@ -28,7 +28,9 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
           property === 'BOT_TO_API_ACTION_HMAC_SECRET' ||
           property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
           property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
-          property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET'
+          property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET' ||
+          property === 'API_DEPOSIT_REFERENCE_PROTECTION_SECRET' ||
+          property === 'API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE'
         ) {
           throw new Error(`unexpected Telegram environment read: ${String(property)}`);
         }
@@ -48,6 +50,7 @@ describe('runtime configuration isolation', () => {
     API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
     API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
     API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
+    API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
   } as const;
 
   it('defaults API financial actions to dry-run mode', () => {
@@ -77,6 +80,7 @@ describe('runtime configuration isolation', () => {
     const redacted = JSON.stringify(redactedApiConfigForLog(config));
     expect(redacted).not.toContain('password');
     expect(redacted).not.toContain('d'.repeat(64));
+    expect(redacted).not.toContain('e'.repeat(64));
   });
 
   it('rejects a foreign project, a generic role, and shared Player-ID action HMACs', () => {
@@ -105,6 +109,14 @@ describe('runtime configuration isolation', () => {
       loadApiConfig({
         ...playerActionEnvironment,
         API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'a'.repeat(64),
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('must be distinct');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'c'.repeat(64),
         PLAYER_ACTION_DATABASE_URL:
           'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),

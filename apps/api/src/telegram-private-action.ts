@@ -3,12 +3,14 @@ import type { IncomingHttpHeaders } from 'node:http';
 
 import {
   TELEGRAM_PRIVATE_ACTION_CONTENT_TYPE,
+  TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH,
   TELEGRAM_PRIVATE_ACTION_HEADERS,
   TELEGRAM_PRIVATE_ACTION_KEY_ID,
   TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES,
   TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS,
   TELEGRAM_PRIVATE_ACTION_PATH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   parseTelegramPlayerRegistrationCapabilityCallback,
   redactTelegramPrivateActionForLog,
   telegramPrivateActionNonceDigestInput,
@@ -98,6 +100,10 @@ const ROOT_MENU_KEYS = new Set([
 ]);
 const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
+const DEPOSIT_INTENT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId', 'amountEtb']);
+const DEPOSIT_REFERENCE_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken', 'transactionReference']);
+const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
+const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 
 function oneHeaderValue(request: TelegramPrivateActionRequest, name: string): string | undefined {
   const values: string[] = [];
@@ -184,6 +190,16 @@ function validPlayerIdText(value: unknown): value is string {
   );
 }
 
+function validDepositReference(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value === value.trim() &&
+    Array.from(value).length >= 4 &&
+    Array.from(value).length <= TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS &&
+    /^[A-Za-z0-9._-]+$/u.test(value)
+  );
+}
+
 /**
  * Strictly parse the versioned action envelope after transport authentication. It intentionally
  * performs only structural safety validation; platform and database authorization do not exist at
@@ -230,6 +246,43 @@ export function parseTelegramPrivateActionEnvelope(
       if (!identity || !validPlayerIdText(parsed.playerId)) return undefined;
 
       return { ...identity, kind: 'player_id_text', playerId: parsed.playerId };
+    }
+    case 'deposit_intent_command': {
+      if (!hasOnlyKeys(parsed, DEPOSIT_INTENT_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (
+        !identity ||
+        !validPlayerIdText(parsed.playerId) ||
+        typeof parsed.amountEtb !== 'string' ||
+        !ETB_AMOUNT_PATTERN.test(parsed.amountEtb)
+      ) {
+        return undefined;
+      }
+      return {
+        ...identity,
+        kind: 'deposit_intent_command',
+        playerId: parsed.playerId,
+        amountEtb: parsed.amountEtb,
+      };
+    }
+    case 'deposit_reference_command': {
+      if (!hasOnlyKeys(parsed, DEPOSIT_REFERENCE_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (
+        !identity ||
+        typeof parsed.depositToken !== 'string' ||
+        parsed.depositToken.length !== TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH ||
+        !COMPACT_UUID_PATTERN.test(parsed.depositToken) ||
+        !validDepositReference(parsed.transactionReference)
+      ) {
+        return undefined;
+      }
+      return {
+        ...identity,
+        kind: 'deposit_reference_command',
+        depositToken: parsed.depositToken,
+        transactionReference: parsed.transactionReference,
+      };
     }
     default:
       return undefined;

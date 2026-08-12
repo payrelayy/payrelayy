@@ -10,6 +10,8 @@ export const TELEGRAM_PRIVATE_ACTION_KEY_ID = 'v1';
 export const TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES = 16 * 1024;
 export const TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS = 60;
 export const TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS = 64;
+export const TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH = 22;
+export const TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS = 128;
 
 export const TELEGRAM_PRIVATE_ACTION_HEADERS = {
   keyId: 'x-payreplayy-action-key-id',
@@ -34,8 +36,10 @@ export interface TelegramPrivateActionIdentity {
 }
 
 /**
- * These are the only future customer action presentations this local contract understands. The
- * envelope contains no payment reference, attachment, database identifier, or Telegram Update.
+ * These are the only customer action presentations this private contract understands. Raw
+ * references are allowed only in the bounded deposit-reference command and must never be logged or
+ * persisted without API-side protection. The envelope contains no attachment, raw database UUID,
+ * or full Telegram Update.
  */
 export type TelegramPrivateActionEnvelope =
   | (TelegramPrivateActionIdentity & {
@@ -50,9 +54,23 @@ export type TelegramPrivateActionEnvelope =
       readonly kind: 'player_id_text';
       /** Customer input for a later reviewed database boundary; never log this raw value. */
       readonly playerId: string;
+    })
+  | (TelegramPrivateActionIdentity & {
+      readonly kind: 'deposit_intent_command';
+      /** Explicit account selection prevents ambiguity when one customer owns several Player IDs. */
+      readonly playerId: string;
+      /** Canonical customer-entered ETB decimal, converted to minor units only by the API. */
+      readonly amountEtb: string;
+    })
+  | (TelegramPrivateActionIdentity & {
+      readonly kind: 'deposit_reference_command';
+      /** Compact opaque UUID presentation. It is not authority and is never logged. */
+      readonly depositToken: string;
+      /** Raw trusted-memory reference. It is encrypted and blinded before persistence. */
+      readonly transactionReference: string;
     });
 
-/** Safe bot-visible result. It never contains a database ID, Player ID, raw callback token, or state. */
+/** Safe bot-visible result. It never contains a raw database UUID, Player ID, raw callback token, or state. */
 export type TelegramPrivateActionResult =
   | {
       readonly version: 1;
@@ -69,7 +87,28 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
-      readonly outcome: 'invalid_player_id' | 'restart_required' | 'menu_required';
+      readonly outcome: 'deposit_instructions';
+      readonly depositToken: string;
+      readonly amountMinor: string;
+      readonly currencyCode: 'ETB';
+      readonly providerName: 'CBE Birr';
+      readonly receiverAccountHolderName: string;
+      readonly receiverAccountMasked: string;
+      readonly customerInstruction: string;
+      readonly paymentDeadline: string;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_reference_received';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome:
+        | 'invalid_player_id'
+        | 'restart_required'
+        | 'menu_required'
+        | 'deposit_input_invalid'
+        | 'deposit_unavailable';
     };
 
 export interface TelegramPrivateActionSignatureInput {

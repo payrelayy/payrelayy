@@ -37,7 +37,7 @@ review the commit, runtime credentials, startup preflight, and resulting rendere
 ## External secret files
 
 No secret value belongs in this repository, an `.env` file, a Compose environment value, an image,
-or a command line. The operator must provide thirteen service-separated input files and one verified
+or a command line. The operator must provide fourteen service-separated input files and one verified
 public CA file outside the checkout:
 
 | Host-path selector                                               | Mounted only into | Container path                                        |
@@ -52,6 +52,7 @@ public CA file outside the checkout:
 | `PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`         | api               | `/run/secrets/api_player_action_payload_hmac`         |
 | `PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`      | api               | `/run/secrets/api_player_action_capability_hmac`      |
 | `PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`        | api               | `/run/secrets/api_player_action_semantic_hmac`        |
+| `PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE`       | api               | `/run/secrets/api_deposit_reference_protection`       |
 | `PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                | all DB clients    | `/run/configs/supabase_ca_certificate`                |
 | `PAYREPLAYY_STAGING_BOT_TOKEN_FILE`                              | bot               | `/run/secrets/telegram_bot_token`                     |
 | `PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE`                     | bot               | `/run/secrets/bot_beta_admission_transport_hmac`      |
@@ -90,7 +91,8 @@ The application must support these exact file-valued variables before activation
 - api: `PLAYER_ACTION_DATABASE_URL_FILE`, `BOT_TO_API_ACTION_HMAC_SECRET_FILE`,
   `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE`,
   `API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE`, and
-  `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE`;
+  `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE`, and
+  `API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE`;
 - bot additionally: `BOT_TO_API_ACTION_HMAC_SECRET_FILE`;
 - owner-control: `OWNER_CONTROL_DATABASE_URL_FILE` and
   `OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`; a Supabase service-role key is forbidden.
@@ -115,7 +117,7 @@ access, disabled generic action/provider gates, and absence of public ingress or
 Before any separately approved build, set `PAYREPLAYY_VCS_REF` to the reviewed full commit SHA and
 `PAYREPLAYY_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
 that contains no `.env`/`.env.*` file and from a cleared process environment with no inherited
-direct secret variable. Supply only the two non-secret image selectors, thirteen external
+direct secret variable. Supply only the two non-secret image selectors, fourteen external
 service-input selectors, and the verified public CA path selector explicitly. The future render must
 disable Compose's implicit checkout `.env` loading:
 
@@ -133,6 +135,7 @@ env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE=<external-path> \
   PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE=<external-path> \
   PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE=<external-path> \
+  PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE=<external-path> \
   PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE=<verified-external-path> \
   PAYREPLAYY_STAGING_BOT_TOKEN_FILE=<external-path> \
   PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE=<external-path> \
@@ -180,13 +183,16 @@ input, or VM command line.
 | `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET` | distinct 32-byte lowercase hex                       |
 | `API_TELEGRAM_CAPABILITY_HMAC_SECRET`            | distinct 32-byte lowercase hex                       |
 | `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET`       | distinct 32-byte lowercase hex                       |
+| `API_DEPOSIT_REFERENCE_PROTECTION_SECRET`        | distinct 32-byte lowercase hex; retain for decrypts  |
 | `STAGING_TELEGRAM_BOT_TOKEN`                     | newly rotated staging-only BotFather token           |
 | `STAGING_SUPABASE_PUBLISHABLE_KEY`               | staging publishable key; never `service_role`        |
 | `STAGING_VM_HOST`                                | exact approved staging VM host                       |
 | `STAGING_VM_KNOWN_HOSTS`                         | pinned OpenSSH known-hosts entry                     |
 | `STAGING_VM_SSH_PRIVATE_KEY`                     | dedicated non-root deployment identity private key   |
 
-The three runtime passwords and all independently purposed HMAC values must differ. The VM key must authenticate only
+The three runtime passwords, all independently purposed HMAC values, and the deposit-reference
+protection key must differ. Keep the deposit-reference key stable for the lifetime of records
+encrypted under version 1; rotate only through a reviewed key-version migration. The VM key must authenticate only
 the non-root `payreplayy-admin` identity. The historical BotFather token shown in an earlier
 screenshot is compromised and must never be reused.
 

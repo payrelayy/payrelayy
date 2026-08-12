@@ -21,6 +21,24 @@ export function presentTelegramPlayerIdFlowResult(
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'enterKemerBetPlayerId') };
     case 'player_id_pending':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerIdPending') };
+    case 'deposit_instructions':
+      return {
+        kind: 'message',
+        text: [
+          `Dry-run CBE Birr deposit: ${formatMinorEtb(result.amountMinor)} ETB.`,
+          `${result.customerInstruction}`,
+          `Receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
+          `Deadline: ${result.paymentDeadline}.`,
+          `After paying, send /reference ${result.depositToken} TRANSACTION_REFERENCE.`,
+          'This records intake only; payment verification and KemerBet execution remain disabled.',
+        ].join('\n'),
+      };
+    case 'deposit_reference_received':
+      return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositReferenceReceived') };
+    case 'deposit_input_invalid':
+      return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositInputInvalid') };
+    case 'deposit_unavailable':
+      return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositUnavailable') };
     case 'invalid_player_id':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'invalidPlayerId') };
     case 'restart_required':
@@ -28,4 +46,10 @@ export function presentTelegramPlayerIdFlowResult(
     case 'menu_required':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerActionMenuRequired') };
   }
+}
+
+function formatMinorEtb(value: string): string {
+  if (!/^[1-9][0-9]*$/u.test(value)) return 'invalid';
+  const minor = BigInt(value);
+  return `${minor / 100n}.${(minor % 100n).toString().padStart(2, '0')}`;
 }

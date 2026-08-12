@@ -1,9 +1,11 @@
 # PayReplayy
 
 PayReplayy is a Telegram-first payment-verification and betting-agent automation service.
-The current launch-preparation scope is an English-only, invite-only CBE Birr **fixture-only
-dry run**. It has no provider call, credential, database claim, Telegram payment instruction, or
-KemerBet execution. TeleBirr and CBE bank are deferred until separately authorized, authoritative
+The current launch-preparation scope is an English-only, invite-only CBE Birr dry run. An admitted
+customer with an Owner-confirmed KemerBet Player ID can open a 25-25,000 ETB intake, receive the
+configured masked receiver instructions, and submit one protected transaction reference for Owner
+review. It has no provider call, payment verification or claim, KemerBet execution, or live
+financial action. TeleBirr and CBE bank are deferred until separately authorized, authoritative
 adapters pass their own evidence, safety, and rollout gates.
 
 ## Current safety status
@@ -27,7 +29,10 @@ The current foundation is deliberately safe:
   request as `pending` through a dedicated database role and durable action nonce store.
 - pending or merely found Player IDs are not usable for deposits; a distinct audited Owner
   ownership confirmation is required to create the validated association;
-  no KemerBet, payment-provider, deposit, withdrawal, or financial action is enabled by this flow.
+- the reviewed dry-run intake may create only `intake_received` intents and `received` protected
+  reference submissions while all four financial feature switches remain disabled; and
+- no provider evidence, payment claim, verification job, KemerBet call, withdrawal, or financial
+  execution is enabled by this flow.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
 a separately reviewed beta-admission runtime, a narrow Player-ID action runtime, and a

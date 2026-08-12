@@ -14,7 +14,7 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({
       kind: 'menu',
       menu: {
-        text: 'Add your KemerBet Player ID to PayReplayy.',
+        text: 'Manage your KemerBet Player ID, or start a dry-run deposit with /deposit PLAYER_ID AMOUNT.',
         buttons: [{ text: 'Add KemerBet Player ID', callbackData }],
       },
     });
@@ -27,6 +27,44 @@ describe('Telegram Player-ID flow presentation', () => {
     ['restart_required', 'That action expired or is no longer available.'],
     ['menu_required', 'Send /menu, then choose Add KemerBet Player ID.'],
   ] as const)('maps %s to safe customer copy', (outcome, expected) => {
+    const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
+    expect(presentation.kind).toBe('message');
+    if (presentation.kind === 'message') expect(presentation.text).toContain(expected);
+  });
+
+  it('renders bounded dry-run instructions without claiming verification or execution', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'deposit_instructions',
+      depositToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      providerName: 'CBE Birr',
+      receiverAccountHolderName: 'PayReplayy Staging',
+      receiverAccountMasked: '****1234',
+      customerInstruction: 'Send only CBE Birr to the shown account.',
+      paymentDeadline: '2026-08-12T13:00:00.000Z',
+    });
+
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: expect.stringContaining(
+        'After paying, send /reference AAAAAAAAAAAAAAAAAAAAAA TRANSACTION_REFERENCE.',
+      ),
+    });
+    if (presentation.kind === 'message') {
+      expect(presentation.text).toContain('25.00 ETB');
+      expect(presentation.text).toContain(
+        'payment verification and KemerBet execution remain disabled',
+      );
+    }
+  });
+
+  it.each([
+    ['deposit_reference_received', 'has not been verified'],
+    ['deposit_input_invalid', 'Use /deposit PLAYER_ID AMOUNT'],
+    ['deposit_unavailable', 'No payment action was started'],
+  ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
     expect(presentation.kind).toBe('message');
     if (presentation.kind === 'message') expect(presentation.text).toContain(expected);

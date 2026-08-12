@@ -2,6 +2,10 @@ import type { OwnerControlConfig } from '@payreplayy/config/owner-control';
 import Fastify, { LogController } from 'fastify';
 
 import {
+  OwnerDepositIntakeRejectedError,
+  OwnerDepositIntakeUnavailableError,
+} from './owner-deposit-intake.js';
+import {
   OwnerAuthenticationRejectedError,
   OwnerAuthenticationUnavailableError,
   bearerTokenFromRawHeaders,
@@ -196,6 +200,35 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner beta-invite revocation is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/dry-run-deposit-intake',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const deposits = await dependencies.runtime.deposits.list(authUserId, limit);
+        return reply.code(200).send({ deposits });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerDepositIntakeRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerDepositIntakeUnavailableError) {
+          request.log.warn('Owner dry-run deposit intake is unavailable.');
+        }
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

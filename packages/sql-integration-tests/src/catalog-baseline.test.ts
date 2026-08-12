@@ -2231,6 +2231,330 @@ describe('disposable SQL migration baseline', () => {
       expect.objectContaining({ association_already_recorded: true }),
     ]);
 
+    const dryRunFunctionAcl = await client.query<{
+      readonly api_can_capture: boolean;
+      readonly api_can_open: boolean;
+      readonly owner_can_list: boolean;
+      readonly player_actions_can_capture: boolean;
+      readonly player_actions_can_open: boolean;
+      readonly public_can_capture: boolean;
+      readonly public_can_list: boolean;
+      readonly public_can_open: boolean;
+    }>(`
+      select
+        has_function_privilege(
+          'payreplayy_player_actions',
+          'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+          'execute'
+        ) as player_actions_can_open,
+        has_function_privilege(
+          'payreplayy_player_actions',
+          'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
+          'execute'
+        ) as player_actions_can_capture,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.list_owner_dry_run_deposit_intake(uuid,integer)',
+          'execute'
+        ) as owner_can_list,
+        has_function_privilege(
+          'payreplayy_api',
+          'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+          'execute'
+        ) as api_can_open,
+        has_function_privilege(
+          'payreplayy_api',
+          'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
+          'execute'
+        ) as api_can_capture,
+        exists (
+          select 1
+          from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) acl
+          where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+        ) as public_can_open,
+        exists (
+          select 1
+          from aclexplode(coalesce(capture.proacl, acldefault('f', capture.proowner))) acl
+          where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+        ) as public_can_capture,
+        exists (
+          select 1
+          from aclexplode(coalesce(owner_list.proacl, acldefault('f', owner_list.proowner))) acl
+          where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+        ) as public_can_list
+      from pg_proc procedure
+      join pg_namespace procedure_namespace on procedure_namespace.oid = procedure.pronamespace
+      join pg_proc capture on capture.oid =
+        'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)'::regprocedure
+      join pg_proc owner_list on owner_list.oid =
+        'app.list_owner_dry_run_deposit_intake(uuid,integer)'::regprocedure
+      where procedure.oid =
+        'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)'::regprocedure
+        and procedure_namespace.nspname = 'app'
+    `);
+    expect(dryRunFunctionAcl.rows).toEqual([
+      {
+        api_can_capture: false,
+        api_can_open: false,
+        owner_can_list: true,
+        player_actions_can_capture: true,
+        player_actions_can_open: true,
+        public_can_capture: false,
+        public_can_list: false,
+        public_can_open: false,
+      },
+    ]);
+
+    const telegramUserId = 9_500_000_001;
+    const telegramIdentity = await client.query<{ readonly id: string }>(
+      `
+        with customer_identity as (
+          insert into app.customer_identities (customer_id, identity_kind, external_subject)
+          values ($1::uuid, 'telegram', $2::text)
+          returning id
+        ), telegram_identity as (
+          insert into app.telegram_identities (
+            customer_identity_id, telegram_user_id, private_chat_id, preferred_locale
+          )
+          select id, $3::bigint, $3::bigint, 'en'
+          from customer_identity
+          returning customer_identity_id
+        )
+        insert into app.bot_conversations (telegram_identity_id)
+        select customer_identity_id
+        from telegram_identity
+        returning telegram_identity_id as id
+      `,
+      [customerId, telegramUserId.toString(), telegramUserId],
+    );
+    const telegramIdentityId = telegramIdentity.rows[0]!.id;
+
+    await client.query(
+      `
+        insert into app.receiver_accounts (
+          provider_id, version, account_holder_name, account_reference_ciphertext,
+          account_reference_masked, instructions, created_by_admin_id
+        )
+        select payment_provider.id, 1, 'PayReplayy Staging', 'fixture-ciphertext',
+               '****1234', jsonb_build_object(
+                 'customer_message', 'Send only CBE Birr to the shown account.'
+               ), $1::uuid
+        from app.payment_providers payment_provider
+        where payment_provider.code = 'cbe_birr'
+      `,
+      [ownerAdminId],
+    );
+
+    const openingInbound = await client.query<{ readonly id: string }>(
+      `
+        insert into app.inbound_events (
+          channel, external_event_id, customer_identity_id, payload_digest
+        )
+        values ('telegram', 'update:9500000001', $1::uuid, $2::text)
+        returning id
+      `,
+      [telegramIdentityId, payloadHmac('a')],
+    );
+    const openingInboundId = openingInbound.rows[0]!.id;
+    const opened = await queryAsRole<{
+      readonly deposit_intent_id: string;
+      readonly deposit_status: string;
+      readonly expected_amount_minor: string;
+      readonly origin_inbound_event_already_consumed: boolean;
+      readonly provider_code: string;
+    }>(
+      'payreplayy_player_actions',
+      `
+        select deposit_intent_id, deposit_status, expected_amount_minor,
+               origin_inbound_event_already_consumed, provider_code
+        from app.open_telegram_dry_run_deposit_intent(
+          $1::uuid, $2::text, $3::bigint, $4::text
+        )
+      `,
+      [openingInboundId, 'STAGING-OWNER-REVIEW-01', 2500, payloadHmac('b')],
+    );
+    expect(opened).toEqual([
+      expect.objectContaining({
+        deposit_status: 'intake_received',
+        expected_amount_minor: '2500',
+        origin_inbound_event_already_consumed: false,
+        provider_code: 'cbe_birr',
+      }),
+    ]);
+    const depositIntentId = opened[0]!.deposit_intent_id;
+
+    const openedReplay = await queryAsRole<{
+      readonly deposit_intent_id: string;
+      readonly origin_inbound_event_already_consumed: boolean;
+    }>(
+      'payreplayy_player_actions',
+      `select deposit_intent_id, origin_inbound_event_already_consumed
+       from app.open_telegram_dry_run_deposit_intent($1::uuid, $2::text, $3::bigint, $4::text)`,
+      [openingInboundId, 'STAGING-OWNER-REVIEW-01', 2500, payloadHmac('b')],
+    );
+    expect(openedReplay).toEqual([
+      {
+        deposit_intent_id: depositIntentId,
+        origin_inbound_event_already_consumed: true,
+      },
+    ]);
+
+    const referenceInbound = await client.query<{ readonly id: string }>(
+      `
+        insert into app.inbound_events (
+          channel, external_event_id, customer_identity_id, payload_digest
+        )
+        values ('telegram', 'update:9500000002', $1::uuid, $2::text)
+        returning id
+      `,
+      [telegramIdentityId, payloadHmac('c')],
+    );
+    const referenceInboundId = referenceInbound.rows[0]!.id;
+    const captured = await queryAsRole<{
+      readonly origin_inbound_event_already_consumed: boolean;
+      readonly result_deposit_intent_id: string;
+      readonly submission_status: string;
+    }>(
+      'payreplayy_player_actions',
+      `
+        select result_deposit_intent_id, submission_status,
+               origin_inbound_event_already_consumed
+        from app.capture_telegram_dry_run_deposit_reference(
+          $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::smallint, $7::text
+        )
+      `,
+      [
+        referenceInboundId,
+        depositIntentId,
+        'v1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCC',
+        'f'.repeat(64),
+        '***7890',
+        1,
+        payloadHmac('d'),
+      ],
+    );
+    expect(captured).toEqual([
+      {
+        origin_inbound_event_already_consumed: false,
+        result_deposit_intent_id: depositIntentId,
+        submission_status: 'received',
+      },
+    ]);
+
+    const capturedReplay = await queryAsRole<{
+      readonly origin_inbound_event_already_consumed: boolean;
+      readonly result_deposit_intent_id: string;
+    }>(
+      'payreplayy_player_actions',
+      `
+        select result_deposit_intent_id, origin_inbound_event_already_consumed
+        from app.capture_telegram_dry_run_deposit_reference(
+          $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::smallint, $7::text
+        )
+      `,
+      [
+        referenceInboundId,
+        depositIntentId,
+        'v1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCC',
+        'f'.repeat(64),
+        '***7890',
+        1,
+        payloadHmac('d'),
+      ],
+    );
+    expect(capturedReplay).toEqual([
+      {
+        origin_inbound_event_already_consumed: true,
+        result_deposit_intent_id: depositIntentId,
+      },
+    ]);
+
+    const ownerProjection = await queryAsRole<{
+      readonly deposit_intent_id: string;
+      readonly deposit_status: string;
+      readonly provider_code: string;
+      readonly submission_status: string;
+      readonly submitted_reference_masked: string;
+    }>(
+      'payreplayy_owner_control',
+      `
+        select deposit_intent_id, deposit_status, provider_code,
+               submission_status, submitted_reference_masked
+        from app.list_owner_dry_run_deposit_intake($1::uuid, 50)
+        where deposit_intent_id = $2::uuid
+      `,
+      [ownerAuthUserId, depositIntentId],
+    );
+    expect(ownerProjection).toEqual([
+      {
+        deposit_intent_id: depositIntentId,
+        deposit_status: 'intake_received',
+        provider_code: 'cbe_birr',
+        submission_status: 'received',
+        submitted_reference_masked: '***7890',
+      },
+    ]);
+
+    const inertLedger = await client.query<{
+      readonly claims: number;
+      readonly evidence: number;
+      readonly jobs: number;
+      readonly non_disabled_switches: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from app.provider_payment_evidence) as evidence,
+          (select count(*)::integer from app.deposit_payment_claims) as claims,
+          (select count(*)::integer from app.deposit_jobs) as jobs,
+          (
+            select count(*)::integer
+            from app.feature_switches feature_switch
+            where feature_switch.mode <> 'disabled'
+          ) as non_disabled_switches
+      `,
+    );
+    expect(inertLedger.rows).toEqual([
+      { claims: 0, evidence: 0, jobs: 0, non_disabled_switches: 0 },
+    ]);
+
+    await expect(
+      queryAsRole(
+        'payreplayy_api',
+        `select * from app.open_telegram_dry_run_deposit_intent(
+           $1::uuid, $2::text, $3::bigint, $4::text
+         )`,
+        [openingInboundId, 'STAGING-OWNER-REVIEW-01', 2500, payloadHmac('b')],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+
+    const blockedInbound = await client.query<{ readonly id: string }>(
+      `
+        insert into app.inbound_events (
+          channel, external_event_id, customer_identity_id, payload_digest
+        )
+        values ('telegram', 'update:9500000003', $1::uuid, $2::text)
+        returning id
+      `,
+      [telegramIdentityId, payloadHmac('e')],
+    );
+    await client.query('begin');
+    try {
+      await client.query(
+        `update app.feature_switches set mode = 'dry_run' where feature_key = 'payment_verification'`,
+      );
+      await client.query('set local role payreplayy_player_actions');
+      await expect(
+        client.query(
+          `select * from app.open_telegram_dry_run_deposit_intent(
+             $1::uuid, $2::text, $3::bigint, $4::text
+           )`,
+          [blockedInbound.rows[0]!.id, 'STAGING-OWNER-REVIEW-01', 2500, payloadHmac('f')],
+        ),
+      ).rejects.toThrow('requires every financial feature to remain disabled');
+    } finally {
+      await client.query('rollback');
+    }
+
     await expect(
       queryAsRole(
         'payreplayy_api',

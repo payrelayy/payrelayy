@@ -34,7 +34,7 @@ and executor communicate with the API, not the database.
 ## Planned deposit flow
 
 1. The bot validates the requested KemerBet Player ID.
-2. A future approved CBE Birr flow displays its configured receiver account and records an intake
+2. The reviewed CBE Birr dry-run intake displays its configured masked receiver account and records
    request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
    Customers may create unlimited separate deposits; PayReplayy has no customer, daily, or
    lifetime deposit-count quota.
@@ -49,11 +49,14 @@ and executor communicate with the API, not the database.
 
 ## Current implementation boundary
 
-The current code stops before Player-ID validation and deposit intake. A private, API-only
-Telegram inbox boundary can create or find a customer identity, empty conversation, and
-idempotent update record using only allowlisted metadata plus an API-generated keyed HMAC.
-It does not receive raw Telegram messages or files, call KemerBet, validate a Player ID,
-show receiver instructions, verify a payment, or change a financial state.
+The invite-only Telegram slice records a Player-ID request, allows the Owner to record a manual
+KemerBet ownership confirmation, and then permits an explicit `/deposit PLAYER_ID AMOUNT` dry-run
+intake for 25-25,000 ETB. A separate `/reference DEPOSIT_CODE TRANSACTION_REFERENCE` command sends
+the raw reference only through the signed internal action channel; the API encrypts and blind-indexes
+it before storage and returns no reference material. The ledger remains at `intake_received` and the
+submission at `received`. All financial feature switches must remain disabled, so the flow cannot
+contact CBE Birr, create provider evidence or a payment claim, enqueue verification, call KemerBet,
+or execute a deposit. Screenshot/PDF intake and provider authority remain later reviewed stages.
 
 ## Withdrawal boundary
 

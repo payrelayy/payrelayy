@@ -251,6 +251,63 @@ describe('private Telegram action transport contract', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('accepts only strict dry-run deposit commands and protected references', async () => {
+    const depositAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'deposit_intent_command',
+      updateId: '123456',
+      telegramUserId: '28379330',
+      privateChatId: '28379330',
+      preferredLocale: 'en',
+      playerId: '28379330',
+      amountEtb: '25.00',
+    };
+    const deposit = signedRequest(depositAction);
+    await expect(
+      verifyTelegramPrivateActionRequest(deposit.request, deposit.rawBody, verificationOptions()),
+    ).resolves.toEqual(depositAction);
+
+    const malformedAmount = signedRequest({ ...depositAction, amountEtb: '25.000' });
+    await expect(
+      verifyTelegramPrivateActionRequest(
+        malformedAmount.request,
+        malformedAmount.rawBody,
+        verificationOptions(),
+      ),
+    ).resolves.toBeUndefined();
+
+    const referenceAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'deposit_reference_command',
+      updateId: '123457',
+      telegramUserId: '28379330',
+      privateChatId: '28379330',
+      preferredLocale: 'en',
+      depositToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+      transactionReference: 'CBE-TEST-7890',
+    };
+    const reference = signedRequest(referenceAction, { nonce: 'o'.repeat(32) });
+    await expect(
+      verifyTelegramPrivateActionRequest(
+        reference.request,
+        reference.rawBody,
+        verificationOptions(),
+      ),
+    ).resolves.toEqual(referenceAction);
+
+    const malformedReference = signedRequest(
+      { ...referenceAction, transactionReference: ' CBE-TEST-7890' },
+      { nonce: 'p'.repeat(32) },
+    );
+    await expect(
+      verifyTelegramPrivateActionRequest(
+        malformedReference.request,
+        malformedReference.rawBody,
+        verificationOptions(),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('redacts opaque callback tokens and Player ID text from the only log projection', () => {
     const redactedCallback = JSON.stringify(redactTelegramPrivateActionForLog(callbackAction));
     const playerId = 'player-123';
@@ -301,6 +358,7 @@ describe('private Telegram action transport contract', () => {
       API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
       API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
       API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
+      API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
       PLAYER_ACTION_DATABASE_URL:
         'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
     });

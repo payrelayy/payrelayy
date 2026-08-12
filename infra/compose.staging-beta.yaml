@@ -133,6 +133,7 @@ services:
       API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/api_player_action_payload_hmac
       API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE: /run/secrets/api_player_action_capability_hmac
       API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE: /run/secrets/api_player_action_semantic_hmac
+      API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE: /run/secrets/api_deposit_reference_protection
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
@@ -165,6 +166,11 @@ services:
         mode: 0400
       - source: api_player_action_semantic_hmac
         target: api_player_action_semantic_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_deposit_reference_protection
+        target: api_deposit_reference_protection
         uid: '10001'
         gid: '10001'
         mode: 0400
@@ -394,6 +400,8 @@ secrets:
     file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE:?set an external API Player-ID capability HMAC file}
   api_player_action_semantic_hmac:
     file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE:?set an external API Player-ID semantic HMAC file}
+  api_deposit_reference_protection:
+    file: ${PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE:?set an external API deposit-reference protection key file}
   telegram_bot_token:
     file: ${PAYREPLAYY_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
   bot_beta_admission_transport_hmac:

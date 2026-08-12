@@ -68,6 +68,7 @@ stop_project() {
     "$SECRET_ROOT/api-action-payload-hmac" \
     "$SECRET_ROOT/api-action-capability-hmac" \
     "$SECRET_ROOT/api-action-semantic-hmac" \
+    "$SECRET_ROOT/api-deposit-reference-protection" \
     "$SECRET_ROOT/bot-action-transport-hmac" \
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
@@ -131,6 +132,7 @@ case "$command" in
 
     expected_files="$({ printf '%s\n' \
       api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
+      api-deposit-reference-protection \
       api-action-transport-hmac \
       beta-database-url beta-payload-hmac beta-transport-hmac bot-token bot-transport-hmac \
       bot-action-transport-hmac player-action-database-url \
@@ -157,6 +159,7 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$incoming/api-action-payload-hmac" "$SECRET_ROOT/api-action-payload-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/api-action-capability-hmac" "$SECRET_ROOT/api-action-capability-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/api-action-semantic-hmac" "$SECRET_ROOT/api-action-semantic-hmac"
+    install -o 10001 -g 10001 -m 0400 "$incoming/api-deposit-reference-protection" "$SECRET_ROOT/api-deposit-reference-protection"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-action-transport-hmac" "$SECRET_ROOT/bot-action-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-token" "$SECRET_ROOT/bot-token"
     install -o 10001 -g 10001 -m 0400 "$incoming/publishable-key" "$SECRET_ROOT/publishable-key"
@@ -182,7 +185,7 @@ case "$command" in
       owner-database-url publishable-key beta-database-url beta-transport-hmac \
       bot-transport-hmac beta-payload-hmac bot-token player-action-database-url \
       api-action-transport-hmac api-action-payload-hmac api-action-capability-hmac \
-      api-action-semantic-hmac bot-action-transport-hmac; do
+      api-action-semantic-hmac api-deposit-reference-protection bot-action-transport-hmac; do
       require_service_file "$SECRET_ROOT/$service_file"
     done
     [[ ! -L "$SECRET_ROOT/supabase-ca.crt" && "$(stat --format='%U:%G:%a' "$SECRET_ROOT/supabase-ca.crt")" == 'root:root:444' ]] ||
@@ -211,6 +214,7 @@ case "$command" in
       PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
       PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
       PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE="$SECRET_ROOT/api-deposit-reference-protection"
       PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
       PAYREPLAYY_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"

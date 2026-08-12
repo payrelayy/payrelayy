@@ -1,5 +1,7 @@
 import {
+  TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   parseTelegramPlayerRegistrationCapabilityCallback,
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionIdentity,
@@ -31,8 +33,14 @@ export interface TelegramPlayerIdTextMetadata extends TelegramPrivateActionMetad
   readonly text: unknown;
 }
 
+export interface TelegramDepositCommandMetadata extends TelegramPrivateActionMetadata {
+  readonly command: unknown;
+}
+
 const MAXIMUM_TELEGRAM_IDENTIFIER = 9_007_199_254_740_991;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
+const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
+const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 
 function isSafeTelegramIdentifier(value: number, permitsZero: boolean): boolean {
   return (
@@ -129,5 +137,48 @@ export function reduceTelegramPlayerIdTextAction(
     ...identity,
     kind: 'player_id_text',
     playerId: metadata.text,
+  };
+}
+
+/** Parse the explicit Player-ID + amount command without guessing which linked account to use. */
+export function reduceTelegramDepositIntentCommand(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.command !== 'string') return undefined;
+  const match = /^\/deposit ([^\s]+) ([^\s]+)$/u.exec(metadata.command);
+  if (!match) return undefined;
+  const [, playerId, amountEtb] = match;
+  if (!validPlayerIdText(playerId) || !amountEtb || !ETB_AMOUNT_PATTERN.test(amountEtb)) {
+    return undefined;
+  }
+  return { ...identity, kind: 'deposit_intent_command', playerId, amountEtb };
+}
+
+/** Parse an exact compact deposit token and a bounded single-token transaction reference. */
+export function reduceTelegramDepositReferenceCommand(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.command !== 'string') return undefined;
+  const match = /^\/reference ([A-Za-z0-9_-]+) ([^\s]+)$/u.exec(metadata.command);
+  if (!match) return undefined;
+  const [, depositToken, transactionReference] = match;
+  if (
+    !depositToken ||
+    depositToken.length !== TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH ||
+    !COMPACT_UUID_PATTERN.test(depositToken) ||
+    !transactionReference ||
+    Array.from(transactionReference).length < 4 ||
+    Array.from(transactionReference).length > TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS ||
+    !/^[A-Za-z0-9._-]+$/u.test(transactionReference)
+  ) {
+    return undefined;
+  }
+  return {
+    ...identity,
+    kind: 'deposit_reference_command',
+    depositToken,
+    transactionReference,
   };
 }

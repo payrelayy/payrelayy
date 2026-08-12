@@ -217,6 +217,7 @@ jobs:
           API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
           API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
           API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
+          API_DEPOSIT_REFERENCE_PROTECTION_SECRET: ${{ secrets.API_DEPOSIT_REFERENCE_PROTECTION_SECRET }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
@@ -237,14 +238,16 @@ jobs:
           [[ "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_DEPOSIT_REFERENCE_PROTECTION_SECRET" =~ ^[0-9a-f]{64}$ ]]
           distinct_count="$(printf '%s\n' \
             "$BETA_ADMISSION_RUNTIME_PASSWORD" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
             "$PLAYER_ACTION_RUNTIME_PASSWORD" "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" \
             "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" "$BOT_TO_API_ACTION_HMAC_SECRET" \
             "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" \
             "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" \
-            "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" | sort -u | wc -l)"
-          [[ "$distinct_count" -eq 9 ]]
+            "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" \
+            "$API_DEPOSIT_REFERENCE_PROTECTION_SECRET" | sort -u | wc -l)"
+          [[ "$distinct_count" -eq 10 ]]
           [[ "$STAGING_TELEGRAM_BOT_TOKEN" =~ ^[0-9]{6,12}:[A-Za-z0-9_-]{30,80}$ ]]
           [[ -n "$SUPABASE_DB_PASSWORD" ]]
           [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
@@ -274,6 +277,7 @@ jobs:
           printf '%s\n' "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" > "$secret_dir/api-action-payload-hmac"
           printf '%s\n' "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" > "$secret_dir/api-action-capability-hmac"
           printf '%s\n' "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" > "$secret_dir/api-action-semantic-hmac"
+          printf '%s\n' "$API_DEPOSIT_REFERENCE_PROTECTION_SECRET" > "$secret_dir/api-deposit-reference-protection"
           printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" > "$secret_dir/bot-token"
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
@@ -358,6 +362,7 @@ jobs:
             "$SECRET_DIR/api-action-transport-hmac" "$SECRET_DIR/bot-action-transport-hmac" \
             "$SECRET_DIR/api-action-payload-hmac" "$SECRET_DIR/api-action-capability-hmac" \
             "$SECRET_DIR/api-action-semantic-hmac" \
+            "$SECRET_DIR/api-deposit-reference-protection" \
             "$SECRET_DIR/beta-payload-hmac" "$SECRET_DIR/bot-token" \
             "$SECRET_DIR/publishable-key" "payreplayy-admin@$VM_HOST:$incoming/"
           ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \

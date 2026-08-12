@@ -14,10 +14,10 @@ describe('English-only private Player ID menu', () => {
     const menu = renderPlayerRegistrationMenu(callbackData);
 
     expect(menu).toEqual({
-      text: 'Add your KemerBet Player ID to PayReplayy.',
+      text: 'Manage your KemerBet Player ID, or start a dry-run deposit with /deposit PLAYER_ID AMOUNT.',
       buttons: [{ text: 'Add KemerBet Player ID', callbackData }],
     });
-    expect(JSON.stringify(menu)).not.toMatch(/deposit|withdrawal|language/i);
+    expect(JSON.stringify(menu)).not.toMatch(/withdrawal|language/i);
   });
 
   it('refuses to render a static or malformed action callback', () => {

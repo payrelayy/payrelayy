@@ -71,6 +71,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly enabled: false;
       readonly connection: undefined;
       readonly payloadHmacSecret: undefined;
+      readonly depositReferenceProtectionSecret: undefined;
       readonly tlsMode: undefined;
     }
   | {
@@ -83,6 +84,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
         readonly user: string;
       };
       readonly payloadHmacSecret: string;
+      readonly depositReferenceProtectionSecret: string;
       readonly tlsMode: 'verify-full';
     };
 
@@ -433,6 +435,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       enabled: false,
       connection: undefined,
       payloadHmacSecret: undefined,
+      depositReferenceProtectionSecret: undefined,
       tlsMode: undefined,
     };
   }
@@ -502,6 +505,17 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       ),
       'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
     ),
+    depositReferenceProtectionSecret: requiredHexHmacSecret(
+      secretFromEnvironmentOrFile(
+        environment.API_DEPOSIT_REFERENCE_PROTECTION_SECRET,
+        environment.API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE,
+        'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
+        'API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE',
+        '/run/secrets/api_deposit_reference_protection',
+        nodeEnv,
+      ),
+      'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
+    ),
     tlsMode: 'verify-full',
   };
 }
@@ -534,10 +548,16 @@ function assertDistinctApiTelegramHmacSecrets(
   }
 
   if (telegramPlayerActionRuntime.enabled) {
-    namedSecrets.push([
-      'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
-      telegramPlayerActionRuntime.payloadHmacSecret,
-    ]);
+    namedSecrets.push(
+      [
+        'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
+        telegramPlayerActionRuntime.payloadHmacSecret,
+      ],
+      [
+        'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
+        telegramPlayerActionRuntime.depositReferenceProtectionSecret,
+      ],
+    );
   }
 
   if (telegramIngress.enabled) {

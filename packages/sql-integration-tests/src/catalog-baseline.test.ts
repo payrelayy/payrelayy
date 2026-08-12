@@ -484,7 +484,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly six non-financial procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly eight non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -520,8 +520,10 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(functions.rows.map((row) => row.signature)).toEqual([
+      'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
+      'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
       admittedPrivateInboundRecorder,
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',

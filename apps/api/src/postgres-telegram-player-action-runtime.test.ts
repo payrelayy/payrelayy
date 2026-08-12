@@ -1,3 +1,5 @@
+import { createHmac } from 'node:crypto';
+
 import { loadApiConfig } from '@payreplayy/config/api';
 import type { TelegramPrivateActionEnvelope } from '@payreplayy/contracts';
 import { describe, expect, it } from 'vitest';
@@ -6,8 +8,11 @@ import {
   createPostgresTelegramPlayerActionRuntime,
   type TelegramPlayerActionDatabase,
 } from './postgres-telegram-player-action-runtime.js';
+import { encodeTelegramCapabilityId } from './telegram-action-capability.js';
 
 const inboundEventId = '64b27169-c249-4d2e-b312-d2ed9d6661ea';
+const depositIntentId = '3d8af16e-87e0-4a17-9098-b0907defd95f';
+const depositSubmissionId = 'a7cfdc2e-360f-47f1-836f-e65c9239e57b';
 const actionConfig = loadApiConfig({
   NODE_ENV: 'test',
   INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
@@ -17,6 +22,7 @@ const actionConfig = loadApiConfig({
   API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
   API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
   API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
+  API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
   PLAYER_ACTION_DATABASE_URL:
     'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
 });
@@ -116,5 +122,177 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         Buffer.from(JSON.stringify(action), 'utf8'),
       ),
     ).resolves.toEqual({ version: 1, outcome: 'player_id_pending' });
+  });
+
+  it('opens only a CBE Birr dry-run intake for an inclusive in-range amount', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-12T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('open_telegram_dry_run_deposit_intent')) {
+          expect(values.slice(0, 3)).toEqual([inboundEventId, '28379330', '2500']);
+          expect(values[3]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+          return {
+            rows: [
+              {
+                deposit_intent_id: depositIntentId,
+                provider_code: 'cbe_birr',
+                receiver_account_holder_name: 'PayReplayy Staging',
+                receiver_account_masked: '****1234',
+                receiver_customer_instruction: 'Send only CBE Birr to the shown account.',
+                expected_amount_minor: '2500',
+                currency_code: 'ETB',
+                payment_deadline_at: new Date('2026-08-12T13:00:00.000Z'),
+                deposit_status: 'intake_received',
+                origin_inbound_event_already_consumed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_intent_command',
+      playerId: '28379330',
+      amountEtb: '25',
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'deposit_instructions',
+      depositToken: encodeTelegramCapabilityId(depositIntentId),
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      providerName: 'CBE Birr',
+      receiverAccountHolderName: 'PayReplayy Staging',
+      receiverAccountMasked: '****1234',
+      customerInstruction: 'Send only CBE Birr to the shown account.',
+      paymentDeadline: '2026-08-12T13:00:00.000Z',
+    });
+    expect(calls).toHaveLength(2);
+  });
+
+  it.each(['24.99', '25000.01'])(
+    'rejects the out-of-range amount %s before opening an intent',
+    async (amountEtb) => {
+      const calls: string[] = [];
+      const database: TelegramPlayerActionDatabase = {
+        async query(query) {
+          calls.push(query);
+          if (query.includes('record_admitted_telegram_private_inbound_event')) {
+            return {
+              rows: [
+                {
+                  inbound_event_id: inboundEventId,
+                  received_at: new Date('2026-08-12T12:00:00.000Z'),
+                  inbound_event_already_recorded: false,
+                },
+              ],
+            };
+          }
+          throw new Error('unexpected statement');
+        },
+        async end() {},
+      };
+      const action: TelegramPrivateActionEnvelope = {
+        ...rootAction,
+        kind: 'deposit_intent_command',
+        playerId: '28379330',
+        amountEtb,
+      };
+
+      await expect(
+        createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+          action,
+          Buffer.from(JSON.stringify(action), 'utf8'),
+        ),
+      ).resolves.toEqual({ version: 1, outcome: 'deposit_input_invalid' });
+      expect(calls.join('\n')).not.toContain('open_telegram_dry_run_deposit_intent');
+    },
+  );
+
+  it('protects a raw reference before the database call and returns no reference material', async () => {
+    const transactionReference = 'tx-abc-7890';
+    const fingerprintKey = createHmac('sha256', Buffer.from('e'.repeat(64), 'hex'))
+      .update('payreplayy:deposit-reference:fingerprint-key:v1', 'utf8')
+      .digest();
+    const expectedFingerprint = createHmac('sha256', fingerprintKey)
+      .update('payreplayy:deposit-reference:fingerprint-input:v1\n', 'utf8')
+      .update('provider:cbe_birr\n', 'utf8')
+      .update(transactionReference.toUpperCase(), 'utf8')
+      .digest('hex');
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-12T12:05:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('capture_telegram_dry_run_deposit_reference')) {
+          expect(values[0]).toBe(inboundEventId);
+          expect(values[1]).toBe(depositIntentId);
+          expect(values[2]).toMatch(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+          expect(values[3]).toBe(expectedFingerprint);
+          expect(values[4]).toBe('***7890');
+          expect(values[5]).toBe(1);
+          expect(values[6]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+          expect(JSON.stringify(values)).not.toContain(transactionReference);
+          return {
+            rows: [
+              {
+                deposit_submission_id: depositSubmissionId,
+                result_deposit_intent_id: depositIntentId,
+                submission_status: 'received',
+                submitted_at: new Date('2026-08-12T12:05:00.000Z'),
+                origin_inbound_event_already_consumed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_reference_command',
+      depositToken: encodeTelegramCapabilityId(depositIntentId),
+      transactionReference,
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_reference_received' });
+    expect(calls.map((call) => call.query).join('\n')).not.toContain(transactionReference);
   });
 });

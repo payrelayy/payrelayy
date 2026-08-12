@@ -14,7 +14,9 @@ export type TelegramActionSemanticConsumer =
   | 'issue_player_registration_capability'
   | 'start_player_registration'
   | 'submit_player_registration_input'
-  | 'expire_player_registration_action';
+  | 'expire_player_registration_action'
+  | 'open_dry_run_deposit_intent'
+  | 'capture_dry_run_deposit_reference';
 
 type CapabilityBoundSemanticInput = {
   readonly consumer: 'issue_player_registration_capability' | 'start_player_registration';
@@ -42,8 +44,30 @@ type PlayerIdExpirySemanticInput = {
   readonly semanticHmacSecret: string;
 };
 
+type DryRunDepositIntentSemanticInput = {
+  readonly consumer: 'open_dry_run_deposit_intent';
+  readonly originInboundEventId: string;
+  readonly playerId: string;
+  readonly expectedAmountMinor: string;
+  readonly semanticHmacSecret: string;
+};
+
+type DryRunDepositReferenceSemanticInput = {
+  readonly consumer: 'capture_dry_run_deposit_reference';
+  readonly originInboundEventId: string;
+  readonly depositIntentId: string;
+  readonly referenceFingerprint: string;
+  readonly referenceMasked: string;
+  readonly keyVersion: number;
+  readonly semanticHmacSecret: string;
+};
+
 export type TelegramActionSemanticHmacInput =
-  CapabilityBoundSemanticInput | PlayerIdSubmissionSemanticInput | PlayerIdExpirySemanticInput;
+  | CapabilityBoundSemanticInput
+  | PlayerIdSubmissionSemanticInput
+  | PlayerIdExpirySemanticInput
+  | DryRunDepositIntentSemanticInput
+  | DryRunDepositReferenceSemanticInput;
 
 export interface TelegramActionCapabilityKeys {
   /** API-only 32-byte hexadecimal key; never send it to the bot or database. */
@@ -219,6 +243,37 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
       canonicalPayload = JSON.stringify({
         ...basePayload,
         platformCode: 'kemerbet',
+      });
+      break;
+    case 'open_dry_run_deposit_intent':
+      if (!/^[1-9][0-9]*$/u.test(input.expectedAmountMinor)) {
+        throw new Error('The expected deposit amount must be canonical positive minor units.');
+      }
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        platformCode: 'kemerbet',
+        providerCode: 'cbe_birr',
+        normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
+        expectedAmountMinor: input.expectedAmountMinor,
+        financialMode: 'dry_run',
+      });
+      break;
+    case 'capture_dry_run_deposit_reference':
+      if (
+        !/^[0-9a-f]{64}$/u.test(input.referenceFingerprint) ||
+        !/^\*{3}[A-Z0-9._-]{4}$/u.test(input.referenceMasked) ||
+        !Number.isSafeInteger(input.keyVersion) ||
+        input.keyVersion < 1
+      ) {
+        throw new Error('The protected deposit-reference semantics are invalid.');
+      }
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        depositIntentId: canonicalUuid(input.depositIntentId, 'The deposit intent ID'),
+        referenceFingerprint: input.referenceFingerprint,
+        referenceMasked: input.referenceMasked,
+        keyVersion: input.keyVersion,
+        financialMode: 'dry_run',
       });
       break;
     default:

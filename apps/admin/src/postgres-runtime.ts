@@ -2,9 +2,11 @@ import type { OwnerControlRuntimeConfig } from '@payreplayy/config/owner-control
 import { Pool, type PoolConfig } from 'pg';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
+import { PostgresOwnerDryRunDepositIntake } from './owner-deposit-intake.js';
 import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
 
 export interface OwnerControlPostgresRuntime {
+  readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
   readonly playerRegistrations: Pick<
     PostgresOwnerPlayerRegistrationReviews,
@@ -104,6 +106,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.review_owner_player_registration_request(uuid,uuid,text,text)', 'execute') as player_request_review_allowed,
     has_function_privilege(current_user, 'app.list_owner_player_registration_association_candidates(uuid,integer)', 'execute') as player_association_list_allowed,
     has_function_privilege(current_user, 'app.associate_owner_validated_player_registration_request(uuid,uuid,text)', 'execute') as player_association_allowed,
+    has_function_privilege(current_user, 'app.list_owner_dry_run_deposit_intake(uuid,integer)', 'execute') as deposit_intake_list_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -126,7 +129,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
           'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure,
           'app.list_owner_player_registration_association_candidates(uuid,integer)'::regprocedure,
-          'app.associate_owner_validated_player_registration_request(uuid,uuid,text)'::regprocedure
+          'app.associate_owner_validated_player_registration_request(uuid,uuid,text)'::regprocedure,
+          'app.list_owner_dry_run_deposit_intake(uuid,integer)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -171,6 +175,9 @@ export async function createOwnerControlPostgresRuntime(
 
   let closed = false;
   return {
+    deposits: new PostgresOwnerDryRunDepositIntake({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
     invites: new PostgresOwnerInviteControl({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),

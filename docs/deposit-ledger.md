@@ -92,14 +92,17 @@ transfer until its reconciliation safeguards are proven.
 
 ## Operations model
 
-The bot calls the API only. The API uses the limited `payreplayy_api` database role, while the
-verification worker will use `payreplayy_worker` through reviewed database procedures. The current
-ledger grants neither role direct table access. The API can call
-app.open_telegram_deposit_intent, which is idempotent by inbound Telegram event and returns the
-frozen display-safe receiver snapshot for the exact intent, and
-app.capture_telegram_deposit_reference, which idempotently records a protected customer reference
-against that intent. The capture procedure leaves the intent at intake_received; it cannot upload
-a file, enqueue verification, create evidence, verify a payment, create a claim, or start KemerBet
-execution. The claim procedure remains ungranted. The browser executor will receive a separate,
-stricter role when it is introduced. No browser, Telegram client, or public Supabase Data API role
-can query the private ledger.
+The bot calls the API only. The signed Telegram action route uses the narrow
+`payreplayy_player_actions` database role for Player-ID actions and the reviewed dry-run intake;
+the generic API role does not receive these procedure grants. The verification worker will use
+`payreplayy_worker` through reviewed database procedures. Neither role receives direct ledger-table
+access. The action route can call `app.open_telegram_dry_run_deposit_intent`, which is idempotent by
+inbound Telegram event, requires an active Owner-confirmed Player ID plus all four disabled financial
+feature switches, and returns the frozen display-safe CBE Birr receiver snapshot. It can then call
+`app.capture_telegram_dry_run_deposit_reference`, which idempotently records only the API-protected
+reference for that exact intake. The capture procedure leaves the intent at `intake_received` and
+the submission at `received`; it cannot upload a file, enqueue verification, create evidence,
+verify or claim a payment, or start KemerBet execution. Owner Control receives a separate masked,
+read-only projection that excludes ciphertext and fingerprints. The claim procedure remains
+ungranted. No browser, Telegram client, or public Supabase Data API role can query the private
+ledger.

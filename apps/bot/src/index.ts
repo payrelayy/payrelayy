@@ -5,6 +5,8 @@ import { Bot, InlineKeyboard } from 'grammy';
 
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
 import {
+  reduceTelegramDepositIntentCommand,
+  reduceTelegramDepositReferenceCommand,
   reduceTelegramPlayerIdTextAction,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
@@ -106,6 +108,15 @@ if (config.telegramBetaAdmission.enabled) {
     const rootAction = reduceTelegramRootMenuAction({ ...metadata, command: text });
     if (rootAction) {
       await deliverPlayerAction(rootAction, (replyText, keyboard) =>
+        context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+      );
+      return;
+    }
+    const depositAction =
+      reduceTelegramDepositIntentCommand({ ...metadata, command: text }) ??
+      reduceTelegramDepositReferenceCommand({ ...metadata, command: text });
+    if (depositAction) {
+      await deliverPlayerAction(depositAction, (replyText, keyboard) =>
         context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
       );
       return;

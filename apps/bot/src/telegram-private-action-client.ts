@@ -47,6 +47,23 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       : undefined;
   }
   if (
+    value.outcome === 'deposit_instructions' &&
+    keys.length === 10 &&
+    typeof value.depositToken === 'string' &&
+    /^[A-Za-z0-9_-]{22}$/u.test(value.depositToken) &&
+    typeof value.amountMinor === 'string' &&
+    /^[1-9][0-9]*$/u.test(value.amountMinor) &&
+    value.currencyCode === 'ETB' &&
+    value.providerName === 'CBE Birr' &&
+    typeof value.receiverAccountHolderName === 'string' &&
+    typeof value.receiverAccountMasked === 'string' &&
+    typeof value.customerInstruction === 'string' &&
+    typeof value.paymentDeadline === 'string' &&
+    !Number.isNaN(Date.parse(value.paymentDeadline))
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     keys.length === 2 &&
     [
       'awaiting_player_id',
@@ -54,6 +71,9 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       'invalid_player_id',
       'restart_required',
       'menu_required',
+      'deposit_reference_received',
+      'deposit_input_invalid',
+      'deposit_unavailable',
     ].includes(value.outcome)
   ) {
     return { version: 1, outcome: value.outcome } as TelegramPrivateActionResult;

@@ -93,6 +93,7 @@ assert.match(workflow, /BOT_TO_API_ACTION_HMAC_SECRET/);
 assert.match(workflow, /API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET/);
 assert.match(workflow, /API_TELEGRAM_CAPABILITY_HMAC_SECRET/);
 assert.match(workflow, /API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET/);
+assert.match(workflow, /API_DEPOSIT_REFERENCE_PROTECTION_SECRET/);
 assert.match(workflow, /distinct_count/);
 assert.match(workflow, /STAGING_TELEGRAM_BOT_TOKEN/);
 assert.match(workflow, /STAGING_SUPABASE_PUBLISHABLE_KEY/);

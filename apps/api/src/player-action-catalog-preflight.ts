@@ -8,6 +8,8 @@ const ALLOWED_FUNCTIONS = [
   'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
   'app.submit_telegram_player_registration_input(uuid,text,text)',
   'app.expire_telegram_player_registration_action(uuid,text)',
+  'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+  'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
 ] as const;
 
 const ALLOWED_FUNCTION_SQL = ALLOWED_FUNCTIONS.map(
@@ -77,7 +79,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
       )
     ) as no_app_base_object_access,
     (
-      select count(*) = 6
+      select count(*) = 8
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname = 'app'
@@ -92,7 +94,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_FUNCTION_SQL})
     ) as exact_function_surface_allowed,
     (
-      select count(*) = 6 and pg_catalog.bool_and(
+      select count(*) = 8 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
         and owner.rolname = 'postgres'

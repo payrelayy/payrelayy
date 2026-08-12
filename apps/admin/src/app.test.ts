@@ -28,6 +28,9 @@ function runtime(
   overrides: Partial<OwnerControlPostgresRuntime> = {},
 ): OwnerControlPostgresRuntime {
   return {
+    deposits: {
+      list: async () => [],
+    },
     invites: {
       issue: async () => ({
         expiresAt: '2026-08-11T12:00:00.000Z',
@@ -82,6 +85,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
     expect(response.body).toContain('Explicit ownership confirmation');
+    expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
   });
@@ -112,6 +116,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain(
       '/v1/owner/player-registration-association-candidates?limit=25',
     );
+    expect(response.body).toContain('/v1/owner/dry-run-deposit-intake?limit=25');
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
     expect(response.body).not.toContain('innerHTML');
     expect(response.body).toContain("url.pathname !== '/payrelayybot'");
@@ -278,6 +283,46 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ requestId: inviteId, status: 'review_required' });
     expect(observed).toEqual([authUserId, inviteId, 'review_required']);
+    await app.close();
+  });
+
+  it('returns a bounded authenticated dry-run deposit projection', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        deposits: {
+          list: async (actor, limit) => {
+            expect([actor, limit]).toEqual([authUserId, 20]);
+            return [
+              {
+                amountMinor: '2500',
+                currencyCode: 'ETB',
+                depositIntentId: inviteId,
+                depositStatus: 'intake_received',
+                openedAt: '2026-08-12T10:00:00.000Z',
+                paymentDeadline: '2026-08-12T11:00:00.000Z',
+                playerId: '28379330',
+                providerCode: 'cbe_birr',
+                receiverAccountMasked: '****1234',
+                submissionStatus: 'received',
+                submittedAt: '2026-08-12T10:05:00.000Z',
+                submittedReferenceMasked: '***A1B2',
+              },
+            ];
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/dry-run-deposit-intake?limit=20',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      deposits: [{ playerId: '28379330', submittedReferenceMasked: '***A1B2' }],
+    });
+    expect(response.body).not.toContain('ciphertext');
     await app.close();
   });
 

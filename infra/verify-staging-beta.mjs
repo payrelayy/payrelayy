@@ -144,6 +144,10 @@ assert.match(
   apiService,
   /API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE: \/run\/secrets\/api_player_action_semantic_hmac/,
 );
+assert.match(
+  apiService,
+  /API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE: \/run\/secrets\/api_deposit_reference_protection/,
+);
 assert.match(apiService, /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/);
 assert.match(apiService, /http:\/\/127\.0\.0\.1:3000\/readyz/);
 assert.match(apiService, /networks:\s*\r?\n\s+- staging_service/);
@@ -240,8 +244,9 @@ assert.deepEqual(
     'api_player_action_payload_hmac',
     'api_player_action_capability_hmac',
     'api_player_action_semantic_hmac',
+    'api_deposit_reference_protection',
   ],
-  'the API must receive only its five dedicated Player-ID secrets',
+  'the API must receive only its six dedicated Player-ID and deposit-intake secrets',
 );
 assert.deepEqual(
   [...apiConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
@@ -258,16 +263,16 @@ assert.deepEqual(
 );
 assert.doesNotMatch(botService, /supabase_ca_certificate|NODE_EXTRA_CA_CERTS/);
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 13, 'every secret mount must be 0400');
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 14, 'every secret mount must be 0400');
 assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 3, 'each public CA mount must be 0444');
 assert.equal(
   countMatches(compose, /^\s+uid: '10001'$/gm),
-  16,
+  17,
   'every mounted input must target UID 10001',
 );
 assert.equal(
   countMatches(compose, /^\s+gid: '10001'$/gm),
-  16,
+  17,
   'every mounted input must target GID 10001',
 );
 
@@ -279,6 +284,7 @@ const expectedSecrets = [
   'api_player_action_payload_hmac',
   'api_player_action_semantic_hmac',
   'api_player_action_transport_hmac',
+  'api_deposit_reference_protection',
   'bot_beta_admission_transport_hmac',
   'bot_player_action_transport_hmac',
   'player_action_database_url',
@@ -318,6 +324,7 @@ for (const directSecretName of [
   'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
   'API_TELEGRAM_CAPABILITY_HMAC_SECRET',
   'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET',
+  'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
 ]) {
   assert.doesNotMatch(
     compose,

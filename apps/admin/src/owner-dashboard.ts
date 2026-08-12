@@ -102,6 +102,20 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </p>
           <div class="request-list" id="player-association-list"></div>
         </section>
+
+        <section class="review-section" aria-labelledby="deposit-intake-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Read-only dry run</p>
+              <h2 id="deposit-intake-title">Dry-run deposit intake</h2>
+            </div>
+          </div>
+          <p class="receipt-label">
+            These are customer-entered CBE Birr intents and protected references only. Nothing here
+            is verified, credited, sent to KemerBet, or eligible for execution.
+          </p>
+          <div class="request-list" id="deposit-intake-list"></div>
+        </section>
       </section>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
@@ -170,6 +184,7 @@ const revokeButton = document.querySelector('#revoke-button');
 const refreshRequestsButton = document.querySelector('#refresh-requests-button');
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
+const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
 let currentInvite;
@@ -198,12 +213,17 @@ function clearAssociationCandidates() {
   playerAssociationList.replaceChildren();
 }
 
+function clearDepositIntake() {
+  depositIntakeList.replaceChildren();
+}
+
 function signOut(message = 'Signed out.') {
   accessToken = undefined;
   passwordInput.value = '';
   clearInvite();
   clearPlayerRequests();
   clearAssociationCandidates();
+  clearDepositIntake();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -281,6 +301,49 @@ function validAssociationCandidate(value) {
       value.platformCode !== 'kemerbet' || !playerId || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(playerId) ||
       typeof value.reviewedAt !== 'string' || !Number.isFinite(Date.parse(value.reviewedAt))) return undefined;
   return { playerId, requestId, reviewedAt: value.reviewedAt };
+}
+
+function validDepositIntake(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const depositIntentId = typeof value.depositIntentId === 'string' ? value.depositIntentId : undefined;
+  const playerId = typeof value.playerId === 'string' ? value.playerId : undefined;
+  const amountMinor = typeof value.amountMinor === 'string' ? value.amountMinor : undefined;
+  const receiverAccountMasked = typeof value.receiverAccountMasked === 'string' ? value.receiverAccountMasked : undefined;
+  const reference = value.submittedReferenceMasked;
+  const hasSubmission = value.submissionStatus === 'received' && typeof value.submittedAt === 'string' &&
+    Number.isFinite(Date.parse(value.submittedAt)) && typeof reference === 'string' && /^\\*{3}[A-Z0-9._-]{4}$/.test(reference);
+  const hasNoSubmission = value.submissionStatus === undefined && value.submittedAt === undefined && reference === undefined;
+  if (!depositIntentId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(depositIntentId) ||
+      !playerId || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(playerId) || !amountMinor || !/^[1-9][0-9]*$/.test(amountMinor) ||
+      value.currencyCode !== 'ETB' || value.providerCode !== 'cbe_birr' || value.depositStatus !== 'intake_received' ||
+      !receiverAccountMasked || !/^\\*{3,}[A-Za-z0-9._-]{2,16}$/.test(receiverAccountMasked) ||
+      typeof value.openedAt !== 'string' || !Number.isFinite(Date.parse(value.openedAt)) ||
+      typeof value.paymentDeadline !== 'string' || !Number.isFinite(Date.parse(value.paymentDeadline)) ||
+      !(hasSubmission || hasNoSubmission)) return undefined;
+  return { amountMinor, openedAt: value.openedAt, playerId, receiverAccountMasked, reference };
+}
+
+function renderDepositIntake(deposits) {
+  clearDepositIntake();
+  if (deposits.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No dry-run deposit intents.';
+    depositIntakeList.append(empty);
+    return;
+  }
+  for (const deposit of deposits) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = deposit.playerId + ' \u00b7 ' + (Number(deposit.amountMinor) / 100).toFixed(2) + ' ETB';
+    const metadata = document.createElement('p');
+    metadata.className = 'request-meta';
+    metadata.textContent = 'CBE Birr \u00b7 ' + deposit.receiverAccountMasked + ' \u00b7 opened ' +
+      new Date(deposit.openedAt).toLocaleString() + (deposit.reference ? ' \u00b7 reference ' + deposit.reference : ' \u00b7 awaiting reference');
+    card.append(title, metadata);
+    depositIntakeList.append(card);
+  }
 }
 
 async function associatePlayerRequest(requestId) {
@@ -404,10 +467,23 @@ async function loadAssociationCandidates() {
   }
 }
 
+async function loadDepositIntake() {
+  const response = await ownerRequest('/v1/owner/dry-run-deposit-intake?limit=25', {
+    method: 'GET',
+    headers: {},
+  });
+  if (!response.ok) throw new Error('deposit_queue');
+  const payload = await response.json();
+  if (!payload || !Array.isArray(payload.deposits) || payload.deposits.length > 25) throw new Error('deposit_queue');
+  const deposits = payload.deposits.map(validDepositIntake);
+  if (deposits.some((deposit) => !deposit)) throw new Error('deposit_queue');
+  renderDepositIntake(deposits);
+}
+
 async function loadOwnerPlayerQueues() {
   refreshRequestsButton.disabled = true;
   try {
-    await Promise.all([loadPlayerRequests(), loadAssociationCandidates()]);
+    await Promise.all([loadPlayerRequests(), loadAssociationCandidates(), loadDepositIntake()]);
   } finally {
     refreshRequestsButton.disabled = false;
   }

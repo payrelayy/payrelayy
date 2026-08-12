@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  reduceTelegramDepositIntentCommand,
+  reduceTelegramDepositReferenceCommand,
   reduceTelegramPlayerIdTextAction,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
@@ -86,5 +88,53 @@ describe('private Telegram action reducers', () => {
       playerId: 'player-123',
       preferredLocale: 'en',
     });
+  });
+
+  it('reduces only exact dry-run deposit commands', () => {
+    expect(
+      reduceTelegramDepositIntentCommand({
+        ...privateMetadata,
+        command: '/deposit 28379330 25.00',
+      }),
+    ).toMatchObject({
+      kind: 'deposit_intent_command',
+      playerId: '28379330',
+      amountEtb: '25.00',
+    });
+    expect(
+      reduceTelegramDepositIntentCommand({
+        ...privateMetadata,
+        command: '/deposit 28379330 25 extra',
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositIntentCommand({ ...privateMetadata, command: '/deposit 28379330 0' }),
+    ).toBeUndefined();
+  });
+
+  it('reduces only one compact deposit token and one bounded reference', () => {
+    const depositToken = 'AAAAAAAAAAAAAAAAAAAAAA';
+    expect(
+      reduceTelegramDepositReferenceCommand({
+        ...privateMetadata,
+        command: `/reference ${depositToken} TX-ABC-7890`,
+      }),
+    ).toMatchObject({
+      kind: 'deposit_reference_command',
+      depositToken,
+      transactionReference: 'TX-ABC-7890',
+    });
+    expect(
+      reduceTelegramDepositReferenceCommand({
+        ...privateMetadata,
+        command: `/reference ${depositToken} raw reference`,
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositReferenceCommand({
+        ...privateMetadata,
+        command: '/reference invalid TX-ABC-7890',
+      }),
+    ).toBeUndefined();
   });
 });

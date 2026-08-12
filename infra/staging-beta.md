@@ -209,13 +209,14 @@ Deployment gives the beta-admission, Owner-control, and Player-ID action roles 2
 LOGIN credentials, installs service-separated `0400` files, and then creates three disposable
 `--no-deps` preflight containers. Each connects through the direct IPv6 endpoint and proves the
 dedicated catalog and privilege contract before any long-lived container starts. The helper removes
-each preflight container and fails closed on any database or network error. Only after all three
-preflights pass does it start the private Compose project without building on the VM and check
-readiness without submitting a payment or
-provider request. It does not make rapid runtime authentication retries during or after the
-propagation interval. Failure disables all three logins. If the administrator cleanup connection is
-temporarily refused after a failed activation, the workflow makes at most four cleanup attempts,
-15 seconds apart, and then fails visibly rather than claiming cleanup. `stop-and-disable` is the explicit cleanup mode
+each preflight container. A preflight may make at most three strict read-only attempts, 15 seconds
+apart, to tolerate a transient direct-database connection failure; it never relaxes a catalog
+assertion or starts another service during those attempts. Only after all three preflights pass does
+it start the private Compose project without building on the VM and check readiness without
+submitting a payment or provider request. Failure disables all three logins. If the administrator
+cleanup connection is temporarily refused after a failed activation, the workflow makes at most
+four cleanup attempts, 15 seconds apart, and then fails visibly rather than claiming cleanup.
+`stop-and-disable` is the explicit cleanup mode
 and must be run before the 24-hour login expiry; credential expiry does not itself stop the
 containers. A successful deployment is a beta demo, not financial launch approval; all payment,
 provider, validation, deposit, withdrawal, and KemerBet execution gates remain off.

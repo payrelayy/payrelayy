@@ -225,12 +225,34 @@ case "$command" in
       --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file"
     )
 
-    env -i "${compose_environment[@]}" "${compose_command[@]}" \
-      run --rm --no-deps owner-control node apps/admin/dist/database-preflight-cli.js
-    env -i "${compose_environment[@]}" "${compose_command[@]}" \
-      run --rm --no-deps api node apps/api/dist/player-action-database-preflight-cli.js
-    env -i "${compose_environment[@]}" "${compose_command[@]}" \
-      run --rm --no-deps beta-admission node apps/beta-admission/dist/catalog-preflight-cli.js
+    run_bounded_database_preflight() {
+      local service="$1"
+      local preflight_cli="$2"
+      local attempt
+
+      for attempt in 1 2 3; do
+        if env -i "${compose_environment[@]}" "${compose_command[@]}" \
+          run --rm --no-deps "$service" node "$preflight_cli"; then
+          return 0
+        fi
+        if [[ "$attempt" -lt 3 ]]; then
+          printf '%s database preflight attempt %s failed; waiting before bounded retry.\n' \
+            "$service" "$attempt" >&2
+          sleep 15
+        fi
+      done
+      return 1
+    }
+
+    run_bounded_database_preflight \
+      owner-control apps/admin/dist/database-preflight-cli.js ||
+      die 'the Owner-control database preflight failed after three bounded attempts'
+    run_bounded_database_preflight \
+      api apps/api/dist/player-action-database-preflight-cli.js ||
+      die 'the Player-ID action database preflight failed after three bounded attempts'
+    run_bounded_database_preflight \
+      beta-admission apps/beta-admission/dist/catalog-preflight-cli.js ||
+      die 'the beta-admission database preflight failed after three bounded attempts'
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       up -d --no-build --wait --wait-timeout 90
     ;;

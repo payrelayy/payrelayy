@@ -17,8 +17,9 @@ The only services are:
 
 All four images use the immutable Linux/amd64 Node base in the repository `Dockerfile`, run as numeric
 UID/GID 10001, use a read-only root filesystem, drop every Linux capability, prevent privilege
-escalation, and have PID, memory, and CPU limits. The private project-scoped bridge permits outbound
-Internet access for staging Supabase TLS and Telegram HTTPS. The bot and admission service publish
+escalation, and have PID, memory, and CPU limits. The two project-scoped bridges are IPv6-enabled
+and permit outbound Internet access for the exact staging Supabase direct database endpoint and
+Telegram HTTPS. The bot and admission service publish
 no port; Owner control publishes only `127.0.0.1:3002`. Docker JSON logs are bounded to three 10 MiB
 files per service.
 
@@ -63,13 +64,13 @@ only to its owning service; the payload HMAC is beta-service-only, and the Teleg
 bot-only. Owner control is placed on a separate egress-capable bridge from the bot and admission
 service.
 
-Both database URLs must use the staging project's IPv4 session pooler exactly:
-`aws-1-eu-west-1.pooler.supabase.com:5432`, database `postgres`, username
-`payreplayy_beta_admission_runtime.spzpiyxheappsfyswewl` or
-`payreplayy_owner_control_runtime.spzpiyxheappsfyswewl`, or
-`payreplayy_player_actions_runtime.spzpiyxheappsfyswewl`, and only
-`sslmode=verify-full`. The free project's direct database endpoint is IPv6-only and is deliberately
-rejected by this staging service. Download the staging project's CA from Supabase, verify its
+All three database URLs must use the staging project's exact IPv6 direct endpoint:
+`db.spzpiyxheappsfyswewl.supabase.co:5432`, database `postgres`, and the bare dedicated username
+`payreplayy_beta_admission_runtime`, `payreplayy_owner_control_runtime`, or
+`payreplayy_player_actions_runtime`, with only `sslmode=verify-full`. Session-pooler runtime URLs are
+rejected. GitHub workflows may continue using the IPv4 session pooler only for short-lived
+administrator SQL because GitHub-hosted runners do not provide the VM's direct IPv6 path. Download
+the staging project's CA from Supabase, verify its
 fingerprint through the reviewed Supabase dashboard path, and provide that public certificate as
 the CA file. Compose mounts it read-only and sets `NODE_EXTRA_CA_CERTS`; certificate verification
 remains enabled.
@@ -145,7 +146,14 @@ approval.
 
 ## Guarded deployment workflow
 
-Before the workflow can deploy, an operator must install the reviewed helper from the exact main
+Before the workflow can deploy, a separately approved maintenance window must enable DigitalOcean
+IPv6 on the existing Droplet and configure the guest with its assigned address and default route.
+That change requires a power cycle and is intentionally outside the deployment workflow; follow
+[`operations/ipv6-direct-database-maintenance.md`](operations/ipv6-direct-database-maintenance.md).
+The deployment helper fails before provisioning any runtime login unless the host has a global IPv6
+address, an IPv6 default route, and resolves the exact direct staging database hostname.
+
+An operator must also install the reviewed helper from the exact main
 commit as `/usr/local/sbin/payreplayy-staging-deploy-helper` with `root:root` ownership and mode
 `0755`. The dedicated `payreplayy-admin` account must be non-root, key-only, and granted
 noninteractive sudo for that helper only. It must not receive `sudo bash`, direct `sudo docker`,
@@ -192,11 +200,12 @@ database passwords. It rejects root SSH and fails if the installed helper checks
 reviewed repository helper.
 
 Deployment gives the beta-admission, Owner-control, and Player-ID action roles 24-hour staging
-LOGIN credentials,
-waits once for 125 seconds before any release transfer or container activation so the shared
-Supavisor credential cache can observe the rotated passwords, makes one read-only identity preflight
-through each dedicated runtime login, installs service-separated `0400` files, starts the private
-Compose project without building on the VM, and checks readiness without submitting a payment or
+LOGIN credentials, installs service-separated `0400` files, and then creates three disposable
+`--no-deps` preflight containers. Each connects through the direct IPv6 endpoint and proves the
+dedicated catalog and privilege contract before any long-lived container starts. The helper removes
+each preflight container and fails closed on any database or network error. Only after all three
+preflights pass does it start the private Compose project without building on the VM and check
+readiness without submitting a payment or
 provider request. It does not make rapid runtime authentication retries during or after the
 propagation interval. Failure disables all three logins. If the administrator cleanup connection is
 temporarily refused after a failed activation, the workflow makes at most four cleanup attempts,
@@ -230,36 +239,10 @@ The workflow must not receive an email, password, display name, access token, or
 
 ## Protected runtime preflight
 
-The manual `Staging beta runtime preflight` GitHub workflow is the read-only inspection path for the
-beta-admission database login. The guarded deployment workflow separately provisions three narrow
-staging logins for at most 24 hours. Both workflows are restricted to `main`, the protected `staging`
-environment, the exact staging project reference, and the approved IPv4 session pooler. The
-preflight never starts a container, contacts Telegram, enables a payment/provider feature, or
-targets production.
-
-The protected `staging` environment must contain these additional values before
-`provision-and-preflight` is selected:
-
-| Environment secret                   | Required shape                                |
-| ------------------------------------ | --------------------------------------------- |
-| `SUPABASE_CA_CERTIFICATE_PEM`        | verified, unexpired staging project CA in PEM |
-| `BETA_ADMISSION_RUNTIME_PASSWORD`    | independently generated 32-byte lowercase hex |
-| `BOT_TO_BETA_ADMISSION_HMAC_SECRET`  | independently generated 32-byte lowercase hex |
-| `BETA_ADMISSION_PAYLOAD_HMAC_SECRET` | distinct independently generated 32-byte hex  |
-
-`SUPABASE_DB_PASSWORD` remains the existing staging administrator credential used only for the
-guarded role alteration. The workflow does not read `SUPABASE_ACCESS_TOKEN` and never prints any
-secret value.
-
-Run `inspect` first. The provision mode gives the dedicated login a one-hour password validity and
-runs the beta service's catalog-only read-only preflight through TLS `verify-full`. It waits once for
-125 seconds after password rotation before making the single runtime authentication attempt. This
-bounded interval accommodates the shared Supavisor credential cache and circuit-breaker window
-without rapid authentication retries. After every provisioning attempt, whether the preflight
-passes or fails, the workflow disables LOGIN, clears its password, terminates runtime sessions, and
-clears PostgreSQL's cached statistics snapshot before asserting that no runtime session remains. An
-abruptly terminated runner still leaves the provisional password expiring within one hour. A later
-deployment workflow must provision the runtime credential atomically with the reviewed service
-deployment rather than leave an unused LOGIN enabled. Both modes require the operator to confirm
-the exact full `main` commit SHA. This workflow does not authorize starting the staging Compose
-profile.
+The manual `Staging beta runtime preflight` GitHub workflow is inspection-only. It uses the IPv4
+session pooler as the PostgreSQL administrator solely to prove that the beta role remains disabled
+and narrow; it cannot provision a password or invoke an application preflight. The guarded deploy
+workflow is the only path that may provision the three time-limited staging logins, and their actual
+read-only application preflights run on the IPv6-capable VM. Both workflows require the exact full
+`main` commit and staging project reference and reject production. Neither inspection nor preflight
+enables a payment/provider feature.

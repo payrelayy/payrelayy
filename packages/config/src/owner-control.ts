@@ -6,9 +6,8 @@ import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.
 export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 export const OWNER_CONTROL_DATABASE_RUNTIME_ROLE = 'payreplayy_owner_control_runtime';
 export const OWNER_CONTROL_TELEGRAM_BOT_USERNAME = 'payrelayybot';
+export const OWNER_CONTROL_DATABASE_DIRECT_HOST = `db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
 
-const SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
-const SESSION_POOLER_USER = `${OWNER_CONTROL_DATABASE_RUNTIME_ROLE}.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}`;
 const STAGING_SUPABASE_URL = `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
 const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
   OWNER_CONTROL_DATABASE_URL: '/run/secrets/owner_control_database_url',
@@ -17,10 +16,10 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
 
 export interface OwnerControlDatabaseConnection {
   readonly database: 'postgres';
-  readonly host: typeof SESSION_POOLER_HOST;
+  readonly host: typeof OWNER_CONTROL_DATABASE_DIRECT_HOST;
   readonly password: string;
   readonly port: 5432;
-  readonly user: typeof SESSION_POOLER_USER;
+  readonly user: typeof OWNER_CONTROL_DATABASE_RUNTIME_ROLE;
 }
 
 export type OwnerControlRuntimeConfig =
@@ -118,9 +117,9 @@ function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
   const queryKeys = [...url.searchParams.keys()];
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
-    url.hostname !== SESSION_POOLER_HOST ||
+    url.hostname !== OWNER_CONTROL_DATABASE_DIRECT_HOST ||
     (url.port !== '' && url.port !== '5432') ||
-    decode(url.username) !== SESSION_POOLER_USER ||
+    decode(url.username) !== OWNER_CONTROL_DATABASE_RUNTIME_ROLE ||
     decode(url.password) === '' ||
     decode(url.pathname.slice(1)) !== 'postgres' ||
     queryKeys.length !== 1 ||
@@ -129,16 +128,16 @@ function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
     url.hash !== ''
   ) {
     throw new Error(
-      'OWNER_CONTROL_DATABASE_URL must use the dedicated staging Owner-control role through the approved verify-full session pooler.',
+      'OWNER_CONTROL_DATABASE_URL must use the dedicated staging Owner-control role through the exact IPv6 direct database endpoint.',
     );
   }
 
   return {
     database: 'postgres',
-    host: SESSION_POOLER_HOST,
+    host: OWNER_CONTROL_DATABASE_DIRECT_HOST,
     password: decode(url.password),
     port: 5432,
-    user: SESSION_POOLER_USER,
+    user: OWNER_CONTROL_DATABASE_RUNTIME_ROLE,
   };
 }
 

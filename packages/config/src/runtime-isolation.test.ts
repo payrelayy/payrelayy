@@ -97,6 +97,13 @@ describe('runtime configuration isolation', () => {
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://payreplayy_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('exact IPv6 direct database endpoint');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
         API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'a'.repeat(64),
         PLAYER_ACTION_DATABASE_URL:
           'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',

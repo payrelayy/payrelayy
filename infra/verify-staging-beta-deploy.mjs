@@ -16,10 +16,6 @@ const diagnostics = readFileSync(
   resolve(root, 'infra/sql/staging-runtime-session-diagnostics.sql'),
   'utf8',
 );
-const runtimeLoginPreflight = readFileSync(
-  resolve(root, 'infra/sql/staging-runtime-login-preflight.sql'),
-  'utf8',
-);
 const helper = readFileSync(
   resolve(root, 'infra/operations/payreplayy-staging-deploy-helper.sh'),
   'utf8',
@@ -31,6 +27,7 @@ assert.match(workflow, /permissions:\s*\r?\n\s+contents: read/);
 assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
 assert.match(workflow, /STAGING_DROPLET_ID: '590666364'/);
+assert.match(workflow, /STAGING_DIRECT_DATABASE_HOST: db\.spzpiyxheappsfyswewl\.supabase\.co/);
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/);
 assert.match(workflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
 assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
@@ -46,6 +43,7 @@ assert.match(workflow, /UserKnownHostsFile=/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper verify/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper install/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper start/g);
+assert.match(workflow, /payreplayy-staging-deploy-helper network-ready/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper diagnose-owner-startup/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper stop/g);
 assert.match(workflow, /payreplayy-staging-deploy-helper discard/g);
@@ -59,45 +57,25 @@ assert.match(workflow, /org\.opencontainers\.image\.revision/);
 assert.match(workflow, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.match(workflow, /stop-and-disable/);
 assert.match(workflow, /infra\/sql\/staging-runtimes-disable\.sql/g);
-assert.match(workflow, /- name: Wait once for staging runtime credential propagation/);
-assert.match(workflow, /- name: Preflight all three runtime logins before release transfer/);
-assert.equal(
-  (workflow.match(/run: sleep 125/g) ?? []).length,
-  1,
-  'Deployment must use exactly one bounded credential-propagation wait.',
-);
 assert.ok(
-  workflow.indexOf('Provision three narrow 24-hour staging logins') <
-    workflow.indexOf('Wait once for staging runtime credential propagation') &&
-    workflow.indexOf('Wait once for staging runtime credential propagation') <
-      workflow.indexOf('Preflight all three runtime logins before release transfer') &&
-    workflow.indexOf('Preflight all three runtime logins before release transfer') <
+  workflow.indexOf('Stop any prior staging project and disable old logins') <
+    workflow.indexOf('Verify the VM has direct IPv6 database readiness') &&
+    workflow.indexOf('Verify the VM has direct IPv6 database readiness') <
+      workflow.indexOf('Provision three narrow 24-hour staging logins') &&
+    workflow.indexOf('Provision three narrow 24-hour staging logins') <
       workflow.indexOf('Transfer and install sealed release inputs') &&
     workflow.indexOf('Transfer and install sealed release inputs') <
       workflow.indexOf('Start the private staging profile and smoke readiness'),
-  'Credential propagation must complete after provisioning and before transfer or activation.',
+  'Old runtimes must stop, then direct IPv6 readiness must pass before new logins are provisioned.',
 );
-const runtimePreflightStep =
-  /- name: Preflight all three runtime logins before release transfer([\s\S]*?)\n\s+- name: Transfer and install sealed release inputs/u.exec(
+const networkReadinessStep =
+  /- name: Verify the VM has direct IPv6 database readiness([\s\S]*?)\n\s+- name: Provision three narrow 24-hour staging logins/u.exec(
     workflow,
   )?.[1];
-assert.ok(
-  runtimePreflightStep,
-  'The deployment must preflight every runtime login before transfer.',
-);
-assert.match(runtimePreflightStep, /PGSSLMODE: verify-full/);
-assert.match(runtimePreflightStep, /PGCONNECT_TIMEOUT: '5'/);
-assert.match(runtimePreflightStep, /staging-runtime-login-preflight\.sql/);
-assert.equal(
-  (
-    runtimePreflightStep.match(
-      /preflight_runtime_login "\$(?:BETA|OWNER|PLAYER_ACTION)_RUNTIME_ROLE"/g,
-    ) ?? []
-  ).length,
-  3,
-  'Each dedicated staging runtime login must receive one exact preflight.',
-);
-assert.doesNotMatch(runtimePreflightStep, /\b(?:for|while|until)\b|\bsleep\b/);
+assert.ok(networkReadinessStep, 'The deployment must verify exact VM IPv6 readiness.');
+assert.match(networkReadinessStep, /payreplayy-staging-deploy-helper network-ready/);
+assert.doesNotMatch(networkReadinessStep, /\b(?:for|while|until)\b|\bsleep\b/);
+assert.doesNotMatch(workflow, /run: sleep 125|staging-runtime-login-preflight\.sql/);
 assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
 assert.match(workflow, /Capture bounded Owner-control startup diagnostics/);
 assert.match(workflow, /infra\/sql\/staging-runtime-session-diagnostics\.sql/);
@@ -150,12 +128,6 @@ assert.match(diagnostics, /count\(\*\)::integer as session_count/);
 assert.match(diagnostics, /payreplayy_player_actions_runtime/);
 assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/i);
 
-assert.match(runtimeLoginPreflight, /begin transaction read only/);
-assert.match(runtimeLoginPreflight, /current_user = :'expected_runtime_role'/);
-assert.match(runtimeLoginPreflight, /session_user = :'expected_runtime_role'/);
-assert.match(runtimeLoginPreflight, /rollback/);
-assert.doesNotMatch(runtimeLoginPreflight, /\b(?:insert|update|delete|merge|call|grant|revoke)\b/i);
-
 const rollbackStep = /- name: Roll back failed activation([\s\S]*?)\n\s+stop:/u.exec(workflow)?.[1];
 assert.ok(rollbackStep, 'The failed-activation rollback must be present.');
 assert.match(rollbackStep, /for attempt in 1 2 3 4/);
@@ -173,6 +145,30 @@ assert.match(helper, /DOCKER_HOST="\$LOCAL_DOCKER_SOCKET"/);
 assert.match(helper, /--env-file \/dev\/null/);
 assert.match(helper, /--project-name "\$PROJECT_NAME"/);
 assert.match(helper, /up -d --no-build --wait --wait-timeout 90/);
+assert.match(helper, /STAGING_DIRECT_DATABASE_HOST='db\.spzpiyxheappsfyswewl\.supabase\.co'/);
+assert.match(helper, /ip -6 address show scope global/);
+assert.match(helper, /ip -6 route show default/);
+assert.match(helper, /getent ahostsv6 "\$STAGING_DIRECT_DATABASE_HOST" >\/dev\/null/);
+assert.match(
+  helper,
+  /run --rm --no-deps owner-control node apps\/admin\/dist\/database-preflight-cli\.js/,
+);
+assert.match(
+  helper,
+  /run --rm --no-deps api node apps\/api\/dist\/player-action-database-preflight-cli\.js/,
+);
+assert.match(
+  helper,
+  /run --rm --no-deps beta-admission node apps\/beta-admission\/dist\/catalog-preflight-cli\.js/,
+);
+const longLivedStart = helper.indexOf('up -d --no-build --wait --wait-timeout 90');
+assert.ok(
+  helper.indexOf('run --rm --no-deps owner-control') < longLivedStart &&
+    helper.indexOf('run --rm --no-deps api') < longLivedStart &&
+    helper.indexOf('run --rm --no-deps beta-admission') < longLivedStart,
+  'All three one-shot runtime preflights must pass before long-lived services start.',
+);
+assert.match(helper, /docker_local network rm \$networks/);
 assert.doesNotMatch(helper, /curl|wget|git |\.env|xzztugbgtulptnbpoelr/);
 
 const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];

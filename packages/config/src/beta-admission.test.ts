@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BETA_ADMISSION_DATABASE_DIRECT_HOST,
   loadBetaAdmissionConfig,
   PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
   redactedBetaAdmissionConfigForLog,
 } from './beta-admission.js';
 
-const sessionPoolerDatabaseUrl = `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`;
+const directDatabaseUrl = `postgresql://payreplayy_beta_admission_runtime:db-password@${BETA_ADMISSION_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
 
-function enabledEnvironment(databaseUrl = sessionPoolerDatabaseUrl): NodeJS.ProcessEnv {
+function enabledEnvironment(databaseUrl = directDatabaseUrl): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'test',
     INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true',
@@ -41,14 +42,14 @@ describe('beta-admission runtime configuration', () => {
     });
   });
 
-  it('accepts only the exact staging eu-west-1 IPv4 session-pooler login', () => {
+  it('accepts only the exact staging IPv6 direct database login', () => {
     expect(loadBetaAdmissionConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
       stage: 'staging',
       projectReference: PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
       connection: {
         database: 'postgres',
-        host: 'aws-1-eu-west-1.pooler.supabase.com',
+        host: BETA_ADMISSION_DATABASE_DIRECT_HOST,
         port: 5432,
       },
       tlsMode: 'verify-full',
@@ -58,8 +59,8 @@ describe('beta-admission runtime configuration', () => {
   it('rejects production, broad roles, transaction pooling, and weak or ambiguous TLS URLs', () => {
     const invalidUrls = [
       'postgresql://payreplayy_beta_admission_runtime:pw@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
-      `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
       `postgresql://postgres:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
+      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
       `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
       `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
       `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=require`,
@@ -88,7 +89,7 @@ describe('beta-admission runtime configuration', () => {
 
   it('supports mutually exclusive absolute secret files and trims one terminal newline', () => {
     const fileValues: Record<string, string> = {
-      '/run/secrets/database-url': `${sessionPoolerDatabaseUrl}\n`,
+      '/run/secrets/database-url': `${directDatabaseUrl}\n`,
       '/run/secrets/transport-hmac': `${'a'.repeat(64)}\n`,
       '/run/secrets/payload-hmac': `${'b'.repeat(64)}\n`,
     };
@@ -128,7 +129,7 @@ describe('beta-admission runtime configuration', () => {
           BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: '/run/secrets/beta_admission_bot_transport_hmac',
           BETA_ADMISSION_PAYLOAD_HMAC_SECRET_FILE: '/run/secrets/beta_admission_payload_hmac',
         },
-        { readSecretFile: () => sessionPoolerDatabaseUrl },
+        { readSecretFile: () => directDatabaseUrl },
       ),
     ).toThrow('approved private runtime secret path');
   });

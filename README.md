@@ -25,7 +25,8 @@ The current foundation is deliberately safe:
   English-only and invite-only: only a one-time Owner-issued invitation may create an identity.
 - the staging bot can now show an admitted-user menu and record a non-claiming KemerBet Player-ID
   request as `pending` through a dedicated database role and durable action nonce store.
-- pending Player IDs are not validated, associated with a provider account, or usable for deposits;
+- pending or merely found Player IDs are not usable for deposits; a distinct audited Owner
+  ownership confirmation is required to create the validated association;
   no KemerBet, payment-provider, deposit, withdrawal, or financial action is enabled by this flow.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
@@ -94,7 +95,7 @@ database-access, provider-verification, and reference-protection boundaries. See
 fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and
 [docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.
-See [docs/player-registration.md](docs/player-registration.md) for the forthcoming non-claiming
-Player-ID registration model and
+See [docs/player-registration.md](docs/player-registration.md) for the Player-ID request, review,
+and explicit Owner association boundary, and
 [docs/telegram-conversation-actions.md](docs/telegram-conversation-actions.md) for the required
 conversation/action gate.

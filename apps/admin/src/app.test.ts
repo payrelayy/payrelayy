@@ -37,7 +37,14 @@ function runtime(
       revoke: async () => undefined,
     },
     playerRegistrations: {
+      associate: async (_actor, requestId) => ({
+        alreadyRecorded: false,
+        associatedAt: '2026-08-11T12:15:00.000Z',
+        playerAccountId: '33333333-3333-4333-8333-333333333333',
+        requestId,
+      }),
       list: async () => [],
+      listAssociationCandidates: async () => [],
       review: async (_actor, requestId, decision) => ({
         alreadyRecorded: false,
         requestId,
@@ -74,6 +81,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('PayReplayy Owner');
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
+    expect(response.body).toContain('Explicit ownership confirmation');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
   });
@@ -101,6 +109,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).not.toContain('refresh_token');
     expect(response.body).not.toContain('service_role');
     expect(response.body).toContain('/v1/owner/player-registration-requests?limit=25');
+    expect(response.body).toContain(
+      '/v1/owner/player-registration-association-candidates?limit=25',
+    );
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
     expect(response.body).not.toContain('innerHTML');
     expect(response.body).toContain("url.pathname !== '/payrelayybot'");
@@ -199,6 +210,9 @@ describe('Owner-control HTTP boundary', () => {
       fetch: verifiedAuthFetch(),
       runtime: runtime({
         playerRegistrations: {
+          associate: async () => {
+            throw new Error('not called');
+          },
           list: async (actor, limit) => {
             observed = [actor, limit ?? -1];
             return [
@@ -212,6 +226,7 @@ describe('Owner-control HTTP boundary', () => {
               },
             ];
           },
+          listAssociationCandidates: async () => [],
           review: async () => {
             throw new Error('not called');
           },
@@ -237,7 +252,11 @@ describe('Owner-control HTTP boundary', () => {
       fetch: verifiedAuthFetch(),
       runtime: runtime({
         playerRegistrations: {
+          associate: async () => {
+            throw new Error('not called');
+          },
           list: async () => [],
+          listAssociationCandidates: async () => [],
           review: async (actor, id, decision) => {
             observed = [actor, id, decision];
             return {
@@ -259,6 +278,54 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ requestId: inviteId, status: 'review_required' });
     expect(observed).toEqual([authUserId, inviteId, 'review_required']);
+    await app.close();
+  });
+
+  it('lists and explicitly associates a reviewed KemerBet Player ID', async () => {
+    let associated: readonly string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        playerRegistrations: {
+          associate: async (actor, id) => {
+            associated = [actor, id];
+            return {
+              alreadyRecorded: false,
+              associatedAt: '2026-08-11T12:15:00.000Z',
+              playerAccountId: '33333333-3333-4333-8333-333333333333',
+              requestId: id,
+            };
+          },
+          list: async () => [],
+          listAssociationCandidates: async () => [
+            {
+              playerId: '28379330',
+              platformCode: 'kemerbet',
+              requestId: inviteId,
+              reviewedAt: '2026-08-11T12:10:00.000Z',
+            },
+          ],
+          review: async () => {
+            throw new Error('not called');
+          },
+        },
+      }),
+    });
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/player-registration-association-candidates?limit=25',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toMatchObject({ candidates: [{ playerId: '28379330' }] });
+    const associateResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/player-registration-requests/${inviteId}/associate`,
+      headers: { authorization: `Bearer ${bearer}` },
+      payload: { confirmation: 'owner_verified_platform_ownership' },
+    });
+    expect(associateResponse.statusCode).toBe(200);
+    expect(associated).toEqual([authUserId, inviteId]);
     await app.close();
   });
 

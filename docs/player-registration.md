@@ -1,11 +1,12 @@
 # Non-claiming Player-ID registration
 
-## Status: staging request capture enabled; Owner existence review remains non-claiming
+## Status: staged request capture and explicit Owner association boundary
 
 The private staging bot can now record a Player-ID registration request through the reviewed
 conversation-action boundary. The Owner-control service can list the bounded KemerBet review queue
-and record an existence result. Neither path calls KemerBet automatically, proves ownership, creates
-a `customer_platform_players` binding, or makes an ID usable for deposits.
+and record an existence result. A separate Owner-confirmed association action can then create the
+validated `customer_platform_players` binding required by deposit intake. No path calls KemerBet
+automatically, opens a deposit, displays payment instructions, or enables a payment switch.
 
 ## Why the existing player table is not an intake table
 
@@ -144,8 +145,22 @@ claim that the customer owns the account.
 4. The bot replies: "Player ID saved - pending validation. It cannot be used for a deposit yet."
 5. The private Owner page lists only pending or review-required KemerBet submissions and can record
    `exists`, `not_found`, `review_required`, or `cancelled` with fixed reason codes.
-6. Only a separately designed proof/association model may ever promote an ID into a deposit-usable
-   binding. Existence lookup alone is insufficient.
+6. After separately verifying that the Telegram customer controls the account, the Owner must use
+   the distinct ownership-confirmation action. That append-only action creates one validated
+   customer/platform binding and an audit event. Existence lookup alone remains insufficient.
+
+## Explicit Owner association
+
+`app.player_registration_request_associations` is an append-only link between the reviewed request,
+the authenticated Owner, the newly validated player account, and its immutable validation attempt.
+The association procedure accepts only the fixed `owner_verified_platform_ownership` reason. It is
+idempotent for the same request, rejects an existing platform-wide Player-ID binding, and is
+executable only through the narrow Owner-control role. Generic API, bot, worker, admission, and
+browser roles have no table access or procedure execution.
+
+This association makes the Player ID structurally eligible for deposit intake. It does not bypass
+the still-disabled payment feature switches, missing receiver-account configuration, exact-amount
+matching, evidence validation, or dry-run execution boundaries.
 
 Before any future existence lookup, add per-customer and platform-wide abuse limits. A Player-ID
 validator must not become an account-enumeration or spam mechanism.
@@ -166,6 +181,5 @@ This stage must not:
 - launch a browser or bypass a CAPTCHA/session control;
 - open a deposit intent or display payment instructions;
 - make a payment-provider call or transfer funds;
-- establish account ownership; or
-- replace the existing exclusive `customer_platform_players` design without a separate migration
-  and review.
+- infer account ownership from existence alone; or
+- replace the explicit Owner-confirmed association with automatic promotion.

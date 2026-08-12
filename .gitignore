@@ -4,6 +4,7 @@ dist/
 coverage/
 .turbo/
 .pnpm-store/
+.supabase-home/
 
 # Local configuration and secrets
 .env

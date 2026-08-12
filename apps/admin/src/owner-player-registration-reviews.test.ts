@@ -91,4 +91,51 @@ describe('PostgreSQL Owner Player-ID review adapter', () => {
       OwnerPlayerRegistrationReviewRejectedError,
     );
   });
+
+  it('lists and records only the fixed explicit ownership association', async () => {
+    const associatedAt = new Date('2026-08-11T12:15:00.000Z');
+    const playerAccountId = '33333333-3333-4333-8333-333333333333';
+    const calls: (readonly (number | string)[])[] = [];
+    const adapter = new PostgresOwnerPlayerRegistrationReviews({
+      query: async (sql, values) => {
+        calls.push(values);
+        return sql.includes('list_owner_player_registration_association_candidates')
+          ? {
+              rows: [
+                {
+                  platform_code: 'kemerbet',
+                  registration_request_id: requestId,
+                  reviewed_at: new Date('2026-08-11T12:10:00.000Z'),
+                  submitted_player_id: '28379330',
+                },
+              ],
+            }
+          : {
+              rows: [
+                {
+                  associated_at: associatedAt,
+                  associated_player_account_id: playerAccountId,
+                  associated_registration_request_id: requestId,
+                  association_already_recorded: false,
+                },
+              ],
+            };
+      },
+    });
+    await expect(adapter.listAssociationCandidates(authUserId)).resolves.toEqual([
+      {
+        playerId: '28379330',
+        platformCode: 'kemerbet',
+        requestId,
+        reviewedAt: '2026-08-11T12:10:00.000Z',
+      },
+    ]);
+    await expect(adapter.associate(authUserId, requestId)).resolves.toEqual({
+      alreadyRecorded: false,
+      associatedAt: associatedAt.toISOString(),
+      playerAccountId,
+      requestId,
+    });
+    expect(calls[1]).toEqual([authUserId, requestId, 'owner_verified_platform_ownership']);
+  });
 });

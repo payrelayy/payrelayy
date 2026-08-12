@@ -266,6 +266,63 @@ export function buildOwnerControlApp(
     },
   );
 
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/player-registration-association-candidates',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const candidates = await dependencies.runtime.playerRegistrations.listAssociationCandidates(
+          authUserId,
+          limit,
+        );
+        return reply.code(200).send({ candidates });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPlayerRegistrationReviewRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner Player ID association queue is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { requestId: string } }>(
+    '/v1/owner/player-registration-requests/:requestId/associate',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['confirmation']);
+        if (body?.confirmation !== 'owner_verified_platform_ownership') {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receipt = await dependencies.runtime.playerRegistrations.associate(
+          authUserId,
+          request.params.requestId,
+        );
+        return reply.code(200).send(receipt);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPlayerRegistrationReviewRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner Player ID association is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
   app.get('/healthz', async () => ({ status: 'ok', service: 'payreplayy-owner-control' }));
   app.get('/readyz', async (_request, reply) => {
     const ready = await dependencies.runtime.ready();

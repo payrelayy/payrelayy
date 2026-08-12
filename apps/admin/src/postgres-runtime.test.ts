@@ -47,12 +47,18 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows only invite and non-claiming Player-ID review procedures', () => {
+  it('allows only invite, Player-ID review, and explicit association procedures', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.review_owner_player_registration_request(uuid,uuid,text,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.list_owner_player_registration_association_candidates(uuid,integer)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.associate_owner_validated_player_registration_request(uuid,uuid,text)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('all_other_app_functions_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');

@@ -6,7 +6,10 @@ import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registrat
 
 export interface OwnerControlPostgresRuntime {
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
-  readonly playerRegistrations: Pick<PostgresOwnerPlayerRegistrationReviews, 'list' | 'review'>;
+  readonly playerRegistrations: Pick<
+    PostgresOwnerPlayerRegistrationReviews,
+    'associate' | 'list' | 'listAssociationCandidates' | 'review'
+  >;
   close(): Promise<void>;
   ready(): Promise<boolean>;
 }
@@ -99,6 +102,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute') as revoke_allowed,
     has_function_privilege(current_user, 'app.list_owner_player_registration_requests(uuid,integer)', 'execute') as player_request_list_allowed,
     has_function_privilege(current_user, 'app.review_owner_player_registration_request(uuid,uuid,text,text)', 'execute') as player_request_review_allowed,
+    has_function_privilege(current_user, 'app.list_owner_player_registration_association_candidates(uuid,integer)', 'execute') as player_association_list_allowed,
+    has_function_privilege(current_user, 'app.associate_owner_validated_player_registration_request(uuid,uuid,text)', 'execute') as player_association_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -119,7 +124,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.issue_telegram_beta_invite(uuid,text,timestamptz)'::regprocedure,
           'app.revoke_telegram_beta_invite(uuid,uuid,text)'::regprocedure,
           'app.list_owner_player_registration_requests(uuid,integer)'::regprocedure,
-          'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure
+          'app.review_owner_player_registration_request(uuid,uuid,text,text)'::regprocedure,
+          'app.list_owner_player_registration_association_candidates(uuid,integer)'::regprocedure,
+          'app.associate_owner_validated_player_registration_request(uuid,uuid,text)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;

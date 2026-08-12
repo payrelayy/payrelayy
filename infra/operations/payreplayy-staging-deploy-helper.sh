@@ -12,6 +12,7 @@ readonly SECRET_ROOT='/srv/payreplayy/secrets/staging'
 readonly PROJECT_NAME='payreplayy-staging-beta'
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
 
 export PATH="$SAFE_PATH"
 
@@ -44,11 +45,16 @@ require_service_file() {
 }
 
 stop_project() {
-  local containers
+  local containers networks
   containers="$(docker_local container ls --all --quiet --filter "label=com.docker.compose.project=$PROJECT_NAME")"
   if [[ -n "$containers" ]]; then
     # Container identifiers returned by Docker contain only hexadecimal characters and newlines.
     docker_local container rm --force $containers >/dev/null
+  fi
+  networks="$(docker_local network ls --quiet --filter "label=com.docker.compose.project=$PROJECT_NAME")"
+  if [[ -n "$networks" ]]; then
+    # Network identifiers returned by Docker contain only hexadecimal characters and newlines.
+    docker_local network rm $networks >/dev/null
   fi
   rm -f -- \
     "$SECRET_ROOT/owner-database-url" \
@@ -65,6 +71,15 @@ stop_project() {
     "$SECRET_ROOT/bot-action-transport-hmac" \
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
+}
+
+require_ipv6_host_ready() {
+  command -v ip >/dev/null 2>&1 || die 'the ip utility is unavailable'
+  command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
+  ip -6 address show scope global | grep -q 'inet6 ' || die 'the VM has no global IPv6 address'
+  ip -6 route show default | grep -q '^default ' || die 'the VM has no default IPv6 route'
+  getent ahostsv6 "$STAGING_DIRECT_DATABASE_HOST" >/dev/null ||
+    die 'the exact staging direct database host has no resolvable IPv6 address'
 }
 
 [[ $EUID -eq 0 ]] || die 'the helper must run as root through sudo'
@@ -85,6 +100,11 @@ case "$command" in
   stop)
     [[ $# -eq 1 ]] || die 'stop accepts no additional arguments'
     stop_project
+    ;;
+
+  network-ready)
+    [[ $# -eq 1 ]] || die 'network-ready accepts no additional arguments'
+    require_ipv6_host_ready
     ;;
 
   discard)
@@ -173,29 +193,42 @@ case "$command" in
         die 'an image revision does not match the reviewed commit'
     done
 
-    env -i \
-      PATH="$SAFE_PATH" \
-      HOME='/root' \
-      DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
-      PAYREPLAYY_VCS_REF="$commit_sha" \
-      PAYREPLAYY_IMAGE_TAG="$image_tag" \
-      PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url" \
-      PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key" \
-      PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url" \
-      PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac" \
-      PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac" \
-      PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url" \
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac" \
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac" \
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac" \
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac" \
-      PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt" \
-      PAYREPLAYY_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token" \
-      PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac" \
-      PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac" \
-      docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null \
-        --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file" \
-        up -d --no-build --wait --wait-timeout 90
+    require_ipv6_host_ready
+
+    compose_environment=(
+      PATH="$SAFE_PATH"
+      HOME='/root'
+      DOCKER_HOST="$LOCAL_DOCKER_SOCKET"
+      PAYREPLAYY_VCS_REF="$commit_sha"
+      PAYREPLAYY_IMAGE_TAG="$image_tag"
+      PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
+      PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
+      PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
+      PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
+      PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
+      PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
+      PAYREPLAYY_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
+      PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
+      PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+    )
+    compose_command=(
+      docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
+      --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file"
+    )
+
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      run --rm --no-deps owner-control node apps/admin/dist/database-preflight-cli.js
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      run --rm --no-deps api node apps/api/dist/player-action-database-preflight-cli.js
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      run --rm --no-deps beta-admission node apps/beta-admission/dist/catalog-preflight-cli.js
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      up -d --no-build --wait --wait-timeout 90
     ;;
 
   diagnose-owner-startup)
@@ -219,6 +252,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, discard, install, start, or diagnose-owner-startup'
+    die 'expected verify, stop, network-ready, discard, install, start, or diagnose-owner-startup'
     ;;
 esac

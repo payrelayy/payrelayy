@@ -355,10 +355,12 @@ services:
 networks:
   owner_control_service:
     driver: bridge
+    enable_ipv6: true
     internal: false
     attachable: false
   staging_service:
     driver: bridge
+    enable_ipv6: true
     internal: false
     attachable: false
 

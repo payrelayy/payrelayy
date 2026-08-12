@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  OWNER_CONTROL_DATABASE_DIRECT_HOST,
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
   OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
   loadOwnerControlConfig,
   redactedOwnerControlConfigForLog,
 } from './owner-control.js';
 
-const databaseUrl = `postgresql://payreplayy_owner_control_runtime.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`;
+const databaseUrl = `postgresql://payreplayy_owner_control_runtime:password@${OWNER_CONTROL_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
 const publishableKey = 'sb_publishable_test_key_for_staging_only';
 
 function enabledEnvironment(): NodeJS.ProcessEnv {
@@ -44,19 +45,22 @@ describe('Owner-control configuration', () => {
     expect(OWNER_CONTROL_TELEGRAM_BOT_USERNAME).toBe('payrelayybot');
   });
 
-  it('accepts only the exact staging project, role, pooler, and verify-full URL', () => {
+  it('accepts only the exact staging project, role, direct host, and verify-full URL', () => {
     expect(loadOwnerControlConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
       stage: 'staging',
       tlsMode: 'verify-full',
       connection: {
-        host: 'aws-1-eu-west-1.pooler.supabase.com',
-        user: `payreplayy_owner_control_runtime.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}`,
+        host: OWNER_CONTROL_DATABASE_DIRECT_HOST,
+        user: 'payreplayy_owner_control_runtime',
       },
     });
     for (const unsafe of [
-      databaseUrl.replace('aws-1-eu-west-1', 'aws-0-eu-west-1'),
+      databaseUrl.replace(
+        OWNER_CONTROL_DATABASE_DIRECT_HOST,
+        'aws-1-eu-west-1.pooler.supabase.com',
+      ),
       databaseUrl.replace('payreplayy_owner_control_runtime', 'postgres'),
       databaseUrl.replace('5432', '6543'),
       databaseUrl.replace('verify-full', 'require'),

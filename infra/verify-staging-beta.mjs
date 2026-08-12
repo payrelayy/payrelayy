@@ -326,12 +326,22 @@ for (const directSecretName of [
   );
 }
 
-for (const networkName of ['owner_control_service', 'staging_service']) {
-  const network = childBlock(networks, networkName);
+const ownerControlNetwork = childBlock(networks, 'owner_control_service');
+const stagingNetwork = childBlock(networks, 'staging_service');
+for (const [networkName, network] of [
+  ['owner_control_service', ownerControlNetwork],
+  ['staging_service', stagingNetwork],
+]) {
   assert.match(network, /driver: bridge/);
   assert.match(network, /internal: false/, `${networkName} must retain outbound Internet access`);
   assert.match(network, /attachable: false/);
 }
+assert.match(
+  ownerControlNetwork,
+  /enable_ipv6: true/,
+  'the Owner-control service bridge must provide IPv6',
+);
+assert.match(stagingNetwork, /enable_ipv6: true/, 'the staging service bridge must provide IPv6');
 
 assert.equal(
   countMatches(compose, /^\s+ports:\s*$/gm),

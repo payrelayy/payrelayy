@@ -4,13 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Inspect the disabled role or provision and preflight the dedicated staging login
+        description: Inspect the disabled staging beta-admission role without changing it
         required: true
         default: inspect
         type: choice
         options:
           - inspect
-          - provision-and-preflight
       confirm_staging_project_ref:
         description: Type the exact staging project ref to confirm the target
         required: true
@@ -55,7 +54,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "$REQUESTED_MODE" != 'inspect' && "$REQUESTED_MODE" != 'provision-and-preflight' ]]; then
+          if [[ "$REQUESTED_MODE" != 'inspect' ]]; then
             echo '::error::The requested mode is not allowed.'
             exit 1
           fi
@@ -81,7 +80,7 @@ jobs:
           fi
 
   staging-runtime:
-    name: Inspect or preflight the staging runtime
+    name: Inspect the disabled staging runtime
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -94,12 +93,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        if: inputs.mode == 'provision-and-preflight'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: '24'
-
       - name: Validate tooling and protected inputs
         id: protected-inputs
         shell: bash
@@ -107,9 +100,6 @@ jobs:
           REQUESTED_MODE: ${{ inputs.mode }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
-          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
-          BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
-          BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
         run: |
           set -euo pipefail
 
@@ -121,25 +111,6 @@ jobs:
           if [[ -z "$SUPABASE_DB_PASSWORD" || -z "$SUPABASE_CA_CERTIFICATE_PEM" ]]; then
             echo '::error::The protected staging environment is missing an administrator credential or CA certificate.'
             exit 1
-          fi
-
-          if [[ "$REQUESTED_MODE" == 'provision-and-preflight' ]]; then
-            if [[ ! "$BETA_ADMISSION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]; then
-              echo '::error::The dedicated runtime password is missing or malformed.'
-              exit 1
-            fi
-            if [[ ! "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]; then
-              echo '::error::The transport HMAC secret is missing or malformed.'
-              exit 1
-            fi
-            if [[ ! "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]; then
-              echo '::error::The payload HMAC secret is missing or malformed.'
-              exit 1
-            fi
-            if [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" == "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" ]]; then
-              echo '::error::The two beta-admission HMAC secrets must be distinct.'
-              exit 1
-            fi
           fi
 
           ca_file="$RUNNER_TEMP/payreplayy-staging-supabase-ca.crt"
@@ -162,95 +133,6 @@ jobs:
           PGSERVICEFILE: /dev/null
           PGPASSFILE: /dev/null
         run: psql -X --file=infra/sql/staging-beta-runtime-inspect.sql
-
-      - name: Enable Corepack and verify pnpm
-        if: inputs.mode == 'provision-and-preflight'
-        shell: bash
-        run: |
-          corepack enable
-          test "$(pnpm --version)" = '11.16.0'
-
-      - name: Install locked dependencies
-        if: inputs.mode == 'provision-and-preflight'
-        run: pnpm install --frozen-lockfile
-
-      - name: Provision a one-hour staging login
-        if: inputs.mode == 'provision-and-preflight'
-        id: provision
-        shell: bash
-        env:
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
-          PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
-          PGSSLMODE: verify-full
-          PGSSLROOTCERT: ${{ steps.protected-inputs.outputs.ca_file }}
-          PGCONNECT_TIMEOUT: '5'
-          PGSERVICEFILE: /dev/null
-          PGPASSFILE: /dev/null
-          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
-        run: |
-          set -euo pipefail
-          echo 'attempted=true' >> "$GITHUB_OUTPUT"
-          psql -X --file=infra/sql/staging-beta-runtime-provision.sql
-
-      - name: Allow one bounded Supavisor credential propagation interval
-        if: inputs.mode == 'provision-and-preflight'
-        shell: bash
-        run: sleep 125
-
-      - name: Run the dedicated catalog-only preflight
-        if: inputs.mode == 'provision-and-preflight'
-        shell: bash
-        env:
-          NODE_ENV: development
-          NODE_EXTRA_CA_CERTS: ${{ steps.protected-inputs.outputs.ca_file }}
-          INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'
-          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
-          BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
-          BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
-        run: |
-          set -euo pipefail
-
-          export BETA_ADMISSION_DATABASE_URL="postgresql://${BETA_RUNTIME_ROLE}.${STAGING_PROJECT_REF}:${BETA_ADMISSION_RUNTIME_PASSWORD}@${STAGING_POOLER_HOST}:5432/postgres?sslmode=verify-full"
-          pnpm --filter @payreplayy/domain run build
-          pnpm --filter @payreplayy/config run build
-          pnpm --filter @payreplayy/contracts run build
-          pnpm --filter @payreplayy/beta-admission run build
-          pnpm --filter @payreplayy/beta-admission run db:preflight
-
-      - name: Capture count-only runtime session diagnostics after a failed preflight
-        if: failure() && steps.provision.outputs.attempted == 'true'
-        shell: bash
-        env:
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
-          PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
-          PGSSLMODE: verify-full
-          PGSSLROOTCERT: ${{ steps.protected-inputs.outputs.ca_file }}
-          PGCONNECT_TIMEOUT: '5'
-          PGSERVICEFILE: /dev/null
-          PGPASSFILE: /dev/null
-        run: psql -X --file=infra/sql/staging-runtime-session-diagnostics.sql
-
-      - name: Disable and clear the login after every preflight attempt
-        if: always() && steps.provision.outputs.attempted == 'true'
-        shell: bash
-        env:
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
-          PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
-          PGSSLMODE: verify-full
-          PGSSLROOTCERT: ${{ steps.protected-inputs.outputs.ca_file }}
-          PGCONNECT_TIMEOUT: '5'
-          PGSERVICEFILE: /dev/null
-          PGPASSFILE: /dev/null
-        run: psql -X --file=infra/sql/staging-beta-runtime-disable.sql
 
       - name: Remove the temporary CA copy
         if: always()

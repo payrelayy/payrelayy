@@ -40,7 +40,7 @@ function config() {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true',
-    BETA_ADMISSION_DATABASE_URL: `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+    BETA_ADMISSION_DATABASE_URL: `postgresql://payreplayy_beta_admission_runtime:password@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
     BOT_TO_BETA_ADMISSION_HMAC_SECRET: transportHmacSecret,
     BETA_ADMISSION_PAYLOAD_HMAC_SECRET: payloadHmacSecret,
   });

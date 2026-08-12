@@ -124,6 +124,29 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     ) as all_other_app_functions_denied
 `;
 
+async function runOwnerControlCatalogPreflight(pool: Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('begin read only');
+    await client.query("set local search_path = 'pg_catalog'");
+    const result = await client.query<Record<string, boolean>>(OWNER_CONTROL_PREFLIGHT_SQL);
+    const row = result.rows.length === 1 ? result.rows[0] : undefined;
+    if (!row || Object.values(row).some((value) => value !== true)) {
+      throw new Error('preflight failed');
+    }
+    await client.query('rollback');
+  } catch (error) {
+    try {
+      await client.query('rollback');
+    } catch {
+      // The caller receives only the generic unavailable error on rollback uncertainty.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createOwnerControlPostgresRuntime(
   config: Extract<OwnerControlRuntimeConfig, { readonly enabled: true }>,
 ): Promise<OwnerControlPostgresRuntime> {
@@ -133,11 +156,7 @@ export async function createOwnerControlPostgresRuntime(
     poolHealthy = false;
   });
   try {
-    const result = await pool.query<Record<string, boolean>>(OWNER_CONTROL_PREFLIGHT_SQL);
-    const row = result.rows.length === 1 ? result.rows[0] : undefined;
-    if (!row || Object.values(row).some((value) => value !== true)) {
-      throw new Error('preflight failed');
-    }
+    await runOwnerControlCatalogPreflight(pool);
   } catch {
     await pool.end();
     throw new OwnerControlPostgresRuntimeUnavailableError();

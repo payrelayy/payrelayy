@@ -140,8 +140,6 @@ const API_DATABASE_SESSION_POOLER_USER = `${API_DATABASE_RUNTIME_ROLE}.${PAYREPL
 const PLAYER_ACTION_DATABASE_RUNTIME_ROLE = 'payreplayy_player_actions_runtime';
 const PLAYER_ACTION_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 const PLAYER_ACTION_DATABASE_DIRECT_HOST = `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`;
-const PLAYER_ACTION_DATABASE_SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
-const PLAYER_ACTION_DATABASE_SESSION_POOLER_USER = `${PLAYER_ACTION_DATABASE_RUNTIME_ROLE}.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}`;
 
 function secretFromEnvironmentOrFile(
   value: string | undefined,
@@ -414,14 +412,8 @@ function resolvePlayerActionDatabaseRuntimeUser(connectionUrl: URL): string {
   ) {
     return user;
   }
-  if (
-    connectionUrl.hostname === PLAYER_ACTION_DATABASE_SESSION_POOLER_HOST &&
-    user === PLAYER_ACTION_DATABASE_SESSION_POOLER_USER
-  ) {
-    return user;
-  }
   throw new Error(
-    'PLAYER_ACTION_DATABASE_URL must use the dedicated staging Player-ID action runtime login and approved project host.',
+    'PLAYER_ACTION_DATABASE_URL must use the dedicated staging Player-ID action runtime login through the exact IPv6 direct database endpoint.',
   );
 }
 

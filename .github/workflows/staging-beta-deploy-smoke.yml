@@ -38,6 +38,7 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '590666364'
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
   STAGING_BANNED_IP: 2a05:d018:135e:1602:5210:739d:5667:fee4
   SUPABASE_CLI_VERSION: 2.113.0
   BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
@@ -256,14 +257,14 @@ jobs:
           printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$secret_dir/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$secret_dir/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$secret_dir/supabase-ca.crt"
-          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$BETA_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$STAGING_DIRECT_DATABASE_HOST" \
             > "$secret_dir/beta-database-url"
-          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$OWNER_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_DIRECT_DATABASE_HOST" \
             > "$secret_dir/owner-database-url"
-          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$PLAYER_ACTION_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$STAGING_DIRECT_DATABASE_HOST" \
             > "$secret_dir/player-action-database-url"
           printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" > "$secret_dir/beta-transport-hmac"
           printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" > "$secret_dir/bot-transport-hmac"
@@ -307,6 +308,17 @@ jobs:
             exit "$remote_status"
           fi
 
+      - name: Verify the VM has direct IPv6 database readiness
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper network-ready"
+
       - name: Provision three narrow 24-hour staging logins
         id: provision
         shell: bash
@@ -327,38 +339,6 @@ jobs:
           set -euo pipefail
           echo 'attempted=true' >> "$GITHUB_OUTPUT"
           psql -X --file=infra/sql/staging-runtimes-provision-for-deploy.sql
-
-      - name: Wait once for staging runtime credential propagation
-        shell: bash
-        run: sleep 125
-
-      - name: Preflight all three runtime logins before release transfer
-        shell: bash
-        env:
-          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
-          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
-          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
-          PGDATABASE: postgres
-          PGSSLMODE: verify-full
-          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
-          PGCONNECT_TIMEOUT: '5'
-          PGSERVICEFILE: /dev/null
-          PGPASSFILE: /dev/null
-        run: |
-          set -euo pipefail
-          preflight_runtime_login() {
-            local runtime_role="$1"
-            local runtime_password="$2"
-            PGUSER="${runtime_role}.${STAGING_PROJECT_REF}" \
-              PGPASSWORD="$runtime_password" \
-              psql -X --set="expected_runtime_role=$runtime_role" \
-                --file=infra/sql/staging-runtime-login-preflight.sql
-          }
-          preflight_runtime_login "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD"
-          preflight_runtime_login "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD"
-          preflight_runtime_login "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD"
 
       - name: Transfer and install sealed release inputs
         shell: bash

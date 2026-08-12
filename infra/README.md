@@ -53,14 +53,14 @@ Production secrets must be supplied by the VM outside this repository, using dis
 or service-owned files with restrictive permissions. The current Compose file intentionally does
 not reference any of them.
 
-| Future process | May receive                                                                                                         | Must never receive                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Beta admission | dedicated staging PostgreSQL session-pooler URL, verified public Supabase CA, bot transport HMAC copy, payload HMAC | Telegram token, generic API/provider credentials, Supabase service-role key         |
-| Owner control  | dedicated staging PostgreSQL session-pooler URL, public Auth client key, verified public Supabase CA                | bot token, beta HMACs, generic API/provider credentials, Supabase service-role key  |
-| API            | dedicated Player-ID PostgreSQL URL and action transport/payload/capability/semantic HMAC keys                       | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
-| Bot            | Telegram bot token plus separately scoped beta-admission and Player-ID transport HMAC copies                        | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
-| Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight                                | bot token, API database credential, financial/provider credentials                  |
-| Executor       | its separately reviewed browser profile and least-privilege platform credentials                                    | bot token, API database credential, Supabase service-role key                       |
+| Future process | May receive                                                                                                      | Must never receive                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Beta admission | dedicated staging PostgreSQL direct IPv6 URL, verified public Supabase CA, bot transport HMAC copy, payload HMAC | Telegram token, generic API/provider credentials, Supabase service-role key         |
+| Owner control  | dedicated staging PostgreSQL direct IPv6 URL, public Auth client key, verified public Supabase CA                | bot token, beta HMACs, generic API/provider credentials, Supabase service-role key  |
+| API            | dedicated Player-ID PostgreSQL URL and action transport/payload/capability/semantic HMAC keys                    | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
+| Bot            | Telegram bot token plus separately scoped beta-admission and Player-ID transport HMAC copies                     | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
+| Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight                             | bot token, API database credential, financial/provider credentials                  |
+| Executor       | its separately reviewed browser profile and least-privilege platform credentials                                 | bot token, API database credential, Supabase service-role key                       |
 
 No container may mount the Docker socket. Do not use a shared production `.env` file, browser
 profile, Git secret, or chat transcript as a secret store.
@@ -76,11 +76,12 @@ Before even a private staging deployment, complete and review all of the followi
 3. Keep the firewall SSH-only and no public Docker port until a reviewed HTTPS/domain/proxy stage.
 4. Give the browser executor either strict Docker resource limits or a small swap plan before it is
    introduced.
-5. For the manual beta profile, provision only the dedicated beta-admission, Owner-control, and
-   Player-ID action staging logins outside Git through the exact staging IPv4 session pooler. Mount
-   the verified staging Supabase CA and require each service `/readyz` preflight before the bot can
-   start. The generic API login/runtime remains absent and disabled. Pending Player-ID registration
-   does not authorize validation, nonce-retention maintenance, a durable bot outbox, or finance.
+5. Before the manual beta profile, complete the separately approved IPv6 maintenance runbook and
+   prove the VM has a global IPv6 address plus default route. Application runtimes must use only the
+   exact staging direct database endpoint; the IPv4 pooler remains administrator-workflow-only.
+   Require all three disposable VM-side database preflights before any service starts. The generic
+   API login/runtime remains absent and disabled. Pending Player-ID registration does not authorize
+   validation, nonce-retention maintenance, a durable bot outbox, or finance.
 
 Staging remains `FINANCIAL_ACTIONS_MODE=dry_run`; no financial transaction may be enabled merely
 because a container can start.

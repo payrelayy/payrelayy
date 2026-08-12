@@ -11,8 +11,7 @@ import {
 export const PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 export const BETA_ADMISSION_DATABASE_RUNTIME_ROLE = 'payreplayy_beta_admission_runtime';
 
-const BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
-const BETA_ADMISSION_DATABASE_SESSION_POOLER_USER = `${BETA_ADMISSION_DATABASE_RUNTIME_ROLE}.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}`;
+export const BETA_ADMISSION_DATABASE_DIRECT_HOST = `db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
 const PRODUCTION_SECRET_FILE_PATHS: Readonly<Record<string, string>> = {
   BETA_ADMISSION_DATABASE_URL: '/run/secrets/beta_admission_database_url',
   BOT_TO_BETA_ADMISSION_HMAC_SECRET: '/run/secrets/beta_admission_bot_transport_hmac',
@@ -122,14 +121,14 @@ function decodeDatabaseUrlComponent(value: string): string {
 function resolveRuntimeUser(connectionUrl: URL): string {
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
   if (
-    connectionUrl.hostname === BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST &&
-    user === BETA_ADMISSION_DATABASE_SESSION_POOLER_USER
+    connectionUrl.hostname === BETA_ADMISSION_DATABASE_DIRECT_HOST &&
+    user === BETA_ADMISSION_DATABASE_RUNTIME_ROLE
   ) {
     return user;
   }
 
   throw new Error(
-    'BETA_ADMISSION_DATABASE_URL must use the dedicated staging beta-admission runtime login through the approved IPv4 session pooler.',
+    'BETA_ADMISSION_DATABASE_URL must use the dedicated staging beta-admission runtime login through the exact IPv6 direct database endpoint.',
   );
 }
 
@@ -154,7 +153,7 @@ function parseDatabaseConnection(connectionString: string): BetaAdmissionDatabas
     );
   }
   if (connectionUrl.port !== '' && connectionUrl.port !== '5432') {
-    throw new Error('BETA_ADMISSION_DATABASE_URL must use session-pooler port 5432.');
+    throw new Error('BETA_ADMISSION_DATABASE_URL must use direct database port 5432.');
   }
 
   const queryKeys = Array.from(connectionUrl.searchParams.keys());

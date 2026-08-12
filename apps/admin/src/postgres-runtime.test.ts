@@ -13,10 +13,10 @@ const config = {
   projectReference: 'spzpiyxheappsfyswewl',
   connection: {
     database: 'postgres',
-    host: 'aws-1-eu-west-1.pooler.supabase.com',
+    host: 'db.spzpiyxheappsfyswewl.supabase.co',
     password: 'test-password',
     port: 5432,
-    user: 'payreplayy_owner_control_runtime.spzpiyxheappsfyswewl',
+    user: 'payreplayy_owner_control_runtime',
   },
   publishableKey: 'sb_publishable_test_key_for_staging_only',
   supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',

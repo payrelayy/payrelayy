@@ -46,11 +46,12 @@ create index deposit_dry_run_fixture_assessments_intent_time_idx
 
 create table app.deposit_dry_run_fixture_reviews (
   id uuid primary key default gen_random_uuid(),
-  assessment_id uuid not null unique
+  assessment_id uuid not null
     references app.deposit_dry_run_fixture_assessments (id) on delete restrict,
   actor_admin_id uuid not null references app.admin_users (id) on delete restrict,
   decision text not null check (decision in ('acknowledged', 'manual_review_required')),
-  reviewed_at timestamptz not null default clock_timestamp()
+  reviewed_at timestamptz not null default clock_timestamp(),
+  constraint deposit_dry_run_fixture_review_once unique (assessment_id)
 );
 
 create function app.reject_deposit_dry_run_fixture_record_mutation()
@@ -255,7 +256,7 @@ begin
   insert into app.deposit_dry_run_fixture_reviews as review (
     assessment_id, actor_admin_id, decision
   ) values (p_assessment_id, actor_admin_id, p_decision)
-  on conflict (assessment_id) do nothing
+  on conflict on constraint deposit_dry_run_fixture_review_once do nothing
   returning review.reviewed_at into inserted_reviewed_at;
 
   if inserted_reviewed_at is null then

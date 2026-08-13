@@ -13,6 +13,7 @@ const publicWorkflow = read('.github/workflows/staging-public-domain.yml');
 
 const legacyBrand = 'pay' + 'replayy';
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
+const legacySudoersSha = '34d408b7139c64888700ccd48f9b95dbe8ec5bfbae58d904ad2d10ffaaf2b928';
 const dropletId = '590666364';
 const transitionVersion = '1';
 
@@ -58,6 +59,26 @@ assert.match(transition, /readonly LEGACY_ADMIN="\$\{LEGACY_BRAND\}-admin"/);
 assert.match(
   transition,
   /readonly LEGACY_HELPER="\/usr\/local\/sbin\/\$\{LEGACY_BRAND\}-staging-deploy-helper"/,
+);
+assert.match(
+  transition,
+  /readonly LEGACY_SUDOERS="\/etc\/sudoers\.d\/\$\{LEGACY_BRAND\}-staging-deploy"/,
+  'The deployed legacy sudoers path must be assembled from the split legacy brand constant.',
+);
+assert.match(
+  deployHelper,
+  /readonly LEGACY_SUDOERS="\/etc\/sudoers\.d\/\$\{LEGACY_BRAND\}-staging-deploy"/,
+  'The final helper must prove absence of the same one fixed legacy sudoers path.',
+);
+assert.doesNotMatch(
+  transition,
+  new RegExp(legacyBrand, 'u'),
+  'The forbidden legacy brand literal must not be reintroduced into the transition source.',
+);
+assert.doesNotMatch(
+  deployHelper,
+  /LEGACY_SUDOERS_[A-Z]/u,
+  'The final helper must not retain speculative legacy sudoers path variants.',
 );
 assert.match(transition, new RegExp(`readonly LEGACY_HELPER_SHA='${legacyHelperSha}'`));
 assert.match(transition, /readonly NEW_ADMIN='fetanagent-admin'/);
@@ -168,6 +189,11 @@ assert.doesNotMatch(
   inspect,
   /authorized_keys[^\n]*(?:cat|sed|awk)|cat[^\n]*(?:secret|authorized_keys)/i,
 );
+assert.match(
+  inspect,
+  /require_legacy_sudoers_boundary/,
+  'Before the stopped receipt, inspection must require the exact live sudoers boundary to be present.',
+);
 
 const prepare = functionBody(transition, 'prepare_transition');
 assertInOrder(
@@ -176,6 +202,7 @@ assertInOrder(
     'require_legacy_identity',
     'require_legacy_helper',
     'require_legacy_authorized_keys',
+    'require_legacy_sudoers_boundary',
     'visudo -cf /etc/sudoers',
     'useradd --create-home',
     'expected_new_sudoers',
@@ -209,6 +236,61 @@ assertInOrder(
     '"$NEW_HELPER_SHA"',
   ],
   'The staged helper source must be a pinned root-only regular file',
+);
+
+const legacySudoersReferences = functionBody(transition, 'legacy_sudoers_references');
+assert.ok(
+  legacySudoersReferences.includes('for candidate in /etc/sudoers "$LEGACY_SUDOERS"; do'),
+  'The exact deployed legacy fragment must be included in the fixed sudoers reference inventory.',
+);
+assert.ok(
+  legacySudoersReferences.includes('if [[ "$candidate" == "$LEGACY_SUDOERS" ]]; then'),
+  'The fixed legacy fragment must be inventoried regardless of its current content.',
+);
+assert.ok(
+  legacySudoersReferences.includes('"$LEGACY_SUDOERS") continue ;;'),
+  'Only the one proven legacy sudoers path may bypass the unknown-fragment scan.',
+);
+const expectedLegacySudoers = functionBody(transition, 'expected_legacy_sudoers');
+const observedLegacySudoersBytes = `${legacyBrand}-admin ALL=(root) NOPASSWD: /usr/local/sbin/${legacyBrand}-staging-deploy-helper\n`;
+assert.equal(
+  createHash('sha256').update(observedLegacySudoersBytes).digest('hex'),
+  legacySudoersSha,
+  'The exact observed one-line LF sudoers contract must retain its reviewed digest.',
+);
+assert.equal(
+  expectedLegacySudoers.trim(),
+  ['cat <<EOF', '$LEGACY_ADMIN ALL=(root) NOPASSWD: $LEGACY_HELPER', 'EOF'].join('\n'),
+  'The fixed fragment must accept only the one exact observed command contract.',
+);
+assert.doesNotMatch(
+  expectedLegacySudoers,
+  /\*|Defaults:/u,
+  'The fixed fragment must not accept any token absent from the observed contract.',
+);
+const legacySudoersState = functionBody(transition, 'require_legacy_sudoers_state');
+assertInOrder(
+  legacySudoersState,
+  [
+    'expected_legacy_sudoers >"$temporary"',
+    '"$LEGACY_SUDOERS")',
+    'require_regular_metadata "$reference" \'root:root:440\'',
+    'cmp -s -- "$temporary" "$reference"',
+  ],
+  'The deployed fixed fragment must be compared with its exact contract before it is accepted',
+);
+const disableLegacySudoers = functionBody(transition, 'disable_legacy_execution_boundary');
+assertInOrder(
+  disableLegacySudoers,
+  [
+    'require_legacy_sudoers_boundary_or_absent',
+    'require_legacy_authorized_keys_present_or_absent',
+    'if [[ -e "$LEGACY_SUDOERS" || -L "$LEGACY_SUDOERS" ]]',
+    'require_legacy_sudoers_boundary',
+    'rm -f -- "$LEGACY_SUDOERS"',
+    'visudo -cf /etc/sudoers',
+  ],
+  'Only the fixed fragment may be deleted, after every removable access artifact is prevalidated',
 );
 
 const markStopped = functionBody(transition, 'mark_legacy_stopped');
@@ -262,6 +344,7 @@ assertInOrder(
   [
     'require_no_new_runtime_artifacts',
     'require_legacy_authorized_keys',
+    'require_legacy_sudoers_boundary',
     'if [[ -e "$PREPARED_MARKER"',
     'require_prepared_contract',
     'else',
@@ -316,7 +399,8 @@ assertInOrder(
     'require_legacy_identity_for_disable',
     'require_legacy_sudoers_boundary_or_absent',
     'require_legacy_authorized_keys_present_or_absent',
-    'rm -f -- "$reference"',
+    'require_legacy_sudoers_boundary',
+    'rm -f -- "$LEGACY_SUDOERS"',
     'visudo -cf /etc/sudoers',
     'rm -f -- "$authorized_keys"',
     'usermod --lock --shell /usr/sbin/nologin "$LEGACY_ADMIN"',
@@ -459,7 +543,7 @@ assertInOrder(
   [
     '[[ ! -L "$LEGACY_HOME" && -d "$LEGACY_HOME" ]]',
     '[[ ! -e "$authorized_keys"',
-    'for candidate in "$LEGACY_SUDOERS_A"',
+    '[[ ! -e "$LEGACY_SUDOERS" && ! -L "$LEGACY_SUDOERS" ]]',
     '[[ ! -L /etc/sudoers && -f /etc/sudoers ]]',
     '[[ ! -L /etc/sudoers.d && -d /etc/sudoers.d ]]',
     'find /etc/sudoers.d -mindepth 1 ! -type f -print -quit',
@@ -632,6 +716,29 @@ assert.match(runbook, /590666364/);
 assert.match(runbook, /root:root.*0700/);
 assert.match(runbook, /visudo -cf/);
 assert.match(runbook, /rollback/i);
+assert.ok(
+  runbook.includes(`/etc/sudoers.d/${legacyBrand}-staging-deploy`),
+  'The runbook must identify the one proven live legacy sudoers path.',
+);
+assert.ok(
+  runbook.includes(
+    `${legacyBrand}-admin ALL=(root) NOPASSWD: /usr/local/sbin/${legacyBrand}-staging-deploy-helper`,
+  ),
+  'The runbook must record the exact proven live sudoers content.',
+);
+assert.ok(
+  runbook.includes(legacySudoersSha),
+  'The runbook must record the normalized LF digest of the proven live sudoers content.',
+);
+assert.equal(
+  createHash('sha256')
+    .update(
+      `${legacyBrand}-admin ALL=(root) NOPASSWD: /usr/local/sbin/${legacyBrand}-staging-deploy-helper\n`,
+    )
+    .digest('hex'),
+  legacySudoersSha,
+  'The recorded legacy sudoers digest must represent the exact one-line content plus LF.',
+);
 assertInOrder(
   runbook,
   [

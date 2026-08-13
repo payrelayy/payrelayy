@@ -43,6 +43,11 @@ The script fixes these contracts:
 - legacy helper: `/usr/local/sbin/payreplayy-staging-deploy-helper`
 - legacy LF SHA-256:
   `4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69`
+- legacy sudoers fragment: `/etc/sudoers.d/payreplayy-staging-deploy`, `root:root` mode `0440`
+- exact legacy sudoers one-line contract:
+  `payreplayy-admin ALL=(root) NOPASSWD: /usr/local/sbin/payreplayy-staging-deploy-helper`
+- legacy sudoers LF SHA-256:
+  `34d408b7139c64888700ccd48f9b95dbe8ec5bfbae58d904ad2d10ffaaf2b928`
 - FetanAgent helper: `/usr/local/sbin/fetanagent-staging-deploy-helper`
 - FetanAgent helper source staged by root:
   `/root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper`
@@ -190,7 +195,7 @@ the root console record the stopped boundary:
 
 This fails unless the old Compose containers and networks are absent, no legacy systemd unit or unit
 file exists, the legacy live-secret directory is absent or empty, and TCP port 3002 is free. It then
-validates and removes the exact allowlisted legacy sudoers fragment and legacy public key, locks the
+validates and removes the one exact legacy sudoers fragment and legacy public key, locks the
 old account, switches it to `/usr/sbin/nologin`, kills its sessions, and proves no already-authorized
 legacy helper process remains. Only after repeating the runtime/port and disabled-access checks does
 it atomically write `legacy-stopped-v1`. The legacy helper, releases, and images remain for retirement
@@ -252,8 +257,7 @@ After successful exact-commit private smoke, run from the root console:
 `retire` rechecks the stopped legacy boundary, disabled old execution access, and the exact healthy
 FetanAgent service set. It then:
 
-- removes only legacy sudoers fragments found at the fixed allowlisted names and refuses unknown
-  sudoers references;
+- removes only the one exact fixed legacy sudoers fragment and refuses unknown sudoers references;
 - removes the old public `authorized_keys` file;
 - locks the legacy password, sets `/usr/sbin/nologin`, and terminates old-user sessions;
 - removes the old helper only if its checksum is still the reviewed legacy SHA;
@@ -273,7 +277,7 @@ retired=true
 ```
 
 Every rerun rechecks live state; markers are evidence, not substitutes for verification. Before the
-receipt exists, `retire` is interruption-resumable: an already absent key, allowlisted sudoers
+receipt exists, `retire` is interruption-resumable: an already absent key, exact fixed sudoers
 fragment, helper, or empty secret directory, and an already locked/nologin account are valid. Any
 remaining artifact is validated exactly before removal. It never requires a removed sudoers fragment
 to reappear. After the receipt exists, reruns are idempotent only when both the exact closed receipt

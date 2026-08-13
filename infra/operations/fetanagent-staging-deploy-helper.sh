@@ -17,9 +17,7 @@ readonly LEGACY_HELPER="/usr/local/sbin/${LEGACY_BRAND}-staging-deploy-helper"
 readonly LEGACY_PROJECT_NAME="${LEGACY_BRAND}-staging-beta"
 readonly LEGACY_SECRET_ROOT="/srv/${LEGACY_BRAND}/secrets/staging"
 readonly LEGACY_SYSTEMD_MARKER="$LEGACY_BRAND"
-readonly LEGACY_SUDOERS_A="/etc/sudoers.d/${LEGACY_BRAND}-staging-deploy-helper"
-readonly LEGACY_SUDOERS_B="/etc/sudoers.d/$LEGACY_ADMIN"
-readonly LEGACY_SUDOERS_C="/etc/sudoers.d/${LEGACY_BRAND}-staging"
+readonly LEGACY_SUDOERS="/etc/sudoers.d/${LEGACY_BRAND}-staging-deploy"
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
@@ -271,10 +269,8 @@ require_legacy_execution_boundary_sealed() {
   [[ ! -e "$authorized_keys" && ! -L "$authorized_keys" ]] ||
     die 'legacy authorized_keys remains after execution-boundary sealing'
 
-  for candidate in "$LEGACY_SUDOERS_A" "$LEGACY_SUDOERS_B" "$LEGACY_SUDOERS_C"; do
-    [[ ! -e "$candidate" && ! -L "$candidate" ]] ||
-      die 'an exact legacy sudoers file remains after retirement'
-  done
+  [[ ! -e "$LEGACY_SUDOERS" && ! -L "$LEGACY_SUDOERS" ]] ||
+    die 'the exact legacy sudoers file remains after retirement'
 
   [[ ! -L /etc/sudoers && -f /etc/sudoers ]] ||
     die 'the primary sudoers policy cannot be safely inspected'

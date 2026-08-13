@@ -22,14 +22,12 @@ readonly LEGACY_HELPER_SHA='4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2
 readonly LEGACY_PROJECT="${LEGACY_BRAND}-staging-beta"
 readonly LEGACY_ROOT="/srv/$LEGACY_BRAND"
 readonly LEGACY_SECRET_ROOT="$LEGACY_ROOT/secrets/staging"
-readonly LEGACY_SUDOERS_A="/etc/sudoers.d/${LEGACY_BRAND}-staging-deploy-helper"
-readonly LEGACY_SUDOERS_B="/etc/sudoers.d/$LEGACY_ADMIN"
-readonly LEGACY_SUDOERS_C="/etc/sudoers.d/${LEGACY_BRAND}-staging"
+readonly LEGACY_SUDOERS="/etc/sudoers.d/${LEGACY_BRAND}-staging-deploy"
 
 readonly NEW_ADMIN='fetanagent-admin'
 readonly NEW_HOME='/home/fetanagent-admin'
 readonly NEW_HELPER='/usr/local/sbin/fetanagent-staging-deploy-helper'
-readonly NEW_HELPER_SHA='9c3e14b8ea0e6b6ae30cd116b95b7002435c3c71a5ffe2f8aa03c2717de96a08'
+readonly NEW_HELPER_SHA='e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af'
 readonly NEW_PROJECT='fetanagent-staging-beta'
 readonly NEW_RELEASE_ROOT='/srv/fetanagent/releases'
 readonly NEW_SECRET_ROOT='/srv/fetanagent/secrets/staging'
@@ -528,11 +526,13 @@ legacy_sudoers_references() {
   [[ ! -L /etc/sudoers && -f /etc/sudoers ]] || die '/etc/sudoers is absent, non-regular, or symbolic'
   [[ ! -L /etc/sudoers.d && -d /etc/sudoers.d ]] ||
     die '/etc/sudoers.d is absent, non-directory, or symbolic'
-  for candidate in /etc/sudoers "$LEGACY_SUDOERS_A" "$LEGACY_SUDOERS_B" "$LEGACY_SUDOERS_C"; do
+  for candidate in /etc/sudoers "$LEGACY_SUDOERS"; do
     [[ -e "$candidate" || -L "$candidate" ]] || continue
     [[ ! -L "$candidate" && -f "$candidate" ]] || die "$candidate is not a safe sudoers file"
     [[ "$candidate" != *$'\n'* ]] || die 'a sudoers path contains a forbidden newline'
-    if grep -Fq -- "$LEGACY_ADMIN" "$candidate" || grep -Fq -- "$LEGACY_HELPER" "$candidate"; then
+    if [[ "$candidate" == "$LEGACY_SUDOERS" ]]; then
+      printf '%s\n' "$candidate"
+    elif grep -Fq -- "$LEGACY_ADMIN" "$candidate" || grep -Fq -- "$LEGACY_HELPER" "$candidate"; then
       printf '%s\n' "$candidate"
     fi
   done
@@ -543,7 +543,7 @@ legacy_sudoers_references() {
   }
   while IFS= read -r -d '' candidate; do
     case "$candidate" in
-      "$LEGACY_SUDOERS_A" | "$LEGACY_SUDOERS_B" | "$LEGACY_SUDOERS_C") continue ;;
+      "$LEGACY_SUDOERS") continue ;;
     esac
     [[ ! -L "$candidate" && -f "$candidate" ]] ||
       { rm -f -- "$inventory"; die "refusing unsafe non-regular sudoers fragment $candidate"; }
@@ -558,8 +558,7 @@ legacy_sudoers_references() {
 
 expected_legacy_sudoers() {
   cat <<EOF
-Defaults:$LEGACY_ADMIN !setenv
-$LEGACY_ADMIN ALL=(root) NOPASSWD: $LEGACY_HELPER *
+$LEGACY_ADMIN ALL=(root) NOPASSWD: $LEGACY_HELPER
 EOF
 }
 
@@ -577,7 +576,7 @@ require_legacy_sudoers_state() {
     [[ -n "$reference" ]] || continue
     count="$((count + 1))"
     case "$reference" in
-      "$LEGACY_SUDOERS_A" | "$LEGACY_SUDOERS_B" | "$LEGACY_SUDOERS_C") ;;
+      "$LEGACY_SUDOERS") ;;
       *)
         rm -f -- "$temporary"
         die "legacy sudo permission remains in unapproved file $reference"
@@ -668,7 +667,7 @@ require_legacy_authorized_keys_absent() {
 }
 
 disable_legacy_execution_boundary() {
-  local authorized_keys legacy_uid reference references
+  local authorized_keys legacy_uid
 
   # Validate every removable artifact before the first mutation. Each item may
   # already be absent when resuming an interrupted disable.
@@ -677,12 +676,11 @@ disable_legacy_execution_boundary() {
   require_legacy_authorized_keys_present_or_absent
   legacy_uid="$(id -u "$LEGACY_ADMIN")"
   authorized_keys="$(legacy_authorized_keys)"
-  references="$(legacy_sudoers_references)" || die 'the legacy sudoers reference inventory failed'
 
-  while IFS= read -r reference; do
-    [[ -n "$reference" ]] || continue
-    rm -f -- "$reference"
-  done <<<"$references"
+  if [[ -e "$LEGACY_SUDOERS" || -L "$LEGACY_SUDOERS" ]]; then
+    require_legacy_sudoers_boundary
+    rm -f -- "$LEGACY_SUDOERS"
+  fi
   visudo -cf /etc/sudoers >/dev/null ||
     die 'sudoers validation failed while disabling the legacy execution boundary'
 

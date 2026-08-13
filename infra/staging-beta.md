@@ -244,6 +244,21 @@ user privately in Supabase; only its UUID belongs in the workflow input. Run `in
 `bootstrap`, confirm the exact staging ref and `main` commit, and use the required one-time phrase.
 The workflow must not receive an email, password, display name, access token, or service-role key.
 
+## Synthetic deposit receiver
+
+The manual `Staging synthetic receiver setup` workflow may configure only the fixed CBE Birr
+simulation receiver `PAYREPLAYY STAGING SIMULATION - DO NOT PAY` with masked value `****TEST` and
+the customer message `SIMULATION ONLY — DO NOT SEND MONEY.` Run `inspect` first, then use
+`configure` only from the exact reviewed `main` commit with the staging ref, active Owner Auth UUID,
+and confirmation phrase. The workflow rejects production, refuses to replace an unknown or real
+active receiver, checks that all four financial feature switches remain disabled, calls the
+existing private audited Owner procedure, and verifies the result afterward. It accepts no account
+number, receiver name, transaction reference, provider credential, or payment secret.
+
+This setup enables only the deposit-intake simulation and protected reference-storage demo. It does
+not contact CBE Birr, verify a payment, submit anything to KemerBet, or authorize a tester to send
+money.
+
 ## Protected runtime preflight
 
 The manual `Staging beta runtime preflight` GitHub workflow is inspection-only. It uses the IPv4

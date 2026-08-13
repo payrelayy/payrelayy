@@ -40,22 +40,24 @@ describe('Telegram Player-ID flow presentation', () => {
       amountMinor: '2500',
       currencyCode: 'ETB',
       providerName: 'CBE Birr',
-      receiverAccountHolderName: 'PayReplayy Staging',
-      receiverAccountMasked: '****1234',
-      customerInstruction: 'Send only CBE Birr to the shown account.',
+      receiverAccountHolderName: 'PAYREPLAYY STAGING SIMULATION - DO NOT PAY',
+      receiverAccountMasked: '****TEST',
+      customerInstruction: 'SIMULATION ONLY — DO NOT SEND MONEY.',
       paymentDeadline: '2026-08-12T13:00:00.000Z',
     });
 
     expect(presentation).toEqual({
       kind: 'message',
       text: expect.stringContaining(
-        'After paying, send /reference AAAAAAAAAAAAAAAAAAAAAA TRANSACTION_REFERENCE.',
+        'To test protected reference capture, send /reference AAAAAAAAAAAAAAAAAAAAAA TEST_REFERENCE.',
       ),
     });
     if (presentation.kind === 'message') {
       expect(presentation.text).toContain('25.00 ETB');
+      expect(presentation.text).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+      expect(presentation.text).toContain('Synthetic receiver:');
       expect(presentation.text).toContain(
-        'payment verification and KemerBet execution remain disabled',
+        'No payment is verified or executed, and KemerBet execution remains disabled',
       );
     }
   });

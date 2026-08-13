@@ -23,21 +23,23 @@ identifiers stay database-backed so later approved adapters do not require a fin
 
 ## Planned entities
 
-| Entity                          | Purpose                                                   | Critical invariant                                                                                |
-| ------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `customer_platform_players`     | A customer's validated Player ID for a platform           | A platform Player ID belongs to only one customer.                                                |
-| `player_validation_attempts`    | Append-only KemerBet Player ID validation results         | A Player ID cannot become valid without its latest immutable successful attempt.                  |
-| `deposit_intents`               | The customer intent and immutable receipt/policy snapshot | Each KemerBet deposit is 25–25,000 ETB; no customer transaction-count cap exists.                 |
-| `deposit_submissions`           | A submitted transaction ID and its attempt number         | The raw ID is encrypted; a keyed fingerprint supports duplicate detection.                        |
-| `deposit_submission_files`      | Private receipt image/PDF metadata                        | Object key only; private Storage bucket; exactly 90-day retention.                                |
-| `provider_payment_evidence`     | Normalized official-provider facts                        | Only provider API, receipt lookup, or account activity sources are allowed; OCR cannot create it. |
-| `deposit_verification_attempts` | Append-only verifier outcomes                             | No raw provider response or credential in the record.                                             |
-| `deposit_payment_claims`        | Authoritative payment accepted for an intent              | Unique on `(provider, canonical-reference fingerprint)` and one claim per intent.                 |
-| `deposit_review_cases`          | Verification or execution uncertainty                     | Only one open case per intent and stage.                                                          |
-| `deposit_jobs`                  | Durable verification/reconciliation queue                 | A lease is required; the current Stage 2 payload is deliberately empty.                           |
-| `deposit_state_events`          | Append-only intent transition history                     | Every insert or status transition produces a system event.                                        |
-| `deposit_execution_attempts`    | Later KemerBet execution record                           | Must exist before execution; uncertain results require reconciliation.                            |
-| `execution_reconciliations`     | Check wallet/history after an uncertain result            | Reconciliation precedes any execution retry.                                                      |
+| Entity                                | Purpose                                                   | Critical invariant                                                                                |
+| ------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `customer_platform_players`           | A customer's validated Player ID for a platform           | A platform Player ID belongs to only one customer.                                                |
+| `player_validation_attempts`          | Append-only KemerBet Player ID validation results         | A Player ID cannot become valid without its latest immutable successful attempt.                  |
+| `deposit_intents`                     | The customer intent and immutable receipt/policy snapshot | Each KemerBet deposit is 25–25,000 ETB; no customer transaction-count cap exists.                 |
+| `deposit_submissions`                 | A submitted transaction ID and its attempt number         | The raw ID is encrypted; a keyed fingerprint supports duplicate detection.                        |
+| `deposit_submission_files`            | Private receipt image/PDF metadata                        | Object key only; private Storage bucket; exactly 90-day retention.                                |
+| `deposit_dry_run_fixture_assessments` | Redacted local-fixture simulation results                 | Append-only and explicitly non-authoritative; never provider evidence or approval.                |
+| `deposit_dry_run_fixture_reviews`     | Final Owner acknowledgement of a simulation               | Append-only; acknowledgement or manual-review routing only.                                       |
+| `provider_payment_evidence`           | Normalized official-provider facts                        | Only provider API, receipt lookup, or account activity sources are allowed; OCR cannot create it. |
+| `deposit_verification_attempts`       | Append-only verifier outcomes                             | No raw provider response or credential in the record.                                             |
+| `deposit_payment_claims`              | Authoritative payment accepted for an intent              | Unique on `(provider, canonical-reference fingerprint)` and one claim per intent.                 |
+| `deposit_review_cases`                | Verification or execution uncertainty                     | Only one open case per intent and stage.                                                          |
+| `deposit_jobs`                        | Durable verification/reconciliation queue                 | A lease is required; the current Stage 2 payload is deliberately empty.                           |
+| `deposit_state_events`                | Append-only intent transition history                     | Every insert or status transition produces a system event.                                        |
+| `deposit_execution_attempts`          | Later KemerBet execution record                           | Must exist before execution; uncertain results require reconciliation.                            |
+| `execution_reconciliations`           | Check wallet/history after an uncertain result            | Reconciliation precedes any execution retry.                                                      |
 
 ## Deposit state flow
 
@@ -103,6 +105,9 @@ feature switches, and returns the frozen display-safe CBE Birr receiver snapshot
 reference for that exact intake. The capture procedure leaves the intent at `intake_received` and
 the submission at `received`; it cannot upload a file, enqueue verification, create evidence,
 verify or claim a payment, or start KemerBet execution. Owner Control receives a separate masked,
-read-only projection that excludes ciphertext and fingerprints. The claim procedure remains
-ungranted. No browser, Telegram client, or public Supabase Data API role can query the private
-ledger.
+read-only projection that excludes ciphertext and fingerprints. Owner Control can additionally
+run a redacted local fixture against a received intake, append the advisory result, and record one
+final acknowledgement or manual-review requirement. Those procedures require every financial
+feature switch to remain disabled and do not change the intent or authoritative ledger. The claim
+procedure remains ungranted. No browser, Telegram client, or public Supabase Data API role can
+query the private ledger.

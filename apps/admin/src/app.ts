@@ -6,6 +6,12 @@ import {
   OwnerDepositIntakeUnavailableError,
 } from './owner-deposit-intake.js';
 import {
+  OWNER_DRY_RUN_FIXTURE_IDS,
+  OwnerDryRunFixtureAssessmentRejectedError,
+  OwnerDryRunFixtureAssessmentUnavailableError,
+  type OwnerDryRunFixtureReviewDecision,
+} from './owner-dry-run-fixture-assessments.js';
+import {
   OwnerAuthenticationRejectedError,
   OwnerAuthenticationUnavailableError,
   bearerTokenFromRawHeaders,
@@ -56,6 +62,11 @@ const PLAYER_REGISTRATION_DECISIONS = new Set<OwnerPlayerRegistrationDecision>([
   'not_found',
   'review_required',
   'cancelled',
+]);
+const DRY_RUN_FIXTURE_IDS = new Set<string>(OWNER_DRY_RUN_FIXTURE_IDS);
+const DRY_RUN_FIXTURE_REVIEW_DECISIONS = new Set<OwnerDryRunFixtureReviewDecision>([
+  'acknowledged',
+  'manual_review_required',
 ]);
 
 function statusCode(error: unknown): number | undefined {
@@ -229,6 +240,103 @@ export function buildOwnerControlApp(
         if (error instanceof OwnerDepositIntakeUnavailableError) {
           request.log.warn('Owner dry-run deposit intake is unavailable.');
         }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { depositIntentId: string } }>(
+    '/v1/owner/dry-run-deposit-intake/:depositIntentId/fixture-assessments',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['fixtureId']);
+        const fixtureId = body?.fixtureId;
+        if (typeof fixtureId !== 'string' || !DRY_RUN_FIXTURE_IDS.has(fixtureId)) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const deposits = await dependencies.runtime.deposits.list(authUserId, 50);
+        const deposit = deposits.find(
+          (item) => item.depositIntentId === request.params.depositIntentId,
+        );
+        if (!deposit) return reply.code(403).send({ error: 'forbidden' });
+        const assessment = await dependencies.runtime.assessments.assess(
+          authUserId,
+          deposit,
+          fixtureId,
+          dependencies.now?.() ?? new Date(),
+        );
+        return reply.code(201).send(assessment);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerDepositIntakeRejectedError ||
+          error instanceof OwnerDryRunFixtureAssessmentRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner dry-run fixture assessment is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/dry-run-fixture-assessments',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const assessments = await dependencies.runtime.assessments.list(authUserId, limit);
+        return reply.code(200).send({ assessments });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerDryRunFixtureAssessmentRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerDryRunFixtureAssessmentUnavailableError) {
+          request.log.warn('Owner dry-run fixture assessment list is unavailable.');
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { assessmentId: string } }>(
+    '/v1/owner/dry-run-fixture-assessments/:assessmentId/review',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['decision']);
+        const decision = body?.decision;
+        if (
+          typeof decision !== 'string' ||
+          !DRY_RUN_FIXTURE_REVIEW_DECISIONS.has(decision as OwnerDryRunFixtureReviewDecision)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receipt = await dependencies.runtime.assessments.review(
+          authUserId,
+          request.params.assessmentId,
+          decision as OwnerDryRunFixtureReviewDecision,
+        );
+        return reply.code(200).send(receipt);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerDryRunFixtureAssessmentRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner dry-run fixture review is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

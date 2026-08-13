@@ -30,7 +30,9 @@ The current foundation is deliberately safe:
 - pending or merely found Player IDs are not usable for deposits; a distinct audited Owner
   ownership confirmation is required to create the validated association;
 - the reviewed dry-run intake may create only `intake_received` intents and `received` protected
-  reference submissions while all four financial feature switches remain disabled; and
+  reference submissions while all four financial feature switches remain disabled;
+- Owner Control may append a redacted local-fixture assessment and one advisory review decision,
+  but neither record is provider evidence or a payment approval; and
 - no provider evidence, payment claim, verification job, KemerBet call, withdrawal, or financial
   execution is enabled by this flow.
 

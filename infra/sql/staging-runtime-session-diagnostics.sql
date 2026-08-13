@@ -9,9 +9,9 @@ select
   count(*)::integer as session_count
 from pg_catalog.pg_stat_activity as activity
 where activity.usename = any (array[
-  'payreplayy_beta_admission_runtime',
-  'payreplayy_owner_control_runtime',
-  'payreplayy_player_actions_runtime'
+  'fetanagent_beta_admission_runtime',
+  'fetanagent_owner_control_runtime',
+  'fetanagent_player_actions_runtime'
 ])
 group by activity.usename, activity.application_name, activity.state
 order by activity.usename, activity.application_name, activity.state;

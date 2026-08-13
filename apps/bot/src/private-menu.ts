@@ -1,5 +1,5 @@
-import { parseTelegramPlayerRegistrationCapabilityCallback } from '@payreplayy/contracts';
-import { DEFAULT_LOCALE, message } from '@payreplayy/i18n';
+import { parseTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
+import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 export interface PrivateTelegramMenuButton {
   readonly text: string;

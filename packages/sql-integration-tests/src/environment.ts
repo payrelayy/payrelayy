@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 const expectedHost = 'postgres';
 const expectedMode = 'local-disposable';
 const expectedMigrationsDirectory = '/workspace/supabase/migrations';
-const expectedRunnerMarker = 'payreplayy-sql-integration-image-v1';
-const expectedRunnerMarkerPath = '/usr/local/share/payreplayy/sql-integration-runner';
+const expectedRunnerMarker = 'fetanagent-sql-integration-image-v1';
+const expectedRunnerMarkerPath = '/usr/local/share/fetanagent/sql-integration-runner';
 
 const forbiddenEnvironmentNames = [
   'DATABASE_URL',
@@ -72,7 +72,7 @@ export function readSqlIntegrationEnvironment(
 
 export function createSqlIntegrationClient(environment: SqlIntegrationEnvironment): Client {
   const config: ClientConfig = {
-    application_name: 'payreplayy_sql_integration',
+    application_name: 'fetanagent_sql_integration',
     database: 'postgres',
     host: environment.host,
     port: 5432,

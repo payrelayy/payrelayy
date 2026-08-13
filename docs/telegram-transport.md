@@ -84,14 +84,14 @@ With the current 60-second timestamp skew limit, the adapter accepts a reservati
 longer than 120 seconds. The database permits up to three minutes only to tolerate normal API and
 database clock differences; it does not make a nonce valid for longer than the transport protocol.
 Expired nonce digests require a separate maintenance-only cleanup identity. The inactive
-`payreplayy_nonce_retention` scaffold has no credential or schedule yet. A standalone manual
+`fetanagent_nonce_retention` scaffold has no credential or schedule yet. A standalone manual
 preflight can inspect its least-privilege catalog boundary, but it has no purge command and does
 not connect during normal application startup. The bounded purge helper can run only after a later
 deployment review explicitly provisions that separate identity. The API and worker must never
 receive the cleanup credential or execute permission.
 
 The bot makes at most two attempts for a retryable transport failure (timeout, 408, 429, or 5xx),
-using a new nonce for every attempt. If both attempts fail, it tells the customer that PayReplayy
+using a new nonce for every attempt. If both attempts fail, it tells the customer that FetanAgent
 could not receive the request. It does not show a success-style reply and has no durable bot outbox
 yet.
 
@@ -105,7 +105,7 @@ yet.
 
 Each process needs a separate production secret mount. Do not use a shared `.env` file, place a
 secret in Git, or use the Telegram token as an internal API secret. The admission API process must
-use only a future login inheriting `payreplayy_beta_admission`; it must not reuse the generic API
+use only a future login inheriting `fetanagent_beta_admission`; it must not reuse the generic API
 database role or credential.
 
 ## Key rotation
@@ -120,7 +120,7 @@ production launch blocker.
 
 1. Validate the invite-admission migration in the disposable SQL harness, then review it
    independently before any remote database change.
-2. Provision a unique login inheriting only `payreplayy_beta_admission`; verify that it can execute
+2. Provision a unique login inheriting only `fetanagent_beta_admission`; verify that it can execute
    only invite redemption and beta-nonce reservation, while both generic API roles and the
    admitted-inbox recorder remain denied.
 3. Wire exact private `/start <invite>` handling to a separately signed, durable replay-protected

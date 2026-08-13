@@ -1,4 +1,4 @@
-import { TELEGRAM_BETA_INVITE_REDEMPTION_MAX_TIMESTAMP_SKEW_SECONDS } from '@payreplayy/contracts';
+import { TELEGRAM_BETA_INVITE_REDEMPTION_MAX_TIMESTAMP_SKEW_SECONDS } from '@fetanagent/contracts';
 
 import type { TelegramBetaInviteAdmissionNonceStore } from './telegram-beta-invite-admission.js';
 

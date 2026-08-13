@@ -1,11 +1,11 @@
 {
-  "name": "@payreplayy/executor",
+  "name": "@fetanagent/executor",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@payreplayy/config": "workspace:*",
-    "@payreplayy/domain": "workspace:*"
+    "@fetanagent/config": "workspace:*",
+    "@fetanagent/domain": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

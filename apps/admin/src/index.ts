@@ -1,7 +1,7 @@
 import {
   loadOwnerControlConfig,
   redactedOwnerControlConfigForLog,
-} from '@payreplayy/config/owner-control';
+} from '@fetanagent/config/owner-control';
 
 import { buildOwnerControlApp } from './app.js';
 import { createOwnerControlPostgresRuntime } from './postgres-runtime.js';
@@ -26,7 +26,7 @@ process.once('SIGTERM', closeGracefully);
 
 app.log.info(
   { config: redactedOwnerControlConfigForLog(config) },
-  'PayReplayy Owner-control service starting',
+  'FetanAgent Owner-control service starting',
 );
 try {
   await app.listen({ host: config.server.host, port: config.server.port });

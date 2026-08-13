@@ -67,14 +67,14 @@ describe('runtime configuration isolation', () => {
     const config = loadApiConfig({
       ...playerActionEnvironment,
       PLAYER_ACTION_DATABASE_URL:
-        'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+        'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
     });
     expect(config.telegramPlayerActionRuntime).toMatchObject({
       enabled: true,
       tlsMode: 'verify-full',
       connection: {
         host: 'db.spzpiyxheappsfyswewl.supabase.co',
-        user: 'payreplayy_player_actions_runtime',
+        user: 'fetanagent_player_actions_runtime',
       },
     });
     const redacted = JSON.stringify(redactedApiConfigForLog(config));
@@ -88,21 +88,21 @@ describe('runtime configuration isolation', () => {
       loadApiConfig({
         ...playerActionEnvironment,
         PLAYER_ACTION_DATABASE_URL:
-          'postgres://payreplayy_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+          'postgres://fetanagent_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('dedicated staging Player-ID action runtime login');
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,
         PLAYER_ACTION_DATABASE_URL:
-          'postgres://payreplayy_api_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+          'postgres://fetanagent_api_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('dedicated staging Player-ID action runtime login');
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,
         PLAYER_ACTION_DATABASE_URL:
-          'postgres://payreplayy_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+          'postgres://fetanagent_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('exact IPv6 direct database endpoint');
     expect(() =>
@@ -110,7 +110,7 @@ describe('runtime configuration isolation', () => {
         ...playerActionEnvironment,
         API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'a'.repeat(64),
         PLAYER_ACTION_DATABASE_URL:
-          'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('must be distinct');
     expect(() =>
@@ -118,7 +118,7 @@ describe('runtime configuration isolation', () => {
         ...playerActionEnvironment,
         API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'c'.repeat(64),
         PLAYER_ACTION_DATABASE_URL:
-          'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('must be distinct');
   });
@@ -374,7 +374,7 @@ describe('runtime configuration isolation', () => {
 
   it('loads only a dedicated TLS-protected nonce-retention maintenance URL', () => {
     const connectionString =
-      'postgresql://payreplayy_nonce_retention_runtime:example-only@db.example.test/postgres?sslmode=verify-full';
+      'postgresql://fetanagent_nonce_retention_runtime:example-only@db.example.test/postgres?sslmode=verify-full';
     const environment = new Proxy(
       {
         INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
@@ -410,7 +410,7 @@ describe('runtime configuration isolation', () => {
         host: 'db.example.test',
         password: 'example-only',
         port: 5432,
-        user: 'payreplayy_nonce_retention_runtime',
+        user: 'fetanagent_nonce_retention_runtime',
       },
       tlsMode: 'verify-full',
     });
@@ -423,13 +423,13 @@ describe('runtime configuration isolation', () => {
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
       NODE_ENV: 'test',
       NONCE_RETENTION_DATABASE_URL:
-        'postgresql://payreplayy_nonce_retention_runtime.abcdefghijklmnopqrst:example-only@aws-0-us-east-1.pooler.supabase.com/postgres?sslmode=verify-full',
+        'postgresql://fetanagent_nonce_retention_runtime.abcdefghijklmnopqrst:example-only@aws-0-us-east-1.pooler.supabase.com/postgres?sslmode=verify-full',
     });
     expect(config.nonceRetentionRuntime).toMatchObject({
       enabled: true,
       connection: {
         host: 'aws-0-us-east-1.pooler.supabase.com',
-        user: 'payreplayy_nonce_retention_runtime.abcdefghijklmnopqrst',
+        user: 'fetanagent_nonce_retention_runtime.abcdefghijklmnopqrst',
       },
     });
 
@@ -446,20 +446,20 @@ describe('runtime configuration isolation', () => {
         NONCE_RETENTION_DATABASE_URL:
           'postgresql://%70ostgres:example@db.example.test/postgres?sslmode=verify-full',
       }),
-    ).toThrow('dedicated PayReplayy nonce-retention runtime login');
+    ).toThrow('dedicated FetanAgent nonce-retention runtime login');
     expect(() =>
       loadMaintenanceConfig({
         INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'true',
         NODE_ENV: 'test',
         NONCE_RETENTION_DATABASE_URL:
-          'postgresql://payreplayy_nonce_retention_runtime:example@db.example.test/postgres?sslmode=verify-full&user=postgres',
+          'postgresql://fetanagent_nonce_retention_runtime:example@db.example.test/postgres?sslmode=verify-full&user=postgres',
       }),
     ).toThrow('only sslmode=verify-full');
   });
 
   it('loads a TLS-protected dedicated API runtime URL only when explicitly enabled', () => {
     const connectionString =
-      'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full';
+      'postgresql://fetanagent_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full';
     const config = loadApiConfig({
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
@@ -473,7 +473,7 @@ describe('runtime configuration isolation', () => {
         host: 'db.xzztugbgtulptnbpoelr.supabase.co',
         password: 'example-only',
         port: 5432,
-        user: 'payreplayy_api_runtime',
+        user: 'fetanagent_api_runtime',
       },
       tlsMode: 'verify-full',
     });
@@ -490,14 +490,14 @@ describe('runtime configuration isolation', () => {
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
       DATABASE_URL:
-        'postgresql://payreplayy_api_runtime.xzztugbgtulptnbpoelr:example-only@aws-0-eu-west-1.pooler.supabase.com/postgres?sslmode=verify-full',
+        'postgresql://fetanagent_api_runtime.xzztugbgtulptnbpoelr:example-only@aws-0-eu-west-1.pooler.supabase.com/postgres?sslmode=verify-full',
     });
 
     expect(config.postgresRuntime).toMatchObject({
       enabled: true,
       connection: {
         host: 'aws-0-eu-west-1.pooler.supabase.com',
-        user: 'payreplayy_api_runtime.xzztugbgtulptnbpoelr',
+        user: 'fetanagent_api_runtime.xzztugbgtulptnbpoelr',
       },
     });
   });
@@ -512,7 +512,7 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres',
+          'postgresql://fetanagent_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres',
       }),
     ).toThrow('only sslmode=verify-full');
 
@@ -523,14 +523,14 @@ describe('runtime configuration isolation', () => {
         DATABASE_URL:
           'postgresql://%70ostgres:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
       }),
-    ).toThrow('dedicated PayReplayy API runtime login');
+    ).toThrow('dedicated FetanAgent API runtime login');
 
     expect(() =>
       loadApiConfig({
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full&user=postgres',
+          'postgresql://fetanagent_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full&user=postgres',
       }),
     ).toThrow('only sslmode=verify-full');
 
@@ -539,7 +539,7 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime:example@db.abcdefghijklmnopqrst.supabase.co/postgres?sslmode=verify-full',
+          'postgresql://fetanagent_api_runtime:example@db.abcdefghijklmnopqrst.supabase.co/postgres?sslmode=verify-full',
       }),
     ).toThrow('approved project host');
 
@@ -548,7 +548,7 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime.xzztugbgtulptnbpoelr:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+          'postgresql://fetanagent_api_runtime.xzztugbgtulptnbpoelr:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
       }),
     ).toThrow('approved project host');
 
@@ -557,7 +557,7 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime.abcdefghijklmnopqrst:example@aws-0-eu-west-1.pooler.supabase.com/postgres?sslmode=verify-full',
+          'postgresql://fetanagent_api_runtime.abcdefghijklmnopqrst:example@aws-0-eu-west-1.pooler.supabase.com/postgres?sslmode=verify-full',
       }),
     ).toThrow('approved project host');
   });
@@ -606,7 +606,7 @@ describe('runtime configuration isolation', () => {
         NODE_ENV: 'test',
         INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
         DATABASE_URL:
-          'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+          'postgresql://fetanagent_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
         INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'true',
       }),
     ).toThrow('requires INTERNAL_TELEGRAM_INGRESS_ENABLED=true');
@@ -615,7 +615,7 @@ describe('runtime configuration isolation', () => {
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
       DATABASE_URL:
-        'postgresql://payreplayy_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+        'postgresql://fetanagent_api_runtime:example@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
       INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
       BOT_TO_API_INGRESS_HMAC_SECRET: 'b'.repeat(64),
       API_TELEGRAM_PAYLOAD_HMAC_SECRET: 'c'.repeat(64),

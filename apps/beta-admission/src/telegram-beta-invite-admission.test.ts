@@ -6,7 +6,7 @@ import {
   TELEGRAM_BETA_INVITE_REDEMPTION_KEY_ID,
   TELEGRAM_BETA_INVITE_REDEMPTION_PATH,
   type TelegramBetaInviteRedemption,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {

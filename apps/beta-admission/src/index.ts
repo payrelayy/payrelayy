@@ -1,7 +1,7 @@
 import {
   loadBetaAdmissionConfig,
   redactedBetaAdmissionConfigForLog,
-} from '@payreplayy/config/beta-admission';
+} from '@fetanagent/config/beta-admission';
 
 import { buildBetaAdmissionApp } from './app.js';
 import { createBetaAdmissionPostgresRuntime } from './postgres-runtime.js';
@@ -30,7 +30,7 @@ process.once('SIGTERM', closeGracefully);
 
 app.log.info(
   { config: redactedBetaAdmissionConfigForLog(config) },
-  'PayReplayy beta-admission service starting',
+  'FetanAgent beta-admission service starting',
 );
 
 try {

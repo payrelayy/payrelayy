@@ -2,7 +2,7 @@ import {
   TELEGRAM_PRIVATE_INGRESS_HEADERS,
   TELEGRAM_PRIVATE_INGRESS_PATH,
   type TelegramPrivateInboundEvent,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {

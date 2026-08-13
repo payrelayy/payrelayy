@@ -3,7 +3,7 @@ import {
   createRedactedCbeBirrFixtureLookup,
   redactedCbeBirrFixtureIds,
   type CbeBirrFixtureVerificationDecision,
-} from '@payreplayy/cbe-birr-fixtures';
+} from '@fetanagent/cbe-birr-fixtures';
 
 import type { OwnerDryRunDepositIntakeItem } from './owner-deposit-intake.js';
 

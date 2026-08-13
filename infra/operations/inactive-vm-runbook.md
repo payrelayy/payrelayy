@@ -2,11 +2,11 @@
 
 ## Purpose and scope
 
-This runbook governs the PayReplayy London VM while it is an **inactive build
+This runbook governs the FetanAgent London VM while it is an **inactive build
 environment only**. It is not a customer-facing service runbook.
 
 At this stage, the VM may contain a sealed source release and a locally built
-inactive API image. It must not run a PayReplayy container, publish a port,
+inactive API image. It must not run a FetanAgent container, publish a port,
 load an application secret, connect to Supabase, receive Telegram updates, or
 perform a KemerBet or payment action.
 
@@ -21,7 +21,7 @@ Before and after any build-only validation, the operator must be able to show:
 - the source release is root-owned and not writable by the repository deploy
   identity;
 - the inactive image has no running container and no declared exposed port;
-- no PayReplayy Docker Compose project, systemd unit, reverse proxy, or public
+- no FetanAgent Docker Compose project, systemd unit, reverse proxy, or public
   HTTP(S) listener exists;
 - all product switches remain disabled and financial actions remain `dry_run`;
 - no application secret has been placed in the repository, image, Compose file,
@@ -34,32 +34,32 @@ commands to select an unreviewed branch.
 ```bash
 set -euo pipefail
 
-readonly RELEASE_DIR='/srv/payreplayy/releases/<reviewed-commit>'
-readonly IMAGE='payreplayy-api:inactive-<short-commit>'
+readonly RELEASE_DIR='/srv/fetanagent/releases/<reviewed-commit>'
+readonly IMAGE='fetanagent-api:inactive-<short-commit>'
 
 git -C "$RELEASE_DIR" rev-parse HEAD
 git -C "$RELEASE_DIR" status --porcelain
 stat --format='%U:%G:%a %n' "$RELEASE_DIR" "$RELEASE_DIR/Dockerfile"
-test -z "$(runuser -u payreplayy-deploy -- env HOME=/srv/payreplayy/deploy \
+test -z "$(runuser -u fetanagent-deploy -- env HOME=/srv/fetanagent/deploy \
   sh -c 'cd "$HOME"; find "$1" -xdev -writable -print -quit' sh "$RELEASE_DIR")"
 docker image inspect "$IMAGE" --format 'image_id={{.Id}} size_bytes={{.Size}}'
 docker image inspect "$IMAGE" --format '{{with index .Config "ExposedPorts"}}{{json .}}{{else}}null{{end}}'
 docker container ls --filter "ancestor=$IMAGE" --quiet
 docker compose --profile inactive -f "$RELEASE_DIR/infra/compose.inactive.yaml" config
-! docker compose ls --all --format json | grep -Fq '"Name":"payreplayy-inactive"'
-! systemctl list-unit-files --no-legend 'payreplayy*' | grep -q .
+! docker compose ls --all --format json | grep -Fq '"Name":"fetanagent-inactive"'
+! systemctl list-unit-files --no-legend 'fetanagent*' | grep -q .
 ss -ltn
 ```
 
-An empty `git status --porcelain` and an empty PayReplayy image container list
+An empty `git status --porcelain` and an empty FetanAgent image container list
 are required. The image port command must print `null`; the recursive
 `runuser` check must be empty. The rendered Compose output must retain
 `FINANCIAL_ACTIONS_MODE: dry_run` and all three `INTERNAL_*` switches set to
 `false`. Other approved, managed VM containers are outside this runbook and do
-not make the PayReplayy image container list non-empty.
+not make the FetanAgent image container list non-empty.
 
 Review `ss -ltn` manually: SSH is the only allowed non-loopback TCP listener
-at this stage. Loopback-only resolver listeners may appear, but no PayReplayy
+at this stage. Loopback-only resolver listeners may appear, but no FetanAgent
 or public HTTP(S) listener is allowed.
 
 ## Build-only validation boundary
@@ -79,7 +79,7 @@ groups. A separately approved administrator path performs a one-time image
 build; it does not give the deploy identity Docker access.
 
 Pass the full reviewed commit as Docker build argument `VCS_REF` and tag the
-image `payreplayy-api:inactive-<first-7-commit-characters>`. The final image
+image `fetanagent-api:inactive-<first-7-commit-characters>`. The final image
 records the full commit in the OCI revision label; the verifier rejects an
 image whose tag or revision label does not match the sealed release.
 
@@ -100,7 +100,7 @@ state and can affect a running VM.
 
 ## Incident stop boundary
 
-If an unexpected PayReplayy container, port, credential, or enabled feature is
+If an unexpected FetanAgent container, port, credential, or enabled feature is
 found:
 
 1. Do not restart, redeploy, pull a newer branch, or retry a payment action.
@@ -108,7 +108,7 @@ found:
    name or image identifier, and listening address. Never record a secret or
    customer/payment payload.
 3. Keep the firewall closed and do not publish a replacement port.
-4. Escalate to the PayReplayy Owner for a separately authorized stop or
+4. Escalate to the FetanAgent Owner for a separately authorized stop or
    remediation action. The current inactive contract has no approved service to
    restart.
 
@@ -130,7 +130,7 @@ All items below must be true before proposing a private staging deployment:
       bot outbox and private transport wiring, have been separately reviewed.
 - [ ] A reviewed HTTPS/domain/proxy plan exists before any public endpoint.
 
-Until every item is checked, the only allowed PayReplayy actions are source
+Until every item is checked, the only allowed FetanAgent actions are source
 inspection and build-only validation under the inactive contract.
 
 ## Repeatable evidence drill
@@ -143,10 +143,10 @@ firewall.
 Run it only as root against a sealed, reviewed release:
 
 ```bash
-/srv/payreplayy/releases/<reviewed-commit>/infra/operations/verify-inactive-vm.sh \
+/srv/fetanagent/releases/<reviewed-commit>/infra/operations/verify-inactive-vm.sh \
   --commit <reviewed-commit> \
-  --release-dir /srv/payreplayy/releases/<reviewed-commit> \
-  --image payreplayy-api:inactive-<short-commit>
+  --release-dir /srv/fetanagent/releases/<reviewed-commit> \
+  --image fetanagent-api:inactive-<short-commit>
 ```
 
 It prints only a pass marker, the reviewed commit, and the local image tag.

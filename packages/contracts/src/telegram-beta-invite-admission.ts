@@ -7,7 +7,7 @@
  */
 export const TELEGRAM_BETA_INVITE_REDEMPTION_PATH = '/internal/v1/telegram/beta-invite-redemption';
 export const TELEGRAM_BETA_INVITE_REDEMPTION_CONTENT_TYPE =
-  'application/vnd.payreplayy.telegram-beta-invite-redemption+json';
+  'application/vnd.fetanagent.telegram-beta-invite-redemption+json';
 export const TELEGRAM_BETA_INVITE_REDEMPTION_KEY_ID = 'v1';
 export const TELEGRAM_BETA_INVITE_REDEMPTION_MAX_BODY_BYTES = 8 * 1024;
 export const TELEGRAM_BETA_INVITE_REDEMPTION_MAX_TIMESTAMP_SKEW_SECONDS = 60;
@@ -17,10 +17,10 @@ export const TELEGRAM_BETA_INVITE_TOKEN_BYTES = 32;
 export const TELEGRAM_BETA_INVITE_TOKEN_LENGTH = 43;
 
 export const TELEGRAM_BETA_INVITE_REDEMPTION_HEADERS = {
-  keyId: 'x-payreplayy-admission-key-id',
-  nonce: 'x-payreplayy-admission-nonce',
-  signature: 'x-payreplayy-admission-signature',
-  timestamp: 'x-payreplayy-admission-timestamp',
+  keyId: 'x-fetanagent-admission-key-id',
+  nonce: 'x-fetanagent-admission-nonce',
+  signature: 'x-fetanagent-admission-signature',
+  timestamp: 'x-fetanagent-admission-timestamp',
 } as const;
 
 /**
@@ -53,7 +53,7 @@ export function telegramBetaInviteRedemptionSignatureInput(
   input: TelegramBetaInviteRedemptionSignatureInput,
 ): string {
   return [
-    'payreplayy-bot-api-beta-invite-v1',
+    'fetanagent-bot-api-beta-invite-v1',
     'POST',
     TELEGRAM_BETA_INVITE_REDEMPTION_PATH,
     TELEGRAM_BETA_INVITE_REDEMPTION_KEY_ID,
@@ -69,7 +69,7 @@ export function telegramBetaInviteRedemptionSignatureInput(
  * that digest. It must never share the inbox or customer-action nonce namespaces.
  */
 export const TELEGRAM_BETA_INVITE_REDEMPTION_NONCE_DIGEST_DOMAIN =
-  'payreplayy:telegram:beta-invite:nonce:v1';
+  'fetanagent:telegram:beta-invite:nonce:v1';
 
 export function telegramBetaInviteRedemptionNonceDigestInput(nonce: string): string {
   return `${TELEGRAM_BETA_INVITE_REDEMPTION_NONCE_DIGEST_DOMAIN}\n${nonce}`;
@@ -80,7 +80,7 @@ export function telegramBetaInviteRedemptionNonceDigestInput(nonce: string): str
  * database call. The raw deep-link token is a 32-byte cryptographically random value and must
  * never cross the API/database boundary.
  */
-export const TELEGRAM_BETA_INVITE_TOKEN_DIGEST_DOMAIN = 'payreplayy:telegram:beta-invite:token:v1';
+export const TELEGRAM_BETA_INVITE_TOKEN_DIGEST_DOMAIN = 'fetanagent:telegram:beta-invite:token:v1';
 
 export function telegramBetaInviteTokenDigestInput(inviteToken: string): string {
   return `${TELEGRAM_BETA_INVITE_TOKEN_DIGEST_DOMAIN}\n${inviteToken}`;

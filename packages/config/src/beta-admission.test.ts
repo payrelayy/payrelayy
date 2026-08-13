@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   BETA_ADMISSION_DATABASE_DIRECT_HOST,
   loadBetaAdmissionConfig,
-  PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
+  FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
   redactedBetaAdmissionConfigForLog,
 } from './beta-admission.js';
 
-const directDatabaseUrl = `postgresql://payreplayy_beta_admission_runtime:db-password@${BETA_ADMISSION_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
+const directDatabaseUrl = `postgresql://fetanagent_beta_admission_runtime:db-password@${BETA_ADMISSION_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
 
 function enabledEnvironment(databaseUrl = directDatabaseUrl): NodeJS.ProcessEnv {
   return {
@@ -46,7 +46,7 @@ describe('beta-admission runtime configuration', () => {
     expect(loadBetaAdmissionConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
       stage: 'staging',
-      projectReference: PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
+      projectReference: FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
       connection: {
         database: 'postgres',
         host: BETA_ADMISSION_DATABASE_DIRECT_HOST,
@@ -58,13 +58,13 @@ describe('beta-admission runtime configuration', () => {
 
   it('rejects production, broad roles, transaction pooling, and weak or ambiguous TLS URLs', () => {
     const invalidUrls = [
-      'postgresql://payreplayy_beta_admission_runtime:pw@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
-      `postgresql://postgres:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
-      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
-      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
-      `postgresql://payreplayy_beta_admission_runtime.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
-      `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=require`,
-      `postgresql://payreplayy_beta_admission_runtime:pw@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full&application_name=unsafe`,
+      'postgresql://fetanagent_beta_admission_runtime:pw@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+      `postgresql://postgres:pw@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
+      `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+      `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+      `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
+      `postgresql://fetanagent_beta_admission_runtime:pw@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=require`,
+      `postgresql://fetanagent_beta_admission_runtime:pw@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full&application_name=unsafe`,
     ];
 
     for (const databaseUrl of invalidUrls) {
@@ -140,7 +140,7 @@ describe('beta-admission runtime configuration', () => {
 
     expect(serialized).not.toContain('db-password');
     expect(serialized).not.toContain('a'.repeat(64));
-    expect(serialized).not.toContain('payreplayy_beta_admission_runtime');
+    expect(serialized).not.toContain('fetanagent_beta_admission_runtime');
     expect(serialized).toContain('"connectionConfigured":true');
   });
 });

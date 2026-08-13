@@ -1,4 +1,4 @@
-import type { FinancialActionsMode } from '@payreplayy/domain';
+import type { FinancialActionsMode } from '@fetanagent/domain';
 
 import {
   booleanFromEnv,

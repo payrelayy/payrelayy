@@ -1,9 +1,9 @@
-# PayReplayy architecture — Stage 0
+# FetanAgent architecture — Stage 0
 
 ## Scope
 
-PayReplayy is independent from QHash. QHash may be used as a product reference only; its
-database, authentication, receipts, workers, and code are not a PayReplayy dependency.
+FetanAgent is independent from QHash. QHash may be used as a product reference only; its
+database, authentication, receipts, workers, and code are not a FetanAgent dependency.
 
 Version 1 uses a private Telegram bot for customers, a private English-only Owner/Admin dashboard,
 and a single KemerBet platform adapter. The current launch-preparation verification scope is CBE
@@ -36,7 +36,7 @@ and executor communicate with the API, not the database.
 1. The bot validates the requested KemerBet Player ID.
 2. The reviewed CBE Birr dry-run intake displays its configured masked receiver account and records
    request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
-   Customers may create unlimited separate deposits; PayReplayy has no customer, daily, or
+   Customers may create unlimited separate deposits; FetanAgent has no customer, daily, or
    lifetime deposit-count quota.
 3. The customer submits a transaction ID and optional screenshot/PDF. Attachments assist
    extraction, but are never the sole approval evidence.
@@ -64,9 +64,9 @@ configured by that workflow.
 
 ## Withdrawal boundary
 
-PayReplayy validates a KemerBet withdrawal Player ID and code. Only an existing, valid,
+FetanAgent validates a KemerBet withdrawal Player ID and code. Only an existing, valid,
 uncompleted withdrawal becomes `awaiting_admin_approval`. An Owner or Administrator later
-records the manual TeleBirr/CBE Birr payout; PayReplayy does not automate sending money in
+records the manual TeleBirr/CBE Birr payout; FetanAgent does not automate sending money in
 version 1.
 
 ## Required safeguards

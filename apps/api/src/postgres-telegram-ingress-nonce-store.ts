@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { TELEGRAM_PRIVATE_INGRESS_MAX_TIMESTAMP_SKEW_SECONDS } from '@payreplayy/contracts';
+import { TELEGRAM_PRIVATE_INGRESS_MAX_TIMESTAMP_SKEW_SECONDS } from '@fetanagent/contracts';
 
 import type { TelegramIngressNonceStore } from './telegram-ingress.js';
 
@@ -33,7 +33,7 @@ export function createTelegramIngressNonceDigest(nonce: string): string {
   }
 
   return `sha256-v1:${createHash('sha256')
-    .update('payreplayy:telegram:private-ingress:nonce:v1\n', 'utf8')
+    .update('fetanagent:telegram:private-ingress:nonce:v1\n', 'utf8')
     .update(nonce, 'utf8')
     .digest('hex')}`;
 }

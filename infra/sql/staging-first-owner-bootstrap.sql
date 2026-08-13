@@ -8,7 +8,7 @@ set local lock_timeout = '1s';
 set local idle_in_transaction_session_timeout = '5s';
 
 select pg_catalog.pg_advisory_xact_lock(
-  pg_catalog.hashtextextended('payreplayy:staging:first-owner-bootstrap', 0)
+  pg_catalog.hashtextextended('fetanagent:staging:first-owner-bootstrap', 0)
 );
 
 select count(*) = 1 as auth_user_ready

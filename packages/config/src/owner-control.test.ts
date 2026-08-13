@@ -8,7 +8,7 @@ import {
   redactedOwnerControlConfigForLog,
 } from './owner-control.js';
 
-const databaseUrl = `postgresql://payreplayy_owner_control_runtime:password@${OWNER_CONTROL_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
+const databaseUrl = `postgresql://fetanagent_owner_control_runtime:password@${OWNER_CONTROL_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
 const publishableKey = 'sb_publishable_test_key_for_staging_only';
 
 function enabledEnvironment(): NodeJS.ProcessEnv {
@@ -42,7 +42,7 @@ describe('Owner-control configuration', () => {
       runtime: { enabled: false },
       server: { host: '127.0.0.1', port: 3002 },
     });
-    expect(OWNER_CONTROL_TELEGRAM_BOT_USERNAME).toBe('payrelayybot');
+    expect(OWNER_CONTROL_TELEGRAM_BOT_USERNAME).toBe('fetanagentbot');
   });
 
   it('accepts only the exact staging project, role, direct host, and verify-full URL', () => {
@@ -53,7 +53,7 @@ describe('Owner-control configuration', () => {
       tlsMode: 'verify-full',
       connection: {
         host: OWNER_CONTROL_DATABASE_DIRECT_HOST,
-        user: 'payreplayy_owner_control_runtime',
+        user: 'fetanagent_owner_control_runtime',
       },
     });
     for (const unsafe of [
@@ -61,7 +61,7 @@ describe('Owner-control configuration', () => {
         OWNER_CONTROL_DATABASE_DIRECT_HOST,
         'aws-1-eu-west-1.pooler.supabase.com',
       ),
-      databaseUrl.replace('payreplayy_owner_control_runtime', 'postgres'),
+      databaseUrl.replace('fetanagent_owner_control_runtime', 'postgres'),
       databaseUrl.replace('5432', '6543'),
       databaseUrl.replace('verify-full', 'require'),
     ]) {
@@ -76,7 +76,7 @@ describe('Owner-control configuration', () => {
     const serialized = JSON.stringify(redactedOwnerControlConfigForLog(config));
     expect(serialized).not.toContain('password');
     expect(serialized).not.toContain(publishableKey);
-    expect(serialized).not.toContain('payreplayy_owner_control_runtime');
+    expect(serialized).not.toContain('fetanagent_owner_control_runtime');
 
     expect(() =>
       loadOwnerControlConfig({ ...enabledEnvironment(), NODE_ENV: 'production' }),

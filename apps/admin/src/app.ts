@@ -1,4 +1,4 @@
-import type { OwnerControlConfig } from '@payreplayy/config/owner-control';
+import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
 import Fastify, { LogController } from 'fastify';
 
 import {
@@ -464,7 +464,7 @@ export function buildOwnerControlApp(
     },
   );
 
-  app.get('/healthz', async () => ({ status: 'ok', service: 'payreplayy-owner-control' }));
+  app.get('/healthz', async () => ({ status: 'ok', service: 'fetanagent-owner-control' }));
   app.get('/readyz', async (_request, reply) => {
     const ready = await dependencies.runtime.ready();
     return ready ? reply.code(200).send({ ready: true }) : reply.code(503).send({ ready: false });

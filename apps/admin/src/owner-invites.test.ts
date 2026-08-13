@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { telegramBetaInviteTokenDigestInput } from '@payreplayy/contracts';
+import { telegramBetaInviteTokenDigestInput } from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
@@ -20,7 +20,7 @@ describe('PostgreSQL Owner invite adapter', () => {
         return { rows: [{ issued_invite_id: inviteId, issued_expires_at: expiresAt }] };
       },
     });
-    const issued = await adapter.issue(authUserId, expiresAt, 'payrelayybot');
+    const issued = await adapter.issue(authUserId, expiresAt, 'fetanagentbot');
     const token = new URL(issued.inviteUrl).searchParams.get('start');
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     const expectedDigest = `sha256-v1:${createHash('sha256')
@@ -31,7 +31,7 @@ describe('PostgreSQL Owner invite adapter', () => {
     expect(observedSql).not.toContain(token!);
     expect(observedValues).not.toContain(token!);
     expect(issued).toMatchObject({ inviteId, expiresAt: expiresAt.toISOString() });
-    expect(new URL(issued.inviteUrl).pathname).toBe('/payrelayybot');
+    expect(new URL(issued.inviteUrl).pathname).toBe('/fetanagentbot');
   });
 
   it('revokes by opaque invite identifier and safe reason code only', async () => {
@@ -53,7 +53,7 @@ describe('PostgreSQL Owner invite adapter', () => {
         throw Object.assign(new Error('sensitive database detail'), { code: 'P0001' });
       },
     });
-    await expect(adapter.issue(authUserId, expiresAt, 'payrelayybot')).rejects.toMatchObject({
+    await expect(adapter.issue(authUserId, expiresAt, 'fetanagentbot')).rejects.toMatchObject({
       name: 'OwnerInviteRejectedError',
       message: 'The Owner invite operation was rejected.',
     });

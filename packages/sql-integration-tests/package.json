@@ -1,5 +1,5 @@
 {
-  "name": "@payreplayy/sql-integration-tests",
+  "name": "@fetanagent/sql-integration-tests",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -13,7 +13,7 @@ const enabledDatabaseConfig = {
     host: 'db.example.test',
     password: 'example-only',
     port: 5432 as const,
-    user: 'payreplayy_api_runtime',
+    user: 'fetanagent_api_runtime',
   },
   tlsMode: 'verify-full' as const,
 };

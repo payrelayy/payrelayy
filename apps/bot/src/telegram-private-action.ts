@@ -5,8 +5,8 @@ import {
   parseTelegramPlayerRegistrationCapabilityCallback,
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionIdentity,
-} from '@payreplayy/contracts';
-import { normalizeLocale } from '@payreplayy/i18n';
+} from '@fetanagent/contracts';
+import { normalizeLocale } from '@fetanagent/i18n';
 
 export interface TelegramPrivateActionMetadata {
   readonly updateId: number;

@@ -1,13 +1,13 @@
 \set ON_ERROR_STOP on
 
-do $payreplayy$
+do $fetanagent$
 declare
   runtime_role pg_catalog.pg_roles%rowtype;
 begin
   select role.*
   into strict runtime_role
   from pg_catalog.pg_roles as role
-  where role.rolname = 'payreplayy_beta_admission_runtime';
+  where role.rolname = 'fetanagent_beta_admission_runtime';
 
   if runtime_role.rolsuper
     or runtime_role.rolcreatedb
@@ -25,8 +25,8 @@ begin
     from pg_catalog.pg_auth_members as membership
     join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
     join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
-    where granted_role.rolname = 'payreplayy_beta_admission'
-      and member_role.rolname = 'payreplayy_beta_admission_runtime'
+    where granted_role.rolname = 'fetanagent_beta_admission'
+      and member_role.rolname = 'fetanagent_beta_admission_runtime'
       and membership.inherit_option
       and not membership.set_option
       and not membership.admin_option
@@ -39,13 +39,13 @@ begin
     from pg_catalog.pg_auth_members as membership
     join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
     join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
-    where member_role.rolname = 'payreplayy_beta_admission_runtime'
-      and granted_role.rolname <> 'payreplayy_beta_admission'
+    where member_role.rolname = 'fetanagent_beta_admission_runtime'
+      and granted_role.rolname <> 'fetanagent_beta_admission'
   ) then
     raise exception 'The staging beta-admission runtime has an unexpected membership.';
   end if;
 end
-$payreplayy$;
+$fetanagent$;
 
 select
   role.rolcanlogin as runtime_login_enabled,
@@ -57,4 +57,4 @@ select
     and not role.rolbypassrls
     and not role.rolinherit as runtime_role_is_non_admin
 from pg_catalog.pg_roles as role
-where role.rolname = 'payreplayy_beta_admission_runtime';
+where role.rolname = 'fetanagent_beta_admission_runtime';

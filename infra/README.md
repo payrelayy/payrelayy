@@ -16,7 +16,7 @@ The repository provides:
   profile on an internal Docker network, with neither an image-exposed nor published host port;
 - [`.dockerignore`](../.dockerignore): excludes local configuration, Git metadata, credentials,
   runtime data, and generated output from the image context; and
-- [`operations/payreplayy-staging-deploy-helper.sh`](operations/payreplayy-staging-deploy-helper.sh):
+- [`operations/fetanagent-staging-deploy-helper.sh`](operations/fetanagent-staging-deploy-helper.sh):
   the reviewed root-owned command boundary for the manual staging workflow. The SSH identity may
   sudo only this checksummed helper, never `bash`, Docker directly, or the Docker socket.
 
@@ -39,7 +39,7 @@ enable a customer-facing service:
 
 ```powershell
 docker build --target api --build-arg VCS_REF=<reviewed-commit> `
-  --tag payreplayy-api:inactive-<short-commit> .
+  --tag fetanagent-api:inactive-<short-commit> .
 docker compose -f infra/compose.inactive.yaml config
 ```
 

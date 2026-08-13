@@ -32,12 +32,12 @@ assert.doesNotMatch(
   /TELEGRAM_BOT_TOKEN|docker compose|docker run|compose up|FINANCIAL_ACTIONS_MODE=live/,
 );
 
-assert.match(inspectSql, /payreplayy_beta_admission_runtime/);
+assert.match(inspectSql, /fetanagent_beta_admission_runtime/);
 assert.match(inspectSql, /not role\.rolsuper/);
 assert.match(inspectSql, /role\.rolconnlimit <> 1/);
 assert.match(inspectSql, /membership\.inherit_option/);
 assert.match(inspectSql, /not membership\.set_option/);
 assert.match(inspectSql, /not membership\.admin_option/);
-assert.doesNotMatch(inspectSql, /service_role|payreplayy_api_runtime|payreplayy_worker|kemerbet/i);
+assert.doesNotMatch(inspectSql, /service_role|fetanagent_api_runtime|fetanagent_worker|kemerbet/i);
 
 console.log('Staging beta runtime workflow verified as read-only role inspection only.');

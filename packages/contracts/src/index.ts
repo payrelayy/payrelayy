@@ -1,4 +1,4 @@
-import type { EtbAmount, VerificationReasonCode } from '@payreplayy/domain';
+import type { EtbAmount, VerificationReasonCode } from '@fetanagent/domain';
 
 export * from './telegram-private-inbound.js';
 export * from './telegram-action-capability.js';

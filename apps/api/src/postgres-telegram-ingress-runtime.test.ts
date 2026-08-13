@@ -1,11 +1,11 @@
-import { loadApiConfig, type ApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig, type ApiConfig } from '@fetanagent/config/api';
 import {
   TELEGRAM_PRIVATE_INGRESS_CONTENT_TYPE,
   TELEGRAM_PRIVATE_INGRESS_HEADERS,
   TELEGRAM_PRIVATE_INGRESS_KEY_ID,
   TELEGRAM_PRIVATE_INGRESS_PATH,
   type TelegramPrivateInboundEvent,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import type { PoolConfig } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -42,7 +42,7 @@ function bothGatesConfig(): ApiConfig {
     NODE_ENV: 'test',
     INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
     DATABASE_URL:
-      'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+      'postgresql://fetanagent_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
     INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
     BOT_TO_API_INGRESS_HMAC_SECRET: transportHmacSecret,
     API_TELEGRAM_PAYLOAD_HMAC_SECRET: payloadHmacSecret,
@@ -103,7 +103,7 @@ describe('Postgres Telegram ingress runtime composition', () => {
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
       DATABASE_URL:
-        'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+        'postgresql://fetanagent_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
     });
     const telegramOnlyConfig = loadApiConfig({
       NODE_ENV: 'test',
@@ -115,7 +115,7 @@ describe('Postgres Telegram ingress runtime composition', () => {
       NODE_ENV: 'test',
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
       DATABASE_URL:
-        'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+        'postgresql://fetanagent_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
       INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
       BOT_TO_API_INGRESS_HMAC_SECRET: transportHmacSecret,
       API_TELEGRAM_PAYLOAD_HMAC_SECRET: payloadHmacSecret,
@@ -171,7 +171,7 @@ describe('Postgres Telegram ingress runtime composition', () => {
 
     expect(createPool).toHaveBeenCalledTimes(1);
     expect(createPool).toHaveBeenCalledWith({
-      application_name: 'payreplayy-api-telegram-ingress',
+      application_name: 'fetanagent-api-telegram-ingress',
       connectionTimeoutMillis: 5_000,
       database: 'postgres',
       host: 'db.xzztugbgtulptnbpoelr.supabase.co',
@@ -183,7 +183,7 @@ describe('Postgres Telegram ingress runtime composition', () => {
       query_timeout: 5_000,
       ssl: { rejectUnauthorized: true },
       statement_timeout: 5_000,
-      user: 'payreplayy_api_runtime',
+      user: 'fetanagent_api_runtime',
     });
     expect(fake.queries).toEqual([]);
 

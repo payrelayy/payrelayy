@@ -1,18 +1,18 @@
 \set ON_ERROR_STOP on
 
-alter role payreplayy_beta_admission_runtime with
+alter role fetanagent_beta_admission_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password null valid until 'infinity';
 
-alter role payreplayy_owner_control_runtime with
+alter role fetanagent_owner_control_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password null valid until 'infinity';
 
-alter role payreplayy_player_actions_runtime with
+alter role fetanagent_player_actions_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 2 password null valid until 'infinity';
 
-do $payreplayy$
+do $fetanagent$
 declare
   activity_pid integer;
   expected_role text;
@@ -22,9 +22,9 @@ begin
     select activity.pid
     from pg_catalog.pg_stat_activity as activity
     where activity.usename = any (array[
-      'payreplayy_beta_admission_runtime',
-      'payreplayy_owner_control_runtime',
-      'payreplayy_player_actions_runtime'
+      'fetanagent_beta_admission_runtime',
+      'fetanagent_owner_control_runtime',
+      'fetanagent_player_actions_runtime'
     ])
       and activity.pid <> pg_catalog.pg_backend_pid()
   loop
@@ -42,9 +42,9 @@ begin
     select 1
     from pg_catalog.pg_stat_activity as activity
     where activity.usename = any (array[
-      'payreplayy_beta_admission_runtime',
-      'payreplayy_owner_control_runtime',
-      'payreplayy_player_actions_runtime'
+      'fetanagent_beta_admission_runtime',
+      'fetanagent_owner_control_runtime',
+      'fetanagent_player_actions_runtime'
     ])
       and activity.pid <> pg_catalog.pg_backend_pid()
   ) then
@@ -52,9 +52,9 @@ begin
   end if;
 
   foreach expected_role in array array[
-    'payreplayy_beta_admission_runtime',
-    'payreplayy_owner_control_runtime',
-    'payreplayy_player_actions_runtime'
+    'fetanagent_beta_admission_runtime',
+    'fetanagent_owner_control_runtime',
+    'fetanagent_player_actions_runtime'
   ]
   loop
     if not exists (
@@ -69,7 +69,7 @@ begin
         and not role.rolreplication
         and not role.rolbypassrls
         and role.rolconnlimit = case expected_role
-          when 'payreplayy_player_actions_runtime' then 2
+          when 'fetanagent_player_actions_runtime' then 2
           else 1
         end
         and role.rolpassword is null
@@ -78,4 +78,4 @@ begin
     end if;
   end loop;
 end
-$payreplayy$;
+$fetanagent$;

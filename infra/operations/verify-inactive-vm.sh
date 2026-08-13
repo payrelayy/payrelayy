@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Verifies the PayReplayy inactive VM contract. It must be run as root and
+# Verifies the FetanAgent inactive VM contract. It must be run as root and
 # performs only local, read-only checks. It never starts, pulls, or removes a
 # container; reads a secret; or changes the firewall, systemd, or Git state.
 
 set -euo pipefail
 
-readonly DEPLOY_USER='payreplayy-deploy'
-readonly DEPLOY_HOME='/srv/payreplayy/deploy'
-readonly RELEASE_ROOT='/srv/payreplayy/releases'
-readonly REPOSITORY='git@github.com:payrelayy/payrelayy.git'
-readonly PROJECT_NAME='payreplayy-inactive'
+readonly DEPLOY_USER='fetanagent-deploy'
+readonly DEPLOY_HOME='/srv/fetanagent/deploy'
+readonly RELEASE_ROOT='/srv/fetanagent/releases'
+readonly REPOSITORY='git@github.com:fetanagent/fetanagent.git'
+readonly PROJECT_NAME='fetanagent-inactive'
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
@@ -19,8 +19,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   verify-inactive-vm.sh --commit <40-lowercase-hex> \
-    --release-dir /srv/payreplayy/releases/<commit> \
-    --image payreplayy-api:inactive-<short-commit>
+    --release-dir /srv/fetanagent/releases/<commit> \
+    --image fetanagent-api:inactive-<short-commit>
 
 The verifier is intentionally fail-closed. It checks a sealed release, the
 inactive image and Compose contract, and the SSH-only listener boundary. It
@@ -94,7 +94,7 @@ done
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || die 'the reviewed commit must be 40 lowercase hexadecimal characters'
 [[ "$release_dir" == "$RELEASE_ROOT/$commit" ]] || die 'the release directory must match the reviewed commit under the release root'
 short_commit="${commit:0:7}"
-[[ "$image" == "payreplayy-api:inactive-$short_commit" ]] || die 'the image tag must match the reviewed commit prefix'
+[[ "$image" == "fetanagent-api:inactive-$short_commit" ]] || die 'the image tag must match the reviewed commit prefix'
 [[ -d "$release_dir/.git" ]] || die 'the release directory is not a Git worktree'
 [[ -f "$release_dir/infra/compose.inactive.yaml" ]] || die 'the inactive Compose contract is absent'
 
@@ -138,14 +138,14 @@ deploy_writable_path="$(runuser -u "$DEPLOY_USER" -- env HOME="$DEPLOY_HOME" \
 
 docker_local image inspect "$image" >/dev/null
 image_title="$(docker_local image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.title"}}')"
-[[ "$image_title" == 'payreplayy-api' ]] || die 'the inactive image is missing the stable PayReplayy identity label'
+[[ "$image_title" == 'fetanagent-api' ]] || die 'the inactive image is missing the stable FetanAgent identity label'
 image_revision="$(docker_local image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 [[ "$image_revision" == "$commit" ]] || die 'the inactive image revision label does not match the reviewed commit'
 image_user="$(docker_local image inspect "$image" --format '{{.Config.User}}')"
-[[ "$image_user" == 'payreplayy:payreplayy' ]] || die 'the inactive image must run as the non-root application user'
+[[ "$image_user" == 'fetanagent:fetanagent' ]] || die 'the inactive image must run as the non-root application user'
 image_ports="$(docker_local image inspect "$image" --format '{{with index .Config "ExposedPorts"}}{{json .}}{{else}}null{{end}}')"
 [[ "$image_ports" == 'null' ]] || die 'the inactive image declares an exposed port'
-if ! payreplayy_container_candidates="$(docker_local container ls --all --quiet)"; then
+if ! fetanagent_container_candidates="$(docker_local container ls --all --quiet)"; then
   die 'could not inspect local containers'
 fi
 while IFS= read -r container_candidate_id; do
@@ -153,10 +153,10 @@ while IFS= read -r container_candidate_id; do
   container_candidate_image="$(docker_local container inspect "$container_candidate_id" --format '{{.Config.Image}}')"
   candidate_image_id="$(docker_local container inspect "$container_candidate_id" --format '{{.Image}}')"
   candidate_image_title="$(docker_local image inspect "$candidate_image_id" --format '{{index .Config.Labels "org.opencontainers.image.title"}}')"
-  if [[ "$container_candidate_image" == payreplayy-api:* || "$candidate_image_title" == 'payreplayy-api' ]]; then
-    die 'a PayReplayy container exists'
+  if [[ "$container_candidate_image" == fetanagent-api:* || "$candidate_image_title" == 'fetanagent-api' ]]; then
+    die 'a FetanAgent container exists'
   fi
-done <<<"$payreplayy_container_candidates"
+done <<<"$fetanagent_container_candidates"
 
 compose_file="$release_dir/infra/compose.inactive.yaml"
 [[ ! -L "$compose_file" ]] || die 'the Compose source must not be a symbolic link'
@@ -238,18 +238,18 @@ if api.get("cap_drop") != ["ALL"]:
     raise SystemExit(1)
 if api.get("security_opt") != ["no-new-privileges:true"]:
     raise SystemExit(1)
-if api.get("networks") != {"payreplayy_internal": None}:
+if api.get("networks") != {"fetanagent_internal": None}:
     raise SystemExit(1)
 if api.get("healthcheck") != expected_healthcheck:
     raise SystemExit(1)
 
 networks = config.get("networks")
-if not isinstance(networks, dict) or set(networks) != {"payreplayy_internal"}:
+if not isinstance(networks, dict) or set(networks) != {"fetanagent_internal"}:
     raise SystemExit(1)
-network = networks["payreplayy_internal"]
+network = networks["fetanagent_internal"]
 if not isinstance(network, dict) or not {"internal", "name"} <= set(network) <= {"internal", "name", "ipam"}:
     raise SystemExit(1)
-if network.get("internal") is not True or network.get("name") != f"{project_name}_payreplayy_internal":
+if network.get("internal") is not True or network.get("name") != f"{project_name}_fetanagent_internal":
     raise SystemExit(1)
 if network.get("ipam", {}) != {}:
     raise SystemExit(1)
@@ -270,24 +270,24 @@ if any(project.get("Name") == project_name for project in projects):
     raise SystemExit(1)
 '
 if ! printf '%s' "$compose_projects_json" | env -i PATH="$SAFE_PATH" HOME='/' python3 -I -c "$COMPOSE_PROJECTS_CHECK" "$PROJECT_NAME"; then
-  die 'a PayReplayy Compose project exists or the Compose project inventory is malformed'
+  die 'a FetanAgent Compose project exists or the Compose project inventory is malformed'
 fi
-if systemd_units="$(systemctl list-unit-files --no-legend 'payreplayy*' 2>&1)"; then
+if systemd_units="$(systemctl list-unit-files --no-legend 'fetanagent*' 2>&1)"; then
   :
 else
   systemd_unit_files_status=$?
-  [[ $systemd_unit_files_status -eq 1 && -z "$systemd_units" ]] || die 'could not inspect PayReplayy systemd unit files'
+  [[ $systemd_unit_files_status -eq 1 && -z "$systemd_units" ]] || die 'could not inspect FetanAgent systemd unit files'
   systemd_units=''
 fi
-[[ -z "$systemd_units" ]] || die 'a PayReplayy systemd unit exists'
-if active_systemd_units="$(systemctl list-units --all --no-legend 'payreplayy*' 2>&1)"; then
+[[ -z "$systemd_units" ]] || die 'a FetanAgent systemd unit exists'
+if active_systemd_units="$(systemctl list-units --all --no-legend 'fetanagent*' 2>&1)"; then
   :
 else
   active_systemd_units_status=$?
-  [[ $active_systemd_units_status -eq 1 && -z "$active_systemd_units" ]] || die 'could not inspect active or transient PayReplayy systemd units'
+  [[ $active_systemd_units_status -eq 1 && -z "$active_systemd_units" ]] || die 'could not inspect active or transient FetanAgent systemd units'
   active_systemd_units=''
 fi
-[[ -z "$active_systemd_units" ]] || die 'an active or transient PayReplayy systemd unit exists'
+[[ -z "$active_systemd_units" ]] || die 'an active or transient FetanAgent systemd unit exists'
 
 if ! non_loopback_tcp_listeners="$(
   ss -ltnH |

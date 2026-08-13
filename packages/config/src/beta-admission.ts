@@ -8,10 +8,10 @@ import {
   type RuntimeConfig,
 } from './shared.js';
 
-export const PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
-export const BETA_ADMISSION_DATABASE_RUNTIME_ROLE = 'payreplayy_beta_admission_runtime';
+export const FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
+export const BETA_ADMISSION_DATABASE_RUNTIME_ROLE = 'fetanagent_beta_admission_runtime';
 
-export const BETA_ADMISSION_DATABASE_DIRECT_HOST = `db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
+export const BETA_ADMISSION_DATABASE_DIRECT_HOST = `db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
 const PRODUCTION_SECRET_FILE_PATHS: Readonly<Record<string, string>> = {
   BETA_ADMISSION_DATABASE_URL: '/run/secrets/beta_admission_database_url',
   BOT_TO_BETA_ADMISSION_HMAC_SECRET: '/run/secrets/beta_admission_bot_transport_hmac',
@@ -39,7 +39,7 @@ export type BetaAdmissionRuntimeConfig =
   | {
       readonly enabled: true;
       readonly stage: 'staging';
-      readonly projectReference: typeof PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE;
+      readonly projectReference: typeof FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE;
       readonly connection: BetaAdmissionDatabaseConnection;
       readonly tlsMode: 'verify-full';
       readonly transportHmacSecret: string;
@@ -246,7 +246,7 @@ export function loadBetaAdmissionConfig(
     runtime: {
       enabled: true,
       stage: 'staging',
-      projectReference: PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
+      projectReference: FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
       connection: parseDatabaseConnection(databaseUrl),
       tlsMode: 'verify-full',
       transportHmacSecret,

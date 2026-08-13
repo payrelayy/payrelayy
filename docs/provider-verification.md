@@ -1,11 +1,11 @@
 # Provider-verification specification
 
-This is PayReplayy's independent verification contract. The current launch-preparation scope is
+This is FetanAgent's independent verification contract. The current launch-preparation scope is
 **CBE Birr only**, using strictly local redacted fixtures and advisory dry-run outcomes. It is not
 a live integration: no provider verifier is enabled, no provider credential is configured, and no
 payment can reach a claim or KemerBet execution. TeleBirr and CBE bank are deferred.
 
-QHash is reference research only. PayReplayy does not use QHash code, databases, workers,
+QHash is reference research only. FetanAgent does not use QHash code, databases, workers,
 credentials, accounts, or runtime services. TeleBirr and CBE bank are later, separate adapters;
 neither may reuse CBE Birr lookup or parsing assumptions.
 
@@ -68,7 +68,7 @@ credited.
 
 ## Result handling
 
-| Provider result                                                                                                                       | PayReplayy outcome |
+| Provider result                                                                                                                       | FetanAgent outcome |
 | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | Every automatic-approval condition is proven                                                                                          | `verified`         |
 | Official source confirms an invalid reference, wrong receiver, or already-claimed canonical reference                                 | `rejected`         |
@@ -80,10 +80,10 @@ an administrator can resolve it through a separately audited review workflow.
 
 ## TeleBirr adapter gate
 
-TeleBirr automatic verification remains disabled until PayReplayy has its own permitted and
+TeleBirr automatic verification remains disabled until FetanAgent has its own permitted and
 reliably reachable authoritative source, validated from the approved deployment infrastructure.
 Reference research found a geo-blocked receipt route in an older system; that does not authorize
-or prove a PayReplayy integration.
+or prove a FetanAgent integration.
 
 The adapter must fail closed to `manual_review` if the source is inaccessible, requires CAPTCHA,
 is geo-blocked, changes format, or cannot prove every required fact. It must not bypass provider
@@ -108,7 +108,7 @@ independently prove all of the following before it can become authoritative evid
 
 The configurable account-holder name is a display and diagnostic aid only. Name spelling,
 language, and formatting can vary, so name text never authorizes a payment. The lookup contract
-must be proven by PayReplayy regression tests for every supported receipt type; an unfamiliar
+must be proven by FetanAgent regression tests for every supported receipt type; an unfamiliar
 response goes to review rather than being parsed optimistically.
 
 The only implemented CBE Birr code at this stage is the redacted fixture package. Its strict parser

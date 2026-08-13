@@ -1,4 +1,4 @@
-import type { FinancialActionsMode } from '@payreplayy/domain';
+import type { FinancialActionsMode } from '@fetanagent/domain';
 
 export type NodeEnvironment = 'development' | 'test' | 'production';
 

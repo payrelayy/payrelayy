@@ -1,13 +1,13 @@
 import type { IncomingHttpHeaders } from 'node:http';
 
-import { loadApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig } from '@fetanagent/config/api';
 import {
   TELEGRAM_PRIVATE_ACTION_CONTENT_TYPE,
   TELEGRAM_PRIVATE_ACTION_HEADERS,
   TELEGRAM_PRIVATE_ACTION_KEY_ID,
   TELEGRAM_PRIVATE_ACTION_PATH,
   type TelegramPrivateActionEnvelope,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';
@@ -360,7 +360,7 @@ describe('private Telegram action transport contract', () => {
       API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
       API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
       PLAYER_ACTION_DATABASE_URL:
-        'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+        'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
     });
     let handled: TelegramPrivateActionEnvelope | undefined;
     let closed = 0;

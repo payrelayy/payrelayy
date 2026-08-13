@@ -4,8 +4,8 @@ import { posix, win32 } from 'node:path';
 import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.js';
 
 export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
-export const OWNER_CONTROL_DATABASE_RUNTIME_ROLE = 'payreplayy_owner_control_runtime';
-export const OWNER_CONTROL_TELEGRAM_BOT_USERNAME = 'payrelayybot';
+export const OWNER_CONTROL_DATABASE_RUNTIME_ROLE = 'fetanagent_owner_control_runtime';
+export const OWNER_CONTROL_TELEGRAM_BOT_USERNAME = 'fetanagentbot';
 export const OWNER_CONTROL_DATABASE_DIRECT_HOST = `db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
 
 const STAGING_SUPABASE_URL = `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;

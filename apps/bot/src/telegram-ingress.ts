@@ -7,8 +7,8 @@ import {
   TELEGRAM_PRIVATE_INGRESS_PATH,
   telegramPrivateIngressSignatureInput,
   type TelegramPrivateInboundEvent,
-} from '@payreplayy/contracts';
-import { normalizeLocale } from '@payreplayy/i18n';
+} from '@fetanagent/contracts';
+import { normalizeLocale } from '@fetanagent/i18n';
 
 export interface TelegramPrivateMessageMetadata {
   readonly updateId: number;

@@ -30,7 +30,7 @@ env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
-  BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
+  BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
 
 jobs:
   validate-target:
@@ -113,7 +113,7 @@ jobs:
             exit 1
           fi
 
-          ca_file="$RUNNER_TEMP/payreplayy-staging-supabase-ca.crt"
+          ca_file="$RUNNER_TEMP/fetanagent-staging-supabase-ca.crt"
           umask 077
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$ca_file"
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null

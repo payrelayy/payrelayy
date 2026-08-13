@@ -1,4 +1,4 @@
-import { formatTelegramPlayerRegistrationCapabilityCallback } from '@payreplayy/contracts';
+import { formatTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { presentTelegramPlayerIdFlowResult } from './telegram-player-id-flow.js';
@@ -40,7 +40,7 @@ describe('Telegram Player-ID flow presentation', () => {
       amountMinor: '2500',
       currencyCode: 'ETB',
       providerName: 'CBE Birr',
-      receiverAccountHolderName: 'PAYREPLAYY STAGING SIMULATION - DO NOT PAY',
+      receiverAccountHolderName: 'FETANAGENT STAGING SIMULATION - DO NOT PAY',
       receiverAccountMasked: '****TEST',
       customerInstruction: 'SIMULATION ONLY — DO NOT SEND MONEY.',
       paymentDeadline: '2026-08-12T13:00:00.000Z',

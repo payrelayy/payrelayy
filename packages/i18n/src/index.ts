@@ -1,4 +1,4 @@
-/** PayReplayy currently communicates with customers in English only. */
+/** FetanAgent currently communicates with customers in English only. */
 export type Locale = 'en';
 
 export const DEFAULT_LOCALE: Locale = 'en';
@@ -14,22 +14,22 @@ export function normalizeLocale(_languageCode: string | undefined): Locale {
 
 export const messages = {
   welcome: {
-    en: 'Welcome to PayReplayy. Secure account setup is being prepared.',
+    en: 'Welcome to FetanAgent. Secure account setup is being prepared.',
   },
   privateChatOnly: {
-    en: 'For your privacy, please use PayReplayy in a private chat with the bot.',
+    en: 'For your privacy, please use FetanAgent in a private chat with the bot.',
   },
   stageZero: {
-    en: 'PayReplayy is being prepared. Financial actions are not available yet.',
+    en: 'FetanAgent is being prepared. Financial actions are not available yet.',
   },
   inboxUnavailable: {
-    en: 'PayReplayy cannot receive requests right now. Please try again shortly.',
+    en: 'FetanAgent cannot receive requests right now. Please try again shortly.',
   },
   betaAdmissionWelcome: {
-    en: 'Welcome to PayReplayy private beta. Your access is active. Payments are not enabled yet.',
+    en: 'Welcome to FetanAgent private beta. Your access is active. Payments are not enabled yet.',
   },
   betaAdmissionUnavailable: {
-    en: 'PayReplayy private beta is temporarily unavailable. Please try again shortly.',
+    en: 'FetanAgent private beta is temporarily unavailable. Please try again shortly.',
   },
   playerRegistrationMenu: {
     en: 'Manage your KemerBet Player ID, or start a dry-run deposit with /deposit PLAYER_ID AMOUNT.',

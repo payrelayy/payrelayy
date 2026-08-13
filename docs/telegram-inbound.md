@@ -2,7 +2,7 @@
 
 ## Current scope
 
-PayReplayy beta admission is **invite-only**. An unknown Telegram user must not become a customer
+FetanAgent beta admission is **invite-only**. An unknown Telegram user must not become a customer
 merely by opening, messaging, or calling the bot. The historic generic
 `app.record_telegram_private_inbound_event(...)` procedure therefore is not an admission path: the
 invite-admission migration revokes its runtime grant and makes it fail closed.
@@ -22,7 +22,7 @@ database login, or later inbox path is enabled by this documentation.
 ## Trust boundary
 
 The Telegram bot is transport only. Before an admission or admitted-inbox procedure can ever be
-invoked, the API must verify that an update came from PayReplayy's bot transport, has a real
+invoked, the API must verify that an update came from FetanAgent's bot transport, has a real
 non-bot sender, and belongs to a private chat. The database cannot prove Telegram chat type by
 itself.
 
@@ -75,8 +75,8 @@ The remaining gates are:
 
 1. Independently review the invite-admission migration in a disposable database before any remote
    database change.
-2. Configure only the dedicated `payreplayy_beta_admission` group and its
-   `payreplayy_beta_admission_runtime` login scaffold for admission; the generic API group and
+2. Configure only the dedicated `fetanagent_beta_admission` group and its
+   `fetanagent_beta_admission_runtime` login scaffold for admission; the generic API group and
    runtime must not execute either admission procedure. Keep its bot secret set separate.
 3. Rotate the exposed BotFather token before polling is ever enabled.
 4. Wire exact `/start <invite>` handling with durable cross-replica replay protection. Ordinary

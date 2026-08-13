@@ -42,21 +42,21 @@ public CA file outside the checkout:
 
 | Host-path selector                                               | Mounted only into | Container path                                        |
 | ---------------------------------------------------------------- | ----------------- | ----------------------------------------------------- |
-| `PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE`             | owner-control     | `/run/secrets/owner_control_database_url`             |
-| `PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE` | owner-control     | `/run/secrets/owner_control_supabase_publishable_key` |
-| `PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE`            | beta-admission    | `/run/secrets/beta_admission_database_url`            |
-| `PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE`          | beta-admission    | `/run/secrets/beta_admission_bot_transport_hmac`      |
-| `PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE`            | beta-admission    | `/run/secrets/beta_admission_payload_hmac`            |
-| `PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE`             | api               | `/run/secrets/player_action_database_url`             |
-| `PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | api               | `/run/secrets/api_player_action_transport_hmac`       |
-| `PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`         | api               | `/run/secrets/api_player_action_payload_hmac`         |
-| `PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`      | api               | `/run/secrets/api_player_action_capability_hmac`      |
-| `PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`        | api               | `/run/secrets/api_player_action_semantic_hmac`        |
-| `PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE`       | api               | `/run/secrets/api_deposit_reference_protection`       |
-| `PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                | all DB clients    | `/run/configs/supabase_ca_certificate`                |
-| `PAYREPLAYY_STAGING_BOT_TOKEN_FILE`                              | bot               | `/run/secrets/telegram_bot_token`                     |
-| `PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE`                     | bot               | `/run/secrets/bot_beta_admission_transport_hmac`      |
-| `PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | bot               | `/run/secrets/bot_player_action_transport_hmac`       |
+| `FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE`             | owner-control     | `/run/secrets/owner_control_database_url`             |
+| `FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE` | owner-control     | `/run/secrets/owner_control_supabase_publishable_key` |
+| `FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE`            | beta-admission    | `/run/secrets/beta_admission_database_url`            |
+| `FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE`          | beta-admission    | `/run/secrets/beta_admission_bot_transport_hmac`      |
+| `FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE`            | beta-admission    | `/run/secrets/beta_admission_payload_hmac`            |
+| `FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE`             | api               | `/run/secrets/player_action_database_url`             |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | api               | `/run/secrets/api_player_action_transport_hmac`       |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`         | api               | `/run/secrets/api_player_action_payload_hmac`         |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`      | api               | `/run/secrets/api_player_action_capability_hmac`      |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`        | api               | `/run/secrets/api_player_action_semantic_hmac`        |
+| `FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE`       | api               | `/run/secrets/api_deposit_reference_protection`       |
+| `FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                | all DB clients    | `/run/configs/supabase_ca_certificate`                |
+| `FETANAGENT_STAGING_BOT_TOKEN_FILE`                              | bot               | `/run/secrets/telegram_bot_token`                     |
+| `FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE`                     | bot               | `/run/secrets/bot_beta_admission_transport_hmac`      |
+| `FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | bot               | `/run/secrets/bot_player_action_transport_hmac`       |
 
 The two transport-HMAC files must contain the same independently generated 32-byte lowercase-hex
 value, but they are intentionally separate host files and separate mounts. The bot cannot read the
@@ -67,8 +67,8 @@ service.
 
 All three database URLs must use the staging project's exact IPv6 direct endpoint:
 `db.spzpiyxheappsfyswewl.supabase.co:5432`, database `postgres`, and the bare dedicated username
-`payreplayy_beta_admission_runtime`, `payreplayy_owner_control_runtime`, or
-`payreplayy_player_actions_runtime`, with only `sslmode=verify-full`. Session-pooler runtime URLs are
+`fetanagent_beta_admission_runtime`, `fetanagent_owner_control_runtime`, or
+`fetanagent_player_actions_runtime`, with only `sslmode=verify-full`. Session-pooler runtime URLs are
 rejected. GitHub workflows may continue using the IPv4 session pooler only for short-lived
 administrator SQL because GitHub-hosted runners do not provide the VM's direct IPv6 path. Download
 the staging project's CA from Supabase, verify its
@@ -114,8 +114,8 @@ It enforces the four-service topology, manual profile, pinned architecture and b
 hardening settings, isolated file-secret set, private egress-capable network, loopback-only Owner
 access, disabled generic action/provider gates, and absence of public ingress or the production ref.
 
-Before any separately approved build, set `PAYREPLAYY_VCS_REF` to the reviewed full commit SHA and
-`PAYREPLAYY_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
+Before any separately approved build, set `FETANAGENT_VCS_REF` to the reviewed full commit SHA and
+`FETANAGENT_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
 that contains no `.env`/`.env.*` file and from a cleared process environment with no inherited
 direct secret variable. Supply only the two non-secret image selectors, fourteen external
 service-input selectors, and the verified public CA path selector explicitly. The future render must
@@ -123,23 +123,23 @@ disable Compose's implicit checkout `.env` loading:
 
 ```bash
 env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  PAYREPLAYY_VCS_REF=<reviewed-full-commit> \
-  PAYREPLAYY_IMAGE_TAG=<commit-derived-tag> \
-  PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE=<external-path> \
-  PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE=<external-path> \
-  PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE=<external-path> \
-  PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE=<external-path> \
-  PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE=<external-path> \
-  PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE=<verified-external-path> \
-  PAYREPLAYY_STAGING_BOT_TOKEN_FILE=<external-path> \
-  PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE=<external-path> \
-  PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE=<external-path> \
+  FETANAGENT_VCS_REF=<reviewed-full-commit> \
+  FETANAGENT_IMAGE_TAG=<commit-derived-tag> \
+  FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE=<external-path> \
+  FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE=<external-path> \
+  FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE=<external-path> \
+  FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE=<external-path> \
+  FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE=<external-path> \
+  FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE=<verified-external-path> \
+  FETANAGENT_STAGING_BOT_TOKEN_FILE=<external-path> \
+  FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE=<external-path> \
+  FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE=<external-path> \
   docker compose --env-file /dev/null --profile staging-manual \
     -f infra/compose.staging-beta.yaml config
 ```
@@ -157,8 +157,8 @@ The deployment helper fails before provisioning any runtime login unless the hos
 address, an IPv6 default route, and resolves the exact direct staging database hostname.
 
 An operator must also install the reviewed helper from the exact main
-commit as `/usr/local/sbin/payreplayy-staging-deploy-helper` with `root:root` ownership and mode
-`0755`. The dedicated `payreplayy-admin` account must be non-root, key-only, and granted
+commit as `/usr/local/sbin/fetanagent-staging-deploy-helper` with `root:root` ownership and mode
+`0755`. The dedicated `fetanagent-admin` account must be non-root, key-only, and granted
 noninteractive sudo for that helper only. It must not receive `sudo bash`, direct `sudo docker`,
 Docker-group membership, or Docker-socket access. The helper validates its own installed path,
 ownership, invoking sudo identity, exact argument shapes, incoming file allowlist, image revision
@@ -193,14 +193,14 @@ input, or VM command line.
 The three runtime passwords, all independently purposed HMAC values, and the deposit-reference
 protection key must differ. Keep the deposit-reference key stable for the lifetime of records
 encrypted under version 1; rotate only through a reviewed key-version migration. The VM key must authenticate only
-the non-root `payreplayy-admin` identity. The historical BotFather token shown in an earlier
+the non-root `fetanagent-admin` identity. The historical BotFather token shown in an earlier
 screenshot is compromised and must never be reused.
 
 `Staging beta deploy and smoke` is manual-only and dormant unless dispatched from the exact
 reviewed `main` commit with the staging project ref and DigitalOcean droplet ID typed back. `plan`
 only builds the four commit-labelled images. `deploy-and-smoke` additionally requires the
-protected `staging` environment, a dedicated `payreplayy-admin` SSH identity with noninteractive
-sudo access only to the root-owned `/usr/local/sbin/payreplayy-staging-deploy-helper`, pinned
+protected `staging` environment, a dedicated `fetanagent-admin` SSH identity with noninteractive
+sudo access only to the root-owned `/usr/local/sbin/fetanagent-staging-deploy-helper`, pinned
 `known_hosts`, a rotated staging bot token, the public Supabase client key, and three distinct narrow
 database passwords. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
@@ -247,7 +247,7 @@ The workflow must not receive an email, password, display name, access token, or
 ## Synthetic deposit receiver
 
 The manual `Staging synthetic receiver setup` workflow may configure only the fixed CBE Birr
-simulation receiver `PAYREPLAYY STAGING SIMULATION - DO NOT PAY` with masked value `****TEST` and
+simulation receiver `FETANAGENT STAGING SIMULATION - DO NOT PAY` with masked value `****TEST` and
 the customer message `SIMULATION ONLY — DO NOT SEND MONEY.` Run `inspect` first, then use
 `configure` only from the exact reviewed `main` commit with the staging ref, active Owner Auth UUID,
 and confirmation phrase. The workflow rejects production, refuses to replace an unknown or real

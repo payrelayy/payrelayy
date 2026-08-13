@@ -9,7 +9,7 @@ import {
   telegramPrivateActionSignatureInput,
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionResult,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 
 export interface TelegramPrivateActionClientConfig {
   readonly baseUrl: string;

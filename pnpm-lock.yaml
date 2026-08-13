@@ -25,13 +25,13 @@ importers:
 
   apps/api:
     dependencies:
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@payreplayy/contracts':
+      '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@payreplayy/domain':
+      '@fetanagent/domain':
         specifier: workspace:*
         version: link:../../packages/domain
       fastify:
@@ -47,13 +47,13 @@ importers:
 
   apps/admin:
     dependencies:
-      '@payreplayy/cbe-birr-fixtures':
+      '@fetanagent/cbe-birr-fixtures':
         specifier: workspace:*
         version: link:../../packages/cbe-birr-fixtures
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@payreplayy/contracts':
+      '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       fastify:
@@ -69,10 +69,10 @@ importers:
 
   apps/beta-admission:
     dependencies:
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@payreplayy/contracts':
+      '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
       fastify:
@@ -88,13 +88,13 @@ importers:
 
   apps/bot:
     dependencies:
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@payreplayy/contracts':
+      '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@payreplayy/i18n':
+      '@fetanagent/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
       grammy:
@@ -103,16 +103,16 @@ importers:
 
   apps/executor:
     dependencies:
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@payreplayy/domain':
+      '@fetanagent/domain':
         specifier: workspace:*
         version: link:../../packages/domain
 
   apps/maintenance:
     dependencies:
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
       pg:
@@ -125,19 +125,19 @@ importers:
 
   apps/worker:
     dependencies:
-      '@payreplayy/config':
+      '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
 
   packages/config:
     dependencies:
-      '@payreplayy/domain':
+      '@fetanagent/domain':
         specifier: workspace:*
         version: link:../domain
 
   packages/contracts:
     dependencies:
-      '@payreplayy/domain':
+      '@fetanagent/domain':
         specifier: workspace:*
         version: link:../domain
 

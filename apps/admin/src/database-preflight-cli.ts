@@ -1,4 +1,4 @@
-import { loadOwnerControlConfig } from '@payreplayy/config/owner-control';
+import { loadOwnerControlConfig } from '@fetanagent/config/owner-control';
 
 import { createOwnerControlPostgresRuntime } from './postgres-runtime.js';
 
@@ -6,7 +6,7 @@ const config = loadOwnerControlConfig();
 
 if (!config.runtime.enabled) {
   console.error(
-    'PayReplayy Owner-control database preflight is disabled. Enable only the dedicated staging runtime environment.',
+    'FetanAgent Owner-control database preflight is disabled. Enable only the dedicated staging runtime environment.',
   );
   process.exitCode = 1;
 } else {
@@ -16,7 +16,7 @@ if (!config.runtime.enabled) {
     console.info('Owner-control database preflight passed.');
   } catch {
     console.error(
-      'PayReplayy Owner-control database preflight did not complete. Check the restricted staging runtime configuration.',
+      'FetanAgent Owner-control database preflight did not complete. Check the restricted staging runtime configuration.',
     );
     process.exitCode = 1;
   }

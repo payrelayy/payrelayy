@@ -1,7 +1,7 @@
 import {
   OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
   type OwnerControlRuntimeConfig,
-} from '@payreplayy/config/owner-control';
+} from '@fetanagent/config/owner-control';
 
 const STAGING_SUPABASE_ORIGIN = 'https://spzpiyxheappsfyswewl.supabase.co';
 
@@ -22,14 +22,14 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>PayReplayy Owner</title>
+    <title>FetanAgent Owner</title>
     <link rel="stylesheet" href="/owner/styles.css" />
   </head>
   <body>
     <main class="shell">
       <header>
         <p class="eyebrow">Private staging control</p>
-        <h1>PayReplayy Owner</h1>
+        <h1>FetanAgent Owner</h1>
         <p class="lede">Issue one-time Telegram beta invitations from this SSH-only workspace.</p>
       </header>
 

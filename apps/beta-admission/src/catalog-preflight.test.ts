@@ -6,7 +6,7 @@ import {
   runBetaAdmissionCatalogPreflight,
   type BetaAdmissionPreflightRow,
 } from './catalog-preflight.js';
-import type { BetaAdmissionRuntimeConfig } from '@payreplayy/config/beta-admission';
+import type { BetaAdmissionRuntimeConfig } from '@fetanagent/config/beta-admission';
 
 const passingRow: BetaAdmissionPreflightRow = {
   runtime_login_identity_allowed: true,
@@ -43,7 +43,7 @@ const runtimeConfig = {
     host: 'db.spzpiyxheappsfyswewl.supabase.co',
     password: 'not-used-by-injected-pool',
     port: 5432,
-    user: 'payreplayy_beta_admission_runtime',
+    user: 'fetanagent_beta_admission_runtime',
   },
   tlsMode: 'verify-full',
   transportHmacSecret: 'a'.repeat(64),
@@ -79,10 +79,10 @@ describe('beta-admission catalog preflight contract', () => {
     expect(result.passed).toBe(false);
     expect(result.betaRoleOnlyExpectedMembers).toBe(false);
     expect(BETA_ADMISSION_CATALOG_PREFLIGHT_SQL).toContain(
-      "member_role.rolname not in ('payreplayy_beta_admission_runtime', 'postgres')",
+      "member_role.rolname not in ('fetanagent_beta_admission_runtime', 'postgres')",
     );
     expect(BETA_ADMISSION_CATALOG_PREFLIGHT_SQL).toContain(
-      "runtime_role.rolname = 'payreplayy_beta_admission_runtime'",
+      "runtime_role.rolname = 'fetanagent_beta_admission_runtime'",
     );
     expect(BETA_ADMISSION_CATALOG_PREFLIGHT_SQL).toContain('membership.admin_option');
   });

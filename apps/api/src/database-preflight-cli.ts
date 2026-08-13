@@ -1,4 +1,4 @@
-import { loadApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig } from '@fetanagent/config/api';
 
 import { runApiDatabasePreflight } from './database-preflight.js';
 
@@ -6,7 +6,7 @@ const config = loadApiConfig();
 
 if (!config.postgresRuntime.enabled) {
   console.error(
-    'PayReplayy API database preflight is disabled. It requires an API-only runtime secret environment.',
+    'FetanAgent API database preflight is disabled. It requires an API-only runtime secret environment.',
   );
   process.exitCode = 1;
 } else {
@@ -18,7 +18,7 @@ if (!config.postgresRuntime.enabled) {
     }
   } catch {
     console.error(
-      'PayReplayy API database preflight did not complete. Check the restricted runtime login and private connection configuration.',
+      'FetanAgent API database preflight did not complete. Check the restricted runtime login and private connection configuration.',
     );
     process.exitCode = 1;
   }

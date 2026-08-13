@@ -309,7 +309,7 @@ assert.deepEqual(
 );
 assert.match(
   configs,
-  /PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE:\?set the verified staging Supabase CA file/,
+  /FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE:\?set the verified staging Supabase CA file/,
 );
 
 for (const directSecretName of [
@@ -371,10 +371,10 @@ assert.equal(
   2,
   'both build and runtime bases must use the reviewed linux/amd64 digest',
 );
-assert.match(dockerfile, /pnpm --filter @payreplayy\/beta-admission\.\.\. run build/);
-assert.match(dockerfile, /pnpm --filter @payreplayy\/bot\.\.\. run build/);
-assert.match(dockerfile, /pnpm --filter @payreplayy\/admin\.\.\. run build/);
-assert.match(dockerfile, /pnpm --filter @payreplayy\/api\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @fetanagent\/beta-admission\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @fetanagent\/bot\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @fetanagent\/admin\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @fetanagent\/api\.\.\. run build/);
 assert.match(dockerfile, /FROM build-base AS beta-admission-build/);
 assert.match(dockerfile, /FROM build-base AS bot-build/);
 assert.match(dockerfile, /FROM build-base AS admin-build/);
@@ -399,7 +399,7 @@ assert.match(botImage, /CMD \["node", "apps\/bot\/dist\/index\.js"\]/);
 assert.match(adminImage, /127\.0\.0\.1:3002\/readyz/);
 assert.match(adminImage, /CMD \["node", "apps\/admin\/dist\/index\.js"\]/);
 const apiImage = dockerfile.split('FROM runtime-base AS api')[1];
-assert.match(apiImage, /USER payreplayy:payreplayy/);
+assert.match(apiImage, /USER fetanagent:fetanagent/);
 
 console.log(
   'staging beta artifacts verified: four manual-profile services, isolated Player-ID inputs, loopback-only Owner access, and locked financial/provider gates',

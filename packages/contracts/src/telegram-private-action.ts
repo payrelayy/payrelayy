@@ -5,7 +5,7 @@
  */
 export const TELEGRAM_PRIVATE_ACTION_PATH = '/internal/v1/telegram/private-action';
 export const TELEGRAM_PRIVATE_ACTION_CONTENT_TYPE =
-  'application/vnd.payreplayy.telegram-private-action+json';
+  'application/vnd.fetanagent.telegram-private-action+json';
 export const TELEGRAM_PRIVATE_ACTION_KEY_ID = 'v1';
 export const TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES = 16 * 1024;
 export const TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS = 60;
@@ -14,10 +14,10 @@ export const TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH = 22;
 export const TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS = 128;
 
 export const TELEGRAM_PRIVATE_ACTION_HEADERS = {
-  keyId: 'x-payreplayy-action-key-id',
-  nonce: 'x-payreplayy-action-nonce',
-  signature: 'x-payreplayy-action-signature',
-  timestamp: 'x-payreplayy-action-timestamp',
+  keyId: 'x-fetanagent-action-key-id',
+  nonce: 'x-fetanagent-action-nonce',
+  signature: 'x-fetanagent-action-signature',
+  timestamp: 'x-fetanagent-action-timestamp',
 } as const;
 
 /**
@@ -25,7 +25,7 @@ export const TELEGRAM_PRIVATE_ACTION_HEADERS = {
  * the raw nonce, and never share the private-inbox nonce namespace.
  */
 export const TELEGRAM_PRIVATE_ACTION_NONCE_DIGEST_DOMAIN =
-  'payreplayy:telegram:private-action:nonce:v1';
+  'fetanagent:telegram:private-action:nonce:v1';
 
 export interface TelegramPrivateActionIdentity {
   readonly version: 1;
@@ -126,7 +126,7 @@ export function telegramPrivateActionSignatureInput(
   input: TelegramPrivateActionSignatureInput,
 ): string {
   return [
-    'payreplayy-bot-api-private-action-v1',
+    'fetanagent-bot-api-private-action-v1',
     'POST',
     TELEGRAM_PRIVATE_ACTION_PATH,
     TELEGRAM_PRIVATE_ACTION_KEY_ID,

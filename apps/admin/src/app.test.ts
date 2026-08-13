@@ -1,7 +1,7 @@
 import {
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
   loadOwnerControlConfig,
-} from '@payreplayy/config/owner-control';
+} from '@fetanagent/config/owner-control';
 import { describe, expect, it } from 'vitest';
 
 import { buildOwnerControlApp } from './app.js';
@@ -18,7 +18,7 @@ function config() {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true',
-    OWNER_CONTROL_DATABASE_URL: `postgresql://payreplayy_owner_control_runtime:password@db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
+    OWNER_CONTROL_DATABASE_URL: `postgresql://fetanagent_owner_control_runtime:password@db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
     OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_for_staging_only',
   });
@@ -53,7 +53,7 @@ function runtime(
       issue: async () => ({
         expiresAt: '2026-08-11T12:00:00.000Z',
         inviteId,
-        inviteUrl: 'https://t.me/payrelayybot?start=raw-token-returned-once',
+        inviteUrl: 'https://t.me/fetanagentbot?start=raw-token-returned-once',
       }),
       revoke: async () => undefined,
     },
@@ -99,7 +99,7 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(response.headers['x-frame-options']).toBe('DENY');
     expect(response.headers['permissions-policy']).toContain('payment=()');
-    expect(response.body).toContain('PayReplayy Owner');
+    expect(response.body).toContain('FetanAgent Owner');
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
     expect(response.body).toContain('Explicit ownership confirmation');
@@ -140,8 +140,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('does not verify, approve, credit, or execute a payment');
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
     expect(response.body).not.toContain('innerHTML');
-    expect(response.body).toContain("url.pathname !== '/payrelayybot'");
-    expect(response.body).not.toContain('/PayReplayyBot');
+    expect(response.body).toContain("url.pathname !== '/fetanagentbot'");
+    expect(response.body).not.toContain('/FetanAgentBot');
     expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
     await app.close();
   });

@@ -1,8 +1,8 @@
-import type { NonceRetentionMaintenanceRuntimeConfig } from '@payreplayy/config/maintenance';
+import type { NonceRetentionMaintenanceRuntimeConfig } from '@fetanagent/config/maintenance';
 import { Pool } from 'pg';
 
-const NONCE_RETENTION_GROUP_ROLE = 'payreplayy_nonce_retention';
-const NONCE_RETENTION_RUNTIME_LOGIN_ROLE = 'payreplayy_nonce_retention_runtime';
+const NONCE_RETENTION_GROUP_ROLE = 'fetanagent_nonce_retention';
+const NONCE_RETENTION_RUNTIME_LOGIN_ROLE = 'fetanagent_nonce_retention_runtime';
 const NONCE_PURGE_FUNCTION =
   'app.purge_expired_telegram_private_ingress_nonce_reservations(integer)';
 const NONCE_RESERVATION_FUNCTION = 'app.reserve_telegram_private_ingress_nonce(text,timestamptz)';
@@ -18,9 +18,9 @@ const NONCE_RETENTION_DATABASE_PREFLIGHT_SQL = `
         'service_role',
         'anon',
         'authenticated',
-        'payreplayy_api',
-        'payreplayy_api_runtime',
-        'payreplayy_worker',
+        'fetanagent_api',
+        'fetanagent_api_runtime',
+        'fetanagent_worker',
         '${NONCE_RETENTION_GROUP_ROLE}'
       )
       and exists (
@@ -171,9 +171,9 @@ const NONCE_RETENTION_DATABASE_PREFLIGHT_SQL = `
         'anon',
         'authenticated',
         'service_role',
-        'payreplayy_api',
-        'payreplayy_api_runtime',
-        'payreplayy_worker'
+        'fetanagent_api',
+        'fetanagent_api_runtime',
+        'fetanagent_worker'
       ]) as broad_role(role_name)
       where pg_catalog.has_function_privilege(
         broad_role.role_name,
@@ -386,7 +386,7 @@ export function createNonceRetentionDatabasePreflightPool(
   config: Extract<NonceRetentionMaintenanceRuntimeConfig, { readonly enabled: true }>,
 ): NonceRetentionDatabasePreflightPool {
   return new Pool({
-    application_name: 'payreplayy-nonce-retention-preflight',
+    application_name: 'fetanagent-nonce-retention-preflight',
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,

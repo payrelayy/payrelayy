@@ -1,10 +1,10 @@
 {
-  "name": "@payreplayy/maintenance",
+  "name": "@fetanagent/maintenance",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@payreplayy/config": "workspace:*",
+    "@fetanagent/config": "workspace:*",
     "pg": "8.22.0"
   },
   "scripts": {

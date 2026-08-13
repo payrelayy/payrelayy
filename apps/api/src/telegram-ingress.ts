@@ -11,7 +11,7 @@ import {
   telegramPrivateIngressSignatureInput,
   type TelegramInboundLocale,
   type TelegramPrivateInboundEvent,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 
 export interface TelegramPrivateInboundRecord {
   readonly event: TelegramPrivateInboundEvent;
@@ -242,7 +242,7 @@ function payloadHmac(event: TelegramPrivateInboundEvent, payloadHmacSecret: stri
   });
 
   return `hmac-sha256-v1:${createHmac('sha256', Buffer.from(payloadHmacSecret, 'hex'))
-    .update('payreplayy-telegram-inbound-payload-v1\n', 'utf8')
+    .update('fetanagent-telegram-inbound-payload-v1\n', 'utf8')
     .update(canonicalPayload, 'utf8')
     .digest('hex')}`;
 }

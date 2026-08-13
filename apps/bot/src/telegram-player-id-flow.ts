@@ -1,5 +1,5 @@
-import type { TelegramPrivateActionResult } from '@payreplayy/contracts';
-import { DEFAULT_LOCALE, message } from '@payreplayy/i18n';
+import type { TelegramPrivateActionResult } from '@fetanagent/contracts';
+import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
 

@@ -1,6 +1,6 @@
 import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.js';
 
-const NONCE_RETENTION_RUNTIME_ROLE = 'payreplayy_nonce_retention_runtime';
+const NONCE_RETENTION_RUNTIME_ROLE = 'fetanagent_nonce_retention_runtime';
 const SUPABASE_PROJECT_REFERENCE_PATTERN = /^[a-z0-9]{20}$/;
 
 /**
@@ -58,7 +58,7 @@ function resolveNonceRetentionRuntimeUser(connectionUrl: URL): string {
   }
 
   throw new Error(
-    'NONCE_RETENTION_DATABASE_URL must use the dedicated PayReplayy nonce-retention runtime login.',
+    'NONCE_RETENTION_DATABASE_URL must use the dedicated FetanAgent nonce-retention runtime login.',
   );
 }
 
@@ -125,7 +125,7 @@ function loadNonceRetentionMaintenanceRuntimeConfig(
 
   const database = decodeDatabaseUrlComponent(connectionUrl.pathname.slice(1));
   if (database !== 'postgres') {
-    throw new Error('NONCE_RETENTION_DATABASE_URL must target the PayReplayy PostgreSQL database.');
+    throw new Error('NONCE_RETENTION_DATABASE_URL must target the FetanAgent PostgreSQL database.');
   }
 
   return {

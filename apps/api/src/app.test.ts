@@ -1,4 +1,4 @@
-import { loadApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig } from '@fetanagent/config/api';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';

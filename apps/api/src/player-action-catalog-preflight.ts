@@ -1,5 +1,5 @@
-const GROUP_ROLE = 'payreplayy_player_actions';
-const RUNTIME_ROLE = 'payreplayy_player_actions_runtime';
+const GROUP_ROLE = 'fetanagent_player_actions';
+const RUNTIME_ROLE = 'fetanagent_player_actions_runtime';
 
 const ALLOWED_FUNCTIONS = [
   'app.reserve_telegram_private_action_nonce(text,timestamptz)',

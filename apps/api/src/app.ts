@@ -1,4 +1,4 @@
-import { loadApiConfig, type ApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig, type ApiConfig } from '@fetanagent/config/api';
 import {
   TELEGRAM_PRIVATE_INGRESS_CONTENT_TYPE,
   TELEGRAM_PRIVATE_INGRESS_MAX_BODY_BYTES,
@@ -7,7 +7,7 @@ import {
   TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES,
   TELEGRAM_PRIVATE_ACTION_PATH,
   type TelegramPrivateActionEnvelope,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import Fastify from 'fastify';
 
 import {
@@ -52,14 +52,14 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
           'req.headers.authorization',
           'req.headers.cookie',
           'req.headers.x-telegram-bot-api-secret-token',
-          'req.headers.x-payreplayy-key-id',
-          'req.headers.x-payreplayy-nonce',
-          'req.headers.x-payreplayy-signature',
-          'req.headers.x-payreplayy-timestamp',
-          'req.headers.x-payreplayy-action-key-id',
-          'req.headers.x-payreplayy-action-nonce',
-          'req.headers.x-payreplayy-action-signature',
-          'req.headers.x-payreplayy-action-timestamp',
+          'req.headers.x-fetanagent-key-id',
+          'req.headers.x-fetanagent-nonce',
+          'req.headers.x-fetanagent-signature',
+          'req.headers.x-fetanagent-timestamp',
+          'req.headers.x-fetanagent-action-key-id',
+          'req.headers.x-fetanagent-action-nonce',
+          'req.headers.x-fetanagent-action-signature',
+          'req.headers.x-fetanagent-action-timestamp',
           '*.token',
           '*.password',
         ],
@@ -216,13 +216,13 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
 
   app.get('/healthz', async () => ({
     status: 'ok',
-    service: 'payreplayy-api',
+    service: 'fetanagent-api',
     financialActionsMode: config.financialActionsMode,
   }));
 
   app.get('/readyz', async (_request, reply) => {
     if (playerActionRuntime && (await playerActionRuntime.ready())) {
-      return reply.code(200).send({ ready: true, service: 'payreplayy-player-actions' });
+      return reply.code(200).send({ ready: true, service: 'fetanagent-player-actions' });
     }
     return reply.code(503).send({
       ready: false,

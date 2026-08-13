@@ -315,6 +315,17 @@ jobs:
             exit "$remote_status"
           fi
 
+      - name: Verify legacy VM cutover residue is absent
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper cutover-ready '$GITHUB_SHA'"
+
       - name: Verify the VM has direct IPv6 database readiness
         shell: bash
         env:

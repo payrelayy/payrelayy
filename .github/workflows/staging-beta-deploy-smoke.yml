@@ -102,7 +102,9 @@ jobs:
             --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-beta-admission:$tag" .
           docker build --pull=false --target bot \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-bot:$tag" .
-          for image in owner-control api beta-admission bot; do
+          docker build --pull=false --target gateway \
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-gateway:$tag" .
+          for image in owner-control api beta-admission bot gateway; do
             test "$(docker image inspect "fetanagent-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
           done
 
@@ -116,7 +118,8 @@ jobs:
             "fetanagent-owner-control:$tag" \
             "fetanagent-api:$tag" \
             "fetanagent-beta-admission:$tag" \
-            "fetanagent-bot:$tag"
+            "fetanagent-bot:$tag" \
+            "fetanagent-gateway:$tag"
 
       - name: Upload sealed image bundle
         if: inputs.mode == 'deploy-and-smoke'

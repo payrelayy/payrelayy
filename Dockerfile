@@ -99,3 +99,20 @@ USER fetanagent:fetanagent
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3000/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
 CMD ["node", "apps/api/dist/index.js"]
+
+# Public HTTPS is a separately selected deployment profile. This image contains only the reviewed
+# gateway configuration and static landing-page assets; it receives no application secret.
+FROM --platform=linux/amd64 caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="fetanagent-gateway" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+COPY infra/gateway/Caddyfile /etc/caddy/Caddyfile
+COPY infra/gateway/site /srv
+
+USER 10001:10001
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD ["caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

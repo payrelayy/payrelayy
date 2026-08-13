@@ -6,6 +6,8 @@ const infraDirectory = fileURLToPath(new URL('.', import.meta.url));
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const compose = await readFile(`${infraDirectory}compose.staging-beta.yaml`, 'utf8');
 const dockerfile = await readFile(`${repositoryRoot}Dockerfile`, 'utf8');
+const caddyfile = await readFile(`${infraDirectory}gateway/Caddyfile`, 'utf8');
+const landingPage = await readFile(`${infraDirectory}gateway/site/index.html`, 'utf8');
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -48,6 +50,7 @@ function sorted(values) {
 
 const services = topLevelSection(compose, 'services');
 const ownerService = childBlock(services, 'owner-control');
+const gatewayService = childBlock(services, 'gateway');
 const apiService = childBlock(services, 'api');
 const betaService = childBlock(services, 'beta-admission');
 const botService = childBlock(services, 'bot');
@@ -58,8 +61,8 @@ const secrets = topLevelSection(compose, 'secrets');
 const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gm)].map((match) => match[1]);
 assert.deepEqual(
   serviceNames,
-  ['owner-control', 'api', 'beta-admission', 'bot'],
-  'only Owner control, the Player-ID API, beta-admission, and bot are allowed',
+  ['owner-control', 'gateway', 'api', 'beta-admission', 'bot'],
+  'only Owner control, the gated public gateway, Player-ID API, beta-admission, and bot are allowed',
 );
 
 for (const [name, service] of [
@@ -87,6 +90,32 @@ for (const [name, service] of [
   assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/);
   assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/);
 }
+
+assert.match(gatewayService, /profiles: \[public-domain\]/);
+assert.match(gatewayService, /platform: linux\/amd64/);
+assert.match(gatewayService, /target: gateway/);
+assert.match(gatewayService, /user: '10001:10001'/);
+assert.match(gatewayService, /restart: 'no'/);
+assert.match(gatewayService, /read_only: true/);
+assert.match(gatewayService, /cap_drop:\s*\r?\n\s+- ALL/);
+assert.match(gatewayService, /cap_add:\s*\r?\n\s+- NET_BIND_SERVICE/);
+assert.match(gatewayService, /no-new-privileges:true/);
+assert.match(gatewayService, /pids_limit: 128/);
+assert.match(gatewayService, /max-size: 10m/);
+assert.match(gatewayService, /max-file: '3'/);
+assert.match(gatewayService, /ports:\s*\r?\n\s+- '80:80\/tcp'\s*\r?\n\s+- '443:443\/tcp'/);
+assert.match(
+  gatewayService,
+  /source: \/var\/lib\/fetanagent-gateway\/data\s*\r?\n\s+target: \/data/,
+);
+assert.match(
+  gatewayService,
+  /source: \/var\/lib\/fetanagent-gateway\/config\s*\r?\n\s+target: \/config/,
+);
+assert.match(gatewayService, /networks:\s*\r?\n\s+- owner_control_service/);
+assert.doesNotMatch(gatewayService, /staging_service|secrets:|configs:|docker\.sock/);
+assert.match(gatewayService, /condition: service_healthy/);
+assert.match(gatewayService, /caddy\s*\r?\n\s+- validate/);
 
 for (const service of [ownerService, betaService]) {
   assert.match(service, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'/);
@@ -352,17 +381,21 @@ assert.match(stagingNetwork, /enable_ipv6: true/, 'the staging service bridge mu
 
 assert.equal(
   countMatches(compose, /^\s+ports:\s*$/gm),
-  1,
-  'only Owner control may bind one host-loopback port',
+  2,
+  'Owner control and the separately gated HTTPS gateway are the only services that may bind ports',
 );
-assert.doesNotMatch(compose, /^\s+(expose|volumes|devices|privileged|network_mode):/m);
+assert.doesNotMatch(compose, /^\s+(expose|devices|privileged|network_mode):/m);
+for (const service of [ownerService, apiService, betaService, botService]) {
+  assert.doesNotMatch(service, /^\s+volumes:/m);
+}
 assert.doesNotMatch(betaService, /^\s+ports:/m);
 assert.doesNotMatch(apiService, /^\s+ports:/m);
 assert.doesNotMatch(botService, /^\s+ports:/m);
 assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker/i);
-assert.doesNotMatch(compose, /\b(?:nginx|caddy|traefik|haproxy)\b/i);
+assert.doesNotMatch(compose, /\b(?:nginx|traefik|haproxy)\b/i);
 assert.doesNotMatch(compose, /xzztugbgtulptnbpoelr/i, 'the production project ref is forbidden');
 assert.doesNotMatch(services, /^  (?:worker|executor|maintenance|proxy):\s*$/m);
+assert.doesNotMatch(compose, /^volumes:\s*$/m, 'named volumes are forbidden');
 
 const reviewedBase =
   'node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066';
@@ -382,6 +415,10 @@ assert.match(dockerfile, /FROM runtime-base AS beta-admission/);
 assert.match(dockerfile, /FROM runtime-base AS bot/);
 assert.match(dockerfile, /FROM runtime-base AS admin/);
 assert.match(dockerfile, /USER 10001:10001/);
+assert.match(
+  dockerfile,
+  /caddy:2\.11\.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway/,
+);
 
 const betaImage = dockerfile
   .split('FROM runtime-base AS beta-admission')[1]
@@ -401,6 +438,26 @@ assert.match(adminImage, /CMD \["node", "apps\/admin\/dist\/index\.js"\]/);
 const apiImage = dockerfile.split('FROM runtime-base AS api')[1];
 assert.match(apiImage, /USER fetanagent:fetanagent/);
 
+const gatewayImage = dockerfile.split(' AS gateway')[1];
+assert.match(gatewayImage, /org\.opencontainers\.image\.title="fetanagent-gateway"/);
+assert.match(gatewayImage, /COPY infra\/gateway\/Caddyfile \/etc\/caddy\/Caddyfile/);
+assert.match(gatewayImage, /COPY infra\/gateway\/site \/srv/);
+assert.match(gatewayImage, /USER 10001:10001/);
+assert.match(gatewayImage, /caddy", "validate"/);
+
+assert.match(caddyfile, /^\s*admin off$/m);
+assert.match(caddyfile, /protocols h1 h2/);
+assert.doesNotMatch(caddyfile, /\bh3\b|:80\s*\{|tls internal|on_demand_tls|acme_dns/i);
+assert.match(caddyfile, /fetanagent\.com, www\.fetanagent\.com/);
+assert.match(caddyfile, /owner\.fetanagent\.com/);
+assert.match(caddyfile, /reverse_proxy owner-control:3002/);
+assert.match(caddyfile, /Strict-Transport-Security "max-age=86400"/);
+assert.match(caddyfile, /Content-Security-Policy/);
+assert.doesNotMatch(caddyfile, /api:3000|beta-admission:3001|docker\.sock/);
+assert.match(landingPage, /https:\/\/t\.me\/FetanAgentBot/);
+assert.match(landingPage, /https:\/\/owner\.fetanagent\.com\/owner/);
+assert.doesNotMatch(landingPage, /\bPayRe(?:layy?|playy)\b/i);
+
 console.log(
-  'staging beta artifacts verified: four manual-profile services, isolated Player-ID inputs, loopback-only Owner access, and locked financial/provider gates',
+  'staging beta artifacts verified: four private services, a separately gated HTTPS gateway, isolated inputs, and locked financial/provider gates',
 );

@@ -2,9 +2,10 @@
 
 `compose.staging-beta.yaml` is a deployment artifact for private beta admission plus pending
 Player-ID registration. It does not run under the default Compose profile and it does not include a
-worker, executor, maintenance process, reverse proxy, public API host port, Docker socket,
-production project reference, Player-ID validation, or a live financial/provider action path.
-Owner control binds only VM loopback for access through an authenticated SSH tunnel.
+worker, executor, maintenance process, public API host port, Docker socket, production project
+reference, Player-ID validation, or a live financial/provider action path. Owner control retains
+its VM-loopback binding. A fifth, secret-free HTTPS gateway exists only in the separate
+`public-domain` profile and is governed by [`public-domain.md`](public-domain.md).
 
 The only services are:
 
@@ -14,13 +15,18 @@ The only services are:
 - `beta-admission`, an internal HTTP service on container port 3001 with a `/readyz` healthcheck;
   and
 - `bot`, exactly one Telegram long-polling process which waits for `beta-admission` readiness.
+- `gateway`, a separately selected Caddy edge which serves the static FetanAgent landing page and
+  proxies only authenticated Owner control. It cannot reach the API or beta-admission bridge.
 
-All four images use the immutable Linux/amd64 Node base in the repository `Dockerfile`, run as numeric
-UID/GID 10001, use a read-only root filesystem, drop every Linux capability, prevent privilege
-escalation, and have PID, memory, and CPU limits. The two project-scoped bridges are IPv6-enabled
+The four application images use the immutable Linux/amd64 Node base in the repository `Dockerfile`;
+the gateway uses a separately pinned official Caddy image. Every service runs as numeric UID/GID
+10001, uses a read-only root filesystem, prevents privilege escalation, and has PID, memory, and
+CPU limits. Application services drop every Linux capability; the gateway adds only
+`NET_BIND_SERVICE` so its non-root process can bind standard HTTPS ports. The two project-scoped bridges are IPv6-enabled
 and permit outbound Internet access for the exact staging Supabase direct database endpoint and
 Telegram HTTPS. The bot and admission service publish
-no port; Owner control publishes only `127.0.0.1:3002`. Docker JSON logs are bounded to three 10 MiB
+no port; Owner control publishes only `127.0.0.1:3002`. The gateway publishes TCP 80/443 only after
+the separate domain/firewall workflow is approved. Docker JSON logs are bounded to three 10 MiB
 files per service.
 
 ## Locked feature boundary
@@ -110,9 +116,9 @@ Supabase, GitHub, Telegram, or the VM:
 node infra/verify-staging-beta.mjs
 ```
 
-It enforces the four-service topology, manual profile, pinned architecture and build targets,
-hardening settings, isolated file-secret set, private egress-capable network, loopback-only Owner
-access, disabled generic action/provider gates, and absence of public ingress or the production ref.
+It enforces the four private-service topology, separately gated secret-free gateway, pinned
+architecture and build targets, hardening settings, isolated file-secret set, network separation,
+disabled generic action/provider gates, and absence of the production ref.
 
 Before any separately approved build, set `FETANAGENT_VCS_REF` to the reviewed full commit SHA and
 `FETANAGENT_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
@@ -198,7 +204,7 @@ screenshot is compromised and must never be reused.
 
 `Staging beta deploy and smoke` is manual-only and dormant unless dispatched from the exact
 reviewed `main` commit with the staging project ref and DigitalOcean droplet ID typed back. `plan`
-only builds the four commit-labelled images. `deploy-and-smoke` additionally requires the
+only builds the five commit-labelled images. `deploy-and-smoke` additionally requires the
 protected `staging` environment, a dedicated `fetanagent-admin` SSH identity with noninteractive
 sudo access only to the root-owned `/usr/local/sbin/fetanagent-staging-deploy-helper`, pinned
 `known_hosts`, a rotated staging bot token, the public Supabase client key, and three distinct narrow
@@ -231,9 +237,10 @@ than a transaction-local stale snapshot.
 
 ## Private Owner page and first-Owner gate
 
-The Owner-control service serves `/owner` only on its existing VM-loopback binding. Use an approved
-SSH local-forward to `127.0.0.1:3002`; never publish that port, add a reverse proxy, or browse via the
-droplet's public address. The page has a fixed content-security policy, receives only the staging
+The Owner-control service retains its existing VM-loopback binding. Before the public-domain stage,
+use an approved SSH local-forward to `127.0.0.1:3002`. After the separately gated HTTPS workflow
+passes, the only supported public route is `https://owner.fetanagent.com/owner` through the reviewed
+gateway; port 3002 itself remains unpublished. The page has a fixed content-security policy, receives only the staging
 publishable key as public configuration, signs in against the exact staging Auth origin, and keeps
 the short-lived access token in memory only. Closing or refreshing the page discards the token and
 the one-time invite receipt.

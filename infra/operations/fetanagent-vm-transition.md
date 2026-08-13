@@ -207,9 +207,11 @@ names. Therefore the migration must be proven applied before any current deploy-
 
 Use the reviewed Supabase staging bootstrap workflow from the acknowledged exact `main` commit:
 
-1. run its read-only migration plan;
+1. dispatch its read-only migration plan from `$REVIEWED_MAIN_COMMIT` and enter that same full SHA
+   in `confirm_main_commit_sha`;
 2. confirm this migration is pending or already canonical;
-3. apply only through the approved workflow;
+3. apply only through the approved workflow from the unchanged `$REVIEWED_MAIN_COMMIT`, entering
+   that same full SHA again;
 4. verify the canonical migration history and new runtime role names.
 
 Keep both application runtimes stopped during this step. Do not manually recreate roles, rename

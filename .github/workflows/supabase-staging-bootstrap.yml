@@ -15,6 +15,10 @@ on:
         description: Type the exact staging project ref to confirm the target
         required: true
         type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -38,6 +42,7 @@ jobs:
     env:
       REQUESTED_MODE: ${{ inputs.mode }}
       CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
     steps:
       - name: Require main and the exact staging ref
         shell: bash
@@ -69,6 +74,11 @@ jobs:
             exit 1
           fi
 
+          if [[ ! "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ || "$CONFIRMED_MAIN_COMMIT_SHA" != "$GITHUB_SHA" ]]; then
+            echo '::error::The confirmed commit does not match the exact workflow commit.'
+            exit 1
+          fi
+
   staging-migrations:
     name: Plan or apply staging migrations
     needs: validate-target
@@ -81,7 +91,18 @@ jobs:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Verify exact checked-out commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo '::error::The checked-out source does not match the exact workflow commit.'
+            exit 1
+          fi
 
       - name: Set up the pinned Supabase CLI
         uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3

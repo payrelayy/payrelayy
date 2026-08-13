@@ -14,19 +14,23 @@ The manually dispatched
 [`Supabase staging bootstrap`](../.github/workflows/supabase-staging-bootstrap.yml) workflow is the
 only repository automation for the separate staging database. It is restricted to `main`, uses the
 GitHub `staging` environment, and requires the operator to type the exact staging project ref
-`spzpiyxheappsfyswewl`. The production ref `xzztugbgtulptnbpoelr` is hard-rejected before any
-database command.
+`spzpiyxheappsfyswewl` and the exact full reviewed `main` commit SHA. The commit must be 40
+lowercase hexadecimal characters and must match the immutable workflow commit. The production ref
+`xzztugbgtulptnbpoelr` is hard-rejected before any database command.
 
 Configure exactly these GitHub environment secrets with staging-only values:
 
 - `SUPABASE_ACCESS_TOKEN`
 - `SUPABASE_DB_PASSWORD`
 
-Run `plan` first. Every dispatch links and verifies the staging ref, lists migration state, and runs
-`supabase db push --dry-run`. The `apply` mode performs that same plan before applying the canonical
-migrations and listing the resulting migration state. The workflow never includes seed data,
-targets production, deploys an application, starts Telegram, or enables a payment flow. Review the
-staging project's security and performance advisors separately after the first successful apply.
+Run `plan` first and enter the reviewed full SHA in `confirm_main_commit_sha`. Before `apply`, verify
+that `main` still points to that same reviewed commit, then dispatch `apply` from and confirm the
+same full SHA. Every dispatch verifies the checked-out commit and staging ref, lists migration
+state, and runs `supabase db push --dry-run`. The `apply` mode performs that same plan before
+applying the canonical migrations and listing the resulting migration state. The workflow never
+includes seed data, targets production, deploys an application, starts Telegram, or enables a
+payment flow. Review the staging project's security and performance advisors separately after the
+first successful apply.
 
 ## First staging Owner
 

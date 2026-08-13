@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createRedactedCbeBirrFixtureLookup,
   evaluateCbeBirrFixtureVerification,
   redactedCbeBirrFixtureIds,
   redactedCbeBirrFixtureLookup,
@@ -31,6 +32,16 @@ function evaluateFixture(
 }
 
 describe('CBE Birr fixture-only dry-run verifier', () => {
+  it('fails closed when asked to construct fixtures from an invalid timeline', () => {
+    const fixtureLookup = createRedactedCbeBirrFixtureLookup({
+      ...baselineInput,
+      openedAt: new Date('invalid'),
+    });
+    expect(fixtureLookup.lookup(redactedCbeBirrFixtureIds.valid)).toEqual({
+      kind: 'unavailable',
+    });
+  });
+
   it('would verify only the completed, matching, fresh synthetic fixture', () => {
     expect(evaluateFixture(redactedCbeBirrFixtureIds.valid)).toEqual({
       outcome: 'would_verify',

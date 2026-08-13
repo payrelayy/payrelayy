@@ -28,6 +28,24 @@ function runtime(
   overrides: Partial<OwnerControlPostgresRuntime> = {},
 ): OwnerControlPostgresRuntime {
   return {
+    assessments: {
+      assess: async (_actor, deposit, fixtureId) => ({
+        alreadyRecorded: false,
+        assessedAt: '2026-08-13T10:00:00.000Z',
+        assessmentId: '44444444-4444-4444-8444-444444444444',
+        depositIntentId: deposit.depositIntentId,
+        fixtureId: fixtureId as 'valid-completed',
+        outcome: 'would_review',
+        reasonCode: 'payment_stale',
+      }),
+      list: async () => [],
+      review: async (_actor, assessmentId, decision) => ({
+        alreadyRecorded: false,
+        assessmentId,
+        decision,
+        reviewedAt: '2026-08-13T10:01:00.000Z',
+      }),
+    },
     deposits: {
       list: async () => [],
     },
@@ -117,6 +135,9 @@ describe('Owner-control HTTP boundary', () => {
       '/v1/owner/player-registration-association-candidates?limit=25',
     );
     expect(response.body).toContain('/v1/owner/dry-run-deposit-intake?limit=25');
+    expect(response.body).toContain('/v1/owner/dry-run-fixture-assessments?limit=50');
+    expect(response.body).toContain('Run advisory fixture');
+    expect(response.body).toContain('does not verify, approve, credit, or execute a payment');
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
     expect(response.body).not.toContain('innerHTML');
     expect(response.body).toContain("url.pathname !== '/payrelayybot'");
@@ -323,6 +344,78 @@ describe('Owner-control HTTP boundary', () => {
       deposits: [{ playerId: '28379330', submittedReferenceMasked: '***A1B2' }],
     });
     expect(response.body).not.toContain('ciphertext');
+    await app.close();
+  });
+
+  it('records and reviews only an advisory redacted fixture result', async () => {
+    const depositIntentId = '55555555-5555-4555-8555-555555555555';
+    const assessmentId = '44444444-4444-4444-8444-444444444444';
+    let observedReview: readonly string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      now: () => new Date('2026-08-13T10:00:00.000Z'),
+      runtime: runtime({
+        deposits: {
+          list: async () => [
+            {
+              amountMinor: '2500',
+              currencyCode: 'ETB',
+              depositIntentId,
+              depositStatus: 'intake_received',
+              openedAt: '2026-08-09T10:00:00.000Z',
+              paymentDeadline: '2026-08-09T11:00:00.000Z',
+              playerId: '28379330',
+              providerCode: 'cbe_birr',
+              receiverAccountMasked: '****1234',
+              submissionStatus: 'received',
+              submittedAt: '2026-08-09T10:05:00.000Z',
+              submittedReferenceMasked: '***7890',
+            },
+          ],
+        },
+        assessments: {
+          assess: async (_actor, deposit, fixtureId) => ({
+            alreadyRecorded: false,
+            assessedAt: '2026-08-13T10:00:00.000Z',
+            assessmentId,
+            depositIntentId: deposit.depositIntentId,
+            fixtureId: fixtureId as 'pending-status',
+            outcome: 'would_review',
+            reasonCode: 'fixture_status_pending',
+          }),
+          list: async () => [],
+          review: async (actor, id, decision) => {
+            observedReview = [actor, id, decision];
+            return {
+              alreadyRecorded: false,
+              assessmentId: id,
+              decision,
+              reviewedAt: '2026-08-13T10:01:00.000Z',
+            };
+          },
+        },
+      }),
+    });
+    const assessmentResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/dry-run-deposit-intake/${depositIntentId}/fixture-assessments`,
+      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+      payload: { fixtureId: 'pending-status' },
+    });
+    expect(assessmentResponse.statusCode).toBe(201);
+    expect(assessmentResponse.json()).toMatchObject({
+      outcome: 'would_review',
+      reasonCode: 'fixture_status_pending',
+    });
+
+    const reviewResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/dry-run-fixture-assessments/${assessmentId}/review`,
+      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+      payload: { decision: 'manual_review_required' },
+    });
+    expect(reviewResponse.statusCode).toBe(200);
+    expect(observedReview).toEqual([authUserId, assessmentId, 'manual_review_required']);
     await app.close();
   });
 

@@ -112,7 +112,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </div>
           <p class="receipt-label">
             These are customer-entered CBE Birr intents and protected references only. Nothing here
-            is verified, credited, sent to KemerBet, or eligible for execution.
+            is verified, credited, sent to KemerBet, or eligible for execution. Redacted fixture
+            assessments below are advisory simulations, never provider evidence.
           </p>
           <div class="request-list" id="deposit-intake-list"></div>
         </section>
@@ -320,10 +321,83 @@ function validDepositIntake(value) {
       typeof value.openedAt !== 'string' || !Number.isFinite(Date.parse(value.openedAt)) ||
       typeof value.paymentDeadline !== 'string' || !Number.isFinite(Date.parse(value.paymentDeadline)) ||
       !(hasSubmission || hasNoSubmission)) return undefined;
-  return { amountMinor, openedAt: value.openedAt, playerId, receiverAccountMasked, reference };
+  return { amountMinor, depositIntentId, openedAt: value.openedAt, paymentDeadline: value.paymentDeadline,
+    playerId, receiverAccountMasked, reference };
 }
 
-function renderDepositIntake(deposits) {
+const dryRunFixtureChoices = [
+  ['valid-completed', 'Completed fixture'],
+  ['wrong-receiver', 'Wrong receiver fixture'],
+  ['wrong-amount', 'Wrong amount fixture'],
+  ['stale-completed', 'Stale fixture'],
+  ['future-completed', 'Future timestamp fixture'],
+  ['pending-status', 'Pending fixture'],
+  ['failed-status', 'Failed fixture'],
+  ['malformed-layout', 'Malformed fixture'],
+  ['unknown-status', 'Unknown status fixture'],
+  ['duplicate-reference', 'Duplicate reference fixture'],
+  ['unavailable-source', 'Unavailable source fixture'],
+];
+
+function validDryRunAssessment(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const assessmentId = typeof value.assessmentId === 'string' ? value.assessmentId : undefined;
+  const depositIntentId = typeof value.depositIntentId === 'string' ? value.depositIntentId : undefined;
+  const fixtureId = typeof value.fixtureId === 'string' ? value.fixtureId : undefined;
+  const outcome = value.outcome;
+  const reasonCode = typeof value.reasonCode === 'string' ? value.reasonCode : undefined;
+  const reviewed =
+    (value.reviewDecision === undefined && value.reviewedAt === undefined) ||
+    ((value.reviewDecision === 'acknowledged' ||
+      value.reviewDecision === 'manual_review_required') &&
+      typeof value.reviewedAt === 'string' &&
+      Number.isFinite(Date.parse(value.reviewedAt)));
+  if (!assessmentId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assessmentId) ||
+      !depositIntentId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(depositIntentId) ||
+      !fixtureId || !dryRunFixtureChoices.some(([id]) => id === fixtureId) ||
+      (outcome !== 'would_verify' && outcome !== 'would_reject' && outcome !== 'would_review') ||
+      !reasonCode || typeof value.assessedAt !== 'string' || !Number.isFinite(Date.parse(value.assessedAt)) || !reviewed) return undefined;
+  return { assessedAt: value.assessedAt, assessmentId, depositIntentId, fixtureId, outcome,
+    reasonCode, reviewDecision: value.reviewDecision, reviewedAt: value.reviewedAt };
+}
+
+async function assessDryRunDeposit(deposit, fixtureId) {
+  if (!deposit.reference) return;
+  setNotice('Running redacted advisory fixture assessment\u2026');
+  try {
+    const response = await ownerRequest('/v1/owner/dry-run-deposit-intake/' +
+      encodeURIComponent(deposit.depositIntentId) + '/fixture-assessments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fixtureId }),
+    });
+    if (!response.ok) throw new Error('assessment');
+    setNotice('Advisory fixture result recorded. No payment was verified or approved.');
+    await loadDepositIntake();
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Advisory fixture assessment failed. The payment ledger was not changed.');
+  }
+}
+
+async function reviewDryRunAssessment(assessmentId, decision) {
+  if (!window.confirm('This records an advisory review only. It does not verify, approve, credit, or execute a payment.')) return;
+  setNotice('Recording advisory Owner review\u2026');
+  try {
+    const response = await ownerRequest('/v1/owner/dry-run-fixture-assessments/' +
+      encodeURIComponent(assessmentId) + '/review', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    });
+    if (!response.ok) throw new Error('review');
+    setNotice('Advisory review recorded. Financial actions remain disabled.');
+    await loadDepositIntake();
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Advisory review failed. No payment action was started.');
+  }
+}
+
+function renderDepositIntake(deposits, assessments) {
   clearDepositIntake();
   if (deposits.length === 0) {
     const empty = document.createElement('p');
@@ -342,6 +416,46 @@ function renderDepositIntake(deposits) {
     metadata.textContent = 'CBE Birr \u00b7 ' + deposit.receiverAccountMasked + ' \u00b7 opened ' +
       new Date(deposit.openedAt).toLocaleString() + (deposit.reference ? ' \u00b7 reference ' + deposit.reference : ' \u00b7 awaiting reference');
     card.append(title, metadata);
+    const latest = assessments.find((assessment) => assessment.depositIntentId === deposit.depositIntentId);
+    if (latest) {
+      const result = document.createElement('p');
+      result.className = 'request-meta';
+      result.textContent = 'Advisory only: ' + latest.outcome.replaceAll('_', ' ') + ' \u00b7 ' +
+        latest.reasonCode.replaceAll('_', ' ') + (latest.reviewDecision ? ' \u00b7 ' + latest.reviewDecision.replaceAll('_', ' ') : '');
+      card.append(result);
+      if (!latest.reviewDecision) {
+        const reviewActions = document.createElement('div');
+        reviewActions.className = 'review-actions';
+        const acknowledge = document.createElement('button');
+        acknowledge.type = 'button';
+        acknowledge.textContent = 'Acknowledge simulation';
+        acknowledge.addEventListener('click', () => reviewDryRunAssessment(latest.assessmentId, 'acknowledged'));
+        const manual = document.createElement('button');
+        manual.type = 'button';
+        manual.className = 'secondary';
+        manual.textContent = 'Require manual review';
+        manual.addEventListener('click', () => reviewDryRunAssessment(latest.assessmentId, 'manual_review_required'));
+        reviewActions.append(acknowledge, manual);
+        card.append(reviewActions);
+      }
+    }
+    if (deposit.reference) {
+      const controls = document.createElement('div');
+      controls.className = 'review-actions';
+      const fixtureSelect = document.createElement('select');
+      for (const [id, label] of dryRunFixtureChoices) {
+        const option = document.createElement('option');
+        option.value = id;
+        option.textContent = label;
+        fixtureSelect.append(option);
+      }
+      const assessButton = document.createElement('button');
+      assessButton.type = 'button';
+      assessButton.textContent = 'Run advisory fixture';
+      assessButton.addEventListener('click', () => assessDryRunDeposit(deposit, fixtureSelect.value));
+      controls.append(fixtureSelect, assessButton);
+      card.append(controls);
+    }
     depositIntakeList.append(card);
   }
 }
@@ -468,16 +582,19 @@ async function loadAssociationCandidates() {
 }
 
 async function loadDepositIntake() {
-  const response = await ownerRequest('/v1/owner/dry-run-deposit-intake?limit=25', {
-    method: 'GET',
-    headers: {},
-  });
-  if (!response.ok) throw new Error('deposit_queue');
-  const payload = await response.json();
+  const [response, assessmentResponse] = await Promise.all([
+    ownerRequest('/v1/owner/dry-run-deposit-intake?limit=25', { method: 'GET', headers: {} }),
+    ownerRequest('/v1/owner/dry-run-fixture-assessments?limit=50', { method: 'GET', headers: {} }),
+  ]);
+  if (!response.ok || !assessmentResponse.ok) throw new Error('deposit_queue');
+  const [payload, assessmentPayload] = await Promise.all([response.json(), assessmentResponse.json()]);
   if (!payload || !Array.isArray(payload.deposits) || payload.deposits.length > 25) throw new Error('deposit_queue');
+  if (!assessmentPayload || !Array.isArray(assessmentPayload.assessments) || assessmentPayload.assessments.length > 50) throw new Error('deposit_queue');
   const deposits = payload.deposits.map(validDepositIntake);
+  const assessments = assessmentPayload.assessments.map(validDryRunAssessment);
   if (deposits.some((deposit) => !deposit)) throw new Error('deposit_queue');
-  renderDepositIntake(deposits);
+  if (assessments.some((assessment) => !assessment)) throw new Error('deposit_queue');
+  renderDepositIntake(deposits, assessments);
 }
 
 async function loadOwnerPlayerQueues() {

@@ -25,15 +25,20 @@ function completedFixture(
   ].join('\n');
 }
 
-function statusFixture(status: string, reference: string): string {
+function statusFixture(
+  status: string,
+  reference: string,
+  amountMinor: number,
+  occurredAt: string,
+): string {
   return [
     'schema=CBE_BIRR_DRY_RUN_V1',
     'provider=cbe_birr',
     `status=${status}`,
     `canonical_reference=${reference}`,
-    'amount_minor=2500',
+    `amount_minor=${amountMinor}`,
     'receiver_key=fixture-receiver-primary',
-    'occurred_at=2026-08-09T10:10:00.000Z',
+    `occurred_at=${occurredAt}`,
     '',
   ].join('\n');
 }
@@ -52,83 +57,141 @@ export const redactedCbeBirrFixtureIds = {
   unavailable: 'unavailable-source',
 } as const;
 
-const fixtureResponses: Readonly<Record<string, CbeBirrFixtureLookupResponse>> = {
-  [redactedCbeBirrFixtureIds.valid]: {
-    kind: 'found',
-    redactedReceipt: completedFixture(
-      'FX-00000001',
-      2500,
-      'fixture-receiver-primary',
-      '2026-08-09T10:10:00.000Z',
-    ),
-  },
-  [redactedCbeBirrFixtureIds.wrongReceiver]: {
-    kind: 'found',
-    redactedReceipt: completedFixture(
-      'FX-00000002',
-      2500,
-      'fixture-receiver-other',
-      '2026-08-09T10:10:00.000Z',
-    ),
-  },
-  [redactedCbeBirrFixtureIds.wrongAmount]: {
-    kind: 'found',
-    redactedReceipt: completedFixture(
-      'FX-00000003',
-      2600,
-      'fixture-receiver-primary',
-      '2026-08-09T10:10:00.000Z',
-    ),
-  },
-  [redactedCbeBirrFixtureIds.stale]: {
-    kind: 'found',
-    redactedReceipt: completedFixture(
-      'FX-00000004',
-      2500,
-      'fixture-receiver-primary',
-      '2026-08-09T09:59:59.999Z',
-    ),
-  },
-  [redactedCbeBirrFixtureIds.future]: {
-    kind: 'found',
-    redactedReceipt: completedFixture(
-      'FX-00000005',
-      2500,
-      'fixture-receiver-primary',
-      '2026-08-09T10:16:00.000Z',
-    ),
-  },
-  [redactedCbeBirrFixtureIds.pending]: {
-    kind: 'found',
-    redactedReceipt: statusFixture('pending', 'FX-00000006'),
-  },
-  [redactedCbeBirrFixtureIds.failed]: {
-    kind: 'found',
-    redactedReceipt: statusFixture('failed', 'FX-00000007'),
-  },
-  [redactedCbeBirrFixtureIds.malformed]: {
-    kind: 'found',
-    redactedReceipt: 'redacted fixture layout deliberately malformed\n',
-  },
-  [redactedCbeBirrFixtureIds.unknown]: {
-    kind: 'found',
-    redactedReceipt: statusFixture('awaiting_settlement', 'FX-00000008'),
-  },
-  [redactedCbeBirrFixtureIds.duplicate]: {
-    kind: 'found',
-    redactedReceipt: completedFixture(
-      'FX-00000009',
-      2500,
-      'fixture-receiver-primary',
-      '2026-08-09T10:10:00.000Z',
-    ),
-  },
-  [redactedCbeBirrFixtureIds.unavailable]: { kind: 'unavailable' },
-};
+export interface RedactedCbeBirrFixtureTimeline {
+  readonly assessedAt: Date;
+  readonly expectedAmountMinor: number;
+  readonly openedAt: Date;
+  readonly paymentDeadlineAt: Date;
+}
 
-/** A local lookup only; it intentionally has no network, provider, database, or filesystem work. */
-export const redactedCbeBirrFixtureLookup: CbeBirrFixtureLookup = {
-  lookup(fixtureId) {
-    return fixtureResponses[fixtureId] ?? { kind: 'missing' };
-  },
-};
+/**
+ * Build wholly synthetic fixture timestamps relative to the dry-run intent under review. This
+ * keeps a fresh scenario fresh for a newly opened intent without introducing provider data.
+ */
+export function createRedactedCbeBirrFixtureLookup(
+  timeline: RedactedCbeBirrFixtureTimeline,
+): CbeBirrFixtureLookup {
+  const assessedTime = timeline.assessedAt.getTime();
+  const openedTime = timeline.openedAt.getTime();
+  const paymentDeadlineTime = timeline.paymentDeadlineAt.getTime();
+  if (
+    !Number.isFinite(assessedTime) ||
+    !Number.isFinite(openedTime) ||
+    !Number.isFinite(paymentDeadlineTime) ||
+    openedTime >= paymentDeadlineTime ||
+    !Number.isSafeInteger(timeline.expectedAmountMinor) ||
+    timeline.expectedAmountMinor < 1 ||
+    timeline.expectedAmountMinor >= Number.MAX_SAFE_INTEGER
+  ) {
+    return { lookup: () => ({ kind: 'unavailable' }) };
+  }
+
+  const latestFreshTime = Math.min(assessedTime, paymentDeadlineTime);
+  const freshTime = new Date(
+    Math.max(openedTime, openedTime + Math.floor((latestFreshTime - openedTime) / 2)),
+  ).toISOString();
+  const staleTime = new Date(openedTime - 1).toISOString();
+  const futureTime = new Date(assessedTime + 6 * 60 * 1_000).toISOString();
+  const fixtureResponses: Readonly<Record<string, CbeBirrFixtureLookupResponse>> = {
+    [redactedCbeBirrFixtureIds.valid]: {
+      kind: 'found',
+      redactedReceipt: completedFixture(
+        'FX-00000001',
+        timeline.expectedAmountMinor,
+        'fixture-receiver-primary',
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.wrongReceiver]: {
+      kind: 'found',
+      redactedReceipt: completedFixture(
+        'FX-00000002',
+        timeline.expectedAmountMinor,
+        'fixture-receiver-other',
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.wrongAmount]: {
+      kind: 'found',
+      redactedReceipt: completedFixture(
+        'FX-00000003',
+        timeline.expectedAmountMinor + 1,
+        'fixture-receiver-primary',
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.stale]: {
+      kind: 'found',
+      redactedReceipt: completedFixture(
+        'FX-00000004',
+        timeline.expectedAmountMinor,
+        'fixture-receiver-primary',
+        staleTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.future]: {
+      kind: 'found',
+      redactedReceipt: completedFixture(
+        'FX-00000005',
+        timeline.expectedAmountMinor,
+        'fixture-receiver-primary',
+        futureTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.pending]: {
+      kind: 'found',
+      redactedReceipt: statusFixture(
+        'pending',
+        'FX-00000006',
+        timeline.expectedAmountMinor,
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.failed]: {
+      kind: 'found',
+      redactedReceipt: statusFixture(
+        'failed',
+        'FX-00000007',
+        timeline.expectedAmountMinor,
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.malformed]: {
+      kind: 'found',
+      redactedReceipt: 'redacted fixture layout deliberately malformed\n',
+    },
+    [redactedCbeBirrFixtureIds.unknown]: {
+      kind: 'found',
+      redactedReceipt: statusFixture(
+        'awaiting_settlement',
+        'FX-00000008',
+        timeline.expectedAmountMinor,
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.duplicate]: {
+      kind: 'found',
+      redactedReceipt: completedFixture(
+        'FX-00000009',
+        timeline.expectedAmountMinor,
+        'fixture-receiver-primary',
+        freshTime,
+      ),
+    },
+    [redactedCbeBirrFixtureIds.unavailable]: { kind: 'unavailable' },
+  };
+
+  return {
+    lookup(fixtureId) {
+      return fixtureResponses[fixtureId] ?? { kind: 'missing' };
+    },
+  };
+}
+
+/** A stable baseline used only by package-level fixture regression tests. */
+export const redactedCbeBirrFixtureLookup = createRedactedCbeBirrFixtureLookup({
+  assessedAt: new Date('2026-08-09T10:10:00.000Z'),
+  expectedAmountMinor: 2500,
+  openedAt: new Date('2026-08-09T10:00:00.000Z'),
+  paymentDeadlineAt: new Date('2026-08-09T11:00:00.000Z'),
+});

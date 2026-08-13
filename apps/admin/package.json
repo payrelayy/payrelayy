@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@payreplayy/cbe-birr-fixtures": "workspace:*",
     "@payreplayy/config": "workspace:*",
     "@payreplayy/contracts": "workspace:*",
     "fastify": "^5.0.0",

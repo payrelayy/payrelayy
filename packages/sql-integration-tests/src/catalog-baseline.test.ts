@@ -2497,6 +2497,187 @@ describe('disposable SQL migration baseline', () => {
       },
     ]);
 
+    const fixtureBoundary = await client.query<{
+      readonly assessments_forced_rls: boolean;
+      readonly assessments_have_no_policies: boolean;
+      readonly owner_can_list_assessments: boolean;
+      readonly owner_can_record_assessment: boolean;
+      readonly owner_can_review_assessment: boolean;
+      readonly owner_has_no_assessment_table_access: boolean;
+      readonly public_record_assessment_denied: boolean;
+      readonly reviews_forced_rls: boolean;
+      readonly reviews_have_no_policies: boolean;
+    }>(`
+      select
+        assessment_table.relrowsecurity and assessment_table.relforcerowsecurity
+          as assessments_forced_rls,
+        review_table.relrowsecurity and review_table.relforcerowsecurity
+          as reviews_forced_rls,
+        not exists (
+          select 1 from pg_policy policy
+          where policy.polrelid in (assessment_table.oid, review_table.oid)
+        ) as assessments_have_no_policies,
+        not exists (
+          select 1 from pg_policy policy where policy.polrelid = review_table.oid
+        ) as reviews_have_no_policies,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)',
+          'execute'
+        ) as owner_can_record_assessment,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)',
+          'execute'
+        ) as owner_can_review_assessment,
+        has_function_privilege(
+          'payreplayy_owner_control',
+          'app.list_owner_dry_run_fixture_assessments(uuid,integer)',
+          'execute'
+        ) as owner_can_list_assessments,
+        not has_table_privilege(
+          'payreplayy_owner_control', assessment_table.oid,
+          'select,insert,update,delete,truncate,references,trigger'
+        ) and not has_table_privilege(
+          'payreplayy_owner_control', review_table.oid,
+          'select,insert,update,delete,truncate,references,trigger'
+        ) as owner_has_no_assessment_table_access,
+        not exists (
+          select 1
+          from pg_proc procedure
+          cross join lateral aclexplode(
+            coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+          ) acl
+          where procedure.oid =
+            'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)'::regprocedure
+            and acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+        ) as public_record_assessment_denied
+      from pg_class assessment_table
+      join pg_namespace namespace on namespace.oid = assessment_table.relnamespace
+      join pg_class review_table on review_table.relname = 'deposit_dry_run_fixture_reviews'
+        and review_table.relnamespace = namespace.oid
+      where namespace.nspname = 'app'
+        and assessment_table.relname = 'deposit_dry_run_fixture_assessments'
+    `);
+    expect(fixtureBoundary.rows).toEqual([
+      {
+        assessments_forced_rls: true,
+        assessments_have_no_policies: true,
+        owner_can_list_assessments: true,
+        owner_can_record_assessment: true,
+        owner_can_review_assessment: true,
+        owner_has_no_assessment_table_access: true,
+        public_record_assessment_denied: true,
+        reviews_forced_rls: true,
+        reviews_have_no_policies: true,
+      },
+    ]);
+
+    const fixtureAssessment = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly assessment_id: string;
+    }>(
+      'payreplayy_owner_control',
+      `select assessment_id, already_recorded
+       from app.record_owner_dry_run_fixture_assessment(
+         $1::uuid, $2::uuid, 'pending-status', 'would_review', 'fixture_status_pending'
+       )`,
+      [ownerAuthUserId, depositIntentId],
+    );
+    expect(fixtureAssessment).toEqual([expect.objectContaining({ already_recorded: false })]);
+    const fixtureAssessmentId = fixtureAssessment[0]!.assessment_id;
+    const fixtureAssessmentReplay = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly assessment_id: string;
+    }>(
+      'payreplayy_owner_control',
+      `select assessment_id, already_recorded
+       from app.record_owner_dry_run_fixture_assessment(
+         $1::uuid, $2::uuid, 'pending-status', 'would_review', 'fixture_status_pending'
+       )`,
+      [ownerAuthUserId, depositIntentId],
+    );
+    expect(fixtureAssessmentReplay).toEqual([
+      { already_recorded: true, assessment_id: fixtureAssessmentId },
+    ]);
+
+    const fixtureReview = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly assessment_id: string;
+      readonly decision: string;
+    }>(
+      'payreplayy_owner_control',
+      `select assessment_id, decision, already_recorded
+       from app.review_owner_dry_run_fixture_assessment(
+         $1::uuid, $2::uuid, 'manual_review_required'
+       )`,
+      [ownerAuthUserId, fixtureAssessmentId],
+    );
+    expect(fixtureReview).toEqual([
+      {
+        already_recorded: false,
+        assessment_id: fixtureAssessmentId,
+        decision: 'manual_review_required',
+      },
+    ]);
+
+    const fixtureProjection = await queryAsRole<{
+      readonly assessment_id: string;
+      readonly outcome: string;
+      readonly review_decision: string;
+    }>(
+      'payreplayy_owner_control',
+      `select assessment_id, outcome, review_decision
+       from app.list_owner_dry_run_fixture_assessments($1::uuid, 50)
+       where assessment_id = $2::uuid`,
+      [ownerAuthUserId, fixtureAssessmentId],
+    );
+    expect(fixtureProjection).toEqual([
+      {
+        assessment_id: fixtureAssessmentId,
+        outcome: 'would_review',
+        review_decision: 'manual_review_required',
+      },
+    ]);
+
+    await expect(
+      client.query(
+        `update app.deposit_dry_run_fixture_assessments
+            set reason_code = 'amount_mismatch'
+          where id = $1::uuid`,
+        [fixtureAssessmentId],
+      ),
+    ).rejects.toThrow(/append-only/u);
+
+    const advisoryRows = await client.query<{
+      readonly assessments: number;
+      readonly assessment_audits: number;
+      readonly review_audits: number;
+      readonly reviews: number;
+    }>(
+      `select
+         (select count(*)::integer from app.deposit_dry_run_fixture_assessments)
+           as assessments,
+         (select count(*)::integer from app.deposit_dry_run_fixture_reviews) as reviews,
+         (select count(*)::integer from app.audit_events
+           where action = 'deposit.dry_run_fixture_assessed') as assessment_audits,
+         (select count(*)::integer from app.audit_events
+           where action = 'deposit.dry_run_fixture_reviewed') as review_audits`,
+    );
+    expect(advisoryRows.rows).toEqual([
+      { assessment_audits: 1, assessments: 1, review_audits: 1, reviews: 1 },
+    ]);
+
+    await expect(
+      queryAsRole(
+        'payreplayy_api',
+        `select * from app.record_owner_dry_run_fixture_assessment(
+          $1::uuid, $2::uuid, 'pending-status', 'would_review', 'fixture_status_pending'
+        )`,
+        [ownerAuthUserId, depositIntentId],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+
     const inertLedger = await client.query<{
       readonly claims: number;
       readonly evidence: number;

@@ -47,6 +47,9 @@ importers:
 
   apps/admin:
     dependencies:
+      '@payreplayy/cbe-birr-fixtures':
+        specifier: workspace:*
+        version: link:../../packages/cbe-birr-fixtures
       '@payreplayy/config':
         specifier: workspace:*
         version: link:../../packages/config

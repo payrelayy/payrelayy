@@ -25,12 +25,13 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          `Dry-run CBE Birr deposit: ${formatMinorEtb(result.amountMinor)} ETB.`,
-          `${result.customerInstruction}`,
-          `Receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
-          `Deadline: ${result.paymentDeadline}.`,
-          `After paying, send /reference ${result.depositToken} TRANSACTION_REFERENCE.`,
-          'This records intake only; payment verification and KemerBet execution remain disabled.',
+          'SIMULATION ONLY — DO NOT SEND MONEY.',
+          `Dry-run CBE Birr deposit simulation: ${formatMinorEtb(result.amountMinor)} ETB.`,
+          `Test instruction: ${result.customerInstruction}`,
+          `Synthetic receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
+          `Test deadline: ${result.paymentDeadline}.`,
+          `To test protected reference capture, send /reference ${result.depositToken} TEST_REFERENCE.`,
+          'No payment is verified or executed, and KemerBet execution remains disabled.',
         ].join('\n'),
       };
     case 'deposit_reference_received':

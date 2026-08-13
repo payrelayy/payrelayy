@@ -58,6 +58,10 @@ submission at `received`. All financial feature switches must remain disabled, s
 contact CBE Birr, create provider evidence or a payment claim, enqueue verification, call KemerBet,
 or execute a deposit. Screenshot/PDF intake and provider authority remain later reviewed stages.
 
+The staging-only simulation uses a fixed synthetic receiver labelled `DO NOT PAY`. Its customer
+instruction explicitly says `SIMULATION ONLY — DO NOT SEND MONEY`; no real payment destination is
+configured by that workflow.
+
 ## Withdrawal boundary
 
 PayReplayy validates a KemerBet withdrawal Player ID and code. Only an existing, valid,

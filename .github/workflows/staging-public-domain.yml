@@ -1,0 +1,148 @@
+name: Staging public domain edge
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect prerequisites, publish HTTPS, or stop only the public gateway
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - publish
+          - stop
+      confirm_domain:
+        description: Type fetanagent.com
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact deployed full main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_cloud_firewall:
+        description: Type cloud-firewall-attached for inspect/publish, or stop for an emergency stop
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-public-domain
+  cancel-in-progress: false
+
+env:
+  PUBLIC_DOMAIN: fetanagent.com
+  STAGING_DROPLET_ID: '590666364'
+
+jobs:
+  edge:
+    name: Guarded public HTTPS edge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact main contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate exact target and protected SSH inputs
+        id: target
+        shell: bash
+        env:
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_DOMAIN: ${{ inputs.confirm_domain }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_FIREWALL: ${{ inputs.confirm_cloud_firewall }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_DOMAIN" == "$PUBLIC_DOMAIN" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|publish|stop)$ ]]
+          if [[ "$REQUESTED_MODE" == 'stop' ]]; then
+            [[ "$CONFIRMED_FIREWALL" == 'stop' ]]
+          else
+            [[ "$CONFIRMED_FIREWALL" == 'cloud-firewall-attached' ]]
+          fi
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+          protected="$RUNNER_TEMP/protected"
+          install -d -m 0700 "$protected"
+          umask 077
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$protected/known-hosts"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
+          echo "protected=$protected" >> "$GITHUB_OUTPUT"
+          echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect DNS, UFW, ports, release, and gateway image without publishing
+        if: inputs.mode == 'inspect'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper public-edge-ready"
+
+      - name: Start only the reviewed public gateway
+        id: publish
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-public-edge '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          echo 'started=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify public HTTPS and authenticated Owner page boundary
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..18}; do
+            if landing="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 https://fetanagent.com/)" && \
+              grep -Fq '<title>FetanAgent</title>' <<<"$landing" && \
+              owner_headers="$(curl --fail --silent --show-error --dump-header - --output /dev/null --proto '=https' --tlsv1.2 --max-time 10 https://owner.fetanagent.com/owner)" && \
+              grep -Fqi 'strict-transport-security: max-age=86400' <<<"$owner_headers"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo '::error::The public HTTPS smoke did not pass within three minutes.'
+          exit 1
+
+      - name: Roll back the public gateway after a failed publish
+        if: failure() && inputs.mode == 'publish' && steps.publish.outputs.started == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
+            "sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop-public-edge"
+
+      - name: Stop only the public gateway
+        if: inputs.mode == 'stop'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop-public-edge"

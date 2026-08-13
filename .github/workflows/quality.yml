@@ -68,5 +68,16 @@ jobs:
             docker compose --env-file /dev/null --file infra/compose.staging-beta.yaml \
               --profile staging-manual config --quiet
 
+      - name: Build and validate the public HTTPS gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --target gateway \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --tag fetanagent-gateway:ci \
+            .
+          docker run --rm --read-only fetanagent-gateway:ci caddy validate --config /etc/caddy/Caddyfile
+
       - name: Build and test
         run: pnpm test

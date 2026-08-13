@@ -4,12 +4,14 @@
 
 The Stage 14A contract remains inactive and exposes no public HTTP(S) listener. A separately
 guarded staging-beta release may run on the London VM with Owner control bound only to loopback and
-all other services on a private Docker bridge. It does not enable KemerBet or financial behavior.
+all other application services on private Docker bridges. A distinct `public-domain` profile may
+later expose only the reviewed Caddy gateway after the firewall and DNS gates in
+[`public-domain.md`](public-domain.md) pass. It does not enable KemerBet or financial behavior.
 
 The repository provides:
 
 - [`../Dockerfile`](../Dockerfile): locked dependency builds and distinct non-root API,
-  API, Owner-control, beta-admission, and bot runtime targets with no secret copied into them. Their shared Linux/amd64
+  API, Owner-control, beta-admission, bot, and secret-free gateway runtime targets with no secret copied into them. Their shared Linux/amd64
   base image is pinned to a reviewed immutable digest for the London VM and must be reverified before
   a real deployment;
 - [`compose.inactive.yaml`](compose.inactive.yaml): an API-only, explicitly `inactive` Compose
@@ -21,8 +23,9 @@ The repository provides:
   sudo only this checksummed helper, never `bash`, Docker directly, or the Docker socket.
 
 The later, still-manual beta-only staging artifact is documented separately in
-[`staging-beta.md`](staging-beta.md). Its four services remain behind the `staging-manual` profile and
-do not change the inactive Stage 14A contract described here.
+[`staging-beta.md`](staging-beta.md). Its four application services remain behind the
+`staging-manual` profile; the gateway has a different `public-domain` profile and cannot start in an
+ordinary private deploy.
 
 The API container is deliberately read-only, has all Linux capabilities dropped, and uses a small
 temporary filesystem. Its default inactive image uses `/healthz`; the staging Player-ID profile
@@ -43,9 +46,8 @@ docker build --target api --build-arg VCS_REF=<reviewed-commit> `
 docker compose -f infra/compose.inactive.yaml config
 ```
 
-Do not run `docker compose up`, publish a port, attach a secret file, add nginx/Caddy, or set an
-enable switch from this stage. The `inactive` profile is an additional guard against an accidental
-default `up`.
+Do not run `docker compose up`, publish a port, attach a secret file, or set an enable switch from
+this stage. The `inactive` profile is an additional guard against an accidental default `up`.
 
 ## Future VM-only secret separation
 

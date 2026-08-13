@@ -13,6 +13,9 @@ readonly PROJECT_NAME='fetanagent-staging-beta'
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
+readonly PUBLIC_IPV4='178.128.39.89'
+readonly PUBLIC_DOMAINS=('fetanagent.com' 'www.fetanagent.com' 'owner.fetanagent.com')
+readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
 
 export PATH="$SAFE_PATH"
 
@@ -81,6 +84,34 @@ require_ipv6_host_ready() {
   ip -6 route show default | grep -q '^default ' || die 'the VM has no default IPv6 route'
   getent ahostsv6 "$STAGING_DIRECT_DATABASE_HOST" >/dev/null ||
     die 'the exact staging direct database host has no resolvable IPv6 address'
+}
+
+require_public_edge_ready() {
+  local domain port resolved_output status
+  local -a resolved
+  command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
+  command -v ss >/dev/null 2>&1 || die 'the ss utility is unavailable'
+  command -v ufw >/dev/null 2>&1 || die 'UFW is unavailable'
+
+  status="$(ufw status)"
+  grep -Fxq 'Status: active' <<<"$status" || die 'UFW is not active'
+  for port in 80 443; do
+    grep -Eq "^${port}/tcp[[:space:]]+ALLOW[[:space:]]+Anywhere$" <<<"$status" ||
+      die "UFW does not allow $port/tcp"
+    grep -Eq "^${port}/tcp \(v6\)[[:space:]]+ALLOW[[:space:]]+Anywhere \(v6\)$" <<<"$status" ||
+      die "UFW does not allow $port/tcp over IPv6"
+  done
+
+  if ss -ltnH | awk '$4 ~ /:(80|443)$/ { found = 1 } END { exit !found }'; then
+    die 'TCP port 80 or 443 is already in use'
+  fi
+
+  for domain in "${PUBLIC_DOMAINS[@]}"; do
+    resolved_output="$(getent ahostsv4 "$domain")" || die "$domain is not resolvable over IPv4"
+    mapfile -t resolved <<<"$(awk '{ print $1 }' <<<"$resolved_output" | sort -u)"
+    [[ "${#resolved[@]}" -eq 1 && "${resolved[0]}" == "$PUBLIC_IPV4" ]] ||
+      die "$domain does not resolve only to the reviewed staging IPv4 address"
+  done
 }
 
 [[ $EUID -eq 0 ]] || die 'the helper must run as root through sudo'
@@ -166,7 +197,7 @@ case "$command" in
     install -o root -g root -m 0444 "$incoming/supabase-ca.crt" "$SECRET_ROOT/supabase-ca.crt"
 
     docker_local image load --input "$incoming/fetanagent-staging-images.tar" >/dev/null
-    for image in owner-control api beta-admission bot; do
+    for image in owner-control api beta-admission bot gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'a loaded image revision does not match the reviewed commit'
     done
@@ -191,7 +222,7 @@ case "$command" in
     [[ ! -L "$SECRET_ROOT/supabase-ca.crt" && "$(stat --format='%U:%G:%a' "$SECRET_ROOT/supabase-ca.crt")" == 'root:root:444' ]] ||
       die 'the public Supabase CA ownership or mode is unsafe'
 
-    for image in owner-control api beta-admission bot; do
+    for image in owner-control api beta-admission bot gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'an image revision does not match the reviewed commit'
     done
@@ -257,6 +288,81 @@ case "$command" in
       up -d --no-build --wait --wait-timeout 90
     ;;
 
+  public-edge-ready)
+    [[ $# -eq 1 ]] || die 'public-edge-ready accepts no additional arguments'
+    require_public_edge_ready
+    ;;
+
+  start-public-edge)
+    [[ $# -eq 3 ]] || die 'start-public-edge requires a commit and image tag'
+    commit_sha="$2"
+    image_tag="$3"
+    validate_commit_and_tag "$commit_sha" "$image_tag"
+    compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
+    [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
+      die 'the sealed Compose contract is absent or unsafe'
+    [[ "$(docker_local image inspect "fetanagent-gateway:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+      die 'the gateway image revision does not match the reviewed commit'
+    owner_container="$(docker_local container ls --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=owner-control' \
+      --filter 'health=healthy')"
+    [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die 'the reviewed Owner-control container is not healthy'
+    require_public_edge_ready
+
+    [[ ! -L "$GATEWAY_STATE_ROOT" && ! -L "$GATEWAY_STATE_ROOT/data" && ! -L "$GATEWAY_STATE_ROOT/config" ]] ||
+      die 'a gateway state path is a symbolic link'
+    install -d -o root -g root -m 0755 "$GATEWAY_STATE_ROOT"
+    install -d -o 10001 -g 10001 -m 0700 "$GATEWAY_STATE_ROOT/data" "$GATEWAY_STATE_ROOT/config"
+    [[ ! -L "$GATEWAY_STATE_ROOT" && "$(stat --format='%U:%G:%a' "$GATEWAY_STATE_ROOT")" == 'root:root:755' ]] ||
+      die 'the gateway state root ownership or mode is unsafe'
+    for state_directory in data config; do
+      [[ ! -L "$GATEWAY_STATE_ROOT/$state_directory" && "$(stat --format='%u:%g:%a' "$GATEWAY_STATE_ROOT/$state_directory")" == '10001:10001:700' ]] ||
+        die 'a gateway state directory ownership or mode is unsafe'
+    done
+
+    compose_environment=(
+      PATH="$SAFE_PATH"
+      HOME='/root'
+      DOCKER_HOST="$LOCAL_DOCKER_SOCKET"
+      FETANAGENT_VCS_REF="$commit_sha"
+      FETANAGENT_IMAGE_TAG="$image_tag"
+      FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
+      FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
+      FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
+      FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE="$SECRET_ROOT/api-deposit-reference-protection"
+      FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
+      FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
+      FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
+      FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+    )
+    compose_command=(
+      docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
+      --project-name "$PROJECT_NAME" --profile staging-manual --profile public-domain -f "$compose_file"
+    )
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      up -d --no-build --wait --wait-timeout 90 gateway
+    ;;
+
+  stop-public-edge)
+    [[ $# -eq 1 ]] || die 'stop-public-edge accepts no additional arguments'
+    gateway_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=gateway')"
+    if [[ -n "$gateway_container" ]]; then
+      [[ "$gateway_container" =~ ^[0-9a-f]{12,64}$ ]] || die 'the gateway container inventory is ambiguous'
+      docker_local container rm --force "$gateway_container" >/dev/null
+    fi
+    ;;
+
   diagnose-owner-startup)
     [[ $# -eq 3 ]] || die 'diagnose-owner-startup requires a commit and image tag'
     commit_sha="$2"
@@ -278,6 +384,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, network-ready, discard, install, start, or diagnose-owner-startup'
+    die 'expected verify, stop, network-ready, public-edge-ready, discard, install, start, start-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

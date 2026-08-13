@@ -4,6 +4,16 @@ import { existsSync, readFileSync } from 'node:fs';
 const legacyNames = ['pay' + 'replayy', 'pay' + 'relayy', 'pay' + 'relay'];
 const legacyPattern = new RegExp(legacyNames.join('|'), 'i');
 
+// These exact files form the reviewed, one-time transition boundary and must
+// name the legacy host identity in order to inspect and retire it safely. The
+// exception is intentionally content-only; legacy branding remains forbidden
+// in every path and in every other tracked file.
+const legacyTransitionFiles = new Set([
+  'infra/operations/fetanagent-vm-transition.sh',
+  'infra/operations/fetanagent-vm-transition.md',
+  'infra/verify-fetanagent-vm-transition.mjs',
+]);
+
 const files = execFileSync(
   'git',
   ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -29,6 +39,10 @@ for (const file of files) {
 
   if (legacyPattern.test(normalizedFile)) {
     violations.push(`${normalizedFile}: legacy brand in path`);
+  }
+
+  if (legacyTransitionFiles.has(normalizedFile)) {
+    continue;
   }
 
   const contents = readFileSync(file);

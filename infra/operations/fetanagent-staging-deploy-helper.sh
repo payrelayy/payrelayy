@@ -10,12 +10,27 @@ readonly HELPER_PATH='/usr/local/sbin/fetanagent-staging-deploy-helper'
 readonly RELEASE_ROOT='/srv/fetanagent/releases'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROJECT_NAME='fetanagent-staging-beta'
+readonly LEGACY_BRAND='pay''replayy'
+readonly LEGACY_ADMIN="${LEGACY_BRAND}-admin"
+readonly LEGACY_HOME="/home/$LEGACY_ADMIN"
+readonly LEGACY_HELPER="/usr/local/sbin/${LEGACY_BRAND}-staging-deploy-helper"
+readonly LEGACY_PROJECT_NAME="${LEGACY_BRAND}-staging-beta"
+readonly LEGACY_SECRET_ROOT="/srv/${LEGACY_BRAND}/secrets/staging"
+readonly LEGACY_SYSTEMD_MARKER="$LEGACY_BRAND"
+readonly LEGACY_SUDOERS_A="/etc/sudoers.d/${LEGACY_BRAND}-staging-deploy-helper"
+readonly LEGACY_SUDOERS_B="/etc/sudoers.d/$LEGACY_ADMIN"
+readonly LEGACY_SUDOERS_C="/etc/sudoers.d/${LEGACY_BRAND}-staging"
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
 readonly PUBLIC_IPV4='178.128.39.89'
 readonly PUBLIC_DOMAINS=('fetanagent.com' 'www.fetanagent.com' 'owner.fetanagent.com')
 readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
+readonly LEGACY_STOPPED_RECEIPT='/var/lib/fetanagent-vm-transition/legacy-stopped-v1'
+readonly TRANSITION_RECEIPT='/var/lib/fetanagent-vm-transition/retired-v1'
+readonly TRANSITION_VERSION='1'
+readonly STAGING_DROPLET_ID='590666364'
+readonly LEGACY_HELPER_SHA='4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69'
 
 export PATH="$SAFE_PATH"
 
@@ -77,6 +92,100 @@ stop_project() {
     "$SECRET_ROOT/supabase-ca.crt"
 }
 
+require_cutover_ready() {
+  local legacy_containers legacy_networks legacy_secret_residue
+  local systemd_units systemd_unit_files
+
+  command -v docker >/dev/null 2>&1 || die 'Docker is unavailable'
+  command -v systemctl >/dev/null 2>&1 || die 'systemctl is unavailable'
+  command -v find >/dev/null 2>&1 || die 'the find utility is unavailable'
+  command -v grep >/dev/null 2>&1 || die 'the grep utility is unavailable'
+
+  if ! legacy_containers="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$LEGACY_PROJECT_NAME")"; then
+    die 'the legacy container inventory could not be inspected'
+  fi
+  [[ -z "$legacy_containers" ]] || die 'legacy project containers remain'
+
+  if ! legacy_networks="$(docker_local network ls --quiet \
+    --filter "label=com.docker.compose.project=$LEGACY_PROJECT_NAME")"; then
+    die 'the legacy network inventory could not be inspected'
+  fi
+  [[ -z "$legacy_networks" ]] || die 'legacy project networks remain'
+
+  if ! systemd_units="$(systemctl list-units --all --full --plain --no-legend --no-pager)"; then
+    die 'the loaded systemd unit inventory could not be inspected'
+  fi
+  if grep -Fiq -- "$LEGACY_SYSTEMD_MARKER" <<<"$systemd_units"; then
+    die 'a legacy systemd unit remains loaded'
+  fi
+
+  if ! systemd_unit_files="$(systemctl list-unit-files --full --no-legend --no-pager)"; then
+    die 'the installed systemd unit inventory could not be inspected'
+  fi
+  if grep -Fiq -- "$LEGACY_SYSTEMD_MARKER" <<<"$systemd_unit_files"; then
+    die 'a legacy systemd unit file remains installed'
+  fi
+
+  if [[ -L "$LEGACY_SECRET_ROOT" ]]; then
+    die 'the legacy secret root remains as a symbolic link'
+  fi
+  if [[ -e "$LEGACY_SECRET_ROOT" ]]; then
+    [[ -d "$LEGACY_SECRET_ROOT" ]] || die 'the legacy secret root is not a directory'
+    if ! legacy_secret_residue="$(find "$LEGACY_SECRET_ROOT" -mindepth 1 -print -quit)"; then
+      die 'the legacy secret root could not be inspected'
+    fi
+    [[ -z "$legacy_secret_residue" ]] || die 'legacy secret files remain'
+  fi
+}
+
+require_port_3002_free() {
+  local socket_inventory
+  command -v awk >/dev/null 2>&1 || die 'the awk utility is unavailable'
+  command -v ss >/dev/null 2>&1 || die 'the ss utility is unavailable'
+  if ! socket_inventory="$(ss -ltnH)"; then
+    die 'the TCP listener inventory could not be inspected'
+  fi
+  if awk '$4 ~ /:3002$/ { found = 1 } END { exit !found }' <<<"$socket_inventory"; then
+    die 'TCP port 3002 is already in use'
+  fi
+}
+
+require_reviewed_owner_port_3002() {
+  local commit_sha="$1"
+  local exact_listener_count owner_binding owner_container port_listener_count socket_inventory
+
+  command -v awk >/dev/null 2>&1 || die 'the awk utility is unavailable'
+  command -v docker >/dev/null 2>&1 || die 'Docker is unavailable'
+  command -v ss >/dev/null 2>&1 || die 'the ss utility is unavailable'
+
+  owner_container="$(docker_local container ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=owner-control' \
+    --filter 'health=healthy')"
+  [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the reviewed Owner-control container is not healthy'
+  [[ "$(docker_local image inspect \
+    "$(docker_local container inspect "$owner_container" --format '{{.Image}}')" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+    die 'the reviewed Owner-control image does not match the requested commit'
+  if ! owner_binding="$(docker_local container port "$owner_container" '3002/tcp')"; then
+    die 'the reviewed Owner-control port binding could not be inspected'
+  fi
+  [[ "$owner_binding" == '127.0.0.1:3002' ]] ||
+    die 'the reviewed Owner-control port binding is not exact'
+
+  if ! socket_inventory="$(ss -ltnH)"; then
+    die 'the TCP listener inventory could not be inspected'
+  fi
+  port_listener_count="$(awk '$4 ~ /:3002$/ { count += 1 } END { print count + 0 }' \
+    <<<"$socket_inventory")"
+  exact_listener_count="$(awk '$4 == "127.0.0.1:3002" { count += 1 } END { print count + 0 }' \
+    <<<"$socket_inventory")"
+  [[ "$port_listener_count" == '1' && "$exact_listener_count" == '1' ]] ||
+    die 'TCP port 3002 has an unexpected or ambiguous listener'
+}
+
 require_ipv6_host_ready() {
   command -v ip >/dev/null 2>&1 || die 'the ip utility is unavailable'
   command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
@@ -86,12 +195,209 @@ require_ipv6_host_ready() {
     die 'the exact staging direct database host has no resolvable IPv6 address'
 }
 
+require_legacy_stopped() {
+  local commit_sha="$1"
+  local current_helper_sha
+
+  command -v cmp >/dev/null 2>&1 || die 'the cmp utility is unavailable'
+  command -v sha256sum >/dev/null 2>&1 || die 'the sha256sum utility is unavailable'
+  command -v stat >/dev/null 2>&1 || die 'the stat utility is unavailable'
+
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+  [[ ! -L "$LEGACY_STOPPED_RECEIPT" && -f "$LEGACY_STOPPED_RECEIPT" ]] ||
+    die 'the legacy-stopped transition receipt is absent or symbolic'
+  [[ "$(stat --format='%U:%G:%a' "$LEGACY_STOPPED_RECEIPT")" == 'root:root:600' ]] ||
+    die 'the legacy-stopped transition receipt ownership or mode is unsafe'
+  if ! current_helper_sha="$(sha256sum "$HELPER_PATH" | awk '{ print $1 }')"; then
+    die 'the installed helper digest could not be computed'
+  fi
+  cmp -s -- "$LEGACY_STOPPED_RECEIPT" <(printf '%s\n' \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$STAGING_DROPLET_ID" \
+    "legacy_helper_sha=$LEGACY_HELPER_SHA" \
+    "new_helper_sha=$current_helper_sha" \
+    "acknowledged_commit=$commit_sha" \
+    'legacy_stopped=true') ||
+    die 'the legacy-stopped transition receipt does not exactly match the reviewed commit and helper'
+}
+
+require_no_legacy_identity_processes() {
+  local legacy_uid process_status
+
+  command -v id >/dev/null 2>&1 || die 'the id utility is unavailable'
+  command -v pgrep >/dev/null 2>&1 || die 'the pgrep utility is unavailable'
+  legacy_uid="$(id -u "$LEGACY_ADMIN")" ||
+    die 'the legacy deployment identity UID could not be inspected'
+  [[ "$legacy_uid" =~ ^[0-9]+$ && "$legacy_uid" -ne 0 ]] ||
+    die 'the legacy deployment identity has an unsafe UID'
+  if pgrep -u "$legacy_uid" >/dev/null 2>&1; then
+    die 'a process owned by the legacy deployment identity remains'
+  else
+    process_status="$?"
+    [[ "$process_status" -eq 1 ]] || die 'the legacy identity process inventory failed'
+  fi
+}
+
+require_no_legacy_helper_processes() {
+  local process_status
+
+  command -v pgrep >/dev/null 2>&1 || die 'the pgrep utility is unavailable'
+  if pgrep -f -- "$LEGACY_HELPER" >/dev/null 2>&1; then
+    die 'a legacy deployment-helper process remains'
+  else
+    process_status="$?"
+    [[ "$process_status" -eq 1 ]] || die 'the legacy helper process inventory failed'
+  fi
+}
+
+require_legacy_execution_boundary_sealed() {
+  local entry groups home password_status shell status uid unsafe_sudoers_entry
+  local authorized_keys="$LEGACY_HOME/.ssh/authorized_keys"
+  local marker candidate
+
+  command -v find >/dev/null 2>&1 || die 'the find utility is unavailable'
+  command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
+  command -v grep >/dev/null 2>&1 || die 'the grep utility is unavailable'
+  command -v id >/dev/null 2>&1 || die 'the id utility is unavailable'
+  command -v passwd >/dev/null 2>&1 || die 'the passwd utility is unavailable'
+
+  [[ ! -L "$LEGACY_HOME" && -d "$LEGACY_HOME" ]] ||
+    die 'the legacy home is absent, non-directory, or symbolic'
+  if [[ -e "$LEGACY_HOME/.ssh" || -L "$LEGACY_HOME/.ssh" ]]; then
+    [[ ! -L "$LEGACY_HOME/.ssh" && -d "$LEGACY_HOME/.ssh" ]] ||
+      die 'the legacy SSH directory is non-directory or symbolic'
+  fi
+  [[ ! -e "$authorized_keys" && ! -L "$authorized_keys" ]] ||
+    die 'legacy authorized_keys remains after execution-boundary sealing'
+
+  for candidate in "$LEGACY_SUDOERS_A" "$LEGACY_SUDOERS_B" "$LEGACY_SUDOERS_C"; do
+    [[ ! -e "$candidate" && ! -L "$candidate" ]] ||
+      die 'an exact legacy sudoers file remains after retirement'
+  done
+
+  [[ ! -L /etc/sudoers && -f /etc/sudoers ]] ||
+    die 'the primary sudoers policy cannot be safely inspected'
+  [[ ! -L /etc/sudoers.d && -d /etc/sudoers.d ]] ||
+    die 'the sudoers fragment directory cannot be safely inspected'
+  if ! unsafe_sudoers_entry="$(find /etc/sudoers.d -mindepth 1 ! -type f -print -quit)"; then
+    die 'the sudoers fragment tree could not be inspected'
+  fi
+  [[ -z "$unsafe_sudoers_entry" ]] ||
+    die 'the sudoers fragment tree contains a non-regular entry'
+  for marker in "$LEGACY_ADMIN" "$LEGACY_HELPER"; do
+    if grep -Fq -- "$marker" /etc/sudoers 2>/dev/null; then
+      die 'a legacy sudo permission remains in the primary sudoers policy'
+    else
+      status=$?
+      [[ "$status" -eq 1 ]] || die 'the primary sudoers policy could not be inspected'
+    fi
+    if grep -r -Fq -- "$marker" /etc/sudoers.d 2>/dev/null; then
+      die 'a legacy sudo permission remains in a sudoers fragment'
+    else
+      status=$?
+      [[ "$status" -eq 1 ]] || die 'the sudoers fragment tree could not be inspected'
+    fi
+  done
+
+  if ! entry="$(getent passwd "$LEGACY_ADMIN")"; then
+    die 'the legacy deployment identity is absent'
+  fi
+  IFS=':' read -r _ _ uid _ _ home shell <<<"$entry"
+  [[ "$uid" =~ ^[0-9]+$ && "$uid" -ne 0 ]] ||
+    die 'the legacy deployment identity has an unsafe UID'
+  [[ "$home" == "$LEGACY_HOME" ]] ||
+    die 'the legacy deployment identity has an unexpected home'
+  [[ "$shell" == '/usr/sbin/nologin' ]] ||
+    die 'the legacy deployment identity is still interactive'
+  if ! password_status="$(passwd --status "$LEGACY_ADMIN" | awk '{ print $2 }')"; then
+    die 'the legacy deployment identity password state could not be inspected'
+  fi
+  [[ "$password_status" == 'L' ]] ||
+    die 'the legacy deployment identity password is not locked'
+  groups="$(id -nG "$LEGACY_ADMIN" | tr ' ' '\n')" ||
+    die 'the legacy deployment identity groups could not be inspected'
+  ! grep -Eq '^(docker|sudo)$' <<<"$groups" ||
+    die 'the legacy deployment identity retains broad Docker or sudo-group access'
+
+  require_no_legacy_identity_processes
+  require_no_legacy_helper_processes
+}
+
+require_legacy_access_retired() {
+  require_legacy_execution_boundary_sealed
+  [[ ! -e "$LEGACY_HELPER" && ! -L "$LEGACY_HELPER" ]] ||
+    die 'the legacy deployment helper remains after retirement'
+  [[ ! -e "$LEGACY_SECRET_ROOT" && ! -L "$LEGACY_SECRET_ROOT" ]] ||
+    die 'the legacy secret root remains after retirement'
+}
+
+require_private_start_cutover_ready() {
+  local commit_sha="$1"
+
+  require_legacy_stopped "$commit_sha"
+  require_legacy_execution_boundary_sealed
+  require_cutover_ready
+  require_port_3002_free
+}
+
+require_transition_retired() {
+  local commit_sha="$1"
+  local current_helper_sha exact_count key key_count line_count required_line
+
+  command -v awk >/dev/null 2>&1 || die 'the awk utility is unavailable'
+  command -v sha256sum >/dev/null 2>&1 || die 'the sha256sum utility is unavailable'
+  command -v stat >/dev/null 2>&1 || die 'the stat utility is unavailable'
+
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+  [[ ! -L "$TRANSITION_RECEIPT" && -f "$TRANSITION_RECEIPT" ]] ||
+    die 'the VM transition retirement receipt is absent or symbolic'
+  [[ "$(stat --format='%U:%G:%a' "$TRANSITION_RECEIPT")" == 'root:root:600' ]] ||
+    die 'the VM transition retirement receipt ownership or mode is unsafe'
+  if ! current_helper_sha="$(sha256sum "$HELPER_PATH" | awk '{ print $1 }')"; then
+    die 'the installed helper digest could not be computed'
+  fi
+  if ! line_count="$(awk 'END { print NR + 0 }' "$TRANSITION_RECEIPT")"; then
+    die 'the VM transition receipt could not be inspected'
+  fi
+  [[ "$line_count" == '6' ]] ||
+    die 'the VM transition receipt has an unexpected schema'
+
+  for required_line in \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$STAGING_DROPLET_ID" \
+    "legacy_helper_sha=$LEGACY_HELPER_SHA" \
+    "new_helper_sha=$current_helper_sha" \
+    "acknowledged_commit=$commit_sha" \
+    'retired=true'; do
+    key="${required_line%%=*}"
+    if ! key_count="$(awk -F= -v required_key="$key" \
+      '$1 == required_key { count += 1 } END { print count + 0 }' "$TRANSITION_RECEIPT")"; then
+      die 'the VM transition receipt could not be inspected'
+    fi
+    if ! exact_count="$(awk -v expected_line="$required_line" \
+      '$0 == expected_line { count += 1 } END { print count + 0 }' "$TRANSITION_RECEIPT")"; then
+      die 'the VM transition receipt could not be inspected'
+    fi
+    [[ "$key_count" == '1' && "$exact_count" == '1' ]] ||
+      die 'a required VM transition receipt field is absent, duplicated, or unexpected'
+  done
+
+  require_legacy_access_retired
+  require_cutover_ready
+  require_reviewed_owner_port_3002 "$commit_sha"
+}
+
 require_public_edge_ready() {
+  local commit_sha="$1"
   local domain port resolved_output status
   local -a resolved
   command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
   command -v ss >/dev/null 2>&1 || die 'the ss utility is unavailable'
   command -v ufw >/dev/null 2>&1 || die 'UFW is unavailable'
+
+  require_transition_retired "$commit_sha"
 
   status="$(ufw status)"
   grep -Fxq 'Status: active' <<<"$status" || die 'UFW is not active'
@@ -132,6 +438,13 @@ case "$command" in
   stop)
     [[ $# -eq 1 ]] || die 'stop accepts no additional arguments'
     stop_project
+    ;;
+
+  cutover-ready)
+    [[ $# -eq 2 ]] || die 'cutover-ready requires one reviewed main commit'
+    require_legacy_stopped "$2"
+    require_cutover_ready
+    require_port_3002_free
     ;;
 
   network-ready)
@@ -209,6 +522,10 @@ case "$command" in
     commit_sha="$2"
     image_tag="$3"
     validate_commit_and_tag "$commit_sha" "$image_tag"
+    # This command is an independently callable privileged boundary. Prove the
+    # commit-bound transition receipt and live stopped state before reading
+    # deploy inputs, running database preflights, or starting any container.
+    require_private_start_cutover_ready "$commit_sha"
     compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
     [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
       die 'the sealed Compose contract is absent or unsafe'
@@ -289,8 +606,8 @@ case "$command" in
     ;;
 
   public-edge-ready)
-    [[ $# -eq 1 ]] || die 'public-edge-ready accepts no additional arguments'
-    require_public_edge_ready
+    [[ $# -eq 2 ]] || die 'public-edge-ready requires one reviewed main commit'
+    require_public_edge_ready "$2"
     ;;
 
   start-public-edge)
@@ -303,13 +620,7 @@ case "$command" in
       die 'the sealed Compose contract is absent or unsafe'
     [[ "$(docker_local image inspect "fetanagent-gateway:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
       die 'the gateway image revision does not match the reviewed commit'
-    owner_container="$(docker_local container ls --quiet \
-      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
-      --filter 'label=com.docker.compose.service=owner-control' \
-      --filter 'health=healthy')"
-    [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
-      die 'the reviewed Owner-control container is not healthy'
-    require_public_edge_ready
+    require_public_edge_ready "$commit_sha"
 
     [[ ! -L "$GATEWAY_STATE_ROOT" && ! -L "$GATEWAY_STATE_ROOT/data" && ! -L "$GATEWAY_STATE_ROOT/config" ]] ||
       die 'a gateway state path is a symbolic link'
@@ -384,6 +695,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, network-ready, public-edge-ready, discard, install, start, start-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, cutover-ready, network-ready, public-edge-ready, discard, install, start, start-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

@@ -40,11 +40,11 @@ Those paths preserve ACME account and certificate state across bounded gateway r
 Preserve every MX, SPF TXT, and `_acme-challenge` TXT record. Do not use **Delete all records**.
 Delete only the Porkbun parking records that conflict with the explicit hosts, then create:
 
-| Type  | Host    | Answer / value     | TTL |
-| ----- | ------- | ------------------ | --- |
-| A     | blank   | `178.128.39.89`    | 600 |
-| A     | `owner` | `178.128.39.89`    | 600 |
-| CNAME | `www`   | `fetanagent.com`   | 600 |
+| Type  | Host    | Answer / value   | TTL |
+| ----- | ------- | ---------------- | --- |
+| A     | blank   | `178.128.39.89`  | 600 |
+| A     | `owner` | `178.128.39.89`  | 600 |
+| CNAME | `www`   | `fetanagent.com` | 600 |
 
 Do not add an AAAA record during the initial cutover. Add IPv6 only after public HTTPS has been
 independently verified over IPv6. Remove the wildcard Porkbun parking CNAME only if it conflicts

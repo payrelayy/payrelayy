@@ -104,8 +104,14 @@ assert.match(gatewayService, /pids_limit: 128/);
 assert.match(gatewayService, /max-size: 10m/);
 assert.match(gatewayService, /max-file: '3'/);
 assert.match(gatewayService, /ports:\s*\r?\n\s+- '80:80\/tcp'\s*\r?\n\s+- '443:443\/tcp'/);
-assert.match(gatewayService, /source: \/var\/lib\/fetanagent-gateway\/data\s*\r?\n\s+target: \/data/);
-assert.match(gatewayService, /source: \/var\/lib\/fetanagent-gateway\/config\s*\r?\n\s+target: \/config/);
+assert.match(
+  gatewayService,
+  /source: \/var\/lib\/fetanagent-gateway\/data\s*\r?\n\s+target: \/data/,
+);
+assert.match(
+  gatewayService,
+  /source: \/var\/lib\/fetanagent-gateway\/config\s*\r?\n\s+target: \/config/,
+);
 assert.match(gatewayService, /networks:\s*\r?\n\s+- owner_control_service/);
 assert.doesNotMatch(gatewayService, /staging_service|secrets:|configs:|docker\.sock/);
 assert.match(gatewayService, /condition: service_healthy/);

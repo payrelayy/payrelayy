@@ -1,8 +1,8 @@
-import type { BetaAdmissionRuntimeConfig } from '@payreplayy/config/beta-admission';
+import type { BetaAdmissionRuntimeConfig } from '@fetanagent/config/beta-admission';
 import { Pool } from 'pg';
 
-const BETA_GROUP_ROLE = 'payreplayy_beta_admission';
-const BETA_RUNTIME_ROLE = 'payreplayy_beta_admission_runtime';
+const BETA_GROUP_ROLE = 'fetanagent_beta_admission';
+const BETA_RUNTIME_ROLE = 'fetanagent_beta_admission_runtime';
 const REDEMPTION_PROCEDURE = 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)';
 const BETA_NONCE_PROCEDURE = 'app.reserve_telegram_beta_invite_admission_nonce(text,timestamptz)';
 
@@ -382,7 +382,7 @@ export function createBetaAdmissionPreflightPool(
   config: Extract<BetaAdmissionRuntimeConfig, { readonly enabled: true }>,
 ): BetaAdmissionPreflightPool {
   return new Pool({
-    application_name: 'payreplayy-beta-admission-preflight',
+    application_name: 'fetanagent-beta-admission-preflight',
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,

@@ -19,16 +19,16 @@ export type TelegramInboundLocale = 'en';
 
 export const TELEGRAM_PRIVATE_INGRESS_PATH = '/internal/v1/telegram/private-inbound';
 export const TELEGRAM_PRIVATE_INGRESS_CONTENT_TYPE =
-  'application/vnd.payreplayy.telegram-private-inbound+json';
+  'application/vnd.fetanagent.telegram-private-inbound+json';
 export const TELEGRAM_PRIVATE_INGRESS_KEY_ID = 'v1';
 export const TELEGRAM_PRIVATE_INGRESS_MAX_BODY_BYTES = 32 * 1024;
 export const TELEGRAM_PRIVATE_INGRESS_MAX_TIMESTAMP_SKEW_SECONDS = 60;
 
 export const TELEGRAM_PRIVATE_INGRESS_HEADERS = {
-  keyId: 'x-payreplayy-key-id',
-  nonce: 'x-payreplayy-nonce',
-  signature: 'x-payreplayy-signature',
-  timestamp: 'x-payreplayy-timestamp',
+  keyId: 'x-fetanagent-key-id',
+  nonce: 'x-fetanagent-nonce',
+  signature: 'x-fetanagent-signature',
+  timestamp: 'x-fetanagent-timestamp',
 } as const;
 
 export interface TelegramPrivateIngressSignatureInput {
@@ -46,7 +46,7 @@ export function telegramPrivateIngressSignatureInput(
   input: TelegramPrivateIngressSignatureInput,
 ): string {
   return [
-    'payreplayy-bot-api-v1',
+    'fetanagent-bot-api-v1',
     'POST',
     TELEGRAM_PRIVATE_INGRESS_PATH,
     TELEGRAM_PRIVATE_INGRESS_KEY_ID,

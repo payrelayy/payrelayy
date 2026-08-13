@@ -1,5 +1,5 @@
 {
-  "name": "@payreplayy/config",
+  "name": "@fetanagent/config",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -34,7 +34,7 @@
     }
   },
   "dependencies": {
-    "@payreplayy/domain": "workspace:*"
+    "@fetanagent/domain": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

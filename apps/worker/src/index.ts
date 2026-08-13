@@ -1,4 +1,4 @@
-import { loadWorkerConfig, redactedWorkerConfigForLog } from '@payreplayy/config/worker';
+import { loadWorkerConfig, redactedWorkerConfigForLog } from '@fetanagent/config/worker';
 
 const config = loadWorkerConfig();
 

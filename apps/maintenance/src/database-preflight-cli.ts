@@ -1,4 +1,4 @@
-import { loadMaintenanceConfig } from '@payreplayy/config/maintenance';
+import { loadMaintenanceConfig } from '@fetanagent/config/maintenance';
 
 import { runNonceRetentionDatabasePreflight } from './database-preflight.js';
 
@@ -6,7 +6,7 @@ const config = loadMaintenanceConfig();
 
 if (!config.nonceRetentionRuntime.enabled) {
   console.error(
-    'PayReplayy nonce-retention database preflight is disabled. It requires a dedicated maintenance runtime secret environment.',
+    'FetanAgent nonce-retention database preflight is disabled. It requires a dedicated maintenance runtime secret environment.',
   );
   process.exitCode = 1;
 } else {
@@ -18,7 +18,7 @@ if (!config.nonceRetentionRuntime.enabled) {
     }
   } catch {
     console.error(
-      'PayReplayy nonce-retention database preflight did not complete. Check the restricted maintenance login and private connection configuration.',
+      'FetanAgent nonce-retention database preflight did not complete. Check the restricted maintenance login and private connection configuration.',
     );
     process.exitCode = 1;
   }

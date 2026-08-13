@@ -1,4 +1,4 @@
-import { TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS } from '@payreplayy/contracts';
+import { TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS } from '@fetanagent/contracts';
 
 import type { TelegramPrivateActionNonceStore } from './telegram-private-action.js';
 

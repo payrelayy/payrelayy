@@ -1,4 +1,4 @@
-import { loadApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig } from '@fetanagent/config/api';
 import { Pool, type PoolClient } from 'pg';
 
 import { playerActionCatalogPreflightPassed } from './player-action-catalog-preflight.js';
@@ -15,7 +15,7 @@ async function runPlayerActionDatabasePreflight(): Promise<void> {
 
   const pool = new Pool({
     ...createTelegramPlayerActionPoolConfig(config.telegramPlayerActionRuntime),
-    application_name: 'payreplayy-player-actions-preflight',
+    application_name: 'fetanagent-player-actions-preflight',
     max: 1,
   });
   let client: PoolClient | undefined;
@@ -47,7 +47,7 @@ try {
   console.info('Player-ID action database preflight passed.');
 } catch {
   console.error(
-    'PayReplayy Player-ID action database preflight did not complete. Check the restricted staging runtime configuration.',
+    'FetanAgent Player-ID action database preflight did not complete. Check the restricted staging runtime configuration.',
   );
   process.exitCode = 1;
 }

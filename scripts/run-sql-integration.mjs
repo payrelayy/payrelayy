@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 // Every invocation owns a fresh Compose project. This prevents cleanup from
 // affecting a pre-existing disposable run if one was interrupted earlier.
-const sqlIntegrationProjectName = `payreplayy-sql-integration-${randomBytes(12).toString('hex')}`;
+const sqlIntegrationProjectName = `fetanagent-sql-integration-${randomBytes(12).toString('hex')}`;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, '..');
 const composeFile = resolve(repositoryRoot, 'infra', 'compose.sql-integration.yaml');

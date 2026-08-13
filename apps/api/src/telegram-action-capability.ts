@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import {
   formatTelegramPlayerRegistrationCapabilityCallback,
   parseTelegramPlayerRegistrationCapabilityCallback,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HMAC_SECRET_PATTERN = /^[0-9a-f]{64}$/;
@@ -146,7 +146,7 @@ export function deriveTelegramPlayerRegistrationCapabilityId(
     'sha256',
     requiredHmacSecret(capabilityHmacSecret, 'The capability HMAC secret'),
   )
-    .update('payreplayy:telegram:player-registration:capability-id:v1\n', 'utf8')
+    .update('fetanagent:telegram:player-registration:capability-id:v1\n', 'utf8')
     .update(canonicalOriginInboundEventId, 'utf8')
     .digest()
     .subarray(0, 16);
@@ -189,7 +189,7 @@ function canonicalToken(token: string): string | undefined {
 
 function deriveCapabilityToken(capabilityId: string, capabilityHmacSecret: Buffer): string {
   return createHmac('sha256', capabilityHmacSecret)
-    .update('payreplayy:telegram:player-registration:capability-token:v1\n', 'utf8')
+    .update('fetanagent:telegram:player-registration:capability-token:v1\n', 'utf8')
     .update(capabilityId, 'utf8')
     .digest()
     .subarray(0, 16)
@@ -207,7 +207,7 @@ export function fingerprintTelegramCapabilityToken(
 
   return `hmac-sha256-v1:${hmacHex(
     requiredHmacSecret(capabilityHmacSecret, 'The capability HMAC secret'),
-    'payreplayy:telegram:player-registration:capability-token-fingerprint:v1\n',
+    'fetanagent:telegram:player-registration:capability-token-fingerprint:v1\n',
     canonicalCapabilityToken,
   )}`;
 }
@@ -282,7 +282,7 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
 
   return `hmac-sha256-v1:${hmacHex(
     requiredHmacSecret(input.semanticHmacSecret, 'The action semantic HMAC secret'),
-    'payreplayy:telegram:action-semantic:v1\n',
+    'fetanagent:telegram:action-semantic:v1\n',
     canonicalPayload,
   )}`;
 }

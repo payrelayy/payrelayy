@@ -1,6 +1,6 @@
 # Deposit ledger design
 
-This is the longer-term design boundary for PayReplayy's automated-deposit workflow. It does not
+This is the longer-term design boundary for FetanAgent's automated-deposit workflow. It does not
 expand the current launch-preparation scope: the only implemented verification code is the CBE
 Birr redacted-fixture dry run. TeleBirr and CBE bank remain deferred. All platform and provider
 identifiers stay database-backed so later approved adapters do not require a financial-core rewrite.
@@ -11,7 +11,7 @@ identifiers stay database-backed so later approved adapters do not require a fin
 - A deposit intent snapshots its payment provider, receiver-account revision, policy, expected
   amount, and one-hour expiry at intake time.
 - KemerBet permits 25–25,000 ETB for each individual deposit. Customers may create unlimited
-  distinct deposits; there is no PayReplayy customer, daily, lifetime, or frequency financial
+  distinct deposits; there is no FetanAgent customer, daily, lifetime, or frequency financial
   quota. Technical abuse and capacity controls remain allowed.
 - Transaction IDs, screenshots, and PDFs are inputs for verification. Only authoritative provider
   evidence can approve a payment.
@@ -95,9 +95,9 @@ transfer until its reconciliation safeguards are proven.
 ## Operations model
 
 The bot calls the API only. The signed Telegram action route uses the narrow
-`payreplayy_player_actions` database role for Player-ID actions and the reviewed dry-run intake;
+`fetanagent_player_actions` database role for Player-ID actions and the reviewed dry-run intake;
 the generic API role does not receive these procedure grants. The verification worker will use
-`payreplayy_worker` through reviewed database procedures. Neither role receives direct ledger-table
+`fetanagent_worker` through reviewed database procedures. Neither role receives direct ledger-table
 access. The action route can call `app.open_telegram_dry_run_deposit_intent`, which is idempotent by
 inbound Telegram event, requires an active Owner-confirmed Player ID plus all four disabled financial
 feature switches, and returns the frozen display-safe CBE Birr receiver snapshot. It can then call

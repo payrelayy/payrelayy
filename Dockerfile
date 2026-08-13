@@ -17,24 +17,24 @@ RUN pnpm install --frozen-lockfile
 
 FROM build-base AS beta-admission-build
 
-RUN pnpm --filter @payreplayy/beta-admission... run build
+RUN pnpm --filter @fetanagent/beta-admission... run build
 
 FROM build-base AS bot-build
 
-RUN pnpm --filter @payreplayy/bot... run build
+RUN pnpm --filter @fetanagent/bot... run build
 
 FROM build-base AS admin-build
 
-RUN pnpm --filter @payreplayy/admin... run build
+RUN pnpm --filter @fetanagent/admin... run build
 
 FROM build-base AS api-build
 
-RUN pnpm --filter @payreplayy/api... run build
+RUN pnpm --filter @fetanagent/api... run build
 
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
-RUN groupadd --gid 10001 payreplayy \
-  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin payreplayy
+RUN groupadd --gid 10001 fetanagent \
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin fetanagent
 
 WORKDIR /workspace
 
@@ -45,7 +45,7 @@ USER 10001:10001
 FROM runtime-base AS beta-admission
 
 ARG VCS_REF=unknown
-LABEL org.opencontainers.image.title="payreplayy-beta-admission" \
+LABEL org.opencontainers.image.title="fetanagent-beta-admission" \
       org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=beta-admission-build --chown=10001:10001 /workspace/node_modules ./node_modules
@@ -59,7 +59,7 @@ CMD ["node", "apps/beta-admission/dist/index.js"]
 FROM runtime-base AS bot
 
 ARG VCS_REF=unknown
-LABEL org.opencontainers.image.title="payreplayy-bot" \
+LABEL org.opencontainers.image.title="fetanagent-bot" \
       org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=bot-build --chown=10001:10001 /workspace/node_modules ./node_modules
@@ -71,7 +71,7 @@ CMD ["node", "apps/bot/dist/index.js"]
 FROM runtime-base AS admin
 
 ARG VCS_REF=unknown
-LABEL org.opencontainers.image.title="payreplayy-owner-control" \
+LABEL org.opencontainers.image.title="fetanagent-owner-control" \
       org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=admin-build --chown=10001:10001 /workspace/node_modules ./node_modules
@@ -85,7 +85,7 @@ CMD ["node", "apps/admin/dist/index.js"]
 FROM runtime-base AS api
 
 ARG VCS_REF=unknown
-LABEL org.opencontainers.image.title="payreplayy-api" \
+LABEL org.opencontainers.image.title="fetanagent-api" \
       org.opencontainers.image.revision="${VCS_REF}"
 
 COPY --from=api-build --chown=10001:10001 /workspace/node_modules ./node_modules
@@ -94,7 +94,7 @@ COPY --from=api-build --chown=10001:10001 /workspace/apps/api ./apps/api
 
 # Preserve the established inactive-image identity contract while the dedicated beta targets use
 # the equivalent numeric UID/GID form required by their Compose secret mounts.
-USER payreplayy:payreplayy
+USER fetanagent:fetanagent
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3000/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 

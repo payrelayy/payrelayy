@@ -1,4 +1,4 @@
-import type { BetaAdmissionRuntimeConfig } from '@payreplayy/config/beta-admission';
+import type { BetaAdmissionRuntimeConfig } from '@fetanagent/config/beta-admission';
 import { Pool, type PoolConfig } from 'pg';
 
 import { runBetaAdmissionCatalogPreflight } from './catalog-preflight.js';
@@ -26,7 +26,7 @@ export function createBetaAdmissionPoolConfig(
     throw new BetaAdmissionPostgresRuntimeUnavailableError();
   }
   return {
-    application_name: 'payreplayy-beta-admission',
+    application_name: 'fetanagent-beta-admission',
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,
@@ -80,7 +80,7 @@ export async function createBetaAdmissionPostgresRuntime(
       if (closed) return false;
       try {
         const result = await pool.query<{ ready: boolean }>(
-          "select current_user = 'payreplayy_beta_admission_runtime' as ready",
+          "select current_user = 'fetanagent_beta_admission_runtime' as ready",
         );
         const ready = result.rows.length === 1 && result.rows[0]?.ready === true;
         poolHealthy = ready;

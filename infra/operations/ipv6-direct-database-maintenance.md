@@ -2,7 +2,7 @@
 
 This runbook prepares a future, explicitly approved maintenance window for DigitalOcean Droplet
 `590666364`. It is not authorization to power off the Droplet, enable IPv6, change Netplan, restart
-Docker, open a firewall rule, or deploy PayReplayy.
+Docker, open a firewall rule, or deploy FetanAgent.
 
 ## Why this is required
 
@@ -17,7 +17,7 @@ Before requesting the outage:
 
 1. Confirm the latest DigitalOcean backup is `available` and record its image ID and creation time.
 2. Confirm SSH key access and DigitalOcean Recovery Console access independently.
-3. Run the staging `stop-and-disable` workflow and prove zero PayReplayy containers and zero runtime
+3. Run the staging `stop-and-disable` workflow and prove zero FetanAgent containers and zero runtime
    database sessions.
 4. Capture the current IPv4 address, Netplan files, IPv4 default route, UFW status, and Docker
    network inventory without reading secrets.
@@ -53,7 +53,7 @@ only public listener and that no firewall or reverse-proxy rule was added.
 ## Stop and recovery boundary
 
 If SSH, routing, DNS, certificate validation, or any disposable preflight fails, stop. Disable and
-clear any temporary staging database logins, remove the PayReplayy Compose project, and retain IPv4
+clear any temporary staging database logins, remove the FetanAgent Compose project, and retain IPv4
 SSH for investigation. Do not weaken TLS, use a pooler runtime URL, expose a port, or retry rapidly.
 DigitalOcean IPv6 cannot be disabled after enablement; recovery therefore means restoring the guest
 network configuration and service inactivity, not attempting to remove the account-side feature.

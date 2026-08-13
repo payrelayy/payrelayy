@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 
-import { loadApiConfig } from '@payreplayy/config/api';
-import type { TelegramPrivateActionEnvelope } from '@payreplayy/contracts';
+import { loadApiConfig } from '@fetanagent/config/api';
+import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -24,7 +24,7 @@ const actionConfig = loadApiConfig({
   API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
   API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
   PLAYER_ACTION_DATABASE_URL:
-    'postgres://payreplayy_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+    'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
 });
 
 const rootAction: TelegramPrivateActionEnvelope = {
@@ -148,7 +148,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
               {
                 deposit_intent_id: depositIntentId,
                 provider_code: 'cbe_birr',
-                receiver_account_holder_name: 'PayReplayy Staging',
+                receiver_account_holder_name: 'FetanAgent Staging',
                 receiver_account_masked: '****1234',
                 receiver_customer_instruction: 'Send only CBE Birr to the shown account.',
                 expected_amount_minor: '2500',
@@ -183,7 +183,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       amountMinor: '2500',
       currencyCode: 'ETB',
       providerName: 'CBE Birr',
-      receiverAccountHolderName: 'PayReplayy Staging',
+      receiverAccountHolderName: 'FetanAgent Staging',
       receiverAccountMasked: '****1234',
       customerInstruction: 'Send only CBE Birr to the shown account.',
       paymentDeadline: '2026-08-12T13:00:00.000Z',
@@ -233,10 +233,10 @@ describe('Postgres Telegram Player-ID action runtime', () => {
   it('protects a raw reference before the database call and returns no reference material', async () => {
     const transactionReference = 'tx-abc-7890';
     const fingerprintKey = createHmac('sha256', Buffer.from('e'.repeat(64), 'hex'))
-      .update('payreplayy:deposit-reference:fingerprint-key:v1', 'utf8')
+      .update('fetanagent:deposit-reference:fingerprint-key:v1', 'utf8')
       .digest();
     const expectedFingerprint = createHmac('sha256', fingerprintKey)
-      .update('payreplayy:deposit-reference:fingerprint-input:v1\n', 'utf8')
+      .update('fetanagent:deposit-reference:fingerprint-input:v1\n', 'utf8')
       .update('provider:cbe_birr\n', 'utf8')
       .update(transactionReference.toUpperCase(), 'utf8')
       .digest('hex');

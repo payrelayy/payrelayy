@@ -1,6 +1,6 @@
-# PayReplayy
+# FetanAgent
 
-PayReplayy is a Telegram-first payment-verification and betting-agent automation service.
+FetanAgent is a Telegram-first payment-verification and betting-agent automation service.
 The current launch-preparation scope is an English-only, invite-only CBE Birr dry run. An admitted
 customer with an Owner-confirmed KemerBet Player ID can open a 25-25,000 ETB intake, receive the
 configured masked receiver instructions, and submit one protected transaction reference for Owner
@@ -41,7 +41,7 @@ a separately reviewed beta-admission runtime, a narrow Player-ID action runtime,
 nonce-retention maintenance process. Each future
 credential belongs in its own VM runtime secret set, never Git or the bot, executor, dashboard,
 browser profile, or logs. The maintenance identity is limited to a future bounded nonce-digest purge
-and must never be reused by the API or worker. PayReplayy does not place a Supabase service-role key
+and must never be reused by the API or worker. FetanAgent does not place a Supabase service-role key
 in application configuration.
 
 Each runtime has a dedicated configuration entry point. The API, worker, and executor do not
@@ -89,7 +89,7 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
 
 ## Language policy
 
-PayReplayy-created customer, Owner/Admin, documentation, PDF, and exported-file content is English
+FetanAgent-created customer, Owner/Admin, documentation, PDF, and exported-file content is English
 only in version 1. Payment evidence and names may remain in the source language because they are
 data, not interface copy. See [docs/language-policy.md](docs/language-policy.md).
 

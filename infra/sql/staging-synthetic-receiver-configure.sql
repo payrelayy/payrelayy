@@ -8,7 +8,7 @@ set local lock_timeout = '1s';
 set local idle_in_transaction_session_timeout = '5s';
 
 select pg_catalog.pg_advisory_xact_lock(
-  pg_catalog.hashtextextended('payreplayy:staging:synthetic-cbe-birr-receiver', 0)
+  pg_catalog.hashtextextended('fetanagent:staging:synthetic-cbe-birr-receiver', 0)
 );
 
 select admin_user.id as owner_admin_id
@@ -45,7 +45,7 @@ select
   count(*) filter (where receiver_account.status = 'active') = 0 as no_active_receiver,
   count(*) filter (
     where receiver_account.status = 'active'
-      and receiver_account.account_holder_name = 'PAYREPLAYY STAGING SIMULATION - DO NOT PAY'
+      and receiver_account.account_holder_name = 'FETANAGENT STAGING SIMULATION - DO NOT PAY'
       and receiver_account.account_reference_ciphertext = 'synthetic-staging-v1:do-not-pay'
       and receiver_account.account_reference_masked = '****TEST'
       and receiver_account.instructions = jsonb_build_object(
@@ -61,7 +61,7 @@ where receiver_account.provider_id = :'cbe_birr_provider_id'::uuid
   select app.replace_receiver_account(
     :'owner_admin_id'::uuid,
     :'cbe_birr_provider_id'::uuid,
-    'PAYREPLAYY STAGING SIMULATION - DO NOT PAY',
+    'FETANAGENT STAGING SIMULATION - DO NOT PAY',
     'synthetic-staging-v1:do-not-pay',
     null,
     '****TEST',

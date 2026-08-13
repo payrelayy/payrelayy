@@ -16,7 +16,7 @@ import {
   telegramPrivateActionNonceDigestInput,
   telegramPrivateActionSignatureInput,
   type TelegramPrivateActionEnvelope,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 
 export interface TelegramPrivateActionRequest {
   readonly headers: IncomingHttpHeaders;

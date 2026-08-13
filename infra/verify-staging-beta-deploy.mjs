@@ -17,7 +17,7 @@ const diagnostics = readFileSync(
   'utf8',
 );
 const helper = readFileSync(
-  resolve(root, 'infra/operations/payreplayy-staging-deploy-helper.sh'),
+  resolve(root, 'infra/operations/fetanagent-staging-deploy-helper.sh'),
   'utf8',
 );
 
@@ -33,21 +33,21 @@ assert.match(workflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
 assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
 assert.match(workflow, /environment: staging/g);
-assert.match(workflow, /payreplayy-admin@/g);
+assert.match(workflow, /fetanagent-admin@/g);
 assert.doesNotMatch(
   workflow,
   /root@|ssh-keyscan|StrictHostKeyChecking=no|sudo -n (?:docker|bash)|docker\.sock/,
 );
 assert.match(workflow, /StrictHostKeyChecking=yes/g);
 assert.match(workflow, /UserKnownHostsFile=/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper verify/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper install/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper start/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper network-ready/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper diagnose-owner-startup/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper stop/g);
-assert.match(workflow, /payreplayy-staging-deploy-helper discard/g);
-assert.match(workflow, /sha256sum infra\/operations\/payreplayy-staging-deploy-helper\.sh/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper verify/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper install/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper start/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper network-ready/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper diagnose-owner-startup/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper stop/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper discard/g);
+assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
 assert.match(workflow, /docker build --pull=false --target admin/);
 assert.match(workflow, /docker build --pull=false --target api/);
@@ -73,7 +73,7 @@ const networkReadinessStep =
     workflow,
   )?.[1];
 assert.ok(networkReadinessStep, 'The deployment must verify exact VM IPv6 readiness.');
-assert.match(networkReadinessStep, /payreplayy-staging-deploy-helper network-ready/);
+assert.match(networkReadinessStep, /fetanagent-staging-deploy-helper network-ready/);
 assert.doesNotMatch(networkReadinessStep, /\b(?:for|while|until)\b|\bsleep\b/);
 assert.doesNotMatch(workflow, /run: sleep 125|staging-runtime-login-preflight\.sql/);
 assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
@@ -101,10 +101,10 @@ assert.match(workflow, /SUPABASE_CA_CERTIFICATE_PEM/);
 assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTIONS_MODE=live/);
 
 for (const sql of [provision, disable]) {
-  assert.match(sql, /payreplayy_beta_admission_runtime/);
-  assert.match(sql, /payreplayy_owner_control_runtime/);
-  assert.match(sql, /payreplayy_player_actions_runtime/);
-  assert.doesNotMatch(sql, /payreplayy_api_runtime|payreplayy_worker|service_role|kemerbet/i);
+  assert.match(sql, /fetanagent_beta_admission_runtime/);
+  assert.match(sql, /fetanagent_owner_control_runtime/);
+  assert.match(sql, /fetanagent_player_actions_runtime/);
+  assert.doesNotMatch(sql, /fetanagent_api_runtime|fetanagent_worker|service_role|kemerbet/i);
 }
 assert.match(provision, /interval '24 hours'/g);
 assert.match(disable, /nologin/g);
@@ -126,7 +126,7 @@ assert.ok(
 
 assert.match(diagnostics, /from pg_catalog\.pg_stat_activity as activity/);
 assert.match(diagnostics, /count\(\*\)::integer as session_count/);
-assert.match(diagnostics, /payreplayy_player_actions_runtime/);
+assert.match(diagnostics, /fetanagent_player_actions_runtime/);
 assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/i);
 
 const rollbackStep = /- name: Roll back failed activation([\s\S]*?)\n\s+stop:/u.exec(workflow)?.[1];
@@ -139,8 +139,8 @@ assert.match(rollbackStep, /exit "\$cleanup_status"/);
 assert.match(rollbackStep, /staging-runtimes-disable\.sql/);
 
 assert.match(helper, /^#!\/usr\/bin\/env bash/);
-assert.match(helper, /EXPECTED_SUDO_USER='payreplayy-admin'/);
-assert.match(helper, /HELPER_PATH='\/usr\/local\/sbin\/payreplayy-staging-deploy-helper'/);
+assert.match(helper, /EXPECTED_SUDO_USER='fetanagent-admin'/);
+assert.match(helper, /HELPER_PATH='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'/);
 assert.match(helper, /root:root:755/);
 assert.match(helper, /DOCKER_HOST="\$LOCAL_DOCKER_SOCKET"/);
 assert.match(helper, /--env-file \/dev\/null/);

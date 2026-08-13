@@ -13,7 +13,7 @@ const enabledMaintenanceConfig = {
     host: 'db.example.test',
     password: 'example-only',
     port: 5432 as const,
-    user: 'payreplayy_nonce_retention_runtime',
+    user: 'fetanagent_nonce_retention_runtime',
   },
   tlsMode: 'verify-full' as const,
 };

@@ -97,10 +97,10 @@ const nonceDigest = (hexCharacter: string): string => hexCharacter.repeat(64);
 
 async function queryAsRole<T extends QueryResultRow>(
   role:
-    | 'payreplayy_api'
-    | 'payreplayy_beta_admission'
-    | 'payreplayy_owner_control'
-    | 'payreplayy_player_actions',
+    | 'fetanagent_api'
+    | 'fetanagent_beta_admission'
+    | 'fetanagent_owner_control'
+    | 'fetanagent_player_actions',
   query: string,
   values: readonly (number | string | null)[] = [],
 ): Promise<readonly T[]> {
@@ -293,17 +293,17 @@ describe('disposable SQL migration baseline', () => {
 
   it('preserves the no-login runtime-role scaffold and constrained memberships', async () => {
     const roleNames = [
-      'payreplayy_api',
-      'payreplayy_api_runtime',
-      'payreplayy_beta_admission',
-      'payreplayy_beta_admission_runtime',
-      'payreplayy_nonce_retention',
-      'payreplayy_nonce_retention_runtime',
-      'payreplayy_owner_control',
-      'payreplayy_owner_control_runtime',
-      'payreplayy_player_actions',
-      'payreplayy_player_actions_runtime',
-      'payreplayy_worker',
+      'fetanagent_api',
+      'fetanagent_api_runtime',
+      'fetanagent_beta_admission',
+      'fetanagent_beta_admission_runtime',
+      'fetanagent_nonce_retention',
+      'fetanagent_nonce_retention_runtime',
+      'fetanagent_owner_control',
+      'fetanagent_owner_control_runtime',
+      'fetanagent_player_actions',
+      'fetanagent_player_actions_runtime',
+      'fetanagent_worker',
     ];
     const roles = await client.query<RoleRow>(
       `
@@ -356,37 +356,37 @@ describe('disposable SQL migration baseline', () => {
     expect(memberships.rows).toEqual([
       {
         admin_option: false,
-        group_role: 'payreplayy_api',
+        group_role: 'fetanagent_api',
         inherit_option: true,
-        member_role: 'payreplayy_api_runtime',
+        member_role: 'fetanagent_api_runtime',
         set_option: false,
       },
       {
         admin_option: false,
-        group_role: 'payreplayy_beta_admission',
+        group_role: 'fetanagent_beta_admission',
         inherit_option: true,
-        member_role: 'payreplayy_beta_admission_runtime',
+        member_role: 'fetanagent_beta_admission_runtime',
         set_option: false,
       },
       {
         admin_option: false,
-        group_role: 'payreplayy_nonce_retention',
+        group_role: 'fetanagent_nonce_retention',
         inherit_option: true,
-        member_role: 'payreplayy_nonce_retention_runtime',
+        member_role: 'fetanagent_nonce_retention_runtime',
         set_option: false,
       },
       {
         admin_option: false,
-        group_role: 'payreplayy_owner_control',
+        group_role: 'fetanagent_owner_control',
         inherit_option: true,
-        member_role: 'payreplayy_owner_control_runtime',
+        member_role: 'fetanagent_owner_control_runtime',
         set_option: false,
       },
       {
         admin_option: false,
-        group_role: 'payreplayy_player_actions',
+        group_role: 'fetanagent_player_actions',
         inherit_option: true,
-        member_role: 'payreplayy_player_actions_runtime',
+        member_role: 'fetanagent_player_actions_runtime',
         set_option: false,
       },
     ]);
@@ -468,7 +468,7 @@ describe('disposable SQL migration baseline', () => {
       select
         procedure_name,
         has_function_privilege(
-          'payreplayy_api_runtime',
+          'fetanagent_api_runtime',
           procedure_name::regprocedure,
           'EXECUTE'
         ) as allowed
@@ -498,14 +498,14 @@ describe('disposable SQL migration baseline', () => {
         procedure.prosecdef
           and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
           and procedure.proowner = 'postgres'::regrole as hardened,
-        has_function_privilege('payreplayy_player_actions', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_player_actions', procedure.oid, 'EXECUTE')
           as group_allowed,
-        has_function_privilege('payreplayy_player_actions_runtime', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_player_actions_runtime', procedure.oid, 'EXECUTE')
           as runtime_effective,
         exists (
           select 1
           from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
-          where privilege.grantee = 'payreplayy_player_actions_runtime'::regrole
+          where privilege.grantee = 'fetanagent_player_actions_runtime'::regrole
             and privilege.privilege_type = 'EXECUTE'
         ) as runtime_direct,
         exists (
@@ -516,7 +516,7 @@ describe('disposable SQL migration baseline', () => {
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
-        and has_function_privilege('payreplayy_player_actions_runtime', procedure.oid, 'EXECUTE')
+        and has_function_privilege('fetanagent_player_actions_runtime', procedure.oid, 'EXECUTE')
       order by signature
     `);
     expect(functions.rows.map((row) => row.signature)).toEqual([
@@ -557,14 +557,14 @@ describe('disposable SQL migration baseline', () => {
     const digest = nonceDigest('9');
     await expect(
       queryAsRole<NonceReservationRow>(
-        'payreplayy_player_actions',
+        'fetanagent_player_actions',
         `select app.reserve_telegram_private_action_nonce($1::text, clock_timestamp() + interval '2 minutes') as reserved`,
         [digest],
       ),
     ).resolves.toEqual([{ reserved: true }]);
     await expect(
       queryAsRole<NonceReservationRow>(
-        'payreplayy_player_actions',
+        'fetanagent_player_actions',
         `select app.reserve_telegram_private_action_nonce($1::text, clock_timestamp() + interval '2 minutes') as reserved`,
         [digest],
       ),
@@ -590,7 +590,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole<AdmissionReceiptRow>(
-        'payreplayy_beta_admission',
+        'fetanagent_beta_admission',
         `
           select *
           from app.redeem_telegram_beta_invite(
@@ -607,7 +607,7 @@ describe('disposable SQL migration baseline', () => {
     ).resolves.toHaveLength(1);
 
     const inbound = await queryAsRole<AdmissionReceiptRow>(
-      'payreplayy_player_actions',
+      'fetanagent_player_actions',
       `
         select *
         from app.record_admitted_telegram_private_inbound_event(
@@ -623,7 +623,7 @@ describe('disposable SQL migration baseline', () => {
     expect(inbound).toHaveLength(1);
 
     const capability = await queryAsRole<PlayerActionCapabilityRow>(
-      'payreplayy_player_actions',
+      'fetanagent_player_actions',
       `
         select *
         from app.issue_telegram_player_registration_capability(
@@ -721,21 +721,21 @@ describe('disposable SQL migration baseline', () => {
         procedure.prosecdef as is_security_definer,
         coalesce(procedure.proconfig, array[]::text[])
           @> array['search_path=pg_catalog, app, pg_temp']::text[] as safe_search_path,
-        has_function_privilege('payreplayy_beta_admission', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_beta_admission', procedure.oid, 'EXECUTE')
           as beta_admission_execute_allowed,
-        has_function_privilege('payreplayy_beta_admission_runtime', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_beta_admission_runtime', procedure.oid, 'EXECUTE')
           as beta_admission_runtime_effective_execute_allowed,
         exists (
           select 1
           from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) as privilege
-          where privilege.grantee = 'payreplayy_beta_admission_runtime'::regrole
+          where privilege.grantee = 'fetanagent_beta_admission_runtime'::regrole
             and privilege.privilege_type = 'EXECUTE'
         ) as beta_admission_runtime_direct_execute_allowed,
-        has_function_privilege('payreplayy_api', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_api', procedure.oid, 'EXECUTE')
           as generic_api_execute_allowed,
-        has_function_privilege('payreplayy_api_runtime', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_api_runtime', procedure.oid, 'EXECUTE')
           as generic_api_runtime_execute_allowed,
-        has_function_privilege('payreplayy_worker', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_worker', procedure.oid, 'EXECUTE')
           as worker_execute_allowed,
         exists (
           select 1
@@ -780,11 +780,11 @@ describe('disposable SQL migration baseline', () => {
         'anon',
         'authenticated',
         'service_role',
-        'payreplayy_api',
-        'payreplayy_api_runtime',
-        'payreplayy_beta_admission',
-        'payreplayy_beta_admission_runtime',
-        'payreplayy_worker'
+        'fetanagent_api',
+        'fetanagent_api_runtime',
+        'fetanagent_beta_admission',
+        'fetanagent_beta_admission_runtime',
+        'fetanagent_worker'
       ]) as candidate(role_name)
       order by role_name
     `);
@@ -796,12 +796,12 @@ describe('disposable SQL migration baseline', () => {
       select
         to_regprocedure('${legacyPrivateInboundRecorder}') is not null as exists,
         has_function_privilege(
-          'payreplayy_api',
+          'fetanagent_api',
           '${legacyPrivateInboundRecorder}'::regprocedure,
           'EXECUTE'
         ) as api_execute_allowed,
         has_function_privilege(
-          'payreplayy_api_runtime',
+          'fetanagent_api_runtime',
           '${legacyPrivateInboundRecorder}'::regprocedure,
           'EXECUTE'
         ) as runtime_execute_allowed
@@ -872,25 +872,25 @@ describe('disposable SQL migration baseline', () => {
         procedure.prosecdef as is_security_definer,
         coalesce(procedure.proconfig, array[]::text[])
           @> array['search_path=pg_catalog, app, pg_temp']::text[] as safe_search_path,
-        has_function_privilege('payreplayy_beta_admission', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_beta_admission', procedure.oid, 'EXECUTE')
           as beta_admission_execute_allowed,
-        has_function_privilege('payreplayy_beta_admission_runtime', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_beta_admission_runtime', procedure.oid, 'EXECUTE')
           as beta_admission_runtime_effective_execute_allowed,
         exists (
           select 1
           from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) as privilege
-          where privilege.grantee = 'payreplayy_beta_admission_runtime'::regrole
+          where privilege.grantee = 'fetanagent_beta_admission_runtime'::regrole
             and privilege.privilege_type = 'EXECUTE'
         ) as beta_admission_runtime_direct_execute_allowed,
-        has_function_privilege('payreplayy_api', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_api', procedure.oid, 'EXECUTE')
           as generic_api_execute_allowed,
-        has_function_privilege('payreplayy_api_runtime', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_api_runtime', procedure.oid, 'EXECUTE')
           as generic_api_runtime_execute_allowed,
-        has_function_privilege('payreplayy_worker', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_worker', procedure.oid, 'EXECUTE')
           as worker_execute_allowed,
-        has_function_privilege('payreplayy_nonce_retention', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_nonce_retention', procedure.oid, 'EXECUTE')
           as nonce_retention_execute_allowed,
-        has_function_privilege('payreplayy_nonce_retention_runtime', procedure.oid, 'EXECUTE')
+        has_function_privilege('fetanagent_nonce_retention_runtime', procedure.oid, 'EXECUTE')
           as nonce_retention_runtime_execute_allowed,
         has_function_privilege('anon', procedure.oid, 'EXECUTE')
           as anon_execute_allowed,
@@ -964,13 +964,13 @@ describe('disposable SQL migration baseline', () => {
         'anon',
         'authenticated',
         'service_role',
-        'payreplayy_api',
-        'payreplayy_api_runtime',
-        'payreplayy_beta_admission',
-        'payreplayy_beta_admission_runtime',
-        'payreplayy_nonce_retention',
-        'payreplayy_nonce_retention_runtime',
-        'payreplayy_worker'
+        'fetanagent_api',
+        'fetanagent_api_runtime',
+        'fetanagent_beta_admission',
+        'fetanagent_beta_admission_runtime',
+        'fetanagent_nonce_retention',
+        'fetanagent_nonce_retention_runtime',
+        'fetanagent_worker'
       ]) as candidate(role_name)
       order by role_name
     `);
@@ -1049,8 +1049,8 @@ describe('disposable SQL migration baseline', () => {
     try {
       await Promise.all([leftSession.query('begin'), rightSession.query('begin')]);
       await Promise.all([
-        leftSession.query('set local role payreplayy_beta_admission'),
-        rightSession.query('set local role payreplayy_beta_admission'),
+        leftSession.query('set local role fetanagent_beta_admission'),
+        rightSession.query('set local role fetanagent_beta_admission'),
       ]);
 
       const leftReservation = leftSession.query<NonceReservationRow>(reserveStatement, [
@@ -1086,23 +1086,23 @@ describe('disposable SQL migration baseline', () => {
     expect(await readBetaAdmissionNonceReservationCount()).toBe(beforeReservation + 1);
 
     await expect(
-      queryAsRole<NonceReservationRow>('payreplayy_api', reserveStatement, [nonceDigest('b')]),
+      queryAsRole<NonceReservationRow>('fetanagent_api', reserveStatement, [nonceDigest('b')]),
     ).rejects.toThrow();
     expect(await readBetaAdmissionNonceReservationCount()).toBe(beforeReservation + 1);
 
     await expect(
-      queryAsRole<NonceReservationRow>('payreplayy_beta_admission', reserveStatement, [
+      queryAsRole<NonceReservationRow>('fetanagent_beta_admission', reserveStatement, [
         nonceDigest('g'),
       ]),
     ).rejects.toThrow('The Telegram beta admission nonce digest is invalid.');
     await expect(
-      queryAsRole<NonceReservationRow>('payreplayy_beta_admission', reserveStatement, [
+      queryAsRole<NonceReservationRow>('fetanagent_beta_admission', reserveStatement, [
         `sha256-v1:${nonceDigest('c')}`,
       ]),
     ).rejects.toThrow('The Telegram beta admission nonce digest is invalid.');
     await expect(
       queryAsRole<NonceReservationRow>(
-        'payreplayy_beta_admission',
+        'fetanagent_beta_admission',
         `
           select app.reserve_telegram_beta_invite_admission_nonce(
             $1::text,
@@ -1114,7 +1114,7 @@ describe('disposable SQL migration baseline', () => {
     ).rejects.toThrow('The Telegram beta admission nonce expiry is invalid.');
     await expect(
       queryAsRole<NonceReservationRow>(
-        'payreplayy_beta_admission',
+        'fetanagent_beta_admission',
         `
           select app.reserve_telegram_beta_invite_admission_nonce(
             $1::text,
@@ -1128,7 +1128,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole(
-        'payreplayy_beta_admission',
+        'fetanagent_beta_admission',
         `
           select app.purge_expired_telegram_beta_invite_admission_nonce_reservations(
             $1::integer
@@ -1182,7 +1182,7 @@ describe('disposable SQL migration baseline', () => {
     expect(before.rows).toEqual([{ expired: 65 }]);
 
     const reservation = await queryAsRole<NonceReservationRow>(
-      'payreplayy_beta_admission',
+      'fetanagent_beta_admission',
       `
         select app.reserve_telegram_beta_invite_admission_nonce(
           $1::text,
@@ -1204,7 +1204,7 @@ describe('disposable SQL migration baseline', () => {
   it('keeps the legacy auto-registration recorder inaccessible to the API role', async () => {
     await expect(
       queryAsRole(
-        'payreplayy_api',
+        'fetanagent_api',
         `
           select *
           from app.record_telegram_private_inbound_event(
@@ -1226,7 +1226,7 @@ describe('disposable SQL migration baseline', () => {
   it('keeps the admitted-inbox recorder inaccessible to the beta-admission role', async () => {
     await expect(
       queryAsRole(
-        'payreplayy_beta_admission',
+        'fetanagent_beta_admission',
         `
           select *
           from app.record_admitted_telegram_private_inbound_event(
@@ -1285,7 +1285,7 @@ describe('disposable SQL migration baseline', () => {
       hmacCharacter: string,
     ): Promise<readonly AdmissionReceiptRow[]> =>
       queryAsRole<AdmissionReceiptRow>(
-        'payreplayy_beta_admission',
+        'fetanagent_beta_admission',
         `
           select *
           from app.redeem_telegram_beta_invite(
@@ -1619,8 +1619,8 @@ describe('disposable SQL migration baseline', () => {
     try {
       await Promise.all([leftSession.query('begin'), rightSession.query('begin')]);
       await Promise.all([
-        leftSession.query('set local role payreplayy_beta_admission'),
-        rightSession.query('set local role payreplayy_beta_admission'),
+        leftSession.query('set local role fetanagent_beta_admission'),
+        rightSession.query('set local role fetanagent_beta_admission'),
       ]);
 
       const leftRedemption = leftSession.query<AdmissionReceiptRow>(redeemStatement, [
@@ -1742,7 +1742,7 @@ describe('disposable SQL migration baseline', () => {
       select rolname, rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole,
              rolreplication, rolbypassrls, rolconnlimit
       from pg_roles
-      where rolname in ('payreplayy_owner_control', 'payreplayy_owner_control_runtime')
+      where rolname in ('fetanagent_owner_control', 'fetanagent_owner_control_runtime')
       order by rolname
     `);
     expect(roleRows.rows).toEqual([
@@ -1753,7 +1753,7 @@ describe('disposable SQL migration baseline', () => {
         rolcreatedb: false,
         rolcreaterole: false,
         rolinherit: false,
-        rolname: 'payreplayy_owner_control',
+        rolname: 'fetanagent_owner_control',
         rolreplication: false,
         rolsuper: false,
       },
@@ -1764,7 +1764,7 @@ describe('disposable SQL migration baseline', () => {
         rolcreatedb: false,
         rolcreaterole: false,
         rolinherit: false,
-        rolname: 'payreplayy_owner_control_runtime',
+        rolname: 'fetanagent_owner_control_runtime',
         rolreplication: false,
         rolsuper: false,
       },
@@ -1786,37 +1786,37 @@ describe('disposable SQL migration baseline', () => {
     }>(`
       select
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.issue_telegram_beta_invite(uuid,text,timestamptz)',
           'execute'
         ) as issue_allowed,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.revoke_telegram_beta_invite(uuid,uuid,text)',
           'execute'
         ) as revoke_allowed,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.list_owner_player_registration_requests(uuid,integer)',
           'execute'
         ) as player_list_allowed,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.review_owner_player_registration_request(uuid,uuid,text,text)',
           'execute'
         ) as player_review_allowed,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.list_owner_player_registration_association_candidates(uuid,integer)',
           'execute'
         ) as player_association_list_allowed,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.associate_owner_validated_player_registration_request(uuid,uuid,text)',
           'execute'
         ) as player_association_allowed,
         has_function_privilege(
-          'payreplayy_owner_control_runtime',
+          'fetanagent_owner_control_runtime',
           'app.issue_telegram_beta_invite(uuid,text,timestamptz)',
           'execute'
         ) as runtime_effective_issue_allowed,
@@ -1834,7 +1834,7 @@ describe('disposable SQL migration baseline', () => {
             and exists (
               select 1
               from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
-              where privilege.grantee = 'payreplayy_owner_control_runtime'::regrole
+              where privilege.grantee = 'fetanagent_owner_control_runtime'::regrole
                 and privilege.privilege_type = 'EXECUTE'
             )
         ) as runtime_direct_execute_denied,
@@ -1863,9 +1863,9 @@ describe('disposable SQL migration baseline', () => {
           from (
             values
               ('anon'), ('authenticated'), ('service_role'),
-              ('payreplayy_api'), ('payreplayy_api_runtime'), ('payreplayy_worker'),
-              ('payreplayy_beta_admission'), ('payreplayy_beta_admission_runtime'),
-              ('payreplayy_nonce_retention'), ('payreplayy_nonce_retention_runtime')
+              ('fetanagent_api'), ('fetanagent_api_runtime'), ('fetanagent_worker'),
+              ('fetanagent_beta_admission'), ('fetanagent_beta_admission_runtime'),
+              ('fetanagent_nonce_retention'), ('fetanagent_nonce_retention_runtime')
           ) denied_role(role_name)
           cross join (
             values
@@ -1883,7 +1883,7 @@ describe('disposable SQL migration baseline', () => {
           )
         ) as broad_execution_denied,
         not has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)',
           'execute'
         ) as beta_execute_denied,
@@ -1899,7 +1899,7 @@ describe('disposable SQL migration baseline', () => {
               ('app.player_validation_attempts')
           ) protected_table(table_name)
           where has_table_privilege(
-            'payreplayy_owner_control',
+            'fetanagent_owner_control',
             protected_table.table_name,
             'select,insert,update,delete,truncate,references,trigger'
           )
@@ -1927,7 +1927,7 @@ describe('disposable SQL migration baseline', () => {
       readonly issued_expires_at: Date;
       readonly issued_invite_id: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `
         select *
         from app.issue_telegram_beta_invite(
@@ -1964,7 +1964,7 @@ describe('disposable SQL migration baseline', () => {
     expect(JSON.stringify(stored.rows[0]?.metadata)).not.toContain(digest);
 
     await queryAsRole(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select * from app.revoke_telegram_beta_invite($1::uuid, $2::uuid, $3::text)`,
       [ownerAuthUserId, issuedInviteId!, 'owner_cancelled'],
     );
@@ -1995,7 +1995,7 @@ describe('disposable SQL migration baseline', () => {
     );
     await expect(
       queryAsRole(
-        'payreplayy_owner_control',
+        'fetanagent_owner_control',
         `
           select *
           from app.issue_telegram_beta_invite(
@@ -2053,7 +2053,7 @@ describe('disposable SQL migration baseline', () => {
       readonly request_status: string;
       readonly submitted_player_id: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select * from app.list_owner_player_registration_requests($1::uuid, $2::integer)`,
       [ownerAuthUserId, 50],
     );
@@ -2071,7 +2071,7 @@ describe('disposable SQL migration baseline', () => {
       readonly reviewed_registration_request_id: string;
       readonly reviewed_status: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `
         select *
         from app.review_owner_player_registration_request(
@@ -2094,7 +2094,7 @@ describe('disposable SQL migration baseline', () => {
     const replayed = await queryAsRole<{
       readonly decision_already_recorded: boolean;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `
         select *
         from app.review_owner_player_registration_request(
@@ -2161,7 +2161,7 @@ describe('disposable SQL migration baseline', () => {
       readonly registration_request_id: string;
       readonly submitted_player_id: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select registration_request_id, submitted_player_id
        from app.list_owner_player_registration_association_candidates($1::uuid, 25)`,
       [ownerAuthUserId],
@@ -2176,7 +2176,7 @@ describe('disposable SQL migration baseline', () => {
       readonly associated_registration_request_id: string;
       readonly association_already_recorded: boolean;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select * from app.associate_owner_validated_player_registration_request(
          $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
        )`,
@@ -2223,7 +2223,7 @@ describe('disposable SQL migration baseline', () => {
     const associationReplay = await queryAsRole<{
       readonly association_already_recorded: boolean;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select * from app.associate_owner_validated_player_registration_request(
          $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
        )`,
@@ -2245,27 +2245,27 @@ describe('disposable SQL migration baseline', () => {
     }>(`
       select
         has_function_privilege(
-          'payreplayy_player_actions',
+          'fetanagent_player_actions',
           'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
           'execute'
         ) as player_actions_can_open,
         has_function_privilege(
-          'payreplayy_player_actions',
+          'fetanagent_player_actions',
           'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
           'execute'
         ) as player_actions_can_capture,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.list_owner_dry_run_deposit_intake(uuid,integer)',
           'execute'
         ) as owner_can_list,
         has_function_privilege(
-          'payreplayy_api',
+          'fetanagent_api',
           'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
           'execute'
         ) as api_can_open,
         has_function_privilege(
-          'payreplayy_api',
+          'fetanagent_api',
           'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
           'execute'
         ) as api_can_capture,
@@ -2337,7 +2337,7 @@ describe('disposable SQL migration baseline', () => {
           provider_id, version, account_holder_name, account_reference_ciphertext,
           account_reference_masked, instructions, created_by_admin_id
         )
-        select payment_provider.id, 1, 'PayReplayy Staging', 'fixture-ciphertext',
+        select payment_provider.id, 1, 'FetanAgent Staging', 'fixture-ciphertext',
                '****1234', jsonb_build_object(
                  'customer_message', 'Send only CBE Birr to the shown account.'
                ), $1::uuid
@@ -2365,7 +2365,7 @@ describe('disposable SQL migration baseline', () => {
       readonly origin_inbound_event_already_consumed: boolean;
       readonly provider_code: string;
     }>(
-      'payreplayy_player_actions',
+      'fetanagent_player_actions',
       `
         select deposit_intent_id, deposit_status, expected_amount_minor,
                origin_inbound_event_already_consumed, provider_code
@@ -2389,7 +2389,7 @@ describe('disposable SQL migration baseline', () => {
       readonly deposit_intent_id: string;
       readonly origin_inbound_event_already_consumed: boolean;
     }>(
-      'payreplayy_player_actions',
+      'fetanagent_player_actions',
       `select deposit_intent_id, origin_inbound_event_already_consumed
        from app.open_telegram_dry_run_deposit_intent($1::uuid, $2::text, $3::bigint, $4::text)`,
       [openingInboundId, 'STAGING-OWNER-REVIEW-01', 2500, payloadHmac('b')],
@@ -2417,7 +2417,7 @@ describe('disposable SQL migration baseline', () => {
       readonly result_deposit_intent_id: string;
       readonly submission_status: string;
     }>(
-      'payreplayy_player_actions',
+      'fetanagent_player_actions',
       `
         select result_deposit_intent_id, submission_status,
                origin_inbound_event_already_consumed
@@ -2447,7 +2447,7 @@ describe('disposable SQL migration baseline', () => {
       readonly origin_inbound_event_already_consumed: boolean;
       readonly result_deposit_intent_id: string;
     }>(
-      'payreplayy_player_actions',
+      'fetanagent_player_actions',
       `
         select result_deposit_intent_id, origin_inbound_event_already_consumed
         from app.capture_telegram_dry_run_deposit_reference(
@@ -2478,7 +2478,7 @@ describe('disposable SQL migration baseline', () => {
       readonly submission_status: string;
       readonly submitted_reference_masked: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `
         select deposit_intent_id, deposit_status, provider_code,
                submission_status, submitted_reference_masked
@@ -2521,25 +2521,25 @@ describe('disposable SQL migration baseline', () => {
           select 1 from pg_policy policy where policy.polrelid = review_table.oid
         ) as reviews_have_no_policies,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)',
           'execute'
         ) as owner_can_record_assessment,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)',
           'execute'
         ) as owner_can_review_assessment,
         has_function_privilege(
-          'payreplayy_owner_control',
+          'fetanagent_owner_control',
           'app.list_owner_dry_run_fixture_assessments(uuid,integer)',
           'execute'
         ) as owner_can_list_assessments,
         not has_table_privilege(
-          'payreplayy_owner_control', assessment_table.oid,
+          'fetanagent_owner_control', assessment_table.oid,
           'select,insert,update,delete,truncate,references,trigger'
         ) and not has_table_privilege(
-          'payreplayy_owner_control', review_table.oid,
+          'fetanagent_owner_control', review_table.oid,
           'select,insert,update,delete,truncate,references,trigger'
         ) as owner_has_no_assessment_table_access,
         not exists (
@@ -2577,7 +2577,7 @@ describe('disposable SQL migration baseline', () => {
       readonly already_recorded: boolean;
       readonly assessment_id: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select assessment_id, already_recorded
        from app.record_owner_dry_run_fixture_assessment(
          $1::uuid, $2::uuid, 'pending-status', 'would_review', 'fixture_status_pending'
@@ -2590,7 +2590,7 @@ describe('disposable SQL migration baseline', () => {
       readonly already_recorded: boolean;
       readonly assessment_id: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select assessment_id, already_recorded
        from app.record_owner_dry_run_fixture_assessment(
          $1::uuid, $2::uuid, 'pending-status', 'would_review', 'fixture_status_pending'
@@ -2606,7 +2606,7 @@ describe('disposable SQL migration baseline', () => {
       readonly assessment_id: string;
       readonly decision: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select assessment_id, decision, already_recorded
        from app.review_owner_dry_run_fixture_assessment(
          $1::uuid, $2::uuid, 'manual_review_required'
@@ -2626,7 +2626,7 @@ describe('disposable SQL migration baseline', () => {
       readonly outcome: string;
       readonly review_decision: string;
     }>(
-      'payreplayy_owner_control',
+      'fetanagent_owner_control',
       `select assessment_id, outcome, review_decision
        from app.list_owner_dry_run_fixture_assessments($1::uuid, 50)
        where assessment_id = $2::uuid`,
@@ -2670,7 +2670,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole(
-        'payreplayy_api',
+        'fetanagent_api',
         `select * from app.record_owner_dry_run_fixture_assessment(
           $1::uuid, $2::uuid, 'pending-status', 'would_review', 'fixture_status_pending'
         )`,
@@ -2702,7 +2702,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole(
-        'payreplayy_api',
+        'fetanagent_api',
         `select * from app.open_telegram_dry_run_deposit_intent(
            $1::uuid, $2::text, $3::bigint, $4::text
          )`,
@@ -2725,7 +2725,7 @@ describe('disposable SQL migration baseline', () => {
       await client.query(
         `update app.feature_switches set mode = 'dry_run' where feature_key = 'payment_verification'`,
       );
-      await client.query('set local role payreplayy_player_actions');
+      await client.query('set local role fetanagent_player_actions');
       await expect(
         client.query(
           `select * from app.open_telegram_dry_run_deposit_intent(
@@ -2740,7 +2740,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole(
-        'payreplayy_api',
+        'fetanagent_api',
         `select * from app.associate_owner_validated_player_registration_request(
            $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
          )`,
@@ -2750,7 +2750,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole(
-        'payreplayy_owner_control',
+        'fetanagent_owner_control',
         `
           select *
           from app.review_owner_player_registration_request(
@@ -2766,7 +2766,7 @@ describe('disposable SQL migration baseline', () => {
 
     await expect(
       queryAsRole(
-        'payreplayy_owner_control',
+        'fetanagent_owner_control',
         `update app.player_registration_requests set status = 'cancelled' where id = $1::uuid`,
         [requestId],
       ),

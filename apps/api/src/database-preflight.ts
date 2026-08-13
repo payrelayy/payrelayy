@@ -1,8 +1,8 @@
-import type { ApiPostgresRuntimeConfig } from '@payreplayy/config/api';
+import type { ApiPostgresRuntimeConfig } from '@fetanagent/config/api';
 import { Pool } from 'pg';
 
-const API_RUNTIME_GROUP_ROLE = 'payreplayy_api';
-const API_RUNTIME_LOGIN_ROLE = 'payreplayy_api_runtime';
+const API_RUNTIME_GROUP_ROLE = 'fetanagent_api';
+const API_RUNTIME_LOGIN_ROLE = 'fetanagent_api_runtime';
 
 const API_DATABASE_PREFLIGHT_SQL = `
   select
@@ -13,8 +13,8 @@ const API_DATABASE_PREFLIGHT_SQL = `
         'service_role',
         'anon',
         'authenticated',
-        'payreplayy_api',
-        'payreplayy_worker'
+        'fetanagent_api',
+        'fetanagent_worker'
       )
       and exists (
         select 1
@@ -85,7 +85,7 @@ const API_DATABASE_PREFLIGHT_SQL = `
         'anon',
         'authenticated',
         'service_role',
-        'payreplayy_worker'
+        'fetanagent_worker'
       ]) as broad_role(role_name)
       where pg_catalog.has_function_privilege(
         broad_role.role_name,
@@ -268,7 +268,7 @@ export function createApiDatabasePreflightPool(
   config: Extract<ApiPostgresRuntimeConfig, { readonly enabled: true }>,
 ): ApiDatabasePreflightPool {
   return new Pool({
-    application_name: 'payreplayy-api-preflight',
+    application_name: 'fetanagent-api-preflight',
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,

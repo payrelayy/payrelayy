@@ -1,14 +1,14 @@
 import {
   loadBetaAdmissionConfig,
-  PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE,
-} from '@payreplayy/config/beta-admission';
+  FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
+} from '@fetanagent/config/beta-admission';
 import {
   TELEGRAM_BETA_INVITE_REDEMPTION_CONTENT_TYPE,
   TELEGRAM_BETA_INVITE_REDEMPTION_HEADERS,
   TELEGRAM_BETA_INVITE_REDEMPTION_KEY_ID,
   TELEGRAM_BETA_INVITE_REDEMPTION_PATH,
   type TelegramBetaInviteRedemption,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { buildBetaAdmissionApp } from './app.js';
@@ -40,7 +40,7 @@ function config() {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true',
-    BETA_ADMISSION_DATABASE_URL: `postgresql://payreplayy_beta_admission_runtime:password@db.${PAYREPLAYY_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
+    BETA_ADMISSION_DATABASE_URL: `postgresql://fetanagent_beta_admission_runtime:password@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
     BOT_TO_BETA_ADMISSION_HMAC_SECRET: transportHmacSecret,
     BETA_ADMISSION_PAYLOAD_HMAC_SECRET: payloadHmacSecret,
   });

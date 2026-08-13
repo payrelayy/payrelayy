@@ -1,4 +1,4 @@
-name: payreplayy-inactive
+name: fetanagent-inactive
 
 # Stage 14A is an intentionally inactive, API-only container contract. It has no host port,
 # credential, bot, worker, executor, reverse proxy, or public ingress. Do not run it as a service.
@@ -31,7 +31,7 @@ services:
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
     networks:
-      - payreplayy_internal
+      - fetanagent_internal
     healthcheck:
       test:
         - CMD
@@ -44,5 +44,5 @@ services:
       retries: 3
 
 networks:
-  payreplayy_internal:
+  fetanagent_internal:
     internal: true

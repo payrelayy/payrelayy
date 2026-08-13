@@ -1,4 +1,4 @@
-import { loadExecutorConfig, redactedExecutorConfigForLog } from '@payreplayy/config/executor';
+import { loadExecutorConfig, redactedExecutorConfigForLog } from '@fetanagent/config/executor';
 
 const config = loadExecutorConfig();
 const finalActionAllowed = false;

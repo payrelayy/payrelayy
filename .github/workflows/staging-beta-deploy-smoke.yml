@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: payreplayy-staging-beta-deploy
+  group: fetanagent-staging-beta-deploy
   cancel-in-progress: false
 
 env:
@@ -41,9 +41,9 @@ env:
   STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
   STAGING_BANNED_IP: 2a05:d018:135e:1602:5210:739d:5667:fee4
   SUPABASE_CLI_VERSION: 2.113.0
-  BETA_RUNTIME_ROLE: payreplayy_beta_admission_runtime
-  OWNER_RUNTIME_ROLE: payreplayy_owner_control_runtime
-  PLAYER_ACTION_RUNTIME_ROLE: payreplayy_player_actions_runtime
+  BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
+  OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
+  PLAYER_ACTION_RUNTIME_ROLE: fetanagent_player_actions_runtime
 
 jobs:
   validate-target:
@@ -95,15 +95,15 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_SHA:0:12}"
           docker build --pull=false --target admin \
-            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-owner-control:$tag" .
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-owner-control:$tag" .
           docker build --pull=false --target api \
-            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-api:$tag" .
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-api:$tag" .
           docker build --pull=false --target beta-admission \
-            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-beta-admission:$tag" .
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-beta-admission:$tag" .
           docker build --pull=false --target bot \
-            --build-arg "VCS_REF=$GITHUB_SHA" -t "payreplayy-bot:$tag" .
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-bot:$tag" .
           for image in owner-control api beta-admission bot; do
-            test "$(docker image inspect "payreplayy-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
+            test "$(docker image inspect "fetanagent-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
           done
 
       - name: Save sealed images for the deployment job
@@ -112,18 +112,18 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_SHA:0:12}"
-          docker save --output "$RUNNER_TEMP/payreplayy-staging-images.tar" \
-            "payreplayy-owner-control:$tag" \
-            "payreplayy-api:$tag" \
-            "payreplayy-beta-admission:$tag" \
-            "payreplayy-bot:$tag"
+          docker save --output "$RUNNER_TEMP/fetanagent-staging-images.tar" \
+            "fetanagent-owner-control:$tag" \
+            "fetanagent-api:$tag" \
+            "fetanagent-beta-admission:$tag" \
+            "fetanagent-bot:$tag"
 
       - name: Upload sealed image bundle
         if: inputs.mode == 'deploy-and-smoke'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: payreplayy-staging-images-${{ github.sha }}
-          path: ${{ runner.temp }}/payreplayy-staging-images.tar
+          name: fetanagent-staging-images-${{ github.sha }}
+          path: ${{ runner.temp }}/fetanagent-staging-images.tar
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -203,7 +203,7 @@ jobs:
       - name: Download sealed image bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: payreplayy-staging-images-${{ github.sha }}
+          name: fetanagent-staging-images-${{ github.sha }}
           path: ${{ runner.temp }}/release
 
       - name: Validate protected deploy inputs
@@ -283,7 +283,7 @@ jobs:
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
           openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
           ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
-          helper_sha="$(sha256sum infra/operations/payreplayy-staging-deploy-helper.sh | awk '{print $1}')"
+          helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
           echo "secret_dir=$secret_dir" >> "$GITHUB_OUTPUT"
           echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
           echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
@@ -304,8 +304,8 @@ jobs:
           set -euo pipefail
           ssh=(ssh -F /dev/null -i '${{ steps.protected.outputs.secret_dir }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.protected.outputs.secret_dir }}/known-hosts')
           remote_status=0
-          "${ssh[@]}" "payreplayy-admin@${{ steps.protected.outputs.vm_host }}" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop" || remote_status=$?
+          "${ssh[@]}" "fetanagent-admin@${{ steps.protected.outputs.vm_host }}" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop" || remote_status=$?
           psql -X --file=infra/sql/staging-runtimes-disable.sql
           if [[ "$remote_status" -ne 0 ]]; then
             echo '::error::The prior staging containers could not be stopped; database logins were disabled.'
@@ -320,8 +320,8 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
-          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper network-ready"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper network-ready"
 
       - name: Provision three narrow 24-hour staging logins
         id: provision
@@ -351,10 +351,10 @@ jobs:
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
           set -euo pipefail
-          incoming="/tmp/payreplayy-$GITHUB_SHA"
+          incoming="/tmp/fetanagent-$GITHUB_SHA"
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
-          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" "install -d -m 0700 '$incoming'"
-          scp "${ssh_opts[@]}" "$RUNNER_TEMP/release/payreplayy-staging-images.tar" \
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" "install -d -m 0700 '$incoming'"
+          scp "${ssh_opts[@]}" "$RUNNER_TEMP/release/fetanagent-staging-images.tar" \
             infra/compose.staging-beta.yaml "$SECRET_DIR/supabase-ca.crt" \
             "$SECRET_DIR/beta-database-url" "$SECRET_DIR/owner-database-url" \
             "$SECRET_DIR/player-action-database-url" \
@@ -364,9 +364,9 @@ jobs:
             "$SECRET_DIR/api-action-semantic-hmac" \
             "$SECRET_DIR/api-deposit-reference-protection" \
             "$SECRET_DIR/beta-payload-hmac" "$SECRET_DIR/bot-token" \
-            "$SECRET_DIR/publishable-key" "payreplayy-admin@$VM_HOST:$incoming/"
-          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
+            "$SECRET_DIR/publishable-key" "fetanagent-admin@$VM_HOST:$incoming/"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
 
       - name: Start the private staging profile and smoke readiness
         id: activate
@@ -377,9 +377,9 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
-          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
-          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
           echo 'started=true' >> "$GITHUB_OUTPUT"
 
@@ -392,8 +392,8 @@ jobs:
         run: |
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
-          ssh "${ssh_opts[@]}" "payreplayy-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper diagnose-owner-startup '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper diagnose-owner-startup '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
 
       - name: Capture count-only runtime session diagnostics after failed activation
         if: failure() && steps.provision.outputs.attempted == 'true'
@@ -431,8 +431,8 @@ jobs:
           if [[ -n "$secret_dir" && -n "$vm_host" ]]; then
             ssh -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
-              "payreplayy-admin@$vm_host" \
-              "sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper discard '$GITHUB_SHA'" || true
+              "fetanagent-admin@$vm_host" \
+              "sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper discard '$GITHUB_SHA'" || true
           fi
           cleanup_status=1
           for attempt in 1 2 3 4; do
@@ -489,12 +489,12 @@ jobs:
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$RUNNER_TEMP/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$PGSSLROOTCERT"
           openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
-          helper_sha="$(sha256sum infra/operations/payreplayy-staging-deploy-helper.sh | awk '{print $1}')"
+          helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
           remote_status=0
           ssh -F /dev/null -i "$RUNNER_TEMP/deploy-key" -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
-            "payreplayy-admin@$STAGING_VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper verify '$helper_sha' && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper stop && sudo -n /usr/local/sbin/payreplayy-staging-deploy-helper discard '$GITHUB_SHA'" || remote_status=$?
+            "fetanagent-admin@$STAGING_VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper discard '$GITHUB_SHA'" || remote_status=$?
           psql -X --file=infra/sql/staging-runtimes-disable.sql
           if [[ "$remote_status" -ne 0 ]]; then
             echo '::error::Database logins were disabled, but the VM cleanup requires operator review.'

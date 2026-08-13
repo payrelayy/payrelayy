@@ -1,4 +1,4 @@
-import type { ApiConfig, ApiPostgresRuntimeConfig } from '@payreplayy/config/api';
+import type { ApiConfig, ApiPostgresRuntimeConfig } from '@fetanagent/config/api';
 import { Pool, type PoolConfig } from 'pg';
 
 import {
@@ -81,7 +81,7 @@ export function createPostgresTelegramIngressPoolConfig(
   }
 
   return {
-    application_name: 'payreplayy-api-telegram-ingress',
+    application_name: 'fetanagent-api-telegram-ingress',
     connectionTimeoutMillis: POSTGRES_TELEGRAM_INGRESS_CONNECTION_TIMEOUT_MS,
     database: config.connection.database,
     host: config.connection.host,

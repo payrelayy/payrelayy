@@ -1,10 +1,10 @@
 import { createCipheriv, createHmac, randomBytes } from 'node:crypto';
 
-import type { ApiConfig } from '@payreplayy/config/api';
+import type { ApiConfig } from '@fetanagent/config/api';
 import type {
   TelegramPrivateActionEnvelope,
   TelegramPrivateActionResult,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { Pool, type PoolConfig } from 'pg';
 
 import {
@@ -119,7 +119,7 @@ function isPgRejection(error: unknown): boolean {
 
 function payloadHmac(secret: string, rawBody: Buffer): string {
   return `hmac-sha256-v1:${createHmac('sha256', Buffer.from(secret, 'hex'))
-    .update('payreplayy:telegram:private-action:payload:v1\n', 'utf8')
+    .update('fetanagent:telegram:private-action:payload:v1\n', 'utf8')
     .update(rawBody)
     .digest('hex')}`;
 }
@@ -151,18 +151,18 @@ function protectReference(
   const normalizedReference = reference.toUpperCase();
   const master = Buffer.from(secret, 'hex');
   const encryptionKey = createHmac('sha256', master)
-    .update('payreplayy:deposit-reference:encryption-key:v1', 'utf8')
+    .update('fetanagent:deposit-reference:encryption-key:v1', 'utf8')
     .digest();
   const fingerprintKey = createHmac('sha256', master)
-    .update('payreplayy:deposit-reference:fingerprint-key:v1', 'utf8')
+    .update('fetanagent:deposit-reference:fingerprint-key:v1', 'utf8')
     .digest();
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', encryptionKey, nonce);
-  cipher.setAAD(Buffer.from('payreplayy:deposit-reference:v1', 'utf8'));
+  cipher.setAAD(Buffer.from('fetanagent:deposit-reference:v1', 'utf8'));
   const encrypted = Buffer.concat([cipher.update(normalizedReference, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   const fingerprint = createHmac('sha256', fingerprintKey)
-    .update('payreplayy:deposit-reference:fingerprint-input:v1\n', 'utf8')
+    .update('fetanagent:deposit-reference:fingerprint-input:v1\n', 'utf8')
     .update('provider:cbe_birr\n', 'utf8')
     .update(normalizedReference, 'utf8')
     .digest('hex');
@@ -445,7 +445,7 @@ export function createTelegramPlayerActionPoolConfig(
   config: EnabledPlayerActionConfig['telegramPlayerActionRuntime'],
 ): PoolConfig {
   return {
-    application_name: 'payreplayy-player-actions',
+    application_name: 'fetanagent-player-actions',
     connectionTimeoutMillis: 5_000,
     database: config.connection.database,
     host: config.connection.host,

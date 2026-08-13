@@ -1,11 +1,11 @@
 {
-  "name": "@payreplayy/beta-admission",
+  "name": "@fetanagent/beta-admission",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@payreplayy/config": "workspace:*",
-    "@payreplayy/contracts": "workspace:*",
+    "@fetanagent/config": "workspace:*",
+    "@fetanagent/contracts": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "8.22.0"
   },

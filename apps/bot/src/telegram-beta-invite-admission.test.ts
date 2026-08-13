@@ -7,8 +7,8 @@ import {
   TELEGRAM_BETA_INVITE_REDEMPTION_PATH,
   telegramBetaInviteRedemptionSignatureInput,
   type TelegramBetaInviteRedemption,
-} from '@payreplayy/contracts';
-import { message } from '@payreplayy/i18n';
+} from '@fetanagent/contracts';
+import { message } from '@fetanagent/i18n';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -56,7 +56,7 @@ describe('beta invite admission reducer', () => {
       '/start',
       `/start  ${inviteToken}`,
       `/start ${inviteToken} extra`,
-      `/start@payrelayybot ${inviteToken}`,
+      `/start@fetanagentbot ${inviteToken}`,
       ` /start ${inviteToken}`,
       `/start ${inviteToken}\n`,
       `/menu ${inviteToken}`,

@@ -1,4 +1,4 @@
-import type { TelegramPrivateActionEnvelope } from '@payreplayy/contracts';
+import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -38,8 +38,8 @@ describe('Telegram private-action bot client', () => {
     ).resolves.toEqual({ version: 1, outcome: 'player_id_pending' });
     expect(Buffer.from(captured?.body as Uint8Array).toString('utf8')).toBe(JSON.stringify(action));
     expect(captured?.headers).toMatchObject({
-      'content-type': 'application/vnd.payreplayy.telegram-private-action+json',
-      'x-payreplayy-action-nonce': 'n'.repeat(32),
+      'content-type': 'application/vnd.fetanagent.telegram-private-action+json',
+      'x-fetanagent-action-nonce': 'n'.repeat(32),
     });
     expect(JSON.stringify(captured?.headers)).not.toContain(config.transportHmacSecret);
   });
@@ -53,7 +53,7 @@ describe('Telegram private-action bot client', () => {
         nonce: () => nonces[attempts] ?? 'c'.repeat(32),
         fetch: async (_input, init) => {
           const headers = init?.headers as Record<string, string>;
-          deliveredNonces.push(headers['x-payreplayy-action-nonce'] ?? '');
+          deliveredNonces.push(headers['x-fetanagent-action-nonce'] ?? '');
           attempts += 1;
           return attempts === 1
             ? { status: 503, json: async () => ({}) }

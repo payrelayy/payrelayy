@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatTelegramPlayerRegistrationCapabilityCallback } from '@payreplayy/contracts';
+import { formatTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 
 import { renderPlayerRegistrationMenu } from './private-menu.js';
 

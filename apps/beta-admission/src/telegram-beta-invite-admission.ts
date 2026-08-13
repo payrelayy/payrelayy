@@ -14,7 +14,7 @@ import {
   telegramBetaInviteRedemptionSignatureInput,
   telegramBetaInviteTokenDigestInput,
   type TelegramBetaInviteRedemption,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 
 export interface TelegramBetaInviteAdmissionRequest {
   readonly headers: IncomingHttpHeaders;
@@ -399,7 +399,7 @@ export function toTelegramBetaInviteRedemptionDatabaseInput(
   });
   const payloadHmac = `hmac-sha256-v1:${hmacSha256Hex(
     options.payloadHmacSecret,
-    `payreplayy:telegram:beta-invite:payload:v1\n${canonicalPayload}`,
+    `fetanagent:telegram:beta-invite:payload:v1\n${canonicalPayload}`,
   )}`;
 
   return {

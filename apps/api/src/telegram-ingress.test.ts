@@ -1,4 +1,4 @@
-import { loadApiConfig } from '@payreplayy/config/api';
+import { loadApiConfig } from '@fetanagent/config/api';
 import {
   TELEGRAM_PRIVATE_INGRESS_CONTENT_TYPE,
   TELEGRAM_PRIVATE_INGRESS_HEADERS,
@@ -6,7 +6,7 @@ import {
   TELEGRAM_PRIVATE_INGRESS_MAX_BODY_BYTES,
   TELEGRAM_PRIVATE_INGRESS_PATH,
   type TelegramPrivateInboundEvent,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp, type ApiDependencies } from './app.js';
@@ -39,7 +39,7 @@ function enabledApiConfig(nodeEnv: 'test' | 'production' = 'test') {
     NODE_ENV: nodeEnv,
     INTERNAL_POSTGRES_RUNTIME_ENABLED: 'true',
     DATABASE_URL:
-      'postgresql://payreplayy_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
+      'postgresql://fetanagent_api_runtime:example-only@db.xzztugbgtulptnbpoelr.supabase.co/postgres?sslmode=verify-full',
     INTERNAL_TELEGRAM_INGRESS_ENABLED: 'true',
     BOT_TO_API_INGRESS_HMAC_SECRET: transportHmacSecret,
     API_TELEGRAM_PAYLOAD_HMAC_SECRET: payloadHmacSecret,

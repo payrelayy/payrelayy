@@ -9,8 +9,8 @@ import {
   isTelegramBetaInviteToken,
   telegramBetaInviteRedemptionSignatureInput,
   type TelegramBetaInviteRedemption,
-} from '@payreplayy/contracts';
-import { message } from '@payreplayy/i18n';
+} from '@fetanagent/contracts';
+import { message } from '@fetanagent/i18n';
 
 export interface TelegramBetaInviteStartMetadata {
   readonly updateId: number;

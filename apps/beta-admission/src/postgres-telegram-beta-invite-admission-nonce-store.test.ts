@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   TELEGRAM_BETA_INVITE_REDEMPTION_MAX_TIMESTAMP_SKEW_SECONDS,
   telegramBetaInviteRedemptionNonceDigestInput,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {

@@ -58,7 +58,7 @@ select
   count(*) filter (where receiver_account.status = 'active') = 0
     or count(*) filter (
       where receiver_account.status = 'active'
-        and receiver_account.account_holder_name = 'PAYREPLAYY STAGING SIMULATION - DO NOT PAY'
+        and receiver_account.account_holder_name = 'FETANAGENT STAGING SIMULATION - DO NOT PAY'
         and receiver_account.account_reference_ciphertext = 'synthetic-staging-v1:do-not-pay'
         and receiver_account.account_reference_masked = '****TEST'
         and receiver_account.instructions = jsonb_build_object(

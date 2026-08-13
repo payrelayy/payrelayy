@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Root-owned, fail-closed helper for the exact PayReplayy staging beta Compose project.
-# Install this reviewed file as /usr/local/sbin/payreplayy-staging-deploy-helper with
+# Root-owned, fail-closed helper for the exact FetanAgent staging beta Compose project.
+# Install this reviewed file as /usr/local/sbin/fetanagent-staging-deploy-helper with
 # root:root ownership and mode 0755. The SSH deployment identity may sudo only this helper.
 
 set -euo pipefail
 
-readonly EXPECTED_SUDO_USER='payreplayy-admin'
-readonly HELPER_PATH='/usr/local/sbin/payreplayy-staging-deploy-helper'
-readonly RELEASE_ROOT='/srv/payreplayy/releases'
-readonly SECRET_ROOT='/srv/payreplayy/secrets/staging'
-readonly PROJECT_NAME='payreplayy-staging-beta'
+readonly EXPECTED_SUDO_USER='fetanagent-admin'
+readonly HELPER_PATH='/usr/local/sbin/fetanagent-staging-deploy-helper'
+readonly RELEASE_ROOT='/srv/fetanagent/releases'
+readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
+readonly PROJECT_NAME='fetanagent-staging-beta'
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
@@ -110,7 +110,7 @@ case "$command" in
 
   discard)
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || die 'discard requires one full commit SHA'
-    incoming="/tmp/payreplayy-$2"
+    incoming="/tmp/fetanagent-$2"
     if [[ -e "$incoming" || -L "$incoming" ]]; then
       [[ ! -L "$incoming" && -d "$incoming" ]] || die 'the incoming cleanup target is unsafe'
       [[ "$(stat --format='%U:%a' "$incoming")" == "$EXPECTED_SUDO_USER:700" ]] ||
@@ -125,7 +125,7 @@ case "$command" in
     image_tag="$3"
     incoming="$4"
     validate_commit_and_tag "$commit_sha" "$image_tag"
-    [[ "$incoming" == "/tmp/payreplayy-$commit_sha" ]] || die 'the incoming directory is outside the approved path'
+    [[ "$incoming" == "/tmp/fetanagent-$commit_sha" ]] || die 'the incoming directory is outside the approved path'
     [[ ! -L "$incoming" && -d "$incoming" ]] || die 'the incoming directory is absent or symbolic'
     [[ "$(stat --format='%U:%a' "$incoming")" == "$EXPECTED_SUDO_USER:700" ]] ||
       die 'the incoming directory ownership or mode is unsafe'
@@ -136,7 +136,7 @@ case "$command" in
       api-action-transport-hmac \
       beta-database-url beta-payload-hmac beta-transport-hmac bot-token bot-transport-hmac \
       bot-action-transport-hmac player-action-database-url \
-      compose.staging-beta.yaml owner-database-url payreplayy-staging-images.tar publishable-key \
+      compose.staging-beta.yaml owner-database-url fetanagent-staging-images.tar publishable-key \
       supabase-ca.crt; } | sort)"
     actual_files="$(find "$incoming" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
     [[ "$actual_files" == "$expected_files" ]] || die 'the incoming release file set is not exact'
@@ -165,9 +165,9 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$incoming/publishable-key" "$SECRET_ROOT/publishable-key"
     install -o root -g root -m 0444 "$incoming/supabase-ca.crt" "$SECRET_ROOT/supabase-ca.crt"
 
-    docker_local image load --input "$incoming/payreplayy-staging-images.tar" >/dev/null
+    docker_local image load --input "$incoming/fetanagent-staging-images.tar" >/dev/null
     for image in owner-control api beta-admission bot; do
-      [[ "$(docker_local image inspect "payreplayy-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+      [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'a loaded image revision does not match the reviewed commit'
     done
     rm -rf -- "$incoming"
@@ -192,7 +192,7 @@ case "$command" in
       die 'the public Supabase CA ownership or mode is unsafe'
 
     for image in owner-control api beta-admission bot; do
-      [[ "$(docker_local image inspect "payreplayy-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+      [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'an image revision does not match the reviewed commit'
     done
 
@@ -202,23 +202,23 @@ case "$command" in
       PATH="$SAFE_PATH"
       HOME='/root'
       DOCKER_HOST="$LOCAL_DOCKER_SOCKET"
-      PAYREPLAYY_VCS_REF="$commit_sha"
-      PAYREPLAYY_IMAGE_TAG="$image_tag"
-      PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
-      PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
-      PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
-      PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
-      PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
-      PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
-      PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
-      PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE="$SECRET_ROOT/api-deposit-reference-protection"
-      PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
-      PAYREPLAYY_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
-      PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
-      PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+      FETANAGENT_VCS_REF="$commit_sha"
+      FETANAGENT_IMAGE_TAG="$image_tag"
+      FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
+      FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
+      FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
+      FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE="$SECRET_ROOT/api-deposit-reference-protection"
+      FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
+      FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
+      FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
+      FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
     )
     compose_command=(
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null

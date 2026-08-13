@@ -21,7 +21,7 @@ Registration must therefore record a customer request, not an ownership claim.
 
 ### `app.player_registration_requests`
 
-Each row means: "this customer asked PayReplayy to validate this Player ID for this platform."
+Each row means: "this customer asked FetanAgent to validate this Player ID for this platform."
 
 The applied immutable identity fields are:
 
@@ -130,7 +130,7 @@ claim that the customer owns the account.
 - Grant no direct table or sequence access to browser clients, Telegram bot, worker, or API role.
 - Use fixed-search-path `SECURITY DEFINER` functions and revoke their default `PUBLIC` execution.
   The registration helper remains ungranted. Staging grants only the conversation-aware wrapper to
-  the dedicated `payreplayy_player_actions` group; the generic API role remains denied.
+  the dedicated `fetanagent_player_actions` group; the generic API role remains denied.
 - The bot never receives database credentials and never invokes KemerBet directly.
 - Display English reason-code translations rather than database errors.
 

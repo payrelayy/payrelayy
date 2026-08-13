@@ -1,4 +1,4 @@
-import type { OwnerControlRuntimeConfig } from '@payreplayy/config/owner-control';
+import type { OwnerControlRuntimeConfig } from '@fetanagent/config/owner-control';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,7 +16,7 @@ const config = {
     host: 'db.spzpiyxheappsfyswewl.supabase.co',
     password: 'test-password',
     port: 5432,
-    user: 'payreplayy_owner_control_runtime',
+    user: 'fetanagent_owner_control_runtime',
   },
   publishableKey: 'sb_publishable_test_key_for_staging_only',
   supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',

@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function writeSecretFile(name: string, value: string): string {
-  const directory = mkdtempSync(join(tmpdir(), 'payreplayy-bot-config-'));
+  const directory = mkdtempSync(join(tmpdir(), 'fetanagent-bot-config-'));
   temporaryDirectories.push(directory);
   const path = join(directory, name);
   writeFileSync(path, `${value}\n`, { encoding: 'utf8', mode: 0o400 });

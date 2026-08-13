@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import type { FinancialActionsMode } from '@payreplayy/domain';
+import type { FinancialActionsMode } from '@fetanagent/domain';
 
 import {
   booleanFromEnv,
@@ -134,12 +134,12 @@ function portFromEnv(value: string | undefined): number {
   return parsed;
 }
 
-const API_DATABASE_RUNTIME_ROLE = 'payreplayy_api_runtime';
-const PAYREPLAYY_SUPABASE_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr';
-const API_DATABASE_DIRECT_HOST = `db.${PAYREPLAYY_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
+const API_DATABASE_RUNTIME_ROLE = 'fetanagent_api_runtime';
+const FETANAGENT_SUPABASE_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr';
+const API_DATABASE_DIRECT_HOST = `db.${FETANAGENT_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
 const API_DATABASE_SESSION_POOLER_HOST = 'aws-0-eu-west-1.pooler.supabase.com';
-const API_DATABASE_SESSION_POOLER_USER = `${API_DATABASE_RUNTIME_ROLE}.${PAYREPLAYY_SUPABASE_PROJECT_REFERENCE}`;
-const PLAYER_ACTION_DATABASE_RUNTIME_ROLE = 'payreplayy_player_actions_runtime';
+const API_DATABASE_SESSION_POOLER_USER = `${API_DATABASE_RUNTIME_ROLE}.${FETANAGENT_SUPABASE_PROJECT_REFERENCE}`;
+const PLAYER_ACTION_DATABASE_RUNTIME_ROLE = 'fetanagent_player_actions_runtime';
 const PLAYER_ACTION_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 const PLAYER_ACTION_DATABASE_DIRECT_HOST = `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`;
 
@@ -196,7 +196,7 @@ function resolveApiDatabaseRuntimeUser(connectionUrl: URL): string {
   }
 
   throw new Error(
-    'DATABASE_URL must use the dedicated PayReplayy API runtime login and approved project host.',
+    'DATABASE_URL must use the dedicated FetanAgent API runtime login and approved project host.',
   );
 }
 
@@ -257,7 +257,7 @@ function loadApiPostgresRuntimeConfig(environment: NodeJS.ProcessEnv): ApiPostgr
 
   const database = decodeDatabaseUrlComponent(connectionUrl.pathname.slice(1));
   if (database !== 'postgres') {
-    throw new Error('DATABASE_URL must target the PayReplayy PostgreSQL database.');
+    throw new Error('DATABASE_URL must target the FetanAgent PostgreSQL database.');
   }
 
   return {

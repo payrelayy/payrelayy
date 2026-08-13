@@ -1,9 +1,9 @@
-import type { BetaAdmissionConfig } from '@payreplayy/config/beta-admission';
+import type { BetaAdmissionConfig } from '@fetanagent/config/beta-admission';
 import {
   TELEGRAM_BETA_INVITE_REDEMPTION_CONTENT_TYPE,
   TELEGRAM_BETA_INVITE_REDEMPTION_MAX_BODY_BYTES,
   TELEGRAM_BETA_INVITE_REDEMPTION_PATH,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 import Fastify, { LogController } from 'fastify';
 
 import { TelegramBetaInviteAdmissionNonceStoreUnavailableError } from './postgres-telegram-beta-invite-admission-nonce-store.js';
@@ -121,7 +121,7 @@ export function buildBetaAdmissionApp(
 
   app.get('/healthz', async () => ({
     status: 'ok',
-    service: 'payreplayy-beta-admission',
+    service: 'fetanagent-beta-admission',
     runtimeEnabled: true,
     stage: 'staging',
   }));

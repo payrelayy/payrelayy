@@ -41,10 +41,10 @@ action, and own all idempotency and authorization checks.
 The future bot-to-API action envelope is reserved as:
 
 - method and path: `POST /internal/v1/telegram/private-action`;
-- MIME type: `application/vnd.payreplayy.telegram-private-action+json`;
-- authentication headers: `x-payreplayy-action-*` only;
-- signing domain: `payreplayy-bot-api-private-action-v1`; and
-- nonce digest input domain: `payreplayy:telegram:private-action:nonce:v1`.
+- MIME type: `application/vnd.fetanagent.telegram-private-action+json`;
+- authentication headers: `x-fetanagent-action-*` only;
+- signing domain: `fetanagent-bot-api-private-action-v1`; and
+- nonce digest input domain: `fetanagent:telegram:private-action:nonce:v1`.
 
 It uses a separately configured `BOT_TO_API_ACTION_HMAC_SECRET`; that key must differ from the
 private inbox transport/payload keys and the capability/semantic keys. The verifier authenticates
@@ -65,7 +65,7 @@ BOT_TO_API_ACTION_HMAC_SECRET=
 
 The bot and API load no action URL or HMAC while the gate is false. The reviewed staging beta
 profile is the sole exception: it enables this channel with service-separated file mounts, an
-invite-only admission boundary, the dedicated `payreplayy_player_actions_runtime` identity,
+invite-only admission boundary, the dedicated `fetanagent_player_actions_runtime` identity,
 durable action-nonce storage, and the existing conversation-aware procedures. That profile can
 create only a pending Player-ID request. It cannot validate an ID, contact KemerBet, open a deposit
 or withdrawal, or perform a financial action.

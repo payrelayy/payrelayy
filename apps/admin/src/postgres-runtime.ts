@@ -1,4 +1,4 @@
-import type { OwnerControlRuntimeConfig } from '@payreplayy/config/owner-control';
+import type { OwnerControlRuntimeConfig } from '@fetanagent/config/owner-control';
 import { Pool, type PoolConfig } from 'pg';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
@@ -32,7 +32,7 @@ export function ownerControlPoolConfig(
     throw new OwnerControlPostgresRuntimeUnavailableError();
   }
   return {
-    application_name: 'payreplayy-owner-control',
+    application_name: 'fetanagent-owner-control',
     database: config.connection.database,
     connectionTimeoutMillis: 5_000,
     host: config.connection.host,
@@ -52,8 +52,8 @@ export function ownerControlPoolConfig(
 
 export const OWNER_CONTROL_PREFLIGHT_SQL = `
   select
-    current_user = 'payreplayy_owner_control_runtime' as exact_runtime,
-    session_user = 'payreplayy_owner_control_runtime' as exact_session,
+    current_user = 'fetanagent_owner_control_runtime' as exact_runtime,
+    session_user = 'fetanagent_owner_control_runtime' as exact_session,
     has_schema_privilege(current_user, 'app', 'usage') as app_usage,
     not has_schema_privilege(current_user, 'app', 'create') as app_create_denied,
     exists (
@@ -75,7 +75,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
       join pg_roles granted_role on granted_role.oid = membership.roleid
       join pg_roles member_role on member_role.oid = membership.member
       where member_role.rolname = current_user
-        and granted_role.rolname = 'payreplayy_owner_control'
+        and granted_role.rolname = 'fetanagent_owner_control'
         and membership.inherit_option
         and not membership.set_option
         and not membership.admin_option
@@ -86,21 +86,21 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
       join pg_roles granted_role on granted_role.oid = membership.roleid
       join pg_roles member_role on member_role.oid = membership.member
       where member_role.rolname = current_user
-        and granted_role.rolname <> 'payreplayy_owner_control'
+        and granted_role.rolname <> 'fetanagent_owner_control'
     ) as no_other_runtime_memberships,
     not exists (
       select 1
       from pg_auth_members membership
       join pg_roles member_role on member_role.oid = membership.member
-      where member_role.rolname = 'payreplayy_owner_control'
+      where member_role.rolname = 'fetanagent_owner_control'
     ) as owner_group_has_no_parent_roles,
     not exists (
       select 1
       from pg_auth_members membership
       join pg_roles granted_role on granted_role.oid = membership.roleid
       join pg_roles member_role on member_role.oid = membership.member
-      where granted_role.rolname = 'payreplayy_owner_control'
-        and member_role.rolname not in ('payreplayy_owner_control_runtime', 'postgres')
+      where granted_role.rolname = 'fetanagent_owner_control'
+        and member_role.rolname not in ('fetanagent_owner_control_runtime', 'postgres')
     ) as owner_group_members_are_private,
     has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute') as issue_allowed,
     has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute') as revoke_allowed,
@@ -199,7 +199,7 @@ export async function createOwnerControlPostgresRuntime(
       if (closed) return false;
       try {
         const result = await pool.query<{ ready: boolean }>(
-          "select current_user = 'payreplayy_owner_control_runtime' as ready",
+          "select current_user = 'fetanagent_owner_control_runtime' as ready",
         );
         const ready = result.rows.length === 1 && result.rows[0]?.ready === true;
         poolHealthy = ready;

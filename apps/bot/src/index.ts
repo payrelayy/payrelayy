@@ -1,6 +1,6 @@
-import { loadBotConfig, redactedBotConfigForLog } from '@payreplayy/config/bot';
-import type { TelegramPrivateActionEnvelope } from '@payreplayy/contracts';
-import { message } from '@payreplayy/i18n';
+import { loadBotConfig, redactedBotConfigForLog } from '@fetanagent/config/bot';
+import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
+import { message } from '@fetanagent/i18n';
 import { Bot, InlineKeyboard } from 'grammy';
 
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';

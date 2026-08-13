@@ -3,12 +3,12 @@
 
 begin;
 
-do $payreplayy$
+do $fetanagent$
 begin
   if not exists (
     select 1
     from pg_catalog.pg_roles as role
-    where role.rolname = 'payreplayy_beta_admission_runtime'
+    where role.rolname = 'fetanagent_beta_admission_runtime'
       and not role.rolcanlogin
       and not role.rolinherit
       and not role.rolsuper
@@ -26,8 +26,8 @@ begin
     from pg_catalog.pg_auth_members as membership
     join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
     join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
-    where granted_role.rolname = 'payreplayy_beta_admission'
-      and member_role.rolname = 'payreplayy_beta_admission_runtime'
+    where granted_role.rolname = 'fetanagent_beta_admission'
+      and member_role.rolname = 'fetanagent_beta_admission_runtime'
       and membership.inherit_option
       and not membership.set_option
       and not membership.admin_option
@@ -36,15 +36,15 @@ begin
     from pg_catalog.pg_auth_members as membership
     join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
     join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
-    where member_role.rolname = 'payreplayy_beta_admission_runtime'
-      and granted_role.rolname <> 'payreplayy_beta_admission'
+    where member_role.rolname = 'fetanagent_beta_admission_runtime'
+      and granted_role.rolname <> 'fetanagent_beta_admission'
   ) then
     raise exception 'The staging beta-admission runtime membership is not in the expected state.';
   end if;
 end
-$payreplayy$;
+$fetanagent$;
 
-alter role payreplayy_beta_admission_runtime with
+alter role fetanagent_beta_admission_runtime with
   login
   noinherit
   nocreatedb
@@ -54,13 +54,13 @@ alter role payreplayy_beta_admission_runtime with
   connection limit 1
   password :'runtime_password';
 
-do $payreplayy$
+do $fetanagent$
 begin
   execute pg_catalog.format(
-    'alter role payreplayy_beta_admission_runtime valid until %L',
+    'alter role fetanagent_beta_admission_runtime valid until %L',
     pg_catalog.clock_timestamp() + interval '1 hour'
   );
 end
-$payreplayy$;
+$fetanagent$;
 
 commit;

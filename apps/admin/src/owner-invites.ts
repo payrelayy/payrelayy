@@ -4,7 +4,7 @@ import {
   TELEGRAM_BETA_INVITE_TOKEN_BYTES,
   isTelegramBetaInviteToken,
   telegramBetaInviteTokenDigestInput,
-} from '@payreplayy/contracts';
+} from '@fetanagent/contracts';
 
 export type BetaInviteRevocationReason = 'owner_cancelled' | 'security_rotation' | 'staging_reset';
 

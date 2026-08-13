@@ -1,14 +1,14 @@
 # Private database access boundary
 
-PayReplayy keeps all operational and financial tables in the private `app` PostgreSQL schema.
+FetanAgent keeps all operational and financial tables in the private `app` PostgreSQL schema.
 It is deliberately not exposed through Supabase's Data API. A Telegram bot, browser executor,
-dashboard, and customer device must call the PayReplayy API; none may query `app` tables.
+dashboard, and customer device must call the FetanAgent API; none may query `app` tables.
 
 ## Planned server access
 
 The API and worker will use direct PostgreSQL connections from the DigitalOcean VM. Before they
-are enabled, a reviewed migration creates two NOLOGIN group roles: `payreplayy_api` and
-`payreplayy_worker`. Each gets only the current operations it needs and its own RLS policies. The
+are enabled, a reviewed migration creates two NOLOGIN group roles: `fetanagent_api` and
+`fetanagent_worker`. Each gets only the current operations it needs and its own RLS policies. The
 worker cannot change configuration, identity, conversations, or audit records. The current API
 role also cannot bootstrap Owners, read the audit log, or change configuration; those capabilities
 will require a separate, reviewed admin role and dashboard boundary.
@@ -41,10 +41,10 @@ Only `app.redeem_telegram_beta_invite` may create an identity, and only
 already-admitted identity. Neither grants the API direct table access to customer identities,
 inbound events, conversations, invite records, or audit events.
 
-Invite admission has its own NOLOGIN `payreplayy_beta_admission` group and
-`payreplayy_beta_admission_runtime` scaffold. The group retains only schema usage plus invite
+Invite admission has its own NOLOGIN `fetanagent_beta_admission` group and
+`fetanagent_beta_admission_runtime` scaffold. The group retains only schema usage plus invite
 redemption and beta-admission nonce-reservation execution. The admitted-inbox recorder is
-intentionally ungranted to both beta roles, and the generic `payreplayy_api` group and its runtime
+intentionally ungranted to both beta roles, and the generic `fetanagent_api` group and its runtime
 scaffold must not execute any beta-admission procedure. A future real login can inherit only the
 dedicated admission group, cannot `SET ROLE`, and must have a separately mounted TLS database
 credential. It is not provisioned or enabled by this repository.
@@ -67,15 +67,15 @@ Telegram ingress, polling, Player-ID processing, payment verification, or financ
 only exception is the separately default-false Stage 15A private-ingress runtime gate, which also
 requires the Telegram transport gate and is described below.
 
-The database migration creates `payreplayy_api_runtime` as a `NOLOGIN` role without a password.
-It inherits only the existing `payreplayy_api` group privileges, cannot administer or switch roles,
+The database migration creates `fetanagent_api_runtime` as a `NOLOGIN` role without a password.
+It inherits only the existing `fetanagent_api` group privileges, cannot administer or switch roles,
 and is unusable until a separate deployment procedure enables a generated login credential. That
 credential belongs exclusively in the API container secret environment.
 
 When a dedicated API runtime login has been provisioned, an operator may explicitly run:
 
 ```text
-pnpm --filter @payreplayy/api db:preflight
+pnpm --filter @fetanagent/api db:preflight
 ```
 
 only with `INTERNAL_POSTGRES_RUNTIME_ENABLED=true` and an API-only TLS database URL. The command
@@ -93,8 +93,8 @@ connection URL, database username, SQL text, or database error detail.
 For the DigitalOcean VM, use the current direct PostgreSQL connection when its supported network
 path is available; otherwise use the Supabase session pooler for the long-lived API process. The
 API parser accepts only `db.xzztugbgtulptnbpoelr.supabase.co` with the bare
-`payreplayy_api_runtime` login, or `aws-0-eu-west-1.pooler.supabase.com` with
-`payreplayy_api_runtime.xzztugbgtulptnbpoelr`. Both forms require port `5432`, database
+`fetanagent_api_runtime` login, or `aws-0-eu-west-1.pooler.supabase.com` with
+`fetanagent_api_runtime.xzztugbgtulptnbpoelr`. Both forms require port `5432`, database
 `postgres`, and exactly `sslmode=verify-full`. Take the exact dedicated-login URL from the project
 Connect panel rather than constructing it by hand. The transaction pooler is not the default for
 this persistent process.
@@ -142,7 +142,7 @@ Compose contract sets all existing gates to `false`.
 
 ## Stage 14B nonce-retention maintenance scaffold
 
-Stage 14B assigns the existing bounded purge helper only to a dedicated `payreplayy_nonce_retention`
+Stage 14B assigns the existing bounded purge helper only to a dedicated `fetanagent_nonce_retention`
 group role and creates its separate `NOLOGIN` runtime scaffold. Neither role can access a base table,
 identity, inbox, audit record, payment record, configuration object, or any other `app` function.
 The future runtime can inherit only the group role's schema usage and one
@@ -162,7 +162,7 @@ database credential outside Git, run that preflight, invoke the purge with a bou
 more than 1,000 rows per call, retain safe count-only telemetry, and have an explicit alert and stop
 procedure. The API and worker must never receive this cleanup grant or credential.
 
-Supabase service-role keys are not part of the PayReplayy runtime design and must never be stored
+Supabase service-role keys are not part of the FetanAgent runtime design and must never be stored
 in this workspace, a bot, a browser profile, or application configuration. A future private
 Storage ingestion/download boundary will be reviewed independently; it must not gain app-schema
 access.

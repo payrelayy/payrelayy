@@ -1,12 +1,12 @@
 {
-  "name": "@payreplayy/bot",
+  "name": "@fetanagent/bot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@payreplayy/config": "workspace:*",
-    "@payreplayy/contracts": "workspace:*",
-    "@payreplayy/i18n": "workspace:*",
+    "@fetanagent/config": "workspace:*",
+    "@fetanagent/contracts": "workspace:*",
+    "@fetanagent/i18n": "workspace:*",
     "grammy": "^1.35.0"
   },
   "scripts": {

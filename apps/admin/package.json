@@ -1,12 +1,12 @@
 {
-  "name": "@payreplayy/admin",
+  "name": "@fetanagent/admin",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@payreplayy/cbe-birr-fixtures": "workspace:*",
-    "@payreplayy/config": "workspace:*",
-    "@payreplayy/contracts": "workspace:*",
+    "@fetanagent/cbe-birr-fixtures": "workspace:*",
+    "@fetanagent/config": "workspace:*",
+    "@fetanagent/contracts": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "8.22.0"
   },

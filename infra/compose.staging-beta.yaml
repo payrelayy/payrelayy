@@ -1,4 +1,4 @@
-name: payreplayy-staging-beta
+name: fetanagent-staging-beta
 
 # This file is an inert, manually selected beta-only staging contract. A plain
 # `docker compose up` starts nothing because every service is profile-gated.
@@ -6,14 +6,14 @@ services:
   owner-control:
     profiles: [staging-manual]
     platform: linux/amd64
-    image: payreplayy-owner-control:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    image: fetanagent-owner-control:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
     pull_policy: never
     build:
       context: ..
       dockerfile: Dockerfile
       target: admin
       args:
-        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+        VCS_REF: ${FETANAGENT_VCS_REF:?set the reviewed full commit SHA}
     init: true
     user: '10001:10001'
     restart: 'no'
@@ -91,14 +91,14 @@ services:
   api:
     profiles: [staging-manual]
     platform: linux/amd64
-    image: payreplayy-api:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    image: fetanagent-api:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
     pull_policy: never
     build:
       context: ..
       dockerfile: Dockerfile
       target: api
       args:
-        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+        VCS_REF: ${FETANAGENT_VCS_REF:?set the reviewed full commit SHA}
     init: true
     user: '10001:10001'
     restart: 'no'
@@ -196,14 +196,14 @@ services:
   beta-admission:
     profiles: [staging-manual]
     platform: linux/amd64
-    image: payreplayy-beta-admission:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    image: fetanagent-beta-admission:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
     pull_policy: never
     build:
       context: ..
       dockerfile: Dockerfile
       target: beta-admission
       args:
-        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+        VCS_REF: ${FETANAGENT_VCS_REF:?set the reviewed full commit SHA}
     init: true
     user: '10001:10001'
     restart: 'no'
@@ -284,14 +284,14 @@ services:
   bot:
     profiles: [staging-manual]
     platform: linux/amd64
-    image: payreplayy-bot:${PAYREPLAYY_IMAGE_TAG:?set a commit-derived image tag}
+    image: fetanagent-bot:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
     pull_policy: never
     build:
       context: ..
       dockerfile: Dockerfile
       target: bot
       args:
-        VCS_REF: ${PAYREPLAYY_VCS_REF:?set the reviewed full commit SHA}
+        VCS_REF: ${FETANAGENT_VCS_REF:?set the reviewed full commit SHA}
     init: true
     user: '10001:10001'
     restart: 'no'
@@ -375,36 +375,36 @@ networks:
 # trust set.
 configs:
   supabase_ca_certificate:
-    file: ${PAYREPLAYY_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
+    file: ${FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
 
 # Every source is an operator-owned file outside the repository. The two transport-HMAC files
 # contain the same value but remain separate mounts so neither service can read the other's file.
 secrets:
   owner_control_database_url:
-    file: ${PAYREPLAYY_STAGING_OWNER_CONTROL_DATABASE_URL_FILE:?set an external Owner-control database URL file}
+    file: ${FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE:?set an external Owner-control database URL file}
   owner_control_supabase_publishable_key:
-    file: ${PAYREPLAYY_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:?set an external staging publishable-key file}
+    file: ${FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:?set an external staging publishable-key file}
   beta_admission_database_url:
-    file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_DATABASE_URL_FILE:?set an external beta database URL file}
+    file: ${FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE:?set an external beta database URL file}
   beta_admission_bot_transport_hmac:
-    file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE:?set an external beta-service transport HMAC file}
+    file: ${FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE:?set an external beta-service transport HMAC file}
   beta_admission_payload_hmac:
-    file: ${PAYREPLAYY_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE:?set an external beta payload HMAC file}
+    file: ${FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE:?set an external beta payload HMAC file}
   player_action_database_url:
-    file: ${PAYREPLAYY_STAGING_PLAYER_ACTION_DATABASE_URL_FILE:?set an external Player-ID action database URL file}
+    file: ${FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE:?set an external Player-ID action database URL file}
   api_player_action_transport_hmac:
-    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE:?set an external API Player-ID transport HMAC file}
+    file: ${FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE:?set an external API Player-ID transport HMAC file}
   api_player_action_payload_hmac:
-    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE:?set an external API Player-ID payload HMAC file}
+    file: ${FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE:?set an external API Player-ID payload HMAC file}
   api_player_action_capability_hmac:
-    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE:?set an external API Player-ID capability HMAC file}
+    file: ${FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE:?set an external API Player-ID capability HMAC file}
   api_player_action_semantic_hmac:
-    file: ${PAYREPLAYY_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE:?set an external API Player-ID semantic HMAC file}
+    file: ${FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE:?set an external API Player-ID semantic HMAC file}
   api_deposit_reference_protection:
-    file: ${PAYREPLAYY_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE:?set an external API deposit-reference protection key file}
+    file: ${FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE:?set an external API deposit-reference protection key file}
   telegram_bot_token:
-    file: ${PAYREPLAYY_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
+    file: ${FETANAGENT_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
   bot_beta_admission_transport_hmac:
-    file: ${PAYREPLAYY_STAGING_BOT_TRANSPORT_HMAC_FILE:?set an external bot transport HMAC file}
+    file: ${FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE:?set an external bot transport HMAC file}
   bot_player_action_transport_hmac:
-    file: ${PAYREPLAYY_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE:?set an external bot Player-ID transport HMAC file}
+    file: ${FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE:?set an external bot Player-ID transport HMAC file}

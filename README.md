@@ -4,7 +4,9 @@ FetanAgent is a Telegram-first payment-verification and betting-agent automation
 The current product scope is an English-only, invite-only CBE Birr dry run plus a disabled
 authoritative-shadow foundation and offline attempt and settlement planners. Stage 1E specifies a
 pure, blocked-by-default official-source policy whose current source status is `unproven`; it
-neither selects nor permits a provider source. An admitted customer with an Owner-confirmed
+neither selects nor permits a provider source. Stage 1F adds a pure authoritative-lookup
+prerequisite contract that records the remaining P0 blockers and keeps every lookup capability
+false. An admitted customer with an Owner-confirmed
 KemerBet Player ID can open a 25-25,000 ETB intake, receive the configured masked receiver
 instructions, and submit one protected transaction reference for Owner review. A pure safe-facts
 evaluator, private shadow queue, and offline attempt and settlement planners can model advisory
@@ -54,6 +56,11 @@ The current foundation is deliberately safe:
   blocked-by-default: synthetic fixtures, browser visibility, known endpoints, and code flags are
   not permission, and the reserved `cbe_birr_official_receipt_lookup_v1` profile has no selected or
   permitted branch; and
+- the Stage 1F `@fetanagent/cbe-birr-authoritative-lookup-prerequisite` package is also pure and
+  blocked. Its 12 exact blockers cover five unresolved areas: source permission; receiver
+  protection, provenance, and fresh immutable provisioning; submitted-reference key lifecycle;
+  review of three distinct normalization profiles; and preflight-safe leasing. Every capability is
+  false, and the package carries no protected material or runtime integration; and
 - no provider evidence, payment claim, authoritative verification job, KemerBet call, withdrawal,
   or financial execution is enabled by this flow.
 
@@ -72,21 +79,22 @@ environment file.
 
 ## Planned services
 
-| Service                                    | Responsibility                                                                      |
-| ------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `apps/api`                                 | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
-| `apps/admin`                               | Owner-authenticated beta invite issue/revoke boundary; no browser database grant    |
-| `apps/bot`                                 | Private Telegram chat transport only                                                |
-| `apps/worker`                              | Disabled pure shadow planners; no provider transport or database runner             |
-| `apps/maintenance`                         | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
-| `apps/executor`                            | Isolated, supervised KemerBet browser adapter; dry-run first                        |
-| `packages/domain`                          | Money rules, state machines, limits, idempotency reason codes                       |
-| `packages/cbe-birr-fixtures`               | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
-| `packages/cbe-birr-authoritative-fixtures` | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
-| `packages/cbe-birr-official-source-policy` | Pure source-permission policy; fixed `unproven` and blocked                         |
-| `packages/contracts`                       | Provider, executor, notifier, and storage interfaces                                |
-| `packages/config`                          | Safe environment parsing and feature switches                                       |
-| `packages/i18n`                            | Shared English message keys and safe locale normalization                           |
+| Service                                               | Responsibility                                                                      |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `apps/api`                                            | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
+| `apps/admin`                                          | Owner-authenticated beta invite issue/revoke boundary; no browser database grant    |
+| `apps/bot`                                            | Private Telegram chat transport only                                                |
+| `apps/worker`                                         | Disabled pure shadow planners; no provider transport or database runner             |
+| `apps/maintenance`                                    | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
+| `apps/executor`                                       | Isolated, supervised KemerBet browser adapter; dry-run first                        |
+| `packages/domain`                                     | Money rules, state machines, limits, idempotency reason codes                       |
+| `packages/cbe-birr-fixtures`                          | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
+| `packages/cbe-birr-authoritative-fixtures`            | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
+| `packages/cbe-birr-official-source-policy`            | Pure source-permission policy; fixed `unproven` and blocked                         |
+| `packages/cbe-birr-authoritative-lookup-prerequisite` | Pure blocked lookup-prerequisite inventory; every capability is false               |
+| `packages/contracts`                                  | Provider, executor, notifier, and storage interfaces                                |
+| `packages/config`                                     | Safe environment parsing and feature switches                                       |
+| `packages/i18n`                                       | Shared English message keys and safe locale normalization                           |
 
 ## Local development
 
@@ -126,7 +134,9 @@ Stage 1A safe-facts/queue boundary and offline Stage 1C/1D planners, and
 [docs/cbe-birr-authoritative-adapter-fixtures.md](docs/cbe-birr-authoritative-adapter-fixtures.md)
 for the offline-only Stage 1B normalization regressions. See
 [docs/cbe-birr-official-source-policy.md](docs/cbe-birr-official-source-policy.md) for the
-Stage 1E blocked-by-default source-permission contract and its P0 prerequisites. See
+Stage 1E blocked-by-default source-permission contract and its P0 prerequisites, and
+[docs/cbe-birr-authoritative-lookup-prerequisite.md](docs/cbe-birr-authoritative-lookup-prerequisite.md)
+for the Stage 1F fail-closed prerequisite inventory. See
 [docs/cbe-birr-fixture-dry-run.md](docs/cbe-birr-fixture-dry-run.md) for the current CBE Birr-only
 fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and

@@ -58,6 +58,32 @@ The policy therefore cannot make an adapter authoritative, enable a source, acqu
 shadow job, or authorize a financial outcome. `payment_verification`, `deposit_execution`,
 `withdrawal_validation`, and `withdrawal_collection` remain off.
 
+## Authoritative-lookup prerequisite boundary
+
+The separate Stage 1F package, `@fetanagent/cbe-birr-authoritative-lookup-prerequisite`, turns the
+known repository gaps into a pure fail-closed prerequisite inventory. Its only valid-request result
+is advisory and `blocked`, with reason `authoritative_lookup_prerequisites_incomplete`. Its 12 exact
+blockers cover five unresolved areas: source permission; receiver protection/provenance and fresh
+immutable provisioning; a submitted-reference key lifecycle independent from the API master; joint
+review of three normalization profiles; and a prelease metadata gate with no protected-material
+return.
+
+Every capability is fixed to `false`. The package does not accept, return, derive, or log raw or
+protected lookup material, ciphertext, secrets, keys, protected-material versions, algorithms, KMS
+values, URLs, credentials, lease values, runtime or schema wiring, provider evidence, financial
+claims, or KemerBet operations. The public
+`cbe_birr_shadow_protected_lookup_material_legacy` label classifies a blocked legacy shape only. It
+is not an envelope or protection profile, does not establish provenance, and does not bless an
+existing `v1` value.
+
+The current receiver ciphertext lacks protection metadata and key provenance. Those facts must not
+be inferred or backfilled; the future design requires a fresh new immutable receiver-account
+revision. Submitted-reference encryption and fingerprint subkeys are domain-separated but still
+share one API master provisioning and rotation root, with no independent worker decrypt lifecycle.
+The current shadow lease also mutates state and returns protected material before a prerequisite
+preflight. These findings are blockers, not implemented capabilities. See
+[cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
+
 ## P0 prerequisites for any positive capability
 
 There must be no positive source capability until every prerequisite below is implemented,
@@ -67,23 +93,32 @@ independently reviewed, and supported by reproducible evidence:
    the provider or another competent authority that proves the precise source, allowed purpose,
    caller, authentication method, deployment context, rate limits, data handling, and revocation
    rules. Browser visibility and inferred behavior do not satisfy this requirement.
-2. **Key split and KMS envelope design.** Define separate purpose-bound keys and envelopes before
-   any runtime receives lookup material. A future lookup component must never receive or share the
-   API master key or canonical-reference fingerprint key.
-3. **Receiver metadata.** Bind protected receiver lookup material to an explicit receiver-account
-   revision, key version, encryption purpose, and lifecycle policy. Missing, mixed, or unknown
-   metadata must fail closed.
-4. **Isolated callback-scoped decryptor.** Any future decryption must occur only inside an isolated,
+2. **Receiver revision and fresh protection provenance.** Create a fresh new immutable
+   receiver-account revision under a reviewed purpose-bound protection design. Do not infer or
+   backfill protection metadata, key provenance, purpose, or lifecycle onto the current receiver
+   ciphertext.
+3. **Independent submitted-reference key lifecycle.** Replace the shared API-master provisioning
+   and rotation root with independently provisioned, purpose-bound worker access. Domain-separated
+   encryption and fingerprint subkeys alone do not establish an independent worker decrypt
+   lifecycle.
+4. **Normalization ownership.** Jointly review the lookup-reference, receiver-lookup, and
+   canonical-reference normalization profiles. Specify their exact transformations, ownership,
+   compatibility rules, and fail-closed upgrades; do not assume that one profile represents
+   another.
+5. **Prelease prerequisite gate.** Redesign acquisition so a non-mutating metadata preflight runs
+   before any lease mutation or protected-material return. A later payload must use an opaque handle
+   and reveal material only inside a separately reviewed narrow boundary.
+6. **Isolated callback-scoped decryptor.** Any future decryption must occur only inside an isolated,
    narrow callback for one permitted request. Plaintext receiver material must not escape the
    callback, become a general return value, enter application state, or appear in errors, logs, or
    telemetry.
-5. **Compiled transport policy.** Pin the exact permitted host and route in reviewed code, require
+7. **Compiled transport policy.** Pin the exact permitted host and route in reviewed code, require
    valid TLS, bound request and response sizes and timeouts, and reject redirects unless an exact
    same-origin rule is compiled and reviewed. Runtime input must never choose a URL or host.
-6. **Telemetry and incident stop.** Provide allowlisted, secret-free telemetry for availability,
+8. **Telemetry and incident stop.** Provide allowlisted, secret-free telemetry for availability,
    policy denial, parser drift, and anomalies, plus a tested immediate stop that cannot enable a
    financial switch or discard reconciliation work.
-7. **Fake-transport tests.** Prove permission denial, host/TLS/redirect rejection, callback-scoped
+9. **Fake-transport tests.** Prove permission denial, host/TLS/redirect rejection, callback-scoped
    secret handling, response bounds, parser drift, outage behavior, telemetry redaction, and
    incident stop with a deterministic fake transport. Tests must make no live provider call.
 

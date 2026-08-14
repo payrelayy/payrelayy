@@ -29,6 +29,11 @@ live financial job, or call KemerBet.
   `unproven`. Its reserved `cbe_birr_official_receipt_lookup_v1` profile does not select or permit a
   source, and it cannot carry a URL, host, credential, raw lookup material, decryptor, lease, job,
   transport, database operation, claim, KemerBet action, or runtime integration.
+- The Stage 1F authoritative-lookup prerequisite package is a separate pure blocked inventory. It
+  records 12 exact blockers across source permission, receiver provenance/fresh provisioning,
+  submitted-reference key lifecycle, three-profile normalization review, and preflight-safe
+  acquisition while keeping every capability false. It neither fixes nor composes any of those
+  boundaries.
 - Private PostgreSQL tables provide a bounded lease and append-only result ledger for a future
   separately deployed shadow worker. A dedicated `NOLOGIN` group role receives only the narrow
   shadow procedures and no direct table access. This repository creates no worker login, password,
@@ -65,7 +70,9 @@ Stored shadow rows contain only internal IDs, allowlisted outcomes and reason co
 keyed fingerprints or decision digests, counters, lease UUIDs, and timestamps. Owner list output and
 audit metadata exclude fingerprints, digests, ciphertext, key versions, provider payloads, and
 receiver data. Worker-only lease output may contain the already-protected reference material and
-immutable intent snapshot needed by a future adapter; it must never be logged.
+immutable intent snapshot once considered for a future adapter; it must never be logged or treated
+as worker-ready. The current lease operation mutates durable state and returns that material before
+a prerequisite preflight. Stage 1F classifies this as blocked; it does not make the payload safe.
 
 ## Still disabled
 
@@ -91,5 +98,16 @@ host/TLS/redirect policy, safe telemetry with an incident stop, and deterministi
 tests. Stage 1E itself contains none of those runtime capabilities. See
 [cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md) and
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
+
+Stage 1F makes the remaining pre-transport blockers explicit without enabling any capability. The
+receiver ciphertext lacks protection metadata and provenance; no metadata may be inferred or
+backfilled, and a fresh new immutable receiver-account revision is required. The domain-separated
+submitted-reference encryption and fingerprint subkeys still share one API master provisioning and
+rotation root and have no independent worker decrypt lifecycle. The lease boundary needs a
+non-mutating metadata preflight and an opaque-handle payload, and all three normalization profiles
+need one explicit ownership and compatibility review. The legacy-material label is not an envelope
+or protection profile and does not bless the existing `v1` value. See
+[cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
+
 Before any payment claim can be enabled, the dormant claim boundary must remain live-only, receive
 an explicit least-privilege review, and pass reconciliation and duplicate-reference tests.

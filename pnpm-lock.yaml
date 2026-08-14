@@ -152,6 +152,12 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/cbe-birr-authoritative-lookup-prerequisite:
+    dependencies:
+      '@fetanagent/cbe-birr-official-source-policy':
+        specifier: workspace:*
+        version: link:../cbe-birr-official-source-policy
+
   packages/cbe-birr-official-source-policy: {}
 
   packages/cbe-birr-fixtures: {}

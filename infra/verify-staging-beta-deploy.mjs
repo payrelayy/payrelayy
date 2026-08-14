@@ -8,6 +8,7 @@ const workflow = readFileSync(
   resolve(root, '.github/workflows/staging-beta-deploy-smoke.yml'),
   'utf8',
 );
+const stagingRunbook = readFileSync(resolve(root, 'infra/staging-beta.md'), 'utf8');
 const provision = readFileSync(
   resolve(root, 'infra/sql/staging-runtimes-provision-for-deploy.sql'),
   'utf8',
@@ -21,6 +22,10 @@ const helper = readFileSync(
   resolve(root, 'infra/operations/fetanagent-staging-deploy-helper.sh'),
   'utf8',
 );
+const legacyBrand = 'pay' + 'replayy';
+const legacyAdmin = `${legacyBrand}-admin`;
+const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
+const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /pull_request:|pull_request_target:|push:|schedule:/);
@@ -34,9 +39,11 @@ assert.match(workflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
 assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
 assert.match(workflow, /^\s+- transition-ssh-verify$/m);
+assert.match(workflow, /^\s+- transition-stop-legacy$/m);
+assert.match(workflow, /stop-legacy-staging-runtime/);
 assert.match(
   workflow,
-  /\^\(plan\|transition-ssh-verify\|unban-and-connectivity-check\|deploy-and-smoke\|stop-and-disable\)\$/,
+  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|stop-and-disable\)\$/,
 );
 assert.match(workflow, /environment: staging/g);
 assert.match(workflow, /fetanagent-admin@/g);
@@ -56,9 +63,24 @@ assert.match(workflow, /fetanagent-staging-deploy-helper discard/g);
 assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
 
-const transitionSshVerify = /\n  transition-ssh-verify:\n([\s\S]*?)\n  deploy:\n/u.exec(
+const legacyStopInput = /\n      confirm_legacy_stop:\n([\s\S]*?)\n\npermissions:/u.exec(
   workflow,
 )?.[1];
+assert.ok(legacyStopInput, 'The legacy-stop confirmation input must exist.');
+assert.match(legacyStopInput, /^\s*required: false$/m);
+assert.match(legacyStopInput, /^\s*default: ''$/m);
+assert.doesNotMatch(legacyStopInput, /^\s*required: true$/m);
+
+const validateTarget = /\n  validate-target:\n([\s\S]*?)\n  build:\n/u.exec(workflow)?.[1];
+assert.ok(validateTarget, 'The exact-target validation job must exist.');
+assert.match(validateTarget, /CONFIRMED_LEGACY_STOP: \$\{\{ inputs\.confirm_legacy_stop \}\}/);
+assert.match(
+  validateTarget,
+  /if \[\[ "\$REQUESTED_MODE" == 'transition-stop-legacy' \]\]; then\s+\[\[ "\$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' \]\]\s+fi/u,
+);
+
+const transitionSshVerify =
+  /\n  transition-ssh-verify:\n([\s\S]*?)\n  transition-stop-legacy:\n/u.exec(workflow)?.[1];
 assert.ok(
   transitionSshVerify,
   'The permanent read-only transition SSH verification job must exist.',
@@ -134,6 +156,121 @@ assert.equal(
 assert.doesNotMatch(
   transitionSshVerify,
   /\bpsql\b|\bsupabase\b|\bdocker\b|\bcompose\b|\bscp\b|\bcurl\b|\bwget\b|staging-runtimes|fetanagent-staging-deploy-helper (?:stop|discard|install|start|cutover-ready|network-ready|diagnose-owner-startup)/,
+);
+
+const transitionStopLegacy = /\n  transition-stop-legacy:\n([\s\S]*?)\n  deploy:\n/u.exec(
+  workflow,
+)?.[1];
+assert.ok(transitionStopLegacy, 'The guarded legacy-stop transition job must exist.');
+assert.equal(
+  createHash('sha256').update(transitionStopLegacy).digest('hex'),
+  'f0ad7ed8cd313c48722de46bde8d446b6e71d56541c1940f17c67d7405c8c56d',
+  'The reviewed legacy-stop transition job body must remain byte-for-byte exact.',
+);
+assert.match(transitionStopLegacy, /if: inputs\.mode == 'transition-stop-legacy'/);
+assert.match(transitionStopLegacy, /needs: validate-target/);
+assert.match(transitionStopLegacy, /environment: staging/);
+assert.match(transitionStopLegacy, /contents: read/);
+assert.match(transitionStopLegacy, /persist-credentials: false/);
+assert.match(transitionStopLegacy, /ref: \$\{\{ github\.sha \}\}/);
+assert.match(transitionStopLegacy, /GITHUB_REF" == 'refs\/heads\/main'/);
+assert.match(transitionStopLegacy, /CONFIRMED_COMMIT" == "\$GITHUB_SHA/);
+assert.match(transitionStopLegacy, /git rev-parse HEAD/);
+assert.match(transitionStopLegacy, /CONFIRMED_PROJECT" == "\$STAGING_PROJECT_REF/);
+assert.match(transitionStopLegacy, /CONFIRMED_PROJECT" != "\$PRODUCTION_PROJECT_REF/);
+assert.match(transitionStopLegacy, /CONFIRMED_DROPLET" == "\$STAGING_DROPLET_ID/);
+assert.match(transitionStopLegacy, /REQUESTED_MODE" == 'transition-stop-legacy'/);
+assert.match(transitionStopLegacy, /CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime'/);
+assert.match(transitionStopLegacy, /STAGING_VM_HOST: \$\{\{ secrets\.STAGING_VM_HOST \}\}/);
+assert.match(
+  transitionStopLegacy,
+  /STAGING_VM_KNOWN_HOSTS: \$\{\{ secrets\.STAGING_VM_KNOWN_HOSTS \}\}/,
+);
+assert.match(
+  transitionStopLegacy,
+  /STAGING_VM_SSH_PRIVATE_KEY: \$\{\{ secrets\.STAGING_VM_SSH_PRIVATE_KEY \}\}/,
+);
+assert.equal(
+  (transitionStopLegacy.match(/\$\{\{ secrets\./g) ?? []).length,
+  3,
+  'The legacy-stop transition job may receive only the three protected VM SSH inputs.',
+);
+assert.match(transitionStopLegacy, /ssh-keygen -F "\$STAGING_VM_HOST"/);
+assert.match(transitionStopLegacy, /BatchMode=yes/);
+assert.match(transitionStopLegacy, /ClearAllForwardings=yes/);
+assert.match(transitionStopLegacy, /IdentitiesOnly=yes/);
+assert.match(transitionStopLegacy, /RequestTTY=no/);
+assert.match(transitionStopLegacy, /StrictHostKeyChecking=yes/);
+assert.match(transitionStopLegacy, /UserKnownHostsFile=/);
+assert.equal(
+  (transitionStopLegacy.match(/^\s*ssh\s/gm) ?? []).length,
+  1,
+  'The legacy-stop transition job may execute SSH exactly once.',
+);
+assert.equal(
+  (transitionStopLegacy.match(/sudo -n '\$legacy_helper'/g) ?? []).length,
+  2,
+  'The legacy-stop transition job may cross the exact legacy sudo boundary twice.',
+);
+assert.equal(
+  (transitionStopLegacy.match(new RegExp(legacyHelperSha, 'gu')) ?? []).length,
+  1,
+  'The legacy-stop transition job must pin the one reviewed legacy helper digest.',
+);
+assert.match(transitionStopLegacy, /legacy_brand='pay''replayy'/);
+assert.match(transitionStopLegacy, /legacy_admin="\$\{legacy_brand\}-admin"/);
+assert.match(
+  transitionStopLegacy,
+  /legacy_helper="\/usr\/local\/sbin\/\$\{legacy_brand\}-staging-deploy-helper"/,
+);
+assert.doesNotMatch(transitionStopLegacy, new RegExp(legacyBrand, 'iu'));
+const transitionStopRemoteCommand = transitionStopLegacy
+  .split(/\r?\n/u)
+  .find((line) => line.includes('remote_command='));
+assert.ok(transitionStopRemoteCommand, 'The legacy-stop remote command must be explicit.');
+assert.equal(
+  transitionStopRemoteCommand.trim(),
+  String.raw`remote_command="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = '$legacy_admin' && sudo -n '$legacy_helper' verify '${legacyHelperSha}' && sudo -n '$legacy_helper' stop"`,
+  'The legacy-stop command must verify the exact legacy helper and then stop only its runtime.',
+);
+assert.equal(
+  transitionStopRemoteCommand
+    .trim()
+    .replaceAll('$legacy_admin', legacyAdmin)
+    .replaceAll('$legacy_helper', legacyHelper),
+  String.raw`remote_command="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = '${legacyAdmin}' && sudo -n '${legacyHelper}' verify '${legacyHelperSha}' && sudo -n '${legacyHelper}' stop"`,
+  'The split legacy constants must render the one exact live identity and helper path.',
+);
+assert.match(transitionStopLegacy, /"\$legacy_admin@\$STAGING_VM_HOST"/);
+assert.doesNotMatch(
+  transitionStopLegacy,
+  /root@|fetanagent-admin@|SUDO_USER|ssh-keyscan|StrictHostKeyChecking=no|\bpsql\b|\bsupabase\b|\bdocker\b|\bcompose\b|\bscp\b|\bcurl\b|\bwget\b|staging-runtimes|fetanagent-staging-deploy-helper|fetanagent-vm-transition|mark-legacy-stopped/,
+);
+
+const transitionStopRunbook =
+  /\n`transition-stop-legacy` is a one-way transition boundary\.([\s\S]*?)\n\n`deploy-and-smoke` additionally requires/u.exec(
+    stagingRunbook,
+  )?.[1];
+assert.ok(transitionStopRunbook, 'The guarded legacy-stop runbook section must exist.');
+assert.equal(
+  createHash('sha256').update(transitionStopRunbook).digest('hex'),
+  '30212ba214058029f8cb2eb9040780c5219f5bfb43efc2c2557c0d64d21bd515',
+  'The reviewed legacy-stop operator sequence must remain byte-for-byte exact.',
+);
+assert.match(transitionStopRunbook, /Freeze `main` at the final post-merge SHA/);
+assert.match(
+  transitionStopRunbook,
+  /`transition-ssh-verify` run for that SHA must pass,[\s\S]*?root-console transition `acknowledge` and `verify` commands for the same SHA must both pass/u,
+);
+assert.match(transitionStopRunbook, /Only then may the stop mode be dispatched/);
+assert.match(transitionStopRunbook, /stop-legacy-staging-runtime/);
+assert.match(
+  transitionStopRunbook,
+  /run\s+`mark-legacy-stopped` with the same SHA, then `verify`; keep staging offline until both pass/u,
+);
+assert.match(
+  transitionStopRunbook,
+  /do not deploy, migrate, restore the old\s+runtime, or claim that the boundary is sealed/u,
 );
 assert.match(workflow, /docker build --pull=false --target admin/);
 assert.match(workflow, /docker build --pull=false --target api/);

@@ -2695,9 +2695,9 @@ describe('disposable SQL migration baseline', () => {
       }>(
         'fetanagent_player_actions',
         `select deposit_submission_id
-         from app.capture_telegram_dry_run_deposit_reference(
-           $1::uuid, $2::uuid, $3::text, $4::text, $5::text, 1, $6::text
-         )`,
+          from app.capture_telegram_dry_run_deposit_reference(
+            $1::uuid, $2::uuid, $3::text, $4::text, $5::text, 1::smallint, $6::text
+          )`,
         [
           referenceEvent.rows[0]!.id,
           openedIntent[0]!.deposit_intent_id,

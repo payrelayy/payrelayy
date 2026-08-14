@@ -2658,13 +2658,15 @@ describe('disposable SQL migration baseline', () => {
       readonly depositIntentId: string;
       readonly depositSubmissionId: string;
     }> => {
+      const openingUpdateId = BigInt(externalEventSeed);
+      const referenceUpdateId = openingUpdateId + 1n;
       const openingEvent = await client.query<{ readonly id: string }>(
         `insert into app.inbound_events (
            channel, external_event_id, customer_identity_id, payload_digest
          ) values ('telegram', $1::text, $2::uuid, $3::text)
-         returning id`,
+        returning id`,
         [
-          `update:${externalEventSeed}:open`,
+          `update:${openingUpdateId.toString()}`,
           telegramIdentityId,
           payloadHmac(referenceFingerprintCharacter),
         ],
@@ -2681,9 +2683,9 @@ describe('disposable SQL migration baseline', () => {
         `insert into app.inbound_events (
            channel, external_event_id, customer_identity_id, payload_digest
          ) values ('telegram', $1::text, $2::uuid, $3::text)
-         returning id`,
+        returning id`,
         [
-          `update:${externalEventSeed}:reference`,
+          `update:${referenceUpdateId.toString()}`,
           telegramIdentityId,
           payloadHmac(referenceFingerprintCharacter),
         ],

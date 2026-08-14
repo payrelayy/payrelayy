@@ -31,6 +31,10 @@
     "./owner-control": {
       "types": "./dist/owner-control.d.ts",
       "default": "./dist/owner-control.js"
+    },
+    "./customer-web": {
+      "types": "./dist/customer-web.d.ts",
+      "default": "./dist/customer-web.js"
     }
   },
   "dependencies": {

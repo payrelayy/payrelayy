@@ -1,0 +1,17 @@
+{
+  "name": "@fetanagent/customer-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fetanagent/config": "workspace:*",
+    "@fetanagent/customer-web-auth-runtime": "workspace:*",
+    "fastify": "5.11.2"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run --passWithNoTests"
+  }
+}

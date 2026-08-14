@@ -14,6 +14,8 @@ const publicWorkflow = read('.github/workflows/staging-public-domain.yml');
 const legacyBrand = 'pay' + 'replayy';
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const legacySudoersSha = '34d408b7139c64888700ccd48f9b95dbe8ec5bfbae58d904ad2d10ffaaf2b928';
+const baseHelperSha = 'e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af';
+const baseReviewedCommit = 'e636de89be179514af3aae3972ee0b086cd8c816';
 const dropletId = '590666364';
 const transitionVersion = '1';
 
@@ -86,21 +88,23 @@ assert.match(
   transition,
   /readonly NEW_HELPER='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'/,
 );
-assert.match(transition, /readonly NEW_HELPER_SHA='[0-9a-f]{64}'/);
-const expectedHelperSha = createHash('sha256')
+assert.match(transition, new RegExp(`readonly NEW_HELPER_SHA='${baseHelperSha}'`));
+const expectedRotatedHelperSha = createHash('sha256')
   .update(deployHelper.replaceAll('\r\n', '\n'))
   .digest('hex');
 assert.match(
   transition,
-  new RegExp(`readonly NEW_HELPER_SHA='${expectedHelperSha}'`),
-  'The transition must pin the normalized LF SHA-256 of the final deploy helper.',
+  new RegExp(`readonly ROTATED_HELPER_SHA='${expectedRotatedHelperSha}'`),
+  'The transition must pin the normalized LF SHA-256 of the rotated deploy helper.',
 );
+assert.match(transition, new RegExp(`readonly BASE_REVIEWED_COMMIT='${baseReviewedCommit}'`));
 assert.match(transition, /readonly STATE_ROOT='\/var\/lib\/fetanagent-vm-transition'/);
 for (const [name, suffix] of [
   ['PREPARED_MARKER', 'prepared-v1'],
   ['ACKNOWLEDGED_MARKER', 'acknowledged-v1'],
   ['LEGACY_STOPPED_MARKER', 'legacy-stopped-v1'],
   ['RETIRED_MARKER', 'retired-v1'],
+  ['HELPER_ROTATION_MARKER', 'helper-rotation-v1'],
 ]) {
   assert.match(transition, new RegExp(`readonly ${name}=\"\\$STATE_ROOT/${suffix}\"`));
 }
@@ -169,6 +173,8 @@ for (const [command, count] of [
   ['mark-legacy-stopped', 2],
   ['rollback-prepare', 1],
   ['retire', 2],
+  ['rotate-retired-helper', 3],
+  ['finalize-retired-helper', 3],
   ['verify', 1],
 ]) {
   const arm = new RegExp(`(?:^|\\n)\\s*${command}\\)([\\s\\S]*?)\\n\\s*;;`, 'u').exec(
@@ -526,6 +532,197 @@ assertInOrder(
   'The retired receipt validator must require the exact written schema',
 );
 
+const baseRotationBoundary = functionBody(transition, 'require_base_retired_overlay_boundary');
+assertInOrder(
+  baseRotationBoundary,
+  [
+    '[[ "$old_commit" == "$BASE_REVIEWED_COMMIT" ]]',
+    'require_prepared_marker',
+    'require_acknowledged_marker "$old_commit"',
+    'require_legacy_stopped_marker "$old_commit"',
+    'require_retired_marker "$old_commit"',
+    'require_new_identity',
+    'require_exact_new_sshd_dropin',
+    'require_legacy_residue_absent',
+    'require_legacy_execution_boundary_disabled',
+    '[[ ! -e "$LEGACY_HELPER"',
+    'require_legacy_secret_root_absent',
+  ],
+  'Helper rotation must start from every exact immutable receipt and the full retired live boundary',
+);
+
+const writeRotationMarker = functionBody(transition, 'write_helper_rotation_marker');
+assertInOrder(
+  writeRotationMarker,
+  [
+    'write_marker "$HELPER_ROTATION_MARKER"',
+    'transition_version=$TRANSITION_VERSION',
+    'droplet_id=$DROPLET_ID',
+    'old_helper_sha=$NEW_HELPER_SHA',
+    'new_helper_sha=$ROTATED_HELPER_SHA',
+    'old_reviewed_commit=$old_commit',
+    'new_reviewed_commit=$new_commit',
+    'rotation_$state=true',
+  ],
+  'The helper-rotation overlay must have one exact commit- and helper-bound schema',
+);
+const rotationMarkerState = functionBody(transition, 'helper_rotation_marker_state');
+assertInOrder(
+  rotationMarkerState,
+  [
+    'old_helper_sha=$NEW_HELPER_SHA',
+    'new_helper_sha=$ROTATED_HELPER_SHA',
+    'old_reviewed_commit=$old_commit',
+    'new_reviewed_commit=$new_commit',
+    'rotation_pending=true',
+    "printf 'pending'",
+    'rotation_complete=true',
+    "printf 'complete'",
+  ],
+  'Overlay inspection must accept only the exact pending or complete receipts',
+);
+
+const rotationState = functionBody(transition, 'helper_rotation_state');
+assertInOrder(
+  rotationState,
+  [
+    '[[ "$helper_sha" == "$ROTATED_HELPER_SHA" ]]',
+    'marker_state="$(helper_rotation_marker_state "$old_commit" "$new_commit")"',
+    '"$NEW_HELPER_SHA") printf \'initial\'',
+    '"$ROTATED_HELPER_SHA") printf \'helper-installed\'',
+    "die 'the installed helper is not an allowed helper-rotation prefix'",
+  ],
+  'Interrupted rotation must classify only initial, helper-installed, pending, or complete prefixes',
+);
+
+const publicEdgeAbsent = functionBody(transition, 'require_public_edge_absent');
+assertInOrder(
+  publicEdgeAbsent,
+  [
+    'label=com.docker.compose.service=gateway',
+    '[[ -z "$gateway_containers" ]]',
+    'ss -ltnH',
+    '/:(80|443)$/',
+    '[[ ! -e "$GATEWAY_STATE_ROOT" && ! -L "$GATEWAY_STATE_ROOT" ]]',
+  ],
+  'Every unpublished rotation mutation must prove gateway, state root, and ports 80/443 are absent',
+);
+const privateRotationBoundary = functionBody(transition, 'require_rotation_private_boundary');
+assertInOrder(
+  privateRotationBoundary,
+  ['require_public_edge_absent', 'require_rotation_live_boundary "$@"'],
+  'The mutation boundary must prove public-edge absence before the exact helper/runtime contract',
+);
+
+const rotatedRuntime = functionBody(transition, 'require_new_runtime_healthy');
+assert.match(rotatedRuntime, /owner-control:private-or-public/);
+assert.match(rotatedRuntime, /gateway\\nowner-control:private-or-public/);
+assert.match(rotatedRuntime, /expected_services\+=\(gateway\)/);
+assert.match(rotatedRuntime, /service set is not exact for the required runtime mode/);
+assertInOrder(
+  rotatedRuntime,
+  [
+    '[[ "$ids" =~ ^[0-9a-f]{12,64}$ ]]',
+    '[[ "$state" == \'running\' ]]',
+    'org.opencontainers.image.revision',
+    '[[ "$revision" == "$commit_sha" ]]',
+    '[[ "$health" == \'healthy\' ]]',
+  ],
+  'Completed inspection may classify one exact gateway but must validate every classified service',
+);
+const rotationLiveBoundary = functionBody(transition, 'require_rotation_live_boundary');
+assert.doesNotMatch(rotationLiveBoundary, /require_public_edge_absent/);
+assertInOrder(
+  rotationLiveBoundary,
+  [
+    'require_base_retired_overlay_boundary "$old_commit"',
+    'require_rotated_helper_source',
+    'complete) require_rotated_helper',
+    '[[ "$runtime_commit" == "$new_commit" ]]',
+    'require_new_runtime_healthy "$runtime_commit" private-or-public',
+    'require_new_runtime_healthy "$runtime_commit" private',
+  ],
+  'The core completed contract must validate C1 while allowing only exact private or classified public service sets',
+);
+
+const rotateHelper = functionBody(transition, 'rotate_retired_helper');
+assert.doesNotMatch(rotateHelper, /\btrap\b/);
+const rotateMutation = rotateHelper.slice(
+  rotateHelper.indexOf('require_new_sudoers_state present-or-absent'),
+);
+assertInOrder(
+  rotateMutation,
+  [
+    'require_rotation_private_boundary "$state" "$old_commit" "$new_commit"',
+    'disable_new_deploy_sudoers',
+    'require_no_new_helper_processes',
+    'require_rotation_private_boundary "$state" "$old_commit" "$new_commit"',
+    'install_exact_file "$NEW_HELPER_SOURCE" "$NEW_HELPER" 0755',
+    'helper-installed',
+    'write_helper_rotation_marker pending "$old_commit" "$new_commit"',
+    'require_rotation_private_boundary pending "$old_commit" "$new_commit"',
+    'restore_new_deploy_sudoers',
+    'require_new_sudoers_state present',
+    'require_rotation_private_boundary pending "$old_commit" "$new_commit"',
+  ],
+  'Rotation must seal sudo, install H1, receipt pending, fully validate, then restore exact sudo',
+);
+const pendingResume = /if \[\[ "\$state" == 'pending' \]\]; then([\s\S]*?)\n\s*fi/u.exec(
+  rotateHelper,
+)?.[1];
+assert.ok(pendingResume, 'Rotation must have an explicit pending resume branch.');
+assertInOrder(
+  pendingResume,
+  [
+    'require_rotation_private_boundary pending',
+    'require_no_new_helper_processes',
+    'require_rotation_private_boundary pending',
+    'restore_new_deploy_sudoers',
+  ],
+  'A pending resume may restore sudo only after the exact unpublished state validates twice',
+);
+
+const finalizeHelper = functionBody(transition, 'finalize_retired_helper');
+assert.doesNotMatch(finalizeHelper, /\btrap\b/);
+const finalizeMutation = finalizeHelper.slice(
+  finalizeHelper.indexOf('require_rotation_private_boundary pending'),
+);
+assertInOrder(
+  finalizeMutation,
+  [
+    'require_rotation_private_boundary pending "$old_commit" "$new_commit"',
+    '[[ "$(rotation_runtime_commit)" == "$new_commit" ]]',
+    'disable_new_deploy_sudoers',
+    'require_no_new_helper_processes',
+    'require_rotation_private_boundary pending "$old_commit" "$new_commit"',
+    '[[ "$(rotation_runtime_commit)" == "$new_commit" ]]',
+    'write_helper_rotation_marker complete "$old_commit" "$new_commit"',
+    'require_rotation_private_boundary complete "$old_commit" "$new_commit"',
+    'restore_new_deploy_sudoers',
+    'require_new_sudoers_state present',
+    'require_rotation_private_boundary complete "$old_commit" "$new_commit"',
+  ],
+  'Finalization must recheck exact C1 under sealed sudo, write complete last, validate, and only then restore sudo',
+);
+assert.doesNotMatch(
+  `${rotateHelper}\n${finalizeHelper}`,
+  /write_marker "\$(?:PREPARED|ACKNOWLEDGED|LEGACY_STOPPED|RETIRED)_MARKER"/,
+  'Rotation must never rewrite an immutable v1 transition receipt',
+);
+
+const inspectRotation = functionBody(transition, 'inspect_helper_rotation');
+assertInOrder(
+  inspectRotation,
+  [
+    'require_rotation_live_boundary "$state"',
+    '[[ "$state" != \'complete\' ]]',
+    'require_public_edge_absent',
+    'complete:present)',
+    'public_edge=managed-separately',
+  ],
+  'Pending inspection must require an unpublished edge while completed inspection permits classified publication',
+);
+
 assert.doesNotMatch(
   transition,
   /\bwget\b|\bgit\s+(?:clone|fetch|pull)|\.env\b|docker\s+(?:system|container|network)\s+prune|NOPASSWD:\s*(?:ALL|\/bin\/bash|\/usr\/bin\/docker)|usermod[^\n]*(?:\bdocker\b|\bsudo\b)|service_role|FINANCIAL_ACTIONS_MODE=live|xzztugbgtulptnbpoelr/i,
@@ -577,7 +774,6 @@ const assertReceiptGate = (body, receipt, fields) => {
   assert.match(body, new RegExp(`! -L \"\\$${receipt}\"`));
   assert.match(body, new RegExp(`-f \"\\$${receipt}\"`));
   assert.match(body, /root:root:600/);
-  assert.match(body, /sha256sum "\$HELPER_PATH" \| awk '\{ print \$1 \}'/);
   for (const field of fields) assert.ok(body.includes(field), `Receipt gate missing ${field}.`);
   const exactComparison = `cmp -s -- "$${receipt}" <(printf '%s\\n'`;
   if (body.includes(exactComparison)) {
@@ -595,37 +791,72 @@ const assertReceiptGate = (body, receipt, fields) => {
   }
 };
 
-const stoppedReceipt = functionBody(deployHelper, 'require_legacy_stopped');
-assert.match(stoppedReceipt, /\[\[ "\$commit_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
-assertReceiptGate(stoppedReceipt, 'LEGACY_STOPPED_RECEIPT', [
+const baseStoppedReceipt = functionBody(deployHelper, 'require_base_legacy_stopped_receipt');
+assertReceiptGate(baseStoppedReceipt, 'LEGACY_STOPPED_RECEIPT', [
   'transition_version=$TRANSITION_VERSION',
   'droplet_id=$STAGING_DROPLET_ID',
   'legacy_helper_sha=$LEGACY_HELPER_SHA',
-  'new_helper_sha=$current_helper_sha',
-  'acknowledged_commit=$commit_sha',
+  'new_helper_sha=$BASE_HELPER_SHA',
+  'acknowledged_commit=$BASE_REVIEWED_COMMIT',
   'legacy_stopped=true',
 ]);
+const stoppedReceipt = functionBody(deployHelper, 'require_legacy_stopped');
+assert.match(stoppedReceipt, /\[\[ "\$commit_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+assert.match(stoppedReceipt, /sha256sum "\$HELPER_PATH" \| awk '\{ print \$1 \}'/);
+assertInOrder(
+  stoppedReceipt,
+  [
+    'require_base_legacy_stopped_receipt',
+    'require_base_retired_receipt',
+    'require_helper_rotation_overlay pending-or-complete',
+  ],
+  'A rotated private start must extend both immutable stopped and retired receipts with an exact overlay',
+);
+
+const baseRetiredReceipt = functionBody(deployHelper, 'require_base_retired_receipt');
+assertInOrder(
+  baseRetiredReceipt,
+  [
+    'cmp -s -- "$TRANSITION_RECEIPT"',
+    'transition_version=$TRANSITION_VERSION',
+    'droplet_id=$STAGING_DROPLET_ID',
+    'legacy_helper_sha=$LEGACY_HELPER_SHA',
+    'new_helper_sha=$BASE_HELPER_SHA',
+    'acknowledged_commit=$BASE_REVIEWED_COMMIT',
+    'retired=true',
+  ],
+  'The immutable retirement receipt must remain bound to the original helper and commit',
+);
+
+const helperRotationOverlay = functionBody(deployHelper, 'require_helper_rotation_overlay');
+assertInOrder(
+  helperRotationOverlay,
+  [
+    'old_helper_sha=$BASE_HELPER_SHA',
+    'new_helper_sha=$current_helper_sha',
+    'old_reviewed_commit=$BASE_REVIEWED_COMMIT',
+    'new_reviewed_commit=$commit_sha',
+    'rotation_complete=true',
+    '[[ "$expected_state" == \'pending-or-complete\' ]]',
+    'rotation_pending=true',
+  ],
+  'The helper must accept only exact complete, or explicitly allowed pending, overlay receipts',
+);
 
 const retirementReceipt = functionBody(deployHelper, 'require_transition_retired');
 assert.match(retirementReceipt, /local commit_sha="\$1"/);
 assert.match(retirementReceipt, /\[\[ "\$commit_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
-assertReceiptGate(retirementReceipt, 'TRANSITION_RECEIPT', [
-  'transition_version=$TRANSITION_VERSION',
-  'droplet_id=$STAGING_DROPLET_ID',
-  'legacy_helper_sha=$LEGACY_HELPER_SHA',
-  'new_helper_sha=$current_helper_sha',
-  'acknowledged_commit=$commit_sha',
-  'retired=true',
-]);
 assertInOrder(
   retirementReceipt,
   [
-    'retired=true',
+    'require_base_legacy_stopped_receipt',
+    'require_base_retired_receipt',
+    'require_helper_rotation_overlay complete "$commit_sha" "$current_helper_sha"',
     'require_legacy_access_retired',
     'require_cutover_ready',
-    'require_reviewed_owner_port_3002 "$commit_sha"',
+    'require_exact_private_runtime "$commit_sha"',
   ],
-  'The public receipt gate must also prove live retired access, legacy runtime absence, and the reviewed Owner loopback',
+  'The public gate must prove both immutable receipts, a complete overlay, live retirement, and the full reviewed runtime',
 );
 const sealedLegacyAccess = functionBody(deployHelper, 'require_legacy_execution_boundary_sealed');
 assertInOrder(
@@ -704,6 +935,27 @@ assertInOrder(
 );
 assert.doesNotMatch(reviewedOwner, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
 
+const exactPrivateRuntime = functionBody(deployHelper, 'require_exact_private_runtime');
+assertInOrder(
+  exactPrivateRuntime,
+  [
+    'expected_services=(api beta-admission bot owner-control)',
+    'label=com.docker.compose.project=$PROJECT_NAME',
+    'com.docker.compose.service',
+    "$'api\\nbeta-admission\\nbot\\nowner-control'",
+    'label=com.docker.compose.service=$service',
+    '[[ "$ids" =~ ^[0-9a-f]{12,64}$ ]]',
+    '[[ "$state" == \'running\' ]]',
+    'org.opencontainers.image.revision',
+    '[[ "$revision" == "$commit_sha" ]]',
+    '[[ "$service" != \'bot\' ]]',
+    '[[ "$health" == \'healthy\' ]]',
+    'require_reviewed_owner_port_3002 "$commit_sha"',
+  ],
+  'Public activation must classify exactly the four private services and validate every revision and health state',
+);
+assert.doesNotMatch(exactPrivateRuntime, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+
 const helperMain = deployHelper.slice(deployHelper.indexOf('case "$command" in'));
 const privateStartGate = functionBody(deployHelper, 'require_private_start_cutover_ready');
 assertInOrder(
@@ -711,7 +963,7 @@ assertInOrder(
   [
     'local commit_sha="$1"',
     'require_legacy_stopped "$commit_sha"',
-    'require_legacy_execution_boundary_sealed',
+    'require_legacy_access_retired',
     'require_cutover_ready',
     'require_port_3002_free',
   ],
@@ -748,6 +1000,58 @@ assertInOrder(
   ['local commit_sha="$1"', 'require_transition_retired "$commit_sha"', 'ufw status'],
   'The retired receipt must pass before UFW and public-edge prerequisites',
 );
+assert.ok(
+  publicEdgeReady.includes(
+    'grep -Eq "^${port}/tcp[[:blank:]]+ALLOW[[:blank:]]+Anywhere[[:blank:]]*$"',
+  ),
+  'The IPv4 UFW gate must allow only trailing horizontal whitespace.',
+);
+assert.ok(
+  publicEdgeReady.includes(
+    'grep -Eq "^${port}/tcp \\(v6\\)[[:blank:]]+ALLOW[[:blank:]]+Anywhere \\(v6\\)[[:blank:]]*$"',
+  ),
+  'The IPv6 UFW gate must allow only trailing horizontal whitespace.',
+);
+assert.doesNotMatch(
+  publicEdgeReady,
+  /\[\[:space:\]\]/,
+  'The UFW parser must not let vertical whitespace satisfy an exact rule line.',
+);
+const ufwAllowsExactWebRules = (status) =>
+  [
+    /^80\/tcp[\t ]+ALLOW[\t ]+Anywhere[\t ]*$/mu,
+    /^80\/tcp \(v6\)[\t ]+ALLOW[\t ]+Anywhere \(v6\)[\t ]*$/mu,
+    /^443\/tcp[\t ]+ALLOW[\t ]+Anywhere[\t ]*$/mu,
+    /^443\/tcp \(v6\)[\t ]+ALLOW[\t ]+Anywhere \(v6\)[\t ]*$/mu,
+  ].every((rule) => rule.test(status));
+const paddedUfwFixture = [
+  'Status: active',
+  '80/tcp      ALLOW       Anywhere   \t',
+  '443/tcp\tALLOW\tAnywhere\t  ',
+  '80/tcp (v6)      ALLOW       Anywhere (v6)   ',
+  '443/tcp (v6)\tALLOW\tAnywhere (v6)\t',
+].join('\n');
+assert.equal(ufwAllowsExactWebRules(paddedUfwFixture), true);
+assert.equal(ufwAllowsExactWebRules(paddedUfwFixture.replace('ALLOW', 'DENY')), false);
+assert.equal(
+  ufwAllowsExactWebRules(
+    paddedUfwFixture
+      .split('\n')
+      .filter((line) => !line.startsWith('443/tcp (v6)'))
+      .join('\n'),
+  ),
+  false,
+);
+assert.equal(ufwAllowsExactWebRules(paddedUfwFixture.replaceAll('443/tcp', '444/tcp')), false);
+assert.equal(
+  ufwAllowsExactWebRules(
+    paddedUfwFixture.replace(
+      '80/tcp      ALLOW       Anywhere   \t',
+      '80/tcp      ALLOW       Anywhere extra',
+    ),
+  ),
+  false,
+);
 const publicEdgeArm = /public-edge-ready\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
 assert.ok(publicEdgeArm, 'The helper must expose a commit-bound public-edge readiness command.');
 assertInOrder(
@@ -759,8 +1063,16 @@ const startPublicEdgeArm = /start-public-edge\)([\s\S]*?)\n\s*;;/u.exec(helperMa
 assert.ok(startPublicEdgeArm, 'The helper must expose the guarded public-edge start command.');
 assertInOrder(
   startPublicEdgeArm,
-  ['commit_sha="$2"', 'require_public_edge_ready "$commit_sha"'],
-  'Starting the public edge must validate the same commit-bound retirement receipt',
+  [
+    'commit_sha="$2"',
+    'require_public_edge_ready "$commit_sha"',
+    'require_exact_private_runtime "$commit_sha"',
+    'install -d -o root -g root -m 0755 "$GATEWAY_STATE_ROOT"',
+    'compose_command=(',
+    'require_public_edge_ready "$commit_sha"',
+    'up -d --no-build --wait --wait-timeout 90 gateway',
+  ],
+  'Starting the public edge must recheck the full commit, DNS, UFW, ports, and runtime gate before gateway activation',
 );
 
 const cutoverStep =
@@ -797,6 +1109,8 @@ for (const phase of [
   'mark-legacy-stopped',
   'rollback-prepare',
   'retire',
+  'rotate-retired-helper',
+  'finalize-retired-helper',
   'verify',
 ]) {
   assert.match(runbook, new RegExp(`\\b${phase}\\b`));
@@ -804,6 +1118,57 @@ for (const phase of [
 assert.match(runbook, /20260813115809_rename_runtime_roles_to_fetanagent\.sql/);
 assert.match(runbook, /590666364/);
 assert.match(runbook, /root:root.*0700/);
+assert.match(runbook, new RegExp(baseReviewedCommit));
+assert.match(runbook, new RegExp(baseHelperSha));
+assert.match(runbook, new RegExp(expectedRotatedHelperSha));
+assert.match(runbook, /TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'/);
+const extractGate =
+  /bash -euo pipefail <<'FETANAGENT_EXTRACT'\n([\s\S]*?)\nFETANAGENT_EXTRACT/u.exec(runbook)?.[1];
+assert.ok(extractGate, 'The clean-checkout extraction must run in a fail-closed Bash process.');
+assertInOrder(
+  extractGate,
+  [
+    "C1='<exact-40-lowercase-C1-from-reviewed-main>'",
+    "TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'",
+    '[[ "$C1" =~ ^[0-9a-f]{40}$ ]]',
+    '[[ "$TRANSITION_SHA" =~ ^[0-9a-f]{64}$ ]]',
+    'git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh"',
+    'git show "$C1:infra/operations/fetanagent-vm-transition.sh"',
+    'sha256sum fetanagent-staging-deploy-helper',
+    'sha256sum fetanagent-vm-transition',
+    'bash -n fetanagent-staging-deploy-helper',
+    'bash -n fetanagent-vm-transition',
+  ],
+  'The extraction process must abort on commit, helper, transition, or syntax mismatch',
+);
+const installGate =
+  /bash -euo pipefail <<'FETANAGENT_INSTALL'\n([\s\S]*?)\nFETANAGENT_INSTALL/u.exec(runbook)?.[1];
+assert.ok(installGate, 'The root installation must run in a fail-closed Bash process.');
+assertInOrder(
+  installGate,
+  [
+    'install -d -o root -g root -m 0700 /root/fetanagent-vm-transition-input',
+    '/root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper',
+    '/root/fetanagent-vm-transition-input/fetanagent-vm-transition.next',
+    "TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'",
+    '[[ "$TRANSITION_SHA" =~ ^[0-9a-f]{64}$ ]]',
+    'sha256sum /root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper',
+    'sha256sum /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next',
+    'bash -n /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next',
+    'TRANSITION_INSTALL_TMP="$(mktemp /usr/local/sbin/.fetanagent-vm-transition.XXXXXX)"',
+    'install -o root -g root -m 0700',
+    'stat --format=\'%U:%G:%a\' "$TRANSITION_INSTALL_TMP"',
+    'sha256sum "$TRANSITION_INSTALL_TMP"',
+    'mv -f -- "$TRANSITION_INSTALL_TMP" /usr/local/sbin/fetanagent-vm-transition',
+    "stat --format='%U:%G:%a' /usr/local/sbin/fetanagent-vm-transition",
+    'sha256sum /usr/local/sbin/fetanagent-vm-transition',
+  ],
+  'The root process must abort before atomic T1 replacement on every hash, syntax, or metadata mismatch',
+);
+assert.ok(
+  runbook.indexOf('\nFETANAGENT_INSTALL\n') < runbook.indexOf('rotate-retired-helper'),
+  'The fail-closed install block must finish before the first rotation command.',
+);
 assert.match(runbook, /visudo -cf/);
 assert.match(runbook, /rollback/i);
 assert.match(runbook, /sshd -T -C user=fetanagent-admin,host=localhost,addr=127\.0\.0\.1/u);

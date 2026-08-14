@@ -23,7 +23,9 @@ The transition separates reversible access preparation from the one-way runtime 
 6. Apply the database role rename migration while both application runtimes are stopped.
 7. Deploy and smoke the acknowledged FetanAgent commit.
 8. **Retire** the old access boundary only after exact-commit private smoke succeeds.
-9. Configure the firewall and public domain only after the retirement receipt exists.
+9. Rotate the retired deploy helper through an exact pending overlay, deploy the next reviewed
+   commit privately, and finalize the overlay only after exact-commit smoke succeeds.
+10. Configure the firewall and public domain only after the finalized helper overlay exists.
 
 Do not reverse steps 4-8 by restarting the old bot. After the role rename, restarting the old
 runtime is not a safe rollback: it can create a second long poller, duplicate financial intake, or
@@ -53,10 +55,12 @@ The script fixes these contracts:
   `/root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper`
 - transition state: `/var/lib/fetanagent-vm-transition`, `root:root` mode `0700`
 
-The `NEW_HELPER_SHA` constant in [`fetanagent-vm-transition.sh`](fetanagent-vm-transition.sh) is
-pinned to the SHA-256 of the final LF Git blob of
-`infra/operations/fetanagent-staging-deploy-helper.sh`. Do not hash a Windows checkout: CRLF
-conversion produces a different digest. Verify the pin from the reviewed commit before installing:
+The historical `NEW_HELPER_SHA` constant in
+[`fetanagent-vm-transition.sh`](fetanagent-vm-transition.sh) remains pinned to the helper installed by
+the immutable retirement receipts. `ROTATED_HELPER_SHA` is pinned to the SHA-256 of the next final LF
+Git blob of `infra/operations/fetanagent-staging-deploy-helper.sh`. Do not hash a Windows checkout:
+CRLF conversion produces a different digest. Verify each pin from its reviewed commit before
+installing:
 
 ```bash
 git show '<reviewed-main-commit>:infra/operations/fetanagent-staging-deploy-helper.sh' |
@@ -302,10 +306,132 @@ remaining artifact is validated exactly before removal. It never requires a remo
 to reappear. After the receipt exists, reruns are idempotent only when both the exact closed receipt
 schema and live retired contract still agree.
 
+## Phase 6A: rotate the retired helper and advance private staging
+
+This one-time overlay advances the retired staging boundary without rewriting any historical
+receipt. The fixed base and helper pins are:
+
+```text
+old_reviewed_commit=e636de89be179514af3aae3972ee0b086cd8c816
+old_helper_sha=e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af
+new_helper_sha=886e0c49b9040f91230d6a774c8a5e3a26c2aa8a16bebce84116faab459b345a
+new_reviewed_commit=<exact-40-lowercase-C1-from-reviewed-main>
+```
+
+Do not substitute another old commit, helper digest, state directory, source path, or installed
+path. On a trusted clean checkout of exact C1, extract the normalized LF blobs and verify H1 before
+transferring them through the root-console staging channel:
+
+```bash
+bash -euo pipefail <<'FETANAGENT_EXTRACT'
+C1='<exact-40-lowercase-C1-from-reviewed-main>'
+TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'
+[[ "$C1" =~ ^[0-9a-f]{40}$ ]]
+[[ "$TRANSITION_SHA" =~ ^[0-9a-f]{64}$ ]]
+git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper
+git show "$C1:infra/operations/fetanagent-vm-transition.sh" > fetanagent-vm-transition
+test "$(sha256sum fetanagent-staging-deploy-helper | awk '{ print $1 }')" = \
+  '886e0c49b9040f91230d6a774c8a5e3a26c2aa8a16bebce84116faab459b345a'
+test "$(sha256sum fetanagent-vm-transition | awk '{ print $1 }')" = "$TRANSITION_SHA"
+bash -n fetanagent-staging-deploy-helper
+bash -n fetanagent-vm-transition
+FETANAGENT_EXTRACT
+```
+
+At the DigitalOcean root console, place only those reviewed LF bytes at these fixed staging paths,
+verify their out-of-band reviewed hashes, then install only the transition controller:
+
+```bash
+bash -euo pipefail <<'FETANAGENT_INSTALL'
+install -d -o root -g root -m 0700 /root/fetanagent-vm-transition-input
+install -o root -g root -m 0600 ./fetanagent-staging-deploy-helper \
+  /root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper
+install -o root -g root -m 0600 ./fetanagent-vm-transition \
+  /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next
+TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'
+[[ "$TRANSITION_SHA" =~ ^[0-9a-f]{64}$ ]]
+test "$(sha256sum /root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper | awk '{ print $1 }')" = \
+  '886e0c49b9040f91230d6a774c8a5e3a26c2aa8a16bebce84116faab459b345a'
+test "$(sha256sum /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next | awk '{ print $1 }')" = \
+  "$TRANSITION_SHA"
+bash -n /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next
+TRANSITION_INSTALL_TMP="$(mktemp /usr/local/sbin/.fetanagent-vm-transition.XXXXXX)"
+install -o root -g root -m 0700 \
+  /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next \
+  "$TRANSITION_INSTALL_TMP"
+test "$(stat --format='%U:%G:%a' "$TRANSITION_INSTALL_TMP")" = 'root:root:700'
+test "$(sha256sum "$TRANSITION_INSTALL_TMP" | awk '{ print $1 }')" = "$TRANSITION_SHA"
+mv -f -- "$TRANSITION_INSTALL_TMP" /usr/local/sbin/fetanagent-vm-transition
+test "$(stat --format='%U:%G:%a' /usr/local/sbin/fetanagent-vm-transition)" = 'root:root:700'
+test "$(sha256sum /usr/local/sbin/fetanagent-vm-transition | awk '{ print $1 }')" = \
+  "$TRANSITION_SHA"
+FETANAGENT_INSTALL
+```
+
+Set C1 to the exact reviewed `main` commit and run the rotation only from that root console:
+
+```bash
+BASE_REVIEWED_MAIN_COMMIT='e636de89be179514af3aae3972ee0b086cd8c816'
+NEXT_REVIEWED_MAIN_COMMIT='<exact-40-lowercase-C1-from-reviewed-main>'
+[[ "$NEXT_REVIEWED_MAIN_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+[[ "$NEXT_REVIEWED_MAIN_COMMIT" != "$BASE_REVIEWED_MAIN_COMMIT" ]]
+/usr/local/sbin/fetanagent-vm-transition rotate-retired-helper \
+  "$BASE_REVIEWED_MAIN_COMMIT" "$NEXT_REVIEWED_MAIN_COMMIT"
+/usr/local/sbin/fetanagent-vm-transition verify
+```
+
+The command exact-validates the four immutable base receipts, live retired access, H0/C0 private
+runtime, staged H1, and the absence of a gateway, gateway state root, and listeners on 80/443. It
+removes only the exact deploy sudoers fragment, rechecks that no helper process exists, installs H1,
+then writes `/var/lib/fetanagent-vm-transition/helper-rotation-v1` atomically as `root:root` mode
+`0600`:
+
+```text
+transition_version=1
+droplet_id=590666364
+old_helper_sha=e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af
+new_helper_sha=886e0c49b9040f91230d6a774c8a5e3a26c2aa8a16bebce84116faab459b345a
+old_reviewed_commit=e636de89be179514af3aae3972ee0b086cd8c816
+new_reviewed_commit=<exact-40-lowercase-C1-from-reviewed-main>
+rotation_pending=true
+```
+
+Pending authorizes only the exact H1 helper to deploy C1 privately; public-edge commands reject it.
+Dispatch the main-only staging deploy-and-smoke workflow for exact C1. After it reports the exact
+four-service C1 runtime healthy and no public edge, finalize from the root console:
+
+```bash
+/usr/local/sbin/fetanagent-vm-transition finalize-retired-helper \
+  "$BASE_REVIEWED_MAIN_COMMIT" "$NEXT_REVIEWED_MAIN_COMMIT"
+/usr/local/sbin/fetanagent-vm-transition verify
+```
+
+Finalization seals the exact sudo boundary again, rechecks the private C1 runtime and unpublished
+edge, and changes only the overlay's last line to `rotation_complete=true`. It restores and validates
+the exact deploy sudoers fragment only after the complete live boundary passes. The immutable
+`prepared-v1`, `acknowledged-v1`, `legacy-stopped-v1`, and `retired-v1` receipts remain byte-for-byte
+unchanged. A complete overlay authorizes the separately guarded public phase.
+
+Rotation is interruption-resumable only for these exact prefixes:
+
+| Exact prefix                                                           | Safe root-console response                                                                     |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| H0, no overlay                                                         | Rerun `rotate-retired-helper C0 C1`.                                                           |
+| H1, no overlay, deploy sudo absent                                     | Rerun the same rotate command; it recognizes only `helper-installed`.                          |
+| Exact pending overlay, deploy sudo absent or present, runtime C0 or C1 | Rerun the same rotate command; sudo is restored only after the unpublished boundary validates. |
+| Exact pending overlay and exact C1 runtime                             | Run `finalize-retired-helper C0 C1`.                                                           |
+| Exact complete overlay, deploy sudo absent, before publication         | Rerun the finalize command; it validates complete state before restoring sudo.                 |
+| Exact complete overlay and deploy sudo present                         | `verify` reports `phase=retired`; proceed to the public runbook.                               |
+
+Any failed mutation after sudo sealing deliberately leaves deploy sudo absent. Never restore it by
+hand. Rerun the matching exact command. An unknown helper digest, overlay schema, commit pair,
+runtime revision, extra service, public listener, gateway artifact, legacy residue, or sudoers
+reference is not resumable: stop and investigate without editing receipts.
+
 ## Phase 7: public edge only after retirement
 
 The private deploy is the rollback and safety boundary. Only after `verify` reports `phase=retired`
-may the separately guarded public-domain runbook proceed:
+with `helper_rotation=complete` may the separately guarded public-domain runbook proceed:
 
 1. configure the reviewed UFW HTTP/HTTPS rules;
 2. update only the reviewed Porkbun A/CNAME records while preserving mail records;

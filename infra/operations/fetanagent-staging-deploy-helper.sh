@@ -26,9 +26,12 @@ readonly PUBLIC_DOMAINS=('fetanagent.com' 'www.fetanagent.com' 'owner.fetanagent
 readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
 readonly LEGACY_STOPPED_RECEIPT='/var/lib/fetanagent-vm-transition/legacy-stopped-v1'
 readonly TRANSITION_RECEIPT='/var/lib/fetanagent-vm-transition/retired-v1'
+readonly HELPER_ROTATION_RECEIPT='/var/lib/fetanagent-vm-transition/helper-rotation-v1'
 readonly TRANSITION_VERSION='1'
 readonly STAGING_DROPLET_ID='590666364'
 readonly LEGACY_HELPER_SHA='4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69'
+readonly BASE_HELPER_SHA='e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af'
+readonly BASE_REVIEWED_COMMIT='e636de89be179514af3aae3972ee0b086cd8c816'
 
 export PATH="$SAFE_PATH"
 
@@ -184,6 +187,43 @@ require_reviewed_owner_port_3002() {
     die 'TCP port 3002 has an unexpected or ambiguous listener'
 }
 
+require_exact_private_runtime() {
+  local commit_sha="$1"
+  local container_id health ids revision service services state
+  local -a expected_services=(api beta-admission bot owner-control)
+
+  services="$({
+    docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" |
+      while IFS= read -r container_id; do
+        [[ -n "$container_id" ]] || continue
+        docker_local container inspect "$container_id" \
+          --format '{{ index .Config.Labels "com.docker.compose.service" }}'
+      done
+  } | sort)" || die 'the private FetanAgent service inventory could not be inspected'
+  [[ "$services" == $'api\nbeta-admission\nbot\nowner-control' ]] ||
+    die 'the private FetanAgent service set is not exact'
+
+  for service in "${expected_services[@]}"; do
+    ids="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter "label=com.docker.compose.service=$service")" ||
+      die "the $service container inventory could not be inspected"
+    [[ "$ids" =~ ^[0-9a-f]{12,64}$ ]] || die "the $service container inventory is not singular"
+    state="$(docker_local container inspect "$ids" --format '{{.State.Status}}')"
+    [[ "$state" == 'running' ]] || die "$service is not running"
+    revision="$(docker_local container inspect "$ids" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+    [[ "$revision" == "$commit_sha" ]] || die "$service does not run the reviewed commit"
+    if [[ "$service" != 'bot' ]]; then
+      health="$(docker_local container inspect "$ids" --format '{{.State.Health.Status}}')"
+      [[ "$health" == 'healthy' ]] || die "$service is not healthy"
+    fi
+  done
+
+  require_reviewed_owner_port_3002 "$commit_sha"
+}
+
 require_ipv6_host_ready() {
   command -v ip >/dev/null 2>&1 || die 'the ip utility is unavailable'
   command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
@@ -193,31 +233,88 @@ require_ipv6_host_ready() {
     die 'the exact staging direct database host has no resolvable IPv6 address'
 }
 
-require_legacy_stopped() {
-  local commit_sha="$1"
-  local current_helper_sha
-
+require_base_legacy_stopped_receipt() {
   command -v cmp >/dev/null 2>&1 || die 'the cmp utility is unavailable'
-  command -v sha256sum >/dev/null 2>&1 || die 'the sha256sum utility is unavailable'
   command -v stat >/dev/null 2>&1 || die 'the stat utility is unavailable'
-
-  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
-    die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
   [[ ! -L "$LEGACY_STOPPED_RECEIPT" && -f "$LEGACY_STOPPED_RECEIPT" ]] ||
     die 'the legacy-stopped transition receipt is absent or symbolic'
   [[ "$(stat --format='%U:%G:%a' "$LEGACY_STOPPED_RECEIPT")" == 'root:root:600' ]] ||
     die 'the legacy-stopped transition receipt ownership or mode is unsafe'
-  if ! current_helper_sha="$(sha256sum "$HELPER_PATH" | awk '{ print $1 }')"; then
-    die 'the installed helper digest could not be computed'
-  fi
   cmp -s -- "$LEGACY_STOPPED_RECEIPT" <(printf '%s\n' \
     "transition_version=$TRANSITION_VERSION" \
     "droplet_id=$STAGING_DROPLET_ID" \
     "legacy_helper_sha=$LEGACY_HELPER_SHA" \
-    "new_helper_sha=$current_helper_sha" \
-    "acknowledged_commit=$commit_sha" \
+    "new_helper_sha=$BASE_HELPER_SHA" \
+    "acknowledged_commit=$BASE_REVIEWED_COMMIT" \
     'legacy_stopped=true') ||
-    die 'the legacy-stopped transition receipt does not exactly match the reviewed commit and helper'
+    die 'the immutable legacy-stopped transition receipt does not match the sealed base transition'
+}
+
+require_legacy_stopped() {
+  local commit_sha="$1"
+  local current_helper_sha
+
+  command -v sha256sum >/dev/null 2>&1 || die 'the sha256sum utility is unavailable'
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+  if ! current_helper_sha="$(sha256sum "$HELPER_PATH" | awk '{ print $1 }')"; then
+    die 'the installed helper digest could not be computed'
+  fi
+  require_base_legacy_stopped_receipt
+  require_base_retired_receipt
+  require_helper_rotation_overlay pending-or-complete "$commit_sha" "$current_helper_sha"
+}
+
+require_base_retired_receipt() {
+  [[ ! -L "$TRANSITION_RECEIPT" && -f "$TRANSITION_RECEIPT" ]] ||
+    die 'the immutable VM retirement receipt is absent or symbolic'
+  [[ "$(stat --format='%U:%G:%a' "$TRANSITION_RECEIPT")" == 'root:root:600' ]] ||
+    die 'the immutable VM retirement receipt ownership or mode is unsafe'
+  cmp -s -- "$TRANSITION_RECEIPT" <(printf '%s\n' \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$STAGING_DROPLET_ID" \
+    "legacy_helper_sha=$LEGACY_HELPER_SHA" \
+    "new_helper_sha=$BASE_HELPER_SHA" \
+    "acknowledged_commit=$BASE_REVIEWED_COMMIT" \
+    'retired=true') ||
+    die 'the immutable retirement receipt does not match the sealed base transition'
+}
+
+require_helper_rotation_overlay() {
+  local expected_state="$1"
+  local commit_sha="$2"
+  local current_helper_sha="$3"
+
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ && "$commit_sha" != "$BASE_REVIEWED_COMMIT" ]] ||
+    die 'the helper rotation must target a distinct reviewed main commit'
+  [[ "$current_helper_sha" =~ ^[0-9a-f]{64}$ && "$current_helper_sha" != "$BASE_HELPER_SHA" ]] ||
+    die 'the helper rotation must target a distinct reviewed helper digest'
+  [[ ! -L "$HELPER_ROTATION_RECEIPT" && -f "$HELPER_ROTATION_RECEIPT" ]] ||
+    die 'the helper-rotation receipt is absent or symbolic'
+  [[ "$(stat --format='%U:%G:%a' "$HELPER_ROTATION_RECEIPT")" == 'root:root:600' ]] ||
+    die 'the helper-rotation receipt ownership or mode is unsafe'
+
+  if cmp -s -- "$HELPER_ROTATION_RECEIPT" <(printf '%s\n' \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$STAGING_DROPLET_ID" \
+    "old_helper_sha=$BASE_HELPER_SHA" \
+    "new_helper_sha=$current_helper_sha" \
+    "old_reviewed_commit=$BASE_REVIEWED_COMMIT" \
+    "new_reviewed_commit=$commit_sha" \
+    'rotation_complete=true'); then
+    return
+  fi
+  [[ "$expected_state" == 'pending-or-complete' ]] ||
+    die 'the helper-rotation receipt is not finalized for public activation'
+  cmp -s -- "$HELPER_ROTATION_RECEIPT" <(printf '%s\n' \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$STAGING_DROPLET_ID" \
+    "old_helper_sha=$BASE_HELPER_SHA" \
+    "new_helper_sha=$current_helper_sha" \
+    "old_reviewed_commit=$BASE_REVIEWED_COMMIT" \
+    "new_reviewed_commit=$commit_sha" \
+    'rotation_pending=true') ||
+    die 'the helper-rotation receipt does not match an allowed pending or complete state'
 }
 
 require_no_legacy_identity_processes() {
@@ -332,57 +429,31 @@ require_private_start_cutover_ready() {
   local commit_sha="$1"
 
   require_legacy_stopped "$commit_sha"
-  require_legacy_execution_boundary_sealed
+  require_legacy_access_retired
   require_cutover_ready
   require_port_3002_free
 }
 
 require_transition_retired() {
   local commit_sha="$1"
-  local current_helper_sha exact_count key key_count line_count required_line
+  local current_helper_sha
 
-  command -v awk >/dev/null 2>&1 || die 'the awk utility is unavailable'
   command -v sha256sum >/dev/null 2>&1 || die 'the sha256sum utility is unavailable'
   command -v stat >/dev/null 2>&1 || die 'the stat utility is unavailable'
 
   [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
     die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
-  [[ ! -L "$TRANSITION_RECEIPT" && -f "$TRANSITION_RECEIPT" ]] ||
-    die 'the VM transition retirement receipt is absent or symbolic'
-  [[ "$(stat --format='%U:%G:%a' "$TRANSITION_RECEIPT")" == 'root:root:600' ]] ||
-    die 'the VM transition retirement receipt ownership or mode is unsafe'
   if ! current_helper_sha="$(sha256sum "$HELPER_PATH" | awk '{ print $1 }')"; then
     die 'the installed helper digest could not be computed'
   fi
-  if ! line_count="$(awk 'END { print NR + 0 }' "$TRANSITION_RECEIPT")"; then
-    die 'the VM transition receipt could not be inspected'
-  fi
-  [[ "$line_count" == '6' ]] ||
-    die 'the VM transition receipt has an unexpected schema'
+  require_base_legacy_stopped_receipt
+  require_base_retired_receipt
 
-  for required_line in \
-    "transition_version=$TRANSITION_VERSION" \
-    "droplet_id=$STAGING_DROPLET_ID" \
-    "legacy_helper_sha=$LEGACY_HELPER_SHA" \
-    "new_helper_sha=$current_helper_sha" \
-    "acknowledged_commit=$commit_sha" \
-    'retired=true'; do
-    key="${required_line%%=*}"
-    if ! key_count="$(awk -F= -v required_key="$key" \
-      '$1 == required_key { count += 1 } END { print count + 0 }' "$TRANSITION_RECEIPT")"; then
-      die 'the VM transition receipt could not be inspected'
-    fi
-    if ! exact_count="$(awk -v expected_line="$required_line" \
-      '$0 == expected_line { count += 1 } END { print count + 0 }' "$TRANSITION_RECEIPT")"; then
-      die 'the VM transition receipt could not be inspected'
-    fi
-    [[ "$key_count" == '1' && "$exact_count" == '1' ]] ||
-      die 'a required VM transition receipt field is absent, duplicated, or unexpected'
-  done
+  require_helper_rotation_overlay complete "$commit_sha" "$current_helper_sha"
 
   require_legacy_access_retired
   require_cutover_ready
-  require_reviewed_owner_port_3002 "$commit_sha"
+  require_exact_private_runtime "$commit_sha"
 }
 
 require_public_edge_ready() {
@@ -398,9 +469,9 @@ require_public_edge_ready() {
   status="$(ufw status)"
   grep -Fxq 'Status: active' <<<"$status" || die 'UFW is not active'
   for port in 80 443; do
-    grep -Eq "^${port}/tcp[[:space:]]+ALLOW[[:space:]]+Anywhere$" <<<"$status" ||
+    grep -Eq "^${port}/tcp[[:blank:]]+ALLOW[[:blank:]]+Anywhere[[:blank:]]*$" <<<"$status" ||
       die "UFW does not allow $port/tcp"
-    grep -Eq "^${port}/tcp \(v6\)[[:space:]]+ALLOW[[:space:]]+Anywhere \(v6\)$" <<<"$status" ||
+    grep -Eq "^${port}/tcp \(v6\)[[:blank:]]+ALLOW[[:blank:]]+Anywhere \(v6\)[[:blank:]]*$" <<<"$status" ||
       die "UFW does not allow $port/tcp over IPv6"
   done
 
@@ -617,6 +688,7 @@ case "$command" in
     [[ "$(docker_local image inspect "fetanagent-gateway:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
       die 'the gateway image revision does not match the reviewed commit'
     require_public_edge_ready "$commit_sha"
+    require_exact_private_runtime "$commit_sha"
 
     [[ ! -L "$GATEWAY_STATE_ROOT" && ! -L "$GATEWAY_STATE_ROOT/data" && ! -L "$GATEWAY_STATE_ROOT/config" ]] ||
       die 'a gateway state path is a symbolic link'
@@ -655,6 +727,7 @@ case "$command" in
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
       --project-name "$PROJECT_NAME" --profile staging-manual --profile public-domain -f "$compose_file"
     )
+    require_public_edge_ready "$commit_sha"
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       up -d --no-build --wait --wait-timeout 90 gateway
     ;;

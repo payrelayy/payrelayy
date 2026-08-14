@@ -2,10 +2,11 @@
 
 FetanAgent is a Telegram-first payment-verification and betting-agent automation service.
 The current product scope is an English-only, invite-only CBE Birr dry run plus a disabled
-authoritative-shadow foundation and offline attempt planner. An admitted
+authoritative-shadow foundation and offline attempt and settlement planners. An admitted
 customer with an Owner-confirmed KemerBet Player ID can open a 25-25,000 ETB intake, receive the
 configured masked receiver instructions, and submit one protected transaction reference for Owner
-review. A pure safe-facts evaluator, private shadow queue, and offline attempt planner can model
+review. A pure safe-facts evaluator, private shadow queue, and offline attempt and settlement
+planners can model
 advisory outcomes, but no provider transport or worker runtime is configured. It has no provider call, payment verification
 or claim, KemerBet execution, or live
 financial action. TeleBirr and CBE bank are deferred until separately authorized, authoritative
@@ -45,6 +46,9 @@ The current foundation is deliberately safe:
 - the Stage 1C attempt planner accepts only a validated intent snapshot and safe adapter result,
   treats duplicate-reference status as unavailable, and returns only an advisory completion or
   retry candidate without scheduling, persistence, approval, or execution; and
+- the Stage 1D settlement planner can translate an exact safe lease receipt and Stage 1C result
+  into a closed advisory completion or retry command, but emits no SQL and performs no database,
+  network, job-acquisition, scheduling, persistence, approval, or execution work; and
 - no provider evidence, payment claim, authoritative verification job, KemerBet call, withdrawal,
   or financial execution is enabled by this flow.
 
@@ -68,7 +72,7 @@ environment file.
 | `apps/api`                                 | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
 | `apps/admin`                               | Owner-authenticated beta invite issue/revoke boundary; no browser database grant    |
 | `apps/bot`                                 | Private Telegram chat transport only                                                |
-| `apps/worker`                              | Disabled pure shadow evaluator/planner; no provider or database runner              |
+| `apps/worker`                              | Disabled pure shadow planners; no provider transport or database runner             |
 | `apps/maintenance`                         | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
 | `apps/executor`                            | Isolated, supervised KemerBet browser adapter; dry-run first                        |
 | `packages/domain`                          | Money rules, state machines, limits, idempotency reason codes                       |
@@ -112,7 +116,7 @@ See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See
 [docs/cbe-birr-authoritative-shadow.md](docs/cbe-birr-authoritative-shadow.md) for the disabled
-Stage 1A safe-facts/queue boundary and offline Stage 1C attempt planner, and
+Stage 1A safe-facts/queue boundary and offline Stage 1C/1D planners, and
 [docs/cbe-birr-authoritative-adapter-fixtures.md](docs/cbe-birr-authoritative-adapter-fixtures.md)
 for the offline-only Stage 1B normalization regressions. See
 [docs/cbe-birr-fixture-dry-run.md](docs/cbe-birr-fixture-dry-run.md) for the current CBE Birr-only

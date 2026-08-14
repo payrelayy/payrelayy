@@ -7,6 +7,7 @@ export * from './telegram-beta-invite-admission.js';
 export * from './cbe-birr-authoritative-shadow.js';
 export * from './cbe-birr-authoritative-adapter.js';
 export * from './cbe-birr-authoritative-shadow-attempt.js';
+export * from './cbe-birr-authoritative-shadow-settlement.js';
 
 /**
  * Values are validated against database-backed registries. They are strings here so a newly

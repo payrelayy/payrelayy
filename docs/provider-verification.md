@@ -111,14 +111,17 @@ language, and formatting can vary, so name text never authorizes a payment. The 
 must be proven by FetanAgent regression tests for every supported receipt type; an unfamiliar
 response goes to review rather than being parsed optimistically.
 
-The implemented CBE Birr code consists of the redacted fixture package plus a separate Stage 1A
-authoritative-shadow foundation. The shadow evaluator accepts only normalized safe facts and can
-emit only `would_verify`, `would_reject`, or `would_review`. A private database queue/result ledger
-is present for a future separately deployed shadow worker, but no runtime login or runner exists.
-Neither path has an HTTP client, provider URL, credential, filesystem evidence reader, Telegram
-integration, payment-claim grant, or KemerBet integration; neither logs or returns raw receipt,
+The implemented CBE Birr code consists of the redacted dry-run fixture package, the separate Stage
+1A authoritative-shadow foundation, and Stage 1B offline authoritative-adapter fixtures. The
+Stage 1B fixture schema is a FetanAgent-owned synthetic test envelope, not a documented CBE Birr
+wire format. It proves strict reduction into the existing safe-facts contract and fails closed on
+layout drift, malformed input, or uncertainty. A private database queue/result ledger is present
+for a future separately deployed shadow worker, but no runtime login or runner exists. None of
+these paths has an HTTP client, provider URL, credential, filesystem evidence reader, Telegram
+integration, payment-claim grant, or KemerBet integration; none logs or returns raw receipt,
 canonical-reference, receiver, or provider-payload values. See
-[cbe-birr-authoritative-shadow.md](cbe-birr-authoritative-shadow.md).
+[cbe-birr-authoritative-shadow.md](cbe-birr-authoritative-shadow.md) and
+[cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
 
 ## Privacy, operations, and rollout
 

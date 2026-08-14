@@ -146,6 +146,12 @@ importers:
 
   packages/domain: {}
 
+  packages/cbe-birr-authoritative-fixtures:
+    dependencies:
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/cbe-birr-fixtures: {}
 
   packages/i18n: {}

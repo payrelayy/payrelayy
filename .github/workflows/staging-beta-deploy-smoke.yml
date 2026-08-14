@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build, unban and check staging once, deploy and smoke, or stop staging
+        description: Build, verify transition SSH, unban and check staging once, deploy and smoke, or stop staging
         required: true
         default: plan
         type: choice
         options:
           - plan
+          - transition-ssh-verify
           - unban-and-connectivity-check
           - deploy-and-smoke
           - stop-and-disable
@@ -65,7 +66,7 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|unban-and-connectivity-check|deploy-and-smoke|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|unban-and-connectivity-check|deploy-and-smoke|stop-and-disable)$ ]]
 
   build:
     name: Build reviewed staging images
@@ -187,6 +188,71 @@ jobs:
           openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
           psql -X --set=ON_ERROR_STOP=1 \
             --command='select 1 as staging_database_reachable;'
+
+  transition-ssh-verify:
+    name: Verify prepared transition SSH access read-only
+    if: inputs.mode == 'transition-ssh-verify'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact helper contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify non-root SSH and the exact installed helper
+        shell: bash
+        env:
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$REQUESTED_MODE" == 'transition-ssh-verify' ]]
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+          secret_dir="$RUNNER_TEMP/transition-ssh-verify"
+          umask 077
+          install -d -m 0700 "$secret_dir"
+          trap 'rm -f "$secret_dir/deploy-key" "$secret_dir/known-hosts"' EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$secret_dir/known-hosts"
+          chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts"
+          ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
+          ssh-keygen -F "$STAGING_VM_HOST" -f "$secret_dir/known-hosts" >/dev/null
+
+          helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
+          [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          ssh_opts=(
+            -F /dev/null
+            -i "$secret_dir/deploy-key"
+            -o BatchMode=yes
+            -o ClearAllForwardings=yes
+            -o ConnectTimeout=10
+            -o ConnectionAttempts=1
+            -o IdentitiesOnly=yes
+            -o RequestTTY=no
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$secret_dir/known-hosts"
+          )
+          remote_command="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha'"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" "$remote_command"
+          echo 'transition_ssh_verification=pass'
 
   deploy:
     name: Deploy and smoke exact staging release

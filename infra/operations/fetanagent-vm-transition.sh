@@ -383,6 +383,24 @@ Match User fetanagent-admin
     GatewayPorts no
     PermitTunnel no
     PermitTTY no
+    X11Forwarding no
+EOF
+}
+
+expected_stranded_new_sshd_dropin() {
+  cat <<'EOF'
+Match User fetanagent-admin
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitEmptyPasswords no
+    AllowAgentForwarding no
+    AllowStreamLocalForwarding no
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:3002
+    GatewayPorts no
+    PermitTunnel no
+    PermitTTY no
     PermitUserEnvironment no
     X11Forwarding no
 EOF
@@ -507,12 +525,64 @@ require_exact_new_sshd_dropin() {
   rm -f -- "$temporary"
 }
 
+matches_exact_stranded_new_sshd_dropin() {
+  local result temporary
+  temporary="$(mktemp)"
+  expected_stranded_new_sshd_dropin >"$temporary"
+  if cmp -s -- "$temporary" "$NEW_SSHD_DROPIN"; then
+    result='0'
+  else
+    result='1'
+  fi
+  rm -f -- "$temporary"
+  return "$result"
+}
+
+require_exact_rollback_new_sshd_dropin() {
+  require_regular_metadata "$NEW_SSHD_DROPIN" 'root:root:644'
+  if matches_exact_stranded_new_sshd_dropin; then
+    return
+  fi
+  require_exact_new_sshd_dropin
+}
+
+require_effective_new_sshd_policy() {
+  local count expected key policy
+  policy="$(sshd -T -C "user=$NEW_ADMIN,host=localhost,addr=127.0.0.1")" ||
+    die 'the effective FetanAgent sshd policy could not be inspected'
+  while IFS= read -r expected; do
+    [[ -n "$expected" ]] || continue
+    key="${expected%% *}"
+    count="$(awk -v key="$key" '$1 == key { count += 1 } END { print count + 0 }' <<<"$policy")"
+    [[ "$count" -eq 1 ]] || die "the effective FetanAgent sshd policy has an unexpected $key count"
+    grep -Fxq -- "$expected" <<<"$policy" ||
+      die "the effective FetanAgent sshd policy has an unexpected $key value"
+  done <<'EOF'
+permituserenvironment no
+authenticationmethods publickey
+pubkeyauthentication yes
+passwordauthentication no
+kbdinteractiveauthentication no
+permitemptypasswords no
+allowagentforwarding no
+allowstreamlocalforwarding no
+allowtcpforwarding local
+disableforwarding no
+permitopen 127.0.0.1:3002
+gatewayports no
+permittunnel no
+permittty no
+x11forwarding no
+EOF
+}
+
 require_new_access_files() {
   require_new_helper
   require_exact_new_sudoers
   require_exact_new_sshd_dropin
   visudo -cf /etc/sudoers >/dev/null || die 'the installed sudoers policy is invalid'
   sshd -t || die 'the installed sshd policy is invalid'
+  require_effective_new_sshd_policy
 }
 
 require_prepared_contract() {
@@ -770,7 +840,8 @@ require_no_new_runtime_artifacts() {
 }
 
 validate_rollback_prepare_state() {
-  local authorized_keys commit_sha
+  local authorized_keys commit_sha stranded_sshd_dropin
+  stranded_sshd_dropin='false'
   require_state_root_if_present
   require_no_new_runtime_artifacts
   require_legacy_identity
@@ -803,7 +874,10 @@ validate_rollback_prepare_state() {
       require_exact_new_sudoers
     fi
     if [[ -e "$NEW_SSHD_DROPIN" || -L "$NEW_SSHD_DROPIN" ]]; then
-      require_exact_new_sshd_dropin
+      require_exact_rollback_new_sshd_dropin
+      if matches_exact_stranded_new_sshd_dropin; then
+        stranded_sshd_dropin='true'
+      fi
     fi
   fi
 
@@ -822,7 +896,9 @@ validate_rollback_prepare_state() {
   fi
 
   visudo -cf /etc/sudoers >/dev/null || die 'the installed sudoers policy is invalid before rollback'
-  sshd -t || die 'the installed sshd policy is invalid before rollback'
+  if [[ "$stranded_sshd_dropin" != 'true' ]]; then
+    sshd -t || die 'the installed sshd policy is invalid before rollback'
+  fi
 }
 
 install_exact_file() {
@@ -952,7 +1028,10 @@ prepare_transition() {
   expected_new_sshd_dropin >"$temporary"
   install_exact_file "$temporary" "$NEW_SSHD_DROPIN" 0644
   rm -f -- "$temporary"
-  reload_sshd
+  sshd -t || die 'the proposed sshd policy is invalid'
+  require_effective_new_sshd_policy
+  systemctl reload ssh || die 'the ssh service could not be safely reloaded'
+  require_effective_new_sshd_policy
 
   write_marker "$PREPARED_MARKER" \
     "transition_version=$TRANSITION_VERSION" \
@@ -1029,7 +1108,7 @@ rollback_prepare() {
   rm -f -- "$ACKNOWLEDGED_MARKER" "$PREPARED_MARKER"
 
   if [[ -e "$NEW_SSHD_DROPIN" || -L "$NEW_SSHD_DROPIN" ]]; then
-    require_exact_new_sshd_dropin
+    require_exact_rollback_new_sshd_dropin
     rm -f -- "$NEW_SSHD_DROPIN"
     reload_sshd
   fi

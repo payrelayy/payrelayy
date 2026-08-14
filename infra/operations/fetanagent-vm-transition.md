@@ -124,6 +124,18 @@ It validates `visudo -cf /etc/sudoers` and `sshd -t` before reloading SSH. The a
 to `docker` or `sudo` and cannot access the Docker socket directly. The old account, helper,
 runtime, releases, and secrets remain untouched.
 
+The SSH Match fragment intentionally omits `PermitUserEnvironment`: OpenSSH keeps its secure `no`
+default, but rejects that keyword inside a `Match` block on the staging host. Local forwarding
+remains restricted to `127.0.0.1:3002` by `AllowTcpForwarding local` and the exact `PermitOpen`.
+Before writing or accepting the prepared receipt, the transition runs `sshd -t` and then queries the
+effective user policy with
+`sshd -T -C user=fetanagent-admin,host=localhost,addr=127.0.0.1`. It fails closed unless OpenSSH
+reports public-key-only authentication; disabled password, keyboard-interactive, empty-password,
+agent, stream-local, tunnel, TTY, X11, gateway, and user-environment access; and local TCP forwarding
+restricted to only `127.0.0.1:3002`. It also requires public-key authentication to remain enabled
+and the global `DisableForwarding` override to remain off. These effective-policy checks run before
+the SSH reload and again after it; the prepared receipt is never written if either check fails.
+
 Before continuing, keep the root console open and prove a second independent SSH session works:
 
 ```bash
@@ -152,6 +164,13 @@ and installed helper against the fixed digest, and any sudoers/sshd fragments ag
 contracts. Unknown or modified state aborts without deletion. Receipts are then removed first so
 that a second run uses the strict partial-state path. The root-only staged helper source is retained.
 It does not touch the old application runtime or legacy execution boundary.
+
+One previously reviewed transition could strand an exact `root:root` mode `0644` owned SSH drop-in
+after OpenSSH rejected `PermitUserEnvironment no` inside its `Match` block and before the prepared
+receipt was written. `rollback-prepare` recognizes only that exact historical fragment (or the
+current exact fragment), completes all other partial-state validation, removes only the fixed owned
+drop-in, and then requires `sshd -t` to pass before reloading SSH. Any other fragment bytes or
+metadata still fail closed.
 
 ## Phase 2: acknowledge the reviewed commit
 

@@ -208,6 +208,10 @@ assertInOrder(
     'expected_new_sudoers',
     'visudo -cf "$temporary"',
     'visudo -cf /etc/sudoers',
+    'sshd -t',
+    'require_effective_new_sshd_policy',
+    'systemctl reload ssh',
+    'require_effective_new_sshd_policy',
     'write_marker "$PREPARED_MARKER"',
   ],
   'Preparation must validate inputs and sudoers before sealing its receipt',
@@ -236,6 +240,80 @@ assertInOrder(
     '"$NEW_HELPER_SHA"',
   ],
   'The staged helper source must be a pinned root-only regular file',
+);
+
+const newSshdDropin = functionBody(transition, 'expected_new_sshd_dropin');
+assert.match(newSshdDropin, /AllowTcpForwarding local/u);
+assert.match(newSshdDropin, /PermitOpen 127\.0\.0\.1:3002/u);
+assert.match(newSshdDropin, /AllowAgentForwarding no/u);
+assert.match(newSshdDropin, /AllowStreamLocalForwarding no/u);
+assert.match(newSshdDropin, /GatewayPorts no/u);
+assert.match(newSshdDropin, /PermitTunnel no/u);
+assert.doesNotMatch(
+  newSshdDropin,
+  /PermitUserEnvironment/u,
+  'The generated Match block must not contain a keyword OpenSSH rejects in that context.',
+);
+const strandedSshdDropin = functionBody(transition, 'expected_stranded_new_sshd_dropin');
+assert.equal(
+  strandedSshdDropin.replace('    PermitUserEnvironment no\n', ''),
+  newSshdDropin,
+  'The rollback-only stranded contract must differ solely by the rejected Match keyword.',
+);
+assert.equal(
+  (strandedSshdDropin.match(/PermitUserEnvironment no/gu) ?? []).length,
+  1,
+  'The rollback-only stranded contract must identify exactly the known invalid line.',
+);
+const rollbackSshdDropin = functionBody(transition, 'require_exact_rollback_new_sshd_dropin');
+assertInOrder(
+  rollbackSshdDropin,
+  [
+    'require_regular_metadata "$NEW_SSHD_DROPIN" \'root:root:644\'',
+    'matches_exact_stranded_new_sshd_dropin',
+    'require_exact_new_sshd_dropin',
+  ],
+  'Rollback must accept only the current or exact stranded owned SSH fragment',
+);
+const effectiveSshdPolicy = functionBody(transition, 'require_effective_new_sshd_policy');
+assert.match(
+  effectiveSshdPolicy,
+  /sshd -T -C "user=\$NEW_ADMIN,host=localhost,addr=127\.0\.0\.1"/u,
+);
+assertInOrder(
+  effectiveSshdPolicy,
+  [
+    'key="${expected%% *}"',
+    'awk -v key="$key"',
+    '[[ "$count" -eq 1 ]]',
+    'grep -Fxq -- "$expected"',
+  ],
+  'The effective SSH policy must require one exact value for every security key',
+);
+for (const expected of [
+  'permituserenvironment no',
+  'authenticationmethods publickey',
+  'pubkeyauthentication yes',
+  'passwordauthentication no',
+  'kbdinteractiveauthentication no',
+  'permitemptypasswords no',
+  'allowagentforwarding no',
+  'allowstreamlocalforwarding no',
+  'allowtcpforwarding local',
+  'disableforwarding no',
+  'permitopen 127.0.0.1:3002',
+  'gatewayports no',
+  'permittunnel no',
+  'permittty no',
+  'x11forwarding no',
+]) {
+  assert.ok(effectiveSshdPolicy.includes(expected), `Effective SSH policy missing ${expected}.`);
+}
+const newAccessFiles = functionBody(transition, 'require_new_access_files');
+assertInOrder(
+  newAccessFiles,
+  ['require_exact_new_sshd_dropin', 'sshd -t', 'require_effective_new_sshd_policy'],
+  'Prepared access validation must prove syntax before the effective user policy',
 );
 
 const legacySudoersReferences = functionBody(transition, 'legacy_sudoers_references');
@@ -351,10 +429,22 @@ assertInOrder(
     'require_partial_new_identity',
     'require_new_helper',
     'require_exact_new_sudoers',
-    'require_exact_new_sshd_dropin',
+    'require_exact_rollback_new_sshd_dropin',
+    'matches_exact_stranded_new_sshd_dropin',
     'require_new_helper_source',
+    'if [[ "$stranded_sshd_dropin" != \'true\' ]]',
+    'sshd -t',
   ],
   'Rollback must safely recognize both complete and interrupted preparation',
+);
+assertInOrder(
+  rollback,
+  ['require_exact_rollback_new_sshd_dropin', 'rm -f -- "$NEW_SSHD_DROPIN"', 'reload_sshd'],
+  'Rollback must validate the exact owned fragment before removal and validate restored SSH before reload',
+);
+assert.match(
+  runbook,
+  /Local forwarding\s+remains restricted to `127\.0\.0\.1:3002` by `AllowTcpForwarding local` and the exact `PermitOpen`/u,
 );
 const partialIdentity = functionBody(transition, 'require_partial_new_identity');
 assert.match(partialIdentity, /unexpected partial FetanAgent SSH artifact/);
@@ -716,6 +806,8 @@ assert.match(runbook, /590666364/);
 assert.match(runbook, /root:root.*0700/);
 assert.match(runbook, /visudo -cf/);
 assert.match(runbook, /rollback/i);
+assert.match(runbook, /sshd -T -C user=fetanagent-admin,host=localhost,addr=127\.0\.0\.1/u);
+assert.match(runbook, /user-environment access/u);
 assert.ok(
   runbook.includes(`/etc/sudoers.d/${legacyBrand}-staging-deploy`),
   'The runbook must identify the one proven live legacy sudoers path.',

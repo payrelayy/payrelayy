@@ -21,6 +21,10 @@ Only one of these independent sources can produce authoritative payment evidence
 - an official provider receipt lookup; or
 - verified provider account activity.
 
+These are categories of potentially authoritative sources, not a statement that FetanAgent has
+selected or received permission to use one. A visible page, known endpoint, synthetic fixture, or
+code flag does not establish permission or provider authority.
+
 An adapter extracts the provider's canonical transaction reference from that source. It must not
 use the customer-entered ID as the final duplicate-protection key. The raw canonical reference is
 used only inside the worker to create encrypted storage and a keyed fingerprint. It never belongs
@@ -130,6 +134,21 @@ integration, payment-claim grant, or KemerBet integration; none logs or returns 
 canonical-reference, receiver, or provider-payload values. See
 [cbe-birr-authoritative-shadow.md](cbe-birr-authoritative-shadow.md) and
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
+
+Stage 1E is a pure official-source policy contract under the package name
+`@fetanagent/cbe-birr-official-source-policy`. Its reserved source profile,
+`cbe_birr_official_receipt_lookup_v1`, remains `unproven`; there is no selected or permitted branch.
+It does not contain a provider URL or host, credentials, protected lookup material, a decryptor,
+transport, lease or job handling, network or database access, claim or KemerBet logic, or runtime
+wiring. All financial switches remain off.
+
+Before any positive source capability can be reviewed, FetanAgent needs an independently reviewed
+permission artifact with exact access rules, a key-split/KMS envelope design that does not share the
+API master or fingerprint key, receiver key-version and purpose metadata, an isolated
+callback-scoped decryptor, a strict compiled host/TLS/redirect policy, redacted telemetry with an
+incident stop, and deterministic fake-transport tests. See
+[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md). Completing those P0 items
+would open another review; it would not itself authorize provider calls or financial action.
 
 ## Privacy, operations, and rollout
 

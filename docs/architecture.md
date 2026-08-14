@@ -8,8 +8,9 @@ database, authentication, receipts, workers, and code are not a FetanAgent depen
 Version 1 uses a private Telegram bot for customers, a private English-only Owner/Admin dashboard,
 and a single KemerBet platform adapter. The current launch-preparation verification scope is CBE
 Birr-only redacted fixture dry-run assessment plus offline authoritative-shadow normalization
-fixtures and fail-closed attempt planning. TeleBirr and CBE bank are deferred; no provider has an enabled adapter, provider
-credential, or runtime integration.
+fixtures and fail-closed attempt and settlement planning. The Stage 1E official-source policy
+is blocked with status `unproven`; no provider has a selected or permitted source, enabled adapter,
+credential, or runtime integration. TeleBirr and CBE bank are deferred.
 
 ## Component boundary
 
@@ -62,6 +63,25 @@ or execute a deposit. Screenshot/PDF intake and provider authority remain later 
 The staging-only simulation uses a fixed synthetic receiver labelled `DO NOT PAY`. Its customer
 instruction explicitly says `SIMULATION ONLY — DO NOT SEND MONEY`; no real payment destination is
 configured by that workflow.
+
+## Official-source policy boundary
+
+The Stage 1E package is `@fetanagent/cbe-birr-official-source-policy`, with the
+reserved source profile `cbe_birr_official_receipt_lookup_v1`. It is a pure policy boundary, not a
+provider adapter or transport. Synthetic fixtures, browser visibility, known endpoints, and code
+flags are not permission, so the current policy has no selected or permitted branch.
+
+The policy contains no URL, host, credential, raw transaction reference, receiver phone,
+ciphertext, key, decryptor, lease, job, network client, database client, payment claim, KemerBet
+operation, or runtime wiring. It cannot change any financial switch or state.
+
+P0 work before any positive source capability includes an independently reviewed permission
+artifact and exact access rules; key-split/KMS envelope design that never shares the API master or
+fingerprint key; receiver key-version and purpose metadata; an isolated callback-scoped decryptor;
+a strict compiled host/TLS/redirect policy; redacted telemetry and a tested incident stop; and
+deterministic fake-transport tests. Each later transport, adapter, database, duplicate-read, claim,
+and rollout boundary remains a separate review. See
+[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md).
 
 ## Withdrawal boundary
 

@@ -28,17 +28,21 @@ readonly NEW_ADMIN='fetanagent-admin'
 readonly NEW_HOME='/home/fetanagent-admin'
 readonly NEW_HELPER='/usr/local/sbin/fetanagent-staging-deploy-helper'
 readonly NEW_HELPER_SHA='e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af'
+readonly ROTATED_HELPER_SHA='886e0c49b9040f91230d6a774c8a5e3a26c2aa8a16bebce84116faab459b345a'
+readonly BASE_REVIEWED_COMMIT='e636de89be179514af3aae3972ee0b086cd8c816'
 readonly NEW_PROJECT='fetanagent-staging-beta'
 readonly NEW_RELEASE_ROOT='/srv/fetanagent/releases'
 readonly NEW_SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly NEW_SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 readonly NEW_SSHD_DROPIN='/etc/ssh/sshd_config.d/91-fetanagent-admin.conf'
+readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
 
 readonly STATE_ROOT='/var/lib/fetanagent-vm-transition'
 readonly PREPARED_MARKER="$STATE_ROOT/prepared-v1"
 readonly ACKNOWLEDGED_MARKER="$STATE_ROOT/acknowledged-v1"
 readonly LEGACY_STOPPED_MARKER="$STATE_ROOT/legacy-stopped-v1"
 readonly RETIRED_MARKER="$STATE_ROOT/retired-v1"
+readonly HELPER_ROTATION_MARKER="$STATE_ROOT/helper-rotation-v1"
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 readonly METADATA_ROOT='http://169.254.169.254/metadata/v1'
@@ -67,6 +71,10 @@ Commands:
       Safely remove complete or partial FetanAgent preparation before legacy stop.
   retire <same-commit>
       After exact-commit private smoke, finish resumable legacy cleanup and receipt it.
+  rotate-retired-helper <old-commit> <new-commit>
+      Install the next reviewed helper and write a private-deploy-only overlay.
+  finalize-retired-helper <old-commit> <new-commit>
+      After exact new-commit private smoke, finalize the overlay for public activation.
   verify
       Recheck the live contract for the furthest completed phase.
 
@@ -106,6 +114,10 @@ require_finalized_new_helper_hash() {
   [[ "$NEW_HELPER_SHA" =~ ^[0-9a-f]{64}$ ]] || die 'the new helper digest is malformed'
   [[ "$NEW_HELPER_SHA" != '0000000000000000000000000000000000000000000000000000000000000000' ]] ||
     die 'the new helper digest placeholder has not been finalized'
+  [[ "$ROTATED_HELPER_SHA" =~ ^[0-9a-f]{64}$ && "$ROTATED_HELPER_SHA" != "$NEW_HELPER_SHA" ]] ||
+    die 'the rotated helper digest is malformed or unchanged'
+  [[ "$BASE_REVIEWED_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the base reviewed main commit is malformed'
 }
 
 require_exact_droplet() {
@@ -181,6 +193,22 @@ require_exact_marker() {
     die "$marker does not exactly match its allowed transition receipt schema"
   }
   rm -f -- "$temporary"
+}
+
+marker_matches_exact() {
+  local marker="$1"
+  shift
+  local temporary result
+  require_regular_metadata "$marker" 'root:root:600'
+  temporary="$(mktemp)"
+  printf '%s\n' "$@" >"$temporary"
+  if cmp -s -- "$temporary" "$marker"; then
+    result='0'
+  else
+    result='1'
+  fi
+  rm -f -- "$temporary"
+  return "$result"
 }
 
 marker_field() {
@@ -279,6 +307,18 @@ require_new_helper_source() {
   require_regular_metadata "$NEW_HELPER_SOURCE" 'root:root:600'
   [[ "$(sha256sum "$NEW_HELPER_SOURCE" | awk '{ print $1 }')" == "$NEW_HELPER_SHA" ]] ||
     die 'the staged FetanAgent helper does not match the finalized LF Git-blob digest'
+}
+
+require_rotated_helper() {
+  require_regular_metadata "$NEW_HELPER" 'root:root:755'
+  [[ "$(sha256sum "$NEW_HELPER" | awk '{ print $1 }')" == "$ROTATED_HELPER_SHA" ]] ||
+    die 'the installed FetanAgent helper does not match the reviewed rotated helper'
+}
+
+require_rotated_helper_source() {
+  require_regular_metadata "$NEW_HELPER_SOURCE" 'root:root:600'
+  [[ "$(sha256sum "$NEW_HELPER_SOURCE" | awk '{ print $1 }')" == "$ROTATED_HELPER_SHA" ]] ||
+    die 'the staged FetanAgent helper does not match the reviewed rotated LF Git blob'
 }
 
 require_legacy_identity() {
@@ -779,6 +819,7 @@ require_legacy_secret_root_absent() {
 
 require_new_runtime_healthy() {
   local commit_sha="$1"
+  local runtime_mode="${2:-private}"
   local service ids container_id state health revision services sockets
   local -a expected_services=(api beta-admission bot owner-control)
 
@@ -791,8 +832,13 @@ require_new_runtime_healthy() {
           --format '{{ index .Config.Labels "com.docker.compose.service" }}'
       done
   } | sort)" || die 'the FetanAgent project service inventory could not be inspected'
-  [[ "$services" == $'api\nbeta-admission\nbot\nowner-control' ]] ||
-    die 'the private FetanAgent service set is not exact'
+  case "$services:$runtime_mode" in
+    $'api\nbeta-admission\nbot\nowner-control:private'|$'api\nbeta-admission\nbot\nowner-control:private-or-public') ;;
+    $'api\nbeta-admission\nbot\ngateway\nowner-control:private-or-public')
+      expected_services+=(gateway)
+      ;;
+    *) die 'the FetanAgent service set is not exact for the required runtime mode' ;;
+  esac
 
   for service in "${expected_services[@]}"; do
     ids="$(docker_local container ls --all --quiet \
@@ -817,6 +863,381 @@ require_new_runtime_healthy() {
   if awk '$4 ~ /:3002$/ && $4 != "127.0.0.1:3002" { found = 1 } END { exit !found }' <<<"$sockets"; then
     die 'Owner control port 3002 is exposed beyond the required loopback address'
   fi
+}
+
+require_base_retired_overlay_boundary() {
+  local old_commit="$1"
+  [[ "$old_commit" == "$BASE_REVIEWED_COMMIT" ]] ||
+    die 'the helper rotation does not start from the pinned retired commit'
+  require_prepared_marker
+  require_acknowledged_marker "$old_commit"
+  require_legacy_stopped_marker "$old_commit"
+  require_retired_marker "$old_commit"
+  require_new_identity
+  require_exact_new_sshd_dropin
+  sshd -t || die 'the installed sshd policy is invalid during helper rotation'
+  require_effective_new_sshd_policy
+  require_legacy_residue_absent
+  require_legacy_execution_boundary_disabled
+  [[ ! -e "$LEGACY_HELPER" && ! -L "$LEGACY_HELPER" ]] ||
+    die 'the legacy helper remains during helper rotation'
+  require_legacy_secret_root_absent
+}
+
+require_helper_rotation_marker() {
+  local expected_state="$1"
+  local old_commit="$2"
+  local new_commit="$3"
+  require_exact_marker "$HELPER_ROTATION_MARKER" \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$DROPLET_ID" \
+    "old_helper_sha=$NEW_HELPER_SHA" \
+    "new_helper_sha=$ROTATED_HELPER_SHA" \
+    "old_reviewed_commit=$old_commit" \
+    "new_reviewed_commit=$new_commit" \
+    "rotation_$expected_state=true"
+}
+
+helper_rotation_marker_state() {
+  local old_commit="$1"
+  local new_commit="$2"
+  if marker_matches_exact "$HELPER_ROTATION_MARKER" \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$DROPLET_ID" \
+    "old_helper_sha=$NEW_HELPER_SHA" \
+    "new_helper_sha=$ROTATED_HELPER_SHA" \
+    "old_reviewed_commit=$old_commit" \
+    "new_reviewed_commit=$new_commit" \
+    'rotation_pending=true'; then
+    printf 'pending'
+  elif marker_matches_exact "$HELPER_ROTATION_MARKER" \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$DROPLET_ID" \
+    "old_helper_sha=$NEW_HELPER_SHA" \
+    "new_helper_sha=$ROTATED_HELPER_SHA" \
+    "old_reviewed_commit=$old_commit" \
+    "new_reviewed_commit=$new_commit" \
+    'rotation_complete=true'; then
+    printf 'complete'
+  else
+    die 'the helper-rotation overlay is not an allowed pending or complete receipt'
+  fi
+}
+
+helper_rotation_new_commit() {
+  local commit_sha
+  commit_sha="$(marker_field "$HELPER_ROTATION_MARKER" 'new_reviewed_commit')"
+  require_commit "$commit_sha"
+  [[ "$commit_sha" != "$BASE_REVIEWED_COMMIT" ]] ||
+    die 'the helper-rotation overlay does not advance the reviewed commit'
+  printf '%s' "$commit_sha"
+}
+
+helper_rotation_state() {
+  local old_commit="$1"
+  local new_commit="$2"
+  local helper_sha marker_state
+  require_regular_metadata "$NEW_HELPER" 'root:root:755'
+  helper_sha="$(sha256sum "$NEW_HELPER" | awk '{ print $1 }')" ||
+    die 'the installed helper digest could not be computed during rotation'
+  if [[ -e "$HELPER_ROTATION_MARKER" || -L "$HELPER_ROTATION_MARKER" ]]; then
+    [[ "$helper_sha" == "$ROTATED_HELPER_SHA" ]] ||
+      die 'a helper-rotation overlay exists without the exact rotated helper'
+    marker_state="$(helper_rotation_marker_state "$old_commit" "$new_commit")"
+    printf '%s' "$marker_state"
+    return
+  fi
+  case "$helper_sha" in
+    "$NEW_HELPER_SHA") printf 'initial' ;;
+    "$ROTATED_HELPER_SHA") printf 'helper-installed' ;;
+    *) die 'the installed helper is not an allowed helper-rotation prefix' ;;
+  esac
+}
+
+new_sudoers_references() {
+  local candidate inventory
+  [[ ! -L /etc/sudoers && -f /etc/sudoers ]] || die '/etc/sudoers is absent, non-regular, or symbolic'
+  [[ ! -L /etc/sudoers.d && -d /etc/sudoers.d ]] ||
+    die '/etc/sudoers.d is absent, non-directory, or symbolic'
+  for candidate in /etc/sudoers "$NEW_SUDOERS"; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    [[ ! -L "$candidate" && -f "$candidate" ]] || die "$candidate is not a safe sudoers file"
+    if [[ "$candidate" == "$NEW_SUDOERS" ]] ||
+      grep -Fq -- "$NEW_ADMIN" "$candidate" || grep -Fq -- "$NEW_HELPER" "$candidate"; then
+      printf '%s\n' "$candidate"
+    fi
+  done
+  inventory="$(mktemp)"
+  find /etc/sudoers.d -mindepth 1 -maxdepth 1 -print0 >"$inventory" || {
+    rm -f -- "$inventory"
+    die 'the sudoers fragment inventory failed during helper rotation'
+  }
+  while IFS= read -r -d '' candidate; do
+    [[ "$candidate" == "$NEW_SUDOERS" ]] && continue
+    [[ ! -L "$candidate" && -f "$candidate" ]] ||
+      { rm -f -- "$inventory"; die "refusing unsafe non-regular sudoers fragment $candidate"; }
+    if grep -Fq -- "$NEW_ADMIN" "$candidate" || grep -Fq -- "$NEW_HELPER" "$candidate"; then
+      printf '%s\n' "$candidate"
+    fi
+  done <"$inventory"
+  rm -f -- "$inventory"
+}
+
+new_sudoers_state() {
+  local count reference references
+  count='0'
+  references="$(new_sudoers_references)" || die 'the FetanAgent sudoers reference inventory failed'
+  while IFS= read -r reference; do
+    [[ -n "$reference" ]] || continue
+    count="$((count + 1))"
+    [[ "$reference" == "$NEW_SUDOERS" ]] ||
+      die "FetanAgent sudo permission remains in unapproved file $reference"
+    require_exact_new_sudoers
+  done <<<"$references"
+  [[ "$count" -le 1 ]] || die 'the FetanAgent sudo boundary is duplicated'
+  visudo -cf /etc/sudoers >/dev/null || die 'the installed sudoers policy is invalid'
+  if [[ "$count" -eq 1 ]]; then
+    printf 'present'
+  else
+    printf 'absent'
+  fi
+}
+
+require_new_sudoers_state() {
+  local expected_state="$1"
+  local actual_state
+  actual_state="$(new_sudoers_state)"
+  case "$expected_state" in
+    present-or-absent) ;;
+    present | absent) [[ "$actual_state" == "$expected_state" ]] ||
+      die "the FetanAgent sudo boundary must be $expected_state" ;;
+    *) die 'internal error: invalid FetanAgent sudoers state' ;;
+  esac
+}
+
+disable_new_deploy_sudoers() {
+  require_new_sudoers_state present-or-absent
+  if [[ -e "$NEW_SUDOERS" || -L "$NEW_SUDOERS" ]]; then
+    require_new_sudoers_state present
+    rm -f -- "$NEW_SUDOERS"
+  fi
+  require_new_sudoers_state absent
+}
+
+restore_new_deploy_sudoers() {
+  local temporary
+  require_new_sudoers_state present-or-absent
+  if [[ ! -e "$NEW_SUDOERS" && ! -L "$NEW_SUDOERS" ]]; then
+    temporary="$(mktemp)"
+    expected_new_sudoers >"$temporary"
+    visudo -cf "$temporary" >/dev/null || {
+      rm -f -- "$temporary"
+      die 'the helper-rotation sudoers contract is invalid'
+    }
+    install_exact_file "$temporary" "$NEW_SUDOERS" 0440
+    rm -f -- "$temporary"
+  fi
+  require_new_sudoers_state present
+}
+
+require_no_new_helper_processes() {
+  local process_status
+  if pgrep -f -- "$NEW_HELPER" >/dev/null 2>&1; then
+    die 'a FetanAgent deployment-helper process remains during helper rotation'
+  else
+    process_status="$?"
+    [[ "$process_status" -eq 1 ]] || die 'the FetanAgent helper process inventory failed'
+  fi
+}
+
+require_public_edge_absent() {
+  local gateway_containers sockets
+  gateway_containers="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$NEW_PROJECT" \
+    --filter 'label=com.docker.compose.service=gateway')" ||
+    die 'the public gateway container inventory could not be inspected'
+  [[ -z "$gateway_containers" ]] || die 'the public gateway is already present'
+  sockets="$(ss -ltnH)" || die 'the TCP listener inventory could not be inspected'
+  if awk '$4 ~ /:(80|443)$/ { found = 1 } END { exit !found }' <<<"$sockets"; then
+    die 'TCP port 80 or 443 is already in use'
+  fi
+  [[ ! -e "$GATEWAY_STATE_ROOT" && ! -L "$GATEWAY_STATE_ROOT" ]] ||
+    die 'the public gateway state root already exists'
+}
+
+rotation_runtime_commit() {
+  local owner_container revision
+  owner_container="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$NEW_PROJECT" \
+    --filter 'label=com.docker.compose.service=owner-control' \
+    --filter 'health=healthy')" || die 'the Owner container inventory could not be inspected'
+  [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the healthy Owner container inventory is not singular during helper rotation'
+  revision="$(docker_local container inspect "$owner_container" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" ||
+    die 'the Owner container revision could not be inspected during helper rotation'
+  require_commit "$revision"
+  printf '%s' "$revision"
+}
+
+require_rotation_live_boundary() {
+  local state="$1"
+  local old_commit="$2"
+  local new_commit="$3"
+  local runtime_commit
+  require_base_retired_overlay_boundary "$old_commit"
+  require_rotated_helper_source
+  case "$state" in
+    initial) require_new_helper ;;
+    helper-installed | pending | complete) require_rotated_helper ;;
+    *) die 'internal error: invalid helper-rotation live state' ;;
+  esac
+  runtime_commit="$(rotation_runtime_commit)"
+  case "$state" in
+    initial | helper-installed)
+      [[ "$runtime_commit" == "$old_commit" ]] ||
+        die 'an unfinished helper rotation no longer runs the exact base commit'
+      ;;
+    pending)
+      [[ "$runtime_commit" == "$old_commit" || "$runtime_commit" == "$new_commit" ]] ||
+        die 'the pending helper rotation runs neither exact reviewed commit'
+      ;;
+    complete)
+      [[ "$runtime_commit" == "$new_commit" ]] ||
+        die 'the finalized helper rotation does not run the exact new commit'
+      ;;
+  esac
+  if [[ "$state" == 'complete' ]]; then
+    require_new_runtime_healthy "$runtime_commit" private-or-public
+  else
+    require_new_runtime_healthy "$runtime_commit" private
+  fi
+}
+
+require_rotation_private_boundary() {
+  require_public_edge_absent
+  require_rotation_live_boundary "$@"
+}
+
+write_helper_rotation_marker() {
+  local state="$1"
+  local old_commit="$2"
+  local new_commit="$3"
+  write_marker "$HELPER_ROTATION_MARKER" \
+    "transition_version=$TRANSITION_VERSION" \
+    "droplet_id=$DROPLET_ID" \
+    "old_helper_sha=$NEW_HELPER_SHA" \
+    "new_helper_sha=$ROTATED_HELPER_SHA" \
+    "old_reviewed_commit=$old_commit" \
+    "new_reviewed_commit=$new_commit" \
+    "rotation_$state=true"
+}
+
+rotate_retired_helper() {
+  local old_commit="$1"
+  local new_commit="$2"
+  local state sudoers_state
+  require_commit "$old_commit"
+  require_commit "$new_commit"
+  [[ "$old_commit" == "$BASE_REVIEWED_COMMIT" ]] ||
+    die 'the old helper-rotation commit is not the pinned retired main commit'
+  [[ "$new_commit" != "$old_commit" ]] || die 'the helper-rotation commits must differ'
+  require_rotated_helper_source
+  state="$(helper_rotation_state "$old_commit" "$new_commit")"
+
+  if [[ "$state" == 'complete' ]]; then
+    sudoers_state="$(new_sudoers_state)"
+    require_rotation_private_boundary complete "$old_commit" "$new_commit"
+    if [[ "$sudoers_state" == 'absent' ]]; then
+      require_no_new_helper_processes
+      require_rotation_private_boundary complete "$old_commit" "$new_commit"
+      restore_new_deploy_sudoers
+    fi
+    require_new_sudoers_state present
+    require_rotation_private_boundary complete "$old_commit" "$new_commit"
+    printf 'transition_phase=retired\nhelper_rotation=already-complete\nreviewed_commit=%s\n' "$new_commit"
+    return
+  fi
+  if [[ "$state" == 'pending' ]]; then
+    sudoers_state="$(new_sudoers_state)"
+    require_rotation_private_boundary pending "$old_commit" "$new_commit"
+    if [[ "$sudoers_state" == 'absent' ]]; then
+      require_no_new_helper_processes
+      require_rotation_private_boundary pending "$old_commit" "$new_commit"
+      restore_new_deploy_sudoers
+    fi
+    require_new_sudoers_state present
+    require_rotation_private_boundary pending "$old_commit" "$new_commit"
+    printf 'transition_phase=helper-rotation-pending\nhelper_rotation=already-pending\nreviewed_commit=%s\n' "$new_commit"
+    return
+  fi
+
+  require_new_sudoers_state present-or-absent
+  require_rotation_private_boundary "$state" "$old_commit" "$new_commit"
+  disable_new_deploy_sudoers
+  require_no_new_helper_processes
+  require_rotation_private_boundary "$state" "$old_commit" "$new_commit"
+  if [[ "$state" == 'initial' ]]; then
+    install_exact_file "$NEW_HELPER_SOURCE" "$NEW_HELPER" 0755
+    require_rotated_helper
+    state="$(helper_rotation_state "$old_commit" "$new_commit")"
+    [[ "$state" == 'helper-installed' ]] ||
+      die 'the rotated helper did not reach its exact interruption-safe prefix'
+  fi
+  write_helper_rotation_marker pending "$old_commit" "$new_commit"
+  state="$(helper_rotation_state "$old_commit" "$new_commit")"
+  [[ "$state" == 'pending' ]] || die 'the helper rotation did not reach its exact pending state'
+  require_rotation_private_boundary pending "$old_commit" "$new_commit"
+  restore_new_deploy_sudoers
+  require_new_sudoers_state present
+  require_rotation_private_boundary pending "$old_commit" "$new_commit"
+  printf 'transition_phase=helper-rotation-pending\nreviewed_commit=%s\nresult=pass\nnext=deploy-reviewed-commit-then-finalize\n' \
+    "$new_commit"
+}
+
+finalize_retired_helper() {
+  local old_commit="$1"
+  local new_commit="$2"
+  local state sudoers_state
+  require_commit "$old_commit"
+  require_commit "$new_commit"
+  [[ "$old_commit" == "$BASE_REVIEWED_COMMIT" ]] ||
+    die 'the old helper-rotation commit is not the pinned retired main commit'
+  [[ "$new_commit" != "$old_commit" ]] || die 'the helper-rotation commits must differ'
+  require_rotated_helper_source
+  state="$(helper_rotation_state "$old_commit" "$new_commit")"
+  [[ "$state" == 'pending' || "$state" == 'complete' ]] ||
+    die 'finalize-retired-helper requires the exact pending or complete overlay'
+  sudoers_state="$(new_sudoers_state)"
+  if [[ "$state" == 'complete' ]]; then
+    require_rotation_private_boundary complete "$old_commit" "$new_commit"
+    if [[ "$sudoers_state" == 'absent' ]]; then
+      require_no_new_helper_processes
+      require_rotation_private_boundary complete "$old_commit" "$new_commit"
+      restore_new_deploy_sudoers
+    fi
+    require_new_sudoers_state present
+    require_rotation_private_boundary complete "$old_commit" "$new_commit"
+    printf 'transition_phase=retired\nhelper_rotation=already-complete\nreviewed_commit=%s\n' "$new_commit"
+    return
+  fi
+  require_rotation_private_boundary pending "$old_commit" "$new_commit"
+  [[ "$(rotation_runtime_commit)" == "$new_commit" ]] ||
+    die 'finalization requires the exact new reviewed runtime commit'
+
+  disable_new_deploy_sudoers
+  require_no_new_helper_processes
+  require_rotation_private_boundary pending "$old_commit" "$new_commit"
+  [[ "$(rotation_runtime_commit)" == "$new_commit" ]] ||
+    die 'the runtime changed while sealing the final helper-rotation overlay'
+  write_helper_rotation_marker complete "$old_commit" "$new_commit"
+  state="$(helper_rotation_state "$old_commit" "$new_commit")"
+  [[ "$state" == 'complete' ]] || die 'the helper-rotation overlay did not finalize exactly'
+  require_rotation_private_boundary complete "$old_commit" "$new_commit"
+  restore_new_deploy_sudoers
+  require_new_sudoers_state present
+  require_rotation_private_boundary complete "$old_commit" "$new_commit"
+  printf 'transition_phase=retired\nhelper_rotation=complete\nreviewed_commit=%s\nresult=pass\n' "$new_commit"
 }
 
 require_no_new_runtime_artifacts() {
@@ -916,9 +1337,52 @@ reload_sshd() {
   systemctl reload ssh || die 'the ssh service could not be safely reloaded'
 }
 
+inspect_helper_rotation() {
+  local helper_sha new_commit state sudoers_state
+  helper_sha="$(sha256sum "$NEW_HELPER" | awk '{ print $1 }')" ||
+    die 'the installed helper digest could not be computed during rotation inspection'
+  if [[ -e "$HELPER_ROTATION_MARKER" || -L "$HELPER_ROTATION_MARKER" ]]; then
+    new_commit="$(helper_rotation_new_commit)"
+    state="$(helper_rotation_state "$BASE_REVIEWED_COMMIT" "$new_commit")"
+    require_helper_rotation_marker "$state" "$BASE_REVIEWED_COMMIT" "$new_commit"
+  else
+    [[ "$helper_sha" == "$ROTATED_HELPER_SHA" ]] ||
+      die 'the helper rotation is not active and has no valid overlay'
+    new_commit="$BASE_REVIEWED_COMMIT"
+    state='helper-installed'
+  fi
+  require_new_sudoers_state present-or-absent
+  sudoers_state="$(new_sudoers_state)"
+  require_rotation_live_boundary "$state" "$BASE_REVIEWED_COMMIT" "$new_commit"
+  if [[ "$state" != 'complete' ]]; then
+    require_public_edge_absent
+  fi
+  printf 'transition_version=%s\ndroplet_id=%s\npublic_ipv4=%s\n' \
+    "$TRANSITION_VERSION" "$DROPLET_ID" "$PUBLIC_IPV4"
+  case "$state:$sudoers_state" in
+    pending:present)
+      printf 'phase=helper-rotation-pending\nreviewed_commit=%s\npublic_edge=blocked\n' "$new_commit"
+      ;;
+    complete:present)
+      printf 'phase=retired\nreviewed_commit=%s\nhelper_rotation=complete\npublic_edge=managed-separately\n' \
+        "$new_commit"
+      ;;
+    *)
+      printf 'phase=helper-rotation-in-progress\nrotation_prefix=%s\ndeploy_sudo=%s\n' \
+        "$state" "$sudoers_state"
+      ;;
+  esac
+}
+
 inspect_transition() {
   local commit_sha containers networks secret_entries phase
   require_state_root_if_present
+  if [[ -e "$HELPER_ROTATION_MARKER" || -L "$HELPER_ROTATION_MARKER" ]] ||
+    [[ -f "$NEW_HELPER" && ! -L "$NEW_HELPER" &&
+       "$(sha256sum "$NEW_HELPER" | awk '{ print $1 }')" == "$ROTATED_HELPER_SHA" ]]; then
+    inspect_helper_rotation
+    return
+  fi
   if [[ -e "$RETIRED_MARKER" ]]; then
     commit_sha="$(marker_commit "$ACKNOWLEDGED_MARKER")"
     verify_retired_contract "$commit_sha"
@@ -1199,6 +1663,13 @@ verify_retired_contract() {
 verify_transition() {
   local commit_sha phase
   require_state_root_if_present
+  if [[ -e "$HELPER_ROTATION_MARKER" || -L "$HELPER_ROTATION_MARKER" ]] ||
+    [[ -f "$NEW_HELPER" && ! -L "$NEW_HELPER" &&
+       "$(sha256sum "$NEW_HELPER" | awk '{ print $1 }')" == "$ROTATED_HELPER_SHA" ]]; then
+    inspect_helper_rotation
+    printf 'transition_verification=pass\n'
+    return
+  fi
   phase='inspected'
   if [[ -e "$PREPARED_MARKER" ]]; then
     require_prepared_contract
@@ -1262,6 +1733,14 @@ main() {
       [[ $# -eq 2 ]] || die 'retire requires the acknowledged main commit'
       retire_legacy_boundary "$2"
       ;;
+    rotate-retired-helper)
+      [[ $# -eq 3 ]] || die 'rotate-retired-helper requires old and new reviewed main commits'
+      rotate_retired_helper "$2" "$3"
+      ;;
+    finalize-retired-helper)
+      [[ $# -eq 3 ]] || die 'finalize-retired-helper requires old and new reviewed main commits'
+      finalize_retired_helper "$2" "$3"
+      ;;
     verify)
       [[ $# -eq 1 ]] || die 'verify accepts no additional arguments'
       verify_transition
@@ -1271,7 +1750,7 @@ main() {
       ;;
     *)
       usage >&2
-      die 'expected inspect, prepare, acknowledge, mark-legacy-stopped, rollback-prepare, retire, or verify'
+      die 'expected inspect, prepare, acknowledge, mark-legacy-stopped, rollback-prepare, retire, rotate-retired-helper, finalize-retired-helper, or verify'
       ;;
   esac
 }

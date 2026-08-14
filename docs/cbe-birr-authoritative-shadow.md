@@ -25,6 +25,10 @@ live financial job, or call KemerBet.
   Stage 1C plan. It maps that closed input to either an advisory-completion command or a bounded
   retry command. It returns structured data only: no SQL text, database client, network call,
   job acquisition, scheduling, persistence, or procedure execution is present.
+- The Stage 1E official-source policy is a separate pure gate whose current status is
+  `unproven`. Its reserved `cbe_birr_official_receipt_lookup_v1` profile does not select or permit a
+  source, and it cannot carry a URL, host, credential, raw lookup material, decryptor, lease, job,
+  transport, database operation, claim, KemerBet action, or runtime integration.
 - Private PostgreSQL tables provide a bounded lease and append-only result ledger for a future
   separately deployed shadow worker. A dedicated `NOLOGIN` group role receives only the narrow
   shadow procedures and no direct table access. This repository creates no worker login, password,
@@ -79,9 +83,13 @@ Stage 1A does not provide or authorize:
 Stage 1B supplies only versioned synthetic normalization fixtures, Stage 1C supplies pure offline
 attempt planning, and Stage 1D supplies pure offline settlement-command planning. None selects or
 contacts an official source, runs SQL, or acquires or settles a job. Before a provider transport can
-be added, a separate review must prove permitted
-official-source access, TLS and host allowlisting, bounded redirects/responses/retries, credential
-isolation, anomaly and outage behavior, safe telemetry, and an incident stop procedure. See
+be added, Stage 1E must remain blocked while a separate review proves permitted official-source
+access and exact access rules. Synthetic fixtures, browser visibility, known endpoints, and code
+flags are not permission. A positive capability also requires reviewed key-split/KMS envelopes,
+receiver key-version and purpose metadata, an isolated callback-scoped decryptor, a strict compiled
+host/TLS/redirect policy, safe telemetry with an incident stop, and deterministic fake-transport
+tests. Stage 1E itself contains none of those runtime capabilities. See
+[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md) and
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
 Before any payment claim can be enabled, the dormant claim boundary must remain live-only, receive
 an explicit least-privilege review, and pass reconciliation and duplicate-reference tests.

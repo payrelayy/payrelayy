@@ -152,6 +152,8 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/cbe-birr-official-source-policy: {}
+
   packages/cbe-birr-fixtures: {}
 
   packages/i18n: {}

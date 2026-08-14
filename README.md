@@ -1,10 +1,13 @@
 # FetanAgent
 
 FetanAgent is a Telegram-first payment-verification and betting-agent automation service.
-The current launch-preparation scope is an English-only, invite-only CBE Birr dry run. An admitted
+The current product scope is an English-only, invite-only CBE Birr dry run plus a disabled
+authoritative-shadow foundation. An admitted
 customer with an Owner-confirmed KemerBet Player ID can open a 25-25,000 ETB intake, receive the
 configured masked receiver instructions, and submit one protected transaction reference for Owner
-review. It has no provider call, payment verification or claim, KemerBet execution, or live
+review. A pure safe-facts evaluator and private shadow queue can model advisory outcomes, but no
+provider transport or worker runtime is configured. It has no provider call, payment verification
+or claim, KemerBet execution, or live
 financial action. TeleBirr and CBE bank are deferred until separately authorized, authoritative
 adapters pass their own evidence, safety, and rollout gates.
 
@@ -33,8 +36,12 @@ The current foundation is deliberately safe:
   reference submissions while all four financial feature switches remain disabled;
 - Owner Control may append a redacted local-fixture assessment and one advisory review decision,
   but neither record is provider evidence or a payment approval; and
-- no provider evidence, payment claim, verification job, KemerBet call, withdrawal, or financial
-  execution is enabled by this flow.
+- the Stage 1A CBE Birr shadow contract and private job/result boundary remain advisory and
+  operationally inert: Owner enqueue/list access accepts only normalized safe facts, processing
+  remains disabled, existing intake/submission states stay unchanged, and the boundary cannot
+  create authoritative evidence, claims, or financial jobs; and
+- no provider evidence, payment claim, authoritative verification job, KemerBet call, withdrawal,
+  or financial execution is enabled by this flow.
 
 The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
 a separately reviewed beta-admission runtime, a narrow Player-ID action runtime, and a
@@ -98,6 +105,8 @@ See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See
+[docs/cbe-birr-authoritative-shadow.md](docs/cbe-birr-authoritative-shadow.md) for the disabled
+Stage 1A safe-facts, queue, and advisory-result boundary. See
 [docs/cbe-birr-fixture-dry-run.md](docs/cbe-birr-fixture-dry-run.md) for the current CBE Birr-only
 fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and

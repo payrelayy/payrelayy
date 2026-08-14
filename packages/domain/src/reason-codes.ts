@@ -10,6 +10,11 @@ export const verificationReasonCodes = [
   'payment_fields_missing',
   'receipt_parse_uncertain',
   'provider_network_uncertain',
+  'provider_status_failed',
+  'provider_status_pending',
+  'payment_type_mismatch',
+  'verification_review_required',
+  'duplicate_check_unavailable',
   'provider_reference_reused',
 ] as const;
 

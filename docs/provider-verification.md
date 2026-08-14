@@ -112,10 +112,13 @@ must be proven by FetanAgent regression tests for every supported receipt type; 
 response goes to review rather than being parsed optimistically.
 
 The implemented CBE Birr code consists of the redacted dry-run fixture package, the separate Stage
-1A authoritative-shadow foundation, and Stage 1B offline authoritative-adapter fixtures. The
+1A authoritative-shadow foundation, Stage 1B offline authoritative-adapter fixtures, and a Stage
+1C pure attempt planner. The
 Stage 1B fixture schema is a FetanAgent-owned synthetic test envelope, not a documented CBE Birr
 wire format. It proves strict reduction into the existing safe-facts contract and fails closed on
-layout drift, malformed input, or uncertainty. A private database queue/result ledger is present
+layout drift, malformed input, or uncertainty. Stage 1C validates an immutable intent snapshot and
+safe adapter result, forces duplicate-reference status to unavailable, and emits only an advisory
+completion or retry candidate; it does not run either disposition. A private database queue/result ledger is present
 for a future separately deployed shadow worker, but no runtime login or runner exists. None of
 these paths has an HTTP client, provider URL, credential, filesystem evidence reader, Telegram
 integration, payment-claim grant, or KemerBet integration; none logs or returns raw receipt,

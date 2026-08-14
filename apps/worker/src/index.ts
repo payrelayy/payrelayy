@@ -13,7 +13,13 @@ console.info(
     cbeBirrAuthoritativeShadow: {
       enabled: cbeBirrAuthoritativeShadow.enabled,
       contractVersion: cbeBirrAuthoritativeShadow.contractVersion,
+      plannerEnabled: cbeBirrAuthoritativeShadow.enabled,
+      mode: cbeBirrAuthoritativeShadow.mode,
+      providerTransportEnabled: cbeBirrAuthoritativeShadow.providerTransportEnabled,
+      durableJobsEnabled: cbeBirrAuthoritativeShadow.durableJobsEnabled,
+      paymentClaimsEnabled: cbeBirrAuthoritativeShadow.paymentClaimsEnabled,
+      kemerBetExecutionEnabled: cbeBirrAuthoritativeShadow.kemerBetExecutionEnabled,
     },
   },
-  'Worker shadow contract scaffold is ready. Provider transport, durable jobs, claims, and execution remain disabled.',
+  'Worker shadow evaluator/planner scaffold is ready. Provider transport, durable jobs, claims, and execution remain disabled.',
 );

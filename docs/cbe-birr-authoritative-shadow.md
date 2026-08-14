@@ -14,8 +14,13 @@ live financial job, or call KemerBet.
   allowlisted reason code. An unknown field, unsupported version, missing fact, changed shape, or
   uncertain provider result fails closed to `would_review`.
 - The worker scaffold is disabled by default. Enabling its contract gate composes only the pure
-  evaluator; it does not compose a provider transport, credential, database pool, queue runner,
-  payment claim, or KemerBet executor.
+  evaluator and Stage 1C attempt planner; it does not compose a provider transport, credential,
+  database pool, queue runner, payment claim, or KemerBet executor.
+- The Stage 1C planner accepts only an exact immutable intent snapshot, assessment time, and a
+  validated Stage 1B adapter result. It forces duplicate-reference state to `unavailable`, so even
+  a matching completed payment remains `would_review / duplicate_check_unavailable` until a
+  separately reviewed protected duplicate-read boundary exists. It returns only
+  `complete_advisory` or `retry_candidate` and never schedules or persists either result.
 - Private PostgreSQL tables provide a bounded lease and append-only result ledger for a future
   separately deployed shadow worker. A dedicated `NOLOGIN` group role receives only the narrow
   shadow procedures and no direct table access. This repository creates no worker login, password,
@@ -36,6 +41,11 @@ Conclusive not-found, receiver-mismatch, provider-failed, and reused-reference f
 `would_reject`. Missing, pending, stale, future, malformed, unavailable, duplicate-check-uncertain,
 or otherwise ambiguous facts produce `would_review`.
 
+The Stage 1C attempt planner deliberately cannot produce `would_verify`: it never possesses
+authoritative duplicate-clear evidence. Only provider-unavailable, network-uncertain, and
+parse-uncertain advisory results are classified as retry candidates. Every other result is a
+terminal advisory completion, not a financial-state transition.
+
 Stored shadow rows contain only internal IDs, allowlisted outcomes and reason codes, version labels,
 keyed fingerprints or decision digests, counters, lease UUIDs, and timestamps. Owner list output and
 audit metadata exclude fingerprints, digests, ciphertext, key versions, provider payloads, and
@@ -55,8 +65,8 @@ Stage 1A does not provide or authorize:
   or payout; or
 - any live financial feature switch.
 
-Stage 1B supplies only versioned synthetic normalization fixtures; it does not select or contact an
-official source. Before a provider transport can be added, a separate review must prove permitted
+Stage 1B supplies only versioned synthetic normalization fixtures, and Stage 1C supplies only pure
+offline attempt planning; neither selects or contacts an official source. Before a provider transport can be added, a separate review must prove permitted
 official-source access, TLS and host allowlisting, bounded redirects/responses/retries, credential
 isolation, anomaly and outage behavior, safe telemetry, and an incident stop procedure. See
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).

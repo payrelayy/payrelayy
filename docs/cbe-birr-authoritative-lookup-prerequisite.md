@@ -77,6 +77,19 @@ They cover five P0 areas, all unresolved:
    redesigned so a non-mutating metadata preflight completes first and any later acquisition uses
    an opaque handle rather than returning protected material in the lease payload.
 
+## Stage 1G containment
+
+The database now exposes a metadata-only preflight for an existing shadow job. It returns only the
+job identifier, fixed version labels, a fixed `blocked` result,
+`legacy_protected_lookup_material_ineligible`, and literal-false lease and protected-material flags.
+It does not return deposit, submission, receiver, key, fingerprint, ciphertext, or provider data and
+does not lock or mutate the job.
+
+The shadow-worker role can execute only this preflight. Its execution rights on the legacy lease,
+completion, and retry procedures are revoked. The legacy procedures remain in the schema solely for
+migration continuity; their presence is not permission to call them. This containment does not
+resolve any prerequisite below, create an opaque acquisition handle, or permit a provider lookup.
+
 The legacy-shape label `cbe_birr_shadow_protected_lookup_material_legacy` identifies the blocked
 shape only. It does not call the current ciphertext an envelope or protection profile, approve its
 format, bless a `v1`, establish provenance, or authorize migration by inference.

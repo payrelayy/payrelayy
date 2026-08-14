@@ -117,6 +117,14 @@ async function queryAsRole<T extends QueryResultRow>(
   }
 }
 
+async function queryAsMigrationOwner<T extends QueryResultRow>(
+  query: string,
+  values: readonly (number | string | null)[] = [],
+): Promise<readonly T[]> {
+  const result = await client.query<T>(query, [...values]);
+  return result.rows;
+}
+
 async function readAdmissionWriteSnapshot(): Promise<AdmissionWriteSnapshot> {
   const result = await client.query<AdmissionWriteSnapshot>(`
     select
@@ -400,9 +408,12 @@ describe('disposable SQL migration baseline', () => {
       readonly functions_are_hardened: boolean;
       readonly jobs_forced_rls: boolean;
       readonly jobs_have_no_policies: boolean;
+      readonly legacy_worker_execution_denied: boolean;
       readonly owner_can_enqueue: boolean;
       readonly owner_can_list: boolean;
       readonly owner_has_no_table_access: boolean;
+      readonly preflight_is_hardened: boolean;
+      readonly shadow_worker_can_preflight: boolean;
       readonly results_forced_rls: boolean;
       readonly results_have_no_policies: boolean;
       readonly shadow_worker_has_no_authoritative_table_access: boolean;
@@ -452,10 +463,35 @@ describe('disposable SQL migration baseline', () => {
           'fetanagent_owner_control',
           'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)', 'execute'
         ) as owner_can_list,
+        has_function_privilege(
+          'fetanagent_cbe_birr_shadow_worker',
+          'app.preflight_cbe_birr_shadow_verification_job(uuid)', 'execute'
+        ) as shadow_worker_can_preflight,
+        not exists (
+          select 1
+          from (
+            values
+              ('app.lease_cbe_birr_shadow_verification_job(uuid,integer)'::regprocedure),
+              ('app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)'::regprocedure),
+              ('app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)'::regprocedure)
+          ) legacy_function(procedure_oid)
+          where has_function_privilege(
+            'fetanagent_cbe_birr_shadow_worker', legacy_function.procedure_oid, 'execute'
+          )
+        ) as legacy_worker_execution_denied,
         not has_function_privilege(
           'fetanagent_cbe_birr_shadow_worker',
           'app.claim_verified_deposit_payment(uuid,uuid,uuid)', 'execute'
         ) as claim_execute_denied,
+        (
+          select procedure.prosecdef
+             and procedure.provolatile = 's'
+             and procedure.proowner = 'postgres'::regrole
+             and procedure.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+          from pg_proc procedure
+          where procedure.oid =
+            'app.preflight_cbe_birr_shadow_verification_job(uuid)'::regprocedure
+        ) as preflight_is_hardened,
         not exists (
           select 1
           from pg_proc procedure
@@ -498,6 +534,36 @@ describe('disposable SQL migration baseline', () => {
       where procedure.oid =
         'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure
     `);
+    const preflightOutput = await client.query<{
+      readonly argument_mode: string;
+      readonly data_type: string;
+      readonly output_name: string;
+      readonly output_position: number;
+    }>(`
+      select
+        (argument.ordinal_position - procedure.pronargs)::integer as output_position,
+        argument.argument_name as output_name,
+        argument.argument_mode::text as argument_mode,
+        pg_catalog.format_type(argument.type_oid, null) as data_type
+      from pg_proc procedure
+      cross join lateral unnest(
+        procedure.proallargtypes,
+        procedure.proargmodes,
+        procedure.proargnames
+      ) with ordinality as argument(
+        type_oid, argument_mode, argument_name, ordinal_position
+      )
+      where procedure.oid =
+        'app.preflight_cbe_birr_shadow_verification_job(uuid)'::regprocedure
+        and argument.argument_mode = 't'
+      order by argument.ordinal_position
+    `);
+    const preflightDefinition = await client.query<{ readonly source: string }>(`
+      select procedure.prosrc as source
+      from pg_proc procedure
+      where procedure.oid =
+        'app.preflight_cbe_birr_shadow_verification_job(uuid)'::regprocedure
+    `);
     const broadExecution = await client.query<{
       readonly allowed: boolean;
       readonly role_name: string;
@@ -517,8 +583,57 @@ describe('disposable SQL migration baseline', () => {
           ('app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure),
           ('app.lease_cbe_birr_shadow_verification_job(uuid,integer)'::regprocedure),
           ('app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)'::regprocedure),
-          ('app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)'::regprocedure)
+          ('app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)'::regprocedure),
+          ('app.preflight_cbe_birr_shadow_verification_job(uuid)'::regprocedure)
       ) shadow_function(procedure_oid)
+      group by denied_role.role_name
+      order by denied_role.role_name
+    `);
+    const preflightDeniedRoles = await client.query<{
+      readonly allowed: boolean;
+      readonly role_name: string;
+    }>(`
+      select denied_role.role_name,
+             has_function_privilege(
+               denied_role.role_name,
+               'app.preflight_cbe_birr_shadow_verification_job(uuid)',
+               'execute'
+             ) as allowed
+      from (
+        values ('anon'), ('authenticated'), ('service_role'),
+               ('fetanagent_api'), ('fetanagent_api_runtime'),
+               ('fetanagent_beta_admission'), ('fetanagent_beta_admission_runtime'),
+               ('fetanagent_nonce_retention'), ('fetanagent_nonce_retention_runtime'),
+               ('fetanagent_owner_control'), ('fetanagent_owner_control_runtime'),
+               ('fetanagent_player_actions'), ('fetanagent_player_actions_runtime'),
+               ('fetanagent_worker')
+      ) denied_role(role_name)
+      order by denied_role.role_name
+    `);
+    const legacyMutationDeniedRoles = await client.query<{
+      readonly allowed: boolean;
+      readonly role_name: string;
+    }>(`
+      select denied_role.role_name,
+             bool_or(has_function_privilege(
+               denied_role.role_name, legacy_function.procedure_oid, 'execute'
+             )) as allowed
+      from (
+        values ('anon'), ('authenticated'), ('service_role'),
+               ('fetanagent_api'), ('fetanagent_api_runtime'),
+               ('fetanagent_worker'),
+               ('fetanagent_beta_admission'), ('fetanagent_beta_admission_runtime'),
+               ('fetanagent_nonce_retention'), ('fetanagent_nonce_retention_runtime'),
+               ('fetanagent_owner_control'), ('fetanagent_owner_control_runtime'),
+               ('fetanagent_player_actions'), ('fetanagent_player_actions_runtime'),
+               ('fetanagent_cbe_birr_shadow_worker')
+      ) denied_role(role_name)
+      cross join (
+        values
+          ('app.lease_cbe_birr_shadow_verification_job(uuid,integer)'::regprocedure),
+          ('app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)'::regprocedure),
+          ('app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)'::regprocedure)
+      ) legacy_function(procedure_oid)
       group by denied_role.role_name
       order by denied_role.role_name
     `);
@@ -529,19 +644,20 @@ describe('disposable SQL migration baseline', () => {
         functions_are_hardened: true,
         jobs_forced_rls: true,
         jobs_have_no_policies: true,
+        legacy_worker_execution_denied: true,
         owner_can_enqueue: true,
         owner_can_list: true,
         owner_has_no_table_access: true,
+        preflight_is_hardened: true,
         results_forced_rls: true,
         results_have_no_policies: true,
+        shadow_worker_can_preflight: true,
         shadow_worker_has_no_authoritative_table_access: true,
         shadow_worker_has_no_table_access: true,
       },
     ]);
     expect(workerFunctions.rows.map((row) => row.signature)).toEqual([
-      'app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)',
-      'app.lease_cbe_birr_shadow_verification_job(uuid,integer)',
-      'app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)',
+      'app.preflight_cbe_birr_shadow_verification_job(uuid)',
     ]);
     expect(ownerListOutput.rows).toEqual([
       {
@@ -563,7 +679,65 @@ describe('disposable SQL migration baseline', () => {
         ],
       },
     ]);
+    expect(preflightOutput.rows).toEqual([
+      { argument_mode: 't', data_type: 'uuid', output_name: 'job_id', output_position: 1 },
+      {
+        argument_mode: 't',
+        data_type: 'text',
+        output_name: 'preflight_version',
+        output_position: 2,
+      },
+      {
+        argument_mode: 't',
+        data_type: 'text',
+        output_name: 'verifier_version',
+        output_position: 3,
+      },
+      {
+        argument_mode: 't',
+        data_type: 'text',
+        output_name: 'eligibility',
+        output_position: 4,
+      },
+      {
+        argument_mode: 't',
+        data_type: 'text',
+        output_name: 'blocker_code',
+        output_position: 5,
+      },
+      {
+        argument_mode: 't',
+        data_type: 'boolean',
+        output_name: 'lease_allowed',
+        output_position: 6,
+      },
+      {
+        argument_mode: 't',
+        data_type: 'boolean',
+        output_name: 'protected_material_allowed',
+        output_position: 7,
+      },
+    ]);
+    expect(preflightOutput.rows.map((row) => row.output_name).join(' ')).not.toMatch(
+      /ciphertext|key|deposit|receiver|submission/u,
+    );
+    expect(preflightDefinition.rows).toHaveLength(1);
+    const preflightSource = preflightDefinition.rows[0]!.source;
+    expect(preflightSource).not.toMatch(
+      /\bfor\s+(?:(?:no\s+)?key\s+)?update\b|\bfor\s+(?:key\s+)?share\b/iu,
+    );
+    expect(preflightSource).not.toMatch(
+      /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory|require_financial_features_disabled_for_dry_run|reclaim_expired_cbe_birr_shadow_verification_jobs|(?:lease|complete|retry)_cbe_birr_shadow_verification_job|claim_verified_deposit_payment|provider_payment_evidence|deposit_verification_attempts|deposit_payment_claims|deposit_jobs|deposit_state_events|kemerbet/iu,
+    );
+    expect(
+      [...preflightSource.matchAll(/\bapp\.([a-z0-9_]+)/giu)]
+        .map((match) => match[1])
+        .filter((name, index, names) => names.indexOf(name) === index)
+        .sort(),
+    ).toEqual(['cbe_birr_shadow_verification_jobs', 'feature_switches']);
     expect(broadExecution.rows.every((row) => !row.allowed)).toBe(true);
+    expect(preflightDeniedRoles.rows.every((row) => !row.allowed)).toBe(true);
+    expect(legacyMutationDeniedRoles.rows.every((row) => !row.allowed)).toBe(true);
   });
 
   it('keeps every private app table under forced row-level security', async () => {
@@ -2989,8 +3163,220 @@ describe('disposable SQL migration baseline', () => {
       ),
     ).rejects.toThrow(/permission denied/u);
 
+    type ShadowPreflightRow = {
+      readonly blocker_code: string;
+      readonly eligibility: string;
+      readonly job_id: string;
+      readonly lease_allowed: boolean;
+      readonly preflight_version: string;
+      readonly protected_material_allowed: boolean;
+      readonly verifier_version: string;
+    };
+    type ShadowPreflightMutationSnapshot = {
+      readonly audit_events: number;
+      readonly claims: number;
+      readonly deposit_jobs: number;
+      readonly deposit_status: string;
+      readonly evidence: number;
+      readonly shadow_job: Readonly<Record<string, unknown>>;
+      readonly shadow_job_xmin: string;
+      readonly shadow_results: number;
+      readonly state_events: number;
+      readonly submission_status: string;
+      readonly verification_attempts: number;
+    };
+    const readShadowPreflightMutationSnapshot =
+      async (): Promise<ShadowPreflightMutationSnapshot> => {
+        const snapshot = await client.query<ShadowPreflightMutationSnapshot>(
+          `select
+           (select to_jsonb(shadow_job)
+              from app.cbe_birr_shadow_verification_jobs shadow_job
+             where shadow_job.id = $1::uuid) as shadow_job,
+           (select shadow_job.xmin::text
+              from app.cbe_birr_shadow_verification_jobs shadow_job
+             where shadow_job.id = $1::uuid) as shadow_job_xmin,
+           (select count(*)::integer
+              from app.cbe_birr_shadow_verification_results
+             where job_id = $1::uuid) as shadow_results,
+           (select count(*)::integer from app.deposit_verification_attempts)
+             as verification_attempts,
+           (select count(*)::integer from app.provider_payment_evidence) as evidence,
+           (select count(*)::integer from app.deposit_payment_claims) as claims,
+           (select count(*)::integer from app.deposit_jobs) as deposit_jobs,
+           (select count(*)::integer from app.deposit_state_events
+             where deposit_intent_id = $2::uuid) as state_events,
+           (select status::text from app.deposit_intents where id = $2::uuid)
+             as deposit_status,
+           (select status::text from app.deposit_submissions where id = $3::uuid)
+             as submission_status,
+           (select count(*)::integer from app.audit_events) as audit_events`,
+          [shadowJobId, depositIntentId, depositSubmissionId],
+        );
+        expect(snapshot.rows).toHaveLength(1);
+        return snapshot.rows[0]!;
+      };
+    const expectedShadowPreflight: ShadowPreflightRow = {
+      blocker_code: 'legacy_protected_lookup_material_ineligible',
+      eligibility: 'blocked',
+      job_id: shadowJobId,
+      lease_allowed: false,
+      preflight_version: 'cbe-birr-shadow-preflight-v1',
+      protected_material_allowed: false,
+      verifier_version: 'cbe-birr-shadow-v1',
+    };
+    const preflightMutationBaseline = await readShadowPreflightMutationSnapshot();
+    const firstPreflight = await queryAsRole<ShadowPreflightRow>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, preflight_version, verifier_version, eligibility,
+              blocker_code, lease_allowed, protected_material_allowed
+         from app.preflight_cbe_birr_shadow_verification_job($1::uuid)`,
+      [shadowJobId],
+    );
+    const replayedPreflight = await queryAsRole<ShadowPreflightRow>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, preflight_version, verifier_version, eligibility,
+              blocker_code, lease_allowed, protected_material_allowed
+         from app.preflight_cbe_birr_shadow_verification_job($1::uuid)`,
+      [shadowJobId],
+    );
+    expect(firstPreflight).toEqual([expectedShadowPreflight]);
+    expect(replayedPreflight).toEqual(firstPreflight);
+    expect(Object.keys(firstPreflight[0]!).sort()).toEqual(
+      [
+        'job_id',
+        'preflight_version',
+        'verifier_version',
+        'eligibility',
+        'blocker_code',
+        'lease_allowed',
+        'protected_material_allowed',
+      ].sort(),
+    );
+    expect(Object.keys(firstPreflight[0]!).join(' ')).not.toMatch(
+      /ciphertext|key|deposit|receiver|submission/u,
+    );
+
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        'select * from app.preflight_cbe_birr_shadow_verification_job(null::uuid)',
+      ),
+    ).rejects.toThrow('The CBE Birr shadow preflight request is invalid.');
+    const nonexistentPreflight = await queryAsRole<ShadowPreflightRow>(
+      'fetanagent_cbe_birr_shadow_worker',
+      'select * from app.preflight_cbe_birr_shadow_verification_job($1::uuid)',
+      ['99999999-9999-4999-8999-999999999999'],
+    );
+    expect(nonexistentPreflight).toEqual([]);
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        'select * from app.preflight_cbe_birr_shadow_verification_job($1::uuid)',
+        [`${shadowJobId}' or true --`],
+      ),
+    ).rejects.toThrow(/invalid input syntax for type uuid/u);
+
+    for (const deniedRole of [
+      'fetanagent_api',
+      'fetanagent_beta_admission',
+      'fetanagent_owner_control',
+      'fetanagent_player_actions',
+    ] as const) {
+      await expect(
+        queryAsRole(
+          deniedRole,
+          'select * from app.preflight_cbe_birr_shadow_verification_job($1::uuid)',
+          [shadowJobId],
+        ),
+      ).rejects.toThrow(/permission denied/u);
+    }
+
+    const deniedLegacyLeaseToken = '33333333-3333-4333-8333-333333333333';
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        'select * from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)',
+        ['22222222-2222-4222-8222-222222222222'],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select * from app.complete_cbe_birr_shadow_verification_job(
+           $1::uuid, $2::uuid, 1, 'would_review', 'provider_network_uncertain',
+           null, null, 'cbe-birr-shadow-worker-v1', 'cbe-birr-normalization-v1'
+         )`,
+        [shadowJobId, deniedLegacyLeaseToken],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select * from app.retry_cbe_birr_shadow_verification_job(
+           $1::uuid, $2::uuid, 1, 'provider_network_uncertain', 1
+         )`,
+        [shadowJobId, deniedLegacyLeaseToken],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+
+    for (const protectedTable of [
+      'feature_switches',
+      'cbe_birr_shadow_verification_jobs',
+      'cbe_birr_shadow_verification_results',
+      'deposit_verification_attempts',
+      'provider_payment_evidence',
+      'deposit_payment_claims',
+      'deposit_jobs',
+      'deposit_state_events',
+    ]) {
+      await expect(
+        queryAsRole(
+          'fetanagent_cbe_birr_shadow_worker',
+          `select * from app.${protectedTable} limit 1`,
+        ),
+      ).rejects.toThrow(/permission denied|row-level security/u);
+    }
+
+    for (const financialSwitch of [
+      'payment_verification',
+      'deposit_execution',
+      'withdrawal_validation',
+      'withdrawal_collection',
+    ]) {
+      await client.query('begin');
+      try {
+        await client.query(
+          `update app.feature_switches set mode = 'dry_run' where feature_key = $1::text`,
+          [financialSwitch],
+        );
+        await client.query('set local role fetanagent_cbe_birr_shadow_worker');
+        await expect(
+          client.query('select * from app.preflight_cbe_birr_shadow_verification_job($1::uuid)', [
+            shadowJobId,
+          ]),
+        ).rejects.toThrow('requires every financial feature to remain disabled');
+      } finally {
+        await client.query('rollback');
+      }
+    }
+    await client.query('begin');
+    try {
+      await client.query(
+        `delete from app.feature_switches where feature_key = 'withdrawal_collection'`,
+      );
+      await client.query('set local role fetanagent_cbe_birr_shadow_worker');
+      await expect(
+        client.query('select * from app.preflight_cbe_birr_shadow_verification_job($1::uuid)', [
+          shadowJobId,
+        ]),
+      ).rejects.toThrow('requires every financial feature to remain disabled');
+    } finally {
+      await client.query('rollback');
+    }
+    expect(await readShadowPreflightMutationSnapshot()).toEqual(preflightMutationBaseline);
+
     const shadowWorkerId = '22222222-2222-4222-8222-222222222222';
-    const firstLease = await queryAsRole<{
+    const firstLease = await queryAsMigrationOwner<{
       readonly attempt_number: number;
       readonly deposit_intent_id: string;
       readonly deposit_submission_id: string;
@@ -2999,7 +3385,6 @@ describe('disposable SQL migration baseline', () => {
       readonly receiver_verification_reference_ciphertext: string;
       readonly submitted_reference_ciphertext: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, deposit_intent_id, deposit_submission_id, attempt_number,
               lease_token, submitted_reference_ciphertext,
               receiver_verification_reference_ciphertext
@@ -3020,8 +3405,7 @@ describe('disposable SQL migration baseline', () => {
 
     await client.query('select pg_sleep(1.1)');
     await expect(
-      queryAsRole(
-        'fetanagent_cbe_birr_shadow_worker',
+      queryAsMigrationOwner(
         `select * from app.complete_cbe_birr_shadow_verification_job(
            $1::uuid, $2::uuid, 1, 'would_review', 'provider_network_uncertain',
            null, null, 'cbe-birr-shadow-worker-v1', 'cbe-birr-normalization-v1'
@@ -3030,12 +3414,11 @@ describe('disposable SQL migration baseline', () => {
       ),
     ).rejects.toThrow(/lease has expired/u);
 
-    const reclaimedLease = await queryAsRole<{
+    const reclaimedLease = await queryAsMigrationOwner<{
       readonly attempt_number: number;
       readonly job_id: string;
       readonly lease_token: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, attempt_number, lease_token
        from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
       [shadowWorkerId],
@@ -3045,14 +3428,13 @@ describe('disposable SQL migration baseline', () => {
     ]);
     expect(reclaimedLease[0]!.lease_token).not.toBe(firstLease[0]!.lease_token);
 
-    const scheduledRetry = await queryAsRole<{
+    const scheduledRetry = await queryAsMigrationOwner<{
       readonly already_recorded: boolean;
       readonly attempt_number: number;
       readonly job_id: string;
       readonly job_status: string;
       readonly run_after: Date;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, job_status, attempt_number, run_after, already_recorded
        from app.retry_cbe_birr_shadow_verification_job(
          $1::uuid, $2::uuid, 2, 'provider_network_uncertain', 1
@@ -3069,14 +3451,13 @@ describe('disposable SQL migration baseline', () => {
       },
     ]);
 
-    const scheduledRetryReplay = await queryAsRole<{
+    const scheduledRetryReplay = await queryAsMigrationOwner<{
       readonly already_recorded: boolean;
       readonly attempt_number: number;
       readonly job_id: string;
       readonly job_status: string;
       readonly run_after: Date;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, job_status, attempt_number, run_after, already_recorded
        from app.retry_cbe_birr_shadow_verification_job(
          $1::uuid, $2::uuid, 2, 'provider_network_uncertain', 1
@@ -3093,8 +3474,7 @@ describe('disposable SQL migration baseline', () => {
       },
     ]);
     await expect(
-      queryAsRole(
-        'fetanagent_cbe_birr_shadow_worker',
+      queryAsMigrationOwner(
         `select * from app.retry_cbe_birr_shadow_verification_job(
            $1::uuid, $2::uuid, 2, 'provider_network_uncertain', 2
          )`,
@@ -3103,12 +3483,11 @@ describe('disposable SQL migration baseline', () => {
     ).rejects.toThrow(/not leased by this exact attempt/u);
 
     await client.query('select pg_sleep(1.1)');
-    const finalLease = await queryAsRole<{
+    const finalLease = await queryAsMigrationOwner<{
       readonly attempt_number: number;
       readonly job_id: string;
       readonly lease_token: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, attempt_number, lease_token
        from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
       [shadowWorkerId],
@@ -3119,14 +3498,13 @@ describe('disposable SQL migration baseline', () => {
 
     const canonicalReferenceFingerprint = 'a'.repeat(64);
     const workerDecisionDigest = 'b'.repeat(64);
-    const completedShadow = await queryAsRole<{
+    const completedShadow = await queryAsMigrationOwner<{
       readonly already_recorded: boolean;
       readonly job_id: string;
       readonly outcome: string;
       readonly reason_code: string;
       readonly result_id: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, result_id, outcome, reason_code, already_recorded
        from app.complete_cbe_birr_shadow_verification_job(
          $1::uuid, $2::uuid, 3, 'would_verify', 'shadow_checks_passed',
@@ -3150,14 +3528,13 @@ describe('disposable SQL migration baseline', () => {
       },
     ]);
 
-    const completedShadowReplay = await queryAsRole<{
+    const completedShadowReplay = await queryAsMigrationOwner<{
       readonly already_recorded: boolean;
       readonly job_id: string;
       readonly outcome: string;
       readonly reason_code: string;
       readonly result_id: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, result_id, outcome, reason_code, already_recorded
        from app.complete_cbe_birr_shadow_verification_job(
          $1::uuid, $2::uuid, 3, 'would_verify', 'shadow_checks_passed',
@@ -3173,8 +3550,7 @@ describe('disposable SQL migration baseline', () => {
     );
     expect(completedShadowReplay).toEqual([{ ...completedShadow[0]!, already_recorded: true }]);
     await expect(
-      queryAsRole(
-        'fetanagent_cbe_birr_shadow_worker',
+      queryAsMigrationOwner(
         `select * from app.complete_cbe_birr_shadow_verification_job(
            $1::uuid, $2::uuid, 3, 'would_verify', 'shadow_checks_passed',
            $3::text, $4::text, 'cbe-birr-shadow-worker-v1',
@@ -3183,6 +3559,17 @@ describe('disposable SQL migration baseline', () => {
         [shadowJobId, finalLease[0]!.lease_token, canonicalReferenceFingerprint, 'c'.repeat(64)],
       ),
     ).rejects.toThrow(/does not match its result/u);
+
+    const completedPreflightMutationBaseline = await readShadowPreflightMutationSnapshot();
+    const completedJobPreflight = await queryAsRole<ShadowPreflightRow>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, preflight_version, verifier_version, eligibility,
+              blocker_code, lease_allowed, protected_material_allowed
+         from app.preflight_cbe_birr_shadow_verification_job($1::uuid)`,
+      [shadowJobId],
+    );
+    expect(completedJobPreflight).toEqual([expectedShadowPreflight]);
+    expect(await readShadowPreflightMutationSnapshot()).toEqual(completedPreflightMutationBaseline);
 
     const duplicateInput = await createAdditionalShadowSubmission(
       '9500000010',
@@ -3198,12 +3585,11 @@ describe('disposable SQL migration baseline', () => {
        from app.enqueue_cbe_birr_shadow_verification($1::uuid, $2::uuid, $3::uuid)`,
       [ownerAuthUserId, duplicateInput.depositIntentId, duplicateInput.depositSubmissionId],
     );
-    const duplicateLease = await queryAsRole<{
+    const duplicateLease = await queryAsMigrationOwner<{
       readonly attempt_number: number;
       readonly job_id: string;
       readonly lease_token: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, attempt_number, lease_token
        from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
       [shadowWorkerId],
@@ -3215,11 +3601,10 @@ describe('disposable SQL migration baseline', () => {
         lease_token: expect.any(String),
       },
     ]);
-    const duplicateCompletion = await queryAsRole<{
+    const duplicateCompletion = await queryAsMigrationOwner<{
       readonly outcome: string;
       readonly reason_code: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select outcome, reason_code
        from app.complete_cbe_birr_shadow_verification_job(
          $1::uuid, $2::uuid, 1, 'would_verify', 'shadow_checks_passed',
@@ -3277,12 +3662,11 @@ describe('disposable SQL migration baseline', () => {
     const retryExhaustionJobId = retryExhaustionEnqueue[0]!.job_id;
     let terminalRetryLeaseToken = '';
     for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber += 1) {
-      const retryLease = await queryAsRole<{
+      const retryLease = await queryAsMigrationOwner<{
         readonly attempt_number: number;
         readonly job_id: string;
         readonly lease_token: string;
       }>(
-        'fetanagent_cbe_birr_shadow_worker',
         `select job_id, attempt_number, lease_token
          from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
         [shadowWorkerId],
@@ -3296,7 +3680,7 @@ describe('disposable SQL migration baseline', () => {
       ]);
       terminalRetryLeaseToken = retryLease[0]!.lease_token;
 
-      const retryReceipt = await queryAsRole<{
+      const retryReceipt = await queryAsMigrationOwner<{
         readonly already_recorded: boolean;
         readonly attempt_number: number;
         readonly job_id: string;
@@ -3304,7 +3688,6 @@ describe('disposable SQL migration baseline', () => {
         readonly outcome: string | null;
         readonly reason_code: string | null;
       }>(
-        'fetanagent_cbe_birr_shadow_worker',
         `select job_id, job_status, attempt_number, outcome, reason_code,
                 already_recorded
          from app.retry_cbe_birr_shadow_verification_job(
@@ -3339,7 +3722,7 @@ describe('disposable SQL migration baseline', () => {
         ]);
       }
     }
-    const terminalRetryReplay = await queryAsRole<{
+    const terminalRetryReplay = await queryAsMigrationOwner<{
       readonly already_recorded: boolean;
       readonly attempt_number: number;
       readonly job_id: string;
@@ -3347,7 +3730,6 @@ describe('disposable SQL migration baseline', () => {
       readonly outcome: string;
       readonly reason_code: string;
     }>(
-      'fetanagent_cbe_birr_shadow_worker',
       `select job_id, job_status, attempt_number, outcome, reason_code, already_recorded
        from app.retry_cbe_birr_shadow_verification_job(
          $1::uuid, $2::uuid, 5, 'authoritative_receipt_unavailable', 1
@@ -3482,7 +3864,6 @@ describe('disposable SQL migration baseline', () => {
             set mode = 'dry_run'
           where feature_key = 'payment_verification'`,
       );
-      await client.query('set local role fetanagent_cbe_birr_shadow_worker');
       await expect(
         client.query(`select * from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`, [
           shadowWorkerId,

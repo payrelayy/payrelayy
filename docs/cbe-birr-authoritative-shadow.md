@@ -55,8 +55,10 @@ Stage 1A does not provide or authorize:
   or payout; or
 - any live financial feature switch.
 
-Before a provider transport can be added, a separate review must prove permitted official-source
-access, TLS and host allowlisting, bounded redirects/responses/retries, versioned redacted fixtures,
-credential isolation, anomaly and outage behavior, safe telemetry, and an incident stop procedure.
+Stage 1B supplies only versioned synthetic normalization fixtures; it does not select or contact an
+official source. Before a provider transport can be added, a separate review must prove permitted
+official-source access, TLS and host allowlisting, bounded redirects/responses/retries, credential
+isolation, anomaly and outage behavior, safe telemetry, and an incident stop procedure. See
+[cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
 Before any payment claim can be enabled, the dormant claim boundary must remain live-only, receive
 an explicit least-privilege review, and pass reconciliation and duplicate-reference tests.

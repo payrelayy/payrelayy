@@ -7,8 +7,9 @@ database, authentication, receipts, workers, and code are not a FetanAgent depen
 
 Version 1 uses a private Telegram bot for customers, a private English-only Owner/Admin dashboard,
 and a single KemerBet platform adapter. The current launch-preparation verification scope is CBE
-Birr-only redacted fixture dry-run assessment. TeleBirr and CBE bank are deferred; neither has an
-enabled adapter, provider credential, or runtime integration.
+Birr-only redacted fixture dry-run assessment plus offline authoritative-shadow normalization
+fixtures. TeleBirr and CBE bank are deferred; no provider has an enabled adapter, provider
+credential, or runtime integration.
 
 ## Component boundary
 

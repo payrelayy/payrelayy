@@ -40,6 +40,8 @@ The current foundation is deliberately safe:
   operationally inert: Owner enqueue/list access accepts only normalized safe facts, processing
   remains disabled, existing intake/submission states stay unchanged, and the boundary cannot
   create authoritative evidence, claims, or financial jobs; and
+- the Stage 1B authoritative-adapter fixtures are offline, synthetic normalization regressions
+  only. They define no provider URL or private wire format and are not wired into the worker; and
 - no provider evidence, payment claim, authoritative verification job, KemerBet call, withdrawal,
   or financial execution is enabled by this flow.
 
@@ -58,19 +60,20 @@ environment file.
 
 ## Planned services
 
-| Service                      | Responsibility                                                                      |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/api`                   | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
-| `apps/admin`                 | Owner-authenticated beta invite issue/revoke boundary; no browser database grant    |
-| `apps/bot`                   | Private Telegram chat transport only                                                |
-| `apps/worker`                | Durable verification, alert, and reconciliation jobs                                |
-| `apps/maintenance`           | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
-| `apps/executor`              | Isolated, supervised KemerBet browser adapter; dry-run first                        |
-| `packages/domain`            | Money rules, state machines, limits, idempotency reason codes                       |
-| `packages/cbe-birr-fixtures` | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
-| `packages/contracts`         | Provider, executor, notifier, and storage interfaces                                |
-| `packages/config`            | Safe environment parsing and feature switches                                       |
-| `packages/i18n`              | Shared English message keys and safe locale normalization                           |
+| Service                                    | Responsibility                                                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `apps/api`                                 | Transaction orchestration, validation, dashboard-facing API, audit boundaries       |
+| `apps/admin`                               | Owner-authenticated beta invite issue/revoke boundary; no browser database grant    |
+| `apps/bot`                                 | Private Telegram chat transport only                                                |
+| `apps/worker`                              | Durable verification, alert, and reconciliation jobs                                |
+| `apps/maintenance`                         | Manual read-only nonce-retention privilege preflight; no scheduler or purge command |
+| `apps/executor`                            | Isolated, supervised KemerBet browser adapter; dry-run first                        |
+| `packages/domain`                          | Money rules, state machines, limits, idempotency reason codes                       |
+| `packages/cbe-birr-fixtures`               | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
+| `packages/cbe-birr-authoritative-fixtures` | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
+| `packages/contracts`                       | Provider, executor, notifier, and storage interfaces                                |
+| `packages/config`                          | Safe environment parsing and feature switches                                       |
+| `packages/i18n`                            | Shared English message keys and safe locale normalization                           |
 
 ## Local development
 
@@ -106,7 +109,9 @@ See [docs/architecture.md](docs/architecture.md), [docs/database-access.md](docs
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See
 [docs/cbe-birr-authoritative-shadow.md](docs/cbe-birr-authoritative-shadow.md) for the disabled
-Stage 1A safe-facts, queue, and advisory-result boundary. See
+Stage 1A safe-facts, queue, and advisory-result boundary, and
+[docs/cbe-birr-authoritative-adapter-fixtures.md](docs/cbe-birr-authoritative-adapter-fixtures.md)
+for the offline-only Stage 1B normalization regressions. See
 [docs/cbe-birr-fixture-dry-run.md](docs/cbe-birr-fixture-dry-run.md) for the current CBE Birr-only
 fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the private Telegram inbox boundary and

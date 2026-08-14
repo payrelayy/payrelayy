@@ -21,6 +21,10 @@ live financial job, or call KemerBet.
   a matching completed payment remains `would_review / duplicate_check_unavailable` until a
   separately reviewed protected duplicate-read boundary exists. It returns only
   `complete_advisory` or `retry_candidate` and never schedules or persists either result.
+- The Stage 1D settlement planner accepts only an exact safe lease receipt and a reconstructed
+  Stage 1C plan. It maps that closed input to either an advisory-completion command or a bounded
+  retry command. It returns structured data only: no SQL text, database client, network call,
+  job acquisition, scheduling, persistence, or procedure execution is present.
 - Private PostgreSQL tables provide a bounded lease and append-only result ledger for a future
   separately deployed shadow worker. A dedicated `NOLOGIN` group role receives only the narrow
   shadow procedures and no direct table access. This repository creates no worker login, password,
@@ -46,6 +50,13 @@ authoritative duplicate-clear evidence. Only provider-unavailable, network-uncer
 parse-uncertain advisory results are classified as retry candidates. Every other result is a
 terminal advisory completion, not a financial-state transition.
 
+The Stage 1D settlement planner preserves that fail-closed classification. Advisory completions
+carry no canonical-reference fingerprint or worker-decision digest, while retry commands accept
+only the three Stage 1C retry reason codes and use a fixed 300-second delay. The existing PostgreSQL
+procedures remain the sole authority for lease ownership, bounded-delay validation, idempotent
+replay, durable retry scheduling, maximum-attempt exhaustion, and result state; a returned command
+is not evidence that any procedure ran.
+
 Stored shadow rows contain only internal IDs, allowlisted outcomes and reason codes, version labels,
 keyed fingerprints or decision digests, counters, lease UUIDs, and timestamps. Owner list output and
 audit metadata exclude fingerprints, digests, ciphertext, key versions, provider payloads, and
@@ -65,8 +76,10 @@ Stage 1A does not provide or authorize:
   or payout; or
 - any live financial feature switch.
 
-Stage 1B supplies only versioned synthetic normalization fixtures, and Stage 1C supplies only pure
-offline attempt planning; neither selects or contacts an official source. Before a provider transport can be added, a separate review must prove permitted
+Stage 1B supplies only versioned synthetic normalization fixtures, Stage 1C supplies pure offline
+attempt planning, and Stage 1D supplies pure offline settlement-command planning. None selects or
+contacts an official source, runs SQL, or acquires or settles a job. Before a provider transport can
+be added, a separate review must prove permitted
 official-source access, TLS and host allowlisting, bounded redirects/responses/retries, credential
 isolation, anomaly and outage behavior, safe telemetry, and an incident stop procedure. See
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).

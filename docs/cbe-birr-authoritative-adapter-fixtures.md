@@ -60,6 +60,20 @@ The fixture package remains a test-only dependency and is never imported by `app
 worker may compose only the shared pure planner behind its existing disabled-by-default contract
 gate.
 
+## Stage 1D settlement-planner coverage
+
+The fixture suite also sends every normalized Stage 1B result through the Stage 1C attempt planner
+and then through the pure Stage 1D settlement planner with a synthetic safe lease receipt. Each
+`complete_advisory` plan becomes only an advisory-completion command, and each `retry_candidate`
+plan becomes only a bounded retry command. The cross-fixture regression asserts that no path can
+produce `would_verify` or return a synthetic reference, receiver token, or fixture digest.
+
+Stage 1D emits structured command data, not SQL, and does not connect to PostgreSQL, acquire a job,
+call a procedure, schedule a retry, persist a result, or contact a provider. Retry commands use a
+fixed 300-second delay; the database remains authoritative for lease and bounded-delay validation,
+idempotent replay, durable retry scheduling, and maximum-attempt exhaustion. Durable jobs, provider
+transport, payment claims, and KemerBet execution remain disabled.
+
 ## Regression matrix
 
 The versioned fixture suite covers a complete matching payment, wrong receiver, provider-identity
@@ -67,5 +81,5 @@ mismatch, wrong amount, stale and future timestamps, pending and failed status, 
 outage, network uncertainty, changed or malformed layouts, missing safe facts, unsupported
 currency and payment types, contradictory timestamps, a reused reference, and an unavailable
 duplicate check. Every listed uncertain case routes to advisory review; no fixture can create a
-payment approval or financial side effect. Every fixture also crosses the Stage 1C planner boundary
-without granting duplicate-clear authority.
+payment approval or financial side effect. Every fixture crosses both the Stage 1C and Stage 1D
+planner boundaries without granting duplicate-clear, persistence, or execution authority.

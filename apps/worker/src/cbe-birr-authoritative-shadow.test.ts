@@ -11,16 +11,21 @@ const fixedDisabledCapabilities = {
 };
 
 describe('worker CBE Birr authoritative-shadow scaffold', () => {
-  it('exposes no evaluator while the contract gate is disabled', () => {
+  it('exposes no evaluator or planner while the contract gate is disabled', () => {
     const contract = createWorkerCbeBirrAuthoritativeShadowContract({
       ...fixedDisabledCapabilities,
       contractEnabled: false,
     });
-    expect(contract).toEqual({ enabled: false, contractVersion: 1 });
+    expect(contract).toEqual({
+      ...fixedDisabledCapabilities,
+      enabled: false,
+      contractVersion: 1,
+    });
     expect(contract).not.toHaveProperty('evaluate');
+    expect(contract).not.toHaveProperty('planAttempt');
   });
 
-  it('composes only the pure evaluator when the contract gate is enabled', () => {
+  it('composes only the pure evaluator and attempt planner when the gate is enabled', () => {
     const contract = createWorkerCbeBirrAuthoritativeShadowContract({
       ...fixedDisabledCapabilities,
       contractEnabled: true,
@@ -37,5 +42,58 @@ describe('worker CBE Birr authoritative-shadow scaffold', () => {
     expect(JSON.stringify(contract.decisionForLog(decision))).not.toContain(
       'raw-provider-material',
     );
+
+    expect(
+      contract.planAttempt({
+        contractVersion: 1,
+        intent: {
+          state: 'intake_received',
+          openReview: false,
+          expectedAmountMinor: 2_500,
+          currencyCode: 'ETB',
+          openedAt: '2026-08-14T10:00:00.000Z',
+          paymentDeadlineAt: '2026-08-14T11:00:00.000Z',
+        },
+        assessedAt: '2026-08-14T10:10:00.000Z',
+        adapterResult: {
+          contractVersion: 1,
+          providerCode: 'cbe_birr',
+          evidence: {
+            lookupOutcome: 'unavailable',
+            uncertainty: 'network',
+          },
+        },
+      }),
+    ).toEqual({
+      contractVersion: 1,
+      providerCode: 'cbe_birr',
+      advisoryOnly: true,
+      disposition: 'retry_candidate',
+      decision: {
+        contractVersion: 1,
+        outcome: 'would_review',
+        reasonCode: 'provider_network_uncertain',
+      },
+    });
+    expect(contract).toMatchObject(fixedDisabledCapabilities);
+  });
+
+  it('cannot widen operational capabilities or expose dependencies from runtime input', () => {
+    for (const contractEnabled of [false, true]) {
+      const contract = createWorkerCbeBirrAuthoritativeShadowContract({
+        contractEnabled,
+        mode: 'live',
+        providerTransportEnabled: true,
+        durableJobsEnabled: true,
+        paymentClaimsEnabled: true,
+        kemerBetExecutionEnabled: true,
+        providerCredential: 'raw-provider-secret',
+        databasePool: { connected: true },
+      } as unknown as Parameters<typeof createWorkerCbeBirrAuthoritativeShadowContract>[0]);
+
+      expect(contract).toMatchObject(fixedDisabledCapabilities);
+      expect(JSON.stringify(contract)).not.toContain('raw-provider-secret');
+      expect(contract).not.toHaveProperty('databasePool');
+    }
   });
 });

@@ -45,7 +45,20 @@ Before a real transport is written, FetanAgent still needs an explicitly permitt
 and a separately reviewed source contract. That review must prove host and TLS policy, credential
 isolation, request authorization, bounded redirects and bodies, timeouts and retries, rate limits,
 safe telemetry, parser-version rollout, anomaly detection, and an incident stop procedure. Until
-then, the Stage 1B package is test-only and must not be wired into `apps/worker`.
+then, the Stage 1B package is test-only and must not be imported by `apps/worker`.
+
+## Stage 1C attempt-planner coverage
+
+Stage 1C adds a pure planner in the shared contracts package, not a provider adapter or runner. The
+fixture suite sends every normalized Stage 1B result across that boundary. The planner validates an
+exact immutable intent snapshot and assessment time, injects `duplicateCheck: unavailable` for
+found evidence, and returns only `complete_advisory` or `retry_candidate`. It cannot produce
+`would_verify`, schedule a retry, construct procedure arguments, persist a result, or emit
+caller-controlled material.
+
+The fixture package remains a test-only dependency and is never imported by `apps/worker`. The
+worker may compose only the shared pure planner behind its existing disabled-by-default contract
+gate.
 
 ## Regression matrix
 
@@ -54,4 +67,5 @@ mismatch, wrong amount, stale and future timestamps, pending and failed status, 
 outage, network uncertainty, changed or malformed layouts, missing safe facts, unsupported
 currency and payment types, contradictory timestamps, a reused reference, and an unavailable
 duplicate check. Every listed uncertain case routes to advisory review; no fixture can create a
-payment approval or financial side effect.
+payment approval or financial side effect. Every fixture also crosses the Stage 1C planner boundary
+without granting duplicate-clear authority.

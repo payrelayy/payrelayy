@@ -1,13 +1,13 @@
-# Private Telegram invite-admission and inbox boundary
+# Legacy private Telegram invite-admission and inbox boundary
 
 ## Current scope
 
-FetanAgent beta admission is **invite-only**. An unknown Telegram user must not become a customer
-merely by opening, messaging, or calling the bot. The historic generic
+The applied Telegram staging admission is **invite-only**. An unknown Telegram user must not become
+a customer merely by opening, messaging, or calling the bot. The historic generic
 `app.record_telegram_private_inbound_event(...)` procedure therefore is not an admission path: the
 invite-admission migration revokes its runtime grant and makes it fail closed.
 
-The only customer-creation path is the reviewed
+The only Telegram-based customer-creation path in the current staging implementation is the reviewed
 `app.redeem_telegram_beta_invite(...)` procedure, called after an exact private
 `/start <single-use-invite>` interaction has passed the separately signed transport boundary. It
 may create the immutable customer identity, Telegram identity, and empty conversation exactly
@@ -18,6 +18,25 @@ are never persisted, logged, or returned.
 reviewed admitted-inbox boundary. It must never create a customer, identity, or conversation, and
 is intentionally ungranted to both beta-admission roles in this stage. No bot polling, API route,
 database login, or later inbox path is enabled by this documentation.
+
+## Settled product role
+
+Telegram is optional in the standalone responsive web/PWA product. A customer may create and use a
+FetanAgent account, associate multiple Player IDs, deposit, withdraw, view activity, recover access,
+and contact support without Telegram. Existing invite admission is legacy staging behavior, not the
+canonical account-creation or sign-in flow.
+
+A future Telegram-history link must begin from an already authenticated web/PWA account and use a
+short-lived, one-time, opaque challenge to prove control of the exact legacy Telegram identity. It
+must reject expiry, replay, identity mismatch, existing-link conflict, and cross-customer ambiguity
+without revealing another account. Linking creates a controlled reference to the legacy history
+scope; it must not merge identities, reparent customer records, copy ledger rows, or turn Telegram
+into sign-in, forgot-password recovery, payment authority, or Player-ID ownership proof. Linked
+history remains under its original authoritative records and requires a separately authorized
+projection. No such link is implemented or enabled.
+
+Optional Telegram messaging may later be disconnected without deleting retained FetanAgent account
+history. See [standalone-web-pwa.md](standalone-web-pwa.md).
 
 ## Trust boundary
 
@@ -62,16 +81,17 @@ delivery retry.
 - No Telegram profile value crosses the admission database boundary, so redemption cannot create a
   customer profile from Telegram-supplied display data.
 
-## Transport status and next gates
+## Optional legacy-transport status and gates
 
-The historic generic private-inbox transport remains disabled and must not be enabled for the
-invite-only beta. It is superseded by a separately signed admission transport and, after
-admission, a separately signed admitted-inbox transport. Each requires an independently reviewed
-runtime credential, private deployment boundary, nonce/idempotency design, durable outbox, and
-BotFather-token rotation before activation. See [telegram-transport.md](telegram-transport.md) for
-the transport separation and key-management requirements.
+The historic generic private-inbox transport remains disabled. It is superseded technically by a
+separately signed admission transport and, after admission, a separately signed admitted-inbox
+transport. Neither is required for the standalone customer product. If optional legacy linking or
+messaging is retained, each transport still requires an independently reviewed runtime credential,
+private deployment boundary, nonce/idempotency design, durable outbox, and BotFather-token rotation
+before activation. See [telegram-transport.md](telegram-transport.md) for the transport separation
+and key-management requirements.
 
-The remaining gates are:
+The gates before any optional Telegram activation are:
 
 1. Independently review the invite-admission migration in a disposable database before any remote
    database change.

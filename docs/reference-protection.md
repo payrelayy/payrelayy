@@ -17,14 +17,14 @@ an opaque object key server-side, and prove the object exists before the databas
 The Telegram bot must forward the raw reference only to the internal API. It never receives an
 encryption key, blind-index key, direct PostgreSQL credential, or private Storage credential. The
 API handles the bounded ASCII value in memory, then the current Node-only dry-run protection module
-applies this versioned envelope before the database procedure:
+applies this stored ciphertext format before the database procedure:
 
 1. Normalize only through a server-selected, provider-specific profile. There is no generic
    fallback: the profile may trim outer ASCII whitespace and uppercase ASCII only where that
    provider's documented identifier format is case-insensitive. It rejects internal whitespace,
    Unicode/confusables, URLs, labels, controls, and unsupported patterns rather than guessing.
-2. Encrypt the normalized value with AES-256-GCM using a fresh 12-byte nonce. The encrypted
-   envelope is v<encryption-key-version>.<nonce>.<tag>.<ciphertext> using base64url fields.
+2. Encrypt the normalized value with AES-256-GCM using a fresh 12-byte nonce. The stored ciphertext
+   is v<encryption-key-version>.<nonce>.<tag>.<ciphertext> using base64url fields.
 3. Produce a separate HMAC-SHA-256 blind index over a domain-separated value containing the fixed
    `cbe_birr` provider profile and normalized reference. The database sees only the 64-character
    hexadecimal fingerprint. Any later provider must receive a distinct reviewed profile before it
@@ -40,8 +40,36 @@ provider evidence; TeleBirr needs its own approved adapter and fixtures first.
 
 The version 1 master secret and both derived subkeys stay stable together. Rotating that master
 requires a separately reviewed ciphertext re-encryption and fingerprint reindex migration so that a
-duplicate reference cannot evade an existing uniqueness index. The ciphertext envelope carries the
-protection version needed for that future rotation.
+duplicate reference cannot evade an existing uniqueness index. The leading ciphertext value is only
+the current API format's key selector. It does not by itself prove protection provenance, a complete
+lifecycle, or worker suitability.
+
+## Authoritative-lookup prerequisite finding
+
+The pure Stage 1F prerequisite contract classifies the current protected lookup-material shape as
+blocked. Its public `cbe_birr_shadow_protected_lookup_material_legacy` label is not an envelope or
+protection profile and does not bless the current `v1` value. The package accepts no raw value,
+ciphertext, key, protected-material version, algorithm or KMS choice, URL, credential, lease value,
+runtime or schema wiring, financial claim, or KemerBet operation; every capability is false.
+
+Two protection lifecycles remain unresolved. First, the receiver verification ciphertext lacks
+protection metadata and key provenance. Those facts must not be inferred or backfilled onto the
+existing immutable receiver-account revision. A future lookup requires a fresh new immutable
+revision with fresh, explicit protection provenance. Second, the submitted-reference encryption and
+fingerprint subkeys are domain-separated but share one API master provisioning and rotation root.
+No independently provisioned worker decrypt lifecycle exists.
+
+Normalization is also unresolved across three separate profiles: lookup-reference,
+receiver-lookup, and canonical-reference normalization. The current capture normalization is not
+evidence that the other two have matching semantics. Their transformations, ownership,
+compatibility, and upgrades require one explicit review before any protected material is eligible.
+
+The current shadow lease cannot close these gaps: it mutates durable state and returns protected
+material before a prerequisite preflight. A future design needs a non-mutating metadata preflight
+and an opaque handle, with any material access confined to a separately reviewed callback-scoped
+boundary. These are P0 prerequisites only; they do not authorize decryption, transport, a provider
+request, or financial action. See
+[cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
 
 ## Database safeguards
 

@@ -3,7 +3,8 @@
 This is FetanAgent's independent verification contract. The current launch-preparation scope is
 **CBE Birr only**, using strictly local redacted fixtures and advisory dry-run outcomes. It is not
 a live integration: no provider verifier is enabled, no provider credential is configured, and no
-payment can reach a claim or KemerBet execution. TeleBirr and CBE bank are deferred.
+payment can reach a claim or KemerBet execution. The authoritative-lookup prerequisite contract is
+also blocked, with all capabilities false. TeleBirr and CBE bank are deferred.
 
 QHash is reference research only. FetanAgent does not use QHash code, databases, workers,
 credentials, accounts, or runtime services. TeleBirr and CBE bank are later, separate adapters;
@@ -100,8 +101,11 @@ CBE Birr is a wallet provider, distinct from CBE bank. Existing genuine receipt 
 that an official lookup is scoped by the transaction ID together with the configured receiver
 phone. That pair is lookup material only, not proof by itself.
 
-The receiver phone stays encrypted in the worker-only configuration. A usable official result must
-independently prove all of the following before it can become authoritative evidence:
+Receiver lookup material must remain protected. The current receiver ciphertext is not worker-ready:
+it lacks protection metadata and key provenance, and FetanAgent has no independently provisioned
+worker decryption lifecycle. Those facts must not be inferred or backfilled. A fresh new immutable
+receiver-account revision is required before a usable official result could independently prove all
+of the following facts and become authoritative evidence:
 
 - CBE Birr identity and a `Completed` transaction status;
 - the provider canonical reference;
@@ -142,13 +146,32 @@ It does not contain a provider URL or host, credentials, protected lookup materi
 transport, lease or job handling, network or database access, claim or KemerBet logic, or runtime
 wiring. All financial switches remain off.
 
+Stage 1F implements the separate pure package
+`@fetanagent/cbe-birr-authoritative-lookup-prerequisite`. Its only valid-request disposition is
+`blocked`, with 12 exact blockers across five unresolved areas: source permission; receiver
+protection, provenance, and fresh immutable provisioning without inference or backfill; a
+submitted-reference key lifecycle independent from the API master; a joint review of the
+lookup-reference, receiver-lookup, and canonical-reference normalization profiles; and a
+non-mutating prerequisite preflight before any lease. The existing lease mutates durable state and
+returns protected material before such a preflight, so a future boundary needs metadata-only
+preflight and opaque-handle payloads.
+
+Every Stage 1F capability is false. The package contains no raw lookup material, ciphertext, key or
+protected-material version, algorithm or KMS selection, URL or credential, lease value, runtime or
+schema wiring, provider evidence, financial claim, or KemerBet operation. Its legacy-shape label is
+not an envelope or protection profile and does not bless the current `v1` stored value. See
+[cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
+
 Before any positive source capability can be reviewed, FetanAgent needs an independently reviewed
 permission artifact with exact access rules, a key-split/KMS envelope design that does not share the
 API master or fingerprint key, receiver key-version and purpose metadata, an isolated
 callback-scoped decryptor, a strict compiled host/TLS/redirect policy, redacted telemetry with an
 incident stop, and deterministic fake-transport tests. See
-[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md). Completing those P0 items
-would open another review; it would not itself authorize provider calls or financial action.
+[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md). The Stage 1F blockers also
+require a fresh immutable receiver revision, an independently provisioned worker decrypt lifecycle,
+one reviewed normalization ownership model, and a metadata-preflight/opaque-handle lease redesign.
+Completing those P0 items would open another review; it would not itself authorize provider calls or
+financial action.
 
 ## Privacy, operations, and rollout
 

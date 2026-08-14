@@ -10,7 +10,8 @@ and a single KemerBet platform adapter. The current launch-preparation verificat
 Birr-only redacted fixture dry-run assessment plus offline authoritative-shadow normalization
 fixtures and fail-closed attempt and settlement planning. The Stage 1E official-source policy
 is blocked with status `unproven`; no provider has a selected or permitted source, enabled adapter,
-credential, or runtime integration. TeleBirr and CBE bank are deferred.
+credential, or runtime integration. The pure Stage 1F authoritative-lookup prerequisite inventory
+also remains blocked with every capability false. TeleBirr and CBE bank are deferred.
 
 ## Component boundary
 
@@ -64,7 +65,7 @@ The staging-only simulation uses a fixed synthetic receiver labelled `DO NOT PAY
 instruction explicitly says `SIMULATION ONLY — DO NOT SEND MONEY`; no real payment destination is
 configured by that workflow.
 
-## Official-source policy boundary
+## Official-source and lookup-prerequisite boundary
 
 The Stage 1E package is `@fetanagent/cbe-birr-official-source-policy`, with the
 reserved source profile `cbe_birr_official_receipt_lookup_v1`. It is a pure policy boundary, not a
@@ -75,13 +76,32 @@ The policy contains no URL, host, credential, raw transaction reference, receive
 ciphertext, key, decryptor, lease, job, network client, database client, payment claim, KemerBet
 operation, or runtime wiring. It cannot change any financial switch or state.
 
+The Stage 1F package is
+`@fetanagent/cbe-birr-authoritative-lookup-prerequisite`. It is another pure, metadata-only blocked
+contract, not a provider adapter, decryptor, job runner, or transport. Its 12 exact blockers cover
+five unresolved areas: official-source permission; receiver protection, provenance, and fresh
+immutable provisioning; submitted-reference key lifecycle; a joint review of the three distinct
+normalization profiles; and preflight-safe acquisition. Its only valid-request disposition is
+`blocked`, every capability is false, and it cannot carry raw or protected lookup material,
+cryptographic or KMS values, a URL or credential, a lease, runtime or schema wiring, a payment
+claim, or a KemerBet action.
+
+The receiver and submitted-reference findings remain separately blocked. The receiver ciphertext
+lacks protection metadata and provenance, so a fresh new immutable receiver-account revision must
+be provisioned without inferring or backfilling facts onto an existing revision. The
+submitted-reference encryption and fingerprint subkeys are domain-separated but share one API
+master provisioning and rotation root and have no independent worker decrypt lifecycle. The current
+lease operation also mutates and returns protected material before preflight, so it must be replaced
+by a non-mutating metadata preflight and a separately reviewed opaque-handle payload design.
+
 P0 work before any positive source capability includes an independently reviewed permission
 artifact and exact access rules; key-split/KMS envelope design that never shares the API master or
 fingerprint key; receiver key-version and purpose metadata; an isolated callback-scoped decryptor;
 a strict compiled host/TLS/redirect policy; redacted telemetry and a tested incident stop; and
 deterministic fake-transport tests. Each later transport, adapter, database, duplicate-read, claim,
 and rollout boundary remains a separate review. See
-[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md).
+[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md) and
+[cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
 
 ## Withdrawal boundary
 

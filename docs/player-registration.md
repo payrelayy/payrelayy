@@ -1,12 +1,33 @@
-# Non-claiming Player-ID registration
+# Player-ID request and ownership-association boundary
 
-## Status: staged request capture and explicit Owner association boundary
+## Status: legacy staged request capture and explicit ownership-association boundary
 
-The private staging bot can now record a Player-ID registration request through the reviewed
-conversation-action boundary. The Owner-control service can list the bounded KemerBet review queue
-and record an existence result. A separate Owner-confirmed association action can then create the
-validated `customer_platform_players` binding required by deposit intake. No path calls KemerBet
-automatically, opens a deposit, displays payment instructions, or enables a payment switch.
+The private staging bot can record a Player-ID request through the reviewed conversation-action
+boundary. The private staging operations service can list the bounded KemerBet review queue and
+record an existence result. A distinct authenticated ownership-association action can then create
+the validated `customer_platform_players` binding required by deposit intake. This is existing
+Telegram staging behavior, not the canonical standalone web/PWA customer experience. No path calls
+KemerBet automatically, opens a deposit, displays payment instructions, or enables a payment switch.
+
+## Canonical standalone customer flow
+
+The responsive web/PWA uses `Add a Player ID`, not `Player-ID registration` or `pending validation`,
+in customer copy:
+
+1. A signed-in customer adds an existing KemerBet Player ID without providing a KemerBet password,
+   OTP, recovery code, or browser session.
+2. FetanAgent creates a non-claiming request and displays `Being checked`.
+3. An existence result remains insufficient; a separately reviewed control must prove the
+   customer-to-player-account association.
+4. A successful association displays `Ready to use`. Uncertainty displays
+   `Needs more information`, and a negative result displays `Could not confirm`.
+5. A customer may retain multiple `Ready to use` Player IDs and chooses one for each deposit or
+   withdrawal. Each transaction snapshots the selected immutable association.
+6. Removal or reassignment preserves history and must not reveal whether the same Player ID was
+   submitted or associated by another customer.
+
+The web/PWA account and action boundaries needed for this flow are not implemented or enabled. See
+[standalone-web-pwa.md](standalone-web-pwa.md).
 
 ## Why the existing player table is not an intake table
 
@@ -14,8 +35,8 @@ automatically, opens a deposit, displays payment instructions, or enables a paym
 a future proven destination binding, but it is unsafe for ordinary customer input: the first person
 to submit a Player ID could permanently prevent another person from submitting the same ID.
 
-Player-ID existence does not prove that the Telegram customer controls that KemerBet account.
-Registration must therefore record a customer request, not an ownership claim.
+Player-ID existence does not prove that the requesting customer controls that KemerBet account.
+The request flow must therefore record customer input, not an ownership claim.
 
 ## Applied private records
 
@@ -57,7 +78,8 @@ that repeats the same Player ID. It must not store raw message text.
 
 ### `app.player_registration_request_reviews`
 
-This append-only table records an authenticated Owner decision without copying the raw Player ID:
+This append-only table records a decision by the authenticated internal Owner role without copying
+the raw Player ID:
 
 - `exists` and `not_found` mean only that the Owner recorded a manual platform lookup;
 - `review_required` means provider evidence is still required; and
@@ -134,7 +156,7 @@ claim that the customer owns the account.
 - The bot never receives database credentials and never invokes KemerBet directly.
 - Display English reason-code translations rather than database errors.
 
-## Staging customer flow
+## Legacy Telegram staging flow
 
 1. A private-chat user presses an "Add Player ID" button carrying a valid, expiring,
    server-issued capability.
@@ -142,17 +164,20 @@ claim that the customer owns the account.
    expiring `awaiting_player_id` state.
 3. A single transaction validates that state and the new inbound event, records a
    non-claiming request, consumes the event globally, and clears or advances the conversation.
-4. The bot replies: "Player ID saved - pending validation. It cannot be used for a deposit yet."
-5. The private Owner page lists only pending or review-required KemerBet submissions and can record
-   `exists`, `not_found`, `review_required`, or `cancelled` with fixed reason codes.
-6. After separately verifying that the Telegram customer controls the account, the Owner must use
-   the distinct ownership-confirmation action. That append-only action creates one validated
-   customer/platform binding and an audit event. Existence lookup alone remains insufficient.
+4. The existing bot uses legacy `pending validation` copy. That wording must not be reused by the
+   standalone customer product; the canonical status is `Being checked`.
+5. The private staging operations page lists only pending or review-required KemerBet submissions
+   and can record `exists`, `not_found`, `review_required`, or `cancelled` with fixed reason codes.
+6. After separately proving that the Telegram customer controls the account, the authenticated
+   internal Owner role must use the distinct ownership-confirmation action. That append-only action
+   creates one validated customer/platform binding and an audit event. Existence lookup alone
+   remains insufficient.
 
-## Explicit Owner association
+## Explicit internal ownership association
 
 `app.player_registration_request_associations` is an append-only link between the reviewed request,
-the authenticated Owner, the newly validated player account, and its immutable validation attempt.
+the authenticated internal Owner role, the newly validated player account, and its immutable
+validation attempt.
 The association procedure accepts only the fixed `owner_verified_platform_ownership` reason. It is
 idempotent for the same request, rejects an existing platform-wide Player-ID binding, and is
 executable only through the narrow Owner-control role. Generic API, bot, worker, admission, and

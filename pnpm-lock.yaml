@@ -162,6 +162,8 @@ importers:
 
   packages/cbe-birr-fixtures: {}
 
+  packages/customer-web-access-foundation: {}
+
   packages/i18n: {}
 
   packages/sql-integration-tests:

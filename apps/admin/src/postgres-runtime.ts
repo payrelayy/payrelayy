@@ -112,6 +112,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)', 'execute') as fixture_assessment_record_allowed,
     has_function_privilege(current_user, 'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)', 'execute') as fixture_assessment_review_allowed,
     has_function_privilege(current_user, 'app.list_owner_dry_run_fixture_assessments(uuid,integer)', 'execute') as fixture_assessment_list_allowed,
+    has_function_privilege(current_user, 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)', 'execute') as shadow_enqueue_allowed,
+    has_function_privilege(current_user, 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)', 'execute') as shadow_list_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -138,7 +140,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.list_owner_dry_run_deposit_intake(uuid,integer)'::regprocedure,
           'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)'::regprocedure,
           'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)'::regprocedure,
-          'app.list_owner_dry_run_fixture_assessments(uuid,integer)'::regprocedure
+          'app.list_owner_dry_run_fixture_assessments(uuid,integer)'::regprocedure,
+          'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)'::regprocedure,
+          'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;

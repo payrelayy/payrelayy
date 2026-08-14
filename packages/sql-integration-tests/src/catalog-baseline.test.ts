@@ -99,6 +99,7 @@ async function queryAsRole<T extends QueryResultRow>(
   role:
     | 'fetanagent_api'
     | 'fetanagent_beta_admission'
+    | 'fetanagent_cbe_birr_shadow_worker'
     | 'fetanagent_owner_control'
     | 'fetanagent_player_actions',
   query: string,
@@ -297,6 +298,7 @@ describe('disposable SQL migration baseline', () => {
       'fetanagent_api_runtime',
       'fetanagent_beta_admission',
       'fetanagent_beta_admission_runtime',
+      'fetanagent_cbe_birr_shadow_worker',
       'fetanagent_nonce_retention',
       'fetanagent_nonce_retention_runtime',
       'fetanagent_owner_control',
@@ -390,6 +392,178 @@ describe('disposable SQL migration baseline', () => {
         set_option: false,
       },
     ]);
+  });
+
+  it('confines CBE Birr shadow verification to advisory procedures', async () => {
+    const boundary = await client.query<{
+      readonly claim_execute_denied: boolean;
+      readonly functions_are_hardened: boolean;
+      readonly jobs_forced_rls: boolean;
+      readonly jobs_have_no_policies: boolean;
+      readonly owner_can_enqueue: boolean;
+      readonly owner_can_list: boolean;
+      readonly owner_has_no_table_access: boolean;
+      readonly results_forced_rls: boolean;
+      readonly results_have_no_policies: boolean;
+      readonly shadow_worker_has_no_authoritative_table_access: boolean;
+      readonly shadow_worker_has_no_table_access: boolean;
+    }>(`
+      select
+        job_table.relrowsecurity and job_table.relforcerowsecurity as jobs_forced_rls,
+        result_table.relrowsecurity and result_table.relforcerowsecurity as results_forced_rls,
+        not exists (
+          select 1 from pg_policy policy where policy.polrelid = job_table.oid
+        ) as jobs_have_no_policies,
+        not exists (
+          select 1 from pg_policy policy where policy.polrelid = result_table.oid
+        ) as results_have_no_policies,
+        not has_table_privilege(
+          'fetanagent_cbe_birr_shadow_worker', job_table.oid,
+          'select,insert,update,delete,truncate,references,trigger'
+        ) and not has_table_privilege(
+          'fetanagent_cbe_birr_shadow_worker', result_table.oid,
+          'select,insert,update,delete,truncate,references,trigger'
+        ) as shadow_worker_has_no_table_access,
+        not exists (
+          select 1
+          from unnest(array[
+            'app.provider_payment_evidence',
+            'app.deposit_verification_attempts',
+            'app.deposit_payment_claims',
+            'app.deposit_jobs'
+          ]) protected_table(table_name)
+          where has_table_privilege(
+            'fetanagent_cbe_birr_shadow_worker', protected_table.table_name,
+            'select,insert,update,delete,truncate,references,trigger'
+          )
+        ) as shadow_worker_has_no_authoritative_table_access,
+        not has_table_privilege(
+          'fetanagent_owner_control', job_table.oid,
+          'select,insert,update,delete,truncate,references,trigger'
+        ) and not has_table_privilege(
+          'fetanagent_owner_control', result_table.oid,
+          'select,insert,update,delete,truncate,references,trigger'
+        ) as owner_has_no_table_access,
+        has_function_privilege(
+          'fetanagent_owner_control',
+          'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)', 'execute'
+        ) as owner_can_enqueue,
+        has_function_privilege(
+          'fetanagent_owner_control',
+          'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)', 'execute'
+        ) as owner_can_list,
+        not has_function_privilege(
+          'fetanagent_cbe_birr_shadow_worker',
+          'app.claim_verified_deposit_payment(uuid,uuid,uuid)', 'execute'
+        ) as claim_execute_denied,
+        not exists (
+          select 1
+          from pg_proc procedure
+          where procedure.oid in (
+            'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)'::regprocedure,
+            'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure,
+            'app.lease_cbe_birr_shadow_verification_job(uuid,integer)'::regprocedure,
+            'app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)'::regprocedure,
+            'app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)'::regprocedure
+          ) and (
+            not procedure.prosecdef
+            or procedure.proowner <> 'postgres'::regrole
+            or not (
+              coalesce(procedure.proconfig, array[]::text[])
+                @> array['search_path=pg_catalog, app, pg_temp']::text[]
+            )
+          )
+        ) as functions_are_hardened
+      from pg_class job_table
+      join pg_namespace namespace on namespace.oid = job_table.relnamespace
+      join pg_class result_table
+        on result_table.relnamespace = namespace.oid
+       and result_table.relname = 'cbe_birr_shadow_verification_results'
+      where namespace.nspname = 'app'
+        and job_table.relname = 'cbe_birr_shadow_verification_jobs'
+    `);
+    const workerFunctions = await client.query<{ readonly signature: string }>(`
+      select procedure.oid::regprocedure::text as signature
+      from pg_proc procedure
+      join pg_namespace namespace on namespace.oid = procedure.pronamespace
+      where namespace.nspname = 'app'
+        and has_function_privilege(
+          'fetanagent_cbe_birr_shadow_worker', procedure.oid, 'execute'
+        )
+      order by signature
+    `);
+    const ownerListOutput = await client.query<{ readonly output_names: readonly string[] }>(`
+      select procedure.proargnames[(procedure.pronargs + 1):] as output_names
+      from pg_proc procedure
+      where procedure.oid =
+        'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure
+    `);
+    const broadExecution = await client.query<{
+      readonly allowed: boolean;
+      readonly role_name: string;
+    }>(`
+      select denied_role.role_name,
+             bool_or(has_function_privilege(
+               denied_role.role_name, shadow_function.procedure_oid, 'execute'
+             )) as allowed
+      from (
+        values ('anon'), ('authenticated'), ('service_role'),
+               ('fetanagent_api'), ('fetanagent_api_runtime'),
+               ('fetanagent_worker')
+      ) denied_role(role_name)
+      cross join (
+        values
+          ('app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)'::regprocedure),
+          ('app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure),
+          ('app.lease_cbe_birr_shadow_verification_job(uuid,integer)'::regprocedure),
+          ('app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)'::regprocedure),
+          ('app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)'::regprocedure)
+      ) shadow_function(procedure_oid)
+      group by denied_role.role_name
+      order by denied_role.role_name
+    `);
+
+    expect(boundary.rows).toEqual([
+      {
+        claim_execute_denied: true,
+        functions_are_hardened: true,
+        jobs_forced_rls: true,
+        jobs_have_no_policies: true,
+        owner_can_enqueue: true,
+        owner_can_list: true,
+        owner_has_no_table_access: true,
+        results_forced_rls: true,
+        results_have_no_policies: true,
+        shadow_worker_has_no_authoritative_table_access: true,
+        shadow_worker_has_no_table_access: true,
+      },
+    ]);
+    expect(workerFunctions.rows.map((row) => row.signature)).toEqual([
+      'app.complete_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,text,text,text,text,text)',
+      'app.lease_cbe_birr_shadow_verification_job(uuid,integer)',
+      'app.retry_cbe_birr_shadow_verification_job(uuid,uuid,integer,text,integer)',
+    ]);
+    expect(ownerListOutput.rows).toEqual([
+      {
+        output_names: [
+          'job_id',
+          'deposit_intent_id',
+          'deposit_submission_id',
+          'job_status',
+          'attempt_count',
+          'max_attempts',
+          'run_after',
+          'lease_expires_at',
+          'created_at',
+          'updated_at',
+          'completed_at',
+          'outcome',
+          'reason_code',
+          'result_completed_at',
+        ],
+      },
+    ]);
+    expect(broadExecution.rows.every((row) => !row.allowed)).toBe(true);
   });
 
   it('keeps every private app table under forced row-level security', async () => {
@@ -2335,10 +2509,11 @@ describe('disposable SQL migration baseline', () => {
       `
         insert into app.receiver_accounts (
           provider_id, version, account_holder_name, account_reference_ciphertext,
-          account_reference_masked, instructions, created_by_admin_id
+          verification_reference_ciphertext, account_reference_masked, instructions,
+          created_by_admin_id
         )
         select payment_provider.id, 1, 'FetanAgent Staging', 'fixture-ciphertext',
-               '****1234', jsonb_build_object(
+               'receiver-verification-ciphertext', '****1234', jsonb_build_object(
                  'customer_message', 'Send only CBE Birr to the shown account.'
                ), $1::uuid
         from app.payment_providers payment_provider
@@ -2413,13 +2588,14 @@ describe('disposable SQL migration baseline', () => {
     );
     const referenceInboundId = referenceInbound.rows[0]!.id;
     const captured = await queryAsRole<{
+      readonly deposit_submission_id: string;
       readonly origin_inbound_event_already_consumed: boolean;
       readonly result_deposit_intent_id: string;
       readonly submission_status: string;
     }>(
       'fetanagent_player_actions',
       `
-        select result_deposit_intent_id, submission_status,
+        select deposit_submission_id, result_deposit_intent_id, submission_status,
                origin_inbound_event_already_consumed
         from app.capture_telegram_dry_run_deposit_reference(
           $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::smallint, $7::text
@@ -2437,11 +2613,13 @@ describe('disposable SQL migration baseline', () => {
     );
     expect(captured).toEqual([
       {
+        deposit_submission_id: expect.any(String),
         origin_inbound_event_already_consumed: false,
         result_deposit_intent_id: depositIntentId,
         submission_status: 'received',
       },
     ]);
+    const depositSubmissionId = captured[0]!.deposit_submission_id;
 
     const capturedReplay = await queryAsRole<{
       readonly origin_inbound_event_already_consumed: boolean;
@@ -2470,6 +2648,71 @@ describe('disposable SQL migration baseline', () => {
         result_deposit_intent_id: depositIntentId,
       },
     ]);
+
+    const createAdditionalShadowSubmission = async (
+      externalEventSeed: string,
+      expectedAmountMinor: number,
+      referenceFingerprintCharacter: string,
+      referenceMasked: string,
+    ): Promise<{
+      readonly depositIntentId: string;
+      readonly depositSubmissionId: string;
+    }> => {
+      const openingUpdateId = BigInt(externalEventSeed);
+      const referenceUpdateId = openingUpdateId + 1n;
+      const openingEvent = await client.query<{ readonly id: string }>(
+        `insert into app.inbound_events (
+           channel, external_event_id, customer_identity_id, payload_digest
+         ) values ('telegram', $1::text, $2::uuid, $3::text)
+        returning id`,
+        [
+          `update:${openingUpdateId.toString()}`,
+          telegramIdentityId,
+          payloadHmac(referenceFingerprintCharacter),
+        ],
+      );
+      const openedIntent = await queryAsRole<{ readonly deposit_intent_id: string }>(
+        'fetanagent_player_actions',
+        `select deposit_intent_id
+         from app.open_telegram_dry_run_deposit_intent(
+           $1::uuid, 'STAGING-OWNER-REVIEW-01', $2::bigint, $3::text
+         )`,
+        [openingEvent.rows[0]!.id, expectedAmountMinor, payloadHmac(referenceFingerprintCharacter)],
+      );
+      const referenceEvent = await client.query<{ readonly id: string }>(
+        `insert into app.inbound_events (
+           channel, external_event_id, customer_identity_id, payload_digest
+         ) values ('telegram', $1::text, $2::uuid, $3::text)
+        returning id`,
+        [
+          `update:${referenceUpdateId.toString()}`,
+          telegramIdentityId,
+          payloadHmac(referenceFingerprintCharacter),
+        ],
+      );
+      const capturedSubmission = await queryAsRole<{
+        readonly deposit_submission_id: string;
+      }>(
+        'fetanagent_player_actions',
+        `select deposit_submission_id
+          from app.capture_telegram_dry_run_deposit_reference(
+            $1::uuid, $2::uuid, $3::text, $4::text, $5::text, 1::smallint, $6::text
+          )`,
+        [
+          referenceEvent.rows[0]!.id,
+          openedIntent[0]!.deposit_intent_id,
+          `v1.${referenceFingerprintCharacter.repeat(16)}.${referenceFingerprintCharacter.repeat(24)}.${referenceFingerprintCharacter.repeat(8)}`,
+          referenceFingerprintCharacter.repeat(64),
+          referenceMasked,
+          payloadHmac(referenceFingerprintCharacter),
+        ],
+      );
+
+      return {
+        depositIntentId: openedIntent[0]!.deposit_intent_id,
+        depositSubmissionId: capturedSubmission[0]!.deposit_submission_id,
+      };
+    };
 
     const ownerProjection = await queryAsRole<{
       readonly deposit_intent_id: string;
@@ -2678,7 +2921,579 @@ describe('disposable SQL migration baseline', () => {
       ),
     ).rejects.toThrow(/permission denied/u);
 
+    const authoritativeBaseline = await client.query<{
+      readonly claims: number;
+      readonly deposit_status: string;
+      readonly evidence: number;
+      readonly jobs: number;
+      readonly state_events: number;
+      readonly submission_status: string;
+      readonly verification_attempts: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from app.provider_payment_evidence) as evidence,
+          (select count(*)::integer from app.deposit_verification_attempts)
+            as verification_attempts,
+          (select count(*)::integer from app.deposit_payment_claims) as claims,
+          (select count(*)::integer from app.deposit_jobs) as jobs,
+          (select count(*)::integer from app.deposit_state_events
+            where deposit_intent_id = $1::uuid) as state_events,
+          (select status from app.deposit_intents where id = $1::uuid) as deposit_status,
+          (select status from app.deposit_submissions where id = $2::uuid)
+            as submission_status
+      `,
+      [depositIntentId, depositSubmissionId],
+    );
+
+    const shadowEnqueue = await queryAsRole<{
+      readonly already_enqueued: boolean;
+      readonly job_id: string;
+      readonly job_status: string;
+    }>(
+      'fetanagent_owner_control',
+      `select job_id, job_status, already_enqueued
+       from app.enqueue_cbe_birr_shadow_verification($1::uuid, $2::uuid, $3::uuid)`,
+      [ownerAuthUserId, depositIntentId, depositSubmissionId],
+    );
+    expect(shadowEnqueue).toEqual([
+      {
+        already_enqueued: false,
+        job_id: expect.any(String),
+        job_status: 'queued',
+      },
+    ]);
+    const shadowJobId = shadowEnqueue[0]!.job_id;
+
+    const shadowEnqueueReplay = await queryAsRole<{
+      readonly already_enqueued: boolean;
+      readonly job_id: string;
+      readonly job_status: string;
+    }>(
+      'fetanagent_owner_control',
+      `select job_id, job_status, already_enqueued
+       from app.enqueue_cbe_birr_shadow_verification($1::uuid, $2::uuid, $3::uuid)`,
+      [ownerAuthUserId, depositIntentId, depositSubmissionId],
+    );
+    expect(shadowEnqueueReplay).toEqual([
+      { already_enqueued: true, job_id: shadowJobId, job_status: 'queued' },
+    ]);
+
+    await expect(
+      queryAsRole(
+        'fetanagent_api',
+        `select * from app.enqueue_cbe_birr_shadow_verification(
+           $1::uuid, $2::uuid, $3::uuid
+         )`,
+        [ownerAuthUserId, depositIntentId, depositSubmissionId],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+
+    const shadowWorkerId = '22222222-2222-4222-8222-222222222222';
+    const firstLease = await queryAsRole<{
+      readonly attempt_number: number;
+      readonly deposit_intent_id: string;
+      readonly deposit_submission_id: string;
+      readonly job_id: string;
+      readonly lease_token: string;
+      readonly receiver_verification_reference_ciphertext: string;
+      readonly submitted_reference_ciphertext: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, deposit_intent_id, deposit_submission_id, attempt_number,
+              lease_token, submitted_reference_ciphertext,
+              receiver_verification_reference_ciphertext
+       from app.lease_cbe_birr_shadow_verification_job($1::uuid, 1)`,
+      [shadowWorkerId],
+    );
+    expect(firstLease).toEqual([
+      {
+        attempt_number: 1,
+        deposit_intent_id: depositIntentId,
+        deposit_submission_id: depositSubmissionId,
+        job_id: shadowJobId,
+        lease_token: expect.any(String),
+        receiver_verification_reference_ciphertext: 'receiver-verification-ciphertext',
+        submitted_reference_ciphertext: 'v1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCC',
+      },
+    ]);
+
+    await client.query('select pg_sleep(1.1)');
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select * from app.complete_cbe_birr_shadow_verification_job(
+           $1::uuid, $2::uuid, 1, 'would_review', 'provider_network_uncertain',
+           null, null, 'cbe-birr-shadow-worker-v1', 'cbe-birr-normalization-v1'
+         )`,
+        [shadowJobId, firstLease[0]!.lease_token],
+      ),
+    ).rejects.toThrow(/lease has expired/u);
+
+    const reclaimedLease = await queryAsRole<{
+      readonly attempt_number: number;
+      readonly job_id: string;
+      readonly lease_token: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, attempt_number, lease_token
+       from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
+      [shadowWorkerId],
+    );
+    expect(reclaimedLease).toEqual([
+      { attempt_number: 2, job_id: shadowJobId, lease_token: expect.any(String) },
+    ]);
+    expect(reclaimedLease[0]!.lease_token).not.toBe(firstLease[0]!.lease_token);
+
+    const scheduledRetry = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly attempt_number: number;
+      readonly job_id: string;
+      readonly job_status: string;
+      readonly run_after: Date;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, job_status, attempt_number, run_after, already_recorded
+       from app.retry_cbe_birr_shadow_verification_job(
+         $1::uuid, $2::uuid, 2, 'provider_network_uncertain', 1
+       )`,
+      [shadowJobId, reclaimedLease[0]!.lease_token],
+    );
+    expect(scheduledRetry).toEqual([
+      {
+        already_recorded: false,
+        attempt_number: 2,
+        job_id: shadowJobId,
+        job_status: 'retry_wait',
+        run_after: expect.any(Date),
+      },
+    ]);
+
+    const scheduledRetryReplay = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly attempt_number: number;
+      readonly job_id: string;
+      readonly job_status: string;
+      readonly run_after: Date;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, job_status, attempt_number, run_after, already_recorded
+       from app.retry_cbe_birr_shadow_verification_job(
+         $1::uuid, $2::uuid, 2, 'provider_network_uncertain', 1
+       )`,
+      [shadowJobId, reclaimedLease[0]!.lease_token],
+    );
+    expect(scheduledRetryReplay).toEqual([
+      {
+        already_recorded: true,
+        attempt_number: 2,
+        job_id: shadowJobId,
+        job_status: 'retry_wait',
+        run_after: scheduledRetry[0]!.run_after,
+      },
+    ]);
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select * from app.retry_cbe_birr_shadow_verification_job(
+           $1::uuid, $2::uuid, 2, 'provider_network_uncertain', 2
+         )`,
+        [shadowJobId, reclaimedLease[0]!.lease_token],
+      ),
+    ).rejects.toThrow(/not leased by this exact attempt/u);
+
+    await client.query('select pg_sleep(1.1)');
+    const finalLease = await queryAsRole<{
+      readonly attempt_number: number;
+      readonly job_id: string;
+      readonly lease_token: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, attempt_number, lease_token
+       from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
+      [shadowWorkerId],
+    );
+    expect(finalLease).toEqual([
+      { attempt_number: 3, job_id: shadowJobId, lease_token: expect.any(String) },
+    ]);
+
+    const canonicalReferenceFingerprint = 'a'.repeat(64);
+    const workerDecisionDigest = 'b'.repeat(64);
+    const completedShadow = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly job_id: string;
+      readonly outcome: string;
+      readonly reason_code: string;
+      readonly result_id: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, result_id, outcome, reason_code, already_recorded
+       from app.complete_cbe_birr_shadow_verification_job(
+         $1::uuid, $2::uuid, 3, 'would_verify', 'shadow_checks_passed',
+         $3::text, $4::text, 'cbe-birr-shadow-worker-v1',
+         'cbe-birr-normalization-v1'
+       )`,
+      [
+        shadowJobId,
+        finalLease[0]!.lease_token,
+        canonicalReferenceFingerprint,
+        workerDecisionDigest,
+      ],
+    );
+    expect(completedShadow).toEqual([
+      {
+        already_recorded: false,
+        job_id: shadowJobId,
+        outcome: 'would_verify',
+        reason_code: 'shadow_checks_passed',
+        result_id: expect.any(String),
+      },
+    ]);
+
+    const completedShadowReplay = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly job_id: string;
+      readonly outcome: string;
+      readonly reason_code: string;
+      readonly result_id: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, result_id, outcome, reason_code, already_recorded
+       from app.complete_cbe_birr_shadow_verification_job(
+         $1::uuid, $2::uuid, 3, 'would_verify', 'shadow_checks_passed',
+         $3::text, $4::text, 'cbe-birr-shadow-worker-v1',
+         'cbe-birr-normalization-v1'
+       )`,
+      [
+        shadowJobId,
+        finalLease[0]!.lease_token,
+        canonicalReferenceFingerprint,
+        workerDecisionDigest,
+      ],
+    );
+    expect(completedShadowReplay).toEqual([{ ...completedShadow[0]!, already_recorded: true }]);
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select * from app.complete_cbe_birr_shadow_verification_job(
+           $1::uuid, $2::uuid, 3, 'would_verify', 'shadow_checks_passed',
+           $3::text, $4::text, 'cbe-birr-shadow-worker-v1',
+           'cbe-birr-normalization-v1'
+         )`,
+        [shadowJobId, finalLease[0]!.lease_token, canonicalReferenceFingerprint, 'c'.repeat(64)],
+      ),
+    ).rejects.toThrow(/does not match its result/u);
+
+    const duplicateInput = await createAdditionalShadowSubmission(
+      '9500000010',
+      2600,
+      'd',
+      '***0002',
+    );
+    const duplicateEnqueue = await queryAsRole<{
+      readonly job_id: string;
+    }>(
+      'fetanagent_owner_control',
+      `select job_id
+       from app.enqueue_cbe_birr_shadow_verification($1::uuid, $2::uuid, $3::uuid)`,
+      [ownerAuthUserId, duplicateInput.depositIntentId, duplicateInput.depositSubmissionId],
+    );
+    const duplicateLease = await queryAsRole<{
+      readonly attempt_number: number;
+      readonly job_id: string;
+      readonly lease_token: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, attempt_number, lease_token
+       from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
+      [shadowWorkerId],
+    );
+    expect(duplicateLease).toEqual([
+      {
+        attempt_number: 1,
+        job_id: duplicateEnqueue[0]!.job_id,
+        lease_token: expect.any(String),
+      },
+    ]);
+    const duplicateCompletion = await queryAsRole<{
+      readonly outcome: string;
+      readonly reason_code: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select outcome, reason_code
+       from app.complete_cbe_birr_shadow_verification_job(
+         $1::uuid, $2::uuid, 1, 'would_verify', 'shadow_checks_passed',
+         $3::text, $4::text, 'cbe-birr-shadow-worker-v1',
+         'cbe-birr-normalization-v1'
+       )`,
+      [
+        duplicateEnqueue[0]!.job_id,
+        duplicateLease[0]!.lease_token,
+        canonicalReferenceFingerprint,
+        'd'.repeat(64),
+      ],
+    );
+    expect(duplicateCompletion).toEqual([
+      { outcome: 'would_reject', reason_code: 'provider_reference_reused' },
+    ]);
+    const duplicateStoredResult = await client.query<{
+      readonly outcome: string;
+      readonly reason_code: string;
+      readonly reported_outcome: string;
+      readonly reported_reason_code: string;
+    }>(
+      `select reported_outcome, reported_reason_code, outcome, reason_code
+       from app.cbe_birr_shadow_verification_results
+       where job_id = $1::uuid`,
+      [duplicateEnqueue[0]!.job_id],
+    );
+    expect(duplicateStoredResult.rows).toEqual([
+      {
+        outcome: 'would_reject',
+        reason_code: 'provider_reference_reused',
+        reported_outcome: 'would_verify',
+        reported_reason_code: 'shadow_checks_passed',
+      },
+    ]);
+
+    const retryExhaustionInput = await createAdditionalShadowSubmission(
+      '9500000020',
+      2700,
+      'e',
+      '***0003',
+    );
+    const retryExhaustionEnqueue = await queryAsRole<{
+      readonly job_id: string;
+    }>(
+      'fetanagent_owner_control',
+      `select job_id
+       from app.enqueue_cbe_birr_shadow_verification($1::uuid, $2::uuid, $3::uuid)`,
+      [
+        ownerAuthUserId,
+        retryExhaustionInput.depositIntentId,
+        retryExhaustionInput.depositSubmissionId,
+      ],
+    );
+    const retryExhaustionJobId = retryExhaustionEnqueue[0]!.job_id;
+    let terminalRetryLeaseToken = '';
+    for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber += 1) {
+      const retryLease = await queryAsRole<{
+        readonly attempt_number: number;
+        readonly job_id: string;
+        readonly lease_token: string;
+      }>(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select job_id, attempt_number, lease_token
+         from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`,
+        [shadowWorkerId],
+      );
+      expect(retryLease).toEqual([
+        {
+          attempt_number: attemptNumber,
+          job_id: retryExhaustionJobId,
+          lease_token: expect.any(String),
+        },
+      ]);
+      terminalRetryLeaseToken = retryLease[0]!.lease_token;
+
+      const retryReceipt = await queryAsRole<{
+        readonly already_recorded: boolean;
+        readonly attempt_number: number;
+        readonly job_id: string;
+        readonly job_status: string;
+        readonly outcome: string | null;
+        readonly reason_code: string | null;
+      }>(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select job_id, job_status, attempt_number, outcome, reason_code,
+                already_recorded
+         from app.retry_cbe_birr_shadow_verification_job(
+           $1::uuid, $2::uuid, $3::integer,
+           'authoritative_receipt_unavailable', 1
+         )`,
+        [retryExhaustionJobId, terminalRetryLeaseToken, attemptNumber],
+      );
+
+      if (attemptNumber < 5) {
+        expect(retryReceipt).toEqual([
+          {
+            already_recorded: false,
+            attempt_number: attemptNumber,
+            job_id: retryExhaustionJobId,
+            job_status: 'retry_wait',
+            outcome: null,
+            reason_code: null,
+          },
+        ]);
+        await client.query('select pg_sleep(1.1)');
+      } else {
+        expect(retryReceipt).toEqual([
+          {
+            already_recorded: false,
+            attempt_number: 5,
+            job_id: retryExhaustionJobId,
+            job_status: 'completed',
+            outcome: 'would_review',
+            reason_code: 'authoritative_receipt_unavailable',
+          },
+        ]);
+      }
+    }
+    const terminalRetryReplay = await queryAsRole<{
+      readonly already_recorded: boolean;
+      readonly attempt_number: number;
+      readonly job_id: string;
+      readonly job_status: string;
+      readonly outcome: string;
+      readonly reason_code: string;
+    }>(
+      'fetanagent_cbe_birr_shadow_worker',
+      `select job_id, job_status, attempt_number, outcome, reason_code, already_recorded
+       from app.retry_cbe_birr_shadow_verification_job(
+         $1::uuid, $2::uuid, 5, 'authoritative_receipt_unavailable', 1
+       )`,
+      [retryExhaustionJobId, terminalRetryLeaseToken],
+    );
+    expect(terminalRetryReplay).toEqual([
+      {
+        already_recorded: true,
+        attempt_number: 5,
+        job_id: retryExhaustionJobId,
+        job_status: 'completed',
+        outcome: 'would_review',
+        reason_code: 'authoritative_receipt_unavailable',
+      },
+    ]);
+
+    const shadowOwnerProjection = await queryAsRole<{
+      readonly attempt_count: number;
+      readonly deposit_intent_id: string;
+      readonly deposit_submission_id: string;
+      readonly job_id: string;
+      readonly job_status: string;
+      readonly outcome: string;
+      readonly reason_code: string;
+    }>(
+      'fetanagent_owner_control',
+      `select job_id, deposit_intent_id, deposit_submission_id, job_status,
+              attempt_count, outcome, reason_code
+       from app.list_owner_cbe_birr_shadow_verifications($1::uuid, 50)
+       where job_id = $2::uuid`,
+      [ownerAuthUserId, shadowJobId],
+    );
+    expect(shadowOwnerProjection).toEqual([
+      {
+        attempt_count: 3,
+        deposit_intent_id: depositIntentId,
+        deposit_submission_id: depositSubmissionId,
+        job_id: shadowJobId,
+        job_status: 'completed',
+        outcome: 'would_verify',
+        reason_code: 'shadow_checks_passed',
+      },
+    ]);
+    expect(JSON.stringify(shadowOwnerProjection)).not.toMatch(
+      /ciphertext|fingerprint|digest|key_version/u,
+    );
+
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        'select * from app.cbe_birr_shadow_verification_jobs',
+      ),
+    ).rejects.toThrow(/permission denied|row-level security/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_cbe_birr_shadow_worker',
+        `select * from app.claim_verified_deposit_payment(
+           $1::uuid, $2::uuid, $3::uuid
+         )`,
+        [depositIntentId, depositSubmissionId, completedShadow[0]!.result_id],
+      ),
+    ).rejects.toThrow(/permission denied/u);
+    await expect(
+      client.query(
+        `update app.cbe_birr_shadow_verification_results
+            set reason_code = 'receiver_mismatch'
+          where id = $1::uuid`,
+        [completedShadow[0]!.result_id],
+      ),
+    ).rejects.toThrow(/append-only/u);
+
+    const shadowAudits = await client.query<{
+      readonly action: string;
+      readonly metadata: Readonly<Record<string, unknown>>;
+    }>(`
+      select action, metadata
+      from app.audit_events
+      where action like 'deposit.cbe_birr_shadow_%'
+      order by created_at, id
+    `);
+    const safeShadowAuditKeys = new Set([
+      'job_id',
+      'deposit_intent_id',
+      'deposit_submission_id',
+      'attempt_number',
+      'outcome',
+      'reason_code',
+      'retry_after_seconds',
+    ]);
+    expect(shadowAudits.rows.length).toBeGreaterThan(0);
+    expect(
+      shadowAudits.rows.every((audit) =>
+        Object.keys(audit.metadata).every((key) => safeShadowAuditKeys.has(key)),
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(shadowAudits.rows)).not.toContain(
+      'v1.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCC',
+    );
+    expect(JSON.stringify(shadowAudits.rows)).not.toContain('receiver-verification-ciphertext');
+
+    const authoritativeAfterShadow = await client.query<{
+      readonly claims: number;
+      readonly deposit_status: string;
+      readonly evidence: number;
+      readonly jobs: number;
+      readonly state_events: number;
+      readonly submission_status: string;
+      readonly verification_attempts: number;
+    }>(
+      `
+        select
+          (select count(*)::integer from app.provider_payment_evidence) as evidence,
+          (select count(*)::integer from app.deposit_verification_attempts)
+            as verification_attempts,
+          (select count(*)::integer from app.deposit_payment_claims) as claims,
+          (select count(*)::integer from app.deposit_jobs) as jobs,
+          (select count(*)::integer from app.deposit_state_events
+            where deposit_intent_id = $1::uuid) as state_events,
+          (select status from app.deposit_intents where id = $1::uuid) as deposit_status,
+          (select status from app.deposit_submissions where id = $2::uuid)
+            as submission_status
+      `,
+      [depositIntentId, depositSubmissionId],
+    );
+    expect(authoritativeAfterShadow.rows).toEqual(authoritativeBaseline.rows);
+
+    await client.query('begin');
+    try {
+      await client.query(
+        `update app.feature_switches
+            set mode = 'dry_run'
+          where feature_key = 'payment_verification'`,
+      );
+      await client.query('set local role fetanagent_cbe_birr_shadow_worker');
+      await expect(
+        client.query(`select * from app.lease_cbe_birr_shadow_verification_job($1::uuid, 30)`, [
+          shadowWorkerId,
+        ]),
+      ).rejects.toThrow('requires every financial feature to remain disabled');
+    } finally {
+      await client.query('rollback');
+    }
+
     const inertLedger = await client.query<{
+      readonly all_financial_switches_disabled: boolean;
       readonly claims: number;
       readonly evidence: number;
       readonly jobs: number;
@@ -2686,6 +3501,14 @@ describe('disposable SQL migration baseline', () => {
     }>(
       `
         select
+          (
+            select count(*) = 4 and bool_and(feature_switch.mode = 'disabled')
+            from app.feature_switches feature_switch
+            where feature_switch.feature_key in (
+              'payment_verification', 'deposit_execution',
+              'withdrawal_validation', 'withdrawal_collection'
+            )
+          ) as all_financial_switches_disabled,
           (select count(*)::integer from app.provider_payment_evidence) as evidence,
           (select count(*)::integer from app.deposit_payment_claims) as claims,
           (select count(*)::integer from app.deposit_jobs) as jobs,
@@ -2697,7 +3520,13 @@ describe('disposable SQL migration baseline', () => {
       `,
     );
     expect(inertLedger.rows).toEqual([
-      { claims: 0, evidence: 0, jobs: 0, non_disabled_switches: 0 },
+      {
+        all_financial_switches_disabled: true,
+        claims: 0,
+        evidence: 0,
+        jobs: 0,
+        non_disabled_switches: 0,
+      },
     ]);
 
     await expect(

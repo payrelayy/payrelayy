@@ -111,11 +111,14 @@ language, and formatting can vary, so name text never authorizes a payment. The 
 must be proven by FetanAgent regression tests for every supported receipt type; an unfamiliar
 response goes to review rather than being parsed optimistically.
 
-The only implemented CBE Birr code at this stage is the redacted fixture package. Its strict parser
-and injected in-memory lookups can emit only `would_verify`, `would_reject`, or `would_review`.
-The package has no HTTP client, provider URL, filesystem evidence reader, database access, Telegram
-integration, or KemerBet integration; it does not log or return raw receipt, canonical-reference,
-or receiver values.
+The implemented CBE Birr code consists of the redacted fixture package plus a separate Stage 1A
+authoritative-shadow foundation. The shadow evaluator accepts only normalized safe facts and can
+emit only `would_verify`, `would_reject`, or `would_review`. A private database queue/result ledger
+is present for a future separately deployed shadow worker, but no runtime login or runner exists.
+Neither path has an HTTP client, provider URL, credential, filesystem evidence reader, Telegram
+integration, payment-claim grant, or KemerBet integration; neither logs or returns raw receipt,
+canonical-reference, receiver, or provider-payload values. See
+[cbe-birr-authoritative-shadow.md](cbe-birr-authoritative-shadow.md).
 
 ## Privacy, operations, and rollout
 

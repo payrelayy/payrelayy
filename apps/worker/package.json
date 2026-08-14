@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@fetanagent/config": "workspace:*"
+    "@fetanagent/config": "workspace:*",
+    "@fetanagent/contracts": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

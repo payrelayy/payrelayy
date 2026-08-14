@@ -173,9 +173,9 @@ checks its SHA-256 before every privileged operation, so an absent, stale, writa
 helper fails closed.
 
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or
-`stop-and-disable` is selected. The permanent read-only `transition-ssh-verify` mode uses only the
-three `STAGING_VM_*` SSH inputs. Never paste any protected value into a task, repository file,
-workflow input, or VM command line.
+`stop-and-disable` is selected. The permanent read-only `transition-ssh-verify` mode and the guarded
+`transition-stop-legacy` mode use only the three `STAGING_VM_*` SSH inputs. Never paste any
+protected value into a task, repository file, workflow input, or VM command line.
 
 | Environment secret                               | Required boundary                                    |
 | ------------------------------------------------ | ---------------------------------------------------- |
@@ -209,7 +209,24 @@ only builds the five commit-labelled images. `transition-ssh-verify` checks out 
 derives the reviewed helper SHA-256, and uses the protected private key and strict pinned
 `known_hosts` entry to connect as non-root `fetanagent-admin`. It invokes only the helper's
 checksum-verifying `verify` command: it does not stop a runtime, access the database, run Compose,
-transfer a release, or alter VM state. `deploy-and-smoke` additionally requires the
+transfer a release, or alter VM state.
+
+`transition-stop-legacy` is a one-way transition boundary. Freeze `main` at the final post-merge SHA
+through this sequence: first the separate `transition-ssh-verify` run for that SHA must pass, then
+the root-console transition `acknowledge` and `verify` commands for the same SHA must both pass.
+Only then may the stop mode be dispatched.
+The stop dispatch must repeat that full SHA, the staging project ref, and the staging Droplet ID, and
+must type the exact irreversible confirmation `stop-legacy-staging-runtime`. In one strict,
+pinned-host SSH session as the literal legacy non-root administrator named in the transition
+runbook, it runs only the legacy helper's fixed-digest `verify` followed by `stop`. It does not access
+the database, run Docker or Compose directly, transfer a release, impersonate root, use the
+FetanAgent helper, or write the root-only transition receipt. A successful job means only that the
+old helper reported a successful stop. Immediately return to the already-open root console and run
+`mark-legacy-stopped` with the same SHA, then `verify`; keep staging offline until both pass. If the
+workflow fails or the root-console checks do not pass, do not deploy, migrate, restore the old
+runtime, or claim that the boundary is sealed.
+
+`deploy-and-smoke` additionally requires the
 protected `staging` environment, a dedicated `fetanagent-admin` SSH identity with noninteractive
 sudo access only to the root-owned `/usr/local/sbin/fetanagent-staging-deploy-helper`, pinned
 `known_hosts`, a rotated staging bot token, the public Supabase client key, and three distinct narrow

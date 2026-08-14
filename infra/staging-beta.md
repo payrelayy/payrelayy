@@ -173,8 +173,9 @@ checks its SHA-256 before every privileged operation, so an absent, stale, writa
 helper fails closed.
 
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or
-`stop-and-disable` is selected. Never paste their values into a task, repository file, workflow
-input, or VM command line.
+`stop-and-disable` is selected. The permanent read-only `transition-ssh-verify` mode uses only the
+three `STAGING_VM_*` SSH inputs. Never paste any protected value into a task, repository file,
+workflow input, or VM command line.
 
 | Environment secret                               | Required boundary                                    |
 | ------------------------------------------------ | ---------------------------------------------------- |
@@ -204,7 +205,11 @@ screenshot is compromised and must never be reused.
 
 `Staging beta deploy and smoke` is manual-only and dormant unless dispatched from the exact
 reviewed `main` commit with the staging project ref and DigitalOcean droplet ID typed back. `plan`
-only builds the five commit-labelled images. `deploy-and-smoke` additionally requires the
+only builds the five commit-labelled images. `transition-ssh-verify` checks out that exact commit,
+derives the reviewed helper SHA-256, and uses the protected private key and strict pinned
+`known_hosts` entry to connect as non-root `fetanagent-admin`. It invokes only the helper's
+checksum-verifying `verify` command: it does not stop a runtime, access the database, run Compose,
+transfer a release, or alter VM state. `deploy-and-smoke` additionally requires the
 protected `staging` environment, a dedicated `fetanagent-admin` SSH identity with noninteractive
 sudo access only to the root-owned `/usr/local/sbin/fetanagent-staging-deploy-helper`, pinned
 `known_hosts`, a rotated staging bot token, the public Supabase client key, and three distinct narrow

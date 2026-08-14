@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -32,6 +33,11 @@ assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/);
 assert.match(workflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
 assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
+assert.match(workflow, /^\s+- transition-ssh-verify$/m);
+assert.match(
+  workflow,
+  /\^\(plan\|transition-ssh-verify\|unban-and-connectivity-check\|deploy-and-smoke\|stop-and-disable\)\$/,
+);
 assert.match(workflow, /environment: staging/g);
 assert.match(workflow, /fetanagent-admin@/g);
 assert.doesNotMatch(
@@ -49,6 +55,86 @@ assert.match(workflow, /fetanagent-staging-deploy-helper stop/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper discard/g);
 assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
+
+const transitionSshVerify = /\n  transition-ssh-verify:\n([\s\S]*?)\n  deploy:\n/u.exec(
+  workflow,
+)?.[1];
+assert.ok(
+  transitionSshVerify,
+  'The permanent read-only transition SSH verification job must exist.',
+);
+assert.equal(
+  createHash('sha256').update(transitionSshVerify).digest('hex'),
+  'd24537ae9f6a7d7640a6991ff8a09c27eb8424202640af94bcec701bab01984e',
+  'The reviewed read-only transition SSH job body must remain byte-for-byte exact.',
+);
+assert.match(transitionSshVerify, /if: inputs\.mode == 'transition-ssh-verify'/);
+assert.match(transitionSshVerify, /needs: validate-target/);
+assert.match(transitionSshVerify, /environment: staging/);
+assert.match(transitionSshVerify, /contents: read/);
+assert.match(transitionSshVerify, /persist-credentials: false/);
+assert.match(transitionSshVerify, /GITHUB_REF" == 'refs\/heads\/main'/);
+assert.match(transitionSshVerify, /CONFIRMED_COMMIT" == "\$GITHUB_SHA/);
+assert.match(transitionSshVerify, /git rev-parse HEAD/);
+assert.match(transitionSshVerify, /CONFIRMED_PROJECT" == "\$STAGING_PROJECT_REF/);
+assert.match(transitionSshVerify, /CONFIRMED_PROJECT" != "\$PRODUCTION_PROJECT_REF/);
+assert.match(transitionSshVerify, /CONFIRMED_DROPLET" == "\$STAGING_DROPLET_ID/);
+assert.match(transitionSshVerify, /REQUESTED_MODE" == 'transition-ssh-verify'/);
+assert.match(transitionSshVerify, /STAGING_VM_HOST: \$\{\{ secrets\.STAGING_VM_HOST \}\}/);
+assert.match(
+  transitionSshVerify,
+  /STAGING_VM_KNOWN_HOSTS: \$\{\{ secrets\.STAGING_VM_KNOWN_HOSTS \}\}/,
+);
+assert.match(
+  transitionSshVerify,
+  /STAGING_VM_SSH_PRIVATE_KEY: \$\{\{ secrets\.STAGING_VM_SSH_PRIVATE_KEY \}\}/,
+);
+assert.equal(
+  (transitionSshVerify.match(/\$\{\{ secrets\./g) ?? []).length,
+  3,
+  'The read-only transition SSH job may receive only the three protected VM SSH inputs.',
+);
+assert.match(
+  transitionSshVerify,
+  /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/,
+);
+assert.match(transitionSshVerify, /ssh-keygen -F "\$STAGING_VM_HOST"/);
+assert.match(transitionSshVerify, /BatchMode=yes/);
+assert.match(transitionSshVerify, /ClearAllForwardings=yes/);
+assert.match(transitionSshVerify, /IdentitiesOnly=yes/);
+assert.match(transitionSshVerify, /RequestTTY=no/);
+assert.match(transitionSshVerify, /StrictHostKeyChecking=yes/);
+assert.match(transitionSshVerify, /UserKnownHostsFile=/);
+assert.equal(
+  (transitionSshVerify.match(/^\s*ssh\s/gm) ?? []).length,
+  1,
+  'The transition SSH verification job may execute SSH exactly once.',
+);
+assert.match(transitionSshVerify, /test \\"\\\$\(id -u\)\\" -ne 0/);
+assert.match(transitionSshVerify, /test \\"\\\$\(id -un\)\\" = 'fetanagent-admin'/);
+assert.equal(
+  (transitionSshVerify.match(/sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper/g) ?? [])
+    .length,
+  1,
+  'The transition SSH verification job may cross the sudo boundary exactly once.',
+);
+assert.match(
+  transitionSshVerify,
+  /sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper verify '\$helper_sha'/,
+);
+const transitionRemoteCommand = transitionSshVerify
+  .split(/\r?\n/u)
+  .find((line) => line.includes('remote_command='));
+assert.ok(transitionRemoteCommand, 'The transition SSH verification command must be explicit.');
+assert.equal(
+  transitionRemoteCommand.trim(),
+  String.raw`remote_command="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha'"`,
+  'The remote command must remain the exact non-root and checksum-only proof.',
+);
+assert.doesNotMatch(
+  transitionSshVerify,
+  /\bpsql\b|\bsupabase\b|\bdocker\b|\bcompose\b|\bscp\b|\bcurl\b|\bwget\b|staging-runtimes|fetanagent-staging-deploy-helper (?:stop|discard|install|start|cutover-ready|network-ready|diagnose-owner-startup)/,
+);
 assert.match(workflow, /docker build --pull=false --target admin/);
 assert.match(workflow, /docker build --pull=false --target api/);
 assert.match(workflow, /docker build --pull=false --target beta-admission/);
@@ -189,5 +275,5 @@ assert.match(ownerDiagnostic, /container logs --tail 80/);
 assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container logs .*bot/);
 
 console.log(
-  'staging deploy workflow verified: manual exact-target guards, sealed images, checksummed root helper, bounded runtime credentials, and stop path',
+  'staging deploy workflow verified: manual exact-target guards, read-only transition SSH proof, sealed images, checksummed root helper, bounded runtime credentials, and stop path',
 );

@@ -25,6 +25,10 @@ calls.
 - The direct-Postgres package has a max-one pool and an exact startup catalog preflight. HTTP
   readiness reuses that result for 30 seconds and coalesces concurrent refreshes so probes cannot
   occupy the only application connection repeatedly.
+- The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package is not imported by
+  this application and is not a permission switch. Its only valid result is
+  `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`; it cannot represent a
+  positive proof, association, `Ready`, or deposit eligibility.
 
 ## Deployment gate
 
@@ -52,6 +56,12 @@ The workspace runtime can execute only these exact functions after its catalog p
 - `app.list_customer_web_player_registrations(uuid,integer)`.
 
 It has no table, sequence, schema-create, or unrelated function capability.
+
+The ownership-proof prerequisite adds no route, page, form, button, environment variable, database
+object, role, runtime composition, provider adapter, network call, or deployment wiring. No
+authoritative proof source, challenge, delivery path, or evidence protocol is selected. The
+application continues to submit and list non-claiming requests only; the database continues to
+reject web-origin ownership association, and `Ready` remains unreachable.
 
 The database migration deliberately leaves `fetanagent_customer_web_runtime` as `NOLOGIN` with no
 password. A separate reviewed role-and-secret provisioning phase must enable that runtime login and

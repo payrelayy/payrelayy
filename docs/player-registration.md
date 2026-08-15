@@ -29,7 +29,11 @@ in customer copy:
 The web/PWA account and non-claiming Player-ID submit/list boundaries now exist in source but remain
 disabled and undeployed. Web ownership proof and association/deposit eligibility are not implemented
 or enabled. A web-origin request cannot reach `Ready` until a later proof-bearing association
-boundary is reviewed and implemented. See [standalone-web-pwa.md](standalone-web-pwa.md).
+boundary is reviewed and implemented. The pure
+`@fetanagent/customer-web-player-ownership-proof-prerequisite` package records why that phase is
+blocked; it does not implement proof or change customer behavior. See
+[customer-web-player-ownership-proof.md](customer-web-player-ownership-proof.md) and
+[standalone-web-pwa.md](standalone-web-pwa.md).
 
 ## Standalone web implementation boundary
 
@@ -60,6 +64,35 @@ rejects association of every web-origin request. Therefore `Ready` is intentiona
 this slice. The boundary cannot validate ownership, make a Player ID deposit-eligible, open a
 deposit, or perform any financial action. It is customer-only; shared staff capability routing
 through the generic public entry remains a future boundary.
+
+## Dormant web ownership-proof prerequisite
+
+The repository has not selected an authoritative KemerBet control signal, challenge profile,
+challenge delivery path, evidence profile, or evidence-verification protocol. Consequently no
+positive web ownership result is representable. The pure
+`@fetanagent/customer-web-player-ownership-proof-prerequisite` package returns only
+`blocked / customer_web_player_ownership_proof_prerequisites_incomplete` for its exact metadata and
+pins these nine ordered `remainingBlockers`:
+
+1. `authoritative_platform_control_signal_unproven`
+2. `challenge_profile_unselected`
+3. `challenge_delivery_path_unselected`
+4. `evidence_profile_unselected`
+5. `evidence_freshness_replay_attempt_and_abuse_policy_unreviewed`
+6. `verification_adapter_absent`
+7. `neutral_staff_proof_review_capability_absent`
+8. `ownership_conflict_recovery_and_reassignment_policy_unreviewed`
+9. `ownership_association_and_deposit_eligibility_are_coupled`
+
+This phase adds no proof input, customer route, UI, staff workflow, provider adapter, database
+record, schema change, grant, role, runtime configuration, deployment wiring, association, `Ready`
+projection, deposit eligibility, or financial action. The existing web-origin association rejection
+and exact three-function customer-web role remain unchanged.
+
+A later proof-bearing implementation must record non-financial ownership independently from deposit
+eligibility. Only a separate financial review may promote a proven ownership fact to a
+deposit-eligible binding. See
+[customer-web-player-ownership-proof.md](customer-web-player-ownership-proof.md).
 
 ## Why the existing player table is not an intake table
 
@@ -237,8 +270,10 @@ the still-disabled payment feature switches, missing receiver-account configurat
 matching, evidence validation, or dry-run execution boundaries.
 
 The database rejects this association when the request has a web-origin receipt. A future reviewed
-migration must introduce the proof-bearing web association path before such a request can become
-`Ready` or deposit-eligible.
+migration may introduce a proof-bearing web association path only after the prerequisite blockers
+are resolved. That path must first represent ownership independently from deposit eligibility; a
+separate financial phase must control any later promotion before the request can become financially
+usable. The current request cannot become `Ready` or deposit-eligible.
 
 Before any future existence lookup, add per-customer and platform-wide abuse limits. A Player-ID
 validator must not become an account-enumeration or spam mechanism.

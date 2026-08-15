@@ -179,6 +179,8 @@ importers:
 
   packages/customer-web-access-foundation: {}
 
+  packages/customer-web-player-ownership-proof-prerequisite: {}
+
   packages/customer-web-auth-runtime:
     dependencies:
       '@fetanagent/config':

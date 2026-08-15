@@ -4748,7 +4748,15 @@ describe('disposable SQL migration baseline', () => {
     expect(functionDefinition).not.toMatch(
       /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\.deposit_intents\b/iu,
     );
-    expect(functionDefinition).not.toMatch(/\b(?:insert\s+into|update|delete\s+from|truncate)\b/iu);
+    const listFunctionDefinition = await client.query<{ readonly definition: string }>(`
+      select lower(pg_get_functiondef(
+        'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure
+      )) as definition
+    `);
+    expect(listFunctionDefinition.rows).toHaveLength(1);
+    expect(listFunctionDefinition.rows[0]!.definition).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|truncate)\b/iu,
+    );
   });
 
   it('keeps active staff Auth UUIDs outside the customer-web identity boundary', async () => {
@@ -6546,7 +6554,7 @@ describe('disposable SQL migration baseline', () => {
     expect(insertGuardSource).toContain('new.decided_at := decision_time');
     expect(insertGuardSource).toContain('new.created_at := decision_time');
 
-    const nonTriggerEntryPoints = await client.query<{ readonly entry_points: number }>(`
+    const nonTriggerEligibilityReaders = await client.query<{ readonly signature: string }>(`
       with ordinary_routines as materialized (
         select procedure.oid
         from pg_proc procedure
@@ -6555,12 +6563,15 @@ describe('disposable SQL migration baseline', () => {
           and procedure.prokind in ('f', 'p')
           and procedure.prorettype <> 'trigger'::regtype
       )
-      select count(*)::integer as entry_points
+      select routine.oid::regprocedure::text as signature
       from ordinary_routines routine
       where lower(pg_get_functiondef(routine.oid))
           like '%player_deposit_eligibility_decisions%'
+      order by signature
     `);
-    expect(nonTriggerEntryPoints.rows).toEqual([{ entry_points: 0 }]);
+    expect(nonTriggerEligibilityReaders.rows).toEqual([
+      { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
+    ]);
 
     const webOriginEligibility = await client.query<{ readonly decisions: number }>(`
       select count(*)::integer as decisions

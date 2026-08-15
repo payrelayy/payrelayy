@@ -62,13 +62,15 @@ Those functions:
 The runtime has no direct table or sequence access and no unrelated function access. The public
 projection has exactly three labels: `Checking`, `Ready`, and `Could not confirm`. Internal pending,
 existence-found, and review-required states remain `Checking`; negative or closed states become
-`Could not confirm`. The current list SQL does not join the eligibility ledger; `Ready` is
-intentionally unreachable because the database rejects association of every web-origin request.
-By product policy, any later implementation that can project `Ready` must require both a valid
-ownership association and separate current financial eligibility. No eligibility-promotion
-boundary exists. This slice cannot validate ownership, promote deposit eligibility, open a deposit,
-or perform any financial action. It is customer-only; shared staff capability routing through the
-generic public entry remains a future boundary.
+`Could not confirm`. `Ready` requires the request to remain in the positive existence state, an
+aligned active/valid same-customer association and active platform, plus a contiguous latest
+`eligible` decision whose time is not in the future and whose player-state snapshot still matches.
+Missing, revoked, stale, or malformed eligibility remains `Checking`. `Ready` is still unreachable
+because the database rejects association of every web-origin request and no eligibility-promotion
+boundary exists. The list is an advisory projection, not a financial authorization check; every new
+intent independently rechecks and snapshots eligibility. This slice cannot validate ownership,
+promote deposit eligibility, open a deposit, or perform any financial action. It is customer-only;
+shared staff capability routing through the generic public entry remains a future boundary.
 
 ## Dormant web ownership-proof prerequisite
 
@@ -306,11 +308,13 @@ eligibility decision exists. A later `revoked` decision blocks subsequent intent
 rewriting prior ones.
 
 This ledger and guard are financial quarantine only. There is no seed, backfill, promotion
-procedure, decision-writing role grant, runtime adapter, application route, staff button, customer
-projection, provider call, or feature-switch change. No ownership association automatically creates
-an `eligible` row, so the repository still has no positive ownership proof, no promotion path, no
-customer `Ready`, and no enabled deposit capability. The private table has enabled and forced RLS,
-no policy, and explicit revocations for public, Data API, service, and application runtime roles.
+procedure, decision-writing role grant, runtime adapter, application route, staff button, provider
+call, or feature-switch change. The fixed customer list projection may only reduce the private state
+to the three public labels and cannot write or expose a decision. No ownership association
+automatically creates an `eligible` row, so the repository still has no positive ownership proof,
+no promotion path, no reachable customer `Ready`, and no enabled deposit capability. The private
+table has enabled and forced RLS, no policy, and explicit revocations for public, Data API, service,
+and application runtime roles.
 
 Before any future existence lookup, add per-customer and platform-wide abuse limits. A Player-ID
 validator must not become an account-enumeration or spam mechanism.

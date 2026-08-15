@@ -103,12 +103,18 @@ the latest decision to be `eligible`, and overwrites the intent's
 `player_deposit_eligibility_decision_id` with that exact decision. A latest `revoked` decision
 blocks later intents without rewriting historical intents.
 
+The customer list projection uses this ledger only to keep its future `Ready` label fail-closed. It
+requires an aligned active/valid association and platform plus a contiguous latest `eligible`
+decision whose time and player-state snapshot are current. Missing, revoked, stale, future-dated, or
+malformed eligibility stays `Checking`. No ledger identifier, version, actor, or reason is returned,
+and the deposit-intent trigger remains the financial authorization boundary.
+
 This is a financial quarantine, not a proof or promotion implementation. There is no seed,
 backfill, decision-writing procedure, runtime grant, application route, staff control, or customer
 projection that can create an eligibility decision. The ledger therefore contains no positive path
 from ownership to financial use. The ninth blocker is now the absent, separately reviewed promotion
-boundary. Proof success must never silently insert an `eligible` decision, display `Ready`, or make
-a Player ID financially usable.
+boundary. Proof success must never silently insert an `eligible` decision or make a Player ID
+financially usable.
 
 ## Required future sequence
 

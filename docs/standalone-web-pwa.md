@@ -19,21 +19,23 @@ support.
 These are product decisions, not claims about deployed capability. The repository now contains a
 disabled-by-default `apps/customer-web` SSR/PWA foundation with the canonical public account pages,
 responsive workspace shell, public-assets-only service worker, self-service email/password flow,
-server-validated Auth handling, sign-out, and forgot-password recovery. It is not wired into
-Compose, Caddy, DNS, firewall rules, production secrets, or live routing. It has no private
-app-schema/customer-workspace action boundary, Player-ID association, Telegram-history link, or
-financial capability. Its workspace is customer-only; capability-based staff routing through the
-generic public entry remains unimplemented.
+server-validated Auth handling, sign-out, forgot-password recovery, and customer Player-ID
+submit/list pages. A dedicated `@fetanagent/customer-web-workspace-runtime` connects the server-side
+BFF directly to PostgreSQL for exactly three private account/Player-ID functions; the browser has no
+database access. The slice is not wired into Compose, Caddy, DNS, firewall rules, production secrets,
+or live routing. It has no Player-ID ownership proof, validated association, deposit eligibility,
+Telegram-history link, or financial capability. Its workspace is customer-only; capability-based
+staff routing through the generic public entry remains unimplemented.
 
 The existing Telegram admission, `/owner` route, `Owner/Admin` labels, `pending validation` copy,
 and manual Player-ID review wording are implementation history and private staging behavior. They
 must not be presented as the settled customer experience. No financial, recovery, linking, or
 session capability becomes enabled merely because this product boundary is documented.
 
-The pure `@fetanagent/customer-web-access-foundation` package remains a fail-closed product-decision
-record. Its advisory `customer_web_access_runtime_not_implemented` result and 23 literal-false
-capabilities describe that package only; it is not imported as a permission switch and does not
-configure or enable the separate customer Auth runtime.
+The pure `@fetanagent/customer-web-access-foundation` package remains a historical, fail-closed,
+non-runtime product-decision record. Its advisory `customer_web_access_runtime_not_implemented`
+result and 23 literal-false capabilities describe that package only; it is not imported as a
+permission switch and does not configure or enable either implemented customer runtime.
 
 ## Canonical information architecture
 
@@ -71,13 +73,23 @@ public route remains neutral even when the authenticated navigation differs.
 3. The customer adds one or more KemerBet Player IDs without supplying a KemerBet password, OTP,
    recovery code, or browser session.
 4. Each Player ID remains unusable until a separately reviewed ownership association succeeds.
-5. The customer chooses one `Ready to use` Player ID when starting a deposit or withdrawal.
+5. The customer chooses one `Ready` Player ID when starting a deposit or withdrawal.
 6. Activity and support remain attached to the FetanAgent account rather than to a browser install
    or Telegram identity.
 
 Finding that a Player ID exists does not prove ownership. A Player ID must not be silently assigned
 to multiple customers, and a conflict must not disclose another account. Removal or reassignment
 must preserve transaction history and follow a separately reviewed dispute/recovery boundary.
+
+The implemented web flow can ensure the server-verified Auth UUID's immutable customer mapping,
+submit a non-claiming KemerBet Player-ID request with a server-generated idempotency key, and list
+only that identity's web-origin requests. Its direct-PostgreSQL role can execute only
+`app.ensure_customer_web_account(uuid)`,
+`app.submit_customer_web_player_registration(uuid,uuid,text)`, and
+`app.list_customer_web_player_registrations(uuid,integer)`. Customer statuses are exactly
+`Checking`, `Ready`, and `Could not confirm`. The database rejects ownership association for a
+web-origin request, so `Ready` is unreachable until a later proof-bearing association boundary is
+reviewed and implemented. Submit/list does not enable a deposit.
 
 ## Optional Telegram legacy-history link
 
@@ -187,18 +199,18 @@ Customer-visible terms are:
 | Owner/Admin                | FetanAgent team                                              | Team member     |
 | Owner/Admin dashboard      | Workspace                                                    | Workspace       |
 | manual verification        | Being checked                                                | Review required |
-| pending validation         | Being checked                                                | Waiting         |
+| pending validation         | Checking                                                     | Waiting         |
 | Player-ID registration     | Add a Player ID                                              | Player request  |
 | found / not found          | No direct existence status; show the final association state | Source result   |
 | payment claim              | Payment decision                                             | Decision        |
 | provider evidence          | Payment information                                          | Source result   |
 | job, lease, shadow         | Omit                                                         | Check           |
 
-Player-ID association uses `Being checked`, `Needs more information`, `Ready to use`, `Could not
-confirm`, and `Removed`. Payment and withdrawal flows may additionally use `Submitted`, `Confirmed`,
-`Expired`, and `Cancelled` only when their exact meaning is established by the authoritative
-workflow. Product copy must not imply that a human review is automatic or that an existence result
-proves ownership.
+The customer Player-ID surface uses exactly `Checking`, `Ready`, and `Could not confirm`. `Ready` is
+unreachable for a web-origin request until a later proof-bearing ownership association succeeds.
+Payment and withdrawal flows may additionally use `Submitted`, `Confirmed`, `Expired`, and
+`Cancelled` only when their exact meaning is established by the authoritative workflow. Product copy
+must not imply that a human review is automatic or that an existence result proves ownership.
 
 Internal database objects, audit records, and source code may retain exact role names, reason codes,
 and workflow identifiers where needed for security and traceability. They must not leak into public
@@ -206,7 +218,8 @@ paths, page titles, customer notifications, or customer-facing errors.
 
 ## No capability expansion
 
-This decision does not enable customer registration endpoints, authentication, recovery, sessions,
-PWA caching, Telegram linking, Player-ID ownership confirmation, provider verification, payment
-claims, KemerBet automation, withdrawals, payouts, or any financial feature switch. Each requires
-its own implemented and reviewed boundary.
+The implemented source boundaries described above remain disabled and undeployed. This decision does
+not enable production customer access, PWA caching of private data, Telegram linking, Player-ID
+ownership confirmation, provider verification, payment claims, KemerBet automation, deposits,
+withdrawals, payouts, or any financial feature switch. Each requires its own implemented and
+reviewed boundary.

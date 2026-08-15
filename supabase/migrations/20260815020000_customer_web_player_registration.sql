@@ -51,6 +51,22 @@ security invoker
 set search_path = pg_catalog, app, pg_temp
 as $$
 begin
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'fetanagent:customer-auth:v1:' || new.auth_user_id::text,
+      0::bigint
+    )
+  );
+
+  if exists (
+    select 1
+      from app.admin_users admin_user
+     where admin_user.auth_user_id = new.auth_user_id
+       and admin_user.status = 'active'
+  ) then
+    raise exception 'The customer Auth identity binding is unavailable.';
+  end if;
+
   if not exists (
     select 1
       from app.customer_identities customer_identity
@@ -70,6 +86,45 @@ create trigger customer_auth_identities_require_parent
 before insert on app.customer_auth_identities
 for each row
 execute function app.enforce_customer_auth_identity_parent();
+
+-- Active staff and customer-web identities are intentionally disjoint. This trigger shares the
+-- same per-Auth-UUID transaction lock as customer provisioning, so an activation racing an Auth
+-- binding cannot commit on both sides of the boundary.
+create function app.enforce_active_admin_customer_auth_separation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = pg_catalog, app, pg_temp
+as $$
+begin
+  if new.status <> 'active' then
+    return new;
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'fetanagent:customer-auth:v1:' || new.auth_user_id::text,
+      0::bigint
+    )
+  );
+
+  if exists (
+    select 1
+      from app.customer_auth_identities customer_auth_identity
+     where customer_auth_identity.auth_user_id = new.auth_user_id
+  ) then
+    raise exception 'The account role assignment is unavailable.';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger admin_users_reject_active_customer_auth_identity
+before insert or update of auth_user_id, status
+on app.admin_users
+for each row
+execute function app.enforce_active_admin_customer_auth_separation();
 
 create function app.reject_customer_auth_identity_mutation()
 returns trigger
@@ -242,6 +297,17 @@ begin
     raise exception 'The customer-web account request is unavailable.';
   end if;
 
+  -- Do not row-lock admin_users here: an UPDATE owns its row before its BEFORE trigger acquires
+  -- the shared advisory lock, so taking the locks in the opposite order could deadlock.
+  if exists (
+    select 1
+      from app.admin_users admin_user
+     where admin_user.auth_user_id = p_actor_auth_user_id
+       and admin_user.status = 'active'
+  ) then
+    raise exception 'The customer-web account request is unavailable.';
+  end if;
+
   select customer_auth_identity.customer_identity_id,
          customer_auth_identity.customer_id,
          customer.status,
@@ -373,6 +439,22 @@ begin
     or char_length(normalized_player_id) not between 1 and 64
     or normalized_player_id ~ '[[:space:][:cntrl:]]' then
     raise exception 'The customer-web Player ID request is invalid.';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'fetanagent:customer-auth:v1:' || p_actor_auth_user_id::text,
+      0::bigint
+    )
+  );
+
+  if exists (
+    select 1
+      from app.admin_users admin_user
+     where admin_user.auth_user_id = p_actor_auth_user_id
+       and admin_user.status = 'active'
+  ) then
+    raise exception 'The customer-web Player ID request is unavailable.';
   end if;
 
   select customer_auth_identity.customer_identity_id,
@@ -611,6 +693,22 @@ begin
     raise exception 'The customer-web Player ID list request is invalid.';
   end if;
 
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'fetanagent:customer-auth:v1:' || p_actor_auth_user_id::text,
+      0::bigint
+    )
+  );
+
+  if exists (
+    select 1
+      from app.admin_users admin_user
+     where admin_user.auth_user_id = p_actor_auth_user_id
+       and admin_user.status = 'active'
+  ) then
+    raise exception 'The customer-web Player ID list request is unavailable.';
+  end if;
+
   select customer_auth_identity.customer_identity_id,
          customer_auth_identity.customer_id
     into resolved_customer_identity_id,
@@ -758,6 +856,7 @@ from public, anon, authenticated, service_role,
      fetanagent_customer_web, fetanagent_customer_web_runtime;
 
 revoke all on function app.enforce_customer_auth_identity_parent(),
+  app.enforce_active_admin_customer_auth_separation(),
   app.reject_customer_auth_identity_mutation(),
   app.enforce_customer_web_player_registration_request_origin(),
   app.reject_customer_web_player_registration_request_origin_mutation(),

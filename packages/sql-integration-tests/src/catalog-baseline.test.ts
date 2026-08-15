@@ -4118,6 +4118,7 @@ describe('disposable SQL migration baseline', () => {
     expect(
       migrationSource.match(/fetanagent:customer-web-player-association-gate:v1:/gu),
     ).toHaveLength(2);
+    expect(migrationSource.match(/fetanagent:customer-auth:v1:/gu)).toHaveLength(5);
 
     const procedures = await client.query<{
       readonly direct_runtime_execute: boolean;
@@ -4436,6 +4437,58 @@ describe('disposable SQL migration baseline', () => {
       { hardened: true, public_execute: false, trigger_enabled: 'O' },
     ]);
 
+    const staffCustomerIdentityGuards = await client.query<{
+      readonly hardened: boolean;
+      readonly public_execute: boolean;
+      readonly relation_name: string;
+      readonly security_invoker: boolean;
+      readonly trigger_enabled: string;
+      readonly trigger_name: string;
+    }>(`
+      select
+        relation.relname as relation_name,
+        trigger.tgname as trigger_name,
+        not procedure.prosecdef as security_invoker,
+        procedure.proowner = 'postgres'::regrole
+          and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+          as hardened,
+        exists (
+          select 1
+          from aclexplode(
+            coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+          ) privilege
+          where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
+        ) as public_execute,
+        trigger.tgenabled::text as trigger_enabled
+      from pg_trigger trigger
+      join pg_proc procedure on procedure.oid = trigger.tgfoid
+      join pg_class relation on relation.oid = trigger.tgrelid
+      where trigger.tgname in (
+        'customer_auth_identities_require_parent',
+        'admin_users_reject_active_customer_auth_identity'
+      )
+        and not trigger.tgisinternal
+      order by relation_name, trigger_name
+    `);
+    expect(staffCustomerIdentityGuards.rows).toEqual([
+      {
+        hardened: true,
+        public_execute: false,
+        relation_name: 'admin_users',
+        security_invoker: true,
+        trigger_enabled: 'O',
+        trigger_name: 'admin_users_reject_active_customer_auth_identity',
+      },
+      {
+        hardened: true,
+        public_execute: false,
+        relation_name: 'customer_auth_identities',
+        security_invoker: true,
+        trigger_enabled: 'O',
+        trigger_name: 'customer_auth_identities_require_parent',
+      },
+    ]);
+
     const tables = await client.query<{
       readonly policies: number;
       readonly relforcerowsecurity: boolean;
@@ -4494,6 +4547,332 @@ describe('disposable SQL migration baseline', () => {
       expect(functionDefinition).not.toContain(forbiddenRelation);
     }
     expect(functionDefinition).not.toMatch(/\bemail\b/iu);
+  });
+
+  it('keeps active staff Auth UUIDs outside the customer-web identity boundary', async () => {
+    const readIdentityBoundarySnapshot = async (): Promise<{
+      readonly audits: number;
+      readonly bindings: number;
+      readonly customers: number;
+      readonly identities: number;
+      readonly origins: number;
+      readonly requests: number;
+    }> => {
+      const result = await client.query<{
+        readonly audits: number;
+        readonly bindings: number;
+        readonly customers: number;
+        readonly identities: number;
+        readonly origins: number;
+        readonly requests: number;
+      }>(`
+        select
+          (select count(*)::integer from app.customers) as customers,
+          (select count(*)::integer from app.customer_identities) as identities,
+          (select count(*)::integer from app.customer_auth_identities) as bindings,
+          (select count(*)::integer
+             from app.customer_web_player_registration_request_origins) as origins,
+          (select count(*)::integer from app.player_registration_requests) as requests,
+          (select count(*)::integer
+             from app.audit_events
+            where action in (
+              'customer.web_account_created',
+              'customer.web_player_registration_requested'
+            )) as audits
+      `);
+      expect(result.rows).toHaveLength(1);
+      return result.rows[0]!;
+    };
+
+    const before = await readIdentityBoundarySnapshot();
+
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.ensure_customer_web_account($1::uuid)',
+        [ownerAuthUserId],
+      ),
+    ).rejects.toThrow('customer-web account request is unavailable');
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, $3::text
+         )`,
+        [ownerAuthUserId, '21111111-1111-4111-8111-333333333333', 'STAFF-PLAYER-ID'],
+      ),
+    ).rejects.toThrow('customer-web Player ID request is unavailable');
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.list_customer_web_player_registrations($1::uuid, 20)',
+        [ownerAuthUserId],
+      ),
+    ).rejects.toThrow('customer-web Player ID list request is unavailable');
+
+    await client.query('begin');
+    try {
+      const customer = await client.query<{ readonly id: string }>(
+        `insert into app.customers (status) values ('active') returning id`,
+      );
+      const identity = await client.query<{ readonly id: string }>(
+        `insert into app.customer_identities (
+           customer_id, identity_kind, external_subject, status
+         )
+         values ($1::uuid, 'supabase_auth', $2::text, 'active')
+         returning id`,
+        [customer.rows[0]!.id, ownerAuthUserId],
+      );
+      await expect(
+        client.query(
+          `insert into app.customer_auth_identities (
+             customer_identity_id, customer_id, auth_user_id
+           )
+           values ($1::uuid, $2::uuid, $3::uuid)`,
+          [identity.rows[0]!.id, customer.rows[0]!.id, ownerAuthUserId],
+        ),
+      ).rejects.toThrow('customer Auth identity binding is unavailable');
+    } finally {
+      await client.query('rollback');
+    }
+
+    const inactiveStaffAuthUserId = '21111111-1111-4111-8111-444444444444';
+    await client.query('begin');
+    try {
+      await client.query(
+        `insert into auth.users (id, email)
+         values ($1::uuid, 'inactive-staff-customer@example.invalid')`,
+        [inactiveStaffAuthUserId],
+      );
+      await client.query(
+        `insert into app.admin_users (auth_user_id, role, status)
+         values ($1::uuid, 'administrator', 'inactive')`,
+        [inactiveStaffAuthUserId],
+      );
+      await client.query('set local role fetanagent_customer_web');
+      const customerAccount = await client.query<{
+        readonly account_created: boolean;
+        readonly account_status: string;
+      }>('select * from app.ensure_customer_web_account($1::uuid)', [inactiveStaffAuthUserId]);
+      expect(customerAccount.rows).toEqual([{ account_created: true, account_status: 'active' }]);
+      await client.query('reset role');
+      await expect(
+        client.query(
+          `update app.admin_users
+              set status = 'active'
+            where auth_user_id = $1::uuid`,
+          [inactiveStaffAuthUserId],
+        ),
+      ).rejects.toThrow('account role assignment is unavailable');
+    } finally {
+      await client.query('rollback');
+    }
+
+    expect(await readIdentityBoundarySnapshot()).toEqual(before);
+  });
+
+  it('serializes staff activation against customer-web account provisioning', async () => {
+    const raceAuthUserId = '29999999-1111-4111-8111-111111111111';
+    await client.query(
+      `insert into auth.users (id, email)
+       values ($1::uuid, 'staff-customer-race@example.invalid')`,
+      [raceAuthUserId],
+    );
+    await client.query(
+      `insert into app.admin_users (auth_user_id, role, status)
+       values ($1::uuid, 'administrator', 'inactive')`,
+      [raceAuthUserId],
+    );
+
+    const readProvisionSnapshot = async (): Promise<{
+      readonly account_audits: number;
+      readonly bindings: number;
+      readonly customers: number;
+      readonly identities: number;
+    }> => {
+      const result = await client.query<{
+        readonly account_audits: number;
+        readonly bindings: number;
+        readonly customers: number;
+        readonly identities: number;
+      }>(`
+        select
+          (select count(*)::integer from app.customers) as customers,
+          (select count(*)::integer from app.customer_identities) as identities,
+          (select count(*)::integer from app.customer_auth_identities) as bindings,
+          (select count(*)::integer
+             from app.audit_events
+            where action = 'customer.web_account_created') as account_audits
+      `);
+      expect(result.rows).toHaveLength(1);
+      return result.rows[0]!;
+    };
+    const beforeProvision = await readProvisionSnapshot();
+
+    type RaceResult = {
+      readonly committed: boolean;
+      readonly error: string | null;
+      readonly side: 'customer' | 'staff';
+    };
+    const customerConnection = createSqlIntegrationClient(environment);
+    const staffConnection = createSqlIntegrationClient(environment);
+    await Promise.all([customerConnection.connect(), staffConnection.connect()]);
+    await customerConnection.query(`set application_name = 'customer_web_staff_race_customer'`);
+    await staffConnection.query(`set application_name = 'customer_web_staff_race_activation'`);
+    await client.query('begin');
+    let blockerReleased = false;
+    try {
+      const runCustomerProvision = async (): Promise<RaceResult> => {
+        await customerConnection.query('begin');
+        try {
+          await customerConnection.query('set local role fetanagent_customer_web');
+          await customerConnection.query(
+            'select * from app.ensure_customer_web_account($1::uuid)',
+            [raceAuthUserId],
+          );
+          await customerConnection.query('commit');
+          return { committed: true, error: null, side: 'customer' };
+        } catch (error) {
+          await customerConnection.query('rollback');
+          return {
+            committed: false,
+            error: error instanceof Error ? error.message : String(error),
+            side: 'customer',
+          };
+        }
+      };
+      const runStaffActivation = async (): Promise<RaceResult> => {
+        await staffConnection.query('begin');
+        try {
+          await staffConnection.query(
+            `update app.admin_users
+                set status = 'active'
+              where auth_user_id = $1::uuid`,
+            [raceAuthUserId],
+          );
+          await staffConnection.query('commit');
+          return { committed: true, error: null, side: 'staff' };
+        } catch (error) {
+          await staffConnection.query('rollback');
+          return {
+            committed: false,
+            error: error instanceof Error ? error.message : String(error),
+            side: 'staff',
+          };
+        }
+      };
+
+      await client.query(
+        `select pg_advisory_xact_lock(hashtextextended(
+           'fetanagent:customer-auth:v1:' || $1::uuid::text,
+           0::bigint
+         ))`,
+        [raceAuthUserId],
+      );
+      const customerAttempt = runCustomerProvision();
+      const staffAttempt = runStaffActivation();
+
+      let advisoryWaiters = 0;
+      for (let poll = 0; poll < 100 && advisoryWaiters !== 2; poll += 1) {
+        const waiting = await client.query<{ readonly waiters: number }>(`
+          select count(*)::integer as waiters
+          from pg_stat_activity
+          where application_name in (
+            'customer_web_staff_race_customer',
+            'customer_web_staff_race_activation'
+          )
+            and wait_event_type = 'Lock'
+            and lower(coalesce(wait_event, '')) = 'advisory'
+        `);
+        advisoryWaiters = waiting.rows[0]!.waiters;
+        if (advisoryWaiters !== 2) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+
+      await client.query('commit');
+      blockerReleased = true;
+      const raceResults = await Promise.all([customerAttempt, staffAttempt]);
+      expect(advisoryWaiters).toBe(2);
+      expect(raceResults.filter((result) => result.committed)).toHaveLength(1);
+      expect(raceResults.filter((result) => !result.committed)).toHaveLength(1);
+      expect(raceResults.find((result) => !result.committed)?.error).toMatch(
+        /(?:customer-web account request|account role assignment) is unavailable/u,
+      );
+    } finally {
+      if (!blockerReleased) {
+        await client.query('rollback');
+      }
+      await Promise.all([customerConnection.end(), staffConnection.end()]);
+    }
+
+    const committedState = await client.query<{
+      readonly account_audits: number;
+      readonly active_staff: number;
+      readonly bindings: number;
+      readonly customers: number;
+      readonly identities: number;
+    }>(
+      `
+        select
+          (select count(*)::integer
+             from app.admin_users admin_user
+            where admin_user.auth_user_id = $1::uuid
+              and admin_user.status = 'active') as active_staff,
+          (select count(*)::integer
+             from app.customer_auth_identities customer_auth_identity
+            where customer_auth_identity.auth_user_id = $1::uuid) as bindings,
+          (select count(*)::integer
+             from app.customer_identities customer_identity
+            where customer_identity.identity_kind = 'supabase_auth'
+              and customer_identity.external_subject = $1::uuid::text) as identities,
+          (select count(*)::integer
+             from app.customers customer
+            where exists (
+              select 1
+                from app.customer_auth_identities customer_auth_identity
+               where customer_auth_identity.auth_user_id = $1::uuid
+                 and customer_auth_identity.customer_id = customer.id
+            )) as customers,
+          (select count(*)::integer
+             from app.audit_events audit_event
+            where audit_event.action = 'customer.web_account_created'
+              and exists (
+                select 1
+                  from app.customer_auth_identities customer_auth_identity
+                 where customer_auth_identity.auth_user_id = $1::uuid
+                   and customer_auth_identity.customer_id = audit_event.actor_customer_id
+              )) as account_audits
+      `,
+      [raceAuthUserId],
+    );
+    expect(committedState.rows).toHaveLength(1);
+    const state = committedState.rows[0]!;
+    expect(state.active_staff + state.bindings).toBe(1);
+    if (state.active_staff === 1) {
+      expect(state).toEqual({
+        account_audits: 0,
+        active_staff: 1,
+        bindings: 0,
+        customers: 0,
+        identities: 0,
+      });
+      expect(await readProvisionSnapshot()).toEqual(beforeProvision);
+    } else {
+      expect(state).toEqual({
+        account_audits: 1,
+        active_staff: 0,
+        bindings: 1,
+        customers: 1,
+        identities: 1,
+      });
+      expect(await readProvisionSnapshot()).toEqual({
+        account_audits: beforeProvision.account_audits + 1,
+        bindings: beforeProvision.bindings + 1,
+        customers: beforeProvision.customers + 1,
+        identities: beforeProvision.identities + 1,
+      });
+    }
   });
 
   it('binds Auth UUIDs one-to-one and keeps web Player-ID requests isolated and non-claiming', async () => {

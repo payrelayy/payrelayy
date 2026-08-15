@@ -17,38 +17,45 @@ shared.
 The current implementation is narrower and must not be confused with that product target. It has an
 invite-only Telegram staging slice, a private internal operations page, CBE Birr-only redacted
 fixture assessment, offline authoritative-shadow normalization fixtures, fail-closed attempt and
-settlement planning, and a disabled/unrouted customer-only SSR/PWA Auth foundation. Capability-based
-staff routing through the generic public entry is not implemented. The Stage 1E official-source
-policy is blocked with status `unproven`; no provider has a selected or permitted source, enabled
-adapter, credential, or runtime integration. The pure Stage 1F authoritative-lookup prerequisite
-inventory also remains blocked with every capability false. TeleBirr and CBE bank are deferred.
+settlement planning, and a disabled/unrouted customer-only SSR/PWA Auth and non-financial Player-ID
+foundation. The customer web server can ensure one customer account for a server-verified Auth UUID
+and submit/list that identity's web-origin KemerBet Player-ID requests through an exact
+direct-PostgreSQL BFF boundary. Capability-based staff routing through the generic public entry is
+not implemented. The Stage 1E official-source policy is blocked with status `unproven`; no provider
+has a selected or permitted source, enabled adapter, credential, or runtime integration. The pure
+Stage 1F authoritative-lookup prerequisite inventory also remains blocked with every capability
+false. TeleBirr and CBE bank are deferred.
 
 ## Component boundary
 
 ```text
-Responsive web/PWA ───────────────> API ──> PostgreSQL / Supabase Storage
-                                      │
-Optional Telegram legacy link ────────┤
-                                      ├──> durable jobs ──> worker ──> provider adapters
-                                      │
-Neutral team workspace ───────────────┤
-                                      │
-                                      └──> supervised executor ──> KemerBet agent UI
+Responsive web/PWA ──> customer web BFF ──> PostgreSQL / Supabase Auth
+                                │
+                                └──> future financial API
+                                                │
+Optional Telegram legacy link ──────────────────┤
+                                                ├──> durable jobs ──> worker ──> provider adapters
+                                                │
+Neutral team workspace ─────────────────────────┤
+                                                │
+                                                └──> supervised executor ──> KemerBet agent UI
 
 ```
 
 The web/PWA, optional bot, worker, workspace, and executor do not own independent financial state.
-The API and database constraints are the source of truth.
+The API and database constraints remain the source of truth for financial workflows.
 
-`app` is a private PostgreSQL schema rather than a Supabase Data API schema. When the database
-layer is introduced, the API and worker will receive isolated direct PostgreSQL runtime credentials.
-A separately reviewed maintenance-only identity is the sole narrow exception: it may eventually
-invoke the bounded expired-nonce purge, but it must never be shared with the API or worker. The bot
-and executor communicate with the API, not the database.
+`app` is a private PostgreSQL schema rather than a Supabase Data API schema. The implemented customer
+web BFF uses `@fetanagent/customer-web-workspace-runtime`, a dedicated direct-PostgreSQL identity
+with execute access to exactly three private functions and no table access. The browser never
+connects to PostgreSQL. The API, worker, and other reviewed server processes keep isolated runtime
+credentials. A separately reviewed maintenance-only identity is the sole narrow exception: it may
+eventually invoke the bounded expired-nonce purge, but it must never be shared with the API or worker.
+The bot and executor communicate with the API, not the database.
 
 ## Product deposit flow
 
-1. The signed-in customer selects one `Ready to use` KemerBet Player ID association.
+1. The signed-in customer selects one `Ready` KemerBet Player ID association.
 2. The reviewed CBE Birr dry-run intake displays its configured masked receiver account and records
    request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
    Customers may create unlimited separate deposits; FetanAgent has no customer, daily, or
@@ -80,9 +87,21 @@ The staging-only simulation uses a fixed synthetic receiver labelled `DO NOT PAY
 instruction explicitly says `SIMULATION ONLY — DO NOT SEND MONEY`; no real payment destination is
 configured by that workflow.
 
+The disabled customer web slice has a separate non-financial boundary. After server-side Supabase
+Auth verification, its BFF supplies only the Auth UUID to
+`app.ensure_customer_web_account(uuid)`,
+`app.submit_customer_web_player_registration(uuid,uuid,text)`, and
+`app.list_customer_web_player_registrations(uuid,integer)`. These functions create or replay the
+immutable customer mapping, record a bounded non-claiming request, and return only that mapping's
+web-origin requests. They cannot prove ownership, create a validated player association, make a
+Player ID deposit-eligible, open a deposit, or execute any financial action.
+The customer projection uses exactly `Checking`, `Ready`, and `Could not confirm`; `Ready` is
+unreachable for web-origin requests until a later proof-bearing association boundary is implemented.
+
 ## Account, session, and optional Telegram-link boundary
 
-The pure `@fetanagent/customer-web-access-foundation` package records these product decisions only.
+The pure `@fetanagent/customer-web-access-foundation` package is a historical, non-runtime record of
+these product decisions only.
 Its valid request returns `blocked / customer_web_access_runtime_not_implemented`, with every web,
 PWA, account-creation, authentication, password, email, recovery, session, linking, persistence,
 platform-action, and financial capability false. Self-service account creation and email/password
@@ -90,8 +109,9 @@ authentication are intent metadata in that pure package, not runtime permission.
 disabled-by-default `apps/customer-web` and `@fetanagent/customer-web-auth-runtime` source boundary
 implements the SSR/PWA account shell, server-handled Auth cookies, current-session sign-out, and a
 recovery operation whose cookie effects commit only after code exchange and password update succeed.
-It is not deployment-wired and has no private app-schema/customer-workspace database or financial
-capability.
+The separate `@fetanagent/customer-web-workspace-runtime` implements only the three non-financial
+account/Player-ID procedures described above. Neither runtime is deployment-wired, and neither
+provides Player-ID ownership proof, association/deposit eligibility, or financial capability.
 
 The canonical public paths are generic `/sign-in`, `/create-account`, and `/workspace` paths. The
 server resolves capabilities after authentication; a URL, page title, or client flag must not reveal

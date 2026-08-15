@@ -20,6 +20,8 @@ in version 1. The shared locale contract is fixed to `en`.
 The same generic public sign-in leads to the neutral `Workspace`. Customer-facing URLs, page titles,
 navigation, errors, notifications, and help content must not expose the internal terms `Owner`,
 `Admin`, `Owner Control`, `manual verification`, `job`, `lease`, `shadow`, or `payment claim`.
+Shared staff capability routing through that generic entry remains a future server-side boundary;
+neutral vocabulary must not be mistaken for implemented staff access.
 
 Use these plain-English terms:
 
@@ -28,7 +30,7 @@ Use these plain-English terms:
 | Owner/Admin             | FetanAgent team                                                       |
 | Owner/Admin dashboard   | Workspace                                                             |
 | manual verification     | Being checked                                                         |
-| pending validation      | Being checked                                                         |
+| pending validation      | Checking                                                              |
 | Player-ID registration  | Add a Player ID                                                       |
 | found / not found       | No direct existence status; use the final ownership-association state |
 | provider evidence       | Payment information                                                   |
@@ -41,10 +43,11 @@ and reason codes remain valid inside authorization, database, source-code, and a
 the language policy does not rename technical identifiers.
 
 Product copy must not imply that an existence check proves Player-ID ownership, that a human review
-is automated, or that a submitted payment is confirmed. Player-ID association uses `Being checked`,
-`Needs more information`, `Ready to use`, `Could not confirm`, and `Removed`. Payment and withdrawal
-flows may additionally use `Submitted`, `Confirmed`, `Expired`, and `Cancelled` only when their exact
-meaning is established by the authoritative workflow.
+is automated, or that a submitted payment is confirmed. The customer Player-ID surface uses exactly
+`Checking`, `Ready`, and `Could not confirm`. `Ready` is unreachable for a web-origin request until a
+later proof-bearing ownership association succeeds. Payment and withdrawal flows may additionally
+use `Submitted`, `Confirmed`, `Expired`, and `Cancelled` only when their exact meaning is established
+by the authoritative workflow.
 
 ## Data and evidence are not interface translations
 

@@ -4,16 +4,26 @@ import {
   type CustomerWebAuthRequestContext,
 } from '@fetanagent/customer-web-auth-runtime';
 import {
+  CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL,
+  createCustomerWorkspacePostgresRuntime,
+  type CustomerWorkspaceRuntime,
+} from '@fetanagent/customer-web-workspace-runtime';
+import {
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
   CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
 } from '@fetanagent/config/customer-web';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildCustomerWebApp } from './app.js';
+import {
+  buildCustomerWebApp as buildCustomerWebAppImplementation,
+  type CustomerWebAppOptions,
+} from './app.js';
 
 const csrfToken = 'A'.repeat(43);
 const recoveryCode = 'recovery_code_1234567890';
 const publicOrigin = 'https://fetanagent.com';
+const authUserId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0184';
+const requestKey = '4f8e2a44-58ef-4cb7-b274-6202e01ed341';
 
 function fakeAuth(overrides: Partial<CustomerWebAuthPort> = {}): CustomerWebAuthPort {
   return {
@@ -28,6 +38,33 @@ function fakeAuth(overrides: Partial<CustomerWebAuthPort> = {}): CustomerWebAuth
     signUpWithEmailPassword: async () => ({ ok: true, status: 'authenticated' }),
     ...overrides,
   };
+}
+
+function fakeWorkspace(
+  overrides: Partial<CustomerWorkspaceRuntime> = {},
+): CustomerWorkspaceRuntime {
+  return {
+    close: async () => undefined,
+    ensureAccount: async () => ({ ok: true, status: 'active' }),
+    listPlayerRegistrations: async () => ({ ok: true, registrations: [] }),
+    ready: async () => true,
+    submitPlayerRegistration: async ({ playerId }) => ({
+      ok: true,
+      registration: { playerId, status: 'checking' },
+    }),
+    ...overrides,
+  };
+}
+
+function buildCustomerWebApp(
+  options: Omit<CustomerWebAppOptions, 'workspace'> & {
+    readonly workspace?: CustomerWorkspaceRuntime;
+  },
+) {
+  return buildCustomerWebAppImplementation({
+    ...options,
+    workspace: options.workspace ?? fakeWorkspace(),
+  });
 }
 
 function setCookies(response: {
@@ -209,14 +246,20 @@ describe('customer web SSR and PWA boundary', () => {
 
   it('serves health and readiness without touching the Auth port', async () => {
     const getCurrentCustomer = vi.fn<CustomerWebAuthPort['getCurrentCustomer']>();
-    const app = buildCustomerWebApp({ auth: fakeAuth({ getCurrentCustomer }) });
+    const ready = vi.fn<CustomerWorkspaceRuntime['ready']>(async () => true);
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({ getCurrentCustomer }),
+      workspace: fakeWorkspace({ ready }),
+    });
 
     expect((await app.inject({ method: 'GET', url: '/healthz' })).json()).toEqual({
       status: 'ok',
     });
+    expect(ready).not.toHaveBeenCalled();
     expect((await app.inject({ method: 'GET', url: '/readyz' })).json()).toEqual({
       status: 'ready',
     });
+    expect(ready).toHaveBeenCalledTimes(1);
     expect(getCurrentCustomer).not.toHaveBeenCalled();
     await app.close();
   });
@@ -225,7 +268,7 @@ describe('customer web SSR and PWA boundary', () => {
     const app = buildCustomerWebApp({
       auth: fakeAuth({
         getCurrentCustomer: async () => ({
-          account: { email: 'person@example.com' },
+          account: { authUserId, email: 'person@example.com' },
           ok: true,
           status: 'authenticated',
         }),
@@ -321,7 +364,13 @@ describe('customer web SSR and PWA boundary', () => {
     expect(worker.body).toContain("request.mode === 'navigate'");
     expect(worker.body).toContain("request.method !== 'GET'");
     expect(worker.body).not.toContain('fetch(request).catch');
-    for (const privatePath of ['/sign-in', '/create-account', '/workspace', '/update-password']) {
+    for (const privatePath of [
+      '/sign-in',
+      '/create-account',
+      '/workspace',
+      '/update-password',
+      '/player-ids',
+    ]) {
       expect(worker.body).not.toContain(`'${privatePath}'`);
     }
     expect(worker.body).not.toMatch(/addEventListener\(['"](?:sync|push)/u);
@@ -338,7 +387,7 @@ describe('customer web SSR and PWA boundary', () => {
     const authenticated = buildCustomerWebApp({
       auth: fakeAuth({
         getCurrentCustomer: async () => ({
-          account: { email: 'safe@example.com<script>' },
+          account: { authUserId, email: 'safe@example.com<script>' },
           ok: true,
           status: 'authenticated',
         }),
@@ -349,8 +398,8 @@ describe('customer web SSR and PWA boundary', () => {
     expect(allowed.statusCode).toBe(200);
     expect(allowed.body).toContain('safe@example.com&lt;script&gt;');
     expect(allowed.body).not.toContain('safe@example.com<script>');
-    expect(allowed.body).toContain('Account status');
-    expect(allowed.body).toContain('Security');
+    expect(allowed.body).toContain('Player IDs');
+    expect(allowed.body).toContain('No Player IDs added yet.');
     await authenticated.close();
   });
 
@@ -358,7 +407,7 @@ describe('customer web SSR and PWA boundary', () => {
     const app = buildCustomerWebApp({
       auth: fakeAuth({
         getCurrentCustomer: async () => ({
-          account: { email: 'person@example.com' },
+          account: { authUserId, email: 'person@example.com' },
           ok: true,
           status: 'authenticated',
         }),
@@ -861,5 +910,419 @@ describe('customer web SSR and PWA boundary', () => {
     expect(response.headers.location).toBe('/sign-in?signed-out=1');
     expect(signOut).toHaveBeenCalledTimes(1);
     await app.close();
+  });
+
+  it('binds the workspace only to the server-confirmed Auth UUID and renders neutral statuses', async () => {
+    const ensureAccount = vi.fn<CustomerWorkspaceRuntime['ensureAccount']>(async () => ({
+      ok: true,
+      status: 'active',
+    }));
+    const listPlayerRegistrations = vi.fn<CustomerWorkspaceRuntime['listPlayerRegistrations']>(
+      async () => ({
+        ok: true,
+        registrations: [
+          { playerId: '<script>', status: 'checking' },
+          { playerId: 'PLAYER-READY', status: 'ready' },
+          { playerId: 'PLAYER-NO', status: 'needs_attention' },
+        ],
+      }),
+    );
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({
+        getCurrentCustomer: async () => ({
+          account: { authUserId, email: 'person@example.com' },
+          ok: true,
+          status: 'authenticated',
+        }),
+      }),
+      csrfTokenFactory: () => csrfToken,
+      requestKeyFactory: () => requestKey,
+      workspace: fakeWorkspace({ ensureAccount, listPlayerRegistrations }),
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/workspace' });
+    expect(response.statusCode).toBe(200);
+    expect(ensureAccount).toHaveBeenCalledWith({ authUserId });
+    expect(listPlayerRegistrations).toHaveBeenCalledWith({ authUserId, limit: 20 });
+    expect(response.body).not.toContain(authUserId);
+    expect(response.body.match(new RegExp(requestKey, 'gu'))).toHaveLength(1);
+    expect(response.body).toContain(`type="hidden" name="requestKey" value="${requestKey}"`);
+    expect(response.body).toContain('&lt;script&gt;');
+    expect(response.body).not.toContain('<script>');
+    expect(response.body).toContain('Checking');
+    expect(response.body).toContain('Ready');
+    expect(response.body).toContain('Could not confirm');
+    expect(response.body).not.toContain('needs_attention');
+    expect(response.body).not.toContain('Needs attention');
+    for (const term of ['own' + 'er', 'ad' + 'min', 'manual', 'deposit', 'payment', 'telegram']) {
+      expect(response.body.toLowerCase()).not.toContain(term);
+    }
+    await app.close();
+  });
+
+  it('submits one exact Player-ID form and uses post-redirect-get with no identifier echo', async () => {
+    const ensureAccount = vi.fn<CustomerWorkspaceRuntime['ensureAccount']>(async () => ({
+      ok: true,
+      status: 'active',
+    }));
+    const submitPlayerRegistration = vi.fn<CustomerWorkspaceRuntime['submitPlayerRegistration']>(
+      async ({ playerId }) => ({
+        ok: true,
+        registration: { playerId, status: 'checking' },
+      }),
+    );
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({
+        getCurrentCustomer: async () => ({
+          account: { authUserId, email: 'person@example.com' },
+          ok: true,
+          status: 'authenticated',
+        }),
+      }),
+      csrfTokenFactory: () => csrfToken,
+      requestKeyFactory: () => requestKey,
+      workspace: fakeWorkspace({ ensureAccount, submitPlayerRegistration }),
+    });
+    const page = await app.inject({ method: 'GET', url: '/workspace' });
+    const cookie = csrfCookie(page);
+    expect(page.body).toContain(`name="requestKey" value="${requestKey}"`);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/player-ids',
+      headers: mutationHeaders(cookie),
+      payload: form({
+        _csrf: csrfValue(cookie),
+        playerId: 'PLAYER-42',
+        requestKey,
+      }),
+    });
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe('/workspace?submitted=1');
+    expect(response.body).toBe('');
+    expect(response.headers['cache-control']).toContain('no-store');
+    expect(response.headers.vary).toContain('Cookie');
+    expect(submitPlayerRegistration).toHaveBeenCalledTimes(1);
+    expect(submitPlayerRegistration).toHaveBeenCalledWith({
+      authUserId,
+      playerId: 'PLAYER-42',
+      requestKey,
+    });
+    expect(JSON.stringify(response.headers)).not.toContain(authUserId);
+    expect(JSON.stringify(response.headers)).not.toContain(requestKey);
+    expect(JSON.stringify(response.headers)).not.toContain('PLAYER-42');
+
+    const receipt = await app.inject({ method: 'GET', url: '/workspace?submitted=1' });
+    expect(receipt.statusCode).toBe(200);
+    expect(receipt.body).toContain('Your Player ID request was received.');
+    expect(receipt.headers['cache-control']).toContain('no-store');
+    await app.close();
+  });
+
+  it('rejects provenance, CSRF, body, key, and identity-spoof attempts before Auth or workspace', async () => {
+    const getCurrentCustomer = vi.fn<CustomerWebAuthPort['getCurrentCustomer']>();
+    const ensureAccount = vi.fn<CustomerWorkspaceRuntime['ensureAccount']>();
+    const submitPlayerRegistration = vi.fn<CustomerWorkspaceRuntime['submitPlayerRegistration']>();
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({ getCurrentCustomer }),
+      workspace: fakeWorkspace({ ensureAccount, submitPlayerRegistration }),
+    });
+    const validPayload = {
+      _csrf: csrfToken,
+      playerId: 'PRIVATE-PLAYER-42',
+      requestKey,
+    };
+    const requests = [
+      {
+        headers: {
+          ...mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+          origin: 'https://example.test',
+        },
+        payload: form(validPayload),
+      },
+      {
+        headers: mutationHeaders(`__Host-fetanagent-csrf=${'B'.repeat(43)}`),
+        payload: form(validPayload),
+      },
+      {
+        headers: {
+          ...mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+          'content-type': 'application/json',
+        },
+        payload: JSON.stringify(validPayload),
+      },
+      {
+        headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+        payload: form({ ...validPayload, authUserId }),
+      },
+      {
+        headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+        payload: form({ ...validPayload, customerId: authUserId }),
+      },
+      {
+        headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+        payload: form({ ...validPayload, requestKey: authUserId }),
+      },
+    ];
+
+    for (const request of requests) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/player-ids',
+        headers: request.headers,
+        payload: request.payload,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.body).not.toContain(authUserId);
+      expect(response.body).not.toContain(requestKey);
+      expect(response.body).not.toContain('PRIVATE-PLAYER-42');
+    }
+    expect(getCurrentCustomer).not.toHaveBeenCalled();
+    expect(ensureAccount).not.toHaveBeenCalled();
+    expect(submitPlayerRegistration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('never calls the workspace for an anonymous GET or protected POST', async () => {
+    const ensureAccount = vi.fn<CustomerWorkspaceRuntime['ensureAccount']>();
+    const listPlayerRegistrations = vi.fn<CustomerWorkspaceRuntime['listPlayerRegistrations']>();
+    const submitPlayerRegistration = vi.fn<CustomerWorkspaceRuntime['submitPlayerRegistration']>();
+    const app = buildCustomerWebApp({
+      auth: fakeAuth(),
+      workspace: fakeWorkspace({
+        ensureAccount,
+        listPlayerRegistrations,
+        submitPlayerRegistration,
+      }),
+    });
+
+    const page = await app.inject({ method: 'GET', url: '/workspace' });
+    expect(page.statusCode).toBe(303);
+    expect(page.headers.location).toBe('/sign-in');
+    const submission = await app.inject({
+      method: 'POST',
+      url: '/player-ids',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({ _csrf: csrfToken, playerId: 'PLAYER-42', requestKey }),
+    });
+    expect(submission.statusCode).toBe(303);
+    expect(submission.headers.location).toBe('/sign-in');
+    expect(ensureAccount).not.toHaveBeenCalled();
+    expect(listPlayerRegistrations).not.toHaveBeenCalled();
+    expect(submitPlayerRegistration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('keeps workspace failures generic while preserving Auth cookie rotation', async () => {
+    const privateDatabaseDetail = 'private-database-function-detail';
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({
+        getCurrentCustomer: async (context) => {
+          context.cookies.appendSetCookie({
+            httpOnly: true,
+            name: 'fetanagent-session',
+            path: '/',
+            sameSite: 'lax',
+            secure: true,
+            value: 'rotated',
+          });
+          return {
+            account: { authUserId, email: 'person@example.com' },
+            ok: true,
+            status: 'authenticated',
+          };
+        },
+      }),
+      workspace: fakeWorkspace({
+        ensureAccount: async () => ({
+          error: 'customer_workspace_unavailable',
+          ok: false,
+        }),
+      }),
+    });
+    const response = await app.inject({ method: 'GET', url: '/workspace' });
+    expect(response.statusCode).toBe(503);
+    expect(
+      setCookies(response).some((cookie) => cookie.includes('fetanagent-session=rotated')),
+    ).toBe(true);
+    for (const secret of [
+      authUserId,
+      requestKey,
+      privateDatabaseDetail,
+      'customer_workspace_unavailable',
+    ]) {
+      expect(response.body).not.toContain(secret);
+      expect(JSON.stringify(response.headers)).not.toContain(secret);
+    }
+    expect(response.body).toContain('Temporarily unavailable.');
+    await app.close();
+  });
+
+  it('keeps Player-ID submission failures generic while preserving Auth cookie rotation', async () => {
+    const privateDatabaseDetail = 'private-submit-database-detail';
+    const submitPlayerRegistration = vi.fn<CustomerWorkspaceRuntime['submitPlayerRegistration']>(
+      async () => {
+        throw new Error(privateDatabaseDetail);
+      },
+    );
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({
+        getCurrentCustomer: async (context) => {
+          context.cookies.appendSetCookie({
+            httpOnly: true,
+            name: 'fetanagent-session',
+            path: '/',
+            sameSite: 'lax',
+            secure: true,
+            value: 'rotated-after-submit',
+          });
+          return {
+            account: { authUserId, email: 'person@example.com' },
+            ok: true,
+            status: 'authenticated',
+          };
+        },
+      }),
+      workspace: fakeWorkspace({ submitPlayerRegistration }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/player-ids',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({ _csrf: csrfToken, playerId: 'PRIVATE-PLAYER-42', requestKey }),
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(
+      setCookies(response).some((cookie) =>
+        cookie.includes('fetanagent-session=rotated-after-submit'),
+      ),
+    ).toBe(true);
+    expect(submitPlayerRegistration).toHaveBeenCalledWith({
+      authUserId,
+      playerId: 'PRIVATE-PLAYER-42',
+      requestKey,
+    });
+    for (const secret of [
+      authUserId,
+      requestKey,
+      'PRIVATE-PLAYER-42',
+      privateDatabaseDetail,
+      'customer_workspace_unavailable',
+    ]) {
+      expect(response.body).not.toContain(secret);
+      expect(JSON.stringify(response.headers)).not.toContain(secret);
+    }
+    expect(response.body).toContain('Temporarily unavailable.');
+    await app.close();
+  });
+
+  it('keeps an idempotent resubmission on the same hidden request key', async () => {
+    const submitPlayerRegistration = vi.fn<CustomerWorkspaceRuntime['submitPlayerRegistration']>(
+      async ({ playerId }) => ({
+        ok: true,
+        registration: { playerId, status: 'checking' },
+      }),
+    );
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({
+        getCurrentCustomer: async () => ({
+          account: { authUserId, email: 'person@example.com' },
+          ok: true,
+          status: 'authenticated',
+        }),
+      }),
+      workspace: fakeWorkspace({ submitPlayerRegistration }),
+    });
+    const request = {
+      method: 'POST' as const,
+      url: '/player-ids',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({ _csrf: csrfToken, playerId: 'PLAYER-42', requestKey }),
+    };
+    expect((await app.inject(request)).headers.location).toBe('/workspace?submitted=1');
+    expect((await app.inject(request)).headers.location).toBe('/workspace?submitted=1');
+    expect(submitPlayerRegistration.mock.calls).toEqual([
+      [{ authUserId, playerId: 'PLAYER-42', requestKey }],
+      [{ authUserId, playerId: 'PLAYER-42', requestKey }],
+    ]);
+    await app.close();
+  });
+
+  it('coalesces a burst of HTTP readiness probes into one catalog query per window', async () => {
+    let now = 1_000;
+    let catalogQueries = 0;
+    const end = vi.fn(async () => undefined);
+    const runtime = await createCustomerWorkspacePostgresRuntime(
+      {
+        connection: {
+          database: 'postgres',
+          host: 'db.spzpiyxheappsfyswewl.supabase.co',
+          password: 'test-password',
+          port: 5432,
+          user: 'fetanagent_customer_web_runtime',
+        },
+        enabled: true,
+        projectReference: 'spzpiyxheappsfyswewl',
+        stage: 'staging',
+        tlsMode: 'verify-full',
+      },
+      {
+        database: {
+          end,
+          async query(query, values) {
+            expect(query).toBe(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL);
+            expect(values).toEqual([]);
+            catalogQueries += 1;
+            return {
+              rows: [
+                {
+                  allowed_functions_execution_private: true,
+                  allowed_functions_hardened: true,
+                  app_schema_boundary_allowed: true,
+                  default_function_execution_private: true,
+                  exact_function_surface_allowed: true,
+                  group_has_no_upstream_membership: true,
+                  group_only_expected_members: true,
+                  group_role_is_safe: true,
+                  group_usage_allowed_set_denied: true,
+                  no_app_base_object_access: true,
+                  only_expected_direct_membership: true,
+                  runtime_has_no_members: true,
+                  runtime_login_identity_allowed: true,
+                  runtime_login_is_safe: true,
+                },
+              ],
+            };
+          },
+        },
+        now: () => now,
+      },
+    );
+    const app = buildCustomerWebApp({ auth: fakeAuth(), workspace: runtime });
+
+    expect(catalogQueries).toBe(1);
+    const cached = await Promise.all(
+      Array.from({ length: 20 }, () => app.inject({ method: 'GET', url: '/readyz' })),
+    );
+    expect(cached.every((response) => response.statusCode === 200)).toBe(true);
+    expect(catalogQueries).toBe(1);
+
+    now += 30_000;
+    const refreshed = await Promise.all(
+      Array.from({ length: 20 }, () => app.inject({ method: 'GET', url: '/readyz' })),
+    );
+    expect(refreshed.every((response) => response.statusCode === 200)).toBe(true);
+    expect(catalogQueries).toBe(2);
+    await app.close();
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the injected workspace exactly once', async () => {
+    const close = vi.fn<CustomerWorkspaceRuntime['close']>(async () => undefined);
+    const app = buildCustomerWebApp({ auth: fakeAuth(), workspace: fakeWorkspace({ close }) });
+    await app.close();
+    await app.close();
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

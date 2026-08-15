@@ -78,6 +78,18 @@ type AdmissionWriteSnapshot = {
   readonly telegram_beta_invites: number;
 };
 
+type CustomerWebFinancialSnapshot = {
+  readonly snapshot: string;
+};
+
+type CustomerWebSubmitRow = {
+  readonly existing_request_reused: boolean;
+  readonly platform_code: string;
+  readonly request_created_at: Date;
+  readonly request_key_already_used: boolean;
+  readonly request_status: string;
+};
+
 const legacyPrivateInboundRecorder =
   'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)';
 const betaInviteRedemptionProcedure =
@@ -100,6 +112,7 @@ async function queryAsRole<T extends QueryResultRow>(
     | 'fetanagent_api'
     | 'fetanagent_beta_admission'
     | 'fetanagent_cbe_birr_shadow_worker'
+    | 'fetanagent_customer_web'
     | 'fetanagent_owner_control'
     | 'fetanagent_player_actions',
   query: string,
@@ -161,10 +174,102 @@ async function readBetaAdmissionNonceReservationCount(): Promise<number> {
   return result.rows[0]!.reservations;
 }
 
+async function readCustomerWebFinancialSnapshot(): Promise<CustomerWebFinancialSnapshot> {
+  const result = await client.query<CustomerWebFinancialSnapshot>(`
+    select jsonb_build_object(
+      'deposit_intents', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_intents
+      ),
+      'deposit_submissions', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_submissions
+      ),
+      'deposit_submission_files', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_submission_files
+      ),
+      'provider_payment_evidence', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.provider_payment_evidence
+      ),
+      'deposit_verification_attempts', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_verification_attempts
+      ),
+      'deposit_payment_claims', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_payment_claims
+      ),
+      'deposit_jobs', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_jobs
+      ),
+      'deposit_review_cases', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_review_cases
+      ),
+      'deposit_state_events', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_state_events
+      ),
+      'deposit_policy_versions', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_policy_versions
+      ),
+      'deposit_dry_run_fixture_assessments', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_dry_run_fixture_assessments
+      ),
+      'deposit_dry_run_fixture_reviews', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_dry_run_fixture_reviews
+      ),
+      'feature_switches', (
+        select coalesce(jsonb_agg(jsonb_build_array(feature_key, xmin::text, ctid::text)
+          order by feature_key), '[]'::jsonb)
+        from app.feature_switches
+      ),
+      'customer_platform_players', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.customer_platform_players
+      ),
+      'player_validation_attempts', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.player_validation_attempts
+      ),
+      'player_registration_request_associations', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.player_registration_request_associations
+      )
+    )::text as snapshot
+  `);
+
+  expect(result.rows).toHaveLength(1);
+  return result.rows[0]!;
+}
+
 let environment: SqlIntegrationEnvironment;
 let client: ReturnType<typeof createSqlIntegrationClient>;
 let appliedMigrationNames: readonly string[];
 const ownerAuthUserId = '11111111-1111-4111-8111-111111111111';
+const customerWebAuthUserId = '21111111-1111-4111-8111-111111111111';
+const secondCustomerWebAuthUserId = '21111111-1111-4111-8111-222222222222';
 let ownerAdminId: string;
 
 beforeAll(async () => {
@@ -307,6 +412,8 @@ describe('disposable SQL migration baseline', () => {
       'fetanagent_beta_admission',
       'fetanagent_beta_admission_runtime',
       'fetanagent_cbe_birr_shadow_worker',
+      'fetanagent_customer_web',
+      'fetanagent_customer_web_runtime',
       'fetanagent_nonce_retention',
       'fetanagent_nonce_retention_runtime',
       'fetanagent_owner_control',
@@ -376,6 +483,13 @@ describe('disposable SQL migration baseline', () => {
         group_role: 'fetanagent_beta_admission',
         inherit_option: true,
         member_role: 'fetanagent_beta_admission_runtime',
+        set_option: false,
+      },
+      {
+        admin_option: false,
+        group_role: 'fetanagent_customer_web',
+        inherit_option: true,
+        member_role: 'fetanagent_customer_web_runtime',
         set_option: false,
       },
       {
@@ -3981,5 +4095,1628 @@ describe('disposable SQL migration baseline', () => {
         [requestId],
       ),
     ).rejects.toThrow(/permission denied|row-level security/u);
+  });
+
+  it('pins the private customer-web catalog, ACL, and source boundary exactly', async () => {
+    const migrationSource = await readFile(
+      join(environment.migrationsDirectory, '20260815020000_customer_web_player_registration.sql'),
+      'utf8',
+    );
+    expect(migrationSource).toContain(
+      'create function app.submit_customer_web_player_registration(\n  p_actor_auth_user_id uuid,\n  p_request_key uuid,\n  p_player_id text',
+    );
+    expect(migrationSource).not.toMatch(/\bauth\.uid\s*\(/iu);
+    expect(migrationSource).not.toMatch(
+      /\bgrant\s+execute[\s\S]{0,300}\bto\s+(?:public|anon|authenticated|service_role)\b/iu,
+    );
+    expect(migrationSource).toContain(
+      "registration_request.created_at >= clock_timestamp() - interval '24 hours'",
+    );
+    expect(migrationSource).not.toContain(
+      "request_origin.created_at >= clock_timestamp() - interval '24 hours'",
+    );
+    expect(
+      migrationSource.match(/fetanagent:customer-web-player-association-gate:v1:/gu),
+    ).toHaveLength(2);
+
+    const procedures = await client.query<{
+      readonly direct_runtime_execute: boolean;
+      readonly group_execute: boolean;
+      readonly hardened: boolean;
+      readonly output_names: readonly string[];
+      readonly public_execute: boolean;
+      readonly runtime_effective_execute: boolean;
+      readonly signature: string;
+    }>(`
+      select
+        procedure.oid::regprocedure::text as signature,
+        procedure.proargnames[(procedure.pronargs + 1):] as output_names,
+        procedure.prosecdef
+          and procedure.prokind = 'f'
+          and procedure.proowner = 'postgres'::regrole
+          and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+          as hardened,
+        has_function_privilege(
+          'fetanagent_customer_web', procedure.oid, 'EXECUTE'
+        ) as group_execute,
+        has_function_privilege(
+          'fetanagent_customer_web_runtime', procedure.oid, 'EXECUTE'
+        ) as runtime_effective_execute,
+        exists (
+          select 1
+          from aclexplode(
+            coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+          ) privilege
+          where privilege.grantee = 'fetanagent_customer_web_runtime'::regrole
+            and privilege.privilege_type = 'EXECUTE'
+        ) as direct_runtime_execute,
+        exists (
+          select 1
+          from aclexplode(
+            coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+          ) privilege
+          where privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        ) as public_execute
+      from pg_proc procedure
+      where procedure.oid in (
+        'app.ensure_customer_web_account(uuid)'::regprocedure,
+        'app.submit_customer_web_player_registration(uuid,uuid,text)'::regprocedure,
+        'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure
+      )
+      order by signature
+    `);
+    expect(procedures.rows).toEqual([
+      {
+        direct_runtime_execute: false,
+        group_execute: true,
+        hardened: true,
+        output_names: ['account_status', 'account_created'],
+        public_execute: false,
+        runtime_effective_execute: true,
+        signature: 'app.ensure_customer_web_account(uuid)',
+      },
+      {
+        direct_runtime_execute: false,
+        group_execute: true,
+        hardened: true,
+        output_names: [
+          'platform_code',
+          'submitted_player_id',
+          'request_status',
+          'request_created_at',
+          'request_updated_at',
+        ],
+        public_execute: false,
+        runtime_effective_execute: true,
+        signature: 'app.list_customer_web_player_registrations(uuid,integer)',
+      },
+      {
+        direct_runtime_execute: false,
+        group_execute: true,
+        hardened: true,
+        output_names: [
+          'platform_code',
+          'request_status',
+          'existing_request_reused',
+          'request_key_already_used',
+          'request_created_at',
+        ],
+        public_execute: false,
+        runtime_effective_execute: true,
+        signature: 'app.submit_customer_web_player_registration(uuid,uuid,text)',
+      },
+    ]);
+
+    const effectiveFunctions = await client.query<{ readonly signature: string }>(`
+      select procedure.oid::regprocedure::text as signature
+      from pg_proc procedure
+      join pg_namespace namespace on namespace.oid = procedure.pronamespace
+      where namespace.nspname = 'app'
+        and has_function_privilege(
+          'fetanagent_customer_web_runtime', procedure.oid, 'EXECUTE'
+        )
+      order by signature
+    `);
+    expect(effectiveFunctions.rows.map((row) => row.signature)).toEqual([
+      'app.ensure_customer_web_account(uuid)',
+      'app.list_customer_web_player_registrations(uuid,integer)',
+      'app.submit_customer_web_player_registration(uuid,uuid,text)',
+    ]);
+
+    const customerWebRoles = await client.query<RoleRow & { readonly rolconnlimit: number }>(`
+      select rolname, rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole,
+             rolreplication, rolbypassrls, rolconnlimit
+      from pg_roles
+      where rolname in ('fetanagent_customer_web', 'fetanagent_customer_web_runtime')
+      order by rolname
+    `);
+    expect(customerWebRoles.rows).toEqual([
+      {
+        rolbypassrls: false,
+        rolcanlogin: false,
+        rolconnlimit: 2,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolinherit: false,
+        rolname: 'fetanagent_customer_web',
+        rolreplication: false,
+        rolsuper: false,
+      },
+      {
+        rolbypassrls: false,
+        rolcanlogin: false,
+        rolconnlimit: 2,
+        rolcreatedb: false,
+        rolcreaterole: false,
+        rolinherit: false,
+        rolname: 'fetanagent_customer_web_runtime',
+        rolreplication: false,
+        rolsuper: false,
+      },
+    ]);
+
+    const unexpectedExecutors = await client.query<{
+      readonly role_name: string;
+      readonly signature: string;
+    }>(`
+      select role.rolname as role_name, procedure.oid::regprocedure::text as signature
+      from pg_roles role
+      cross join pg_proc procedure
+      where (role.rolname in ('anon', 'authenticated', 'service_role')
+          or role.rolname like 'fetanagent\\_%' escape '\\')
+        and role.rolname not in (
+          'fetanagent_customer_web',
+          'fetanagent_customer_web_runtime'
+        )
+        and procedure.oid in (
+          'app.ensure_customer_web_account(uuid)'::regprocedure,
+          'app.submit_customer_web_player_registration(uuid,uuid,text)'::regprocedure,
+          'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure
+        )
+        and has_function_privilege(role.rolname, procedure.oid, 'EXECUTE')
+      order by role_name, signature
+    `);
+    expect(unexpectedExecutors.rows).toEqual([]);
+
+    const membership = await client.query<MembershipRow>(`
+      select
+        member_role.rolname as member_role,
+        group_role.rolname as group_role,
+        membership.inherit_option,
+        membership.set_option,
+        membership.admin_option
+      from pg_auth_members membership
+      join pg_roles group_role on group_role.oid = membership.roleid
+      join pg_roles member_role on member_role.oid = membership.member
+      where group_role.rolname in (
+             'fetanagent_customer_web', 'fetanagent_customer_web_runtime'
+           )
+         or member_role.rolname in (
+           'fetanagent_customer_web', 'fetanagent_customer_web_runtime'
+         )
+      order by member_role, group_role
+    `);
+    expect(membership.rows).toEqual([
+      {
+        admin_option: false,
+        group_role: 'fetanagent_customer_web',
+        inherit_option: true,
+        member_role: 'fetanagent_customer_web_runtime',
+        set_option: false,
+      },
+    ]);
+
+    const mappingConstraints = await client.query<{
+      readonly constraint_definition: string;
+      readonly constraint_name: string;
+    }>(`
+      select constraint_name, pg_get_constraintdef(constraint.oid) as constraint_definition
+      from pg_constraint constraint
+      where constraint.conrelid = 'app.customer_auth_identities'::regclass
+        and constraint.conname in (
+          'customer_auth_identities_customer_id_key',
+          'customer_auth_identities_auth_user_id_key',
+          'customer_auth_identities_identity_customer_fkey'
+        )
+      order by constraint_name
+    `);
+    expect(mappingConstraints.rows).toEqual([
+      {
+        constraint_definition: 'UNIQUE (auth_user_id)',
+        constraint_name: 'customer_auth_identities_auth_user_id_key',
+      },
+      {
+        constraint_definition: 'UNIQUE (customer_id)',
+        constraint_name: 'customer_auth_identities_customer_id_key',
+      },
+      {
+        constraint_definition:
+          'FOREIGN KEY (customer_identity_id, customer_id) REFERENCES app.customer_identities(id, customer_id) ON DELETE RESTRICT',
+        constraint_name: 'customer_auth_identities_identity_customer_fkey',
+      },
+    ]);
+    const originRequestUniqueness = await client.query<{ readonly constraints: number }>(`
+      select count(*)::integer as constraints
+      from pg_constraint constraint
+      where constraint.conrelid =
+            'app.customer_web_player_registration_request_origins'::regclass
+        and constraint.contype = 'u'
+        and constraint.conkey = array[(
+          select attribute.attnum
+          from pg_attribute attribute
+          where attribute.attrelid = constraint.conrelid
+            and attribute.attname = 'player_registration_request_id'
+            and not attribute.attisdropped
+        )]::smallint[]
+    `);
+    expect(originRequestUniqueness.rows).toEqual([{ constraints: 1 }]);
+
+    const basePrivileges = await client.query<{ readonly privilege_count: number }>(`
+      select count(*)::integer as privilege_count
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      where namespace.nspname = 'app'
+        and (
+          (
+            relation.relkind = 'S'
+            and (
+              has_sequence_privilege(
+                'fetanagent_customer_web', relation.oid, 'USAGE,SELECT,UPDATE'
+              )
+              or has_sequence_privilege(
+                'fetanagent_customer_web_runtime', relation.oid, 'USAGE,SELECT,UPDATE'
+              )
+            )
+          )
+          or (
+            relation.relkind in ('r', 'p', 'v', 'm', 'f')
+            and (
+              has_table_privilege(
+                'fetanagent_customer_web', relation.oid,
+                'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+              )
+              or has_table_privilege(
+                'fetanagent_customer_web_runtime', relation.oid,
+                'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+              )
+              or has_any_column_privilege(
+                'fetanagent_customer_web', relation.oid,
+                'SELECT,INSERT,UPDATE,REFERENCES'
+              )
+              or has_any_column_privilege(
+                'fetanagent_customer_web_runtime', relation.oid,
+                'SELECT,INSERT,UPDATE,REFERENCES'
+              )
+            )
+          )
+        )
+    `);
+    expect(basePrivileges.rows).toEqual([{ privilege_count: 0 }]);
+
+    const unexpectedAssociationInserters = await client.query<{ readonly role_name: string }>(`
+      select role.rolname as role_name
+      from pg_roles role
+      where (role.rolname in ('anon', 'authenticated', 'service_role')
+          or role.rolname like 'fetanagent\\_%' escape '\\')
+        and has_table_privilege(
+          role.rolname,
+          'app.player_registration_request_associations',
+          'INSERT'
+        )
+      order by role_name
+    `);
+    expect(unexpectedAssociationInserters.rows).toEqual([]);
+
+    const associationGuard = await client.query<{
+      readonly hardened: boolean;
+      readonly public_execute: boolean;
+      readonly trigger_enabled: string;
+    }>(`
+      select
+        procedure.prosecdef
+          and procedure.proowner = 'postgres'::regrole
+          and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+          as hardened,
+        exists (
+          select 1
+          from aclexplode(
+            coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+          ) privilege
+          where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
+        ) as public_execute,
+        trigger.tgenabled::text as trigger_enabled
+      from pg_trigger trigger
+      join pg_proc procedure on procedure.oid = trigger.tgfoid
+      where trigger.tgrelid = 'app.player_registration_request_associations'::regclass
+        and trigger.tgname = 'player_registration_associations_reject_customer_web'
+        and not trigger.tgisinternal
+    `);
+    expect(associationGuard.rows).toEqual([
+      { hardened: true, public_execute: false, trigger_enabled: 'O' },
+    ]);
+
+    const tables = await client.query<{
+      readonly policies: number;
+      readonly relforcerowsecurity: boolean;
+      readonly relname: string;
+      readonly relrowsecurity: boolean;
+    }>(`
+      select relation.relname, relation.relrowsecurity, relation.relforcerowsecurity,
+             count(policy.oid)::integer as policies
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      left join pg_policy policy on policy.polrelid = relation.oid
+      where namespace.nspname = 'app'
+        and relation.relname in (
+          'customer_auth_identities',
+          'customer_web_player_registration_request_origins'
+        )
+      group by relation.oid
+      order by relation.relname
+    `);
+    expect(tables.rows).toEqual([
+      {
+        policies: 0,
+        relforcerowsecurity: true,
+        relname: 'customer_auth_identities',
+        relrowsecurity: true,
+      },
+      {
+        policies: 0,
+        relforcerowsecurity: true,
+        relname: 'customer_web_player_registration_request_origins',
+        relrowsecurity: true,
+      },
+    ]);
+
+    const functionDefinitions = await client.query<{ readonly definition: string }>(`
+      select string_agg(lower(pg_get_functiondef(procedure.oid)), E'\\n') as definition
+      from pg_proc procedure
+      where procedure.oid in (
+        'app.ensure_customer_web_account(uuid)'::regprocedure,
+        'app.submit_customer_web_player_registration(uuid,uuid,text)'::regprocedure,
+        'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure
+      )
+    `);
+    expect(functionDefinitions.rows).toHaveLength(1);
+    const functionDefinition = functionDefinitions.rows[0]!.definition;
+    for (const forbiddenRelation of [
+      'deposit_intents',
+      'deposit_submissions',
+      'deposit_jobs',
+      'deposit_payment_claims',
+      'provider_payment_evidence',
+      'feature_switches',
+      'telegram_identities',
+      'inbound_events',
+    ]) {
+      expect(functionDefinition).not.toContain(forbiddenRelation);
+    }
+    expect(functionDefinition).not.toMatch(/\bemail\b/iu);
+  });
+
+  it('binds Auth UUIDs one-to-one and keeps web Player-ID requests isolated and non-claiming', async () => {
+    await client.query(
+      `insert into auth.users (id, email) values
+         ($1::uuid, 'customer-web-one@example.invalid'),
+         ($2::uuid, 'customer-web-two@example.invalid')`,
+      [customerWebAuthUserId, secondCustomerWebAuthUserId],
+    );
+    const financialBefore = await readCustomerWebFinancialSnapshot();
+
+    const firstEnsure = await queryAsRole<{
+      readonly account_created: boolean;
+      readonly account_status: string;
+    }>('fetanagent_customer_web', 'select * from app.ensure_customer_web_account($1::uuid)', [
+      customerWebAuthUserId,
+    ]);
+    expect(firstEnsure).toEqual([{ account_created: true, account_status: 'active' }]);
+    expect(
+      await queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.ensure_customer_web_account($1::uuid)',
+        [customerWebAuthUserId],
+      ),
+    ).toEqual([{ account_created: false, account_status: 'active' }]);
+    expect(
+      await queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.ensure_customer_web_account($1::uuid)',
+        [secondCustomerWebAuthUserId],
+      ),
+    ).toEqual([{ account_created: true, account_status: 'active' }]);
+
+    const bindings = await client.query<{
+      readonly auth_user_id: string;
+      readonly customer_id: string;
+      readonly external_subject: string;
+      readonly identity_kind: string;
+      readonly identity_status: string;
+    }>(
+      `
+        select binding.auth_user_id::text,
+               binding.customer_id::text,
+               customer_identity.external_subject,
+               customer_identity.identity_kind,
+               customer_identity.status::text as identity_status
+        from app.customer_auth_identities binding
+        join app.customer_identities customer_identity
+          on customer_identity.id = binding.customer_identity_id
+         and customer_identity.customer_id = binding.customer_id
+        where binding.auth_user_id in ($1::uuid, $2::uuid)
+        order by binding.auth_user_id
+      `,
+      [customerWebAuthUserId, secondCustomerWebAuthUserId],
+    );
+    expect(bindings.rows).toHaveLength(2);
+    expect(new Set(bindings.rows.map((row) => row.customer_id)).size).toBe(2);
+    expect(bindings.rows).toEqual(
+      [customerWebAuthUserId, secondCustomerWebAuthUserId].map((authUserId, index) => ({
+        auth_user_id: authUserId,
+        customer_id: bindings.rows[index]!.customer_id,
+        external_subject: authUserId,
+        identity_kind: 'supabase_auth',
+        identity_status: 'active',
+      })),
+    );
+
+    const telegramMerge = await client.query<{ readonly identities: number }>(
+      `
+        select count(*)::integer as identities
+        from app.telegram_identities telegram_identity
+        join app.customer_identities customer_identity
+          on customer_identity.id = telegram_identity.customer_identity_id
+        where customer_identity.customer_id in (
+          select customer_id
+          from app.customer_auth_identities
+          where auth_user_id in ($1::uuid, $2::uuid)
+        )
+      `,
+      [customerWebAuthUserId, secondCustomerWebAuthUserId],
+    );
+    expect(telegramMerge.rows).toEqual([{ identities: 0 }]);
+
+    const accountAudits = await client.query<{
+      readonly action: string;
+      readonly metadata: Readonly<Record<string, unknown>>;
+    }>(
+      `
+      select action, metadata
+      from app.audit_events
+      where action = 'customer.web_account_created'
+        and actor_customer_id in (
+          select customer_id
+          from app.customer_auth_identities
+          where auth_user_id in ($1::uuid, $2::uuid)
+        )
+      order by actor_customer_id
+    `,
+      [customerWebAuthUserId, secondCustomerWebAuthUserId],
+    );
+    expect(accountAudits.rows).toHaveLength(2);
+    expect(
+      accountAudits.rows.every((audit) => audit.action === 'customer.web_account_created'),
+    ).toBe(true);
+    expect(
+      accountAudits.rows.every(
+        (audit) => JSON.stringify(audit.metadata) === '{"channel":"customer_web"}',
+      ),
+    ).toBe(true);
+
+    const firstRequestKey = '31111111-1111-4111-8111-111111111111';
+    const firstSubmit = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, $3::text
+       )`,
+      [customerWebAuthUserId, firstRequestKey, 'WEB-PLAYER-01'],
+    );
+    expect(firstSubmit).toEqual([
+      {
+        existing_request_reused: false,
+        platform_code: 'kemerbet',
+        request_created_at: expect.any(Date),
+        request_key_already_used: false,
+        request_status: 'checking',
+      },
+    ]);
+
+    const exactReplay = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, $3::text
+       )`,
+      [customerWebAuthUserId, firstRequestKey, 'WEB-PLAYER-01'],
+    );
+    expect(exactReplay).toEqual([
+      {
+        ...firstSubmit[0]!,
+        existing_request_reused: true,
+        request_key_already_used: true,
+      },
+    ]);
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, $3::text
+         )`,
+        [customerWebAuthUserId, firstRequestKey, 'CHANGED-WEB-PLAYER'],
+      ),
+    ).rejects.toThrow(/conflicts with its recorded receipt/u);
+
+    const naturalReplayLedgerBefore = await client.query<{ readonly snapshot: string }>(
+      `
+        select jsonb_build_object(
+          'origins', (
+            select jsonb_agg(jsonb_build_array(
+              origin.request_key, origin.xmin::text, origin.ctid::text
+            ))
+            from app.customer_web_player_registration_request_origins origin
+            join app.customer_auth_identities binding
+              on binding.customer_identity_id = origin.customer_auth_identity_id
+            where binding.auth_user_id = $1::uuid
+          ),
+          'audits', (
+            select jsonb_agg(jsonb_build_array(
+              audit.id, audit.xmin::text, audit.ctid::text
+            ) order by audit.id)
+            from app.audit_events audit
+            where audit.action = 'customer.web_player_registration_requested'
+              and audit.actor_customer_id = (
+                select customer_id
+                from app.customer_auth_identities
+                where auth_user_id = $1::uuid
+              )
+          )
+        )::text as snapshot
+      `,
+      [customerWebAuthUserId],
+    );
+    const naturalReplay = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, $3::text
+       )`,
+      [customerWebAuthUserId, '31111111-1111-4111-8111-111111111112', 'WEB-PLAYER-01'],
+    );
+    expect(naturalReplay).toEqual([
+      {
+        ...firstSubmit[0]!,
+        existing_request_reused: true,
+        request_key_already_used: false,
+      },
+    ]);
+    const naturalReplayLedgerAfter = await client.query<{ readonly snapshot: string }>(
+      `
+        select jsonb_build_object(
+          'origins', (
+            select jsonb_agg(jsonb_build_array(
+              origin.request_key, origin.xmin::text, origin.ctid::text
+            ))
+            from app.customer_web_player_registration_request_origins origin
+            join app.customer_auth_identities binding
+              on binding.customer_identity_id = origin.customer_auth_identity_id
+            where binding.auth_user_id = $1::uuid
+          ),
+          'audits', (
+            select jsonb_agg(jsonb_build_array(
+              audit.id, audit.xmin::text, audit.ctid::text
+            ) order by audit.id)
+            from app.audit_events audit
+            where audit.action = 'customer.web_player_registration_requested'
+              and audit.actor_customer_id = (
+                select customer_id
+                from app.customer_auth_identities
+                where auth_user_id = $1::uuid
+              )
+          )
+        )::text as snapshot
+      `,
+      [customerWebAuthUserId],
+    );
+    expect(naturalReplayLedgerAfter.rows).toEqual(naturalReplayLedgerBefore.rows);
+
+    const secondCustomerSubmit = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, $3::text
+       )`,
+      [secondCustomerWebAuthUserId, '31111111-1111-4111-8111-222222222222', 'WEB-PLAYER-01'],
+    );
+    expect(secondCustomerSubmit).toEqual([
+      {
+        existing_request_reused: false,
+        platform_code: 'kemerbet',
+        request_created_at: expect.any(Date),
+        request_key_already_used: false,
+        request_status: 'checking',
+      },
+    ]);
+
+    const firstList = await queryAsRole<{
+      readonly platform_code: string;
+      readonly request_created_at: Date;
+      readonly request_status: string;
+      readonly request_updated_at: Date;
+      readonly submitted_player_id: string;
+    }>(
+      'fetanagent_customer_web',
+      'select * from app.list_customer_web_player_registrations($1::uuid, 20)',
+      [customerWebAuthUserId],
+    );
+    expect(firstList).toEqual([
+      {
+        platform_code: 'kemerbet',
+        request_created_at: firstSubmit[0]!.request_created_at,
+        request_status: 'checking',
+        request_updated_at: expect.any(Date),
+        submitted_player_id: 'WEB-PLAYER-01',
+      },
+    ]);
+    expect(Object.keys(firstList[0]!).sort()).toEqual([
+      'platform_code',
+      'request_created_at',
+      'request_status',
+      'request_updated_at',
+      'submitted_player_id',
+    ]);
+
+    const requestIds = await client.query<{
+      readonly auth_user_id: string;
+      readonly request_id: string;
+    }>(
+      `
+        select binding.auth_user_id::text,
+               registration_request.id::text as request_id
+        from app.customer_web_player_registration_request_origins origin
+        join app.customer_auth_identities binding
+          on binding.customer_identity_id = origin.customer_auth_identity_id
+        join app.player_registration_requests registration_request
+          on registration_request.id = origin.player_registration_request_id
+        where binding.auth_user_id in ($1::uuid, $2::uuid)
+          and registration_request.player_id = 'WEB-PLAYER-01'
+        group by binding.auth_user_id, registration_request.id
+        order by binding.auth_user_id
+      `,
+      [customerWebAuthUserId, secondCustomerWebAuthUserId],
+    );
+    expect(requestIds.rows).toHaveLength(2);
+    const firstRequestId = requestIds.rows[0]!.request_id;
+    const secondRequestId = requestIds.rows[1]!.request_id;
+
+    await queryAsRole(
+      'fetanagent_owner_control',
+      `select * from app.review_owner_player_registration_request(
+         $1::uuid, $2::uuid, 'exists', 'owner_platform_lookup'
+       )`,
+      [ownerAuthUserId, firstRequestId],
+    );
+    const replayAfterExists = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, $3::text
+       )`,
+      [customerWebAuthUserId, firstRequestKey, 'WEB-PLAYER-01'],
+    );
+    expect(replayAfterExists[0]?.request_status).toBe('checking');
+    const listAfterExists = await queryAsRole<{ readonly request_status: string }>(
+      'fetanagent_customer_web',
+      `select request_status
+       from app.list_customer_web_player_registrations($1::uuid, 20)`,
+      [customerWebAuthUserId],
+    );
+    expect(listAfterExists).toEqual([{ request_status: 'checking' }]);
+
+    await queryAsRole(
+      'fetanagent_owner_control',
+      `select * from app.review_owner_player_registration_request(
+         $1::uuid, $2::uuid, 'review_required', 'provider_evidence_required'
+       )`,
+      [ownerAuthUserId, secondRequestId],
+    );
+    expect(
+      await queryAsRole(
+        'fetanagent_customer_web',
+        `select request_status
+         from app.list_customer_web_player_registrations($1::uuid, 20)`,
+        [secondCustomerWebAuthUserId],
+      ),
+    ).toEqual([{ request_status: 'checking' }]);
+    await queryAsRole(
+      'fetanagent_owner_control',
+      `select * from app.review_owner_player_registration_request(
+         $1::uuid, $2::uuid, 'not_found', 'owner_platform_lookup'
+       )`,
+      [ownerAuthUserId, secondRequestId],
+    );
+    expect(
+      await queryAsRole(
+        'fetanagent_customer_web',
+        `select request_status
+         from app.list_customer_web_player_registrations($1::uuid, 20)`,
+        [secondCustomerWebAuthUserId],
+      ),
+    ).toEqual([{ request_status: 'needs_attention' }]);
+
+    const associationCandidates = await queryAsRole<{
+      readonly registration_request_id: string;
+    }>(
+      'fetanagent_owner_control',
+      `select registration_request_id
+       from app.list_owner_player_registration_association_candidates($1::uuid, 50)`,
+      [ownerAuthUserId],
+    );
+    expect(associationCandidates.map((row) => row.registration_request_id)).not.toContain(
+      firstRequestId,
+    );
+
+    const associationBefore = await client.query<{
+      readonly associations: number;
+      readonly players: number;
+      readonly validations: number;
+    }>(`
+      select
+        (select count(*)::integer from app.player_registration_request_associations)
+          as associations,
+        (select count(*)::integer from app.customer_platform_players) as players,
+        (select count(*)::integer from app.player_validation_attempts) as validations
+    `);
+    await expect(
+      queryAsRole(
+        'fetanagent_owner_control',
+        `select * from app.associate_owner_validated_player_registration_request(
+           $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+         )`,
+        [ownerAuthUserId, firstRequestId],
+      ),
+    ).rejects.toThrow(/ownership association is not available/u);
+    const associationAfter = await client.query<{
+      readonly associations: number;
+      readonly players: number;
+      readonly validations: number;
+    }>(`
+      select
+        (select count(*)::integer from app.player_registration_request_associations)
+          as associations,
+        (select count(*)::integer from app.customer_platform_players) as players,
+        (select count(*)::integer from app.player_validation_attempts) as validations
+    `);
+    expect(associationAfter.rows).toEqual(associationBefore.rows);
+
+    const requestAudits = await client.query<{
+      readonly metadata: Readonly<Record<string, unknown>>;
+    }>(
+      `
+        select metadata
+        from app.audit_events
+        where action = 'customer.web_player_registration_requested'
+          and actor_customer_id in (
+            select customer_id
+            from app.customer_auth_identities
+            where auth_user_id in ($1::uuid, $2::uuid)
+          )
+        order by created_at, id
+      `,
+      [customerWebAuthUserId, secondCustomerWebAuthUserId],
+    );
+    expect(requestAudits.rows).toHaveLength(2);
+    expect(
+      requestAudits.rows.every((audit) =>
+        Object.keys(audit.metadata).every((key) =>
+          ['channel', 'platform_code', 'request_reused'].includes(key),
+        ),
+      ),
+    ).toBe(true);
+    const serializedAudits = JSON.stringify(requestAudits.rows).toLowerCase();
+    expect(serializedAudits).not.toContain(customerWebAuthUserId);
+    expect(serializedAudits).not.toContain(secondCustomerWebAuthUserId);
+    expect(serializedAudits).not.toContain(firstRequestKey);
+    expect(serializedAudits).not.toContain('web-player-01');
+    expect(serializedAudits).not.toContain('example.invalid');
+
+    expect(await readCustomerWebFinancialSnapshot()).toEqual(financialBefore);
+  });
+
+  it('enforces non-consuming replays and serialized rolling and unresolved quotas', async () => {
+    const rollingAuthUserId = '21111111-1111-4111-8111-333333333333';
+    const unresolvedAuthUserId = '21111111-1111-4111-8111-444444444444';
+    const concurrentAuthUserId = '21111111-1111-4111-8111-555555555555';
+    await client.query(
+      `insert into auth.users (id, email) values
+         ($1::uuid, 'rolling-quota@example.invalid'),
+         ($2::uuid, 'unresolved-quota@example.invalid'),
+         ($3::uuid, 'concurrent-quota@example.invalid')`,
+      [rollingAuthUserId, unresolvedAuthUserId, concurrentAuthUserId],
+    );
+    for (const authUserId of [rollingAuthUserId, unresolvedAuthUserId, concurrentAuthUserId]) {
+      await queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.ensure_customer_web_account($1::uuid)',
+        [authUserId],
+      );
+    }
+
+    await queryAsRole(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, 'OLD-WEB-PLAYER'
+       )`,
+      [rollingAuthUserId, '41111111-1111-4111-8111-111111111111'],
+    );
+    await client.query(
+      `
+        update app.player_registration_requests registration_request
+        set created_at = clock_timestamp() - interval '48 hours'
+        where registration_request.id = (
+          select origin.player_registration_request_id
+          from app.customer_web_player_registration_request_origins origin
+          join app.customer_auth_identities binding
+            on binding.customer_identity_id = origin.customer_auth_identity_id
+          where binding.auth_user_id = $1::uuid
+          limit 1
+        )
+      `,
+      [rollingAuthUserId],
+    );
+
+    const oldNaturalReplay = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, 'OLD-WEB-PLAYER'
+       )`,
+      [rollingAuthUserId, '41111111-1111-4111-8111-111111111112'],
+    );
+    expect(oldNaturalReplay[0]).toMatchObject({
+      existing_request_reused: true,
+      request_key_already_used: false,
+      request_status: 'checking',
+    });
+
+    for (let index = 1; index <= 5; index += 1) {
+      const submitted = await queryAsRole<CustomerWebSubmitRow>(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, $3::text
+         )`,
+        [
+          rollingAuthUserId,
+          `41111111-1111-4111-8111-22222222222${index}`,
+          `RECENT-WEB-PLAYER-${index}`,
+        ],
+      );
+      expect(submitted[0]).toMatchObject({
+        existing_request_reused: false,
+        request_key_already_used: false,
+        request_status: 'checking',
+      });
+    }
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, 'RECENT-WEB-PLAYER-6'
+         )`,
+        [rollingAuthUserId, '41111111-1111-4111-8111-222222222226'],
+      ),
+    ).rejects.toThrow(/request limit has been reached/u);
+
+    const exactReplayAtLimit = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, 'RECENT-WEB-PLAYER-1'
+       )`,
+      [rollingAuthUserId, '41111111-1111-4111-8111-222222222221'],
+    );
+    expect(exactReplayAtLimit[0]).toMatchObject({
+      existing_request_reused: true,
+      request_key_already_used: true,
+    });
+    const naturalReplayAtLimit = await queryAsRole<CustomerWebSubmitRow>(
+      'fetanagent_customer_web',
+      `select * from app.submit_customer_web_player_registration(
+         $1::uuid, $2::uuid, 'RECENT-WEB-PLAYER-1'
+       )`,
+      [rollingAuthUserId, '41111111-1111-4111-8111-333333333331'],
+    );
+    expect(naturalReplayAtLimit[0]).toMatchObject({
+      existing_request_reused: true,
+      request_key_already_used: false,
+    });
+
+    const rollingCounts = await client.query<{
+      readonly recent_distinct_requests: number;
+      readonly receipts: number;
+    }>(
+      `
+        select
+          count(*)::integer as receipts,
+          count(distinct registration_request.id) filter (
+            where registration_request.created_at >= clock_timestamp() - interval '24 hours'
+          )::integer as recent_distinct_requests
+        from app.customer_web_player_registration_request_origins origin
+        join app.customer_auth_identities binding
+          on binding.customer_identity_id = origin.customer_auth_identity_id
+        join app.player_registration_requests registration_request
+          on registration_request.id = origin.player_registration_request_id
+        where binding.auth_user_id = $1::uuid
+      `,
+      [rollingAuthUserId],
+    );
+    expect(rollingCounts.rows).toEqual([{ recent_distinct_requests: 5, receipts: 6 }]);
+
+    const naturalReplayGrowthBefore = await client.query<{ readonly snapshot: string }>(
+      `
+        select jsonb_build_object(
+          'origins', (
+            select jsonb_agg(jsonb_build_array(
+              origin.request_key, origin.xmin::text, origin.ctid::text
+            )
+              order by origin.request_key)
+            from app.customer_web_player_registration_request_origins origin
+            join app.customer_auth_identities binding
+              on binding.customer_identity_id = origin.customer_auth_identity_id
+            where binding.auth_user_id = $1::uuid
+          ),
+          'audits', (
+            select jsonb_agg(jsonb_build_array(
+              audit.id, audit.xmin::text, audit.ctid::text
+            ) order by audit.id)
+            from app.audit_events audit
+            where audit.action = 'customer.web_player_registration_requested'
+              and audit.actor_customer_id = (
+                select customer_id
+                from app.customer_auth_identities
+                where auth_user_id = $1::uuid
+              )
+          )
+        )::text as snapshot
+      `,
+      [rollingAuthUserId],
+    );
+    for (let index = 1; index <= 25; index += 1) {
+      const replay = await queryAsRole<CustomerWebSubmitRow>(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, 'RECENT-WEB-PLAYER-1'
+         )`,
+        [rollingAuthUserId, `71111111-1111-4111-8111-7777777777${String(index).padStart(2, '0')}`],
+      );
+      expect(replay[0]).toMatchObject({
+        existing_request_reused: true,
+        request_key_already_used: false,
+      });
+    }
+    const naturalReplayGrowthAfter = await client.query<{ readonly snapshot: string }>(
+      `
+        select jsonb_build_object(
+          'origins', (
+            select jsonb_agg(jsonb_build_array(
+              origin.request_key, origin.xmin::text, origin.ctid::text
+            )
+              order by origin.request_key)
+            from app.customer_web_player_registration_request_origins origin
+            join app.customer_auth_identities binding
+              on binding.customer_identity_id = origin.customer_auth_identity_id
+            where binding.auth_user_id = $1::uuid
+          ),
+          'audits', (
+            select jsonb_agg(jsonb_build_array(
+              audit.id, audit.xmin::text, audit.ctid::text
+            ) order by audit.id)
+            from app.audit_events audit
+            where audit.action = 'customer.web_player_registration_requested'
+              and audit.actor_customer_id = (
+                select customer_id
+                from app.customer_auth_identities
+                where auth_user_id = $1::uuid
+              )
+          )
+        )::text as snapshot
+      `,
+      [rollingAuthUserId],
+    );
+    expect(naturalReplayGrowthAfter.rows).toEqual(naturalReplayGrowthBefore.rows);
+    const naturalReplayLedgerCounts = await client.query<{
+      readonly audits: number;
+      readonly origins: number;
+    }>(
+      `
+        select
+          (select count(*)::integer
+           from app.customer_web_player_registration_request_origins origin
+           join app.customer_auth_identities binding
+             on binding.customer_identity_id = origin.customer_auth_identity_id
+           where binding.auth_user_id = $1::uuid) as origins,
+          (select count(*)::integer
+           from app.audit_events audit
+           where audit.action = 'customer.web_player_registration_requested'
+             and audit.actor_customer_id = (
+               select customer_id
+               from app.customer_auth_identities
+               where auth_user_id = $1::uuid
+             )) as audits
+      `,
+      [rollingAuthUserId],
+    );
+    expect(naturalReplayLedgerCounts.rows).toEqual([{ audits: 6, origins: 6 }]);
+
+    await client.query(
+      `
+        with context as (
+          select binding.customer_identity_id, binding.customer_id, platform.id as platform_id
+          from app.customer_auth_identities binding
+          cross join app.platforms platform
+          where binding.auth_user_id = $1::uuid
+            and platform.code = 'kemerbet'
+        ), inserted as (
+          insert into app.player_registration_requests (
+            customer_id, platform_id, player_id, created_at
+          )
+          select context.customer_id,
+                 context.platform_id,
+                 'UNRESOLVED-WEB-PLAYER-' || series.value::text,
+                 clock_timestamp() - interval '48 hours'
+          from context
+          cross join generate_series(1, 10) series(value)
+          returning id
+        )
+        insert into app.customer_web_player_registration_request_origins (
+          customer_auth_identity_id,
+          request_key,
+          player_registration_request_id,
+          created_at
+        )
+        select context.customer_identity_id,
+               gen_random_uuid(),
+               inserted.id,
+               clock_timestamp() - interval '48 hours'
+        from context
+        cross join inserted
+      `,
+      [unresolvedAuthUserId],
+    );
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, 'UNRESOLVED-WEB-PLAYER-11'
+         )`,
+        [unresolvedAuthUserId, '41111111-1111-4111-8111-444444444444'],
+      ),
+    ).rejects.toThrow(/request limit has been reached/u);
+
+    const concurrentClients = Array.from({ length: 6 }, () =>
+      createSqlIntegrationClient(environment),
+    );
+    await Promise.all(concurrentClients.map(async (connection) => connection.connect()));
+    try {
+      const outcomes = await Promise.allSettled(
+        concurrentClients.map(async (connection, index) => {
+          await connection.query('begin');
+          try {
+            await connection.query('set local role fetanagent_customer_web');
+            const result = await connection.query<CustomerWebSubmitRow>(
+              `select * from app.submit_customer_web_player_registration(
+                 $1::uuid, $2::uuid, $3::text
+               )`,
+              [
+                concurrentAuthUserId,
+                `41111111-1111-4111-8111-55555555555${index + 1}`,
+                `CONCURRENT-WEB-PLAYER-${index + 1}`,
+              ],
+            );
+            await connection.query('commit');
+            return result.rows;
+          } catch (error) {
+            await connection.query('rollback');
+            throw error;
+          }
+        }),
+      );
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(5);
+      expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+      const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+      expect(rejected).toMatchObject({ status: 'rejected' });
+      expect(String((rejected as PromiseRejectedResult).reason)).toMatch(
+        /request limit has been reached/u,
+      );
+    } finally {
+      await Promise.all(concurrentClients.map(async (connection) => connection.end()));
+    }
+
+    const concurrentCount = await client.query<{ readonly requests: number }>(
+      `
+        select count(distinct origin.player_registration_request_id)::integer as requests
+        from app.customer_web_player_registration_request_origins origin
+        join app.customer_auth_identities binding
+          on binding.customer_identity_id = origin.customer_auth_identity_id
+        where binding.auth_user_id = $1::uuid
+      `,
+      [concurrentAuthUserId],
+    );
+    expect(concurrentCount.rows).toEqual([{ requests: 5 }]);
+  });
+
+  it('serializes the origin-versus-association race so both states cannot commit', async () => {
+    const raceAuthUserId = '21111111-1111-4111-8111-999999999999';
+    await client.query(
+      `insert into auth.users (id, email)
+       values ($1::uuid, 'association-race@example.invalid')`,
+      [raceAuthUserId],
+    );
+    await queryAsRole(
+      'fetanagent_customer_web',
+      'select * from app.ensure_customer_web_account($1::uuid)',
+      [raceAuthUserId],
+    );
+    const raceScope = await client.query<{
+      readonly customer_id: string;
+      readonly identity_id: string;
+    }>(
+      `
+        select customer_id::text, customer_identity_id::text as identity_id
+        from app.customer_auth_identities
+        where auth_user_id = $1::uuid
+      `,
+      [raceAuthUserId],
+    );
+    expect(raceScope.rows).toHaveLength(1);
+    const raceRequest = await client.query<{ readonly request_id: string }>(
+      `
+        insert into app.player_registration_requests (customer_id, platform_id, player_id)
+        select $1::uuid, platform.id, 'RACE-WEB-PLAYER'
+        from app.platforms platform
+        where platform.code = 'kemerbet'
+        returning id::text as request_id
+      `,
+      [raceScope.rows[0]!.customer_id],
+    );
+    const raceRequestId = raceRequest.rows[0]!.request_id;
+    await queryAsRole(
+      'fetanagent_owner_control',
+      `select * from app.review_owner_player_registration_request(
+         $1::uuid, $2::uuid, 'exists', 'owner_platform_lookup'
+       )`,
+      [ownerAuthUserId, raceRequestId],
+    );
+
+    const originConnection = createSqlIntegrationClient(environment);
+    const associationConnection = createSqlIntegrationClient(environment);
+    await Promise.all([originConnection.connect(), associationConnection.connect()]);
+    await originConnection.query(`set application_name = 'customer_web_origin_race'`);
+    await associationConnection.query(`set application_name = 'customer_web_association_race'`);
+    await client.query('begin');
+    let blockerReleased = false;
+    try {
+      await client.query(
+        `select pg_advisory_xact_lock(hashtextextended(
+           'fetanagent:customer-web-player-association-gate:v1:' || $1::uuid::text,
+           0::bigint
+         ))`,
+        [raceRequestId],
+      );
+
+      const originAttempt = (async () => {
+        await originConnection.query('begin');
+        try {
+          await originConnection.query(
+            `
+              insert into app.customer_web_player_registration_request_origins (
+                customer_auth_identity_id, request_key, player_registration_request_id
+              )
+              values ($1::uuid, $2::uuid, $3::uuid)
+            `,
+            [raceScope.rows[0]!.identity_id, '61111111-1111-4111-8111-111111111111', raceRequestId],
+          );
+          await originConnection.query('commit');
+          return 'origin' as const;
+        } catch (error) {
+          await originConnection.query('rollback');
+          throw error;
+        }
+      })();
+      const associationAttempt = (async () => {
+        await associationConnection.query('begin');
+        try {
+          await associationConnection.query('set local role fetanagent_owner_control');
+          await associationConnection.query(
+            `select * from app.associate_owner_validated_player_registration_request(
+               $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+             )`,
+            [ownerAuthUserId, raceRequestId],
+          );
+          await associationConnection.query('commit');
+          return 'association' as const;
+        } catch (error) {
+          await associationConnection.query('rollback');
+          throw error;
+        }
+      })();
+
+      let advisoryWaiters = 0;
+      for (let poll = 0; poll < 100 && advisoryWaiters !== 2; poll += 1) {
+        const waiting = await client.query<{ readonly waiters: number }>(`
+          select count(*)::integer as waiters
+          from pg_stat_activity
+          where application_name in (
+            'customer_web_origin_race', 'customer_web_association_race'
+          )
+            and wait_event_type = 'Lock'
+            and lower(coalesce(wait_event, '')) = 'advisory'
+        `);
+        advisoryWaiters = waiting.rows[0]!.waiters;
+        if (advisoryWaiters !== 2) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+
+      await client.query('commit');
+      blockerReleased = true;
+      const outcomes = await Promise.allSettled([originAttempt, associationAttempt]);
+      expect(advisoryWaiters).toBe(2);
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+      const winner = outcomes.find(
+        (outcome): outcome is PromiseFulfilledResult<'origin' | 'association'> =>
+          outcome.status === 'fulfilled',
+      );
+      expect(['origin', 'association']).toContain(winner?.value);
+    } finally {
+      if (!blockerReleased) {
+        await client.query('rollback');
+      }
+      await Promise.all([originConnection.end(), associationConnection.end()]);
+    }
+
+    const committedStates = await client.query<{
+      readonly associations: number;
+      readonly origins: number;
+    }>(
+      `
+        select
+          (select count(*)::integer
+           from app.customer_web_player_registration_request_origins origin
+           where origin.player_registration_request_id = $1::uuid) as origins,
+          (select count(*)::integer
+           from app.player_registration_request_associations association
+           where association.player_registration_request_id = $1::uuid) as associations
+      `,
+      [raceRequestId],
+    );
+    expect(committedStates.rows).toHaveLength(1);
+    expect(committedStates.rows[0]!.associations + committedStates.rows[0]!.origins).toBe(1);
+  });
+
+  it('fails closed on hostile identity inputs and preserves append-only bindings and receipts', async () => {
+    const concurrentEnsureAuthUserId = '21111111-1111-4111-8111-666666666666';
+    await client.query(
+      `insert into auth.users (id, email)
+       values ($1::uuid, 'concurrent-ensure@example.invalid')`,
+      [concurrentEnsureAuthUserId],
+    );
+    const beforeEnsure = await client.query<{
+      readonly audits: number;
+      readonly bindings: number;
+      readonly customers: number;
+      readonly identities: number;
+    }>(`
+      select
+        (select count(*)::integer from app.customers) as customers,
+        (select count(*)::integer from app.customer_identities) as identities,
+        (select count(*)::integer from app.customer_auth_identities) as bindings,
+        (select count(*)::integer from app.audit_events
+          where action = 'customer.web_account_created') as audits
+    `);
+    const ensureClients = Array.from({ length: 6 }, () => createSqlIntegrationClient(environment));
+    await Promise.all(ensureClients.map(async (connection) => connection.connect()));
+    try {
+      const concurrentEnsures = await Promise.all(
+        ensureClients.map(async (connection) => {
+          await connection.query('begin');
+          try {
+            await connection.query('set local role fetanagent_customer_web');
+            const result = await connection.query<{
+              readonly account_created: boolean;
+              readonly account_status: string;
+            }>('select * from app.ensure_customer_web_account($1::uuid)', [
+              concurrentEnsureAuthUserId,
+            ]);
+            await connection.query('commit');
+            return result.rows[0]!;
+          } catch (error) {
+            await connection.query('rollback');
+            throw error;
+          }
+        }),
+      );
+      expect(concurrentEnsures.filter((receipt) => receipt.account_created)).toHaveLength(1);
+      expect(concurrentEnsures.filter((receipt) => !receipt.account_created)).toHaveLength(5);
+      expect(concurrentEnsures.every((receipt) => receipt.account_status === 'active')).toBe(true);
+    } finally {
+      await Promise.all(ensureClients.map(async (connection) => connection.end()));
+    }
+
+    const afterEnsure = await client.query<{
+      readonly audits: number;
+      readonly bindings: number;
+      readonly customers: number;
+      readonly identities: number;
+    }>(`
+      select
+        (select count(*)::integer from app.customers) as customers,
+        (select count(*)::integer from app.customer_identities) as identities,
+        (select count(*)::integer from app.customer_auth_identities) as bindings,
+        (select count(*)::integer from app.audit_events
+          where action = 'customer.web_account_created') as audits
+    `);
+    expect(afterEnsure.rows).toEqual([
+      {
+        audits: beforeEnsure.rows[0]!.audits + 1,
+        bindings: beforeEnsure.rows[0]!.bindings + 1,
+        customers: beforeEnsure.rows[0]!.customers + 1,
+        identities: beforeEnsure.rows[0]!.identities + 1,
+      },
+    ]);
+
+    const invalidBefore = await client.query<{
+      readonly bindings: number;
+      readonly origins: number;
+      readonly requests: number;
+    }>(`
+      select
+        (select count(*)::integer from app.customer_auth_identities) as bindings,
+        (select count(*)::integer
+          from app.customer_web_player_registration_request_origins) as origins,
+        (select count(*)::integer from app.player_registration_requests) as requests
+    `);
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.ensure_customer_web_account(null::uuid)',
+      ),
+    ).rejects.toThrow(/account request is invalid/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.ensure_customer_web_account($1::uuid)',
+        ['21111111-1111-4111-8111-777777777777'],
+      ),
+    ).rejects.toThrow(/account request is unavailable/u);
+    for (const invalidPlayerId of [
+      null,
+      '',
+      '   ',
+      'HAS SPACE',
+      'X'.repeat(65),
+      `CONTROL${String.fromCharCode(1)}`,
+    ]) {
+      await expect(
+        queryAsRole(
+          'fetanagent_customer_web',
+          `select * from app.submit_customer_web_player_registration(
+             $1::uuid, $2::uuid, $3::text
+           )`,
+          [concurrentEnsureAuthUserId, '51111111-1111-4111-8111-111111111111', invalidPlayerId],
+        ),
+      ).rejects.toThrow(/Player ID request is invalid/u);
+    }
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, null::uuid, 'PLAYER'
+         )`,
+        [concurrentEnsureAuthUserId],
+      ),
+    ).rejects.toThrow(/Player ID request is invalid/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        `select * from app.submit_customer_web_player_registration(
+           $1::uuid, $2::uuid, 'PLAYER'
+         )`,
+        ['21111111-1111-4111-8111-777777777777', '51111111-1111-4111-8111-222222222222'],
+      ),
+    ).rejects.toThrow(/Player ID request is unavailable/u);
+    for (const invalidLimit of [0, 21, null]) {
+      await expect(
+        queryAsRole(
+          'fetanagent_customer_web',
+          'select * from app.list_customer_web_player_registrations($1::uuid, $2::integer)',
+          [concurrentEnsureAuthUserId, invalidLimit],
+        ),
+      ).rejects.toThrow(/list request is invalid/u);
+    }
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.list_customer_web_player_registrations($1::uuid, 20)',
+        ['21111111-1111-4111-8111-777777777777'],
+      ),
+    ).rejects.toThrow(/list request is unavailable/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.list_customer_web_player_registrations(null::uuid, 20)',
+      ),
+    ).rejects.toThrow(/list request is invalid/u);
+    const invalidAfter = await client.query<{
+      readonly bindings: number;
+      readonly origins: number;
+      readonly requests: number;
+    }>(`
+      select
+        (select count(*)::integer from app.customer_auth_identities) as bindings,
+        (select count(*)::integer
+          from app.customer_web_player_registration_request_origins) as origins,
+        (select count(*)::integer from app.player_registration_requests) as requests
+    `);
+    expect(invalidAfter.rows).toEqual(invalidBefore.rows);
+
+    await expect(
+      queryAsRole('fetanagent_customer_web', 'select * from app.customer_auth_identities'),
+    ).rejects.toThrow(/permission denied|row-level security/u);
+    await expect(
+      queryAsRole(
+        'fetanagent_customer_web',
+        'select * from app.customer_web_player_registration_request_origins',
+      ),
+    ).rejects.toThrow(/permission denied|row-level security/u);
+
+    await expect(
+      client.query(
+        `update app.customer_auth_identities
+         set auth_user_id = $2::uuid
+         where auth_user_id = $1::uuid`,
+        [customerWebAuthUserId, concurrentEnsureAuthUserId],
+      ),
+    ).rejects.toThrow(/append-only/u);
+    await expect(
+      client.query('delete from app.customer_auth_identities where auth_user_id = $1::uuid', [
+        customerWebAuthUserId,
+      ]),
+    ).rejects.toThrow(/append-only/u);
+    await expect(client.query('truncate app.customer_auth_identities')).rejects.toThrow(
+      /append-only|cannot truncate/u,
+    );
+    await expect(
+      client.query(
+        `
+        update app.customer_web_player_registration_request_origins
+        set request_key = gen_random_uuid()
+        where customer_auth_identity_id = (
+          select customer_identity_id
+          from app.customer_auth_identities
+          where auth_user_id = $1::uuid
+        )
+      `,
+        [customerWebAuthUserId],
+      ),
+    ).rejects.toThrow(/append-only/u);
+    await expect(
+      client.query(
+        `
+        delete from app.customer_web_player_registration_request_origins
+        where customer_auth_identity_id = (
+          select customer_identity_id
+          from app.customer_auth_identities
+          where auth_user_id = $1::uuid
+        )
+      `,
+        [customerWebAuthUserId],
+      ),
+    ).rejects.toThrow(/append-only/u);
+    await expect(
+      client.query('truncate app.customer_web_player_registration_request_origins'),
+    ).rejects.toThrow(/append-only/u);
+
+    const webRequest = await client.query<{ readonly request_id: string }>(
+      `
+        select origin.player_registration_request_id::text as request_id
+        from app.customer_web_player_registration_request_origins origin
+        join app.customer_auth_identities binding
+          on binding.customer_identity_id = origin.customer_auth_identity_id
+        where binding.auth_user_id = $1::uuid
+        order by origin.created_at
+        limit 1
+      `,
+      [customerWebAuthUserId],
+    );
+    expect(webRequest.rows).toHaveLength(1);
+    const directAssociationBefore = await client.query<{
+      readonly associations: number;
+    }>(
+      'select count(*)::integer as associations from app.player_registration_request_associations',
+    );
+    await expect(
+      client.query(
+        `
+          insert into app.player_registration_request_associations (
+            player_registration_request_id,
+            actor_admin_id,
+            player_account_id,
+            validation_attempt_id,
+            reason_code
+          )
+          values (
+            $1::uuid, $2::uuid, gen_random_uuid(), gen_random_uuid(),
+            'owner_verified_platform_ownership'
+          )
+        `,
+        [webRequest.rows[0]!.request_id, ownerAdminId],
+      ),
+    ).rejects.toThrow(/ownership association is not available/u);
+    const directAssociationAfter = await client.query<{
+      readonly associations: number;
+    }>(
+      'select count(*)::integer as associations from app.player_registration_request_associations',
+    );
+    expect(directAssociationAfter.rows).toEqual(directAssociationBefore.rows);
+
+    const associatedFixture = await client.query<{
+      readonly customer_id: string;
+      readonly request_id: string;
+    }>(`
+      select registration_request.customer_id::text,
+             association.player_registration_request_id::text as request_id
+      from app.player_registration_request_associations association
+      join app.player_registration_requests registration_request
+        on registration_request.id = association.player_registration_request_id
+      where not exists (
+        select 1
+        from app.customer_auth_identities binding
+        where binding.customer_id = registration_request.customer_id
+      )
+      order by association.created_at
+      limit 1
+    `);
+    expect(associatedFixture.rows).toHaveLength(1);
+    await client.query('begin');
+    try {
+      const associatedFixtureAuthUserId = '21111111-1111-4111-8111-888888888888';
+      await client.query(
+        `insert into auth.users (id, email)
+         values ($1::uuid, 'associated-origin-guard@example.invalid')`,
+        [associatedFixtureAuthUserId],
+      );
+      const fixtureIdentity = await client.query<{ readonly identity_id: string }>(
+        `
+          insert into app.customer_identities (
+            customer_id, identity_kind, external_subject, status
+          )
+          values ($1::uuid, 'supabase_auth', $2::text, 'active')
+          returning id::text as identity_id
+        `,
+        [associatedFixture.rows[0]!.customer_id, associatedFixtureAuthUserId],
+      );
+      await client.query(
+        `
+          insert into app.customer_auth_identities (
+            customer_identity_id, customer_id, auth_user_id
+          )
+          values ($1::uuid, $2::uuid, $3::uuid)
+        `,
+        [
+          fixtureIdentity.rows[0]!.identity_id,
+          associatedFixture.rows[0]!.customer_id,
+          associatedFixtureAuthUserId,
+        ],
+      );
+      await expect(
+        client.query(
+          `
+            insert into app.customer_web_player_registration_request_origins (
+              customer_auth_identity_id, request_key, player_registration_request_id
+            )
+            values ($1::uuid, gen_random_uuid(), $2::uuid)
+          `,
+          [fixtureIdentity.rows[0]!.identity_id, associatedFixture.rows[0]!.request_id],
+        ),
+      ).rejects.toThrow(/request origin is invalid/u);
+    } finally {
+      await client.query('rollback');
+    }
   });
 });

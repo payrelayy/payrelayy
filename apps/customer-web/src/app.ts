@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import type {
@@ -9,6 +9,11 @@ import type {
   CustomerWebRequestCookie,
   CustomerWebResponseCookie,
 } from '@fetanagent/customer-web-auth-runtime';
+import type {
+  CustomerWorkspaceDisplayStatus,
+  CustomerWorkspaceRegistration,
+  CustomerWorkspaceRuntime,
+} from '@fetanagent/customer-web-workspace-runtime';
 import Fastify, { LogController, type FastifyReply, type FastifyRequest } from 'fastify';
 
 import {
@@ -59,6 +64,7 @@ const NO_STORE_PATHS = new Set([
   '/auth/recovery',
   '/update-password',
   '/workspace',
+  '/player-ids',
 ]);
 
 const MUTATION_PATHS = new Set([
@@ -67,6 +73,7 @@ const MUTATION_PATHS = new Set([
   '/sign-out',
   '/forgot-password',
   '/update-password',
+  '/player-ids',
 ]);
 
 const RATE_LIMITED_ROUTES = new Set([
@@ -98,6 +105,8 @@ export interface CustomerWebAppOptions {
   readonly now?: () => number;
   readonly publicOrigin?: string;
   readonly rateLimit?: CustomerWebRateLimitOptions;
+  readonly requestKeyFactory?: () => string;
+  readonly workspace: CustomerWorkspaceRuntime;
 }
 
 interface RateLimitBucket {
@@ -326,6 +335,61 @@ function validRecoveryCode(value: unknown): value is string {
   );
 }
 
+function validRequestKey(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
+  );
+}
+
+function newRequestKey(factory: (() => string) | undefined): string {
+  const requestKey = factory?.() ?? randomUUID();
+  if (!validRequestKey(requestKey)) throw new Error('Invalid request-key factory output.');
+  return requestKey;
+}
+
+function validPlayerId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value === value.trim() &&
+    Array.from(value).length >= 1 &&
+    Array.from(value).length <= 64 &&
+    /^[^\s\u0000-\u001f\u007f]+$/u.test(value)
+  );
+}
+
+function validDisplayStatus(value: unknown): value is CustomerWorkspaceDisplayStatus {
+  return value === 'checking' || value === 'ready' || value === 'needs_attention';
+}
+
+function safeRegistrations(value: unknown): readonly CustomerWorkspaceRegistration[] | undefined {
+  if (!Array.isArray(value) || value.length > 20) return undefined;
+  try {
+    return Object.freeze(
+      value.map((registration) => {
+        if (
+          typeof registration !== 'object' ||
+          registration === null ||
+          Array.isArray(registration)
+        ) {
+          throw new Error();
+        }
+        const record = registration as Record<string, unknown>;
+        if (
+          Object.keys(record).sort().join(',') !== 'playerId,status' ||
+          !validPlayerId(record.playerId) ||
+          !validDisplayStatus(record.status)
+        ) {
+          throw new Error();
+        }
+        return Object.freeze({ playerId: record.playerId, status: record.status });
+      }),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
 function html(reply: FastifyReply, statusCode: number, body: string): FastifyReply {
   return reply.code(statusCode).type(HTML_CONTENT_TYPE).send(body);
 }
@@ -364,6 +428,10 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
     logController: new LogController({ disableRequestLogging: true }),
     logger: false,
     trustProxy: false,
+  });
+
+  app.addHook('onClose', async () => {
+    await options.workspace.close();
   });
 
   app.addContentTypeParser(
@@ -428,7 +496,15 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   });
 
   app.get('/healthz', async (_request, reply) => reply.send({ status: 'ok' }));
-  app.get('/readyz', async (_request, reply) => reply.send({ status: 'ready' }));
+  app.get('/readyz', async (_request, reply) => {
+    try {
+      return (await options.workspace.ready())
+        ? reply.send({ status: 'ready' })
+        : reply.code(503).send({ status: 'unavailable' });
+    } catch {
+      return reply.code(503).send({ status: 'unavailable' });
+    }
+  });
 
   app.get('/', async (request, reply) => {
     try {
@@ -653,14 +729,68 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
       const customer = await options.auth.getCurrentCustomer(authContext(request, reply));
       if (!customer.ok) return html(reply, 503, genericErrorPage(503));
       if (customer.status === 'anonymous') return redirect(reply, '/sign-in');
+      const ensured = await options.workspace.ensureAccount({
+        authUserId: customer.account.authUserId,
+      });
+      if (!ensured.ok || ensured.status !== 'active') {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      const listed = await options.workspace.listPlayerRegistrations({
+        authUserId: customer.account.authUserId,
+        limit: 20,
+      });
+      if (!listed.ok) return html(reply, 503, genericErrorPage(503));
+      const registrations = safeRegistrations(listed.registrations);
+      if (!registrations) return html(reply, 503, genericErrorPage(503));
+      const query = request.query as Record<string, unknown>;
+      const submitted = Object.keys(query).length === 1 && query.submitted === '1';
       return html(
         reply,
         200,
         workspacePage(
           customer.account.email,
           issueCsrfCookie(request, reply, options.csrfTokenFactory),
+          newRequestKey(options.requestKeyFactory),
+          registrations,
+          submitted ? { kind: 'info', message: 'Your Player ID request was received.' } : undefined,
         ),
       );
+    } catch {
+      return html(reply, 503, genericErrorPage(503));
+    }
+  });
+
+  app.post('/player-ids', async (request, reply) => {
+    const form = exactForm(request.body, ['_csrf', 'playerId', 'requestKey']);
+    const playerId = form?.playerId;
+    const requestKey = form?.requestKey;
+    if (!form || !validPlayerId(playerId) || !validRequestKey(requestKey)) {
+      return html(reply, 400, genericErrorPage(400));
+    }
+
+    try {
+      const customer = await options.auth.getCurrentCustomer(authContext(request, reply));
+      if (!customer.ok) return html(reply, 503, genericErrorPage(503));
+      if (customer.status === 'anonymous') return redirect(reply, '/sign-in');
+      const ensured = await options.workspace.ensureAccount({
+        authUserId: customer.account.authUserId,
+      });
+      if (!ensured.ok || ensured.status !== 'active') {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      const submitted = await options.workspace.submitPlayerRegistration({
+        authUserId: customer.account.authUserId,
+        playerId,
+        requestKey,
+      });
+      if (
+        !submitted.ok ||
+        submitted.registration.playerId !== playerId ||
+        !validDisplayStatus(submitted.registration.status)
+      ) {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      return redirect(reply, '/workspace?submitted=1');
     } catch {
       return html(reply, 503, genericErrorPage(503));
     }

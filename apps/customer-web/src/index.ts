@@ -1,5 +1,9 @@
-import { loadCustomerWebAuthConfig } from '@fetanagent/config/customer-web';
+import {
+  loadCustomerWebAuthConfig,
+  loadCustomerWebWorkspaceConfig,
+} from '@fetanagent/config/customer-web';
 import { createCustomerWebAuthPort } from '@fetanagent/customer-web-auth-runtime';
+import { createCustomerWorkspacePostgresRuntime } from '@fetanagent/customer-web-workspace-runtime';
 
 import { buildCustomerWebApp } from './app.js';
 
@@ -13,10 +17,16 @@ function customerWebPort(value: string | undefined): number {
 
 const config = loadCustomerWebAuthConfig();
 if (!config.enabled) throw new Error('The customer web Auth runtime gate is disabled.');
+const workspaceConfig = loadCustomerWebWorkspaceConfig();
+if (!workspaceConfig.enabled) {
+  throw new Error('The customer workspace runtime gate is disabled.');
+}
+const workspace = await createCustomerWorkspacePostgresRuntime(workspaceConfig);
 
 const app = buildCustomerWebApp({
   auth: createCustomerWebAuthPort(config),
   publicOrigin: 'https://fetanagent.com',
+  workspace,
 });
 let closing = false;
 

@@ -1,8 +1,9 @@
 # FetanAgent customer web
 
-This Fastify application renders the responsive FetanAgent account surface and delegates account
-operations to an injected `CustomerWebAuthPort`. Route tests use a fake port; they make no network
-or database calls.
+This Fastify application renders the responsive FetanAgent account surface. Supabase session work
+is isolated behind `CustomerWebAuthPort`; customer and Player-ID work is isolated behind the
+separate `CustomerWorkspacePort`. Route tests use fake ports and make no network or live database
+calls.
 
 ## Security boundary
 
@@ -16,6 +17,14 @@ or database calls.
   attempt.
 - The service worker caches only fixed public assets and the offline page. It does not cache
   navigations or form submissions.
+- Workspace access uses only the Auth UUID returned by the server-side `auth.getUser()` check. No
+  browser-supplied Auth UUID, customer UUID, or internal database record UUID is accepted.
+- The Player-ID form carries one server-generated UUIDv4 idempotency key. The key is never returned
+  by the database, and every database result is reduced to `Checking`, `Ready`, or
+  `Could not confirm` before rendering.
+- The direct-Postgres package has a max-one pool and an exact startup catalog preflight. HTTP
+  readiness reuses that result for 30 seconds and coalesces concurrent refreshes so probes cannot
+  occupy the only application connection repeatedly.
 
 ## Deployment gate
 
@@ -30,7 +39,24 @@ Runtime composition requires:
 - `INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true`;
 - `CUSTOMER_WEB_SUPABASE_URL=https://spzpiyxheappsfyswewl.supabase.co` exactly;
 - `CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY` set through the existing secret-delivery boundary; and
+- `INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true`;
+- `CUSTOMER_WEB_DATABASE_URL_FILE=/run/secrets/customer_web_database_url` in production, containing
+  only the dedicated `fetanagent_customer_web_runtime` direct-Postgres URL for the exact staging
+  host with `sslmode=verify-full`; and
 - optional `CUSTOMER_WEB_PORT` (defaults to loopback port `3003`).
+
+The workspace runtime can execute only these exact functions after its catalog preflight:
+
+- `app.ensure_customer_web_account(uuid)`;
+- `app.submit_customer_web_player_registration(uuid,uuid,text)`; and
+- `app.list_customer_web_player_registrations(uuid,integer)`.
+
+It has no table, sequence, schema-create, or unrelated function capability.
+
+The database migration deliberately leaves `fetanagent_customer_web_runtime` as `NOLOGIN` with no
+password. A separate reviewed role-and-secret provisioning phase must enable that runtime login and
+deliver its URL secret; a separate reviewed Compose/Caddy phase must deploy and route the service.
+The URL configuration above cannot make this slice live on its own.
 
 This slice does not add or change Compose, Caddy, DNS, firewall rules, deployment secrets, or live
 routing. Those remain separate reviewed deployment work.

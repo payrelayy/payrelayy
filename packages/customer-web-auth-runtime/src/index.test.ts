@@ -25,6 +25,7 @@ vi.mock('@supabase/ssr', () => ({
 }));
 
 const publishableKey = `sb_publishable_${'a'.repeat(22)}_${'b'.repeat(8)}`;
+const authUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const password = 'correct horse battery staple';
 const recoveryCode = 'a_secure_recovery_code_1234567890';
 const config: Extract<CustomerWebAuthConfig, { readonly enabled: true }> = {
@@ -148,7 +149,7 @@ describe('customer web Auth port', () => {
 
   it('calls only the narrow Auth SDK methods with normalized inputs and no signup options', async () => {
     auth.getUser.mockResolvedValue({
-      data: { user: { email: '  Current.Customer@Example.COM ' } },
+      data: { user: { email: '  Current.Customer@Example.COM ', id: authUserId } },
       error: null,
     });
     const port = createCustomerWebAuthPort(config);
@@ -177,7 +178,7 @@ describe('customer web Auth port', () => {
       }),
     ).toEqual({ ok: true, status: 'password_updated' });
     expect(await port.getCurrentCustomer(context)).toEqual({
-      account: { email: 'current.customer@example.com' },
+      account: { authUserId, email: 'current.customer@example.com' },
       ok: true,
       status: 'authenticated',
     });
@@ -544,6 +545,20 @@ describe('customer web Auth port', () => {
       status: 'anonymous',
     });
     expect(auth.getUser).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when the server-confirmed Auth subject is missing or non-canonical', async () => {
+    const port = createCustomerWebAuthPort(config);
+    for (const id of [undefined, authUserId.toUpperCase(), 'not-a-uuid']) {
+      auth.getUser.mockResolvedValueOnce({
+        data: { user: { email: 'customer@example.com', id } },
+        error: null,
+      });
+      await expect(port.getCurrentCustomer(createContext().context)).resolves.toEqual({
+        error: 'customer_auth_request_failed',
+        ok: false,
+      });
+    }
   });
 
   it('maps only the real missing-session Auth error with a null user to anonymous', async () => {

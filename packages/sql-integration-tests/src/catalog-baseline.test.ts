@@ -6335,7 +6335,7 @@ describe('disposable SQL migration baseline', () => {
       'player_deposit_eligibility_decisions_no_truncate',
     ]);
     expect(decisionTriggers.rows[0]!.trigger_definition).toContain('BEFORE INSERT');
-    expect(decisionTriggers.rows[1]!.trigger_definition).toContain('BEFORE UPDATE OR DELETE');
+    expect(decisionTriggers.rows[1]!.trigger_definition).toContain('BEFORE DELETE OR UPDATE');
     expect(decisionTriggers.rows[2]!.trigger_definition).toContain('BEFORE TRUNCATE');
 
     const depositInsertTriggers = await client.query<{ readonly trigger_name: string }>(`
@@ -6910,9 +6910,9 @@ describe('disposable SQL migration baseline', () => {
         primaryEligibilityId,
       ]),
     ).rejects.toThrow(/append-only/u);
-    await expect(client.query('truncate app.player_deposit_eligibility_decisions')).rejects.toThrow(
-      /append-only/u,
-    );
+    await expect(
+      client.query('truncate app.player_deposit_eligibility_decisions cascade'),
+    ).rejects.toThrow(/append-only/u);
 
     const revocation = await client.query<{
       readonly decision_version: number;
@@ -7145,7 +7145,7 @@ describe('disposable SQL migration baseline', () => {
     const liveInbound = await client.query<{ readonly id: string }>(
       `insert into app.inbound_events (
          channel, external_event_id, customer_identity_id, payload_digest
-       ) values ('telegram', 'eligibility-live-gate:1', $1::uuid, $2::text)
+       ) values ('telegram', 'update:9800000001', $1::uuid, $2::text)
        returning id`,
       [telegramIdentity.rows[0]!.id, payloadHmac('9')],
     );

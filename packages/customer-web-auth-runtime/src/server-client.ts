@@ -16,7 +16,7 @@ export interface CustomerWebServerClient {
   readonly auth: {
     exchangeCodeForSession(code: string): AuthResult<{ readonly session: unknown | null }>;
     getUser(): AuthResult<{
-      readonly user: { readonly email?: string } | null;
+      readonly user: { readonly email?: string; readonly id: string } | null;
     }>;
     resetPasswordForEmail(
       email: string,

@@ -6,6 +6,7 @@
   "dependencies": {
     "@fetanagent/config": "workspace:*",
     "@fetanagent/customer-web-auth-runtime": "workspace:*",
+    "@fetanagent/customer-web-workspace-runtime": "workspace:*",
     "fastify": "5.11.2"
   },
   "scripts": {

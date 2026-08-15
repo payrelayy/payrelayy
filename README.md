@@ -9,14 +9,17 @@ recovery, not account creation or routine sign-in. Product copy is English-only.
 
 The repository currently implements an earlier English-only, invite-only Telegram staging slice for
 a CBE Birr dry run, a disabled authoritative-shadow foundation with offline attempt and settlement
-planners, and a disabled-by-default customer web authentication foundation. The customer source now
-includes a responsive PWA shell, generic account creation and sign-in, server-handled Supabase Auth
-cookies, sign-out, and forgot-password recovery. It is not deployment-wired or publicly enabled, and
-it has no private app-schema/customer-workspace database actions or financial capability. Stage 1E specifies a pure,
-blocked-by-default official-source policy whose current source status is `unproven`; it neither
-selects nor permits a provider source. Stage 1F records the remaining authoritative-lookup blockers
-and keeps every lookup capability false. Telegram is optional in the settled product and requires a
-separately reviewed legacy-history link rather than becoming web authentication or recovery.
+planners, and a disabled-by-default customer web authentication and non-financial workspace
+foundation. The customer source now includes a responsive PWA shell, generic account creation and
+sign-in, server-handled Supabase Auth cookies, sign-out, forgot-password recovery, an immutable Auth
+UUID-to-customer mapping, and non-claiming Player-ID submit/list actions. The customer workspace uses
+a dedicated direct-PostgreSQL BFF/runtime with only three exact private functions. It is not
+deployment-wired or publicly enabled, and it has no Player-ID ownership proof, validated association,
+deposit eligibility, or financial capability. Stage 1E specifies a pure, blocked-by-default
+official-source policy whose current source status is `unproven`; it neither selects nor permits a
+provider source. Stage 1F records the remaining authoritative-lookup blockers and keeps every lookup
+capability false. Telegram is optional in the settled product and requires a separately reviewed
+legacy-history link rather than becoming web authentication or recovery.
 
 ## Current safety status
 
@@ -28,15 +31,21 @@ The current foundation is deliberately safe:
 - the source provides self-service email/password account creation, generic sign-in, sign-out,
   ordered Supabase cookie refresh effects hardened to Secure/HttpOnly host-only cookies, CSRF
   protection, and a recovery operation that commits cookie effects only after code exchange and
-  password update both succeed, while customer database actions outside Supabase Auth and every
-  financial capability remain absent;
+  password update both succeed;
+- `@fetanagent/customer-web-workspace-runtime` is the dedicated direct-PostgreSQL BFF boundary. It
+  can ensure the server-verified Auth UUID's customer account, submit a non-claiming KemerBet Player
+  ID, and list only that identity's web-origin requests. Its exact role cannot read tables or call
+  unrelated functions, and the web slice has no financial operation;
+- customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
+  unreachable for a web-origin request until a later proof-bearing ownership-association boundary is
+  reviewed and implemented, so submit/list does not make a Player ID eligible for deposits;
 - the intended long-lived routine experience is not a claim of an infinite or irrevocable session:
   per-device visibility, remote sign-out, and explicit global session revocation after recovery are
   not implemented, and production enablement still requires exact hosted Auth, SMTP, trusted-proxy,
   shared fail-closed rate-limit configuration, plus an audit of effective `anon` and `authenticated`
   grants, exposed RPC/PostgREST surfaces, and RLS before issuing customer principals;
-- `@fetanagent/customer-web-access-foundation` remains a pure, non-runtime record of the settled
-  product intent. Its blocked result does not enable or configure the separate Auth foundation;
+- `@fetanagent/customer-web-access-foundation` remains a historical, pure, non-runtime record of the
+  settled product intent. Its blocked result does not enable or configure either implemented runtime;
 - the optional Telegram-history link is still unimplemented and cannot be inferred from either Auth
   or the existing Telegram admission flow;
 - the implemented workspace is customer-only; capability-based staff routing through the generic
@@ -86,9 +95,9 @@ The current foundation is deliberately safe:
 - no provider evidence, payment claim, authoritative verification job, KemerBet call, withdrawal,
   or financial execution is enabled by this flow.
 
-The private `app` database schema will use direct PostgreSQL connections only from the API, worker,
-a separately reviewed beta-admission runtime, a narrow Player-ID action runtime, and a
-nonce-retention maintenance process. Each future
+The private `app` database schema uses direct PostgreSQL connections only from reviewed server
+runtimes. These include the API, worker, beta-admission runtime, narrow Telegram Player-ID action
+runtime, dedicated customer-web workspace runtime, and nonce-retention maintenance process. Each
 credential belongs in its own VM runtime secret set, never Git or the bot, executor, dashboard,
 browser profile, or logs. The maintenance identity is limited to a future bounded nonce-digest purge
 and must never be reused by the API or worker. FetanAgent does not place a Supabase service-role key
@@ -103,7 +112,7 @@ environment file.
 
 | Component                                             | Responsibility                                                                      |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/customer-web`                                   | Disabled SSR/PWA account shell; not deployed or financial                           |
+| `apps/customer-web`                                   | Disabled SSR/PWA account and non-financial Player-ID shell                          |
 | `apps/api`                                            | Transaction orchestration, validation, future web boundary, and audit boundaries    |
 | `apps/admin`                                          | Existing private staging operations service; not the public neutral workspace       |
 | `apps/bot`                                            | Optional private Telegram legacy transport; not customer authentication or recovery |
@@ -115,8 +124,9 @@ environment file.
 | `packages/cbe-birr-authoritative-fixtures`            | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
 | `packages/cbe-birr-official-source-policy`            | Pure source-permission policy; fixed `unproven` and blocked                         |
 | `packages/cbe-birr-authoritative-lookup-prerequisite` | Pure blocked lookup-prerequisite inventory; every capability is false               |
-| `packages/customer-web-access-foundation`             | Pure blocked web/PWA product-decision record; no runtime or authentication          |
+| `packages/customer-web-access-foundation`             | Historical pure web/PWA decision record; no runtime or authentication               |
 | `packages/customer-web-auth-runtime`                  | Server-only Supabase Auth adapter; disabled by configuration                        |
+| `packages/customer-web-workspace-runtime`             | Exact direct-PostgreSQL account and Player-ID BFF; disabled by configuration        |
 | `packages/contracts`                                  | Provider, executor, notifier, and storage interfaces                                |
 | `packages/config`                                     | Safe environment parsing and feature switches                                       |
 | `packages/i18n`                                       | Shared English message keys and safe locale normalization                           |

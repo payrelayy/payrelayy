@@ -109,6 +109,9 @@ importers:
       '@fetanagent/customer-web-auth-runtime':
         specifier: workspace:*
         version: link:../../packages/customer-web-auth-runtime
+      '@fetanagent/customer-web-workspace-runtime':
+        specifier: workspace:*
+        version: link:../../packages/customer-web-workspace-runtime
       fastify:
         specifier: 5.11.2
         version: 5.11.2
@@ -187,6 +190,19 @@ importers:
       '@supabase/supabase-js':
         specifier: 2.112.3
         version: 2.112.3
+
+  packages/customer-web-workspace-runtime:
+    dependencies:
+      '@fetanagent/config':
+        specifier: workspace:*
+        version: link:../config
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
 
   packages/i18n: {}
 

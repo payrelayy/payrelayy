@@ -1,3 +1,5 @@
+import type { CustomerWorkspaceRegistration } from '@fetanagent/customer-web-workspace-runtime';
+
 export interface PageNotice {
   readonly kind: 'info' | 'error';
   readonly message: string;
@@ -166,7 +168,42 @@ export function updatePasswordPage(csrfToken: string, notice?: PageNotice): stri
   );
 }
 
-export function workspacePage(email: string, csrfToken: string): string {
+function statusLabel(status: CustomerWorkspaceRegistration['status']): string {
+  switch (status) {
+    case 'checking':
+      return 'Checking';
+    case 'ready':
+      return 'Ready';
+    case 'needs_attention':
+      return 'Could not confirm';
+  }
+}
+
+function statusClass(status: CustomerWorkspaceRegistration['status']): string {
+  return status === 'needs_attention' ? 'status-unconfirmed' : `status-${status}`;
+}
+
+function registrationList(registrations: readonly CustomerWorkspaceRegistration[]): string {
+  if (registrations.length === 0) {
+    return '<p class="empty-state">No Player IDs added yet.</p>';
+  }
+  return `<ul class="player-id-list">${registrations
+    .map(
+      (registration) => `<li>
+        <span class="player-id-value">${escapeHtml(registration.playerId)}</span>
+        <span class="status ${statusClass(registration.status)}">${statusLabel(registration.status)}</span>
+      </li>`,
+    )
+    .join('')}</ul>`;
+}
+
+export function workspacePage(
+  email: string,
+  csrfToken: string,
+  requestKey: string,
+  registrations: readonly CustomerWorkspaceRegistration[],
+  notice?: PageNotice,
+): string {
   return layout(
     'Workspace',
     `<main class="workspace-layout">
@@ -174,14 +211,23 @@ export function workspacePage(email: string, csrfToken: string): string {
         <p class="eyebrow">Workspace</p>
         <h2 id="workspace-title">Good to see you.</h2>
         <p class="supporting">Signed in as ${escapeHtml(email)}.</p>
+        ${noticeMarkup(notice)}
         <div class="workspace-grid">
           <article class="workspace-panel">
-            <h3>Account status</h3>
-            <p>Your account is signed in and ready.</p>
+            <h3>Player IDs</h3>
+            <p>Add a Player ID to keep its status in one place.</p>
+            <form method="post" action="/player-ids" accept-charset="utf-8">
+              ${csrfField(csrfToken)}
+              <input type="hidden" name="requestKey" value="${escapeHtml(requestKey)}">
+              <label>Player ID
+                <input name="playerId" type="text" autocomplete="off" maxlength="64" required>
+              </label>
+              <button type="submit">Add Player ID</button>
+            </form>
           </article>
           <article class="workspace-panel">
-            <h3>Security</h3>
-            <p>Use Sign out below when you finish on a shared device.</p>
+            <h3>Your Player IDs</h3>
+            ${registrationList(registrations)}
           </article>
         </div>
         <form method="post" action="/sign-out" accept-charset="utf-8">

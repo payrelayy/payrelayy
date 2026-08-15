@@ -69,6 +69,16 @@ function normalizeEmail(input: unknown): string {
   return email;
 }
 
+function normalizeAuthUserId(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)
+  ) {
+    throw new Error();
+  }
+  return value;
+}
+
 function readPassword(input: unknown): string {
   const password = readExactStringInput(input, 'password');
   if (password.length < 12 || password.length > 128 || /[\u0000]/u.test(password)) {
@@ -279,9 +289,10 @@ export function createCustomerWebAuthPort(config: CustomerWebAuthConfig): Custom
           transaction.commitDeletionsOnly();
           return GENERIC_FAILURE;
         }
+        const authUserId = normalizeAuthUserId(data.user.id);
         const email = normalizeEmail({ email: data.user.email });
         transaction.commit();
-        return { account: { email }, ok: true, status: 'authenticated' };
+        return { account: { authUserId, email }, ok: true, status: 'authenticated' };
       } catch {
         try {
           transaction?.commitDeletionsOnly();

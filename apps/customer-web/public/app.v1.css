@@ -280,6 +280,57 @@ input::placeholder {
   line-height: 1.55;
 }
 
+.workspace-panel form {
+  margin-top: 1rem;
+}
+
+.player-id-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.player-id-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-top: 1px solid #303744;
+  padding-top: 0.75rem;
+}
+
+.player-id-value {
+  overflow-wrap: anywhere;
+  color: #f7f8fb;
+  font-weight: 750;
+}
+
+.status {
+  flex: 0 0 auto;
+  border: 1px solid #435163;
+  border-radius: 999px;
+  padding: 0.35rem 0.6rem;
+  color: #dbe4ef;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.status-ready {
+  border-color: #2f786d;
+  color: #9bf3d8;
+}
+
+.status-unconfirmed {
+  border-color: #76505a;
+  color: #ffd9dd;
+}
+
+.empty-state {
+  margin-top: 1rem !important;
+}
+
 .quiet {
   color: #8d96a5;
   font-size: 0.88rem;

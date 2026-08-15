@@ -1,6 +1,6 @@
 # Player-ID request and ownership-association boundary
 
-## Status: legacy staged request capture and explicit ownership-association boundary
+## Status: web request capture plus legacy staged ownership-association boundary
 
 The private staging bot can record a Player-ID request through the reviewed conversation-action
 boundary. The private staging operations service can list the bounded KemerBet review queue and
@@ -16,19 +16,50 @@ in customer copy:
 
 1. A signed-in customer adds an existing KemerBet Player ID without providing a KemerBet password,
    OTP, recovery code, or browser session.
-2. FetanAgent creates a non-claiming request and displays `Being checked`.
+2. FetanAgent creates a non-claiming request and displays `Checking`.
 3. An existence result remains insufficient; a separately reviewed control must prove the
    customer-to-player-account association.
-4. A successful association displays `Ready to use`. Uncertainty displays
-   `Needs more information`, and a negative result displays `Could not confirm`.
-5. A customer may retain multiple `Ready to use` Player IDs and chooses one for each deposit or
+4. A successful proof-bearing association displays `Ready`; a negative or closed result displays
+   `Could not confirm`.
+5. A customer may retain multiple `Ready` Player IDs and chooses one for each deposit or
    withdrawal. Each transaction snapshots the selected immutable association.
 6. Removal or reassignment preserves history and must not reveal whether the same Player ID was
    submitted or associated by another customer.
 
-The web/PWA account boundary now exists in source but remains disabled and undeployed. The customer
-Player-ID action and ownership-proof boundaries needed for this flow are not implemented or enabled.
-See [standalone-web-pwa.md](standalone-web-pwa.md).
+The web/PWA account and non-claiming Player-ID submit/list boundaries now exist in source but remain
+disabled and undeployed. Web ownership proof and association/deposit eligibility are not implemented
+or enabled. A web-origin request cannot reach `Ready` until a later proof-bearing association
+boundary is reviewed and implemented. See [standalone-web-pwa.md](standalone-web-pwa.md).
+
+## Standalone web implementation boundary
+
+The customer web server verifies the Supabase Auth session, then passes only that Auth UUID through
+the `CustomerWorkspacePort`. The dedicated `@fetanagent/customer-web-workspace-runtime` is a
+direct-PostgreSQL BFF adapter with a one-connection pool and an exact catalog/privilege preflight. It
+can execute only:
+
+```text
+app.ensure_customer_web_account(uuid)
+app.submit_customer_web_player_registration(uuid, uuid, text)
+app.list_customer_web_player_registrations(uuid, integer)
+```
+
+Those functions:
+
+- create or replay one immutable Supabase Auth UUID-to-customer mapping without accepting email,
+  Telegram identity, or a browser-supplied customer UUID;
+- submit or naturally replay one bounded, non-claiming KemerBet Player-ID request using a
+  server-generated UUIDv4 request key; and
+- list only requests recorded through the caller's immutable web identity mapping.
+
+The runtime has no direct table or sequence access and no unrelated function access. The public
+projection has exactly three labels: `Checking`, `Ready`, and `Could not confirm`. Internal pending,
+existence-found, and review-required states remain `Checking`; negative or closed states become
+`Could not confirm`. `Ready` requires a valid ownership association, while the database explicitly
+rejects association of every web-origin request. Therefore `Ready` is intentionally unreachable in
+this slice. The boundary cannot validate ownership, make a Player ID deposit-eligible, open a
+deposit, or perform any financial action. It is customer-only; shared staff capability routing
+through the generic public entry remains a future boundary.
 
 ## Why the existing player table is not an intake table
 
@@ -40,6 +71,20 @@ Player-ID existence does not prove that the requesting customer controls that Ke
 The request flow must therefore record customer input, not an ownership claim.
 
 ## Applied private records
+
+### `app.customer_auth_identities`
+
+This append-only table binds one server-verified Supabase Auth UUID to exactly one FetanAgent
+customer and its `supabase_auth` customer identity. The Auth UUID, customer, and identity binding is
+immutable; neither email nor Telegram identity is accepted by the web procedures.
+
+### `app.customer_web_player_registration_request_origins`
+
+This append-only receipt binds one server-generated request key and one Player-ID request to the
+caller's immutable Auth identity. Exact transport replay is idempotent, and a natural replay of the
+same customer/platform/Player-ID does not grow the origin or audit ledgers. The origin record never
+asserts ownership and is the database gate that keeps web-origin requests out of the current
+association path.
 
 ### `app.player_registration_requests`
 
@@ -154,6 +199,9 @@ claim that the customer owns the account.
 - Use fixed-search-path `SECURITY DEFINER` functions and revoke their default `PUBLIC` execution.
   The registration helper remains ungranted. Staging grants only the conversation-aware wrapper to
   the dedicated `fetanagent_player_actions` group; the generic API role remains denied.
+- Grant the dedicated `fetanagent_customer_web` group execute access only to the three standalone
+  web functions. Its runtime identity uses direct PostgreSQL from the server-side BFF and has no
+  base-table, sequence, schema-create, Data API, or unrelated procedure access.
 - The bot never receives database credentials and never invokes KemerBet directly.
 - Display English reason-code translations rather than database errors.
 
@@ -166,7 +214,7 @@ claim that the customer owns the account.
 3. A single transaction validates that state and the new inbound event, records a
    non-claiming request, consumes the event globally, and clears or advances the conversation.
 4. The existing bot uses legacy `pending validation` copy. That wording must not be reused by the
-   standalone customer product; the canonical status is `Being checked`.
+   standalone customer product; the canonical web status is `Checking`.
 5. The private staging operations page lists only pending or review-required KemerBet submissions
    and can record `exists`, `not_found`, `review_required`, or `cancelled` with fixed reason codes.
 6. After separately proving that the Telegram customer controls the account, the authenticated
@@ -188,6 +236,10 @@ This association makes the Player ID structurally eligible for deposit intake. I
 the still-disabled payment feature switches, missing receiver-account configuration, exact-amount
 matching, evidence validation, or dry-run execution boundaries.
 
+The database rejects this association when the request has a web-origin receipt. A future reviewed
+migration must introduce the proof-bearing web association path before such a request can become
+`Ready` or deposit-eligible.
+
 Before any future existence lookup, add per-customer and platform-wide abuse limits. A Player-ID
 validator must not become an account-enumeration or spam mechanism.
 
@@ -205,6 +257,7 @@ This stage must not:
 
 - automate a KemerBet lookup or treat an Owner-recorded existence result as ownership;
 - launch a browser or bypass a CAPTCHA/session control;
+- associate a web-origin request or report it as `Ready` without proof;
 - open a deposit intent or display payment instructions;
 - make a payment-provider call or transfer funds;
 - infer account ownership from existence alone; or

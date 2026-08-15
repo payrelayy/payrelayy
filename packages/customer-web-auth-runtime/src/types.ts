@@ -57,6 +57,7 @@ export type CustomerWebAuthActionResult<
 export type CustomerWebCurrentCustomerResult =
   | {
       readonly account: {
+        readonly authUserId: string;
         readonly email: string;
       };
       readonly ok: true;

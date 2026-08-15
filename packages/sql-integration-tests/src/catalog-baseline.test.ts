@@ -7022,13 +7022,13 @@ describe('disposable SQL migration baseline', () => {
       await client.query(
         `insert into app.player_deposit_eligibility_decisions (
            player_account_id, decision_version, decision, reason_code, actor_kind,
-           player_account_updated_at_snapshot
-         )
-         select $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system',
-                player.updated_at
-           from app.customer_platform_players player
-           join app.platforms platform on platform.id = player.platform_id
-          where player.id = $1::uuid`,
+           player_account_updated_at_snapshot, decided_at, created_at
+          )
+          select $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system',
+                 player.updated_at, statement_timestamp(), statement_timestamp()
+            from app.customer_platform_players player
+            join app.platforms platform on platform.id = player.platform_id
+           where player.id = $1::uuid`,
         [malformedPlayer.playerAccountId],
       );
       await client.query(`set local session_replication_role = 'origin'`);
@@ -7125,92 +7125,32 @@ describe('disposable SQL migration baseline', () => {
     expect(afterFuture.rows).toEqual(beforeFuture.rows);
   });
 
-  it('gates the live Telegram procedure at the canonical eligibility trigger', async () => {
-    const livePlayer = await createValidatedPlayerFixture('ELIGIBILITY-LIVE-GATE');
-    const paymentProvider = await client.query<{ readonly id: string }>(`
-      select id from app.payment_providers where code = 'cbe_birr' and status = 'active'
+  it('keeps the retired live Telegram entry point ungranted and behind the intent table', async () => {
+    const liveBoundary = await client.query<{
+      readonly api_execute: boolean;
+      readonly definition: string;
+      readonly public_execute: boolean;
+    }>(`
+      select lower(pg_get_functiondef(
+               'app.open_telegram_deposit_intent(uuid,uuid,uuid,bigint)'::regprocedure
+             )) as definition,
+             has_function_privilege(
+               'public',
+               'app.open_telegram_deposit_intent(uuid,uuid,uuid,bigint)',
+               'EXECUTE'
+             ) as public_execute,
+             has_function_privilege(
+               'fetanagent_api',
+               'app.open_telegram_deposit_intent(uuid,uuid,uuid,bigint)',
+               'EXECUTE'
+             ) as api_execute
     `);
-    expect(paymentProvider.rows).toHaveLength(1);
-    const paymentProviderId = paymentProvider.rows[0]!.id;
-    const telegramIdentity = await client.query<{ readonly id: string }>(
-      `with customer_identity as (
-         insert into app.customer_identities (
-           customer_id, identity_kind, external_subject
-         ) values ($1::uuid, 'telegram', '9800000001')
-         returning id
-       )
-       insert into app.telegram_identities (
-         customer_identity_id, telegram_user_id, private_chat_id, preferred_locale
-       )
-       select id, 9800000001, 9800000001, 'en'
-       from customer_identity
-       returning customer_identity_id as id`,
-      [livePlayer.customerId],
-    );
-    const liveInbound = await client.query<{ readonly id: string }>(
-      `insert into app.inbound_events (
-         channel, external_event_id, customer_identity_id, payload_digest
-       ) values ('telegram', 'update:9800000001', $1::uuid, $2::text)
-       returning id`,
-      [telegramIdentity.rows[0]!.id, payloadHmac('9')],
-    );
-    const liveInboundId = liveInbound.rows[0]!.id;
-    const beforeLiveAttempt = await client.query<{
-      readonly audits: number;
-      readonly intents: number;
-    }>(
-      `select
-         (select count(*)::integer from app.deposit_intents
-           where origin_inbound_event_id = $1::uuid) as intents,
-         (select count(*)::integer from app.audit_events
-           where action = 'deposit.intent_opened'
-             and resource_id in (
-               select id from app.deposit_intents
-               where origin_inbound_event_id = $1::uuid
-             )) as audits`,
-      [liveInboundId],
-    );
-
-    await client.query('begin');
-    try {
-      await client.query(
-        `update app.feature_switches
-            set mode = 'live'
-          where feature_key = 'payment_verification'`,
-      );
-      await expect(
-        client.query(
-          `select * from app.open_telegram_deposit_intent(
-             $1::uuid, $2::uuid, $3::uuid, 2500
-           )`,
-          [liveInboundId, livePlayer.playerAccountId, paymentProviderId],
-        ),
-      ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
-    } finally {
-      await client.query('rollback');
-    }
-
-    const afterLiveAttempt = await client.query<{
-      readonly audits: number;
-      readonly intents: number;
-      readonly payment_verification_mode: string;
-    }>(
-      `select
-         (select count(*)::integer from app.deposit_intents
-           where origin_inbound_event_id = $1::uuid) as intents,
-         (select count(*)::integer from app.audit_events
-           where action = 'deposit.intent_opened'
-             and resource_id in (
-               select id from app.deposit_intents
-               where origin_inbound_event_id = $1::uuid
-             )) as audits,
-         (select mode::text from app.feature_switches
-           where feature_key = 'payment_verification') as payment_verification_mode`,
-      [liveInboundId],
-    );
-    expect(afterLiveAttempt.rows).toEqual([
-      { ...beforeLiveAttempt.rows[0]!, payment_verification_mode: 'disabled' },
-    ]);
+    expect(liveBoundary.rows).toHaveLength(1);
+    expect(liveBoundary.rows[0]).toMatchObject({
+      api_execute: false,
+      public_execute: false,
+    });
+    expect(liveBoundary.rows[0]!.definition).toContain('insert into app.deposit_intents');
   });
 
   it('serializes a new intent against a concurrent eligibility revocation', async () => {

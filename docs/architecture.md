@@ -21,7 +21,10 @@ settlement planning, and a disabled/unrouted customer-only SSR/PWA Auth and non-
 foundation. The customer web server can ensure one customer account for a server-verified Auth UUID
 and submit/list that identity's web-origin KemerBet Player-ID requests through an exact
 direct-PostgreSQL BFF boundary. Capability-based staff routing through the generic public entry is
-not implemented. The Stage 1E official-source policy is blocked with status `unproven`; no provider
+not implemented. A pure customer-web ownership-proof prerequisite now records why that next phase
+must remain dormant: no authoritative proof source, challenge, evidence protocol, or positive
+result is selected, and ownership association is still coupled to deposit eligibility. The Stage 1E
+official-source policy is blocked with status `unproven`; no provider
 has a selected or permitted source, enabled adapter, credential, or runtime integration. The pure
 Stage 1F authoritative-lookup prerequisite inventory also remains blocked with every capability
 false. TeleBirr and CBE bank are deferred.
@@ -98,6 +101,13 @@ Player ID deposit-eligible, open a deposit, or execute any financial action.
 The customer projection uses exactly `Checking`, `Ready`, and `Could not confirm`; `Ready` is
 unreachable for web-origin requests until a later proof-bearing association boundary is implemented.
 
+The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package does not change
+that boundary. Its only valid disposition is
+`blocked / customer_web_player_ownership_proof_prerequisites_incomplete`, with a fixed ordered
+nine-item `remainingBlockers` inventory. It cannot represent proof success, associate a customer to
+a Player ID, create `Ready`, or grant deposit eligibility. It has no database, schema, role,
+application, runtime, environment, network, or infrastructure wiring.
+
 ## Account, session, and optional Telegram-link boundary
 
 The pure `@fetanagent/customer-web-access-foundation` package is a historical, non-runtime record of
@@ -112,6 +122,26 @@ recovery operation whose cookie effects commit only after code exchange and pass
 The separate `@fetanagent/customer-web-workspace-runtime` implements only the three non-financial
 account/Player-ID procedures described above. Neither runtime is deployment-wired, and neither
 provides Player-ID ownership proof, association/deposit eligibility, or financial capability.
+
+## Customer-web ownership-proof prerequisite boundary
+
+No reviewed authoritative KemerBet control signal exists for the customer-web flow. The challenge
+profile, challenge delivery path, evidence profile, freshness/replay/attempt/abuse policy,
+verification adapter, neutral staff proof-review capability, and ownership conflict/recovery policy
+are also unselected or absent. The ninth blocker records the existing coupling between ownership
+association and deposit eligibility.
+
+The prerequisite package is pure advisory metadata. It accepts no Player ID, identity, evidence,
+credential, token, provider session, or financial input; performs no I/O; and exports no positive
+proof state. It adds no migration, table, function, trigger, grant, role, RLS policy, route, UI,
+worker, adapter, secret, feature switch, deployment component, or financial action. The current
+three-function customer-web PostgreSQL surface and the database rejection of web-origin association
+remain unchanged.
+
+A future proof flow must first create a non-financial ownership fact independent from deposit
+eligibility. Any later promotion to a financially usable player binding is a separate reviewed
+phase; proof success must never silently enable deposits. See
+[customer-web-player-ownership-proof.md](customer-web-player-ownership-proof.md).
 
 The canonical public paths are generic `/sign-in`, `/create-account`, and `/workspace` paths. The
 server resolves capabilities after authentication; a URL, page title, or client flag must not reveal

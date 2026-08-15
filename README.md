@@ -15,7 +15,11 @@ sign-in, server-handled Supabase Auth cookies, sign-out, forgot-password recover
 UUID-to-customer mapping, and non-claiming Player-ID submit/list actions. The customer workspace uses
 a dedicated direct-PostgreSQL BFF/runtime with only three exact private functions. It is not
 deployment-wired or publicly enabled, and it has no Player-ID ownership proof, validated association,
-deposit eligibility, or financial capability. Stage 1E specifies a pure, blocked-by-default
+deposit eligibility, or financial capability. The pure
+`@fetanagent/customer-web-player-ownership-proof-prerequisite` package freezes the next web
+ownership-proof boundary as advisory-only and blocked: no authoritative proof source, challenge,
+delivery path, evidence protocol, or positive result has been selected, and it adds no runtime or
+deployment wiring. Stage 1E specifies a pure, blocked-by-default
 official-source policy whose current source status is `unproven`; it neither selects nor permits a
 provider source. Stage 1F records the remaining authoritative-lookup blockers and keeps every lookup
 capability false. Telegram is optional in the settled product and requires a separately reviewed
@@ -39,6 +43,11 @@ The current foundation is deliberately safe:
 - customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
   unreachable for a web-origin request until a later proof-bearing ownership-association boundary is
   reviewed and implemented, so submit/list does not make a Player ID eligible for deposits;
+- `@fetanagent/customer-web-player-ownership-proof-prerequisite` records the exact nine unresolved
+  ownership-proof blockers and returns only
+  `blocked / customer_web_player_ownership_proof_prerequisites_incomplete` for its valid metadata.
+  It cannot represent proof success, `Ready`, association, or deposit eligibility; it adds no
+  database, role, app, runtime, network, configuration, or infrastructure capability;
 - the intended long-lived routine experience is not a claim of an infinite or irrevocable session:
   per-device visibility, remote sign-out, and explicit global session revocation after recovery are
   not implemented, and production enablement still requires exact hosted Auth, SMTP, trusted-proxy,
@@ -110,26 +119,27 @@ environment file.
 
 ## Current and planned components
 
-| Component                                             | Responsibility                                                                      |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/customer-web`                                   | Disabled SSR/PWA account and non-financial Player-ID shell                          |
-| `apps/api`                                            | Transaction orchestration, validation, future web boundary, and audit boundaries    |
-| `apps/admin`                                          | Existing private staging operations service; not the public neutral workspace       |
-| `apps/bot`                                            | Optional private Telegram legacy transport; not customer authentication or recovery |
-| `apps/worker`                                         | Disabled pure shadow planners; no provider transport or database runner             |
-| `apps/maintenance`                                    | Internal nonce-retention privilege preflight; no scheduler or purge command         |
-| `apps/executor`                                       | Isolated, supervised KemerBet browser adapter; dry-run first                        |
-| `packages/domain`                                     | Money rules, state machines, limits, idempotency reason codes                       |
-| `packages/cbe-birr-fixtures`                          | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
-| `packages/cbe-birr-authoritative-fixtures`            | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
-| `packages/cbe-birr-official-source-policy`            | Pure source-permission policy; fixed `unproven` and blocked                         |
-| `packages/cbe-birr-authoritative-lookup-prerequisite` | Pure blocked lookup-prerequisite inventory; every capability is false               |
-| `packages/customer-web-access-foundation`             | Historical pure web/PWA decision record; no runtime or authentication               |
-| `packages/customer-web-auth-runtime`                  | Server-only Supabase Auth adapter; disabled by configuration                        |
-| `packages/customer-web-workspace-runtime`             | Exact direct-PostgreSQL account and Player-ID BFF; disabled by configuration        |
-| `packages/contracts`                                  | Provider, executor, notifier, and storage interfaces                                |
-| `packages/config`                                     | Safe environment parsing and feature switches                                       |
-| `packages/i18n`                                       | Shared English message keys and safe locale normalization                           |
+| Component                                                   | Responsibility                                                                      |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `apps/customer-web`                                         | Disabled SSR/PWA account and non-financial Player-ID shell                          |
+| `apps/api`                                                  | Transaction orchestration, validation, future web boundary, and audit boundaries    |
+| `apps/admin`                                                | Existing private staging operations service; not the public neutral workspace       |
+| `apps/bot`                                                  | Optional private Telegram legacy transport; not customer authentication or recovery |
+| `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner             |
+| `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command         |
+| `apps/executor`                                             | Isolated, supervised KemerBet browser adapter; dry-run first                        |
+| `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
+| `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
+| `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
+| `packages/cbe-birr-official-source-policy`                  | Pure source-permission policy; fixed `unproven` and blocked                         |
+| `packages/cbe-birr-authoritative-lookup-prerequisite`       | Pure blocked lookup-prerequisite inventory; every capability is false               |
+| `packages/customer-web-access-foundation`                   | Historical pure web/PWA decision record; no runtime or authentication               |
+| `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                        |
+| `packages/customer-web-workspace-runtime`                   | Exact direct-PostgreSQL account and Player-ID BFF; disabled by configuration        |
+| `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
+| `packages/contracts`                                        | Provider, executor, notifier, and storage interfaces                                |
+| `packages/config`                                           | Safe environment parsing and feature switches                                       |
+| `packages/i18n`                                             | Shared English message keys and safe locale normalization                           |
 
 ## Local development
 
@@ -180,6 +190,8 @@ fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the optional legacy Telegram boundary and
 [docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.
 See [docs/player-registration.md](docs/player-registration.md) for the Player-ID request, review,
-and explicit ownership-association boundary, and
+and explicit ownership-association boundary,
+[docs/customer-web-player-ownership-proof.md](docs/customer-web-player-ownership-proof.md) for the
+dormant nine-blocker ownership-proof prerequisite, and
 [docs/telegram-conversation-actions.md](docs/telegram-conversation-actions.md) for the required
 conversation/action gate.

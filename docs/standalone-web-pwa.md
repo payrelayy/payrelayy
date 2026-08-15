@@ -27,6 +27,13 @@ or live routing. It has no Player-ID ownership proof, validated association, dep
 Telegram-history link, or financial capability. Its workspace is customer-only; capability-based
 staff routing through the generic public entry remains unimplemented.
 
+The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package records the dormant
+next boundary. No authoritative KemerBet proof source, challenge, delivery path, evidence protocol,
+or positive proof result has been selected. Its only valid decision is
+`blocked / customer_web_player_ownership_proof_prerequisites_incomplete`; it does not add an app
+route, runtime, database object, role, configuration, infrastructure wiring, association, `Ready`,
+deposit eligibility, or financial action.
+
 The existing Telegram admission, `/owner` route, `Owner/Admin` labels, `pending validation` copy,
 and manual Player-ID review wording are implementation history and private staging behavior. They
 must not be presented as the settled customer experience. No financial, recovery, linking, or
@@ -89,7 +96,9 @@ only that identity's web-origin requests. Its direct-PostgreSQL role can execute
 `app.list_customer_web_player_registrations(uuid,integer)`. Customer statuses are exactly
 `Checking`, `Ready`, and `Could not confirm`. The database rejects ownership association for a
 web-origin request, so `Ready` is unreachable until a later proof-bearing association boundary is
-reviewed and implemented. Submit/list does not enable a deposit.
+reviewed and implemented. The frozen prerequisite cannot produce a positive ownership result.
+Submit/list does not enable a deposit, and a future ownership fact must remain independent from
+deposit eligibility until a separate financial review promotes it.
 
 ## Optional Telegram legacy-history link
 
@@ -207,7 +216,8 @@ Customer-visible terms are:
 | job, lease, shadow         | Omit                                                         | Check           |
 
 The customer Player-ID surface uses exactly `Checking`, `Ready`, and `Could not confirm`. `Ready` is
-unreachable for a web-origin request until a later proof-bearing ownership association succeeds.
+unreachable for a web-origin request. The current proof prerequisite is blocked and has no positive
+state, so merely adding that package does not make ownership association possible.
 Payment and withdrawal flows may additionally use `Submitted`, `Confirmed`, `Expired`, and
 `Cancelled` only when their exact meaning is established by the authoritative workflow. Product copy
 must not imply that a human review is automatic or that an existence result proves ownership.

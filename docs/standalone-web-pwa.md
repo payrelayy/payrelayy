@@ -16,26 +16,24 @@ support.
 
 ## Current implementation status
 
-These are product decisions, not claims about deployed capability. The repository currently
-contains an invite-only Telegram staging slice and a private operations page with internal
-Owner-oriented copy. It does not yet contain the canonical public customer account flow, responsive
-workspace, PWA manifest/service worker, generic public sign-in, persistent customer session policy,
-forgot-password recovery, controlled Telegram-history link, or customer web action boundary.
+These are product decisions, not claims about deployed capability. The repository now contains a
+disabled-by-default `apps/customer-web` SSR/PWA foundation with the canonical public account pages,
+responsive workspace shell, public-assets-only service worker, self-service email/password flow,
+server-validated Auth handling, sign-out, and forgot-password recovery. It is not wired into
+Compose, Caddy, DNS, firewall rules, production secrets, or live routing. It has no private
+app-schema/customer-workspace action boundary, Player-ID association, Telegram-history link, or
+financial capability. Its workspace is customer-only; capability-based staff routing through the
+generic public entry remains unimplemented.
 
 The existing Telegram admission, `/owner` route, `Owner/Admin` labels, `pending validation` copy,
 and manual Player-ID review wording are implementation history and private staging behavior. They
 must not be presented as the settled customer experience. No financial, recovery, linking, or
 session capability becomes enabled merely because this product boundary is documented.
 
-The pure `@fetanagent/customer-web-access-foundation` package records the settled intent in a
-fail-closed contract. Its metadata fixes self-service account creation and email/password
-authentication as intent only. Its only valid-request result is advisory and `blocked`, with reason
-`customer_web_access_runtime_not_implemented`. All 23 capability fields remain literal `false`,
-covering the web/PWA runtime, service worker, network, cookies and browser storage, account creation,
-authentication and credentials, password and email handling, recovery, session creation and
-persistence, Telegram linking or identity merge, database/persistence/runtime wiring, platform
-action, and financial capability. The package accepts no customer data or runtime material and is
-not an account-creation, authentication, or session implementation.
+The pure `@fetanagent/customer-web-access-foundation` package remains a fail-closed product-decision
+record. Its advisory `customer_web_access_runtime_not_implemented` result and 23 literal-false
+capabilities describe that package only; it is not imported as a permission switch and does not
+configure or enable the separate customer Auth runtime.
 
 ## Canonical information architecture
 
@@ -110,25 +108,34 @@ security revocation. The intended credential is email plus password. Email owner
 is requested only for a forgot-password recovery flow, not for self-service account creation,
 ordinary sign-in, or every customer action.
 
-That requested behavior is **not enabled**. No reviewed implementation currently creates accounts,
-accepts email/password credentials, provides secure persistent sessions, or performs forgot-password
-recovery. The absence of step-up authentication must not be mistaken for approval of high-risk
+That requested behavior is **not deployed or enabled**. The source now implements account creation,
+email/password sign-in, current-session sign-out, ordered server-handled Supabase Auth cookie refresh
+effects, and a forgot-password flow with enumeration-neutral requests and a short-lived protected
+recovery code. Its browser cookie effects commit only after code exchange and password update both
+succeed. The absence of step-up authentication must not be mistaken for approval of high-risk
 account or financial actions.
 
-Before persistent customer login can be enabled, the session boundary needs secure HTTP-only
-cookies, rotation, server-side revocation, logout, per-device session visibility, remote sign-out,
-cross-site request protection, and generic authentication errors. Conventional bounded idle and
-absolute lifetimes would eventually require another sign-in and therefore conflict with the selected
-no-repeated-authentication experience. No reviewed alternative or precise security-revocation policy
-currently resolves that conflict, so session persistence remains disabled. Persistent must never
-mean an irrevocable session or a trusted browser install.
+The implemented boundary has Secure, HttpOnly, host-only cookies, ordered refresh effects,
+cross-site request protection, private/no-store responses, generic errors, and current-session
+logout. It does not provide per-device session visibility, remote sign-out, or an explicit global
+revocation operation after password recovery. Supabase still owns the underlying refresh-session
+lifecycle, so this code must not be described as an infinite session. Persistent must never mean an
+irrevocable session or a trusted browser install.
 
-Before recovery-only email confirmation can be enabled, a separate review must resolve how the
-recovery address is bound safely when email ownership is not confirmed at self-service account
-creation or routine sign-in. The recovery flow needs non-enumerating responses, rate limits,
-short-lived single-use protected tokens, invalidation after use, password and session revocation,
-customer notification, and an audited exception path. Until that design is approved,
-forgot-password recovery remains unavailable.
+The recovery source uses non-enumerating responses, bounded inputs, and a short-lived recovery code
+held in an HttpOnly cookie. The server exchanges that code and then updates the password; browser
+cookie effects commit only after both SDK calls succeed. Before public enablement, the hosted
+Supabase project must be verified to match the selected account-creation behavior, exact recovery
+redirect, and production SMTP configuration. The current in-process limiter must be replaced by a
+shared fail-closed limiter behind an exact trusted-proxy chain, and global session revocation and
+recovery notification behavior remain explicit follow-up gates. Effective `anon` and `authenticated`
+grants, exposed RPC/PostgREST surfaces, and RLS must be audited before issuing any customer principal
+in the shared project.
+
+Because account creation does not confirm the email address, mailbox control becomes authoritative
+for password recovery only when recovery is requested. Recovery must never auto-link or merge
+another identity, and all prior sessions must be revoked before this policy is enabled for
+financially relevant use.
 
 The decision against repeated or step-up authentication remains a product requirement. It does not
 waive authorization, two-person approval for sensitive team actions, account-change safeguards, or

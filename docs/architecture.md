@@ -16,11 +16,12 @@ shared.
 
 The current implementation is narrower and must not be confused with that product target. It has an
 invite-only Telegram staging slice, a private internal operations page, CBE Birr-only redacted
-fixture assessment, offline authoritative-shadow normalization fixtures, and fail-closed attempt and
-settlement planning. The Stage 1E official-source policy is blocked with status `unproven`; no
-provider has a selected or permitted source, enabled adapter, credential, or runtime integration.
-The pure Stage 1F authoritative-lookup prerequisite inventory also remains blocked with every
-capability false. TeleBirr and CBE bank are deferred.
+fixture assessment, offline authoritative-shadow normalization fixtures, fail-closed attempt and
+settlement planning, and a disabled/unrouted customer-only SSR/PWA Auth foundation. Capability-based
+staff routing through the generic public entry is not implemented. The Stage 1E official-source
+policy is blocked with status `unproven`; no provider has a selected or permitted source, enabled
+adapter, credential, or runtime integration. The pure Stage 1F authoritative-lookup prerequisite
+inventory also remains blocked with every capability false. TeleBirr and CBE bank are deferred.
 
 ## Component boundary
 
@@ -85,7 +86,12 @@ The pure `@fetanagent/customer-web-access-foundation` package records these prod
 Its valid request returns `blocked / customer_web_access_runtime_not_implemented`, with every web,
 PWA, account-creation, authentication, password, email, recovery, session, linking, persistence,
 platform-action, and financial capability false. Self-service account creation and email/password
-authentication are intent metadata only, not runtime readiness.
+authentication are intent metadata in that pure package, not runtime permission. A separate
+disabled-by-default `apps/customer-web` and `@fetanagent/customer-web-auth-runtime` source boundary
+implements the SSR/PWA account shell, server-handled Auth cookies, current-session sign-out, and a
+recovery operation whose cookie effects commit only after code exchange and password update succeed.
+It is not deployment-wired and has no private app-schema/customer-workspace database or financial
+capability.
 
 The canonical public paths are generic `/sign-in`, `/create-account`, and `/workspace` paths. The
 server resolves capabilities after authentication; a URL, page title, or client flag must not reveal
@@ -95,13 +101,13 @@ and reason codes remain available to authorization and audit systems.
 
 Routine customer login is intended to persist across ordinary browser/PWA restarts without repeated
 or step-up authentication, until explicit sign-out or a server-side security revocation. Email
-confirmation is requested only for forgot-password recovery. Those behaviors are not implemented or
-enabled: no reviewed session or recovery boundary currently makes them safe. Ordinary bounded
-session expiry conflicts with the selected no-repeated-authentication experience, and no reviewed
-alternative or precise security-revocation policy resolves that conflict. Private data must not enter
-a service-worker cache. Recovery needs a separately reviewed recovery-address binding and
-one-time-token design. The decision against step-up prompts does not authorize an unsafe account
-change or financial action.
+confirmation is requested only for forgot-password recovery. The source implements a bounded,
+server-handled session-cookie and short-lived recovery-code boundary, but it is disabled and must not
+be called an infinite session. Per-device visibility, remote sign-out, explicit post-recovery global
+revocation, hosted Auth/SMTP settings, exact trusted-proxy handling, shared fail-closed rate limiting,
+and an audit of effective Data API grants, exposed RPCs, and RLS remain deployment gates. Private data
+does not enter the service-worker cache. The decision against step-up prompts does not authorize an
+unsafe account change or financial action.
 
 Telegram is not sign-in, recovery, or transaction authority. A future optional history link must
 begin from an authenticated web account, prove the exact legacy Telegram identity with a one-time
@@ -175,8 +181,9 @@ FetanAgent does not automate sending money in version 1.
 
 ## Deployment path
 
-The public responsive web/PWA and generic workspace are not implemented by the current deployment.
-The London DigitalOcean VM will run Docker Compose: API, optional bot, worker, executor, and nginx.
-No public HTTP/HTTPS firewall rule is opened until a domain, TLS, reverse proxy, and a
-staging health check are ready. Supabase remains in Ireland; London is the closest practical
-DigitalOcean region and a good latency/security tradeoff for this deployment.
+The public responsive web/PWA and generic workspace exist in source but are not part of the current
+deployment. Adding them requires a reviewed customer-web image, runtime secret boundary, exact
+trusted-proxy chain, shared fail-closed limiter, Compose/Caddy routing, and a staging health check.
+The London DigitalOcean VM otherwise continues to run the reviewed private services. Supabase
+remains in Ireland; London is the closest practical DigitalOcean region and a good latency/security
+tradeoff for this deployment.

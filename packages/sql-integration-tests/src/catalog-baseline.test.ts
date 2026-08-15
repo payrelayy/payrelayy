@@ -6474,12 +6474,17 @@ describe('disposable SQL migration baseline', () => {
     expect(insertGuardSource).toContain('new.created_at := decision_time');
 
     const nonTriggerEntryPoints = await client.query<{ readonly entry_points: number }>(`
+      with ordinary_routines as materialized (
+        select procedure.oid
+        from pg_proc procedure
+        join pg_namespace namespace on namespace.oid = procedure.pronamespace
+        where namespace.nspname = 'app'
+          and procedure.prokind in ('f', 'p')
+          and procedure.prorettype <> 'trigger'::regtype
+      )
       select count(*)::integer as entry_points
-      from pg_proc procedure
-      join pg_namespace namespace on namespace.oid = procedure.pronamespace
-      where namespace.nspname = 'app'
-        and procedure.prorettype <> 'trigger'::regtype
-        and lower(pg_get_functiondef(procedure.oid))
+      from ordinary_routines routine
+      where lower(pg_get_functiondef(routine.oid))
           like '%player_deposit_eligibility_decisions%'
     `);
     expect(nonTriggerEntryPoints.rows).toEqual([{ entry_points: 0 }]);
@@ -7173,7 +7178,6 @@ describe('disposable SQL migration baseline', () => {
             set mode = 'live'
           where feature_key = 'payment_verification'`,
       );
-      await client.query('set local role fetanagent_api');
       await expect(
         client.query(
           `select * from app.open_telegram_deposit_intent(

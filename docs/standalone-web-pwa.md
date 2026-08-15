@@ -105,9 +105,12 @@ only that identity's web-origin requests. Its direct-PostgreSQL role can execute
 `app.list_customer_web_player_registrations(uuid,integer)`. Customer statuses are exactly
 `Checking`, `Ready`, and `Could not confirm`. The database rejects ownership association for a
 web-origin request, so `Ready` is unreachable until a later proof-bearing association boundary is
-reviewed and implemented. The frozen prerequisite cannot produce a positive ownership result. Even
-a future ownership fact remains insufficient: the private intent guard requires a separate latest
-`eligible` ledger decision, and no promotion path exists. Submit/list does not enable a deposit.
+reviewed and implemented. The list projection also requires an aligned active/valid association,
+active platform, and an exact current `eligible` history with a matching player-state snapshot;
+missing, revoked, stale, future-dated, or malformed eligibility remains `Checking`. The frozen
+prerequisite cannot produce a positive ownership result, and no eligibility-promotion path exists.
+The projection is advisory display only: the private intent guard independently authorizes and
+snapshots eligibility, so submit/list does not enable a deposit.
 
 ## Optional Telegram legacy-history link
 

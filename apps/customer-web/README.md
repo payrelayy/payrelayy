@@ -21,7 +21,9 @@ calls.
   browser-supplied Auth UUID, customer UUID, or internal database record UUID is accepted.
 - The Player-ID form carries one server-generated UUIDv4 idempotency key. The key is never returned
   by the database, and every database result is reduced to `Checking`, `Ready`, or
-  `Could not confirm` before rendering.
+  `Could not confirm` before rendering. `Ready` additionally requires the aligned active/valid
+  association and platform plus a contiguous latest `eligible` decision with a current player-state
+  snapshot; missing, revoked, stale, future-dated, or malformed eligibility stays `Checking`.
 - The direct-Postgres package has a max-one pool and an exact startup catalog preflight. HTTP
   readiness reuses that result for 30 seconds and coalesces concurrent refreshes so probes cannot
   occupy the only application connection repeatedly.
@@ -67,6 +69,8 @@ authoritative proof source, challenge, delivery path, or evidence protocol is se
 application continues to submit and list non-claiming requests only; the database continues to
 reject web-origin ownership association. The separate financial ledger has no promotion path, so
 `Ready` remains unreachable and ownership could not silently enable deposits even if later proven.
+The list projection is advisory display only; the deposit-intent trigger remains the independent
+financial authorization boundary.
 
 The database migration deliberately leaves `fetanagent_customer_web_runtime` as `NOLOGIN` with no
 password. A separate reviewed role-and-secret provisioning phase must enable that runtime login and

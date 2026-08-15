@@ -64,9 +64,12 @@ may retain a null snapshot only for compatibility; null is not current eligibili
 
 This is fail-closed financial quarantine, not an eligibility-promotion feature. The migration adds
 no seed, backfill, view, enum, decision-writing procedure, policy, runtime grant, feature-switch
-change, route, UI, provider adapter, or customer `Ready` projection. Consequently there is no
-supported way for an application to create an `eligible` decision, and ownership confirmation
-cannot silently enable deposit intake.
+change, route, UI, or provider adapter. The fixed customer list projection can read only enough
+private state to keep `Ready` aligned with a well-formed current `eligible` decision; it returns no
+ledger fields and cannot write one. Consequently there is no supported way for an application to
+create an `eligible` decision, no reachable customer `Ready`, and ownership confirmation cannot
+silently enable deposit intake. The deposit-intent trigger remains the financial authorization and
+serialization boundary.
 
 ## Deposit state flow
 

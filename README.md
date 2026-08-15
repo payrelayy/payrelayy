@@ -45,8 +45,11 @@ The current foundation is deliberately safe:
   unrelated functions, and the web slice has no financial operation;
 - customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
   unreachable for a web-origin request until both a later proof-bearing ownership boundary and a
-  separate financial eligibility-promotion boundary are reviewed and implemented, so submit/list
-  does not make a Player ID eligible for deposits;
+  separate financial eligibility-promotion boundary are reviewed and implemented. The list
+  projection now also requires the exact current `eligible` decision and fails closed for missing,
+  revoked, stale, future-dated, or malformed histories. It remains advisory display only; the
+  deposit-intent trigger is the financial authorization boundary, and submit/list does not make a
+  Player ID eligible for deposits;
 - `@fetanagent/customer-web-player-ownership-proof-prerequisite` records the exact nine unresolved
   ownership-proof blockers and returns only
   `blocked / customer_web_player_ownership_proof_prerequisites_incomplete` for its valid metadata.

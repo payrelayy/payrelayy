@@ -4230,6 +4230,13 @@ describe('disposable SQL migration baseline', () => {
       join(environment.migrationsDirectory, '20260815020000_customer_web_player_registration.sql'),
       'utf8',
     );
+    const readyProjectionMigrationSource = await readFile(
+      join(
+        environment.migrationsDirectory,
+        '20260815154559_require_current_deposit_eligibility_for_customer_ready.sql',
+      ),
+      'utf8',
+    );
     expect(migrationSource).toContain(
       'create function app.submit_customer_web_player_registration(\n  p_actor_auth_user_id uuid,\n  p_request_key uuid,\n  p_player_id text',
     );
@@ -4247,6 +4254,33 @@ describe('disposable SQL migration baseline', () => {
       migrationSource.match(/fetanagent:customer-web-player-association-gate:v1:/gu),
     ).toHaveLength(2);
     expect(migrationSource.match(/fetanagent:customer-auth:v1:/gu)).toHaveLength(5);
+    expect(readyProjectionMigrationSource).toContain(
+      'create or replace function app.list_customer_web_player_registrations(',
+    );
+    expect(readyProjectionMigrationSource).toContain(
+      'alter function app.list_customer_web_player_registrations(uuid, integer) owner to postgres',
+    );
+    expect(readyProjectionMigrationSource).toContain(
+      'grant execute on function app.list_customer_web_player_registrations(uuid, integer)',
+    );
+    expect(readyProjectionMigrationSource).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\.player_deposit_eligibility_decisions\b/iu,
+    );
+    expect(readyProjectionMigrationSource).not.toMatch(
+      /\bgrant\s+[^;]*\bon\s+(?:table\s+)?app\.player_deposit_eligibility_decisions\b/iu,
+    );
+    expect(readyProjectionMigrationSource).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\.deposit_intents\b/iu,
+    );
+    expect(readyProjectionMigrationSource).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\.feature_switches\b/iu,
+    );
+    expect(readyProjectionMigrationSource).not.toMatch(
+      /\bgrant\s+[^;]*\bon\s+(?!function\b)(?:table\s+|sequence\s+)?app\./iu,
+    );
+    expect(readyProjectionMigrationSource).not.toMatch(
+      /\b(?:create|alter|drop)\s+(?:table|policy|role)\b/iu,
+    );
 
     const procedures = await client.query<{
       readonly direct_runtime_execute: boolean;
@@ -4676,6 +4710,45 @@ describe('disposable SQL migration baseline', () => {
       expect(functionDefinition).not.toContain(forbiddenRelation);
     }
     expect(functionDefinition).not.toMatch(/\bemail\b/iu);
+    for (const requiredReadyPredicate of [
+      "registration_request.status = 'exists'",
+      'player_account.customer_id = resolved_customer_id',
+      'player_account.platform_id = registration_request.platform_id',
+      'player_account.player_id = registration_request.player_id',
+      'validation_attempt.player_account_id = player_account.id',
+      "validation_attempt.outcome = 'valid'",
+      "player_account.status = 'active'",
+      "player_account.validation_status = 'valid'",
+      "platform.status = 'active'",
+      'eligibility_history.decision_count > 0',
+      'eligibility_history.decision_count = eligibility_history.maximum_version',
+      'eligibility_history.history_is_monotonic',
+      'latest_eligibility.decision_version = eligibility_history.maximum_version',
+      "latest_eligibility.decision = 'eligible'",
+      'latest_eligibility.decided_at <= clock_timestamp()',
+    ]) {
+      expect(functionDefinition).toContain(requiredReadyPredicate);
+    }
+    expect(functionDefinition).toMatch(
+      /latest_eligibility\.player_account_updated_at_snapshot\s+is not distinct from player_account\.updated_at/iu,
+    );
+    expect(functionDefinition).toContain(
+      "when registration_request.status in ('not_found', 'cancelled') then",
+    );
+    expect(
+      functionDefinition.indexOf(
+        "when registration_request.status in ('not_found', 'cancelled') then",
+      ),
+    ).toBeLessThan(functionDefinition.indexOf("when registration_request.status = 'exists'"));
+    expect(functionDefinition).toMatch(/else\s+'checking'/iu);
+    expect(functionDefinition).toContain('app.player_deposit_eligibility_decisions');
+    expect(functionDefinition).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\.player_deposit_eligibility_decisions\b/iu,
+    );
+    expect(functionDefinition).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\.deposit_intents\b/iu,
+    );
+    expect(functionDefinition).not.toMatch(/\b(?:insert\s+into|update|delete\s+from|truncate)\b/iu);
   });
 
   it('keeps active staff Auth UUIDs outside the customer-web identity boundary', async () => {

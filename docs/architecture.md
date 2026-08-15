@@ -106,9 +106,12 @@ immutable customer mapping, record a bounded non-claiming request, and return on
 web-origin requests. They cannot prove ownership, create a validated player association, promote a
 Player ID to deposit eligibility, open a deposit, or execute any financial action.
 The customer projection uses exactly `Checking`, `Ready`, and `Could not confirm`; `Ready` is
-unreachable because web-origin association remains rejected. The current list SQL does not join the
-eligibility ledger. Any later implementation that can project `Ready` must additionally require a
-separate current `eligible` decision.
+unreachable because web-origin association remains rejected. The list SQL nevertheless enforces the
+complete future-facing display rule now: `Ready` additionally requires an active, validated,
+same-customer association, an active platform, and a contiguous latest `eligible` decision whose
+player-state snapshot still matches. Missing, revoked, stale, future-dated, or malformed eligibility
+stays `Checking`. This projection is not financial authorization; the deposit-intent insert trigger
+independently rechecks and snapshots eligibility.
 
 The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package does not change
 that boundary. Its only valid disposition is
@@ -123,8 +126,10 @@ The separate private `app.player_deposit_eligibility_decisions` ledger is an app
 quarantine, not part of that package and not an ownership-proof system. The deposit-intent insert
 guard locks the player row, requires the latest decision to be `eligible`, and snapshots that exact
 decision ID. A later `revoked` row blocks later intents. There is no seed, backfill, promotion
-procedure, writer grant, runtime adapter, customer projection, or staff control, so the ledger adds
-no positive eligibility, `Ready`, deposit UI, provider call, or financial runtime capability.
+procedure, writer grant, runtime adapter, or staff control. The customer list can only read the
+ledger through its fixed security-definer projection to keep `Ready` fail-closed; it cannot expose
+ledger fields or create a decision. The ledger therefore adds no positive eligibility, reachable
+`Ready`, deposit UI, provider call, or financial runtime capability.
 
 ## Account, session, and optional Telegram-link boundary
 

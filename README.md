@@ -19,7 +19,10 @@ deposit eligibility, or financial capability. The pure
 `@fetanagent/customer-web-player-ownership-proof-prerequisite` package freezes the next web
 ownership-proof boundary as advisory-only and blocked: no authoritative proof source, challenge,
 delivery path, evidence protocol, or positive result has been selected, and it adds no runtime or
-deployment wiring. Stage 1E specifies a pure, blocked-by-default
+deployment wiring. A separate private, append-only eligibility ledger now makes every new deposit
+intent require an explicit latest `eligible` decision, but no seed, backfill, promotion procedure,
+runtime grant, route, UI, or customer status can create one. It is a fail-closed financial
+quarantine, not proof or deposit enablement. Stage 1E specifies a pure, blocked-by-default
 official-source policy whose current source status is `unproven`; it neither selects nor permits a
 provider source. Stage 1F records the remaining authoritative-lookup blockers and keeps every lookup
 capability false. Telegram is optional in the settled product and requires a separately reviewed
@@ -41,13 +44,16 @@ The current foundation is deliberately safe:
   ID, and list only that identity's web-origin requests. Its exact role cannot read tables or call
   unrelated functions, and the web slice has no financial operation;
 - customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
-  unreachable for a web-origin request until a later proof-bearing ownership-association boundary is
-  reviewed and implemented, so submit/list does not make a Player ID eligible for deposits;
+  unreachable for a web-origin request until both a later proof-bearing ownership boundary and a
+  separate financial eligibility-promotion boundary are reviewed and implemented, so submit/list
+  does not make a Player ID eligible for deposits;
 - `@fetanagent/customer-web-player-ownership-proof-prerequisite` records the exact nine unresolved
   ownership-proof blockers and returns only
   `blocked / customer_web_player_ownership_proof_prerequisites_incomplete` for its valid metadata.
-  It cannot represent proof success, `Ready`, association, or deposit eligibility; it adds no
-  database, role, app, runtime, network, configuration, or infrastructure capability;
+  Contract version 2 replaces the resolved coupling blocker with
+  `deposit_eligibility_promotion_boundary_absent` while keeping all 19 capabilities false. It cannot
+  represent proof success, `Ready`, association, or deposit eligibility; it adds no database, role,
+  app, runtime, network, configuration, or infrastructure capability;
 - the intended long-lived routine experience is not a claim of an infinite or irrevocable session:
   per-device visibility, remote sign-out, and explicit global session revocation after recovery are
   not implemented, and production enablement still requires exact hosted Auth, SMTP, trusted-proxy,
@@ -65,19 +71,25 @@ The current foundation is deliberately safe:
 - no provider credential, Supabase key, account number, or customer evidence belongs in Git;
 - reviewed private-schema migrations provide immutable deposit intents, provider evidence,
   duplicate-payment claims, expiry, review, retention, and queue foundations;
+- `app.player_deposit_eligibility_decisions` now isolates ownership from financial eligibility. Its
+  append-only latest-decision guard snapshots the exact `eligible` decision on every new intent;
+  no existing runtime can write a decision, and no ownership action promotes one;
 - the current API and worker database roles have no direct ledger access until narrow procedures
   and runtime login roles are reviewed; and
-- the only current ledger procedures for the API are live-gated: one opens an unverified intent
-  and returns frozen display-safe payment instructions, while the other records an already-encrypted
-  customer transaction reference without verifying it or exposing ledger tables.
+- the only current ledger procedures for the API are live-gated: one can open an unverified intent
+  only after the separate latest-eligibility guard passes and then returns frozen display-safe
+  payment instructions, while the other records an already-encrypted customer transaction reference
+  without verifying it or exposing ledger tables. No API path can create the required eligibility
+  decision;
 - the historical generic private Telegram inbox procedure is retired. The staging beta boundary is
   English-only and invite-only: only a one-time authorized team invitation may create an identity.
 - the staging bot can now show an admitted-user menu and record a non-claiming KemerBet Player-ID
   request as `pending` through a dedicated database role and durable action nonce store.
-- pending or merely found Player IDs are not usable for deposits; a distinct audited ownership
-  confirmation is required to create the validated association;
-- the reviewed dry-run intake may create only `intake_received` intents and `received` protected
-  reference submissions while all four financial feature switches remain disabled;
+- pending or merely found Player IDs are not usable for deposits; the legacy audited ownership
+  confirmation creates only the validated association and does not grant financial eligibility;
+- the reviewed dry-run intake remains limited to `intake_received` intents and `received` protected
+  reference submissions, but every new intent also requires a separate latest `eligible` decision.
+  No runtime can write that decision, and all four financial feature switches remain disabled;
 - the private staging operations service may append a redacted local-fixture assessment and one
   advisory review decision, but neither record is provider evidence or a payment approval; and
 - the Stage 1A CBE Birr shadow contract and private job/result boundary remain advisory and
@@ -190,7 +202,7 @@ fixture scope and its explicit non-live limits. See
 [docs/telegram-inbound.md](docs/telegram-inbound.md) for the optional legacy Telegram boundary and
 [docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.
 See [docs/player-registration.md](docs/player-registration.md) for the Player-ID request, review,
-and explicit ownership-association boundary,
+explicit ownership-association boundary, and separate deposit-eligibility quarantine,
 [docs/customer-web-player-ownership-proof.md](docs/customer-web-player-ownership-proof.md) for the
 dormant nine-blocker ownership-proof prerequisite, and
 [docs/telegram-conversation-actions.md](docs/telegram-conversation-actions.md) for the required

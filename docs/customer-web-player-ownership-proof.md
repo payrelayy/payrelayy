@@ -17,7 +17,7 @@ its contract.
 The package describes exactly this candidate boundary:
 
 ```text
-contractVersion: 1
+contractVersion: 2
 platformCode: kemerbet
 requestOrigin: customer_web
 challengeProfile: unselected
@@ -37,7 +37,7 @@ Its `remainingBlockers` field is the following fixed, ordered nine-item inventor
 6. `verification_adapter_absent`
 7. `neutral_staff_proof_review_capability_absent`
 8. `ownership_conflict_recovery_and_reassignment_policy_unreviewed`
-9. `ownership_association_and_deposit_eligibility_are_coupled`
+9. `deposit_eligibility_promotion_boundary_absent`
 
 The blocked result and blocker tuple are fixed metadata. They do not become true merely because a
 route, runtime, database role, feature flag, or deployment configuration exists elsewhere. A later
@@ -50,6 +50,10 @@ The package cannot express verified ownership, success, approval, association, `
 eligibility. Its evaluator returns only the frozen blocked contract for its exact metadata input or
 a frozen invalid result for any other input. Its fixed redacted log projection contains controlled
 metadata only and must never echo caller-controlled values.
+
+Contract version 2 preserves all 19 literal-false capability flags. Separating the database's
+financial eligibility gate does not turn any proof, review, association, database, runtime,
+network, `Ready`, deposit-eligibility, or financial capability on in this package.
 
 The package accepts no Player ID, Auth UUID, customer ID, email address, proof material, credential,
 token, provider session, or financial input. It does not issue or deliver a challenge, accept or
@@ -71,10 +75,10 @@ It also adds no application import, route, page, form, button, worker, provider 
 environment variable, network call, runtime composition, deployment secret, Compose/Caddy rule,
 DNS change, firewall change, or live routing.
 
-The existing database rejection of every web-origin ownership association remains absolute. This
-phase creates no validated player binding, validation attempt, deposit intent, audit event, or
-financial record. It cannot call KemerBet, perform a provider lookup, enable a payment switch,
-display payment instructions, or execute any financial action.
+The existing database rejection of every web-origin ownership association remains absolute. The
+package creates no validated player binding, validation attempt, eligibility decision, deposit
+intent, audit event, or financial record. It cannot call KemerBet, perform a provider lookup,
+enable a payment switch, display payment instructions, or execute any financial action.
 
 ## Customer and team behavior
 
@@ -90,15 +94,21 @@ customer controls the KemerBet account.
 
 ## Ownership is not deposit eligibility
 
-The historical association path couples an ownership association to
-`app.customer_platform_players`, which is structurally consumable by deposit intake. That coupling
-is one of the nine blockers. A future proof-bearing design must first record a non-financial,
-durable ownership fact independently from deposit eligibility.
+The historical association path creates `app.customer_platform_players`, but that ownership
+association no longer makes the row sufficient for a new deposit intent. The private
+`app.player_deposit_eligibility_decisions` table is a separate append-only, versioned financial
+ledger. Every new intent is guarded by
+`app.require_player_deposit_eligibility_for_intent()`, which locks the selected player row, requires
+the latest decision to be `eligible`, and overwrites the intent's
+`player_deposit_eligibility_decision_id` with that exact decision. A latest `revoked` decision
+blocks later intents without rewriting historical intents.
 
-Only a later, separately reviewed financial phase may decide whether a proven ownership fact can be
-promoted to a deposit-eligible player binding. That decision must recheck current ownership,
-conflict, status, and financial safeguards. Proof success must never silently enable a deposit or
-make a Player ID financially usable.
+This is a financial quarantine, not a proof or promotion implementation. There is no seed,
+backfill, decision-writing procedure, runtime grant, application route, staff control, or customer
+projection that can create an eligibility decision. The ledger therefore contains no positive path
+from ownership to financial use. The ninth blocker is now the absent, separately reviewed promotion
+boundary. Proof success must never silently insert an `eligible` decision, display `Ready`, or make
+a Player ID financially usable.
 
 ## Required future sequence
 
@@ -112,7 +122,8 @@ Before any positive result can exist, a later phase must:
 5. add append-only proof-attempt and evidence receipts through a separately reviewed private
    database boundary;
 6. create a non-financial ownership binding that is independent from deposit eligibility; and
-7. review any promotion from proven ownership to deposit eligibility as its own financial phase.
+7. implement and review any promotion from proven ownership to an `eligible` ledger decision as
+   its own financial phase, including revocation, authorization, and audit rules.
 
 Until all of those boundaries are implemented and reviewed, the only supported ownership-proof
 decision remains `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`.

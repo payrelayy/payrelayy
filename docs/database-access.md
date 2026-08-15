@@ -28,6 +28,11 @@ minor-unit amount. It returns the newly frozen receiver display snapshot and dea
 never needs a ledger-table SELECT grant. app.capture_telegram_deposit_reference accepts only an
 event ID, an owned intent ID, and pre-encrypted, HMAC-fingerprinted reference material. It records
 untrusted input with no verification job, provider evidence, payment claim, or KemerBet action.
+Every direct, live, or dry-run intent insert also passes the ungranted private
+`app.require_player_deposit_eligibility_for_intent()` trigger guard. It locks the player row,
+requires the latest separate decision to be `eligible`, and snapshots that exact decision ID. The
+API has no table grant or decision-writing procedure, so a validated ownership association alone
+cannot open a new intent.
 Both procedures run only when the payment-verification switch is explicitly live; the current Owner
 configuration procedure still deliberately refuses live, so both remain dormant until a later
 launch review.

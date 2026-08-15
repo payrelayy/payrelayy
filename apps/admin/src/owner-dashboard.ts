@@ -92,13 +92,13 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           <div class="panel-heading">
             <div>
               <p class="status-ok">Explicit ownership confirmation</p>
-              <h2 id="player-association-title">Deposit-eligible Player IDs</h2>
+              <h2 id="player-association-title">Player ID ownership associations</h2>
             </div>
           </div>
           <p class="receipt-label">
             Confirm only after independently verifying that this Telegram customer controls the
-            KemerBet account. This creates the validated association required by deposit intake,
-            but does not open a deposit or enable payments.
+            KemerBet account. This records the legacy ownership association only. Deposit
+            eligibility is a separate financial decision and remains unavailable here.
           </p>
           <div class="request-list" id="player-association-list"></div>
         </section>
@@ -461,7 +461,7 @@ function renderDepositIntake(deposits, assessments) {
 }
 
 async function associatePlayerRequest(requestId) {
-  if (!window.confirm('Confirm that you independently verified this Telegram customer controls the exact KemerBet account. This creates a validated deposit-eligible association.')) return;
+  if (!window.confirm('Confirm that you independently verified this Telegram customer controls the exact KemerBet account. This records ownership only and does not grant deposit eligibility.')) return;
   setNotice('Recording explicit Player ID ownership association\u2026');
   try {
     const response = await ownerRequest('/v1/owner/player-registration-requests/' + encodeURIComponent(requestId) + '/associate', {
@@ -470,7 +470,7 @@ async function associatePlayerRequest(requestId) {
       body: JSON.stringify({ confirmation: 'owner_verified_platform_ownership' }),
     });
     if (!response.ok) throw new Error('association');
-    setNotice('Player ID association recorded. It is eligible for deposit intake; payments remain disabled.');
+    setNotice('Player ID ownership association recorded. Deposit eligibility remains separate and unavailable.');
     await loadOwnerPlayerQueues();
   } catch (error) {
     if (!isSignedOutError(error)) setNotice('Player ID association failed. Refresh and verify before trying again.');
@@ -496,7 +496,7 @@ function renderAssociationCandidates(candidates) {
     metadata.textContent = 'found on KemerBet \u00b7 reviewed ' + new Date(candidate.reviewedAt).toLocaleString();
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = 'Confirm ownership and enable deposit intake';
+    button.textContent = 'Confirm ownership only';
     button.addEventListener('click', () => associatePlayerRequest(candidate.requestId));
     card.append(title, metadata, button);
     playerAssociationList.append(card);

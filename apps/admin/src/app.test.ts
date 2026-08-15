@@ -103,6 +103,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
     expect(response.body).toContain('Explicit ownership confirmation');
+    expect(response.body).toContain('Player ID ownership associations');
+    expect(response.body).toMatch(/Deposit\s+eligibility is a separate financial decision/u);
+    expect(response.body).not.toContain('Deposit-eligible Player IDs');
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
@@ -139,6 +142,10 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Run advisory fixture');
     expect(response.body).toContain('does not verify, approve, credit, or execute a payment');
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
+    expect(response.body).toContain('Confirm ownership only');
+    expect(response.body).toContain('does not grant deposit eligibility');
+    expect(response.body).not.toContain('enable deposit intake');
+    expect(response.body).not.toContain('eligible for deposit intake');
     expect(response.body).not.toContain('innerHTML');
     expect(response.body).toContain("url.pathname !== '/fetanagentbot'");
     expect(response.body).not.toContain('/FetanAgentBot');

@@ -70,6 +70,8 @@ The current foundation is deliberately safe:
   public entry remains a future boundary and must precede any staff use of this app;
 - all financial actions default to `dry_run`;
 - the KemerBet executor cannot perform a final transfer action;
+- one sanitized manual KemerBet agent-system deposit is documented as an external-interface
+  observation, but it does not enable the executor or change FetanAgent's configured amount policy;
 - Telegram polling is off until the bot is configured;
 - no provider credential, Supabase key, account number, or customer evidence belongs in Git;
 - reviewed private-schema migrations provide immutable deposit intents, provider evidence,
@@ -188,7 +190,8 @@ See [docs/standalone-web-pwa.md](docs/standalone-web-pwa.md) for the settled cus
 session/recovery safety status, optional Telegram-history link, PWA lifecycle, and canonical
 vocabulary. See [docs/architecture.md](docs/architecture.md),
 [docs/database-access.md](docs/database-access.md),
-[docs/deposit-ledger.md](docs/deposit-ledger.md), and
+[docs/deposit-ledger.md](docs/deposit-ledger.md),
+[docs/kemerbet-agent-deposit-observation.md](docs/kemerbet-agent-deposit-observation.md),
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See

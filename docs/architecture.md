@@ -64,7 +64,7 @@ The bot and executor communicate with the API, not the database.
 1. The signed-in customer selects one KemerBet Player ID with both proven ownership and a separate
    current deposit-eligibility decision. Only that combined state may eventually display `Ready`.
 2. The reviewed CBE Birr dry-run intake displays its configured masked receiver account and records
-   request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
+   a request with FetanAgent's current 25–25,000 ETB inclusive amount range for that one deposit.
    Customers may create unlimited separate deposits; FetanAgent has no customer, daily, or
    lifetime deposit-count quota.
 3. The customer submits a transaction ID and optional screenshot/PDF. Attachments assist
@@ -76,6 +76,12 @@ The bot and executor communicate with the API, not the database.
 required` in the team workspace.
 6. Only a confirmed record may be sent to the KemerBet executor. The executor reconciles
    before any retry. The current implementation cannot perform the final KemerBet transfer.
+
+A controlled manual agent-system deposit observed the visible lookup, transfer, success, history,
+and player-balance reconciliation sequence once without enabling the executor. The observation is
+sanitized in
+[kemerbet-agent-deposit-observation.md](kemerbet-agent-deposit-observation.md). It does not make the
+private UI a stable API or authorize an unattended transfer.
 
 ## Current implementation boundary
 

@@ -26,8 +26,9 @@ in customer copy:
 6. Removal or reassignment preserves history and must not reveal whether the same Player ID was
    submitted or associated by another customer.
 
-The web/PWA account and action boundaries needed for this flow are not implemented or enabled. See
-[standalone-web-pwa.md](standalone-web-pwa.md).
+The web/PWA account boundary now exists in source but remains disabled and undeployed. The customer
+Player-ID action and ownership-proof boundaries needed for this flow are not implemented or enabled.
+See [standalone-web-pwa.md](standalone-web-pwa.md).
 
 ## Why the existing player table is not an intake table
 

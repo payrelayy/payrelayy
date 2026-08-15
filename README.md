@@ -8,29 +8,39 @@ authorized team members. Email ownership confirmation is requested only for forg
 recovery, not account creation or routine sign-in. Product copy is English-only.
 
 The repository currently implements an earlier English-only, invite-only Telegram staging slice for
-a CBE Birr dry run plus a disabled authoritative-shadow foundation and offline attempt and settlement
-planners. Stage 1E specifies a pure, blocked-by-default official-source policy whose current source
-status is `unproven`; it neither selects nor permits a provider source. Stage 1F adds a pure
-authoritative-lookup prerequisite contract that records the remaining P0 blockers and keeps every
-lookup capability false. The current staging slice can model advisory outcomes, but it has no public
-web/PWA customer account flow, provider call, payment verification or claim, KemerBet execution, or
-live financial action. Telegram is optional in the settled product and requires a separately
-reviewed legacy-history link rather than becoming web authentication or recovery.
+a CBE Birr dry run, a disabled authoritative-shadow foundation with offline attempt and settlement
+planners, and a disabled-by-default customer web authentication foundation. The customer source now
+includes a responsive PWA shell, generic account creation and sign-in, server-handled Supabase Auth
+cookies, sign-out, and forgot-password recovery. It is not deployment-wired or publicly enabled, and
+it has no private app-schema/customer-workspace database actions or financial capability. Stage 1E specifies a pure,
+blocked-by-default official-source policy whose current source status is `unproven`; it neither
+selects nor permits a provider source. Stage 1F records the remaining authoritative-lookup blockers
+and keeps every lookup capability false. Telegram is optional in the settled product and requires a
+separately reviewed legacy-history link rather than becoming web authentication or recovery.
 
 ## Current safety status
 
 The current foundation is deliberately safe:
 
-- the standalone customer web/PWA, generic sign-in, neutral workspace, persistent login,
-  forgot-password recovery, and Telegram-history link are product decisions only and are not
-  implemented or enabled;
-- the requested persistent routine login and recovery-only email confirmation do not yet have a
-  reviewed session or recovery boundary, so they must not be represented as safe capabilities;
-- self-service account creation and email/password authentication are intent only; account creation,
-  password acceptance, email handling, authentication, and session creation remain disabled;
-- `@fetanagent/customer-web-access-foundation` records the settled intent only and returns
-  `customer_web_access_runtime_not_implemented`; all web, PWA, authentication, email, session,
-  Telegram-linking, persistence, platform-action, and financial capabilities remain false;
+- `apps/customer-web` and `@fetanagent/customer-web-auth-runtime` implement a reviewed SSR/PWA Auth
+  foundation, but its internal gate defaults off and no Compose, Caddy, DNS, firewall, secret, or
+  live route enables it;
+- the source provides self-service email/password account creation, generic sign-in, sign-out,
+  ordered Supabase cookie refresh effects hardened to Secure/HttpOnly host-only cookies, CSRF
+  protection, and a recovery operation that commits cookie effects only after code exchange and
+  password update both succeed, while customer database actions outside Supabase Auth and every
+  financial capability remain absent;
+- the intended long-lived routine experience is not a claim of an infinite or irrevocable session:
+  per-device visibility, remote sign-out, and explicit global session revocation after recovery are
+  not implemented, and production enablement still requires exact hosted Auth, SMTP, trusted-proxy,
+  shared fail-closed rate-limit configuration, plus an audit of effective `anon` and `authenticated`
+  grants, exposed RPC/PostgREST surfaces, and RLS before issuing customer principals;
+- `@fetanagent/customer-web-access-foundation` remains a pure, non-runtime record of the settled
+  product intent. Its blocked result does not enable or configure the separate Auth foundation;
+- the optional Telegram-history link is still unimplemented and cannot be inferred from either Auth
+  or the existing Telegram admission flow;
+- the implemented workspace is customer-only; capability-based staff routing through the generic
+  public entry remains a future boundary and must precede any staff use of this app;
 - all financial actions default to `dry_run`;
 - the KemerBet executor cannot perform a final transfer action;
 - Telegram polling is off until the bot is configured;
@@ -93,7 +103,7 @@ environment file.
 
 | Component                                             | Responsibility                                                                      |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Public responsive web/PWA                             | Canonical customer and neutral team workspace; not implemented                      |
+| `apps/customer-web`                                   | Disabled SSR/PWA account shell; not deployed or financial                           |
 | `apps/api`                                            | Transaction orchestration, validation, future web boundary, and audit boundaries    |
 | `apps/admin`                                          | Existing private staging operations service; not the public neutral workspace       |
 | `apps/bot`                                            | Optional private Telegram legacy transport; not customer authentication or recovery |
@@ -106,6 +116,7 @@ environment file.
 | `packages/cbe-birr-official-source-policy`            | Pure source-permission policy; fixed `unproven` and blocked                         |
 | `packages/cbe-birr-authoritative-lookup-prerequisite` | Pure blocked lookup-prerequisite inventory; every capability is false               |
 | `packages/customer-web-access-foundation`             | Pure blocked web/PWA product-decision record; no runtime or authentication          |
+| `packages/customer-web-auth-runtime`                  | Server-only Supabase Auth adapter; disabled by configuration                        |
 | `packages/contracts`                                  | Provider, executor, notifier, and storage interfaces                                |
 | `packages/config`                                     | Safe environment parsing and feature switches                                       |
 | `packages/i18n`                                       | Shared English message keys and safe locale normalization                           |

@@ -1,9 +1,12 @@
 # Deposit ledger design
 
 This is the longer-term design boundary for FetanAgent's automated-deposit workflow. It does not
-expand the current launch-preparation scope: the only implemented verification code is the CBE
-Birr redacted-fixture dry run. TeleBirr and CBE bank remain deferred. All platform and provider
-identifiers stay database-backed so later approved adapters do not require a financial-core rewrite.
+expand the current launch-preparation scope: the only implemented provider-verification code is the
+CBE Birr redacted-fixture dry run. The KemerBet side now has private dormant execution and
+reconciliation ledgers plus a pure deterministic fake contract, but no writer, runner, browser,
+network, credential, final action, or retry capability. TeleBirr and CBE bank remain deferred. All
+platform and provider identifiers stay database-backed so later approved adapters do not require a
+financial-core rewrite.
 
 ## Scope and safety boundary
 
@@ -21,7 +24,7 @@ identifiers stay database-backed so later approved adapters do not require a fin
   not create an automated wallet/bank payout.
 - The initial executor remains dry-run and has no ability to complete a KemerBet transfer.
 
-## Planned entities
+## Ledger entities
 
 | Entity                                 | Purpose                                                   | Critical invariant                                                                                |
 | -------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -37,10 +40,10 @@ identifiers stay database-backed so later approved adapters do not require a fin
 | `deposit_verification_attempts`        | Append-only verifier outcomes                             | No raw provider response or credential in the record.                                             |
 | `deposit_payment_claims`               | Authoritative payment accepted for an intent              | Unique on `(provider, canonical-reference fingerprint)` and one claim per intent.                 |
 | `deposit_review_cases`                 | Verification or execution uncertainty                     | Only one open case per intent and stage.                                                          |
-| `deposit_jobs`                         | Durable verification/reconciliation queue                 | A lease is required; the current Stage 2 payload is deliberately empty.                           |
+| `deposit_jobs`                         | Durable verification/reconciliation queue                 | Execution jobs are one-shot; the payload is deliberately empty.                                   |
 | `deposit_state_events`                 | Append-only intent transition history                     | Every insert or status transition produces a system event.                                        |
-| `deposit_execution_attempts`           | Later KemerBet execution record                           | Must exist before execution; uncertain results require reconciliation.                            |
-| `execution_reconciliations`            | Check wallet/history after an uncertain result            | Reconciliation precedes any execution retry.                                                      |
+| `deposit_execution_attempts`           | Dormant one-shot KemerBet final-action fence              | One intent and agent lane stay blocked through uncertainty and review.                            |
+| `execution_reconciliations`            | Sanitized external-history/player-credit observations     | Only exact positive evidence can support `executed`; no outcome authorizes retry.                 |
 
 ## Player eligibility quarantine
 
@@ -77,19 +80,59 @@ serialization boundary.
 intake_received
   -> verification_pending
   -> verified
-  -> execution_pending                (future, still dry-run)
-  -> execution_in_progress            (future)
-  -> executed
+  -> execution_pending
+  -> execution_in_progress
+  -> execution_uncertain
+  -> execution_reconciliation
+  -> executed | execution_review
 
 verification_pending -> verification_review -> verification_pending | verified | rejected
 verification_pending -> rejected | expired
-execution_in_progress -> execution_uncertain -> execution_reconciliation
-execution_reconciliation -> execution_pending | executed | execution_review
+execution_pending -> execution_review
+execution_review -> execution_reconciliation | rejected
 ```
 
-No transition may move an uncertain execution directly to `executed`. A reconciliation record is
-required first. A duplicate, stale, receiver-mismatched, incomplete, or non-authoritative payment
-is rejected or routed to `verification_review`; it cannot reach execution.
+No transition may move an in-progress or uncertain execution directly to `executed`, return review
+or reconciliation to `execution_pending`, or retry an execution job. A matching positive
+reconciliation record and resolved attempt are required first. Review may become `rejected` only
+when no final action was fenced. A duplicate, stale, receiver-mismatched, incomplete, or
+non-authoritative payment is rejected or routed to `verification_review`; it cannot reach execution.
+
+## Dormant execution and reconciliation boundary
+
+`app.deposit_execution_attempts` is a private one-shot ledger. An attempt starts `prepared`, may be
+cancelled only before the final-action fence, and otherwise moves through
+`final_action_fenced -> reconciliation_required`. Only a completed positive reconciliation may
+resolve it as `confirmed_executed`; ambiguity resolves it as `review_required`, which continues to
+block the shared agent account. Partial unique indexes enforce one blocking attempt per intent and
+per agent account.
+
+`app.execution_reconciliations` is append-only and sequential per attempt. A positive outcome
+requires the normalized operation type `deposit`, exactly one approved history match, a sanitized
+matched-history timestamp inside the inclusive server-authored window from
+`final_action_fenced_at` through `reconciliation_required_at`, exact player, amount, currency, and
+player-credit matches, and a versioned keyed external-reference fingerprint. It stores no raw UI
+operation label, Player ID, reference, username, balance, route, selector, response, payload,
+credential, cookie, or session. Non-deposit, unknown, before-window, after-window, and missing facts
+cannot confirm execution or authorize retry. `ambiguous` and `not_observed` retain no asserted
+operation or matched timestamp; `not_observed` leaves the attempt reconciliation-required and is not
+proof that no transfer occurred.
+
+The canonical intent and job triggers enforce the same correspondence. Execution jobs require one
+attempt and `max_attempts = 1`; `retry_wait` is rejected. An intent can enter execution only behind
+the durable fence, and can become `executed` only after its reconciliation job, immutable positive
+outcome, and attempt all agree. Both new tables have forced RLS, zero policies, and no runtime
+grants. There is no ordinary callable function, supported runtime writer, role grant, application,
+browser adapter, queue runner, feature-switch change, or deployment wiring that can create or
+advance these records; their private trigger functions only enforce the dormant lifecycle.
+
+`@fetanagent/contracts` supplies a pure deterministic fake boundary for development. Its closed
+scenarios cover lookup mismatch, selector/session/CAPTCHA failures, pre/post-action timeout, lost
+success feedback, delayed/missing/duplicate/non-approved history, non-deposit or unknown operation,
+before/after/unknown execution-window correlation, player/amount/currency mismatch, player-credit
+mismatch, and one exact approved in-window deposit with exact player credit. It performs no I/O,
+final action, persistence, scheduling, or retry; its log projections omit identifiers, amounts,
+timestamps, and observations.
 
 ## Privacy and retention
 
@@ -119,9 +162,10 @@ An automatic approval requires all of the following in one database transaction:
 7. The intent is still `verification_pending` with no open verification review. An expired or
    reviewed intent must wait for a separately audited administrator decision.
 
-The current ledger ends at a verified payment claim. A later, separately reviewed migration will
-atomically add the dry-run execution record and job; it will still not permit a real KemerBet
-transfer until its reconciliation safeguards are proven.
+The current application runtime still ends at a verified payment claim. The schema can now represent
+a fenced execution attempt and reconciled outcome, but no supported caller can create or advance
+that workflow. A real KemerBet transfer remains unavailable until a separately reviewed runtime,
+credential, incident stop, authorization boundary, and deployment prove the same invariants.
 
 One controlled manual 10 ETB agent-system transfer observed the visible lookup, transfer, success,
 history, and player-balance reconciliation sequence once. It was a bounded diagnostic below

@@ -70,6 +70,12 @@ The current foundation is deliberately safe:
   public entry remains a future boundary and must precede any staff use of this app;
 - all financial actions default to `dry_run`;
 - the KemerBet executor cannot perform a final transfer action;
+- private dormant execution-attempt and reconciliation ledgers now require one one-shot attempt per
+  intent, serialize blocking work per agent account, and prevent `executed` without a positive
+  reconciliation; no runtime role can write those ledgers and no runner is wired;
+- `@fetanagent/contracts` now includes only deterministic, advisory KemerBet attempt,
+  reconciliation, and agent-lane planning. Its network, browser, final-action, database, and retry
+  capabilities are all false;
 - one sanitized manual KemerBet agent-system deposit is documented as an external-interface
   observation, but it does not enable the executor or change FetanAgent's configured amount policy;
 - Telegram polling is off until the bot is configured;
@@ -154,7 +160,7 @@ environment file.
 | `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                        |
 | `packages/customer-web-workspace-runtime`                   | Exact direct-PostgreSQL account and Player-ID BFF; disabled by configuration        |
 | `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
-| `packages/contracts`                                        | Provider, executor, notifier, and storage interfaces                                |
+| `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                        |
 | `packages/config`                                           | Safe environment parsing and feature switches                                       |
 | `packages/i18n`                                             | Shared English message keys and safe locale normalization                           |
 
@@ -177,7 +183,8 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
    uniquely recorded before it can reach execution.
 3. Every uncertain provider or KemerBet outcome goes to review and reconciliation;
    it is never retried blindly.
-4. The executor must reconcile wallet/history before retrying an uncertain collection.
+4. The current execution foundation authorizes no retry. Any later retry boundary must first prove
+   non-execution through a separately reviewed reconciliation policy.
 5. External withdrawal payout remains manual in version 1.
 
 ## Language policy

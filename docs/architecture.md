@@ -26,7 +26,12 @@ must remain dormant: no authoritative proof source, challenge, evidence protocol
 result is selected, and no reviewed deposit-eligibility promotion boundary exists. A separate
 private eligibility ledger now quarantines every new deposit intent behind an explicit latest
 `eligible` decision, but no decision-writing procedure, writer grant, runtime, or UI can create that
-decision. The Stage 1E
+decision. Private dormant KemerBet execution-attempt and reconciliation ledgers now enforce a
+one-shot final-action fence, one blocking attempt per agent account, and positive reconciliation
+before `executed`. A pure deterministic fake contract models stop, uncertainty, reconciliation,
+review, and lane serialization with no network, browser, final action, database, or retry
+capability. No procedure, runtime grant, runner, credential, or deployment wiring can use these
+execution records. The Stage 1E
 official-source policy is blocked with status `unproven`; no provider
 has a selected or permitted source, enabled adapter, credential, or runtime integration. The pure
 Stage 1F authoritative-lookup prerequisite inventory also remains blocked with every capability
@@ -74,8 +79,10 @@ The bot and executor communicate with the API, not the database.
 5. The API enforces provider-reference uniqueness, amount/receiver/freshness checks, and a
    single execution lease. Uncertainty becomes `Being checked` for the customer and `Review
 required` in the team workspace.
-6. Only a confirmed record may be sent to the KemerBet executor. The executor reconciles
-   before any retry. The current implementation cannot perform the final KemerBet transfer.
+6. Only a confirmed record may eventually reach the KemerBet executor. The dormant ledger permits
+   one execution attempt, keeps uncertainty and review agent-blocking, and requires a sanitized
+   positive reconciliation before `executed`. The current implementation cannot perform the final
+   KemerBet transfer and authorizes no retry.
 
 A controlled manual agent-system deposit observed the visible lookup, transfer, success, history,
 and player-balance reconciliation sequence once without enabling the executor. The observation is
@@ -136,6 +143,29 @@ procedure, writer grant, runtime adapter, or staff control. The customer list ca
 ledger through its fixed security-definer projection to keep `Ready` fail-closed; it cannot expose
 ledger fields or create a decision. The ledger therefore adds no positive eligibility, reachable
 `Ready`, deposit UI, provider call, or financial runtime capability.
+
+The private execution foundation is similarly dormant. `app.deposit_execution_attempts` records a
+single prepared attempt, a durable final-action fence, and any subsequent reconciliation or review
+requirement. Its partial unique indexes keep one intent and one agent account blocked throughout
+prepared, fenced, uncertain, reconciling, or review-required work. `app.execution_reconciliations`
+stores only closed outcomes and sanitized facts: a confirmed outcome requires the normalized
+operation `deposit`, exactly one approved history match, a sanitized history timestamp inside the
+inclusive server-authored final-action/reconciliation window, exact player, amount, currency, and
+player-credit matches, plus a keyed external-reference fingerprint. Non-deposit, unknown, missing,
+or out-of-window facts cannot confirm execution. `not_observed` is not evidence of non-execution and
+never authorizes retry.
+Both tables are private, forced-RLS, policy-free, and ungranted. Reconciliation rows are append-only;
+attempt identity is immutable, while its closed lifecycle changes and all delete/truncate attempts
+are trigger-guarded. Existing jobs gain database guards for one-shot execution and reconciliation
+correspondence, but no application can create, lease, or complete this workflow.
+
+The pure KemerBet contract mirrors that boundary with deterministic fake observations for lookup
+failure, selector drift, expired sessions, CAPTCHA, pre/post-action timeout, lost success feedback,
+delayed/missing/duplicate/non-approved history, non-deposit/unknown operations,
+before/after/unknown-window observations, other mismatches, and one exact in-window deposit with
+exact player credit. It can return only advisory stop, reconciliation, review, or lane-wait plans.
+Every plan has `retryAllowed: false`; it performs no I/O, and no application runtime invokes or
+composes these planners.
 
 ## Account, session, and optional Telegram-link boundary
 
@@ -250,7 +280,8 @@ FetanAgent does not automate sending money in version 1.
   event, and a durable execution-attempt record.
 - Provider evidence is unique by provider and canonical reference.
 - Locks/leases prevent duplicate verification and execution jobs.
-- Reconciliation precedes retries after timeout, session change, CAPTCHA, or UI ambiguity.
+- Timeout, session change, CAPTCHA, or UI ambiguity requires reconciliation. The current execution
+  foundation exposes no retry path.
 - Team configuration, receipt files, and user data live in private Supabase resources
   protected by a private-schema boundary, least-privilege server roles, row-level security, and
   audit events.

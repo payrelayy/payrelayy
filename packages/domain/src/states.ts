@@ -32,15 +32,15 @@ const depositTransitions: Readonly<Record<DepositStatus, readonly DepositStatus[
   verification_pending: ['verification_review', 'verified', 'rejected', 'expired', 'cancelled'],
   verification_review: ['verification_pending', 'verified', 'rejected', 'expired', 'cancelled'],
   verified: ['execution_pending', 'execution_review'],
-  execution_pending: ['execution_in_progress', 'execution_uncertain', 'execution_review'],
-  execution_in_progress: ['executed', 'execution_uncertain', 'execution_review'],
-  execution_review: ['execution_pending', 'execution_reconciliation', 'rejected'],
-  execution_reconciliation: ['execution_pending', 'executed', 'execution_review'],
+  execution_pending: ['execution_in_progress'],
+  execution_in_progress: ['execution_uncertain'],
+  execution_review: ['execution_reconciliation'],
+  execution_reconciliation: ['executed', 'execution_review'],
   executed: [],
   rejected: [],
   expired: ['verification_review', 'cancelled'],
   cancelled: [],
-  execution_uncertain: ['execution_reconciliation', 'execution_review'],
+  execution_uncertain: ['execution_reconciliation'],
 };
 
 export function canTransitionDeposit(from: DepositStatus, to: DepositStatus): boolean {

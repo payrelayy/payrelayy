@@ -96,6 +96,10 @@ type ValidatedPlayerFixture = {
   readonly playerAccountId: string;
 };
 
+type ExecutionIntentFixture = ValidatedPlayerFixture & {
+  readonly depositIntentId: string;
+};
+
 const legacyPrivateInboundRecorder =
   'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)';
 const betaInviteRedemptionProcedure =
@@ -218,6 +222,16 @@ async function readCustomerWebFinancialSnapshot(): Promise<CustomerWebFinancialS
           order by id), '[]'::jsonb)
         from app.deposit_jobs
       ),
+      'deposit_execution_attempts', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.deposit_execution_attempts
+      ),
+      'execution_reconciliations', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.execution_reconciliations
+      ),
       'deposit_review_cases', (
         select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
           order by id), '[]'::jsonb)
@@ -311,6 +325,67 @@ async function createValidatedPlayerFixture(playerId: string): Promise<Validated
   );
 
   return { customerId, platformId, playerAccountId };
+}
+
+async function createExecutionIntentFixture(playerId: string): Promise<ExecutionIntentFixture> {
+  const player = await createValidatedPlayerFixture(playerId);
+  await client.query(
+    `insert into app.player_deposit_eligibility_decisions (
+       player_account_id, decision_version, decision, reason_code, actor_kind
+     ) values (
+       $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+     )`,
+    [player.playerAccountId],
+  );
+
+  const paymentBoundary = await client.query<{
+    readonly payment_provider_id: string;
+    readonly receiver_account_id: string;
+  }>(`
+    select payment_provider.id as payment_provider_id,
+           receiver_account.id as receiver_account_id
+      from app.payment_providers payment_provider
+      join app.receiver_accounts receiver_account
+        on receiver_account.provider_id = payment_provider.id
+       and receiver_account.status = 'active'
+     where payment_provider.code = 'cbe_birr'
+       and payment_provider.status = 'active'
+  `);
+  expect(paymentBoundary.rows).toHaveLength(1);
+
+  const depositIntent = await client.query<{ readonly id: string }>(
+    `insert into app.deposit_intents (
+       customer_id, platform_id, player_account_id, payment_provider_id,
+       receiver_account_id, expected_amount_minor
+     ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
+     returning id`,
+    [
+      player.customerId,
+      player.platformId,
+      player.playerAccountId,
+      paymentBoundary.rows[0]!.payment_provider_id,
+      paymentBoundary.rows[0]!.receiver_account_id,
+    ],
+  );
+
+  return {
+    ...player,
+    depositIntentId: depositIntent.rows[0]!.id,
+  };
+}
+
+async function expectSqlFailureInTransaction(
+  query: string,
+  values: readonly (boolean | number | string | null)[],
+  message: RegExp | string,
+): Promise<void> {
+  await client.query('savepoint expected_sql_failure');
+  try {
+    await expect(client.query(query, [...values])).rejects.toThrow(message);
+  } finally {
+    await client.query('rollback to savepoint expected_sql_failure');
+    await client.query('release savepoint expected_sql_failure');
+  }
 }
 
 let environment: SqlIntegrationEnvironment;
@@ -7523,5 +7598,1257 @@ describe('disposable SQL migration baseline', () => {
     expect(revocationFirstState.rows).toEqual([
       { intents: 0, latest_decision: 'revoked', latest_version: 2 },
     ]);
+  });
+
+  it('installs only private dormant execution and reconciliation ledger surfaces', async () => {
+    const enumRows = await client.query<{
+      readonly labels: readonly string[];
+      readonly type_name: string;
+    }>(`
+      select enum_type.typname as type_name,
+             array_agg(enum_value.enumlabel order by enum_value.enumsortorder)::text[] as labels
+        from pg_type enum_type
+        join pg_namespace namespace on namespace.oid = enum_type.typnamespace
+        join pg_enum enum_value on enum_value.enumtypid = enum_type.oid
+       where namespace.nspname = 'app'
+         and enum_type.typname in (
+           'deposit_execution_attempt_status',
+           'execution_reconciliation_outcome'
+         )
+       group by enum_type.typname
+       order by enum_type.typname
+    `);
+    expect(enumRows.rows).toEqual([
+      {
+        labels: [
+          'prepared',
+          'cancelled_before_action',
+          'final_action_fenced',
+          'reconciliation_required',
+          'confirmed_executed',
+          'review_required',
+        ],
+        type_name: 'deposit_execution_attempt_status',
+      },
+      {
+        labels: ['confirmed_executed', 'ambiguous', 'not_observed'],
+        type_name: 'execution_reconciliation_outcome',
+      },
+    ]);
+
+    const columnRows = await client.query<{
+      readonly columns: readonly string[];
+      readonly table_name: string;
+    }>(`
+      select table_name,
+             array_agg(column_name order by ordinal_position)::text[] as columns
+        from information_schema.columns
+       where table_schema = 'app'
+         and table_name in ('deposit_execution_attempts', 'execution_reconciliations')
+       group by table_name
+       order by table_name
+    `);
+    expect(columnRows.rows).toEqual([
+      {
+        columns: [
+          'id',
+          'deposit_intent_id',
+          'deposit_job_id',
+          'platform_agent_account_id',
+          'attempt_number',
+          'status',
+          'final_action_fenced_at',
+          'reconciliation_required_at',
+          'resolved_at',
+          'created_at',
+          'updated_at',
+        ],
+        table_name: 'deposit_execution_attempts',
+      },
+      {
+        columns: [
+          'id',
+          'deposit_execution_attempt_id',
+          'deposit_intent_id',
+          'platform_agent_account_id',
+          'deposit_job_id',
+          'reconciliation_number',
+          'outcome',
+          'reason_code',
+          'keyed_external_reference_fingerprint',
+          'approved_history_match_count',
+          'normalized_operation_type',
+          'matched_history_occurred_at',
+          'exact_player_match',
+          'exact_amount_match',
+          'exact_currency_match',
+          'exact_player_credit_match',
+          'created_at',
+        ],
+        table_name: 'execution_reconciliations',
+      },
+    ]);
+
+    const forbiddenColumns = await client.query<{ readonly column_name: string }>(`
+      select column_name
+        from information_schema.columns
+       where table_schema = 'app'
+         and table_name in ('deposit_execution_attempts', 'execution_reconciliations')
+         and column_name ~* '(player_id|username|external_id|balance|route|payload)'
+       order by column_name
+    `);
+    expect(forbiddenColumns.rows).toEqual([]);
+
+    const rlsRows = await client.query<RlsRow>(`
+      select relation.relname,
+             relation.relrowsecurity,
+             relation.relforcerowsecurity
+        from pg_class relation
+        join pg_namespace namespace on namespace.oid = relation.relnamespace
+       where namespace.nspname = 'app'
+         and relation.relname in ('deposit_execution_attempts', 'execution_reconciliations')
+       order by relation.relname
+    `);
+    expect(rlsRows.rows).toEqual([
+      {
+        relforcerowsecurity: true,
+        relname: 'deposit_execution_attempts',
+        relrowsecurity: true,
+      },
+      {
+        relforcerowsecurity: true,
+        relname: 'execution_reconciliations',
+        relrowsecurity: true,
+      },
+    ]);
+
+    const policyRows = await client.query<{ readonly policies: number }>(`
+      select count(*)::integer as policies
+        from pg_policy policy
+        join pg_class relation on relation.oid = policy.polrelid
+        join pg_namespace namespace on namespace.oid = relation.relnamespace
+       where namespace.nspname = 'app'
+         and relation.relname in ('deposit_execution_attempts', 'execution_reconciliations')
+    `);
+    expect(policyRows.rows).toEqual([{ policies: 0 }]);
+
+    const privilegeRows = await client.query<{
+      readonly has_privilege: boolean;
+      readonly role_name: string;
+      readonly table_name: string;
+    }>(`
+      with roles(role_name) as (
+        values
+          ('public'),
+          ('anon'),
+          ('authenticated'),
+          ('service_role'),
+          ('fetanagent_api'),
+          ('fetanagent_api_runtime'),
+          ('fetanagent_worker'),
+          ('fetanagent_beta_admission'),
+          ('fetanagent_beta_admission_runtime'),
+          ('fetanagent_nonce_retention'),
+          ('fetanagent_nonce_retention_runtime'),
+          ('fetanagent_owner_control'),
+          ('fetanagent_owner_control_runtime'),
+          ('fetanagent_player_actions'),
+          ('fetanagent_player_actions_runtime'),
+          ('fetanagent_cbe_birr_shadow_worker'),
+          ('fetanagent_customer_web'),
+          ('fetanagent_customer_web_runtime')
+      ), tables(table_name) as (
+        values ('deposit_execution_attempts'), ('execution_reconciliations')
+      )
+      select roles.role_name,
+             tables.table_name,
+             has_table_privilege(
+               roles.role_name,
+               pg_catalog.format('app.%I', tables.table_name),
+               'SELECT'
+             )
+             or has_table_privilege(
+               roles.role_name,
+               pg_catalog.format('app.%I', tables.table_name),
+               'INSERT'
+             )
+             or has_table_privilege(
+               roles.role_name,
+               pg_catalog.format('app.%I', tables.table_name),
+               'UPDATE'
+             )
+             or has_table_privilege(
+               roles.role_name,
+               pg_catalog.format('app.%I', tables.table_name),
+               'DELETE'
+             ) as has_privilege
+        from roles
+        cross join tables
+       order by roles.role_name, tables.table_name
+    `);
+    expect(privilegeRows.rows.every((row) => row.has_privilege === false)).toBe(true);
+
+    const typePrivilegeRows = await client.query<{
+      readonly has_usage: boolean;
+      readonly role_name: string;
+      readonly type_name: string;
+    }>(`
+      with roles(role_name) as (
+        values
+          ('public'),
+          ('anon'),
+          ('authenticated'),
+          ('service_role'),
+          ('fetanagent_api'),
+          ('fetanagent_api_runtime'),
+          ('fetanagent_worker'),
+          ('fetanagent_beta_admission'),
+          ('fetanagent_beta_admission_runtime'),
+          ('fetanagent_nonce_retention'),
+          ('fetanagent_nonce_retention_runtime'),
+          ('fetanagent_owner_control'),
+          ('fetanagent_owner_control_runtime'),
+          ('fetanagent_player_actions'),
+          ('fetanagent_player_actions_runtime'),
+          ('fetanagent_cbe_birr_shadow_worker'),
+          ('fetanagent_customer_web'),
+          ('fetanagent_customer_web_runtime')
+      ), types(type_name) as (
+        values
+          ('deposit_execution_attempt_status'),
+          ('execution_reconciliation_outcome')
+      )
+      select roles.role_name,
+             types.type_name,
+             has_type_privilege(
+               roles.role_name,
+               pg_catalog.format('app.%I', types.type_name),
+               'USAGE'
+             ) as has_usage
+        from roles
+        cross join types
+       order by roles.role_name, types.type_name
+    `);
+    expect(typePrivilegeRows.rows.every((row) => row.has_usage === false)).toBe(true);
+
+    const functionRows = await client.query<{
+      readonly api_execute: boolean;
+      readonly function_name: string;
+      readonly is_procedure: boolean;
+      readonly is_security_definer: boolean;
+      readonly public_execute: boolean;
+      readonly returns_trigger: boolean;
+      readonly safe_search_path: boolean;
+      readonly worker_execute: boolean;
+    }>(`
+      with expected(signature) as (
+        values
+          ('app.reject_execution_ledger_truncate()'),
+          ('app.enforce_deposit_execution_attempt()'),
+          ('app.enforce_execution_reconciliation_insert()'),
+          ('app.enforce_execution_deposit_job_safety()'),
+          ('app.require_deposit_execution_correspondence()')
+      )
+      select routine.proname as function_name,
+             routine.prosecdef as is_security_definer,
+             routine.prokind = 'p' as is_procedure,
+             routine.prorettype = 'trigger'::regtype as returns_trigger,
+             coalesce(
+               exists (
+                 select 1
+                   from unnest(routine.proconfig) option
+                  where option like 'search_path=pg_catalog%'
+               ),
+               false
+             ) as safe_search_path,
+             has_function_privilege('public', routine.oid, 'EXECUTE') as public_execute,
+             has_function_privilege('fetanagent_api', routine.oid, 'EXECUTE') as api_execute,
+             has_function_privilege('fetanagent_worker', routine.oid, 'EXECUTE') as worker_execute
+        from expected
+        join pg_proc routine on routine.oid = pg_catalog.to_regprocedure(expected.signature)
+       order by routine.proname
+    `);
+    expect(functionRows.rows).toHaveLength(5);
+    expect(
+      functionRows.rows.every(
+        (row) =>
+          row.api_execute === false &&
+          row.is_procedure === false &&
+          row.is_security_definer === false &&
+          row.public_execute === false &&
+          row.returns_trigger &&
+          row.safe_search_path &&
+          row.worker_execute === false,
+      ),
+    ).toBe(true);
+
+    const functionPrivilegeRows = await client.query<{
+      readonly function_name: string;
+      readonly has_execute: boolean;
+      readonly role_name: string;
+    }>(`
+      with roles(role_name) as (
+        values
+          ('public'),
+          ('anon'),
+          ('authenticated'),
+          ('service_role'),
+          ('fetanagent_api'),
+          ('fetanagent_api_runtime'),
+          ('fetanagent_worker'),
+          ('fetanagent_beta_admission'),
+          ('fetanagent_beta_admission_runtime'),
+          ('fetanagent_nonce_retention'),
+          ('fetanagent_nonce_retention_runtime'),
+          ('fetanagent_owner_control'),
+          ('fetanagent_owner_control_runtime'),
+          ('fetanagent_player_actions'),
+          ('fetanagent_player_actions_runtime'),
+          ('fetanagent_cbe_birr_shadow_worker'),
+          ('fetanagent_customer_web'),
+          ('fetanagent_customer_web_runtime')
+      ), expected(signature) as (
+        values
+          ('app.reject_execution_ledger_truncate()'),
+          ('app.enforce_deposit_execution_attempt()'),
+          ('app.enforce_execution_reconciliation_insert()'),
+          ('app.enforce_execution_deposit_job_safety()'),
+          ('app.require_deposit_execution_correspondence()')
+      )
+      select roles.role_name,
+             routine.proname as function_name,
+             has_function_privilege(roles.role_name, routine.oid, 'EXECUTE') as has_execute
+        from roles
+        cross join expected
+        join pg_proc routine on routine.oid = pg_catalog.to_regprocedure(expected.signature)
+       order by roles.role_name, routine.proname
+    `);
+    expect(functionPrivilegeRows.rows).toHaveLength(90);
+    expect(functionPrivilegeRows.rows.every((row) => row.has_execute === false)).toBe(true);
+
+    const executionProcedures = await client.query<{ readonly procedures: number }>(`
+      select count(*)::integer as procedures
+        from pg_proc routine
+        join pg_namespace namespace on namespace.oid = routine.pronamespace
+       where namespace.nspname = 'app'
+         and routine.prokind = 'p'
+         and routine.proname ~ '(execution|reconciliation)'
+    `);
+    expect(executionProcedures.rows).toEqual([{ procedures: 0 }]);
+
+    const callableExecutionRoutines = await client.query<{ readonly routines: number }>(`
+      select count(*)::integer as routines
+        from pg_proc routine
+        join pg_namespace namespace on namespace.oid = routine.pronamespace
+       where namespace.nspname = 'app'
+         and routine.proname ~ '(execution|reconciliation)'
+         and routine.prorettype <> 'trigger'::regtype
+    `);
+    expect(callableExecutionRoutines.rows).toEqual([{ routines: 0 }]);
+
+    const indexRows = await client.query<{
+      readonly indexdef: string;
+      readonly indexname: string;
+    }>(`
+      select indexname, lower(indexdef) as indexdef
+        from pg_indexes
+       where schemaname = 'app'
+         and indexname in (
+           'deposit_execution_attempts_one_blocking_intent_idx',
+           'deposit_execution_attempts_one_blocking_agent_idx',
+           'execution_reconciliations_one_terminal_attempt_idx',
+           'execution_reconciliations_agent_reference_idx',
+           'deposit_jobs_one_active_execution_intent_idx',
+           'deposit_jobs_one_active_reconciliation_intent_idx'
+         )
+       order by indexname
+    `);
+    expect(indexRows.rows).toHaveLength(6);
+    expect(
+      indexRows.rows.find(
+        (row) => row.indexname === 'deposit_execution_attempts_one_blocking_agent_idx',
+      )?.indexdef,
+    ).toContain("'review_required'::app.deposit_execution_attempt_status");
+    expect(
+      indexRows.rows.find((row) => row.indexname === 'deposit_jobs_one_active_execution_intent_idx')
+        ?.indexdef,
+    ).toContain("'retry_wait'::app.deposit_job_status");
+    expect(
+      indexRows.rows.find(
+        (row) => row.indexname === 'execution_reconciliations_agent_reference_idx',
+      )?.indexdef,
+    ).toContain('keyed_external_reference_fingerprint is not null');
+
+    const triggerRows = await client.query<{ readonly trigger_name: string }>(`
+      select trigger.tgname as trigger_name
+        from pg_trigger trigger
+       where not trigger.tgisinternal
+         and trigger.tgname in (
+           'deposit_execution_attempts_enforce',
+           'deposit_execution_attempts_no_delete',
+           'deposit_execution_attempts_no_truncate',
+           'execution_reconciliations_enforce_insert',
+           'execution_reconciliations_immutable',
+           'execution_reconciliations_no_truncate',
+           'deposit_jobs_enforce_execution_safety',
+           'deposit_intents_require_execution_correspondence'
+         )
+       order by trigger.tgname
+    `);
+    expect(triggerRows.rows.map((row) => row.trigger_name)).toEqual([
+      'deposit_execution_attempts_enforce',
+      'deposit_execution_attempts_no_delete',
+      'deposit_execution_attempts_no_truncate',
+      'deposit_intents_require_execution_correspondence',
+      'deposit_jobs_enforce_execution_safety',
+      'execution_reconciliations_enforce_insert',
+      'execution_reconciliations_immutable',
+      'execution_reconciliations_no_truncate',
+    ]);
+
+    const guardSources = await client.query<{
+      readonly execution_job_guard: string;
+      readonly intent_guard: string;
+      readonly reconciliation_guard: string;
+    }>(`
+      select lower(pg_get_functiondef(
+               'app.enforce_execution_deposit_job_safety()'::regprocedure
+             )) as execution_job_guard,
+             lower(pg_get_functiondef(
+               'app.require_deposit_execution_correspondence()'::regprocedure
+             )) as intent_guard,
+             lower(pg_get_functiondef(
+               'app.enforce_execution_reconciliation_insert()'::regprocedure
+             )) as reconciliation_guard
+    `);
+    expect(guardSources.rows).toHaveLength(1);
+    expect(guardSources.rows[0]!.execution_job_guard).toContain('new.max_attempts <> 1');
+    expect(guardSources.rows[0]!.execution_job_guard).toContain("new.status = 'retry_wait'");
+    expect(guardSources.rows[0]!.execution_job_guard).toContain(
+      "intent_status <> 'execution_reconciliation'",
+    );
+    expect(guardSources.rows[0]!.intent_guard).toContain(
+      "attempt_row.status <> 'final_action_fenced'",
+    );
+    expect(guardSources.rows[0]!.intent_guard).toContain(
+      "latest_reconciliation.outcome <> 'confirmed_executed'",
+    );
+    expect(guardSources.rows[0]!.intent_guard).toContain('execution retry is not authorized');
+    expect(guardSources.rows[0]!.reconciliation_guard).toContain(
+      'new.matched_history_occurred_at < attempt_row.final_action_fenced_at',
+    );
+    expect(guardSources.rows[0]!.reconciliation_guard).toContain(
+      'new.matched_history_occurred_at > attempt_row.reconciliation_required_at',
+    );
+
+    const evidenceConstraint = await client.query<{ readonly definition: string }>(`
+      select lower(pg_get_constraintdef(constraint_row.oid)) as definition
+        from pg_constraint constraint_row
+       where constraint_row.conrelid = 'app.execution_reconciliations'::regclass
+         and constraint_row.conname = 'execution_reconciliations_evidence_shape_check'
+    `);
+    expect(evidenceConstraint.rows).toHaveLength(1);
+    expect(evidenceConstraint.rows[0]!.definition).toContain(
+      "normalized_operation_type = 'deposit'::text",
+    );
+    expect(evidenceConstraint.rows[0]!.definition).toContain(
+      'matched_history_occurred_at is not null',
+    );
+    expect(evidenceConstraint.rows[0]!.definition).toContain('normalized_operation_type is null');
+    expect(evidenceConstraint.rows[0]!.definition).toContain('matched_history_occurred_at is null');
+  });
+
+  it('fails closed from the action fence through mandatory reconciliation', async () => {
+    await client.query('begin');
+    try {
+      const agent = await client.query<{ readonly id: string }>(`
+        insert into app.platform_agent_accounts (
+          platform_id, label, credential_ref
+        )
+        select platform.id, 'dormant-sql-execution-agent', 'secret://dormant-sql-agent'
+          from app.platforms platform
+         where platform.code = 'kemerbet'
+        returning id
+      `);
+      expect(agent.rows).toHaveLength(1);
+      const agentId = agent.rows[0]!.id;
+
+      const promoteToExecutionPending = async (depositIntentId: string): Promise<void> => {
+        await client.query(`set local session_replication_role = 'replica'`);
+        try {
+          await client.query(
+            `update app.deposit_intents
+                set status = 'execution_pending',
+                    status_changed_at = clock_timestamp()
+              where id = $1::uuid`,
+            [depositIntentId],
+          );
+        } finally {
+          await client.query(`set local session_replication_role = 'origin'`);
+        }
+      };
+
+      const leaseJob = async (jobId: string): Promise<void> => {
+        await client.query(
+          `update app.deposit_jobs
+              set status = 'leased',
+                  attempt_count = attempt_count + 1,
+                  lease_token = gen_random_uuid(),
+                  leased_by = 'dormant_sql_test',
+                  lease_expires_at = clock_timestamp() + interval '5 minutes'
+            where id = $1::uuid`,
+          [jobId],
+        );
+      };
+
+      const succeedJob = async (jobId: string): Promise<void> => {
+        await client.query(
+          `update app.deposit_jobs
+              set status = 'succeeded',
+                  lease_token = null,
+                  leased_by = null,
+                  lease_expires_at = null,
+                  last_error_code = null
+            where id = $1::uuid`,
+          [jobId],
+        );
+      };
+
+      const first = await createExecutionIntentFixture('DORMANT-EXECUTION-CONFIRMED');
+      await promoteToExecutionPending(first.depositIntentId);
+
+      await expectSqlFailureInTransaction(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'execute_deposit', $2::text, 2)`,
+        [first.depositIntentId, `sql:execute-invalid:${first.depositIntentId}`],
+        /one-shot and require max_attempts = 1/u,
+      );
+
+      const executionJob = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'execute_deposit', $2::text, 1)
+         returning id`,
+        [first.depositIntentId, `sql:execute:${first.depositIntentId}`],
+      );
+      const executionJobId = executionJob.rows[0]!.id;
+      await leaseJob(executionJobId);
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_jobs
+            set status = 'retry_wait',
+                run_after = clock_timestamp() + interval '1 minute',
+                lease_token = null,
+                leased_by = null,
+                lease_expires_at = null,
+                last_error_code = 'retry_requested'
+          where id = $1::uuid`,
+        [executionJobId],
+        /retry_wait is not authorized/u,
+      );
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_intents
+            set status = 'execution_in_progress'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+        /durable final-action fence/u,
+      );
+
+      const executionAttempt = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_execution_attempts (
+           deposit_intent_id, deposit_job_id, platform_agent_account_id, attempt_number
+         ) values ($1::uuid, $2::uuid, $3::uuid, 1)
+         returning id`,
+        [first.depositIntentId, executionJobId, agentId],
+      );
+      const executionAttemptId = executionAttempt.rows[0]!.id;
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_execution_attempts
+            set id = gen_random_uuid()
+          where id = $1::uuid`,
+        [executionAttemptId],
+        /identity is immutable/u,
+      );
+
+      await client.query(
+        `update app.deposit_execution_attempts
+            set status = 'final_action_fenced'
+          where id = $1::uuid`,
+        [executionAttemptId],
+      );
+      await client.query(
+        `update app.deposit_intents
+            set status = 'execution_in_progress'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+      );
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_intents
+            set status = 'executed'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+        /must be reconciled before execution or review/u,
+      );
+
+      await client.query(
+        `update app.deposit_execution_attempts
+            set status = 'reconciliation_required'
+          where id = $1::uuid`,
+        [executionAttemptId],
+      );
+      await client.query(
+        `update app.deposit_intents
+            set status = 'execution_uncertain'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+      );
+      await succeedJob(executionJobId);
+
+      const firstReconciliationJob = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'reconcile_execution', $2::text, 4)
+         returning id`,
+        [first.depositIntentId, `sql:reconcile:1:${first.depositIntentId}`],
+      );
+      const firstReconciliationJobId = firstReconciliationJob.rows[0]!.id;
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_jobs
+            set status = 'leased',
+                attempt_count = attempt_count + 1,
+                lease_token = gen_random_uuid(),
+                leased_by = 'dormant_sql_test',
+                lease_expires_at = clock_timestamp() + interval '5 minutes'
+          where id = $1::uuid`,
+        [firstReconciliationJobId],
+        /may be leased only while the intent is reconciling/u,
+      );
+
+      await expectSqlFailureInTransaction(
+        `insert into app.execution_reconciliations (
+           deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+           deposit_job_id, reconciliation_number, outcome, reason_code
+         ) values (
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+           'not_observed', 'agent_history_not_observed'
+         )`,
+        [executionAttemptId, first.depositIntentId, agentId, firstReconciliationJobId],
+        /only while the intent is reconciling/u,
+      );
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_execution_attempts
+            set status = 'confirmed_executed'
+          where id = $1::uuid`,
+        [executionAttemptId],
+        /only while its intent is reconciling/u,
+      );
+
+      await client.query(
+        `update app.deposit_intents
+            set status = 'execution_reconciliation'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+      );
+      await leaseJob(firstReconciliationJobId);
+
+      const validFingerprint = `hmac-sha256-v1:${'a'.repeat(64)}`;
+      const executionWindow = await client.query<{
+        readonly after_execution_window: string;
+        readonly before_execution_window: string;
+        readonly final_action_fenced_at: string;
+        readonly middle_execution_window: string;
+        readonly reconciliation_required_at: string;
+      }>(
+        `select final_action_fenced_at::text,
+                reconciliation_required_at::text,
+                (
+                  final_action_fenced_at
+                  + (reconciliation_required_at - final_action_fenced_at) / 2
+                )::text as middle_execution_window,
+                (final_action_fenced_at - interval '1 microsecond')::text
+                  as before_execution_window,
+                (reconciliation_required_at + interval '1 microsecond')::text
+                  as after_execution_window
+           from app.deposit_execution_attempts
+          where id = $1::uuid`,
+        [executionAttemptId],
+      );
+      expect(executionWindow.rows).toHaveLength(1);
+      const executionWindowStart = executionWindow.rows[0]!.final_action_fenced_at;
+      const executionWindowEnd = executionWindow.rows[0]!.reconciliation_required_at;
+      const executionWindowMiddle = executionWindow.rows[0]!.middle_execution_window;
+      const beforeExecutionWindow = executionWindow.rows[0]!.before_execution_window;
+      const afterExecutionWindow = executionWindow.rows[0]!.after_execution_window;
+      const confirmedInsert = `insert into app.execution_reconciliations (
+         deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+         deposit_job_id, reconciliation_number, outcome, reason_code,
+         keyed_external_reference_fingerprint, approved_history_match_count,
+         normalized_operation_type, matched_history_occurred_at,
+         exact_player_match, exact_amount_match, exact_currency_match,
+         exact_player_credit_match
+       ) values (
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+         'confirmed_executed',
+         'agent_deposit_history_in_window_and_player_credit_confirmed',
+         $5::text, $6::smallint, $7::text, $8::timestamptz,
+         $9::boolean, $10::boolean, $11::boolean, $12::boolean
+       )`;
+      const confirmedIdentifiers = [
+        executionAttemptId,
+        first.depositIntentId,
+        agentId,
+        firstReconciliationJobId,
+      ] as const;
+
+      await expectSqlFailureInTransaction(
+        confirmedInsert,
+        [...confirmedIdentifiers, null, null, null, null, null, null, null, null],
+        /server-authored execution window/u,
+      );
+
+      const individuallyMissingEvidence: readonly (readonly (
+        boolean | number | string | null
+      )[])[] = [
+        [null, 1, 'deposit', executionWindowMiddle, true, true, true, true],
+        [validFingerprint, null, 'deposit', executionWindowMiddle, true, true, true, true],
+        [validFingerprint, 1, null, executionWindowMiddle, true, true, true, true],
+        [validFingerprint, 1, 'deposit', null, true, true, true, true],
+        [validFingerprint, 1, 'deposit', executionWindowMiddle, null, true, true, true],
+        [validFingerprint, 1, 'deposit', executionWindowMiddle, true, null, true, true],
+        [validFingerprint, 1, 'deposit', executionWindowMiddle, true, true, null, true],
+        [validFingerprint, 1, 'deposit', executionWindowMiddle, true, true, true, null],
+      ];
+      for (const [index, evidence] of individuallyMissingEvidence.entries()) {
+        await expectSqlFailureInTransaction(
+          confirmedInsert,
+          [...confirmedIdentifiers, ...evidence],
+          index === 3
+            ? /server-authored execution window/u
+            : /execution_reconciliations_evidence_shape_check/u,
+        );
+      }
+
+      for (const normalizedOperationType of ['non_deposit', 'unknown']) {
+        await expectSqlFailureInTransaction(
+          confirmedInsert,
+          [
+            ...confirmedIdentifiers,
+            validFingerprint,
+            1,
+            normalizedOperationType,
+            executionWindowMiddle,
+            true,
+            true,
+            true,
+            true,
+          ],
+          /execution_reconciliations_evidence_shape_check/u,
+        );
+      }
+
+      for (const matchedHistoryOccurredAt of [beforeExecutionWindow, afterExecutionWindow]) {
+        await expectSqlFailureInTransaction(
+          confirmedInsert,
+          [
+            ...confirmedIdentifiers,
+            validFingerprint,
+            1,
+            'deposit',
+            matchedHistoryOccurredAt,
+            true,
+            true,
+            true,
+            true,
+          ],
+          /server-authored execution window/u,
+        );
+      }
+
+      for (let falsePredicate = 0; falsePredicate < 4; falsePredicate += 1) {
+        const evidence: (boolean | number | string)[] = [
+          validFingerprint,
+          1,
+          'deposit',
+          executionWindowMiddle,
+          true,
+          true,
+          true,
+          true,
+        ];
+        evidence[falsePredicate + 4] = false;
+        await expectSqlFailureInTransaction(
+          confirmedInsert,
+          [...confirmedIdentifiers, ...evidence],
+          /execution_reconciliations_evidence_shape_check/u,
+        );
+      }
+      await expectSqlFailureInTransaction(
+        confirmedInsert,
+        [
+          ...confirmedIdentifiers,
+          validFingerprint,
+          2,
+          'deposit',
+          executionWindowMiddle,
+          true,
+          true,
+          true,
+          true,
+        ],
+        /execution_reconciliations_evidence_shape_check/u,
+      );
+
+      for (const inclusiveBoundary of [executionWindowStart, executionWindowEnd]) {
+        await client.query('savepoint confirmed_execution_window_boundary');
+        await client.query(confirmedInsert, [
+          ...confirmedIdentifiers,
+          validFingerprint,
+          1,
+          'deposit',
+          inclusiveBoundary,
+          true,
+          true,
+          true,
+          true,
+        ]);
+        await client.query('rollback to savepoint confirmed_execution_window_boundary');
+        await client.query('release savepoint confirmed_execution_window_boundary');
+      }
+
+      await expectSqlFailureInTransaction(
+        `insert into app.execution_reconciliations (
+           deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+           deposit_job_id, reconciliation_number, outcome, reason_code,
+           normalized_operation_type, matched_history_occurred_at
+         ) values (
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+           'not_observed', 'agent_history_not_observed', 'deposit', $5::timestamptz
+         )`,
+        [
+          executionAttemptId,
+          first.depositIntentId,
+          agentId,
+          firstReconciliationJobId,
+          executionWindowMiddle,
+        ],
+        /execution_reconciliations_evidence_shape_check/u,
+      );
+
+      await client.query(
+        `insert into app.execution_reconciliations (
+           deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+           deposit_job_id, reconciliation_number, outcome, reason_code
+         ) values (
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+           'not_observed', 'agent_history_not_observed'
+         )`,
+        [executionAttemptId, first.depositIntentId, agentId, firstReconciliationJobId],
+      );
+      await succeedJob(firstReconciliationJobId);
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_execution_attempts
+            set status = 'confirmed_executed'
+          where id = $1::uuid`,
+        [executionAttemptId],
+        /matching completed reconciliation/u,
+      );
+      await expectSqlFailureInTransaction(
+        `update app.deposit_intents
+            set status = 'execution_pending'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+        /retry is not authorized after reconciliation/u,
+      );
+      await expectSqlFailureInTransaction(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'execute_deposit', $2::text, 1)`,
+        [first.depositIntentId, `sql:execute-retry:${first.depositIntentId}`],
+        /retry is not authorized/u,
+      );
+
+      const secondReconciliationJob = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'reconcile_execution', $2::text, 4)
+         returning id`,
+        [first.depositIntentId, `sql:reconcile:2:${first.depositIntentId}`],
+      );
+      const secondReconciliationJobId = secondReconciliationJob.rows[0]!.id;
+      await leaseJob(secondReconciliationJobId);
+      await client.query(
+        `insert into app.execution_reconciliations (
+           deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+           deposit_job_id, reconciliation_number, outcome, reason_code,
+           keyed_external_reference_fingerprint, approved_history_match_count,
+           normalized_operation_type, matched_history_occurred_at,
+           exact_player_match, exact_amount_match, exact_currency_match,
+           exact_player_credit_match
+         ) values (
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 2,
+           'confirmed_executed',
+           'agent_deposit_history_in_window_and_player_credit_confirmed',
+           $5::text, 1, 'deposit', $6::timestamptz, true, true, true, true
+         )`,
+        [
+          executionAttemptId,
+          first.depositIntentId,
+          agentId,
+          secondReconciliationJobId,
+          validFingerprint,
+          executionWindowMiddle,
+        ],
+      );
+      await succeedJob(secondReconciliationJobId);
+      await client.query(
+        `update app.deposit_execution_attempts
+            set status = 'confirmed_executed'
+          where id = $1::uuid`,
+        [executionAttemptId],
+      );
+      await client.query(
+        `update app.deposit_intents
+            set status = 'executed'
+          where id = $1::uuid`,
+        [first.depositIntentId],
+      );
+
+      await expectSqlFailureInTransaction(
+        `update app.execution_reconciliations
+            set reason_code = 'agent_history_ambiguous'
+          where deposit_execution_attempt_id = $1::uuid
+            and reconciliation_number = 2`,
+        [executionAttemptId],
+        /must be retained/u,
+      );
+
+      const ambiguous = await createExecutionIntentFixture('DORMANT-EXECUTION-AMBIGUOUS');
+      await promoteToExecutionPending(ambiguous.depositIntentId);
+      const ambiguousExecutionJob = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'execute_deposit', $2::text, 1)
+         returning id`,
+        [ambiguous.depositIntentId, `sql:execute:${ambiguous.depositIntentId}`],
+      );
+      const ambiguousExecutionJobId = ambiguousExecutionJob.rows[0]!.id;
+      await leaseJob(ambiguousExecutionJobId);
+      const ambiguousAttempt = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_execution_attempts (
+           deposit_intent_id, deposit_job_id, platform_agent_account_id, attempt_number
+         ) values ($1::uuid, $2::uuid, $3::uuid, 1)
+         returning id`,
+        [ambiguous.depositIntentId, ambiguousExecutionJobId, agentId],
+      );
+      const ambiguousAttemptId = ambiguousAttempt.rows[0]!.id;
+      await client.query(
+        `update app.deposit_execution_attempts set status = 'final_action_fenced'
+          where id = $1::uuid`,
+        [ambiguousAttemptId],
+      );
+      await client.query(
+        `update app.deposit_intents set status = 'execution_in_progress'
+          where id = $1::uuid`,
+        [ambiguous.depositIntentId],
+      );
+      await client.query(
+        `update app.deposit_execution_attempts set status = 'reconciliation_required'
+          where id = $1::uuid`,
+        [ambiguousAttemptId],
+      );
+      await client.query(
+        `update app.deposit_intents set status = 'execution_uncertain'
+          where id = $1::uuid`,
+        [ambiguous.depositIntentId],
+      );
+      await succeedJob(ambiguousExecutionJobId);
+      const ambiguousReconciliationJob = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'reconcile_execution', $2::text, 4)
+         returning id`,
+        [ambiguous.depositIntentId, `sql:reconcile:1:${ambiguous.depositIntentId}`],
+      );
+      const ambiguousReconciliationJobId = ambiguousReconciliationJob.rows[0]!.id;
+      await client.query(
+        `update app.deposit_intents set status = 'execution_reconciliation'
+          where id = $1::uuid`,
+        [ambiguous.depositIntentId],
+      );
+      await leaseJob(ambiguousReconciliationJobId);
+      await expectSqlFailureInTransaction(
+        `insert into app.execution_reconciliations (
+           deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+           deposit_job_id, reconciliation_number, outcome, reason_code,
+           normalized_operation_type, matched_history_occurred_at
+         ) values (
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+           'ambiguous', 'agent_history_ambiguous', 'deposit', clock_timestamp()
+         )`,
+        [ambiguousAttemptId, ambiguous.depositIntentId, agentId, ambiguousReconciliationJobId],
+        /execution_reconciliations_evidence_shape_check/u,
+      );
+      await client.query(
+        `insert into app.execution_reconciliations (
+           deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+           deposit_job_id, reconciliation_number, outcome, reason_code
+         ) values (
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+           'ambiguous', 'agent_history_ambiguous'
+         )`,
+        [ambiguousAttemptId, ambiguous.depositIntentId, agentId, ambiguousReconciliationJobId],
+      );
+      await succeedJob(ambiguousReconciliationJobId);
+      await client.query(
+        `update app.deposit_execution_attempts set status = 'review_required'
+          where id = $1::uuid`,
+        [ambiguousAttemptId],
+      );
+      await client.query(
+        `update app.deposit_intents set status = 'execution_review'
+          where id = $1::uuid`,
+        [ambiguous.depositIntentId],
+      );
+
+      await expectSqlFailureInTransaction(
+        `update app.deposit_intents
+            set status = 'rejected',
+                rejection_reason_code = 'execution_rejected'
+          where id = $1::uuid`,
+        [ambiguous.depositIntentId],
+        /cannot be rejected from review/u,
+      );
+
+      const blocked = await createExecutionIntentFixture('DORMANT-EXECUTION-AGENT-BLOCKED');
+      await promoteToExecutionPending(blocked.depositIntentId);
+      const blockedJob = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'execute_deposit', $2::text, 1)
+         returning id`,
+        [blocked.depositIntentId, `sql:execute:${blocked.depositIntentId}`],
+      );
+      const blockedJobId = blockedJob.rows[0]!.id;
+      await leaseJob(blockedJobId);
+      await expectSqlFailureInTransaction(
+        `insert into app.deposit_execution_attempts (
+           deposit_intent_id, deposit_job_id, platform_agent_account_id, attempt_number
+         ) values ($1::uuid, $2::uuid, $3::uuid, 1)`,
+        [blocked.depositIntentId, blockedJobId, agentId],
+        /deposit_execution_attempts_one_blocking_agent_idx/u,
+      );
+
+      const finalState = await client.query<{
+        readonly ambiguous_attempt_status: string;
+        readonly ambiguous_intent_status: string;
+        readonly confirmed_attempt_status: string;
+        readonly confirmed_intent_status: string;
+        readonly first_outcome: string;
+        readonly second_outcome: string;
+      }>(
+        `select
+           (select status::text from app.deposit_execution_attempts where id = $1::uuid)
+             as confirmed_attempt_status,
+           (select status::text from app.deposit_intents where id = $2::uuid)
+             as confirmed_intent_status,
+           (select outcome::text from app.execution_reconciliations
+             where deposit_execution_attempt_id = $1::uuid and reconciliation_number = 1)
+             as first_outcome,
+           (select outcome::text from app.execution_reconciliations
+             where deposit_execution_attempt_id = $1::uuid and reconciliation_number = 2)
+             as second_outcome,
+           (select status::text from app.deposit_execution_attempts where id = $3::uuid)
+             as ambiguous_attempt_status,
+           (select status::text from app.deposit_intents where id = $4::uuid)
+             as ambiguous_intent_status`,
+        [executionAttemptId, first.depositIntentId, ambiguousAttemptId, ambiguous.depositIntentId],
+      );
+      expect(finalState.rows).toEqual([
+        {
+          ambiguous_attempt_status: 'review_required',
+          ambiguous_intent_status: 'execution_review',
+          confirmed_attempt_status: 'confirmed_executed',
+          confirmed_intent_status: 'executed',
+          first_outcome: 'not_observed',
+          second_outcome: 'confirmed_executed',
+        },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  it('serializes concurrent execution attempts on one agent account', async () => {
+    const agent = await client.query<{ readonly id: string }>(`
+      insert into app.platform_agent_accounts (
+        platform_id, label, credential_ref
+      )
+      select platform.id, 'concurrent-sql-execution-agent', 'secret://concurrent-sql-agent'
+        from app.platforms platform
+       where platform.code = 'kemerbet'
+      returning id
+    `);
+    expect(agent.rows).toHaveLength(1);
+    const agentId = agent.rows[0]!.id;
+
+    const first = await createExecutionIntentFixture('DORMANT-EXECUTION-RACE-A');
+    const second = await createExecutionIntentFixture('DORMANT-EXECUTION-RACE-B');
+    await client.query('begin');
+    try {
+      await client.query(`set local session_replication_role = 'replica'`);
+      await client.query(
+        `update app.deposit_intents
+            set status = 'execution_pending',
+                status_changed_at = clock_timestamp()
+          where id in ($1::uuid, $2::uuid)`,
+        [first.depositIntentId, second.depositIntentId],
+      );
+      await client.query(`set local session_replication_role = 'origin'`);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    }
+
+    const insertLeasedJob = async (depositIntentId: string): Promise<string> => {
+      const job = await client.query<{ readonly id: string }>(
+        `insert into app.deposit_jobs (
+           deposit_intent_id, job_kind, job_key, max_attempts
+         ) values ($1::uuid, 'execute_deposit', $2::text, 1)
+         returning id`,
+        [depositIntentId, `sql:concurrent-execute:${depositIntentId}`],
+      );
+      const jobId = job.rows[0]!.id;
+      await client.query(
+        `update app.deposit_jobs
+            set status = 'leased',
+                attempt_count = 1,
+                lease_token = gen_random_uuid(),
+                leased_by = 'dormant_concurrency_test',
+                lease_expires_at = clock_timestamp() + interval '5 minutes'
+          where id = $1::uuid`,
+        [jobId],
+      );
+      return jobId;
+    };
+
+    const firstJobId = await insertLeasedJob(first.depositIntentId);
+    const secondJobId = await insertLeasedJob(second.depositIntentId);
+    const firstConnection = createSqlIntegrationClient(environment);
+    const secondConnection = createSqlIntegrationClient(environment);
+    let firstCommitted = false;
+    let secondRolledBack = false;
+    let secondAttempt: Promise<unknown> | undefined;
+    let firstAttemptId: string | undefined;
+    await Promise.all([firstConnection.connect(), secondConnection.connect()]);
+    try {
+      await Promise.all([firstConnection.query('begin'), secondConnection.query('begin')]);
+      await firstConnection.query(`set local lock_timeout = '5s'`);
+      await secondConnection.query(`set local lock_timeout = '5s'`);
+      await secondConnection.query(`set local application_name = 'execution_agent_lane_race'`);
+
+      const firstAttempt = await firstConnection.query<{ readonly id: string }>(
+        `insert into app.deposit_execution_attempts (
+           deposit_intent_id, deposit_job_id, platform_agent_account_id, attempt_number
+         ) values ($1::uuid, $2::uuid, $3::uuid, 1)
+         returning id`,
+        [first.depositIntentId, firstJobId, agentId],
+      );
+      firstAttemptId = firstAttempt.rows[0]!.id;
+
+      secondAttempt = secondConnection.query(
+        `insert into app.deposit_execution_attempts (
+           deposit_intent_id, deposit_job_id, platform_agent_account_id, attempt_number
+         ) values ($1::uuid, $2::uuid, $3::uuid, 1)`,
+        [second.depositIntentId, secondJobId, agentId],
+      );
+
+      let observedAgentLaneWait = false;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const lockState = await client.query<{ readonly waiting: boolean }>(`
+          select exists (
+            select 1
+              from pg_stat_activity activity
+             where activity.application_name = 'execution_agent_lane_race'
+               and activity.wait_event_type = 'Lock'
+          ) as waiting
+        `);
+        if (lockState.rows[0]!.waiting) {
+          observedAgentLaneWait = true;
+          break;
+        }
+        await client.query('select pg_sleep(0.025)');
+      }
+      expect(observedAgentLaneWait).toBe(true);
+
+      await firstConnection.query('commit');
+      firstCommitted = true;
+      await expect(secondAttempt).rejects.toThrow(
+        /deposit_execution_attempts_one_blocking_agent_idx/u,
+      );
+      secondAttempt = undefined;
+      await secondConnection.query('rollback');
+      secondRolledBack = true;
+    } finally {
+      if (!firstCommitted) {
+        await Promise.allSettled([firstConnection.query('rollback')]);
+      }
+      if (secondAttempt) {
+        await Promise.allSettled([secondAttempt]);
+      }
+      if (!secondRolledBack) {
+        await Promise.allSettled([secondConnection.query('rollback')]);
+      }
+      await Promise.allSettled([firstConnection.end(), secondConnection.end()]);
+    }
+
+    expect(firstAttemptId).toEqual(expect.any(String));
+    await client.query(
+      `update app.deposit_execution_attempts
+          set status = 'cancelled_before_action'
+        where id = $1::uuid`,
+      [firstAttemptId!],
+    );
+    await client.query(
+      `update app.deposit_jobs
+          set status = 'cancelled',
+              lease_token = null,
+              leased_by = null,
+              lease_expires_at = null,
+              last_error_code = 'cancelled_before_action'
+        where id = $1::uuid`,
+      [firstJobId],
+    );
+    await client.query(
+      `update app.deposit_jobs
+          set status = 'cancelled',
+              lease_token = null,
+              leased_by = null,
+              lease_expires_at = null,
+              last_error_code = 'agent_lane_unavailable'
+        where id = $1::uuid`,
+      [secondJobId],
+    );
+
+    const blockingRows = await client.query<{ readonly blocking_attempts: number }>(
+      `select count(*)::integer as blocking_attempts
+         from app.deposit_execution_attempts
+        where platform_agent_account_id = $1::uuid
+          and status in (
+            'prepared',
+            'final_action_fenced',
+            'reconciliation_required',
+            'review_required'
+          )`,
+      [agentId],
+    );
+    expect(blockingRows.rows).toEqual([{ blocking_attempts: 0 }]);
   });
 });

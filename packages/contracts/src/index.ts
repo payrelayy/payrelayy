@@ -8,6 +8,7 @@ export * from './cbe-birr-authoritative-shadow.js';
 export * from './cbe-birr-authoritative-adapter.js';
 export * from './cbe-birr-authoritative-shadow-attempt.js';
 export * from './cbe-birr-authoritative-shadow-settlement.js';
+export * from './kemerbet-deposit-execution.js';
 
 /**
  * Values are validated against database-backed registries. They are strings here so a newly
@@ -69,21 +70,4 @@ export type PaymentVerificationResult =
 export interface PaymentProviderVerifier {
   readonly paymentMethodCode: PaymentMethodCode;
   verify(input: PaymentVerificationInput): Promise<PaymentVerificationResult>;
-}
-
-export interface PlatformDepositRequest {
-  readonly executionAttemptId: string;
-  readonly platformCode: PlatformCode;
-  readonly playerId: string;
-  readonly amount: EtbAmount;
-}
-
-export type PlatformDepositResult =
-  | { readonly outcome: 'completed'; readonly platformReference: string }
-  | { readonly outcome: 'rejected'; readonly reason: string }
-  | { readonly outcome: 'uncertain'; readonly reason: string };
-
-export interface PlatformDepositExecutor {
-  readonly platformCode: PlatformCode;
-  deposit(request: PlatformDepositRequest): Promise<PlatformDepositResult>;
 }

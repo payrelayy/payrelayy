@@ -4312,10 +4312,11 @@ describe('disposable SQL migration baseline', () => {
       readonly constraint_definition: string;
       readonly constraint_name: string;
     }>(`
-      select constraint_name, pg_get_constraintdef(constraint.oid) as constraint_definition
-      from pg_constraint constraint
-      where constraint.conrelid = 'app.customer_auth_identities'::regclass
-        and constraint.conname in (
+      select conname as constraint_name,
+             pg_get_constraintdef(catalog_constraint.oid) as constraint_definition
+      from pg_constraint catalog_constraint
+      where catalog_constraint.conrelid = 'app.customer_auth_identities'::regclass
+        and catalog_constraint.conname in (
           'customer_auth_identities_customer_id_key',
           'customer_auth_identities_auth_user_id_key',
           'customer_auth_identities_identity_customer_fkey'
@@ -4339,14 +4340,14 @@ describe('disposable SQL migration baseline', () => {
     ]);
     const originRequestUniqueness = await client.query<{ readonly constraints: number }>(`
       select count(*)::integer as constraints
-      from pg_constraint constraint
-      where constraint.conrelid =
-            'app.customer_web_player_registration_request_origins'::regclass
-        and constraint.contype = 'u'
-        and constraint.conkey = array[(
+      from pg_constraint catalog_constraint
+      where catalog_constraint.conrelid =
+             'app.customer_web_player_registration_request_origins'::regclass
+        and catalog_constraint.contype = 'u'
+        and catalog_constraint.conkey = array[(
           select attribute.attnum
           from pg_attribute attribute
-          where attribute.attrelid = constraint.conrelid
+          where attribute.attrelid = catalog_constraint.conrelid
             and attribute.attname = 'player_registration_request_id'
             and not attribute.attisdropped
         )]::smallint[]

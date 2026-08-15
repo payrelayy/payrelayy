@@ -90,6 +90,12 @@ type CustomerWebSubmitRow = {
   readonly request_status: string;
 };
 
+type ValidatedPlayerFixture = {
+  readonly customerId: string;
+  readonly platformId: string;
+  readonly playerAccountId: string;
+};
+
 const legacyPrivateInboundRecorder =
   'app.record_telegram_private_inbound_event(bigint,bigint,bigint,text,text,text,text,text)';
 const betaInviteRedemptionProcedure =
@@ -247,6 +253,11 @@ async function readCustomerWebFinancialSnapshot(): Promise<CustomerWebFinancialS
           order by id), '[]'::jsonb)
         from app.customer_platform_players
       ),
+      'player_deposit_eligibility_decisions', (
+        select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
+          order by id), '[]'::jsonb)
+        from app.player_deposit_eligibility_decisions
+      ),
       'player_validation_attempts', (
         select coalesce(jsonb_agg(jsonb_build_array(id, xmin::text, ctid::text)
           order by id), '[]'::jsonb)
@@ -262,6 +273,44 @@ async function readCustomerWebFinancialSnapshot(): Promise<CustomerWebFinancialS
 
   expect(result.rows).toHaveLength(1);
   return result.rows[0]!;
+}
+
+async function createValidatedPlayerFixture(playerId: string): Promise<ValidatedPlayerFixture> {
+  const customer = await client.query<{ readonly id: string }>(
+    `insert into app.customers default values returning id`,
+  );
+  const customerId = customer.rows[0]!.id;
+  const platform = await client.query<{ readonly id: string }>(
+    `select id from app.platforms where code = 'kemerbet'`,
+  );
+  const platformId = platform.rows[0]!.id;
+  const player = await client.query<{ readonly id: string }>(
+    `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+     values ($1::uuid, $2::uuid, $3::text)
+     returning id`,
+    [customerId, platformId, playerId],
+  );
+  const playerAccountId = player.rows[0]!.id;
+
+  await client.query(
+    `insert into app.player_validation_attempts (
+       player_account_id, attempt_number, outcome, reason_code, adapter_version,
+       started_at, completed_at, result_digest
+     ) values (
+       $1::uuid, 1, 'valid', 'sql_eligibility_fixture', 'sql_eligibility_fixture_v1',
+       clock_timestamp() - interval '1 second', clock_timestamp(),
+       'sql-eligibility-fixture'
+     )`,
+    [playerAccountId],
+  );
+  await client.query(
+    `update app.customer_platform_players
+        set validation_status = 'valid'
+      where id = $1::uuid`,
+    [playerAccountId],
+  );
+
+  return { customerId, platformId, playerAccountId };
 }
 
 let environment: SqlIntegrationEnvironment;
@@ -2821,6 +2870,74 @@ describe('disposable SQL migration baseline', () => {
       [telegramIdentityId, payloadHmac('a')],
     );
     const openingInboundId = openingInbound.rows[0]!.id;
+
+    const beforeEligibilityGate = await client.query<{
+      readonly audits: number;
+      readonly consumptions: number;
+      readonly decisions: number;
+      readonly intents: number;
+      readonly processed: boolean;
+    }>(
+      `select
+         (select count(*)::integer from app.deposit_intents
+           where origin_inbound_event_id = $1::uuid) as intents,
+         (select count(*)::integer from app.inbound_event_consumptions
+           where origin_inbound_event_id = $1::uuid) as consumptions,
+         (select count(*)::integer from app.audit_events
+           where action = 'deposit.dry_run_intent_opened'
+             and metadata ->> 'platform_code' = 'kemerbet') as audits,
+         (select count(*)::integer from app.player_deposit_eligibility_decisions
+           where player_account_id = $2::uuid) as decisions,
+         (select processed_at is not null from app.inbound_events
+           where id = $1::uuid) as processed`,
+      [openingInboundId, playerAccountId],
+    );
+
+    await expect(
+      queryAsRole(
+        'fetanagent_player_actions',
+        `select * from app.open_telegram_dry_run_deposit_intent(
+           $1::uuid, $2::text, $3::bigint, $4::text
+         )`,
+        [openingInboundId, 'STAGING-OWNER-REVIEW-01', 2500, payloadHmac('b')],
+      ),
+    ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
+
+    const afterEligibilityGate = await client.query<{
+      readonly audits: number;
+      readonly consumptions: number;
+      readonly decisions: number;
+      readonly intents: number;
+      readonly processed: boolean;
+    }>(
+      `select
+         (select count(*)::integer from app.deposit_intents
+           where origin_inbound_event_id = $1::uuid) as intents,
+         (select count(*)::integer from app.inbound_event_consumptions
+           where origin_inbound_event_id = $1::uuid) as consumptions,
+         (select count(*)::integer from app.audit_events
+           where action = 'deposit.dry_run_intent_opened'
+             and metadata ->> 'platform_code' = 'kemerbet') as audits,
+         (select count(*)::integer from app.player_deposit_eligibility_decisions
+           where player_account_id = $2::uuid) as decisions,
+         (select processed_at is not null from app.inbound_events
+           where id = $1::uuid) as processed`,
+      [openingInboundId, playerAccountId],
+    );
+    expect(afterEligibilityGate.rows).toEqual(beforeEligibilityGate.rows);
+
+    const eligibilityDecision = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code,
+         actor_kind, actor_admin_id
+       ) values (
+         $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'admin', $2::uuid
+       )
+       returning id`,
+      [playerAccountId, ownerAdminId],
+    );
+    const eligibilityDecisionId = eligibilityDecision.rows[0]!.id;
+
     const opened = await queryAsRole<{
       readonly deposit_intent_id: string;
       readonly deposit_status: string;
@@ -2847,6 +2964,17 @@ describe('disposable SQL migration baseline', () => {
       }),
     ]);
     const depositIntentId = opened[0]!.deposit_intent_id;
+    const depositEligibilitySnapshot = await client.query<{
+      readonly player_deposit_eligibility_decision_id: string;
+    }>(
+      `select player_deposit_eligibility_decision_id
+         from app.deposit_intents
+        where id = $1::uuid`,
+      [depositIntentId],
+    );
+    expect(depositEligibilitySnapshot.rows).toEqual([
+      { player_deposit_eligibility_decision_id: eligibilityDecisionId },
+    ]);
 
     const openedReplay = await queryAsRole<{
       readonly deposit_intent_id: string;
@@ -6098,5 +6226,1274 @@ describe('disposable SQL migration baseline', () => {
     } finally {
       await client.query('rollback');
     }
+  });
+
+  it('installs a private ungranted Player-ID deposit-eligibility boundary', async () => {
+    const relationBoundary = await client.query<{
+      readonly policies: number;
+      readonly relforcerowsecurity: boolean;
+      readonly relrowsecurity: boolean;
+      readonly snapshot_nullable: boolean;
+    }>(`
+      select relation.relrowsecurity,
+             relation.relforcerowsecurity,
+             count(policy.oid)::integer as policies,
+             not snapshot_attribute.attnotnull as snapshot_nullable
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      join pg_attribute snapshot_attribute
+        on snapshot_attribute.attrelid = 'app.deposit_intents'::regclass
+       and snapshot_attribute.attname = 'player_deposit_eligibility_decision_id'
+       and not snapshot_attribute.attisdropped
+      left join pg_policy policy on policy.polrelid = relation.oid
+      where relation.oid = 'app.player_deposit_eligibility_decisions'::regclass
+        and namespace.nspname = 'app'
+      group by relation.oid, snapshot_attribute.attnotnull
+    `);
+    expect(relationBoundary.rows).toEqual([
+      {
+        policies: 0,
+        relforcerowsecurity: true,
+        relrowsecurity: true,
+        snapshot_nullable: true,
+      },
+    ]);
+
+    const constraints = await client.query<{
+      readonly constraint_definition: string;
+      readonly constraint_name: string;
+    }>(`
+      select catalog_constraint.conname as constraint_name,
+             pg_get_constraintdef(catalog_constraint.oid) as constraint_definition
+      from pg_constraint catalog_constraint
+      where catalog_constraint.conrelid in (
+        'app.player_deposit_eligibility_decisions'::regclass,
+        'app.deposit_intents'::regclass
+      )
+        and catalog_constraint.conname in (
+          'player_deposit_eligibility_decisions_player_version_key',
+          'player_deposit_eligibility_decisions_id_player_key',
+          'player_deposit_eligibility_decisions_reason_check',
+          'player_deposit_eligibility_decisions_actor_check',
+          'player_deposit_eligibility_decisions_time_shape_check',
+          'deposit_intents_player_eligibility_decision_fkey'
+        )
+      order by constraint_name
+    `);
+    expect(constraints.rows).toHaveLength(6);
+    expect(constraints.rows).toContainEqual({
+      constraint_definition:
+        'FOREIGN KEY (player_deposit_eligibility_decision_id, player_account_id) REFERENCES app.player_deposit_eligibility_decisions(id, player_account_id) ON DELETE RESTRICT',
+      constraint_name: 'deposit_intents_player_eligibility_decision_fkey',
+    });
+    expect(constraints.rows).toContainEqual({
+      constraint_definition: 'UNIQUE (player_account_id, decision_version)',
+      constraint_name: 'player_deposit_eligibility_decisions_player_version_key',
+    });
+    expect(constraints.rows).toContainEqual({
+      constraint_definition: 'UNIQUE (id, player_account_id)',
+      constraint_name: 'player_deposit_eligibility_decisions_id_player_key',
+    });
+    const constraintDefinitions = constraints.rows
+      .map((row) => `${row.constraint_name}:${row.constraint_definition}`)
+      .join('\n');
+    expect(constraintDefinitions).toContain("decision = 'eligible'::text");
+    expect(constraintDefinitions).toContain("financial_eligibility_approved'::text");
+    expect(constraintDefinitions).toContain("decision = 'revoked'::text");
+    expect(constraintDefinitions).toContain("financial_eligibility_revoked'::text");
+    expect(constraintDefinitions).toContain("actor_kind = 'admin'::app.actor_kind");
+    expect(constraintDefinitions).toContain('decided_at = created_at');
+
+    const indexes = await client.query<{ readonly indexname: string }>(`
+      select indexname
+      from pg_indexes
+      where schemaname = 'app'
+        and tablename = 'player_deposit_eligibility_decisions'
+      order by indexname
+    `);
+    expect(indexes.rows.map((row) => row.indexname)).toEqual([
+      'player_deposit_eligibility_decisions_actor_created_idx',
+      'player_deposit_eligibility_decisions_id_player_key',
+      'player_deposit_eligibility_decisions_pkey',
+      'player_deposit_eligibility_decisions_player_version_key',
+    ]);
+
+    const decisionTriggers = await client.query<{
+      readonly trigger_definition: string;
+      readonly trigger_name: string;
+    }>(`
+      select trigger.tgname as trigger_name,
+             pg_get_triggerdef(trigger.oid) as trigger_definition
+      from pg_trigger trigger
+      where trigger.tgrelid = 'app.player_deposit_eligibility_decisions'::regclass
+        and not trigger.tgisinternal
+      order by trigger_name
+    `);
+    expect(decisionTriggers.rows.map((row) => row.trigger_name)).toEqual([
+      'player_deposit_eligibility_decisions_enforce_insert',
+      'player_deposit_eligibility_decisions_immutable',
+      'player_deposit_eligibility_decisions_no_truncate',
+    ]);
+    expect(decisionTriggers.rows[0]!.trigger_definition).toContain('BEFORE INSERT');
+    expect(decisionTriggers.rows[1]!.trigger_definition).toContain('BEFORE UPDATE OR DELETE');
+    expect(decisionTriggers.rows[2]!.trigger_definition).toContain('BEFORE TRUNCATE');
+
+    const depositInsertTriggers = await client.query<{ readonly trigger_name: string }>(`
+      select trigger.tgname as trigger_name
+      from pg_trigger trigger
+      where trigger.tgrelid = 'app.deposit_intents'::regclass
+        and not trigger.tgisinternal
+        and (trigger.tgtype & 2) = 2
+        and (trigger.tgtype & 4) = 4
+      order by trigger_name
+    `);
+    expect(depositInsertTriggers.rows.map((row) => row.trigger_name)).toEqual([
+      'deposit_intents_enforce_player_deposit_eligibility',
+      'deposit_intents_populate_snapshot',
+    ]);
+
+    const functionBoundary = await client.query<{
+      readonly function_name: string;
+      readonly hardened: boolean;
+      readonly public_execute: boolean;
+      readonly runtime_execute: boolean;
+    }>(`
+      select procedure.proname as function_name,
+             procedure.prosecdef
+               and procedure.proowner = 'postgres'::regrole
+               and procedure.proconfig =
+                 array['search_path=pg_catalog, app, pg_temp']::text[] as hardened,
+             exists (
+               select 1
+               from aclexplode(
+                 coalesce(procedure.proacl, acldefault('f', procedure.proowner))
+               ) privilege
+               where privilege.grantee = 0
+                 and privilege.privilege_type = 'EXECUTE'
+             ) as public_execute,
+             exists (
+               select 1
+               from pg_roles database_role
+               where database_role.rolname like 'fetanagent\\_%' escape '\\'
+                 and has_function_privilege(
+                   database_role.rolname, procedure.oid, 'EXECUTE'
+                 )
+             ) as runtime_execute
+      from pg_proc procedure
+      where procedure.oid in (
+        'app.enforce_player_deposit_eligibility_decision_insert()'::regprocedure,
+        'app.reject_player_deposit_eligibility_decision_mutation()'::regprocedure,
+        'app.require_player_deposit_eligibility_for_intent()'::regprocedure,
+        'app.enforce_deposit_intent_eligibility_snapshot_immutable()'::regprocedure
+      )
+      order by function_name
+    `);
+    expect(functionBoundary.rows).toEqual([
+      {
+        function_name: 'enforce_deposit_intent_eligibility_snapshot_immutable',
+        hardened: true,
+        public_execute: false,
+        runtime_execute: false,
+      },
+      {
+        function_name: 'enforce_player_deposit_eligibility_decision_insert',
+        hardened: true,
+        public_execute: false,
+        runtime_execute: false,
+      },
+      {
+        function_name: 'reject_player_deposit_eligibility_decision_mutation',
+        hardened: true,
+        public_execute: false,
+        runtime_execute: false,
+      },
+      {
+        function_name: 'require_player_deposit_eligibility_for_intent',
+        hardened: true,
+        public_execute: false,
+        runtime_execute: false,
+      },
+    ]);
+
+    const runtimeTableAccess = await client.query<{ readonly role_name: string }>(`
+      select database_role.rolname as role_name
+      from pg_roles database_role
+      where (
+          database_role.rolname in ('anon', 'authenticated', 'service_role')
+          or database_role.rolname like 'fetanagent\\_%' escape '\\'
+        )
+        and (
+          has_table_privilege(
+            database_role.rolname,
+            'app.player_deposit_eligibility_decisions',
+            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+          )
+          or has_any_column_privilege(
+            database_role.rolname,
+            'app.player_deposit_eligibility_decisions',
+            'SELECT,INSERT,UPDATE,REFERENCES'
+          )
+        )
+      order by role_name
+    `);
+    expect(runtimeTableAccess.rows).toEqual([]);
+
+    const guardDefinition = await client.query<{ readonly definition: string }>(`
+      select lower(pg_get_functiondef(
+        'app.require_player_deposit_eligibility_for_intent()'::regprocedure
+      )) as definition
+    `);
+    const guardSource = guardDefinition.rows[0]!.definition;
+    expect(guardSource).toContain('for update');
+    expect(guardSource).toContain('count(*)::integer');
+    expect(guardSource).toContain('max(decision.decision_version)');
+    expect(guardSource).toContain('maximum_decision_version <> decision_count');
+    expect(guardSource).toContain('latest_decision.decision_version <> maximum_decision_version');
+    expect(guardSource).toContain('latest_decision.decided_at > clock_timestamp()');
+    expect(guardSource).toContain("locked_player.validation_status <> 'valid'");
+    expect(guardSource).toContain("player_platform.status <> 'active'");
+    expect(guardSource).toContain('latest_decision.player_account_updated_at_snapshot');
+    expect(guardSource).toContain('is distinct from locked_player.updated_at');
+    expect(guardSource).toContain(
+      'new.player_deposit_eligibility_decision_id := latest_decision.id',
+    );
+    const insertGuardDefinition = await client.query<{ readonly definition: string }>(`
+      select lower(pg_get_functiondef(
+        'app.enforce_player_deposit_eligibility_decision_insert()'::regprocedure
+      )) as definition
+    `);
+    const insertGuardSource = insertGuardDefinition.rows[0]!.definition;
+    expect(insertGuardSource).toContain('existing_decision_count <> existing_maximum_version');
+    expect(insertGuardSource).toContain('decision_time < previous_decided_at');
+    expect(insertGuardSource).toContain("locked_player.validation_status <> 'valid'");
+    expect(insertGuardSource).toContain("player_platform.status <> 'active'");
+    expect(insertGuardSource).toContain(
+      'new.player_account_updated_at_snapshot := locked_player.updated_at',
+    );
+    expect(insertGuardSource).toContain('new.decided_at := decision_time');
+    expect(insertGuardSource).toContain('new.created_at := decision_time');
+
+    const nonTriggerEntryPoints = await client.query<{ readonly entry_points: number }>(`
+      select count(*)::integer as entry_points
+      from pg_proc procedure
+      join pg_namespace namespace on namespace.oid = procedure.pronamespace
+      where namespace.nspname = 'app'
+        and procedure.prorettype <> 'trigger'::regtype
+        and lower(pg_get_functiondef(procedure.oid))
+          like '%player_deposit_eligibility_decisions%'
+    `);
+    expect(nonTriggerEntryPoints.rows).toEqual([{ entry_points: 0 }]);
+
+    const webOriginEligibility = await client.query<{ readonly decisions: number }>(`
+      select count(*)::integer as decisions
+      from app.player_deposit_eligibility_decisions decision
+      join app.player_registration_request_associations association
+        on association.player_account_id = decision.player_account_id
+      join app.customer_web_player_registration_request_origins request_origin
+        on request_origin.player_registration_request_id =
+           association.player_registration_request_id
+    `);
+    expect(webOriginEligibility.rows).toEqual([{ decisions: 0 }]);
+
+    const financialSwitches = await client.query<{
+      readonly all_disabled: boolean;
+      readonly non_disabled: number;
+    }>(`
+      select count(*) = 4 and bool_and(mode = 'disabled') as all_disabled,
+             count(*) filter (where mode <> 'disabled')::integer as non_disabled
+      from app.feature_switches
+      where feature_key in (
+        'payment_verification', 'deposit_execution',
+        'withdrawal_validation', 'withdrawal_collection'
+      )
+    `);
+    expect(financialSwitches.rows).toEqual([{ all_disabled: true, non_disabled: 0 }]);
+
+    const migrationSource = await readFile(
+      join(
+        environment.migrationsDirectory,
+        '20260815143416_separate_player_deposit_eligibility.sql',
+      ),
+      'utf8',
+    );
+    expect(migrationSource).not.toMatch(
+      /insert\s+into\s+app\.player_deposit_eligibility_decisions/iu,
+    );
+    expect(migrationSource).not.toMatch(
+      /(?:insert\s+into|update|delete\s+from)\s+app\.feature_switches/iu,
+    );
+  });
+
+  it('requires exact append-only decisions and snapshots only current eligibility', async () => {
+    const primaryPlayer = await createValidatedPlayerFixture('ELIGIBILITY-DIRECT-PRIMARY');
+    const alternatePlayer = await createValidatedPlayerFixture('ELIGIBILITY-DIRECT-ALTERNATE');
+    const paymentBoundary = await client.query<{
+      readonly payment_provider_id: string;
+      readonly receiver_account_id: string;
+    }>(`
+      select payment_provider.id as payment_provider_id,
+             receiver_account.id as receiver_account_id
+      from app.payment_providers payment_provider
+      join app.receiver_accounts receiver_account
+        on receiver_account.provider_id = payment_provider.id
+       and receiver_account.status = 'active'
+      where payment_provider.code = 'cbe_birr'
+        and payment_provider.status = 'active'
+    `);
+    expect(paymentBoundary.rows).toHaveLength(1);
+    const { payment_provider_id: paymentProviderId, receiver_account_id: receiverAccountId } =
+      paymentBoundary.rows[0]!;
+
+    const unverifiedCustomer = await client.query<{ readonly id: string }>(
+      `insert into app.customers default values returning id`,
+    );
+    const unverifiedPlayer = await client.query<{ readonly id: string }>(
+      `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+       values ($1::uuid, $2::uuid, 'ELIGIBILITY-UNVERIFIED-PRESEED')
+       returning id`,
+      [unverifiedCustomer.rows[0]!.id, primaryPlayer.platformId],
+    );
+    const unverifiedPlayerId = unverifiedPlayer.rows[0]!.id;
+    await expect(
+      client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+         )`,
+        [unverifiedPlayerId],
+      ),
+    ).rejects.toThrow(/requires an active, validated player account and platform/u);
+    const unverifiedRevocation = await client.query<{ readonly decision: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 1, 'revoked', 'financial_eligibility_revoked', 'system'
+       )
+       returning decision`,
+      [unverifiedPlayerId],
+    );
+    expect(unverifiedRevocation.rows).toEqual([{ decision: 'revoked' }]);
+
+    await client.query(
+      `insert into app.player_validation_attempts (
+         player_account_id, attempt_number, outcome, reason_code, adapter_version,
+         started_at, completed_at, result_digest
+       ) values (
+         $1::uuid, 1, 'valid', 'sql_eligibility_fixture',
+         'sql_eligibility_fixture_v1', clock_timestamp() - interval '1 second',
+         clock_timestamp(), 'sql-eligibility-invalid-to-valid'
+       )`,
+      [unverifiedPlayerId],
+    );
+    await client.query(
+      `update app.customer_platform_players
+          set validation_status = 'valid'
+        where id = $1::uuid`,
+      [unverifiedPlayerId],
+    );
+    await expect(
+      client.query(
+        `insert into app.deposit_intents (
+           customer_id, platform_id, player_account_id, payment_provider_id,
+           receiver_account_id, expected_amount_minor
+         ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+        [
+          unverifiedCustomer.rows[0]!.id,
+          primaryPlayer.platformId,
+          unverifiedPlayerId,
+          paymentProviderId,
+          receiverAccountId,
+        ],
+      ),
+    ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
+    const revalidatedEligibility = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system'
+       )
+       returning id`,
+      [unverifiedPlayerId],
+    );
+    const revalidatedIntent = await client.query<{
+      readonly player_deposit_eligibility_decision_id: string;
+    }>(
+      `insert into app.deposit_intents (
+         customer_id, platform_id, player_account_id, payment_provider_id,
+         receiver_account_id, expected_amount_minor
+       ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
+       returning player_deposit_eligibility_decision_id`,
+      [
+        unverifiedCustomer.rows[0]!.id,
+        primaryPlayer.platformId,
+        unverifiedPlayerId,
+        paymentProviderId,
+        receiverAccountId,
+      ],
+    );
+    expect(revalidatedIntent.rows).toEqual([
+      { player_deposit_eligibility_decision_id: revalidatedEligibility.rows[0]!.id },
+    ]);
+
+    const inactivePlayer = await createValidatedPlayerFixture('ELIGIBILITY-INACTIVE-PRESEED');
+    const beforeInactiveEligibility = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+       )
+       returning id`,
+      [inactivePlayer.playerAccountId],
+    );
+    await client.query(
+      `update app.customer_platform_players set status = 'inactive' where id = $1::uuid`,
+      [inactivePlayer.playerAccountId],
+    );
+    await expect(
+      client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system'
+         )`,
+        [inactivePlayer.playerAccountId],
+      ),
+    ).rejects.toThrow(/requires an active, validated player account and platform/u);
+    await client.query(
+      `update app.customer_platform_players set status = 'active' where id = $1::uuid`,
+      [inactivePlayer.playerAccountId],
+    );
+    await expect(
+      client.query(
+        `insert into app.deposit_intents (
+           customer_id, platform_id, player_account_id, payment_provider_id,
+           receiver_account_id, expected_amount_minor
+         ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+        [
+          inactivePlayer.customerId,
+          inactivePlayer.platformId,
+          inactivePlayer.playerAccountId,
+          paymentProviderId,
+          receiverAccountId,
+        ],
+      ),
+    ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
+    const afterReactivationEligibility = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system'
+       )
+       returning id`,
+      [inactivePlayer.playerAccountId],
+    );
+    expect(afterReactivationEligibility.rows[0]!.id).not.toBe(
+      beforeInactiveEligibility.rows[0]!.id,
+    );
+    const reactivatedIntent = await client.query<{
+      readonly player_deposit_eligibility_decision_id: string;
+    }>(
+      `insert into app.deposit_intents (
+         customer_id, platform_id, player_account_id, payment_provider_id,
+         receiver_account_id, expected_amount_minor
+       ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
+       returning player_deposit_eligibility_decision_id`,
+      [
+        inactivePlayer.customerId,
+        inactivePlayer.platformId,
+        inactivePlayer.playerAccountId,
+        paymentProviderId,
+        receiverAccountId,
+      ],
+    );
+    expect(reactivatedIntent.rows).toEqual([
+      { player_deposit_eligibility_decision_id: afterReactivationEligibility.rows[0]!.id },
+    ]);
+
+    const inactivePlatformPlayer = await createValidatedPlayerFixture(
+      'ELIGIBILITY-INACTIVE-PLATFORM-PRESEED',
+    );
+    await client.query('begin');
+    try {
+      await client.query(`update app.platforms set status = 'inactive' where id = $1::uuid`, [
+        inactivePlatformPlayer.platformId,
+      ]);
+      await expect(
+        client.query(
+          `insert into app.player_deposit_eligibility_decisions (
+             player_account_id, decision_version, decision, reason_code, actor_kind
+           ) values (
+             $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+           )`,
+          [inactivePlatformPlayer.playerAccountId],
+        ),
+      ).rejects.toThrow(/requires an active, validated player account and platform/u);
+    } finally {
+      await client.query('rollback');
+    }
+
+    const beforeInvalidDecisions = await client.query<{ readonly decisions: number }>(
+      `select count(*)::integer as decisions
+         from app.player_deposit_eligibility_decisions
+        where player_account_id = $1::uuid`,
+      [primaryPlayer.playerAccountId],
+    );
+    await expect(
+      client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system'
+         )`,
+        [primaryPlayer.playerAccountId],
+      ),
+    ).rejects.toThrow(/exact sequential versions; expected 1/u);
+    await expect(
+      client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 1, 'eligible', 'financial_eligibility_revoked', 'system'
+         )`,
+        [primaryPlayer.playerAccountId],
+      ),
+    ).rejects.toThrow(/player_deposit_eligibility_decisions_reason_check/u);
+    await expect(
+      client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code,
+           actor_kind, actor_admin_id
+         ) values (
+           $1::uuid, 1, 'eligible', 'financial_eligibility_approved',
+           'system', $2::uuid
+         )`,
+        [primaryPlayer.playerAccountId, ownerAdminId],
+      ),
+    ).rejects.toThrow(/player_deposit_eligibility_decisions_actor_check/u);
+    const afterInvalidDecisions = await client.query<{ readonly decisions: number }>(
+      `select count(*)::integer as decisions
+         from app.player_deposit_eligibility_decisions
+        where player_account_id = $1::uuid`,
+      [primaryPlayer.playerAccountId],
+    );
+    expect(afterInvalidDecisions.rows).toEqual(beforeInvalidDecisions.rows);
+
+    const primaryEligibility = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code,
+         actor_kind, actor_admin_id
+       ) values (
+         $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'admin', $2::uuid
+       )
+       returning id`,
+      [primaryPlayer.playerAccountId, ownerAdminId],
+    );
+    const primaryEligibilityId = primaryEligibility.rows[0]!.id;
+    const alternateEligibility = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+       )
+       returning id`,
+      [alternatePlayer.playerAccountId],
+    );
+    const alternateEligibilityId = alternateEligibility.rows[0]!.id;
+
+    await expect(
+      client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 1, 'revoked', 'financial_eligibility_revoked', 'system'
+         )`,
+        [primaryPlayer.playerAccountId],
+      ),
+    ).rejects.toThrow(/exact sequential versions; expected 2/u);
+
+    const directIntent = await client.query<{
+      readonly id: string;
+      readonly player_deposit_eligibility_decision_id: string;
+    }>(
+      `insert into app.deposit_intents (
+         customer_id, platform_id, player_account_id, payment_provider_id,
+         receiver_account_id, expected_amount_minor,
+         player_deposit_eligibility_decision_id
+       ) values (
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid,
+         $5::uuid, 2500, $6::uuid
+       )
+       returning id, player_deposit_eligibility_decision_id`,
+      [
+        primaryPlayer.customerId,
+        primaryPlayer.platformId,
+        primaryPlayer.playerAccountId,
+        paymentProviderId,
+        receiverAccountId,
+        alternateEligibilityId,
+      ],
+    );
+    expect(directIntent.rows).toEqual([
+      {
+        id: expect.any(String),
+        player_deposit_eligibility_decision_id: primaryEligibilityId,
+      },
+    ]);
+    const directIntentId = directIntent.rows[0]!.id;
+
+    // Simulate a row created before this migration: the new snapshot column is NULL, while every
+    // other immutable financial field was populated by the historical insert path. Once normal
+    // trigger execution is restored, an ordinary lifecycle update must remain available.
+    await client.query('begin');
+    try {
+      await client.query(`set local session_replication_role = 'replica'`);
+      await client.query(
+        `update app.deposit_intents
+            set player_deposit_eligibility_decision_id = null
+          where id = $1::uuid`,
+        [directIntentId],
+      );
+      await client.query(`set local session_replication_role = 'origin'`);
+      const legacyUpdate = await client.query<{
+        readonly player_deposit_eligibility_decision_id: string | null;
+        readonly status: string;
+      }>(
+        `update app.deposit_intents
+            set status = 'cancelled'
+          where id = $1::uuid
+          returning status::text, player_deposit_eligibility_decision_id`,
+        [directIntentId],
+      );
+      expect(legacyUpdate.rows).toEqual([
+        { player_deposit_eligibility_decision_id: null, status: 'cancelled' },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
+
+    const cancelledIntent = await client.query<{
+      readonly player_deposit_eligibility_decision_id: string;
+      readonly status: string;
+    }>(
+      `update app.deposit_intents
+          set status = 'cancelled'
+        where id = $1::uuid
+        returning status::text, player_deposit_eligibility_decision_id`,
+      [directIntentId],
+    );
+    expect(cancelledIntent.rows).toEqual([
+      {
+        player_deposit_eligibility_decision_id: primaryEligibilityId,
+        status: 'cancelled',
+      },
+    ]);
+    await expect(
+      client.query(
+        `update app.deposit_intents
+            set player_deposit_eligibility_decision_id = $2::uuid
+          where id = $1::uuid`,
+        [directIntentId, alternateEligibilityId],
+      ),
+    ).rejects.toThrow(/eligibility snapshot is immutable/u);
+
+    await expect(
+      client.query(
+        `update app.player_deposit_eligibility_decisions
+            set reason_code = 'financial_eligibility_revoked'
+          where id = $1::uuid`,
+        [primaryEligibilityId],
+      ),
+    ).rejects.toThrow(/append-only/u);
+    await expect(
+      client.query(`delete from app.player_deposit_eligibility_decisions where id = $1::uuid`, [
+        primaryEligibilityId,
+      ]),
+    ).rejects.toThrow(/append-only/u);
+    await expect(client.query('truncate app.player_deposit_eligibility_decisions')).rejects.toThrow(
+      /append-only/u,
+    );
+
+    const revocation = await client.query<{
+      readonly decision_version: number;
+      readonly id: string;
+    }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 2, 'revoked', 'financial_eligibility_revoked', 'system'
+       )
+       returning id, decision_version`,
+      [primaryPlayer.playerAccountId],
+    );
+    expect(revocation.rows).toEqual([{ decision_version: 2, id: expect.any(String) }]);
+
+    const latestState = await client.query<{
+      readonly decision: string;
+      readonly decision_version: number;
+      readonly validation_status: string;
+    }>(
+      `select latest.decision,
+              latest.decision_version,
+              player.validation_status::text as validation_status
+         from app.customer_platform_players player
+         join lateral (
+           select decision, decision_version
+             from app.player_deposit_eligibility_decisions decision
+            where decision.player_account_id = player.id
+            order by decision_version desc
+            limit 1
+         ) latest on true
+        where player.id = $1::uuid`,
+      [primaryPlayer.playerAccountId],
+    );
+    expect(latestState.rows).toEqual([
+      { decision: 'revoked', decision_version: 2, validation_status: 'valid' },
+    ]);
+
+    const beforeRevokedIntent = await client.query<{ readonly intents: number }>(
+      `select count(*)::integer as intents
+         from app.deposit_intents
+        where player_account_id = $1::uuid`,
+      [primaryPlayer.playerAccountId],
+    );
+    await expect(
+      client.query(
+        `insert into app.deposit_intents (
+           customer_id, platform_id, player_account_id, payment_provider_id,
+           receiver_account_id, expected_amount_minor
+         ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+        [
+          primaryPlayer.customerId,
+          primaryPlayer.platformId,
+          primaryPlayer.playerAccountId,
+          paymentProviderId,
+          receiverAccountId,
+        ],
+      ),
+    ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
+    const afterRevokedIntent = await client.query<{ readonly intents: number }>(
+      `select count(*)::integer as intents
+         from app.deposit_intents
+        where player_account_id = $1::uuid`,
+      [primaryPlayer.playerAccountId],
+    );
+    expect(afterRevokedIntent.rows).toEqual(beforeRevokedIntent.rows);
+  });
+
+  it('rejects malformed or future eligibility history without deposit side effects', async () => {
+    const paymentBoundary = await client.query<{
+      readonly payment_provider_id: string;
+      readonly receiver_account_id: string;
+    }>(`
+      select payment_provider.id as payment_provider_id,
+             receiver_account.id as receiver_account_id
+      from app.payment_providers payment_provider
+      join app.receiver_accounts receiver_account
+        on receiver_account.provider_id = payment_provider.id
+       and receiver_account.status = 'active'
+      where payment_provider.code = 'cbe_birr'
+        and payment_provider.status = 'active'
+    `);
+    expect(paymentBoundary.rows).toHaveLength(1);
+    const { payment_provider_id: paymentProviderId, receiver_account_id: receiverAccountId } =
+      paymentBoundary.rows[0]!;
+
+    const malformedPlayer = await createValidatedPlayerFixture('ELIGIBILITY-MALFORMED-HISTORY');
+    const beforeMalformed = await client.query<{
+      readonly decisions: number;
+      readonly intents: number;
+    }>(
+      `select
+         (select count(*)::integer from app.player_deposit_eligibility_decisions
+           where player_account_id = $1::uuid) as decisions,
+         (select count(*)::integer from app.deposit_intents
+           where player_account_id = $1::uuid) as intents`,
+      [malformedPlayer.playerAccountId],
+    );
+    await client.query('begin');
+    try {
+      await client.query(`set local session_replication_role = 'replica'`);
+      await client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind,
+           player_account_updated_at_snapshot
+         )
+         select $1::uuid, 2, 'eligible', 'financial_eligibility_approved', 'system',
+                player.updated_at
+           from app.customer_platform_players player
+           join app.platforms platform on platform.id = player.platform_id
+          where player.id = $1::uuid`,
+        [malformedPlayer.playerAccountId],
+      );
+      await client.query(`set local session_replication_role = 'origin'`);
+      await expect(
+        client.query(
+          `insert into app.deposit_intents (
+             customer_id, platform_id, player_account_id, payment_provider_id,
+             receiver_account_id, expected_amount_minor
+           ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+          [
+            malformedPlayer.customerId,
+            malformedPlayer.platformId,
+            malformedPlayer.playerAccountId,
+            paymentProviderId,
+            receiverAccountId,
+          ],
+        ),
+      ).rejects.toThrow(/decision history is invalid/u);
+    } finally {
+      await client.query('rollback');
+    }
+    const afterMalformed = await client.query<{
+      readonly decisions: number;
+      readonly intents: number;
+    }>(
+      `select
+         (select count(*)::integer from app.player_deposit_eligibility_decisions
+           where player_account_id = $1::uuid) as decisions,
+         (select count(*)::integer from app.deposit_intents
+           where player_account_id = $1::uuid) as intents`,
+      [malformedPlayer.playerAccountId],
+    );
+    expect(afterMalformed.rows).toEqual(beforeMalformed.rows);
+
+    const futurePlayer = await createValidatedPlayerFixture('ELIGIBILITY-FUTURE-HISTORY');
+    const beforeFuture = await client.query<{
+      readonly decisions: number;
+      readonly intents: number;
+    }>(
+      `select
+         (select count(*)::integer from app.player_deposit_eligibility_decisions
+           where player_account_id = $1::uuid) as decisions,
+         (select count(*)::integer from app.deposit_intents
+           where player_account_id = $1::uuid) as intents`,
+      [futurePlayer.playerAccountId],
+    );
+    await client.query('begin');
+    try {
+      await client.query(`set local session_replication_role = 'replica'`);
+      await client.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind,
+           player_account_updated_at_snapshot, decided_at, created_at
+         )
+         select $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system',
+                player.updated_at,
+                statement_timestamp() + interval '1 hour',
+                statement_timestamp() + interval '1 hour'
+           from app.customer_platform_players player
+           join app.platforms platform on platform.id = player.platform_id
+          where player.id = $1::uuid`,
+        [futurePlayer.playerAccountId],
+      );
+      await client.query(`set local session_replication_role = 'origin'`);
+      await expect(
+        client.query(
+          `insert into app.deposit_intents (
+             customer_id, platform_id, player_account_id, payment_provider_id,
+             receiver_account_id, expected_amount_minor
+           ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+          [
+            futurePlayer.customerId,
+            futurePlayer.platformId,
+            futurePlayer.playerAccountId,
+            paymentProviderId,
+            receiverAccountId,
+          ],
+        ),
+      ).rejects.toThrow(/decision history is invalid/u);
+    } finally {
+      await client.query('rollback');
+    }
+    const afterFuture = await client.query<{
+      readonly decisions: number;
+      readonly intents: number;
+    }>(
+      `select
+         (select count(*)::integer from app.player_deposit_eligibility_decisions
+           where player_account_id = $1::uuid) as decisions,
+         (select count(*)::integer from app.deposit_intents
+           where player_account_id = $1::uuid) as intents`,
+      [futurePlayer.playerAccountId],
+    );
+    expect(afterFuture.rows).toEqual(beforeFuture.rows);
+  });
+
+  it('gates the live Telegram procedure at the canonical eligibility trigger', async () => {
+    const livePlayer = await createValidatedPlayerFixture('ELIGIBILITY-LIVE-GATE');
+    const paymentProvider = await client.query<{ readonly id: string }>(`
+      select id from app.payment_providers where code = 'cbe_birr' and status = 'active'
+    `);
+    expect(paymentProvider.rows).toHaveLength(1);
+    const paymentProviderId = paymentProvider.rows[0]!.id;
+    const telegramIdentity = await client.query<{ readonly id: string }>(
+      `with customer_identity as (
+         insert into app.customer_identities (
+           customer_id, identity_kind, external_subject
+         ) values ($1::uuid, 'telegram', '9800000001')
+         returning id
+       )
+       insert into app.telegram_identities (
+         customer_identity_id, telegram_user_id, private_chat_id, preferred_locale
+       )
+       select id, 9800000001, 9800000001, 'en'
+       from customer_identity
+       returning customer_identity_id as id`,
+      [livePlayer.customerId],
+    );
+    const liveInbound = await client.query<{ readonly id: string }>(
+      `insert into app.inbound_events (
+         channel, external_event_id, customer_identity_id, payload_digest
+       ) values ('telegram', 'eligibility-live-gate:1', $1::uuid, $2::text)
+       returning id`,
+      [telegramIdentity.rows[0]!.id, payloadHmac('9')],
+    );
+    const liveInboundId = liveInbound.rows[0]!.id;
+    const beforeLiveAttempt = await client.query<{
+      readonly audits: number;
+      readonly intents: number;
+    }>(
+      `select
+         (select count(*)::integer from app.deposit_intents
+           where origin_inbound_event_id = $1::uuid) as intents,
+         (select count(*)::integer from app.audit_events
+           where action = 'deposit.intent_opened'
+             and resource_id in (
+               select id from app.deposit_intents
+               where origin_inbound_event_id = $1::uuid
+             )) as audits`,
+      [liveInboundId],
+    );
+
+    await client.query('begin');
+    try {
+      await client.query(
+        `update app.feature_switches
+            set mode = 'live'
+          where feature_key = 'payment_verification'`,
+      );
+      await client.query('set local role fetanagent_api');
+      await expect(
+        client.query(
+          `select * from app.open_telegram_deposit_intent(
+             $1::uuid, $2::uuid, $3::uuid, 2500
+           )`,
+          [liveInboundId, livePlayer.playerAccountId, paymentProviderId],
+        ),
+      ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
+    } finally {
+      await client.query('rollback');
+    }
+
+    const afterLiveAttempt = await client.query<{
+      readonly audits: number;
+      readonly intents: number;
+      readonly payment_verification_mode: string;
+    }>(
+      `select
+         (select count(*)::integer from app.deposit_intents
+           where origin_inbound_event_id = $1::uuid) as intents,
+         (select count(*)::integer from app.audit_events
+           where action = 'deposit.intent_opened'
+             and resource_id in (
+               select id from app.deposit_intents
+               where origin_inbound_event_id = $1::uuid
+             )) as audits,
+         (select mode::text from app.feature_switches
+           where feature_key = 'payment_verification') as payment_verification_mode`,
+      [liveInboundId],
+    );
+    expect(afterLiveAttempt.rows).toEqual([
+      { ...beforeLiveAttempt.rows[0]!, payment_verification_mode: 'disabled' },
+    ]);
+  });
+
+  it('serializes a new intent against a concurrent eligibility revocation', async () => {
+    const racePlayer = await createValidatedPlayerFixture('ELIGIBILITY-REVOCATION-RACE');
+    const initialEligibility = await client.query<{ readonly id: string }>(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+       )
+       returning id`,
+      [racePlayer.playerAccountId],
+    );
+    const initialEligibilityId = initialEligibility.rows[0]!.id;
+    const paymentBoundary = await client.query<{
+      readonly payment_provider_id: string;
+      readonly receiver_account_id: string;
+    }>(`
+      select payment_provider.id as payment_provider_id,
+             receiver_account.id as receiver_account_id
+      from app.payment_providers payment_provider
+      join app.receiver_accounts receiver_account
+        on receiver_account.provider_id = payment_provider.id
+       and receiver_account.status = 'active'
+      where payment_provider.code = 'cbe_birr'
+        and payment_provider.status = 'active'
+    `);
+    expect(paymentBoundary.rows).toHaveLength(1);
+    const { payment_provider_id: paymentProviderId, receiver_account_id: receiverAccountId } =
+      paymentBoundary.rows[0]!;
+
+    const intentConnection = createSqlIntegrationClient(environment);
+    const revocationConnection = createSqlIntegrationClient(environment);
+    let revocationAttempt: Promise<unknown> | undefined;
+    let intentCommitted = false;
+    let revocationCommitted = false;
+    let concurrentIntentId: string | undefined;
+    await Promise.all([intentConnection.connect(), revocationConnection.connect()]);
+    try {
+      await Promise.all([intentConnection.query('begin'), revocationConnection.query('begin')]);
+      await intentConnection.query(`set local lock_timeout = '5s'`);
+      await revocationConnection.query(`set local lock_timeout = '5s'`);
+      await revocationConnection.query(
+        `set local application_name = 'eligibility_revocation_race'`,
+      );
+
+      const concurrentIntent = await intentConnection.query<{
+        readonly id: string;
+        readonly player_deposit_eligibility_decision_id: string;
+      }>(
+        `insert into app.deposit_intents (
+           customer_id, platform_id, player_account_id, payment_provider_id,
+           receiver_account_id, expected_amount_minor
+         ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
+         returning id, player_deposit_eligibility_decision_id`,
+        [
+          racePlayer.customerId,
+          racePlayer.platformId,
+          racePlayer.playerAccountId,
+          paymentProviderId,
+          receiverAccountId,
+        ],
+      );
+      expect(concurrentIntent.rows).toEqual([
+        {
+          id: expect.any(String),
+          player_deposit_eligibility_decision_id: initialEligibilityId,
+        },
+      ]);
+      concurrentIntentId = concurrentIntent.rows[0]!.id;
+
+      revocationAttempt = revocationConnection.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 2, 'revoked', 'financial_eligibility_revoked', 'worker'
+         )`,
+        [racePlayer.playerAccountId],
+      );
+
+      let observedLockWait = false;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const lockState = await client.query<{ readonly waiting: boolean }>(`
+          select exists (
+            select 1
+            from pg_stat_activity activity
+            where activity.application_name = 'eligibility_revocation_race'
+              and activity.wait_event_type = 'Lock'
+          ) as waiting
+        `);
+        if (lockState.rows[0]!.waiting) {
+          observedLockWait = true;
+          break;
+        }
+        await client.query('select pg_sleep(0.025)');
+      }
+      expect(observedLockWait).toBe(true);
+
+      await intentConnection.query('commit');
+      intentCommitted = true;
+      await revocationAttempt;
+      revocationAttempt = undefined;
+      await revocationConnection.query('commit');
+      revocationCommitted = true;
+    } finally {
+      if (!intentCommitted) {
+        await Promise.allSettled([intentConnection.query('rollback')]);
+      }
+      if (revocationAttempt) {
+        await Promise.allSettled([revocationAttempt]);
+      }
+      if (!revocationCommitted) {
+        await Promise.allSettled([revocationConnection.query('rollback')]);
+      }
+      await Promise.allSettled([intentConnection.end(), revocationConnection.end()]);
+    }
+
+    expect(concurrentIntentId).toEqual(expect.any(String));
+    const serializedState = await client.query<{
+      readonly intent_decision_id: string;
+      readonly latest_decision: string;
+      readonly latest_version: number;
+    }>(
+      `select intent.player_deposit_eligibility_decision_id as intent_decision_id,
+              latest.decision as latest_decision,
+              latest.decision_version as latest_version
+         from app.deposit_intents intent
+         join lateral (
+           select decision, decision_version
+             from app.player_deposit_eligibility_decisions decision
+            where decision.player_account_id = intent.player_account_id
+            order by decision_version desc
+            limit 1
+         ) latest on true
+        where intent.id = $1::uuid`,
+      [concurrentIntentId!],
+    );
+    expect(serializedState.rows).toEqual([
+      {
+        intent_decision_id: initialEligibilityId,
+        latest_decision: 'revoked',
+        latest_version: 2,
+      },
+    ]);
+
+    const beforePostRevocation = await client.query<{ readonly intents: number }>(
+      `select count(*)::integer as intents
+         from app.deposit_intents
+        where player_account_id = $1::uuid`,
+      [racePlayer.playerAccountId],
+    );
+    await expect(
+      client.query(
+        `insert into app.deposit_intents (
+           customer_id, platform_id, player_account_id, payment_provider_id,
+           receiver_account_id, expected_amount_minor
+         ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+        [
+          racePlayer.customerId,
+          racePlayer.platformId,
+          racePlayer.playerAccountId,
+          paymentProviderId,
+          receiverAccountId,
+        ],
+      ),
+    ).rejects.toThrow('requires a current Player-ID deposit-eligibility decision');
+    const afterPostRevocation = await client.query<{ readonly intents: number }>(
+      `select count(*)::integer as intents
+         from app.deposit_intents
+        where player_account_id = $1::uuid`,
+      [racePlayer.playerAccountId],
+    );
+    expect(afterPostRevocation.rows).toEqual(beforePostRevocation.rows);
+
+    const revocationFirstPlayer = await createValidatedPlayerFixture(
+      'ELIGIBILITY-REVOCATION-FIRST-RACE',
+    );
+    await client.query(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values (
+         $1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system'
+       )`,
+      [revocationFirstPlayer.playerAccountId],
+    );
+
+    const revocationFirstConnection = createSqlIntegrationClient(environment);
+    const blockedIntentConnection = createSqlIntegrationClient(environment);
+    let blockedIntentAttempt: Promise<unknown> | undefined;
+    let revocationFirstCommitted = false;
+    let blockedIntentRolledBack = false;
+    await Promise.all([revocationFirstConnection.connect(), blockedIntentConnection.connect()]);
+    try {
+      await Promise.all([
+        revocationFirstConnection.query('begin'),
+        blockedIntentConnection.query('begin'),
+      ]);
+      await revocationFirstConnection.query(`set local lock_timeout = '5s'`);
+      await blockedIntentConnection.query(`set local lock_timeout = '5s'`);
+      await blockedIntentConnection.query(
+        `set local application_name = 'eligibility_intent_after_revocation_race'`,
+      );
+
+      await revocationFirstConnection.query(
+        `insert into app.player_deposit_eligibility_decisions (
+           player_account_id, decision_version, decision, reason_code, actor_kind
+         ) values (
+           $1::uuid, 2, 'revoked', 'financial_eligibility_revoked', 'worker'
+         )`,
+        [revocationFirstPlayer.playerAccountId],
+      );
+
+      blockedIntentAttempt = blockedIntentConnection.query(
+        `insert into app.deposit_intents (
+           customer_id, platform_id, player_account_id, payment_provider_id,
+           receiver_account_id, expected_amount_minor
+         ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)`,
+        [
+          revocationFirstPlayer.customerId,
+          revocationFirstPlayer.platformId,
+          revocationFirstPlayer.playerAccountId,
+          paymentProviderId,
+          receiverAccountId,
+        ],
+      );
+
+      let observedIntentLockWait = false;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const lockState = await client.query<{ readonly waiting: boolean }>(`
+          select exists (
+            select 1
+            from pg_stat_activity activity
+            where activity.application_name =
+                  'eligibility_intent_after_revocation_race'
+              and activity.wait_event_type = 'Lock'
+          ) as waiting
+        `);
+        if (lockState.rows[0]!.waiting) {
+          observedIntentLockWait = true;
+          break;
+        }
+        await client.query('select pg_sleep(0.025)');
+      }
+      expect(observedIntentLockWait).toBe(true);
+
+      await revocationFirstConnection.query('commit');
+      revocationFirstCommitted = true;
+      await expect(blockedIntentAttempt).rejects.toThrow(
+        'requires a current Player-ID deposit-eligibility decision',
+      );
+      blockedIntentAttempt = undefined;
+      await blockedIntentConnection.query('rollback');
+      blockedIntentRolledBack = true;
+    } finally {
+      if (!revocationFirstCommitted) {
+        await Promise.allSettled([revocationFirstConnection.query('rollback')]);
+      }
+      if (blockedIntentAttempt) {
+        await Promise.allSettled([blockedIntentAttempt]);
+      }
+      if (!blockedIntentRolledBack) {
+        await Promise.allSettled([blockedIntentConnection.query('rollback')]);
+      }
+      await Promise.allSettled([revocationFirstConnection.end(), blockedIntentConnection.end()]);
+    }
+
+    const revocationFirstState = await client.query<{
+      readonly intents: number;
+      readonly latest_decision: string;
+      readonly latest_version: number;
+    }>(
+      `select
+         (select count(*)::integer from app.deposit_intents
+           where player_account_id = $1::uuid) as intents,
+         latest.decision as latest_decision,
+         latest.decision_version as latest_version
+       from lateral (
+         select decision, decision_version
+         from app.player_deposit_eligibility_decisions decision
+         where decision.player_account_id = $1::uuid
+         order by decision_version desc
+         limit 1
+       ) latest`,
+      [revocationFirstPlayer.playerAccountId],
+    );
+    expect(revocationFirstState.rows).toEqual([
+      { intents: 0, latest_decision: 'revoked', latest_version: 2 },
+    ]);
   });
 });

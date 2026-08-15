@@ -97,7 +97,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
 
     expect(result).toBe(CUSTOMER_WEB_PLAYER_OWNERSHIP_PROOF_BLOCKED_RESULT);
     expect(result).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       platformCode: 'kemerbet',
       requestOrigin: 'customer_web',
       challengeProfile: 'unselected',
@@ -114,7 +114,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
         'verification_adapter_absent',
         'neutral_staff_proof_review_capability_absent',
         'ownership_conflict_recovery_and_reassignment_policy_unreviewed',
-        'ownership_association_and_deposit_eligibility_are_coupled',
+        'deposit_eligibility_promotion_boundary_absent',
       ],
       ...disabledCapabilities,
     });
@@ -133,6 +133,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
   it('makes no permitted or ready capability representable', () => {
     type DisabledCapabilityKey = keyof typeof disabledCapabilities;
 
+    expect(disabledCapabilityKeys).toHaveLength(19);
     expectTypeOf<
       CustomerWebPlayerOwnershipProofBlockedResult['advisoryOnly']
     >().toEqualTypeOf<true>();
@@ -164,7 +165,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
       [],
       new Date(),
       {},
-      { ...validRequest(), contractVersion: 2 },
+      { ...validRequest(), contractVersion: 1 },
       { ...validRequest(), platformCode: 'other' },
       { ...validRequest(), requestOrigin: 'telegram' },
       { ...validRequest(), challengeProfile: 'selected' },
@@ -179,7 +180,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
     }
 
     expect(CUSTOMER_WEB_PLAYER_OWNERSHIP_PROOF_INVALID_RESULT).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       platformCode: 'kemerbet',
       requestOrigin: 'customer_web',
       advisoryOnly: true,
@@ -305,7 +306,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
     }
     expect(getterCalls).toBe(0);
     expect(invalidProjection).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       platformCode: 'kemerbet',
       requestOrigin: 'customer_web',
       advisoryOnly: true,

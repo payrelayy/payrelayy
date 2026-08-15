@@ -5,9 +5,10 @@
 The private staging bot can record a Player-ID request through the reviewed conversation-action
 boundary. The private staging operations service can list the bounded KemerBet review queue and
 record an existence result. A distinct authenticated ownership-association action can then create
-the validated `customer_platform_players` binding required by deposit intake. This is existing
-Telegram staging behavior, not the canonical standalone web/PWA customer experience. No path calls
-KemerBet automatically, opens a deposit, displays payment instructions, or enables a payment switch.
+the legacy validated `customer_platform_players` binding. That association records ownership only;
+it no longer grants deposit eligibility. This is existing Telegram staging behavior, not the
+canonical standalone web/PWA customer experience. No path calls KemerBet automatically, promotes
+financial eligibility, opens a deposit, displays payment instructions, or enables a payment switch.
 
 ## Canonical standalone customer flow
 
@@ -19,11 +20,13 @@ in customer copy:
 2. FetanAgent creates a non-claiming request and displays `Checking`.
 3. An existence result remains insufficient; a separately reviewed control must prove the
    customer-to-player-account association.
-4. A successful proof-bearing association displays `Ready`; a negative or closed result displays
-   `Could not confirm`.
-5. A customer may retain multiple `Ready` Player IDs and chooses one for each deposit or
-   withdrawal. Each transaction snapshots the selected immutable association.
-6. Removal or reassignment preserves history and must not reveal whether the same Player ID was
+4. A successful proof-bearing association remains non-financial. A separate reviewed financial
+   boundary must promote the player account to deposit eligibility; neither boundary exists today.
+5. Only a player account with both proven ownership and current financial eligibility may display
+   `Ready`; a negative or closed ownership result displays `Could not confirm`.
+6. A customer may retain multiple `Ready` Player IDs and chooses one for each deposit or
+   withdrawal. Each new deposit snapshots the exact eligibility decision used by its guard.
+7. Removal or reassignment preserves history and must not reveal whether the same Player ID was
    submitted or associated by another customer.
 
 The web/PWA account and non-claiming Player-ID submit/list boundaries now exist in source but remain
@@ -59,11 +62,13 @@ Those functions:
 The runtime has no direct table or sequence access and no unrelated function access. The public
 projection has exactly three labels: `Checking`, `Ready`, and `Could not confirm`. Internal pending,
 existence-found, and review-required states remain `Checking`; negative or closed states become
-`Could not confirm`. `Ready` requires a valid ownership association, while the database explicitly
-rejects association of every web-origin request. Therefore `Ready` is intentionally unreachable in
-this slice. The boundary cannot validate ownership, make a Player ID deposit-eligible, open a
-deposit, or perform any financial action. It is customer-only; shared staff capability routing
-through the generic public entry remains a future boundary.
+`Could not confirm`. The current list SQL does not join the eligibility ledger; `Ready` is
+intentionally unreachable because the database rejects association of every web-origin request.
+By product policy, any later implementation that can project `Ready` must require both a valid
+ownership association and separate current financial eligibility. No eligibility-promotion
+boundary exists. This slice cannot validate ownership, promote deposit eligibility, open a deposit,
+or perform any financial action. It is customer-only; shared staff capability routing through the
+generic public entry remains a future boundary.
 
 ## Dormant web ownership-proof prerequisite
 
@@ -82,12 +87,13 @@ pins these nine ordered `remainingBlockers`:
 6. `verification_adapter_absent`
 7. `neutral_staff_proof_review_capability_absent`
 8. `ownership_conflict_recovery_and_reassignment_policy_unreviewed`
-9. `ownership_association_and_deposit_eligibility_are_coupled`
+9. `deposit_eligibility_promotion_boundary_absent`
 
-This phase adds no proof input, customer route, UI, staff workflow, provider adapter, database
-record, schema change, grant, role, runtime configuration, deployment wiring, association, `Ready`
-projection, deposit eligibility, or financial action. The existing web-origin association rejection
-and exact three-function customer-web role remain unchanged.
+The prerequisite package adds no proof input, customer route, UI, staff workflow, provider adapter,
+database record, schema change, grant, role, runtime configuration, deployment wiring, association,
+`Ready` projection, deposit eligibility, or financial action. Its contract version 2 keeps all 19
+capability flags false. The existing web-origin association rejection and exact three-function
+customer-web role remain unchanged.
 
 A later proof-bearing implementation must record non-financial ownership independently from deposit
 eligibility. Only a separate financial review may promote a proven ownership fact to a
@@ -96,9 +102,10 @@ deposit-eligible binding. See
 
 ## Why the existing player table is not an intake table
 
-`app.customer_platform_players` has a unique key on `(platform_id, player_id)`. That is correct for
-a future proven destination binding, but it is unsafe for ordinary customer input: the first person
-to submit a Player ID could permanently prevent another person from submitting the same ID.
+`app.customer_platform_players` has a unique key on `(platform_id, player_id)`. It records a
+validated ownership association, but it is no longer sufficient for new deposit intake. It remains
+unsafe for ordinary customer input: the first person to submit a Player ID could permanently
+prevent another person from submitting the same ID.
 
 Player-ID existence does not prove that the requesting customer controls that KemerBet account.
 The request flow must therefore record customer input, not an ownership claim.
@@ -252,8 +259,8 @@ claim that the customer owns the account.
    and can record `exists`, `not_found`, `review_required`, or `cancelled` with fixed reason codes.
 6. After separately proving that the Telegram customer controls the account, the authenticated
    internal Owner role must use the distinct ownership-confirmation action. That append-only action
-   creates one validated customer/platform binding and an audit event. Existence lookup alone
-   remains insufficient.
+   creates one validated customer/platform binding and an audit event. It does not create a deposit
+   eligibility decision. Existence lookup alone remains insufficient.
 
 ## Explicit internal ownership association
 
@@ -265,15 +272,45 @@ idempotent for the same request, rejects an existing platform-wide Player-ID bin
 executable only through the narrow Owner-control role. Generic API, bot, worker, admission, and
 browser roles have no table access or procedure execution.
 
-This association makes the Player ID structurally eligible for deposit intake. It does not bypass
-the still-disabled payment feature switches, missing receiver-account configuration, exact-amount
-matching, evidence validation, or dry-run execution boundaries.
+This association records only the legacy ownership binding. It does not insert into
+`app.player_deposit_eligibility_decisions`, make the Player ID eligible for a new intent, display
+`Ready`, or bypass any payment safeguard.
 
 The database rejects this association when the request has a web-origin receipt. A future reviewed
 migration may introduce a proof-bearing web association path only after the prerequisite blockers
-are resolved. That path must first represent ownership independently from deposit eligibility; a
-separate financial phase must control any later promotion before the request can become financially
-usable. The current request cannot become `Ready` or deposit-eligible.
+are resolved. That path must remain non-financial; a separate promotion boundary must create any
+later eligibility decision before the player account can become financially usable. The current
+request cannot become `Ready` or deposit-eligible.
+
+## Private deposit-eligibility quarantine
+
+`app.player_deposit_eligibility_decisions` is a separate append-only financial ledger. Each row
+binds one player account to a caller-supplied exact next `decision_version`, an `eligible` or
+`revoked` decision, its paired fixed reason code (`financial_eligibility_approved` or
+`financial_eligibility_revoked`), an `admin`, `system`, or `worker` actor with the required
+admin-ID shape, and decision/create timestamps. The insert trigger
+`player_deposit_eligibility_decisions_enforce_insert` calls
+`app.enforce_player_deposit_eligibility_decision_insert()`, locks the player row, and enforces
+sequential versions. The immutable and no-truncate triggers reject updates, deletes, and truncation
+through `app.reject_player_deposit_eligibility_decision_mutation()`.
+
+Every new `app.deposit_intents` row is guarded by
+`app.require_player_deposit_eligibility_for_intent()`. The
+`deposit_intents_enforce_player_deposit_eligibility` trigger locks the selected player row, reads
+its latest decision by version, requires `eligible`, and replaces any caller-supplied
+`player_deposit_eligibility_decision_id` with that exact decision ID. A composite foreign key keeps
+the snapshot attached to the same player account.
+`app.enforce_deposit_intent_eligibility_snapshot_immutable()` keeps the snapshot immutable after
+insert. Existing legacy intents may retain a null snapshot; they are not evidence that a current
+eligibility decision exists. A later `revoked` decision blocks subsequent intents without
+rewriting prior ones.
+
+This ledger and guard are financial quarantine only. There is no seed, backfill, promotion
+procedure, decision-writing role grant, runtime adapter, application route, staff button, customer
+projection, provider call, or feature-switch change. No ownership association automatically creates
+an `eligible` row, so the repository still has no positive ownership proof, no promotion path, no
+customer `Ready`, and no enabled deposit capability. The private table has enabled and forced RLS,
+no policy, and explicit revocations for public, Data API, service, and application runtime roles.
 
 Before any future existence lookup, add per-customer and platform-wide abuse limits. A Player-ID
 validator must not become an account-enumeration or spam mechanism.
@@ -296,4 +333,4 @@ This stage must not:
 - open a deposit intent or display payment instructions;
 - make a payment-provider call or transfer funds;
 - infer account ownership from existence alone; or
-- replace the explicit Owner-confirmed association with automatic promotion.
+- treat ownership association as deposit eligibility or add automatic promotion.

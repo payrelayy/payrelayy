@@ -44,10 +44,12 @@ the language policy does not rename technical identifiers.
 
 Product copy must not imply that an existence check proves Player-ID ownership, that a human review
 is automated, or that a submitted payment is confirmed. The customer Player-ID surface uses exactly
-`Checking`, `Ready`, and `Could not confirm`. `Ready` is unreachable for a web-origin request until a
-later proof-bearing ownership association succeeds. Payment and withdrawal flows may additionally
-use `Submitted`, `Confirmed`, `Expired`, and `Cancelled` only when their exact meaning is established
-by the authoritative workflow.
+`Checking`, `Ready`, and `Could not confirm`. `Ready` is unreachable for a web-origin request because
+web ownership association remains rejected. Any later implementation that can project `Ready` must
+require both proof-bearing ownership and a separate current financial-eligibility decision; the
+present list SQL does not join that ledger. Payment and withdrawal flows may additionally use
+`Submitted`, `Confirmed`, `Expired`, and `Cancelled` only when their exact meaning is established by
+the authoritative workflow.
 
 ## Data and evidence are not interface translations
 

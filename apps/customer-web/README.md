@@ -28,7 +28,11 @@ calls.
 - The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package is not imported by
   this application and is not a permission switch. Its only valid result is
   `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`; it cannot represent a
-  positive proof, association, `Ready`, or deposit eligibility.
+  positive proof, association, `Ready`, or deposit eligibility. Contract version 2 preserves all
+  19 false capabilities and records the absent financial promotion boundary.
+- The separate private eligibility ledger is not reachable from this application. New deposit
+  intents require a latest explicit `eligible` decision, but this app has no decision route,
+  procedure grant, table access, UI, or financial runtime capability.
 
 ## Deployment gate
 
@@ -61,7 +65,8 @@ The ownership-proof prerequisite adds no route, page, form, button, environment 
 object, role, runtime composition, provider adapter, network call, or deployment wiring. No
 authoritative proof source, challenge, delivery path, or evidence protocol is selected. The
 application continues to submit and list non-claiming requests only; the database continues to
-reject web-origin ownership association, and `Ready` remains unreachable.
+reject web-origin ownership association. The separate financial ledger has no promotion path, so
+`Ready` remains unreachable and ownership could not silently enable deposits even if later proven.
 
 The database migration deliberately leaves `fetanagent_customer_web_runtime` as `NOLOGIN` with no
 password. A separate reviewed role-and-secret provisioning phase must enable that runtime login and

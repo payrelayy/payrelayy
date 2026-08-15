@@ -32,7 +32,14 @@ next boundary. No authoritative KemerBet proof source, challenge, delivery path,
 or positive proof result has been selected. Its only valid decision is
 `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`; it does not add an app
 route, runtime, database object, role, configuration, infrastructure wiring, association, `Ready`,
-deposit eligibility, or financial action.
+deposit eligibility, or financial action. Contract version 2 keeps all 19 capabilities false and
+records `deposit_eligibility_promotion_boundary_absent` as the ninth blocker.
+
+A separate private eligibility ledger now prevents ownership association from being sufficient for
+new deposit intents. Every new intent must snapshot the latest explicit `eligible` decision, but no
+seed, backfill, promotion procedure, writer grant, route, UI, or runtime can create such a decision.
+This is a financial quarantine only; it does not add proof, `Ready`, deposit UI, provider access, or
+financial runtime capability.
 
 The existing Telegram admission, `/owner` route, `Owner/Admin` labels, `pending validation` copy,
 and manual Player-ID review wording are implementation history and private staging behavior. They
@@ -79,9 +86,11 @@ public route remains neutral even when the authenticated navigation differs.
    `/workspace`. Routine sign-in does not request email ownership confirmation.
 3. The customer adds one or more KemerBet Player IDs without supplying a KemerBet password, OTP,
    recovery code, or browser session.
-4. Each Player ID remains unusable until a separately reviewed ownership association succeeds.
-5. The customer chooses one `Ready` Player ID when starting a deposit or withdrawal.
-6. Activity and support remain attached to the FetanAgent account rather than to a browser install
+4. Each Player ID remains unusable until a separately reviewed ownership association succeeds and
+   a separate financial boundary promotes the player account to current deposit eligibility.
+5. Only that combined state may display `Ready`; neither positive boundary exists today.
+6. The customer chooses one `Ready` Player ID when starting a deposit or withdrawal.
+7. Activity and support remain attached to the FetanAgent account rather than to a browser install
    or Telegram identity.
 
 Finding that a Player ID exists does not prove ownership. A Player ID must not be silently assigned
@@ -96,9 +105,9 @@ only that identity's web-origin requests. Its direct-PostgreSQL role can execute
 `app.list_customer_web_player_registrations(uuid,integer)`. Customer statuses are exactly
 `Checking`, `Ready`, and `Could not confirm`. The database rejects ownership association for a
 web-origin request, so `Ready` is unreachable until a later proof-bearing association boundary is
-reviewed and implemented. The frozen prerequisite cannot produce a positive ownership result.
-Submit/list does not enable a deposit, and a future ownership fact must remain independent from
-deposit eligibility until a separate financial review promotes it.
+reviewed and implemented. The frozen prerequisite cannot produce a positive ownership result. Even
+a future ownership fact remains insufficient: the private intent guard requires a separate latest
+`eligible` ledger decision, and no promotion path exists. Submit/list does not enable a deposit.
 
 ## Optional Telegram legacy-history link
 

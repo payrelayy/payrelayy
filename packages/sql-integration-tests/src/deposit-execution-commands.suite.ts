@@ -897,6 +897,24 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
         );
         expect(postRecoveryFenceReplay).toEqual([{ first_fence_acquired: false }]);
 
+        const matchedHistory = await client.query<{
+          readonly matched_history_occurred_at: string;
+        }>(
+          `select (
+             attempt.final_action_fenced_at
+               + (
+                   attempt.reconciliation_required_at
+                     - attempt.final_action_fenced_at
+                 ) / 2
+           )::text as matched_history_occurred_at
+             from app.deposit_execution_attempts attempt
+            where attempt.id = $1::uuid
+              and attempt.final_action_fenced_at is not null
+              and attempt.reconciliation_required_at is not null`,
+          [execution.executionAttemptId],
+        );
+        expect(matchedHistory.rows).toHaveLength(1);
+
         const reconciled = await queryAsExecutor<{
           readonly attempt_status: string;
           readonly deposit_status: string;
@@ -914,7 +932,7 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
             reconciliationLease[0]!.reconciliation_job_id,
             reconciliationLease[0]!.lease_token,
             `hmac-sha256-v1:${'c'.repeat(64)}`,
-            reconciliationLease[0]!.final_action_fenced_at,
+            matchedHistory.rows[0]!.matched_history_occurred_at,
           ],
         );
         expect(reconciled).toEqual([
@@ -1059,25 +1077,109 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
            from app.require_deposit_execution_reconciliation($1::uuid, $2::uuid, false)`,
           [execution.executionAttemptId, execution.executionLeaseToken],
         );
+        const reconciliationWorkerId = '8ccccccc-cccc-4ccc-8ccc-cccccccccccc';
         const lease = await queryAsExecutor<{
           readonly reconciliation_job_id: string;
         }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
-          '8ccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          reconciliationWorkerId,
         ]);
         expect(lease).toHaveLength(1);
 
-        await client.query(
-          `update app.deposit_jobs
-            set attempt_count = max_attempts,
-                lease_expires_at = clock_timestamp() - interval '1 second'
-          where id = $1::uuid`,
+        const initialJobState = await client.query<{
+          readonly attempt_count: number;
+          readonly max_attempts: number;
+          readonly status: string;
+        }>(
+          `select job.status::text as status,
+                  job.attempt_count,
+                  job.max_attempts
+             from app.deposit_jobs job
+            where job.id = $1::uuid`,
           [lease[0]!.reconciliation_job_id],
         );
+        expect(initialJobState.rows).toEqual([
+          { status: 'leased', attempt_count: 1, max_attempts: 8 },
+        ]);
+
+        const maxAttempts = initialJobState.rows[0]!.max_attempts;
+        for (
+          let expectedAttemptCount = 2;
+          expectedAttemptCount <= maxAttempts;
+          expectedAttemptCount += 1
+        ) {
+          const expiredLease = await client.query<{
+            readonly attempt_count: number;
+            readonly max_attempts: number;
+            readonly status: string;
+          }>(
+            `update app.deposit_jobs
+                set lease_expires_at = clock_timestamp() - interval '1 second'
+              where id = $1::uuid
+                and status = 'leased'
+            returning status::text, attempt_count, max_attempts`,
+            [lease[0]!.reconciliation_job_id],
+          );
+          expect(expiredLease.rows).toEqual([
+            {
+              status: 'leased',
+              attempt_count: expectedAttemptCount - 1,
+              max_attempts: maxAttempts,
+            },
+          ]);
+
+          const renewedLease = await queryAsExecutor<{
+            readonly reconciliation_job_id: string;
+          }>(
+            client,
+            `select reconciliation_job_id
+               from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
+            [reconciliationWorkerId],
+          );
+          expect(renewedLease).toEqual([
+            { reconciliation_job_id: lease[0]!.reconciliation_job_id },
+          ]);
+
+          const renewedJobState = await client.query<{
+            readonly attempt_count: number;
+            readonly max_attempts: number;
+            readonly status: string;
+          }>(
+            `select job.status::text as status,
+                    job.attempt_count,
+                    job.max_attempts
+               from app.deposit_jobs job
+              where job.id = $1::uuid`,
+            [lease[0]!.reconciliation_job_id],
+          );
+          expect(renewedJobState.rows).toEqual([
+            {
+              status: 'leased',
+              attempt_count: expectedAttemptCount,
+              max_attempts: maxAttempts,
+            },
+          ]);
+        }
+
+        const finalExpiredLease = await client.query<{
+          readonly attempt_count: number;
+          readonly max_attempts: number;
+          readonly status: string;
+        }>(
+          `update app.deposit_jobs
+              set lease_expires_at = clock_timestamp() - interval '1 second'
+            where id = $1::uuid
+              and status = 'leased'
+          returning status::text, attempt_count, max_attempts`,
+          [lease[0]!.reconciliation_job_id],
+        );
+        expect(finalExpiredLease.rows).toEqual([
+          { status: 'leased', attempt_count: maxAttempts, max_attempts: maxAttempts },
+        ]);
 
         const nextLease = await queryAsExecutor(
           client,
           `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
-          ['8ddddddd-dddd-4ddd-8ddd-dddddddddddd'],
+          [reconciliationWorkerId],
         );
         expect(nextLease).toEqual([]);
 

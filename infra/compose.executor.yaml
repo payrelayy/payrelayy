@@ -1,0 +1,178 @@
+name: fetanagent-deposit-executor
+
+# Both services consume the same externally built, reviewed image by immutable digest and are inert
+# unless their explicit profile is selected. The long-lived executor has
+# no published port or inbound action API. Session provisioning is a separate transient process;
+# it receives no database URL, HMAC key, identity binding, selector contract, or financial gate.
+services:
+  executor:
+    profiles: [executor]
+    platform: linux/amd64
+    image: ${FETANAGENT_EXECUTOR_IMAGE_REFERENCE:?set the reviewed repository@sha256 immutable image reference}
+    pull_policy: always
+    init: true
+    user: '10001:10001'
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    shm_size: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1536m
+    cpus: 2.0
+    stop_grace_period: 60s
+    deploy:
+      replicas: 1
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '5'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: live
+      KEMERBET_EXECUTOR_ENABLED: 'true'
+      KEMERBET_FINAL_ACTION_ENABLED: 'true'
+      INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true'
+      KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: ${FETANAGENT_EXECUTOR_DEPLOYMENT_TARGET:?set staging or production}
+      KEMERBET_EXECUTOR_DATABASE_URL_FILE: /run/secrets/kemerbet_executor_database_url
+      KEMERBET_AGENT_IDENTITY_BINDINGS_FILE: /run/secrets/kemerbet_agent_identity_bindings
+      KEMERBET_AGENT_PROFILES_ROOT: /var/lib/fetanagent/kemerbet-sessions
+      KEMERBET_BROWSER_EXECUTABLE_PATH: /usr/bin/chromium
+      KEMERBET_SELECTOR_CONTRACT_FILE: /etc/fetanagent/kemerbet-selector-contract.v1.json
+      KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE: /run/secrets/kemerbet_history_reference_hmac_key
+      KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE: /run/secrets/kemerbet_agent_identity_hmac_key
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      EXECUTOR_HEALTH_HOST: 127.0.0.1
+      EXECUTOR_HEALTH_PORT: '8090'
+    secrets:
+      - source: kemerbet_executor_database_url
+        target: kemerbet_executor_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: kemerbet_agent_identity_bindings
+        target: kemerbet_agent_identity_bindings
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: kemerbet_history_reference_hmac_key
+        target: kemerbet_history_reference_hmac_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: kemerbet_agent_identity_hmac_key
+        target: kemerbet_agent_identity_hmac_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: kemerbet_selector_contract
+        target: /etc/fetanagent/kemerbet-selector-contract.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    volumes:
+      - type: bind
+        source: /var/lib/fetanagent/kemerbet-sessions
+        target: /var/lib/fetanagent/kemerbet-sessions
+        read_only: false
+    networks:
+      - executor_egress
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8090/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 60s
+      timeout: 45s
+      start_period: 120s
+      retries: 3
+
+  session-provision:
+    profiles: [executor-session-provision]
+    platform: linux/amd64
+    image: ${FETANAGENT_EXECUTOR_IMAGE_REFERENCE:?set the reviewed repository@sha256 immutable image reference}
+    pull_policy: always
+    command: ['node', 'apps/executor/dist/kemerbet-session-provision.js']
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    stdin_open: true
+    tty: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    shm_size: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1536m
+    cpus: 2.0
+    stop_grace_period: 60s
+    healthcheck:
+      disable: true
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DISPLAY: ${FETANAGENT_KEMERBET_SESSION_DISPLAY:-}
+      XAUTHORITY: /run/secrets/kemerbet_session_xauthority
+      KEMERBET_SESSION_PROVISION_ACCOUNT_ID: ${FETANAGENT_KEMERBET_AGENT_ACCOUNT_ID:-}
+    secrets:
+      - source: kemerbet_session_xauthority
+        target: kemerbet_session_xauthority
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    volumes:
+      - type: bind
+        source: /var/lib/fetanagent/kemerbet-sessions
+        target: /var/lib/fetanagent/kemerbet-sessions
+        read_only: false
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+        read_only: true
+    networks:
+      - executor_egress
+
+networks:
+  executor_egress:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
+
+# Every source is an operator-owned file outside Git. The two HMAC keys must be independently
+# generated and unequal. Session provisioning gets only an X11 authorization cookie and the
+# profile bind; it cannot read any executor secret or selector contract.
+secrets:
+  kemerbet_executor_database_url:
+    file: ${FETANAGENT_EXECUTOR_DATABASE_URL_FILE:-/etc/fetanagent/executor-secrets/kemerbet_executor_database_url}
+  kemerbet_agent_identity_bindings:
+    file: ${FETANAGENT_KEMERBET_AGENT_IDENTITY_BINDINGS_FILE:-/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings}
+  kemerbet_history_reference_hmac_key:
+    file: ${FETANAGENT_KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE:-/etc/fetanagent/executor-secrets/kemerbet_history_reference_hmac_key}
+  kemerbet_agent_identity_hmac_key:
+    file: ${FETANAGENT_KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE:-/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key}
+  kemerbet_session_xauthority:
+    file: ${FETANAGENT_KEMERBET_SESSION_XAUTHORITY_FILE:-/etc/fetanagent/session-provision/kemerbet_session_xauthority}
+
+configs:
+  kemerbet_selector_contract:
+    file: ${FETANAGENT_KEMERBET_SELECTOR_CONTRACT_FILE:-/etc/fetanagent/executor-config/kemerbet-selector-contract.v1.json}
+  supabase_ca_certificate:
+    file: ${FETANAGENT_SUPABASE_CA_CERTIFICATE_FILE:-/etc/fetanagent/executor-config/supabase-ca-certificate.crt}

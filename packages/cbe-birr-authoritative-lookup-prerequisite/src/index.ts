@@ -1,6 +1,8 @@
 import { CBE_BIRR_OFFICIAL_SOURCE_PROFILE } from '@fetanagent/cbe-birr-official-source-policy';
 import { isProxy } from 'node:util/types';
 
+export * from './normalization-ownership.js';
+
 /**
  * Pure Stage 1F prerequisite inventory. This package cannot accept or decrypt protected material,
  * infer missing protection metadata, acquire a lease, contact a provider, persist state, or make a

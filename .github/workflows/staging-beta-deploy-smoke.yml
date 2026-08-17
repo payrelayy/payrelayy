@@ -365,7 +365,9 @@ jobs:
           API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
           API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
           API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
-          API_DEPOSIT_REFERENCE_PROTECTION_SECRET: ${{ secrets.API_DEPOSIT_REFERENCE_PROTECTION_SECRET }}
+          CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
+          CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
+          CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
@@ -386,7 +388,9 @@ jobs:
           [[ "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$API_DEPOSIT_REFERENCE_PROTECTION_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" ]]
           distinct_count="$(printf '%s\n' \
             "$BETA_ADMISSION_RUNTIME_PASSWORD" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
             "$PLAYER_ACTION_RUNTIME_PASSWORD" "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" \
@@ -394,8 +398,9 @@ jobs:
             "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" \
             "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" \
             "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" \
-            "$API_DEPOSIT_REFERENCE_PROTECTION_SECRET" | sort -u | wc -l)"
-          [[ "$distinct_count" -eq 10 ]]
+            "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" \
+            "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" | sort -u | wc -l)"
+          [[ "$distinct_count" -eq 11 ]]
           [[ "$STAGING_TELEGRAM_BOT_TOKEN" =~ ^[0-9]{6,12}:[A-Za-z0-9_-]{30,80}$ ]]
           [[ -n "$SUPABASE_DB_PASSWORD" ]]
           [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
@@ -425,10 +430,33 @@ jobs:
           printf '%s\n' "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" > "$secret_dir/api-action-payload-hmac"
           printf '%s\n' "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" > "$secret_dir/api-action-capability-hmac"
           printf '%s\n' "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" > "$secret_dir/api-action-semantic-hmac"
-          printf '%s\n' "$API_DEPOSIT_REFERENCE_PROTECTION_SECRET" > "$secret_dir/api-deposit-reference-protection"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" > "$secret_dir/cbe-deposit-reference-encryption-key"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" > "$secret_dir/cbe-deposit-reference-fingerprint-key"
+          node --input-type=module <<'NODE'
+          const encoded = process.env.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON;
+          const keyFingerprint = /^sha256:[0-9a-f]{64}$/u;
+          const profile = JSON.parse(encoded);
+          if (typeof profile !== 'object' || profile === null || Array.isArray(profile)) {
+            throw new Error('the protected CBE deposit-reference key profile is invalid');
+          }
+          if (
+            Object.keys(profile).sort().join(',') !==
+              'encryptionKeyFingerprint,fingerprintKeyFingerprint,version' ||
+            profile.version !== 1 ||
+            typeof profile.encryptionKeyFingerprint !== 'string' ||
+            typeof profile.fingerprintKeyFingerprint !== 'string' ||
+            !keyFingerprint.test(profile.encryptionKeyFingerprint) ||
+            !keyFingerprint.test(profile.fingerprintKeyFingerprint) ||
+            profile.encryptionKeyFingerprint === profile.fingerprintKeyFingerprint
+          ) {
+            throw new Error('the protected CBE deposit-reference key profile is invalid');
+          }
+          NODE
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" > "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
           printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" > "$secret_dir/bot-token"
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
+          chmod 0644 "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
           openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
           ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
           helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
@@ -521,7 +549,9 @@ jobs:
             "$SECRET_DIR/api-action-transport-hmac" "$SECRET_DIR/bot-action-transport-hmac" \
             "$SECRET_DIR/api-action-payload-hmac" "$SECRET_DIR/api-action-capability-hmac" \
             "$SECRET_DIR/api-action-semantic-hmac" \
-            "$SECRET_DIR/api-deposit-reference-protection" \
+            "$SECRET_DIR/cbe-deposit-reference-encryption-key" \
+            "$SECRET_DIR/cbe-deposit-reference-fingerprint-key" \
+            "$SECRET_DIR/cbe-deposit-reference-key-profile.v1.json" \
             "$SECRET_DIR/beta-payload-hmac" "$SECRET_DIR/bot-token" \
             "$SECRET_DIR/publishable-key" "fetanagent-admin@$VM_HOST:$incoming/"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \

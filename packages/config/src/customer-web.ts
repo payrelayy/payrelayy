@@ -2,6 +2,11 @@ import { readFileSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 
 import { booleanFromEnv } from './shared.js';
+import {
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+  loadAndVerifyCbeDepositReferenceKeyProfile,
+} from './deposit-reference-profile.js';
 
 export const CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN =
@@ -59,6 +64,30 @@ export type CustomerWebWorkspaceConfig =
       readonly tlsMode: 'verify-full';
     };
 
+export type CustomerWebDepositConfig =
+  | {
+      readonly enabled: false;
+      readonly referenceEncryptionSecret: undefined;
+      readonly referenceFingerprintSecret: undefined;
+      readonly referenceKeyProfileVersion: undefined;
+    }
+  | {
+      readonly enabled: true;
+      readonly referenceEncryptionSecret: string;
+      readonly referenceFingerprintSecret: string;
+      readonly referenceKeyProfileVersion: 1;
+    };
+
+export interface CustomerWebDepositConfigDependencies {
+  readonly readSecretFile?: (path: string) => string;
+}
+
+export interface RedactedCustomerWebDepositConfig {
+  readonly enabled: boolean;
+  readonly referenceProtectionConfigured: boolean;
+  readonly referenceKeyProfileVersion: 1 | undefined;
+}
+
 export interface CustomerWebWorkspaceConfigDependencies {
   readonly readSecretFile?: (path: string) => string;
 }
@@ -76,6 +105,47 @@ function requiredPublishableKey(value: string | undefined): string {
     throw new Error(
       'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY must be a current Supabase publishable key.',
     );
+  }
+  return value;
+}
+
+function depositReferenceSecretFromEnvironmentOrFile(
+  environment: NodeJS.ProcessEnv,
+  dependencies: CustomerWebDepositConfigDependencies,
+  names: {
+    readonly direct: string;
+    readonly file: string;
+    readonly productionFile: string;
+  },
+): string | undefined {
+  const directValue = environment[names.direct];
+  const filePath = environment[names.file];
+  if (environment.NODE_ENV === 'production') {
+    if (directValue !== undefined) {
+      throw new Error(`${names.file} is required in production.`);
+    }
+    if (filePath !== names.productionFile) {
+      throw new Error(`${names.file} must use the approved private path.`);
+    }
+  }
+  if (directValue !== undefined && filePath !== undefined) {
+    throw new Error(`${names.direct} and ${names.file} are mutually exclusive.`);
+  }
+  let value = directValue;
+  if (value === undefined && filePath !== undefined) {
+    if (!posix.isAbsolute(filePath) && !win32.isAbsolute(filePath)) {
+      throw new Error(`${names.file} must be an absolute path.`);
+    }
+    try {
+      value = (dependencies.readSecretFile ?? ((path) => readFileSync(path, 'utf8')))(filePath);
+    } catch {
+      throw new Error(`${names.file} could not be read.`);
+    }
+    value = value.replace(/\r?\n$/u, '');
+  }
+  if (value === undefined) return undefined;
+  if (!/^[0-9a-f]{64}$/u.test(value)) {
+    throw new Error(`${names.direct} must be exactly 32 lowercase-hex bytes.`);
   }
   return value;
 }
@@ -237,6 +307,74 @@ export function redactedCustomerWebAuthConfigForLog(
     passwordRecoveryRedirectUrl: config.passwordRecoveryRedirectUrl,
     publishableKeyConfigured: config.enabled,
     supabaseOriginConfigured: config.enabled,
+  };
+}
+
+/** Loads only the server-side reference-protection capability for live customer deposit intake. */
+export function loadCustomerWebDepositConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: CustomerWebDepositConfigDependencies = {},
+): CustomerWebDepositConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED,
+    false,
+    'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED',
+  );
+  if (!enabled) {
+    return {
+      enabled: false,
+      referenceEncryptionSecret: undefined,
+      referenceFingerprintSecret: undefined,
+      referenceKeyProfileVersion: undefined,
+    };
+  }
+  const referenceEncryptionSecret = depositReferenceSecretFromEnvironmentOrFile(
+    environment,
+    dependencies,
+    {
+      direct: 'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
+      file: 'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE',
+      productionFile: CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+    },
+  );
+  const referenceFingerprintSecret = depositReferenceSecretFromEnvironmentOrFile(
+    environment,
+    dependencies,
+    {
+      direct: 'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
+      file: 'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE',
+      productionFile: CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+    },
+  );
+  if (!referenceEncryptionSecret || !referenceFingerprintSecret) {
+    throw new Error(
+      'Both CBE deposit-reference secret files are required when deposits are enabled.',
+    );
+  }
+  const profile = loadAndVerifyCbeDepositReferenceKeyProfile(
+    environment,
+    environment.NODE_ENV,
+    {
+      encryptionSecret: referenceEncryptionSecret,
+      fingerprintSecret: referenceFingerprintSecret,
+    },
+    dependencies.readSecretFile === undefined ? {} : { readFile: dependencies.readSecretFile },
+  );
+  return {
+    enabled: true,
+    referenceEncryptionSecret,
+    referenceFingerprintSecret,
+    referenceKeyProfileVersion: profile.version,
+  };
+}
+
+export function redactedCustomerWebDepositConfigForLog(
+  config: CustomerWebDepositConfig,
+): RedactedCustomerWebDepositConfig {
+  return {
+    enabled: config.enabled,
+    referenceProtectionConfigured: config.enabled,
+    referenceKeyProfileVersion: config.enabled ? config.referenceKeyProfileVersion : undefined,
   };
 }
 

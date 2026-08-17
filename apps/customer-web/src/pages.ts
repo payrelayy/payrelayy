@@ -1,4 +1,8 @@
-import type { CustomerWorkspaceRegistration } from '@fetanagent/customer-web-workspace-runtime';
+import type {
+  CustomerDepositInstructions,
+  CustomerDepositSummary,
+  CustomerWorkspaceRegistration,
+} from '@fetanagent/customer-web-workspace-runtime';
 
 export interface PageNotice {
   readonly kind: 'info' | 'error';
@@ -197,13 +201,47 @@ function registrationList(registrations: readonly CustomerWorkspaceRegistration[
     .join('')}</ul>`;
 }
 
+function amountEtb(amountMinor: string): string {
+  if (!/^[1-9][0-9]*$/u.test(amountMinor)) return '—';
+  const minor = BigInt(amountMinor);
+  return `${minor / 100n}.${(minor % 100n).toString().padStart(2, '0')}`;
+}
+
+function depositStatusClass(tone: CustomerDepositSummary['status']['tone']): string {
+  return tone === 'attention' ? 'status-unconfirmed' : `status-${tone}`;
+}
+
+function depositList(deposits: readonly CustomerDepositSummary[]): string {
+  if (deposits.length === 0) return '<p class="empty-state">No deposits yet.</p>';
+  return `<ul class="player-id-list">${deposits
+    .map(
+      (deposit) => `<li>
+        <span class="player-id-value">${amountEtb(deposit.amountMinor)} ETB</span>
+        <span class="status ${depositStatusClass(deposit.status.tone)}">${escapeHtml(deposit.status.label)}</span>
+      </li>`,
+    )
+    .join('')}</ul>`;
+}
+
+function depositPlayerOptions(registrations: readonly CustomerWorkspaceRegistration[]): string {
+  return registrations
+    .filter((registration) => registration.status === 'ready')
+    .map(
+      (registration) =>
+        `<option value="${escapeHtml(registration.playerId)}">${escapeHtml(registration.playerId)}</option>`,
+    )
+    .join('');
+}
+
 export function workspacePage(
   email: string,
   csrfToken: string,
   requestKey: string,
   registrations: readonly CustomerWorkspaceRegistration[],
+  deposits: readonly CustomerDepositSummary[],
   notice?: PageNotice,
 ): string {
+  const readyOptions = depositPlayerOptions(registrations);
   return layout(
     'Workspace',
     `<main class="workspace-layout">
@@ -212,6 +250,31 @@ export function workspacePage(
         <h2 id="workspace-title">Good to see you.</h2>
         <p class="supporting">Signed in as ${escapeHtml(email)}.</p>
         ${noticeMarkup(notice)}
+        <div class="workspace-grid">
+          <article class="workspace-panel">
+            <h3>Deposit</h3>
+            <p>Deposit from 25 to 25,000 ETB to a ready KemerBet Player ID.</p>
+            ${
+              readyOptions === ''
+                ? '<p class="empty-state">Add and confirm a Player ID before depositing.</p>'
+                : `<form method="post" action="/deposits" accept-charset="utf-8">
+              ${csrfField(csrfToken)}
+              <input type="hidden" name="requestKey" value="${escapeHtml(requestKey)}">
+              <label>Player ID
+                <select name="playerId" required>${readyOptions}</select>
+              </label>
+              <label>Amount (ETB)
+                <input name="amountEtb" type="number" inputmode="decimal" min="25" max="25000" step="0.01" required>
+              </label>
+              <button type="submit">Continue deposit</button>
+            </form>`
+            }
+          </article>
+          <article class="workspace-panel">
+            <h3>Recent deposits</h3>
+            ${depositList(deposits)}
+          </article>
+        </div>
         <div class="workspace-grid">
           <article class="workspace-panel">
             <h3>Player IDs</h3>
@@ -234,6 +297,52 @@ export function workspacePage(
           ${csrfField(csrfToken)}
           <button class="secondary" type="submit">Sign out</button>
         </form>
+      </section>
+    </main>`,
+    'signed-in',
+  );
+}
+
+export function depositInstructionsPage(
+  email: string,
+  csrfToken: string,
+  requestKey: string,
+  depositToken: string,
+  instructions: CustomerDepositInstructions,
+): string {
+  return layout(
+    'Deposit instructions',
+    `<main class="workspace-layout">
+      <section class="card wide" aria-labelledby="deposit-title">
+        <p class="eyebrow">Deposit</p>
+        <h2 id="deposit-title">Send ${amountEtb(instructions.amountMinor)} ETB</h2>
+        <p class="supporting">Signed in as ${escapeHtml(email)}. Complete this payment in CBE Birr, then submit its transaction reference.</p>
+        <div class="workspace-grid">
+          <article class="workspace-panel">
+            <h3>Payment details</h3>
+            <dl>
+              <dt>Provider</dt><dd>${escapeHtml(instructions.providerName)}</dd>
+              <dt>Receiver</dt><dd>${escapeHtml(instructions.receiverAccountHolderName)}</dd>
+              <dt>Account</dt><dd>${escapeHtml(instructions.receiverAccountMasked)}</dd>
+              <dt>Status</dt><dd>${escapeHtml(instructions.status.label)}</dd>
+            </dl>
+            <p>${escapeHtml(instructions.customerInstruction)}</p>
+            <p class="quiet">Complete payment before ${escapeHtml(instructions.paymentDeadline)}.</p>
+          </article>
+          <article class="workspace-panel">
+            <h3>Submit transaction reference</h3>
+            <form method="post" action="/deposits/reference" accept-charset="utf-8">
+              ${csrfField(csrfToken)}
+              <input type="hidden" name="requestKey" value="${escapeHtml(requestKey)}">
+              <input type="hidden" name="depositToken" value="${escapeHtml(depositToken)}">
+              <label>CBE Birr transaction reference
+                <input name="transactionReference" type="text" autocomplete="off" minlength="5" maxlength="128" required>
+              </label>
+              <button type="submit">Check payment</button>
+            </form>
+          </article>
+        </div>
+        <div class="actions"><a class="button secondary" href="/workspace">Return to workspace</a></div>
       </section>
     </main>`,
     'signed-in',

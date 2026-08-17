@@ -1,4 +1,12 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it, vi } from 'vitest';
+
+import {
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_KEY_PROFILE_FILE,
+} from './deposit-reference-profile.js';
 
 import {
   CUSTOMER_WEB_DATABASE_DIRECT_HOST,
@@ -8,13 +16,26 @@ import {
   CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   loadCustomerWebAuthConfig,
+  loadCustomerWebDepositConfig,
   loadCustomerWebWorkspaceConfig,
   redactedCustomerWebAuthConfigForLog,
+  redactedCustomerWebDepositConfigForLog,
   redactedCustomerWebWorkspaceConfigForLog,
 } from './customer-web.js';
 
 const publishableKey = `sb_publishable_${'a'.repeat(22)}_${'b'.repeat(8)}`;
 const databaseUrl = `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}:db-password@${CUSTOMER_WEB_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
+const referenceEncryptionSecret = 'a'.repeat(64);
+const referenceFingerprintSecret = 'b'.repeat(64);
+const referenceProfile = (
+  encryption = referenceEncryptionSecret,
+  fingerprint = referenceFingerprintSecret,
+) =>
+  JSON.stringify({
+    encryptionKeyFingerprint: `sha256:${createHash('sha256').update(Buffer.from(encryption, 'hex')).digest('hex')}`,
+    fingerprintKeyFingerprint: `sha256:${createHash('sha256').update(Buffer.from(fingerprint, 'hex')).digest('hex')}`,
+    version: 1,
+  });
 
 describe('customer web auth configuration', () => {
   it('is disabled by default without reading the Supabase URL or key', () => {
@@ -97,6 +118,184 @@ describe('customer web auth configuration', () => {
     expect(() =>
       loadWith(CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN, `sb_publishable_${'a'.repeat(257)}`),
     ).toThrow('current Supabase publishable key');
+  });
+});
+
+describe('customer web deposit-reference configuration', () => {
+  it('is disabled by default without reading a secret', () => {
+    const environment = new Proxy(
+      { INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false' },
+      {
+        get(target, property, receiver) {
+          if (String(property).includes('DEPOSIT_REFERENCE')) throw new Error('unexpected read');
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    expect(loadCustomerWebDepositConfig(environment)).toEqual({
+      enabled: false,
+      referenceEncryptionSecret: undefined,
+      referenceFingerprintSecret: undefined,
+      referenceKeyProfileVersion: undefined,
+    });
+  });
+
+  it('loads the shared non-production key profile and redacts both secrets', () => {
+    const config = loadCustomerWebDepositConfig({
+      CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: referenceEncryptionSecret,
+      CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceFingerprintSecret,
+      CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile(),
+      INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+      NODE_ENV: 'test',
+    });
+    expect(config).toEqual({
+      enabled: true,
+      referenceEncryptionSecret,
+      referenceFingerprintSecret,
+      referenceKeyProfileVersion: 1,
+    });
+    expect(redactedCustomerWebDepositConfigForLog(config)).toEqual({
+      enabled: true,
+      referenceProtectionConfigured: true,
+      referenceKeyProfileVersion: 1,
+    });
+    const redacted = JSON.stringify(redactedCustomerWebDepositConfigForLog(config));
+    expect(redacted).not.toContain(referenceEncryptionSecret);
+    expect(redacted).not.toContain(referenceFingerprintSecret);
+  });
+
+  it('requires the fixed production files and accepts one terminal secret newline', () => {
+    const readSecretFile = vi.fn((path: string) => {
+      if (path === CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE) {
+        return `${referenceEncryptionSecret}\n`;
+      }
+      if (path === CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE) {
+        return `${referenceFingerprintSecret}\n`;
+      }
+      if (path === CBE_DEPOSIT_REFERENCE_PRODUCTION_KEY_PROFILE_FILE) return referenceProfile();
+      throw new Error('unexpected path');
+    });
+    expect(
+      loadCustomerWebDepositConfig(
+        {
+          CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE:
+            CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+          CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE:
+            CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+          CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE: CBE_DEPOSIT_REFERENCE_PRODUCTION_KEY_PROFILE_FILE,
+          INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+          NODE_ENV: 'production',
+        },
+        { readSecretFile },
+      ),
+    ).toEqual({
+      enabled: true,
+      referenceEncryptionSecret,
+      referenceFingerprintSecret,
+      referenceKeyProfileVersion: 1,
+    });
+    expect(readSecretFile).toHaveBeenCalledWith(
+      CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+    );
+    expect(readSecretFile).toHaveBeenCalledWith(
+      CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+    );
+    expect(readSecretFile).toHaveBeenCalledWith(CBE_DEPOSIT_REFERENCE_PRODUCTION_KEY_PROFILE_FILE);
+  });
+
+  it.each(['', 'A'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), `${'a'.repeat(64)}\nextra`])(
+    'rejects malformed secret material without echoing it',
+    (secret) => {
+      let thrown: unknown;
+      try {
+        loadCustomerWebDepositConfig({
+          CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: secret,
+          CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceFingerprintSecret,
+          CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile(),
+          INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+          NODE_ENV: 'test',
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      if (secret !== '') expect(String(thrown)).not.toContain(secret);
+    },
+  );
+
+  it('rejects direct production secrets, wrong paths, dual sources, and relative files', () => {
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: referenceEncryptionSecret,
+        CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceFingerprintSecret,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile(),
+        INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('required in production');
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: '/tmp/wrong',
+        CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE:
+          CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE: CBE_DEPOSIT_REFERENCE_PRODUCTION_KEY_PROFILE_FILE,
+        INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('approved private path');
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: referenceEncryptionSecret,
+        CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: 'C:\\secret',
+        CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceFingerprintSecret,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile(),
+        INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'test',
+      }),
+    ).toThrow('mutually exclusive');
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: 'relative',
+        CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceFingerprintSecret,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile(),
+        INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'test',
+      }),
+    ).toThrow('absolute path');
+  });
+
+  it('rejects mismatched, duplicate, and unapproved key profiles', () => {
+    const base = {
+      CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: referenceEncryptionSecret,
+      CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceFingerprintSecret,
+      INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true',
+      NODE_ENV: 'test',
+    };
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        ...base,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile('c'.repeat(64)),
+      }),
+    ).toThrow('do not match');
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        ...base,
+        CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: referenceEncryptionSecret,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceProfile(
+          referenceEncryptionSecret,
+          referenceEncryptionSecret,
+        ),
+      }),
+    ).toThrow('valid and distinct');
+    expect(() =>
+      loadCustomerWebDepositConfig({
+        ...base,
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: JSON.stringify({
+          ...JSON.parse(referenceProfile()),
+          version: 2,
+        }),
+      }),
+    ).toThrow('profile is invalid');
   });
 });
 

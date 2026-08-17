@@ -11,6 +11,7 @@ import {
   TELEGRAM_PRIVATE_ACTION_PATH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
   parseTelegramPlayerRegistrationCapabilityCallback,
   redactTelegramPrivateActionForLog,
   telegramPrivateActionNonceDigestInput,
@@ -102,6 +103,7 @@ const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
 const DEPOSIT_INTENT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId', 'amountEtb']);
 const DEPOSIT_REFERENCE_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken', 'transactionReference']);
+const DEPOSIT_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken']);
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
 const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 
@@ -194,7 +196,7 @@ function validDepositReference(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value === value.trim() &&
-    Array.from(value).length >= 4 &&
+    Array.from(value).length >= TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS &&
     Array.from(value).length <= TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS &&
     /^[A-Za-z0-9._-]+$/u.test(value)
   );
@@ -283,6 +285,19 @@ export function parseTelegramPrivateActionEnvelope(
         depositToken: parsed.depositToken,
         transactionReference: parsed.transactionReference,
       };
+    }
+    case 'deposit_status_command': {
+      if (!hasOnlyKeys(parsed, DEPOSIT_STATUS_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (
+        !identity ||
+        typeof parsed.depositToken !== 'string' ||
+        parsed.depositToken.length !== TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH ||
+        !COMPACT_UUID_PATTERN.test(parsed.depositToken)
+      ) {
+        return undefined;
+      }
+      return { ...identity, kind: 'deposit_status_command', depositToken: parsed.depositToken };
     }
     default:
       return undefined;

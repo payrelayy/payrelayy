@@ -195,7 +195,9 @@ services:
       API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/api_player_action_payload_hmac
       API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE: /run/secrets/api_player_action_capability_hmac
       API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE: /run/secrets/api_player_action_semantic_hmac
-      API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE: /run/secrets/api_deposit_reference_protection
+      CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: /run/secrets/cbe_deposit_reference_encryption_key
+      CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE: /run/secrets/cbe_deposit_reference_fingerprint_key
+      CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE: /etc/fetanagent/cbe-deposit-reference-key-profile.v1.json
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
@@ -231,14 +233,24 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
-      - source: api_deposit_reference_protection
-        target: api_deposit_reference_protection
+      - source: cbe_deposit_reference_encryption_key
+        target: cbe_deposit_reference_encryption_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: cbe_deposit_reference_fingerprint_key
+        target: cbe_deposit_reference_fingerprint_key
         uid: '10001'
         gid: '10001'
         mode: 0400
     configs:
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: cbe_deposit_reference_key_profile
+        target: /etc/fetanagent/cbe-deposit-reference-key-profile.v1.json
         uid: '10001'
         gid: '10001'
         mode: 0444
@@ -438,6 +450,8 @@ networks:
 configs:
   supabase_ca_certificate:
     file: ${FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
+  cbe_deposit_reference_key_profile:
+    file: ${FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE:?set the immutable CBE deposit-reference key-profile file}
 
 # Every source is an operator-owned file outside the repository. The two transport-HMAC files
 # contain the same value but remain separate mounts so neither service can read the other's file.
@@ -462,8 +476,10 @@ secrets:
     file: ${FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE:?set an external API Player-ID capability HMAC file}
   api_player_action_semantic_hmac:
     file: ${FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE:?set an external API Player-ID semantic HMAC file}
-  api_deposit_reference_protection:
-    file: ${FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE:?set an external API deposit-reference protection key file}
+  cbe_deposit_reference_encryption_key:
+    file: ${FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE:?set the external CBE deposit-reference encryption key file}
+  cbe_deposit_reference_fingerprint_key:
+    file: ${FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE:?set the external CBE deposit-reference fingerprint key file}
   telegram_bot_token:
     file: ${FETANAGENT_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
   bot_beta_admission_transport_hmac:

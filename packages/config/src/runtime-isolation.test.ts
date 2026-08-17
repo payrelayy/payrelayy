@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import { loadApiConfig, redactedApiConfigForLog } from './api.js';
@@ -29,8 +31,12 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
           property === 'API_TELEGRAM_PAYLOAD_HMAC_SECRET' ||
           property === 'API_TELEGRAM_CAPABILITY_HMAC_SECRET' ||
           property === 'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET' ||
-          property === 'API_DEPOSIT_REFERENCE_PROTECTION_SECRET' ||
-          property === 'API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE'
+          property === 'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET' ||
+          property === 'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE' ||
+          property === 'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET' ||
+          property === 'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE' ||
+          property === 'CBE_DEPOSIT_REFERENCE_KEY_PROFILE' ||
+          property === 'CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE'
         ) {
           throw new Error(`unexpected Telegram environment read: ${String(property)}`);
         }
@@ -41,6 +47,15 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
 }
 
 describe('runtime configuration isolation', () => {
+  const referenceKeyProfile = JSON.stringify({
+    encryptionKeyFingerprint: `sha256:${createHash('sha256')
+      .update(Buffer.from('e'.repeat(64), 'hex'))
+      .digest('hex')}`,
+    fingerprintKeyFingerprint: `sha256:${createHash('sha256')
+      .update(Buffer.from('f'.repeat(64), 'hex'))
+      .digest('hex')}`,
+    version: 1,
+  });
   const playerActionEnvironment = {
     NODE_ENV: 'test',
     INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
@@ -50,7 +65,9 @@ describe('runtime configuration isolation', () => {
     API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
     API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
     API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
-    API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
+    CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
+    CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
+    CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceKeyProfile,
   } as const;
 
   it('defaults API financial actions to dry-run mode', () => {
@@ -116,11 +133,31 @@ describe('runtime configuration isolation', () => {
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,
-        API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'c'.repeat(64),
+        CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'c'.repeat(64),
+        CBE_DEPOSIT_REFERENCE_KEY_PROFILE: JSON.stringify({
+          encryptionKeyFingerprint: `sha256:${createHash('sha256')
+            .update(Buffer.from('c'.repeat(64), 'hex'))
+            .digest('hex')}`,
+          fingerprintKeyFingerprint: `sha256:${createHash('sha256')
+            .update(Buffer.from('f'.repeat(64), 'hex'))
+            .digest('hex')}`,
+          version: 1,
+        }),
         PLAYER_ACTION_DATABASE_URL:
           'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('must be distinct');
+  });
+
+  it('rejects inline deposit-reference keys and profile in production', () => {
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        NODE_ENV: 'production',
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('must use fixed files in production');
   });
 
   it('keeps Telegram configuration out of the API process', () => {

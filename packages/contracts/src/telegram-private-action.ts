@@ -1,3 +1,5 @@
+import type { CustomerDepositStatusProjection } from './customer-deposit-status.js';
+
 /**
  * Versioned, private bot-to-API action envelope. It is intentionally separate from the metadata
  * inbox transport: it has a different URL, MIME type, authentication headers, HMAC domain, and
@@ -11,6 +13,7 @@ export const TELEGRAM_PRIVATE_ACTION_MAX_BODY_BYTES = 16 * 1024;
 export const TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS = 60;
 export const TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS = 64;
 export const TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH = 22;
+export const TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS = 5;
 export const TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS = 128;
 
 export const TELEGRAM_PRIVATE_ACTION_HEADERS = {
@@ -68,6 +71,11 @@ export type TelegramPrivateActionEnvelope =
       readonly depositToken: string;
       /** Raw trusted-memory reference. It is encrypted and blinded before persistence. */
       readonly transactionReference: string;
+    })
+  | (TelegramPrivateActionIdentity & {
+      readonly kind: 'deposit_status_command';
+      /** Compact opaque UUID presentation. It is not authority and is never logged. */
+      readonly depositToken: string;
     });
 
 /** Safe bot-visible result. It never contains a raw database UUID, Player ID, raw callback token, or state. */
@@ -96,10 +104,21 @@ export type TelegramPrivateActionResult =
       readonly receiverAccountMasked: string;
       readonly customerInstruction: string;
       readonly paymentDeadline: string;
+      readonly depositStatus: CustomerDepositStatusProjection;
+      readonly financialMode: 'dry_run' | 'live';
     }
   | {
       readonly version: 1;
       readonly outcome: 'deposit_reference_received';
+      readonly depositStatus: CustomerDepositStatusProjection;
+      readonly financialMode: 'dry_run' | 'live';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_status';
+      readonly amountMinor: string;
+      readonly currencyCode: 'ETB';
+      readonly depositStatus: CustomerDepositStatusProjection;
     }
   | {
       readonly version: 1;

@@ -1,5 +1,6 @@
 import {
   loadCustomerWebAuthConfig,
+  loadCustomerWebDepositConfig,
   loadCustomerWebWorkspaceConfig,
 } from '@fetanagent/config/customer-web';
 import { createCustomerWebAuthPort } from '@fetanagent/customer-web-auth-runtime';
@@ -22,9 +23,18 @@ if (!workspaceConfig.enabled) {
   throw new Error('The customer workspace runtime gate is disabled.');
 }
 const workspace = await createCustomerWorkspacePostgresRuntime(workspaceConfig);
+const depositConfig = loadCustomerWebDepositConfig();
 
 const app = buildCustomerWebApp({
   auth: createCustomerWebAuthPort(config),
+  ...(depositConfig.enabled
+    ? {
+        depositReferenceProtectionSecrets: {
+          encryptionSecret: depositConfig.referenceEncryptionSecret,
+          fingerprintSecret: depositConfig.referenceFingerprintSecret,
+        },
+      }
+    : {}),
   publicOrigin: 'https://fetanagent.com',
   workspace,
 });

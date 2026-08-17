@@ -2,11 +2,14 @@ import type { CustomerWebWorkspaceConfig } from '@fetanagent/config/customer-web
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL,
   createCustomerWorkspacePoolConfig,
   createCustomerWorkspacePostgresRuntime,
   CustomerWorkspaceRuntimeUnavailableError,
   ENSURE_CUSTOMER_WEB_ACCOUNT_SQL,
+  LIST_CUSTOMER_WEB_DEPOSITS_SQL,
   LIST_CUSTOMER_WEB_PLAYER_REGISTRATIONS_SQL,
+  OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL,
   SUBMIT_CUSTOMER_WEB_PLAYER_REGISTRATION_SQL,
   type CustomerWorkspaceDatabase,
 } from './postgres-workspace-runtime.js';
@@ -17,6 +20,7 @@ import {
 
 const authUserId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0184';
 const requestKey = '4f8e2a44-58ef-4cb7-b274-6202e01ed341';
+const depositIntentId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0185';
 const createdAt = new Date('2026-08-15T12:00:00.000Z');
 
 const config = {
@@ -103,7 +107,27 @@ async function expectAllOperationsUnavailableWithoutQueries(
   const failure = { error: 'customer_workspace_unavailable', ok: false } as const;
 
   expect(await runtime.ensureAccount({ authUserId })).toEqual(failure);
+  expect(await runtime.listDeposits({ authUserId, limit: 20 })).toEqual(failure);
   expect(await runtime.listPlayerRegistrations({ authUserId, limit: 20 })).toEqual(failure);
+  expect(
+    await runtime.openDeposit({
+      amountMinor: '2500',
+      authUserId,
+      playerId: 'PLAYER-42',
+      requestKey,
+    }),
+  ).toEqual(failure);
+  expect(
+    await runtime.captureDepositReference({
+      authUserId,
+      ciphertext: 'v1.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAA',
+      depositIntentId,
+      fingerprint: 'a'.repeat(64),
+      keyVersion: 1,
+      masked: '***1234',
+      requestKey,
+    }),
+  ).toEqual(failure);
   expect(
     await runtime.submitPlayerRegistration({
       authUserId,
@@ -187,6 +211,15 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       "pg_catalog.to_regprocedure('app.list_customer_web_player_registrations(uuid,integer)')",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "pg_catalog.to_regprocedure('app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)')",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "pg_catalog.to_regprocedure('app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)')",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "pg_catalog.to_regprocedure('app.list_customer_web_deposits(uuid,integer)')",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
       "routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain("owner.rolname = 'postgres'");
@@ -241,7 +274,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     expect(database.end).toHaveBeenCalledTimes(1);
   });
 
-  it('uses only the three exact parameterized function calls and returns no database UUIDs', async () => {
+  it('uses only the six exact parameterized function calls and returns customer-safe projections', async () => {
     const database = databaseWithOperations((query) => {
       if (query === ENSURE_CUSTOMER_WEB_ACCOUNT_SQL) {
         return [{ account_status: 'active', account_created: true }];
@@ -268,6 +301,45 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
           },
         ];
       }
+      if (query === OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL) {
+        return [
+          {
+            deposit_intent_id: depositIntentId,
+            provider_code: 'cbe_birr',
+            receiver_account_holder_name: 'FetanAgent',
+            receiver_account_masked: '***1234',
+            receiver_customer_instruction: 'Send the exact amount using CBE Birr.',
+            expected_amount_minor: '2500',
+            currency_code: 'ETB',
+            payment_deadline_at: new Date('2026-08-15T12:30:00.000Z'),
+            deposit_status: 'intake_received',
+            request_key_already_used: false,
+          },
+        ];
+      }
+      if (query === CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL) {
+        return [
+          {
+            result_deposit_intent_id: depositIntentId,
+            submission_status: 'verification_enqueued',
+            deposit_status: 'verification_pending',
+            submitted_at: createdAt,
+            request_key_already_used: false,
+          },
+        ];
+      }
+      if (query === LIST_CUSTOMER_WEB_DEPOSITS_SQL) {
+        return [
+          {
+            deposit_intent_id: depositIntentId,
+            expected_amount_minor: '2500',
+            currency_code: 'ETB',
+            deposit_status: 'verification_pending',
+            created_at: createdAt,
+            updated_at: createdAt,
+          },
+        ];
+      }
       throw new Error('unexpected query');
     });
     const runtime = await createCustomerWorkspacePostgresRuntime(config, { database });
@@ -288,15 +360,69 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     });
     expect(JSON.stringify(submitted)).not.toContain(authUserId);
     expect(JSON.stringify(submitted)).not.toContain(requestKey);
+    const opened = await runtime.openDeposit({
+      amountMinor: '2500',
+      authUserId,
+      playerId: 'PLAYER-42',
+      requestKey,
+    });
+    expect(opened).toMatchObject({
+      ok: true,
+      instructions: {
+        amountMinor: '2500',
+        providerName: 'CBE Birr',
+        status: { label: 'Ready to start', tone: 'neutral' },
+      },
+    });
+    const captured = await runtime.captureDepositReference({
+      authUserId,
+      ciphertext: 'v1.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAA',
+      depositIntentId,
+      fingerprint: 'a'.repeat(64),
+      keyVersion: 1,
+      masked: '***1234',
+      requestKey,
+    });
+    expect(captured).toMatchObject({
+      ok: true,
+      status: { label: 'Checking payment', tone: 'working' },
+    });
+    expect(await runtime.listDeposits({ authUserId, limit: 20 })).toEqual({
+      ok: true,
+      deposits: [
+        {
+          amountMinor: '2500',
+          createdAt: createdAt.toISOString(),
+          currencyCode: 'ETB',
+          depositIntentId,
+          status: { label: 'Checking payment', tone: 'working' },
+          updatedAt: createdAt.toISOString(),
+        },
+      ],
+    });
 
     expect(database.queries.slice(1).map(({ query }) => query)).toEqual([
       ENSURE_CUSTOMER_WEB_ACCOUNT_SQL,
       LIST_CUSTOMER_WEB_PLAYER_REGISTRATIONS_SQL,
       SUBMIT_CUSTOMER_WEB_PLAYER_REGISTRATION_SQL,
+      OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL,
+      CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL,
+      LIST_CUSTOMER_WEB_DEPOSITS_SQL,
     ]);
     expect(database.queries[1]?.values).toEqual([authUserId]);
     expect(database.queries[2]?.values).toEqual([authUserId, 20]);
     expect(database.queries[3]?.values).toEqual([authUserId, requestKey, 'PLAYER-42']);
+    expect(database.queries[4]?.values).toEqual([authUserId, requestKey, 'PLAYER-42', '2500']);
+    expect(database.queries[5]?.values).toEqual([
+      authUserId,
+      requestKey,
+      depositIntentId,
+      'v1.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAA',
+      'a'.repeat(64),
+      '***1234',
+      1,
+    ]);
+    expect(database.queries[6]?.values).toEqual([authUserId, 20]);
     await runtime.close();
   });
 

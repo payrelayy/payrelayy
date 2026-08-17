@@ -16,6 +16,11 @@ The repository provides:
   a real deployment;
 - [`compose.inactive.yaml`](compose.inactive.yaml): an API-only, explicitly `inactive` Compose
   profile on an internal Docker network, with neither an image-exposed nor published host port;
+- [`compose.executor.yaml`](compose.executor.yaml): a separate, explicit-profile-only, non-root
+  deposit-executor activation composition plus an isolated manual session provisioner. Both consume
+  one immutable image reference; the executor requires an explicit staging/production target and a
+  lifetime database singleton. It publishes no port, changes no database switch, and remains
+  unprovisioned; see [`executor.md`](executor.md);
 - [`.dockerignore`](../.dockerignore): excludes local configuration, Git metadata, credentials,
   runtime data, and generated output from the image context; and
 - [`operations/fetanagent-staging-deploy-helper.sh`](operations/fetanagent-staging-deploy-helper.sh):
@@ -44,6 +49,7 @@ enable a customer-facing service:
 docker build --target api --build-arg VCS_REF=<reviewed-commit> `
   --tag fetanagent-api:inactive-<short-commit> .
 docker compose -f infra/compose.inactive.yaml config
+node infra/verify-executor-deployment.mjs
 ```
 
 Do not run `docker compose up`, publish a port, attach a secret file, or set an enable switch from

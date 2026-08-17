@@ -9,6 +9,11 @@ import {
   requiredHexHmacSecret,
   type RuntimeConfig,
 } from './shared.js';
+import {
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+  CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+  loadAndVerifyCbeDepositReferenceKeyProfile,
+} from './deposit-reference-profile.js';
 
 export type ApiTelegramIngressConfig =
   | {
@@ -71,7 +76,9 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly enabled: false;
       readonly connection: undefined;
       readonly payloadHmacSecret: undefined;
-      readonly depositReferenceProtectionSecret: undefined;
+      readonly depositReferenceEncryptionSecret: undefined;
+      readonly depositReferenceFingerprintSecret: undefined;
+      readonly depositReferenceKeyProfileVersion: undefined;
       readonly tlsMode: undefined;
     }
   | {
@@ -84,7 +91,9 @@ export type ApiTelegramPlayerActionRuntimeConfig =
         readonly user: string;
       };
       readonly payloadHmacSecret: string;
-      readonly depositReferenceProtectionSecret: string;
+      readonly depositReferenceEncryptionSecret: string;
+      readonly depositReferenceFingerprintSecret: string;
+      readonly depositReferenceKeyProfileVersion: 1;
       readonly tlsMode: 'verify-full';
     };
 
@@ -435,7 +444,9 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       enabled: false,
       connection: undefined,
       payloadHmacSecret: undefined,
-      depositReferenceProtectionSecret: undefined,
+      depositReferenceEncryptionSecret: undefined,
+      depositReferenceFingerprintSecret: undefined,
+      depositReferenceKeyProfileVersion: undefined,
       tlsMode: undefined,
     };
   }
@@ -485,6 +496,46 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     throw new Error('PLAYER_ACTION_DATABASE_URL must contain only sslmode=verify-full.');
   }
 
+  if (
+    nodeEnv === 'production' &&
+    (environment.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET !== undefined ||
+      environment.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET !== undefined ||
+      environment.CBE_DEPOSIT_REFERENCE_KEY_PROFILE !== undefined)
+  ) {
+    throw new Error('CBE deposit-reference keys and profile must use fixed files in production.');
+  }
+
+  const depositReferenceEncryptionSecret = requiredHexHmacSecret(
+    secretFromEnvironmentOrFile(
+      environment.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET,
+      environment.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE,
+      'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
+      'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE',
+      CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
+      nodeEnv,
+    ),
+    'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
+  );
+  const depositReferenceFingerprintSecret = requiredHexHmacSecret(
+    secretFromEnvironmentOrFile(
+      environment.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET,
+      environment.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE,
+      'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
+      'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE',
+      CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
+      nodeEnv,
+    ),
+    'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
+  );
+  const depositReferenceKeyProfile = loadAndVerifyCbeDepositReferenceKeyProfile(
+    environment,
+    nodeEnv,
+    {
+      encryptionSecret: depositReferenceEncryptionSecret,
+      fingerprintSecret: depositReferenceFingerprintSecret,
+    },
+  );
+
   return {
     enabled: true,
     connection: {
@@ -505,17 +556,9 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       ),
       'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
     ),
-    depositReferenceProtectionSecret: requiredHexHmacSecret(
-      secretFromEnvironmentOrFile(
-        environment.API_DEPOSIT_REFERENCE_PROTECTION_SECRET,
-        environment.API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE,
-        'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
-        'API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE',
-        '/run/secrets/api_deposit_reference_protection',
-        nodeEnv,
-      ),
-      'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
-    ),
+    depositReferenceEncryptionSecret,
+    depositReferenceFingerprintSecret,
+    depositReferenceKeyProfileVersion: depositReferenceKeyProfile.version,
     tlsMode: 'verify-full',
   };
 }
@@ -554,8 +597,12 @@ function assertDistinctApiTelegramHmacSecrets(
         telegramPlayerActionRuntime.payloadHmacSecret,
       ],
       [
-        'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
-        telegramPlayerActionRuntime.depositReferenceProtectionSecret,
+        'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
+        telegramPlayerActionRuntime.depositReferenceEncryptionSecret,
+      ],
+      [
+        'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
+        telegramPlayerActionRuntime.depositReferenceFingerprintSecret,
       ],
     );
   }
@@ -649,6 +696,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
   readonly telegramPlayerActionRuntime: {
     readonly enabled: boolean;
     readonly connectionConfigured: boolean;
+    readonly depositReferenceKeysConfigured: boolean;
+    readonly depositReferenceKeyProfileVersion: 1 | undefined;
     readonly payloadHmacConfigured: boolean;
     readonly tlsMode: 'verify-full' | undefined;
   };
@@ -681,6 +730,9 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     telegramPlayerActionRuntime: {
       enabled: config.telegramPlayerActionRuntime.enabled,
       connectionConfigured: config.telegramPlayerActionRuntime.enabled,
+      depositReferenceKeysConfigured: config.telegramPlayerActionRuntime.enabled,
+      depositReferenceKeyProfileVersion:
+        config.telegramPlayerActionRuntime.depositReferenceKeyProfileVersion,
       payloadHmacConfigured: config.telegramPlayerActionRuntime.enabled,
       tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },

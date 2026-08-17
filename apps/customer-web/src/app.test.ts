@@ -44,9 +44,32 @@ function fakeWorkspace(
   overrides: Partial<CustomerWorkspaceRuntime> = {},
 ): CustomerWorkspaceRuntime {
   return {
+    captureDepositReference: async ({ depositIntentId }) => ({
+      ok: true,
+      depositIntentId,
+      replayed: false,
+      status: { label: 'Checking payment', tone: 'working' },
+      submittedAt: '2026-08-16T00:00:00.000Z',
+    }),
     close: async () => undefined,
     ensureAccount: async () => ({ ok: true, status: 'active' }),
+    listDeposits: async () => ({ ok: true, deposits: [] }),
     listPlayerRegistrations: async () => ({ ok: true, registrations: [] }),
+    openDeposit: async ({ amountMinor }) => ({
+      ok: true,
+      instructions: {
+        amountMinor,
+        currencyCode: 'ETB',
+        customerInstruction: 'Send the exact amount using CBE Birr.',
+        depositIntentId: '018f1f58-91bd-7cc0-9e5a-5bda1d0c0185',
+        paymentDeadline: '2026-08-16T00:30:00.000Z',
+        providerName: 'CBE Birr',
+        receiverAccountHolderName: 'FetanAgent',
+        receiverAccountMasked: '***1234',
+        replayed: false,
+        status: { label: 'Ready to start', tone: 'neutral' },
+      },
+    }),
     ready: async () => true,
     submitPlayerRegistration: async ({ playerId }) => ({
       ok: true,
@@ -945,7 +968,7 @@ describe('customer web SSR and PWA boundary', () => {
     expect(ensureAccount).toHaveBeenCalledWith({ authUserId });
     expect(listPlayerRegistrations).toHaveBeenCalledWith({ authUserId, limit: 20 });
     expect(response.body).not.toContain(authUserId);
-    expect(response.body.match(new RegExp(requestKey, 'gu'))).toHaveLength(1);
+    expect(response.body.match(new RegExp(requestKey, 'gu'))).toHaveLength(2);
     expect(response.body).toContain(`type="hidden" name="requestKey" value="${requestKey}"`);
     expect(response.body).toContain('&lt;script&gt;');
     expect(response.body).not.toContain('<script>');
@@ -954,7 +977,7 @@ describe('customer web SSR and PWA boundary', () => {
     expect(response.body).toContain('Could not confirm');
     expect(response.body).not.toContain('needs_attention');
     expect(response.body).not.toContain('Needs attention');
-    for (const term of ['own' + 'er', 'ad' + 'min', 'manual', 'deposit', 'payment', 'telegram']) {
+    for (const term of ['own' + 'er', 'ad' + 'min', 'manual', 'telegram']) {
       expect(response.body.toLowerCase()).not.toContain(term);
     }
     await app.close();
@@ -1324,5 +1347,214 @@ describe('customer web SSR and PWA boundary', () => {
     await app.close();
     await app.close();
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('customer web deposit flow', () => {
+  const depositIntentId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0185';
+  const depositToken = Buffer.from(depositIntentId.replaceAll('-', ''), 'hex').toString(
+    'base64url',
+  );
+  const authenticated = fakeAuth({
+    getCurrentCustomer: async () => ({
+      account: { authUserId, email: 'person@example.com' },
+      ok: true,
+      status: 'authenticated',
+    }),
+  });
+
+  it('opens an owned policy-bounded deposit and renders protected-reference instructions', async () => {
+    const openDeposit = vi.fn<CustomerWorkspaceRuntime['openDeposit']>(async ({ amountMinor }) => ({
+      ok: true,
+      instructions: {
+        amountMinor,
+        currencyCode: 'ETB',
+        customerInstruction: 'Send the exact amount using CBE Birr.',
+        depositIntentId,
+        paymentDeadline: '2026-08-16T00:30:00.000Z',
+        providerName: 'CBE Birr',
+        receiverAccountHolderName: 'FetanAgent',
+        receiverAccountMasked: '***1234',
+        replayed: false,
+        status: { label: 'Ready to start', tone: 'neutral' },
+      },
+    }));
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      depositReferenceProtectionSecrets: {
+        encryptionSecret: 'd'.repeat(64),
+        fingerprintSecret: 'e'.repeat(64),
+      },
+      requestKeyFactory: () => requestKey,
+      workspace: fakeWorkspace({ openDeposit }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/deposits',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({
+        _csrf: csrfToken,
+        amountEtb: '25.00',
+        playerId: 'PLAYER-DEMO-42',
+        requestKey,
+      }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(openDeposit).toHaveBeenCalledWith({
+      amountMinor: '2500',
+      authUserId,
+      playerId: 'PLAYER-DEMO-42',
+      requestKey,
+    });
+    expect(response.body).toContain('Send 25.00 ETB');
+    expect(response.body).toContain('***1234');
+    expect(response.body).toContain(`name="depositToken" value="${depositToken}"`);
+    expect(response.body).toContain('name="transactionReference"');
+    expect(response.body).toContain('minlength="5"');
+    expect(response.body).not.toContain(depositIntentId);
+    await app.close();
+  });
+
+  it('protects the reference in trusted memory and submits no raw reference to the database port', async () => {
+    const captureDepositReference = vi.fn<CustomerWorkspaceRuntime['captureDepositReference']>(
+      async (input) => ({
+        ok: true,
+        depositIntentId: input.depositIntentId,
+        replayed: false,
+        status: { label: 'Checking payment', tone: 'working' },
+        submittedAt: '2026-08-16T00:05:00.000Z',
+      }),
+    );
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      depositReferenceProtectionSecrets: {
+        encryptionSecret: 'd'.repeat(64),
+        fingerprintSecret: 'e'.repeat(64),
+      },
+      workspace: fakeWorkspace({ captureDepositReference }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/deposits/reference',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({
+        _csrf: csrfToken,
+        depositToken,
+        requestKey,
+        transactionReference: 'Ab.Cd-1234',
+      }),
+    });
+
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe('/workspace?deposit-submitted=1');
+    const input = captureDepositReference.mock.calls[0]?.[0];
+    expect(input).toMatchObject({
+      authUserId,
+      depositIntentId,
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      keyVersion: 1,
+      masked: '***1234',
+      requestKey,
+    });
+    expect(input?.ciphertext).toMatch(/^v1\./u);
+    expect(JSON.stringify(input)).not.toContain('Ab.Cd-1234');
+    expect(JSON.stringify(input)).not.toContain('AB.CD-1234');
+    await app.close();
+  });
+
+  it('rejects a reference whose four-character mask would reveal the complete value', async () => {
+    const captureDepositReference = vi.fn<CustomerWorkspaceRuntime['captureDepositReference']>();
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      depositReferenceProtectionSecrets: {
+        encryptionSecret: 'd'.repeat(64),
+        fingerprintSecret: 'e'.repeat(64),
+      },
+      workspace: fakeWorkspace({ captureDepositReference }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/deposits/reference',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({
+        _csrf: csrfToken,
+        depositToken,
+        requestKey,
+        transactionReference: 'ABCD',
+      }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(captureDepositReference).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('fails closed before database mutation when protection is unavailable or amount is outside policy', async () => {
+    const openDeposit = vi.fn<CustomerWorkspaceRuntime['openDeposit']>();
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      workspace: fakeWorkspace({ openDeposit }),
+    });
+    const cookie = `__Host-fetanagent-csrf=${csrfToken}`;
+    const unavailable = await app.inject({
+      method: 'POST',
+      url: '/deposits',
+      headers: mutationHeaders(cookie),
+      payload: form({
+        _csrf: csrfToken,
+        amountEtb: '25',
+        playerId: 'PLAYER-DEMO-42',
+        requestKey,
+      }),
+    });
+    const belowMinimum = await app.inject({
+      method: 'POST',
+      url: '/deposits',
+      headers: mutationHeaders(cookie),
+      payload: form({
+        _csrf: csrfToken,
+        amountEtb: '24.99',
+        playerId: 'PLAYER-DEMO-42',
+        requestKey,
+      }),
+    });
+    expect(unavailable.statusCode).toBe(503);
+    expect(belowMinimum.statusCode).toBe(400);
+    expect(openDeposit).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('shows customer-safe deposit status without internal execution identifiers', async () => {
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      workspace: fakeWorkspace({
+        listDeposits: async () => ({
+          ok: true,
+          deposits: [
+            {
+              amountMinor: '2500',
+              createdAt: '2026-08-16T00:00:00.000Z',
+              currencyCode: 'ETB',
+              depositIntentId,
+              status: { label: 'Preparing deposit', tone: 'working' },
+              updatedAt: '2026-08-16T00:10:00.000Z',
+            },
+          ],
+        }),
+      }),
+    });
+    const response = await app.inject({ method: 'GET', url: '/workspace' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('25.00 ETB');
+    expect(response.body).toContain('Preparing deposit');
+    expect(response.body).not.toContain(depositIntentId);
+    expect(response.body).not.toMatch(/execution_attempt|platform_agent|external_reference/iu);
+    await app.close();
   });
 });

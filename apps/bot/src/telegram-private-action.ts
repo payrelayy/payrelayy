@@ -2,6 +2,7 @@ import {
   TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
   parseTelegramPlayerRegistrationCapabilityCallback,
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionIdentity,
@@ -169,7 +170,7 @@ export function reduceTelegramDepositReferenceCommand(
     depositToken.length !== TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH ||
     !COMPACT_UUID_PATTERN.test(depositToken) ||
     !transactionReference ||
-    Array.from(transactionReference).length < 4 ||
+    Array.from(transactionReference).length < TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS ||
     Array.from(transactionReference).length > TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS ||
     !/^[A-Za-z0-9._-]+$/u.test(transactionReference)
   ) {
@@ -181,4 +182,22 @@ export function reduceTelegramDepositReferenceCommand(
     depositToken,
     transactionReference,
   };
+}
+
+/** Parse an exact compact status token without treating its presentation as authority. */
+export function reduceTelegramDepositStatusCommand(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.command !== 'string') return undefined;
+  const match = /^\/deposit_status ([A-Za-z0-9_-]+)$/u.exec(metadata.command);
+  const depositToken = match?.[1];
+  if (
+    !depositToken ||
+    depositToken.length !== TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH ||
+    !COMPACT_UUID_PATTERN.test(depositToken)
+  ) {
+    return undefined;
+  }
+  return { ...identity, kind: 'deposit_status_command', depositToken };
 }

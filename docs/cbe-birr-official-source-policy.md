@@ -84,6 +84,21 @@ The current shadow lease also mutates state and returns protected material befor
 preflight. These findings are blockers, not implemented capabilities. See
 [cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
 
+The Stage 1F package also exposes a metadata-only normalization ownership inventory for three
+existing boundaries. Submitted-reference capture has no normalization version: after strict bounded
+ASCII validation it uppercases the accepted reference inside the protection boundary. The
+`fixture-normalizer-v1` label belongs only to offline synthetic safe-fact reduction, and
+`cbe-birr-normalization-v1` is only shadow-settlement metadata with no bound normalizer. None of
+these observations selects or implements an authoritative normalization profile.
+
+Authoritative ownership remains unassigned, joint review remains incomplete, and compatibility
+between every pair remains not established. Unknown versions, labels, fields, and shapes fail
+closed, with no implicit upgrade. Normalized source attestations also make unreviewed semantic drift
+in the two transforming boundaries fail the compatibility tests. The three normalization blockers
+therefore remain unresolved. The inventory adds no runtime, provider request, decryption,
+protected-material access, database grant, evidence, claim, or financial capability and does not
+change the source status from `unproven`.
+
 ## P0 prerequisites for any positive capability
 
 There must be no positive source capability until every prerequisite below is implemented,
@@ -103,7 +118,8 @@ independently reviewed, and supported by reproducible evidence:
    lifecycle.
 4. **Normalization ownership.** Jointly review the lookup-reference, receiver-lookup, and
    canonical-reference normalization profiles. Specify their exact transformations, ownership,
-   compatibility rules, and fail-closed upgrades; do not assume that one profile represents
+   compatibility rules, and fail-closed upgrades; the metadata-only inventory records current
+   observations but does not complete this review, and no profile may be assumed to represent
    another.
 5. **Prelease prerequisite gate.** Redesign acquisition so a non-mutating metadata preflight runs
    before any lease mutation or protected-material return. A later payload must use an opaque handle

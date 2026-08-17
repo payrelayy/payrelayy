@@ -24,18 +24,41 @@ export function presentTelegramPlayerIdFlowResult(
     case 'deposit_instructions':
       return {
         kind: 'message',
-        text: [
-          'SIMULATION ONLY — DO NOT SEND MONEY.',
-          `Dry-run CBE Birr deposit simulation: ${formatMinorEtb(result.amountMinor)} ETB.`,
-          `Test instruction: ${result.customerInstruction}`,
-          `Synthetic receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
-          `Test deadline: ${result.paymentDeadline}.`,
-          `To test protected reference capture, send /reference ${result.depositToken} TEST_REFERENCE.`,
-          'No payment is verified or executed, and KemerBet execution remains disabled.',
-        ].join('\n'),
+        text:
+          result.financialMode === 'live'
+            ? [
+                `CBE Birr deposit: ${formatMinorEtb(result.amountMinor)} ETB.`,
+                `Status: ${result.depositStatus.label}.`,
+                result.customerInstruction,
+                `Receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
+                `Payment deadline: ${result.paymentDeadline}.`,
+                `After paying, send /reference ${result.depositToken} YOUR_TRANSACTION_REFERENCE.`,
+                `Check progress with /deposit_status ${result.depositToken}.`,
+              ].join('\n')
+            : [
+                'SIMULATION ONLY — DO NOT SEND MONEY.',
+                `Dry-run CBE Birr deposit simulation: ${formatMinorEtb(result.amountMinor)} ETB.`,
+                `Status: ${result.depositStatus.label}.`,
+                `Test instruction: ${result.customerInstruction}`,
+                `Synthetic receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
+                `Test deadline: ${result.paymentDeadline}.`,
+                `To test protected reference capture, send /reference ${result.depositToken} TEST_REFERENCE.`,
+                'No payment is verified or executed in this simulation.',
+              ].join('\n'),
       };
     case 'deposit_reference_received':
-      return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositReferenceReceived') };
+      return {
+        kind: 'message',
+        text:
+          result.financialMode === 'live'
+            ? `Reference received. Status: ${result.depositStatus.label}.`
+            : `Simulation reference received. Status: ${result.depositStatus.label}.`,
+      };
+    case 'deposit_status':
+      return {
+        kind: 'message',
+        text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${result.depositStatus.label}.`,
+      };
     case 'deposit_input_invalid':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositInputInvalid') };
     case 'deposit_unavailable':

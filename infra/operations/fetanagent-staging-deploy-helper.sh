@@ -63,6 +63,13 @@ require_service_file() {
     die 'a service secret does not have the required ownership and mode'
 }
 
+require_immutable_config_file() {
+  local path="$1"
+  [[ ! -L "$path" && -f "$path" ]] || die 'a required immutable config file is absent or symbolic'
+  [[ "$(stat --format='%U:%G:%a' "$path")" == 'root:root:444' ]] ||
+    die 'an immutable config file does not have the required ownership and mode'
+}
+
 stop_project() {
   local containers networks
   containers="$(docker_local container ls --all --quiet --filter "label=com.docker.compose.project=$PROJECT_NAME")"
@@ -87,7 +94,9 @@ stop_project() {
     "$SECRET_ROOT/api-action-payload-hmac" \
     "$SECRET_ROOT/api-action-capability-hmac" \
     "$SECRET_ROOT/api-action-semantic-hmac" \
-    "$SECRET_ROOT/api-deposit-reference-protection" \
+    "$SECRET_ROOT/cbe-deposit-reference-encryption-key" \
+    "$SECRET_ROOT/cbe-deposit-reference-fingerprint-key" \
+    "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json" \
     "$SECRET_ROOT/bot-action-transport-hmac" \
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
@@ -543,7 +552,8 @@ case "$command" in
 
     expected_files="$({ printf '%s\n' \
       api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
-      api-deposit-reference-protection \
+      cbe-deposit-reference-encryption-key cbe-deposit-reference-fingerprint-key \
+      cbe-deposit-reference-key-profile.v1.json \
       api-action-transport-hmac \
       beta-database-url beta-payload-hmac beta-transport-hmac bot-token bot-transport-hmac \
       bot-action-transport-hmac player-action-database-url \
@@ -570,7 +580,9 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$incoming/api-action-payload-hmac" "$SECRET_ROOT/api-action-payload-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/api-action-capability-hmac" "$SECRET_ROOT/api-action-capability-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/api-action-semantic-hmac" "$SECRET_ROOT/api-action-semantic-hmac"
-    install -o 10001 -g 10001 -m 0400 "$incoming/api-deposit-reference-protection" "$SECRET_ROOT/api-deposit-reference-protection"
+    install -o 10001 -g 10001 -m 0400 "$incoming/cbe-deposit-reference-encryption-key" "$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+    install -o 10001 -g 10001 -m 0400 "$incoming/cbe-deposit-reference-fingerprint-key" "$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+    install -o root -g root -m 0444 "$incoming/cbe-deposit-reference-key-profile.v1.json" "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-action-transport-hmac" "$SECRET_ROOT/bot-action-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-token" "$SECRET_ROOT/bot-token"
     install -o 10001 -g 10001 -m 0400 "$incoming/publishable-key" "$SECRET_ROOT/publishable-key"
@@ -600,11 +612,12 @@ case "$command" in
       owner-database-url publishable-key beta-database-url beta-transport-hmac \
       bot-transport-hmac beta-payload-hmac bot-token player-action-database-url \
       api-action-transport-hmac api-action-payload-hmac api-action-capability-hmac \
-      api-action-semantic-hmac api-deposit-reference-protection bot-action-transport-hmac; do
+      api-action-semantic-hmac cbe-deposit-reference-encryption-key \
+      cbe-deposit-reference-fingerprint-key bot-action-transport-hmac; do
       require_service_file "$SECRET_ROOT/$service_file"
     done
-    [[ ! -L "$SECRET_ROOT/supabase-ca.crt" && "$(stat --format='%U:%G:%a' "$SECRET_ROOT/supabase-ca.crt")" == 'root:root:444' ]] ||
-      die 'the public Supabase CA ownership or mode is unsafe'
+    require_immutable_config_file "$SECRET_ROOT/supabase-ca.crt"
+    require_immutable_config_file "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
 
     for image in owner-control api beta-admission bot gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
@@ -629,7 +642,9 @@ case "$command" in
       FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
       FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
       FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
-      FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE="$SECRET_ROOT/api-deposit-reference-protection"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
       FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
       FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
@@ -717,7 +732,9 @@ case "$command" in
       FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
       FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
       FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
-      FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE="$SECRET_ROOT/api-deposit-reference-protection"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
       FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
       FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"

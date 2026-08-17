@@ -43,33 +43,39 @@ review the commit, runtime credentials, startup preflight, and resulting rendere
 ## External secret files
 
 No secret value belongs in this repository, an `.env` file, a Compose environment value, an image,
-or a command line. The operator must provide fourteen service-separated input files and one verified
-public CA file outside the checkout:
+or a command line. The operator must provide fifteen service-separated secret files, one
+independently approved immutable nonsecret key-profile file, and one verified public CA file outside
+the checkout:
 
-| Host-path selector                                               | Mounted only into | Container path                                        |
-| ---------------------------------------------------------------- | ----------------- | ----------------------------------------------------- |
-| `FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE`             | owner-control     | `/run/secrets/owner_control_database_url`             |
-| `FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE` | owner-control     | `/run/secrets/owner_control_supabase_publishable_key` |
-| `FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE`            | beta-admission    | `/run/secrets/beta_admission_database_url`            |
-| `FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE`          | beta-admission    | `/run/secrets/beta_admission_bot_transport_hmac`      |
-| `FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE`            | beta-admission    | `/run/secrets/beta_admission_payload_hmac`            |
-| `FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE`             | api               | `/run/secrets/player_action_database_url`             |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | api               | `/run/secrets/api_player_action_transport_hmac`       |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`         | api               | `/run/secrets/api_player_action_payload_hmac`         |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`      | api               | `/run/secrets/api_player_action_capability_hmac`      |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`        | api               | `/run/secrets/api_player_action_semantic_hmac`        |
-| `FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE`       | api               | `/run/secrets/api_deposit_reference_protection`       |
-| `FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                | all DB clients    | `/run/configs/supabase_ca_certificate`                |
-| `FETANAGENT_STAGING_BOT_TOKEN_FILE`                              | bot               | `/run/secrets/telegram_bot_token`                     |
-| `FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE`                     | bot               | `/run/secrets/bot_beta_admission_transport_hmac`      |
-| `FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | bot               | `/run/secrets/bot_player_action_transport_hmac`       |
+| Host-path selector                                               | Mounted only into | Container path                                              |
+| ---------------------------------------------------------------- | ----------------- | ----------------------------------------------------------- |
+| `FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE`             | owner-control     | `/run/secrets/owner_control_database_url`                   |
+| `FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE` | owner-control     | `/run/secrets/owner_control_supabase_publishable_key`       |
+| `FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE`            | beta-admission    | `/run/secrets/beta_admission_database_url`                  |
+| `FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE`          | beta-admission    | `/run/secrets/beta_admission_bot_transport_hmac`            |
+| `FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE`            | beta-admission    | `/run/secrets/beta_admission_payload_hmac`                  |
+| `FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE`             | api               | `/run/secrets/player_action_database_url`                   |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | api               | `/run/secrets/api_player_action_transport_hmac`             |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`         | api               | `/run/secrets/api_player_action_payload_hmac`               |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`      | api               | `/run/secrets/api_player_action_capability_hmac`            |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`        | api               | `/run/secrets/api_player_action_semantic_hmac`              |
+| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE`   | api               | `/run/secrets/cbe_deposit_reference_encryption_key`         |
+| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE`  | api               | `/run/secrets/cbe_deposit_reference_fingerprint_key`        |
+| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE`      | api               | `/etc/fetanagent/cbe-deposit-reference-key-profile.v1.json` |
+| `FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                | all DB clients    | `/run/configs/supabase_ca_certificate`                      |
+| `FETANAGENT_STAGING_BOT_TOKEN_FILE`                              | bot               | `/run/secrets/telegram_bot_token`                           |
+| `FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE`                     | bot               | `/run/secrets/bot_beta_admission_transport_hmac`            |
+| `FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`       | bot               | `/run/secrets/bot_player_action_transport_hmac`             |
 
 The two transport-HMAC files must contain the same independently generated 32-byte lowercase-hex
 value, but they are intentionally separate host files and separate mounts. The bot cannot read the
 beta service's copy and the beta service cannot read the bot's copy. Each database URL is visible
 only to its owning service; the payload HMAC is beta-service-only, and the Telegram token is
-bot-only. Owner control is placed on a separate egress-capable bridge from the bot and admission
-service.
+bot-only. The CBE encryption and fingerprint files contain two distinct independently provisioned
+32-byte lowercase-hex keys. Their version-1 profile is a separately approved nonsecret artifact
+containing only the two `sha256:` key identities; ordinary deployment must never derive or replace
+that profile from the current keys. Only the API receives the two key mounts and the profile mount.
+Owner control is placed on a separate egress-capable bridge from the bot and admission service.
 
 All three database URLs must use the staging project's exact IPv6 direct endpoint:
 `db.spzpiyxheappsfyswewl.supabase.co:5432`, database `postgres`, and the bare dedicated username
@@ -83,8 +89,9 @@ the CA file. Compose mounts it read-only and sets `NODE_EXTRA_CA_CERTS`; certifi
 remains enabled.
 
 Each secret source file must be owned by UID/GID 10001 and have mode `0400` before any container is
-created. The public CA must be immutable to the service account and mounted as `0444`. The long
-Compose syntax repeats UID, GID, and mode on every mount. Some non-Swarm Compose
+created. The public CA and CBE key profile must be owned by root, mode `0444`, and immutable to the
+service account. Both configs are mounted as `0444`. The long Compose syntax repeats UID, GID, and
+mode on every mount. Some non-Swarm Compose
 implementations use a bind mount and may not enforce those attributes, so staging activation must
 verify the source metadata and the mounted metadata rather than assuming the YAML changed it.
 
@@ -97,8 +104,10 @@ The application must support these exact file-valued variables before activation
 - api: `PLAYER_ACTION_DATABASE_URL_FILE`, `BOT_TO_API_ACTION_HMAC_SECRET_FILE`,
   `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE`,
   `API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE`, and
-  `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE`, and
-  `API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE`;
+  `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE`,
+  `CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE`,
+  `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE`, and
+  `CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE`;
 - bot additionally: `BOT_TO_API_ACTION_HMAC_SECRET_FILE`;
 - owner-control: `OWNER_CONTROL_DATABASE_URL_FILE` and
   `OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`; a Supabase service-role key is forbidden.
@@ -123,9 +132,9 @@ disabled generic action/provider gates, and absence of the production ref.
 Before any separately approved build, set `FETANAGENT_VCS_REF` to the reviewed full commit SHA and
 `FETANAGENT_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
 that contains no `.env`/`.env.*` file and from a cleared process environment with no inherited
-direct secret variable. Supply only the two non-secret image selectors, fourteen external
-service-input selectors, and the verified public CA path selector explicitly. The future render must
-disable Compose's implicit checkout `.env` loading:
+direct secret variable. Supply only the two non-secret image selectors, fifteen external secret-file
+selectors, the immutable key-profile selector, and the verified public CA path selector explicitly.
+The future render must disable Compose's implicit checkout `.env` loading:
 
 ```bash
 env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
@@ -141,7 +150,9 @@ env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE=<external-path> \
   FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE=<external-path> \
   FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE=<external-path> \
-  FETANAGENT_STAGING_API_DEPOSIT_REFERENCE_PROTECTION_FILE=<external-path> \
+  FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE=<external-path> \
+  FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE=<external-path> \
+  FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE=<approved-immutable-profile-path> \
   FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE=<verified-external-path> \
   FETANAGENT_STAGING_BOT_TOKEN_FILE=<external-path> \
   FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE=<external-path> \
@@ -177,31 +188,35 @@ The protected `staging` environment must hold these deploy inputs before `deploy
 `transition-stop-legacy` mode use only the three `STAGING_VM_*` SSH inputs. Never paste any
 protected value into a task, repository file, workflow input, or VM command line.
 
-| Environment secret                               | Required boundary                                    |
-| ------------------------------------------------ | ---------------------------------------------------- |
-| `SUPABASE_DB_PASSWORD`                           | staging database administrator password              |
-| `SUPABASE_CA_CERTIFICATE_PEM`                    | verified staging database CA PEM                     |
-| `BETA_ADMISSION_RUNTIME_PASSWORD`                | independent 32-byte lowercase hex                    |
-| `OWNER_CONTROL_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex          |
-| `PLAYER_ACTION_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex          |
-| `BOT_TO_BETA_ADMISSION_HMAC_SECRET`              | independent 32-byte lowercase hex                    |
-| `BETA_ADMISSION_PAYLOAD_HMAC_SECRET`             | different independent 32-byte lowercase hex          |
-| `BOT_TO_API_ACTION_HMAC_SECRET`                  | distinct 32-byte lowercase hex; shared bot/API value |
-| `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET` | distinct 32-byte lowercase hex                       |
-| `API_TELEGRAM_CAPABILITY_HMAC_SECRET`            | distinct 32-byte lowercase hex                       |
-| `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET`       | distinct 32-byte lowercase hex                       |
-| `API_DEPOSIT_REFERENCE_PROTECTION_SECRET`        | distinct 32-byte lowercase hex; retain for decrypts  |
-| `STAGING_TELEGRAM_BOT_TOKEN`                     | newly rotated staging-only BotFather token           |
-| `STAGING_SUPABASE_PUBLISHABLE_KEY`               | staging publishable key; never `service_role`        |
-| `STAGING_VM_HOST`                                | exact approved staging VM host                       |
-| `STAGING_VM_KNOWN_HOSTS`                         | pinned OpenSSH known-hosts entry                     |
-| `STAGING_VM_SSH_PRIVATE_KEY`                     | dedicated non-root deployment identity private key   |
+| Protected environment input                      | Required boundary                                                     |
+| ------------------------------------------------ | --------------------------------------------------------------------- |
+| `SUPABASE_DB_PASSWORD`                           | staging database administrator password                               |
+| `SUPABASE_CA_CERTIFICATE_PEM`                    | verified staging database CA PEM                                      |
+| `BETA_ADMISSION_RUNTIME_PASSWORD`                | independent 32-byte lowercase hex                                     |
+| `OWNER_CONTROL_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex                           |
+| `PLAYER_ACTION_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex                           |
+| `BOT_TO_BETA_ADMISSION_HMAC_SECRET`              | independent 32-byte lowercase hex                                     |
+| `BETA_ADMISSION_PAYLOAD_HMAC_SECRET`             | different independent 32-byte lowercase hex                           |
+| `BOT_TO_API_ACTION_HMAC_SECRET`                  | distinct 32-byte lowercase hex; shared bot/API value                  |
+| `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET` | distinct 32-byte lowercase hex                                        |
+| `API_TELEGRAM_CAPABILITY_HMAC_SECRET`            | distinct 32-byte lowercase hex                                        |
+| `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET`       | distinct 32-byte lowercase hex                                        |
+| `CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET`        | distinct 32-byte lowercase hex; retain for decrypts                   |
+| `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET`       | distinct 32-byte lowercase hex; stable blind index                    |
+| `CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON`      | protected nonsecret variable; independently approved exact v1 profile |
+| `STAGING_TELEGRAM_BOT_TOKEN`                     | newly rotated staging-only BotFather token                            |
+| `STAGING_SUPABASE_PUBLISHABLE_KEY`               | staging publishable key; never `service_role`                         |
+| `STAGING_VM_HOST`                                | exact approved staging VM host                                        |
+| `STAGING_VM_KNOWN_HOSTS`                         | pinned OpenSSH known-hosts entry                                      |
+| `STAGING_VM_SSH_PRIVATE_KEY`                     | dedicated non-root deployment identity private key                    |
 
-The three runtime passwords, all independently purposed HMAC values, and the deposit-reference
-protection key must differ. Keep the deposit-reference key stable for the lifetime of records
-encrypted under version 1; rotate only through a reviewed key-version migration. The VM key must authenticate only
-the non-root `fetanagent-admin` identity. The historical BotFather token shown in an earlier
-screenshot is compromised and must never be reused.
+The three runtime passwords, all independently purposed HMAC values, and both deposit-reference keys
+must differ. Keep both deposit-reference keys and their separately approved profile stable for the
+lifetime of version-1 records; rotate only through a reviewed key-version migration. The workflow
+validates and materializes the protected profile value without computing it from the keys, and the
+API startup preflight machine-checks both mounted key identities against it. The VM key must
+authenticate only the non-root `fetanagent-admin` identity. The historical BotFather token shown in
+an earlier screenshot is compromised and must never be reused.
 
 `Staging beta deploy and smoke` is manual-only and dormant unless dispatched from the exact
 reviewed `main` commit with the staging project ref and DigitalOcean droplet ID typed back. `plan`

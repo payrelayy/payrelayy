@@ -31,6 +31,9 @@ importers:
       '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../../packages/deposit-reference-protection
       '@fetanagent/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -106,12 +109,18 @@ importers:
       '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@fetanagent/customer-web-auth-runtime':
         specifier: workspace:*
         version: link:../../packages/customer-web-auth-runtime
       '@fetanagent/customer-web-workspace-runtime':
         specifier: workspace:*
         version: link:../../packages/customer-web-workspace-runtime
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../../packages/deposit-reference-protection
       fastify:
         specifier: 5.11.2
         version: 5.11.2
@@ -124,6 +133,12 @@ importers:
       '@fetanagent/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+      playwright-core:
+        specifier: 1.62.1
+        version: 1.62.1
 
   apps/maintenance:
     dependencies:
@@ -193,11 +208,19 @@ importers:
         specifier: 2.112.3
         version: 2.112.3
 
+  packages/deposit-reference-protection: {}
+
   packages/customer-web-workspace-runtime:
     dependencies:
       '@fetanagent/config':
         specifier: workspace:*
         version: link:../config
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@fetanagent/domain':
+        specifier: workspace:*
+        version: link:../domain
       pg:
         specifier: 8.22.0
         version: 8.22.0
@@ -1289,6 +1312,14 @@ packages:
       }
     hasBin: true
 
+  playwright-core@1.62.1:
+    resolution:
+      {
+        integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==,
+      }
+    engines: { node: '>=20' }
+    hasBin: true
+
   postcss@8.5.26:
     resolution:
       {
@@ -2206,6 +2237,8 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
+
+  playwright-core@1.62.1: {}
 
   postcss@8.5.26:
     dependencies:

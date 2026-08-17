@@ -95,7 +95,9 @@ The prerequisite package adds no proof input, customer route, UI, staff workflow
 database record, schema change, grant, role, runtime configuration, deployment wiring, association,
 `Ready` projection, deposit eligibility, or financial action. Its contract version 2 keeps all 19
 capability flags false. The existing web-origin association rejection and exact three-function
-customer-web role remain unchanged.
+ownership/account surface remain unchanged. The customer-web role now has three additional
+default-off deposit-intake/status functions, but they cannot create ownership or eligibility and
+cannot accept a write unless the independent financial/source switches are locked live.
 
 A later proof-bearing implementation must record non-financial ownership independently from deposit
 eligibility. Only a separate financial review may promote a proven ownership fact to a

@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@fetanagent/config": "workspace:*",
+    "@fetanagent/contracts": "workspace:*",
+    "@fetanagent/domain": "workspace:*",
     "pg": "8.22.0"
   },
   "scripts": {

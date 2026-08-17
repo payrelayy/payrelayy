@@ -1,0 +1,153 @@
+name: Executor image smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  executor-image-smoke:
+    name: Build and smoke inert executor startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Resolve the exact Chromium package from the pinned base
+        id: chromium
+        shell: bash
+        env:
+          EXECUTOR_BASE_IMAGE: node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
+        run: |
+          set -euo pipefail
+          chromium_version="$(
+            docker run --rm --platform linux/amd64 "$EXECUTOR_BASE_IMAGE" \
+              sh -euc "apt-get update >/dev/null; apt-cache policy chromium | awk '/Candidate:/ { print \$2; exit }'"
+          )"
+          [[ "$chromium_version" =~ ^[0-9][0-9A-Za-z.+:~_-]*$ ]]
+          [[ "$chromium_version" != '(none)' ]]
+          echo "version=$chromium_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build the executor image
+        shell: bash
+        env:
+          CHROMIUM_PACKAGE_VERSION: ${{ steps.chromium.outputs.version }}
+          EXECUTOR_IMAGE: fetanagent-deposit-executor:ci
+        run: |
+          set -euo pipefail
+          docker build --pull=false --target executor \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=$CHROMIUM_PACKAGE_VERSION" \
+            --tag "$EXECUTOR_IMAGE" .
+
+          test "$(docker image inspect "$EXECUTOR_IMAGE" --format '{{.Config.User}}')" = '10001:10001'
+          test "$(docker image inspect "$EXECUTOR_IMAGE" --format '{{json .Config.Cmd}}')" = \
+            '["node","apps/executor/dist/index.js"]'
+          test "$(docker image inspect "$EXECUTOR_IMAGE" \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          test "$(docker image inspect "$EXECUTOR_IMAGE" \
+            --format '{{index .Config.Labels "org.opencontainers.image.chromium-package-version"}}')" = \
+            "$CHROMIUM_PACKAGE_VERSION"
+
+      - name: Verify default startup fails closed without live inputs
+        shell: bash
+        env:
+          EXECUTOR_IMAGE: fetanagent-deposit-executor:ci
+        run: |
+          set -euo pipefail
+          set +e
+          startup_output="$(
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --env NODE_ENV=production \
+              --env FINANCIAL_ACTIONS_MODE=dry_run \
+              --env KEMERBET_EXECUTOR_ENABLED=false \
+              --env KEMERBET_FINAL_ACTION_ENABLED=false \
+              "$EXECUTOR_IMAGE" 2>&1
+          )"
+          startup_status=$?
+          set -e
+
+          test "$startup_status" -eq 1
+          grep -Fx 'FetanAgent deposit executor failed closed.' <<<"$startup_output"
+
+      - name: Start and probe the inert executor health boundary
+        shell: bash
+        env:
+          EXECUTOR_IMAGE: fetanagent-deposit-executor:ci
+        run: |
+          set -euo pipefail
+          container_name='fetanagent-executor-startup-smoke'
+          trap 'docker rm --force "$container_name" >/dev/null 2>&1 || true' EXIT
+
+          docker run --detach --name "$container_name" --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges --no-healthcheck \
+            --env NODE_ENV=production \
+            --env FINANCIAL_ACTIONS_MODE=dry_run \
+            --env KEMERBET_EXECUTOR_ENABLED=false \
+            --env KEMERBET_FINAL_ACTION_ENABLED=false \
+            "$EXECUTOR_IMAGE" node --input-type=module --eval "
+              const { createKemerBetExecutorHealth } = await import(
+                './apps/executor/dist/executor-health.js'
+              );
+              const { createKemerBetExecutorHealthServer } = await import(
+                './apps/executor/dist/executor-health-server.js'
+              );
+              const forbiddenProbe = async () => {
+                throw new Error('The inert container smoke must not probe a live dependency.');
+              };
+              const health = createKemerBetExecutorHealth({
+                platformAgentAccountIds: [],
+                probeDatabase: forbiddenProbe,
+                probeSessionReadiness: forbiddenProbe,
+              });
+              const server = createKemerBetExecutorHealthServer(health, {
+                host: '127.0.0.1',
+                port: 8090,
+              });
+              await server.start();
+              const stop = async () => {
+                health.markStopping();
+                await server.close();
+              };
+              process.once('SIGINT', () => void stop());
+              process.once('SIGTERM', () => void stop());
+            "
+
+          for attempt in {1..20}; do
+            if docker exec "$container_name" node --input-type=module --eval \
+              "const response = await fetch('http://127.0.0.1:8090/healthz');
+               if (response.status !== 200) process.exit(1);"; then
+              break
+            fi
+            test "$(docker inspect "$container_name" --format '{{.State.Running}}')" = 'true'
+            if [[ "$attempt" -eq 20 ]]; then
+              docker logs "$container_name"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker exec "$container_name" node --input-type=module --eval \
+            "const health = await fetch('http://127.0.0.1:8090/healthz');
+             const healthBody = await health.json();
+             if (health.status !== 200 || healthBody.status !== 'ok' ||
+                 healthBody.service !== 'fetanagent-executor') process.exit(1);
+             const readiness = await fetch('http://127.0.0.1:8090/readyz');
+             const readinessBody = await readiness.json();
+             if (readiness.status !== 503 || readinessBody.ready !== false ||
+                 readinessBody.reason !== 'sessions_not_configured' ||
+                 readinessBody.service !== 'fetanagent-executor') process.exit(1);"

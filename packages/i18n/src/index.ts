@@ -32,7 +32,7 @@ export const messages = {
     en: 'FetanAgent private beta is temporarily unavailable. Please try again shortly.',
   },
   playerRegistrationMenu: {
-    en: 'Manage your KemerBet Player ID, or start a dry-run deposit with /deposit PLAYER_ID AMOUNT.',
+    en: 'Manage your KemerBet Player ID, or start a deposit with /deposit PLAYER_ID AMOUNT.',
   },
   addKemerBetPlayerId: {
     en: 'Add KemerBet Player ID',
@@ -56,13 +56,13 @@ export const messages = {
     en: 'Player ID setup is temporarily unavailable. Please try again shortly.',
   },
   depositInputInvalid: {
-    en: 'Use /deposit PLAYER_ID AMOUNT or /reference DEPOSIT_CODE TRANSACTION_REFERENCE.',
+    en: 'Use /deposit PLAYER_ID AMOUNT, /reference DEPOSIT_CODE TRANSACTION_REFERENCE, or /deposit_status DEPOSIT_CODE.',
   },
   depositUnavailable: {
-    en: 'Dry-run deposit intake is temporarily unavailable. No payment action was started.',
+    en: 'Deposit intake is temporarily unavailable. No payment action was started.',
   },
   depositReferenceReceived: {
-    en: 'Transaction reference saved for dry-run review. It has not been verified and no KemerBet action was started.',
+    en: 'Transaction reference received. Check the deposit status for progress.',
   },
 } as const satisfies Record<string, Record<Locale, string>>;
 

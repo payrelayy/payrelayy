@@ -8,8 +8,12 @@ import {
   readSqlIntegrationEnvironment,
   type SqlIntegrationEnvironment,
 } from './environment.js';
+import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
+import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
+import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
+import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
 
 type RoleRow = {
   readonly rolbypassrls: boolean;
@@ -7600,7 +7604,7 @@ describe('disposable SQL migration baseline', () => {
     ]);
   });
 
-  it('installs only private dormant execution and reconciliation ledger surfaces', async () => {
+  it('keeps execution ledgers private beneath the exact production command surface', async () => {
     const enumRows = await client.query<{
       readonly labels: readonly string[];
       readonly type_name: string;
@@ -7662,6 +7666,7 @@ describe('disposable SQL migration baseline', () => {
           'resolved_at',
           'created_at',
           'updated_at',
+          'exact_player_credit_match',
         ],
         table_name: 'deposit_execution_attempts',
       },
@@ -7844,6 +7849,7 @@ describe('disposable SQL migration baseline', () => {
       with expected(signature) as (
         values
           ('app.reject_execution_ledger_truncate()'),
+          ('app.enforce_deposit_execution_modal_fact()'),
           ('app.enforce_deposit_execution_attempt()'),
           ('app.enforce_execution_reconciliation_insert()'),
           ('app.enforce_execution_deposit_job_safety()'),
@@ -7868,7 +7874,7 @@ describe('disposable SQL migration baseline', () => {
         join pg_proc routine on routine.oid = pg_catalog.to_regprocedure(expected.signature)
        order by routine.proname
     `);
-    expect(functionRows.rows).toHaveLength(5);
+    expect(functionRows.rows).toHaveLength(6);
     expect(
       functionRows.rows.every(
         (row) =>
@@ -7910,6 +7916,7 @@ describe('disposable SQL migration baseline', () => {
       ), expected(signature) as (
         values
           ('app.reject_execution_ledger_truncate()'),
+          ('app.enforce_deposit_execution_modal_fact()'),
           ('app.enforce_deposit_execution_attempt()'),
           ('app.enforce_execution_reconciliation_insert()'),
           ('app.enforce_execution_deposit_job_safety()'),
@@ -7923,7 +7930,7 @@ describe('disposable SQL migration baseline', () => {
         join pg_proc routine on routine.oid = pg_catalog.to_regprocedure(expected.signature)
        order by roles.role_name, routine.proname
     `);
-    expect(functionPrivilegeRows.rows).toHaveLength(90);
+    expect(functionPrivilegeRows.rows).toHaveLength(108);
     expect(functionPrivilegeRows.rows.every((row) => row.has_execute === false)).toBe(true);
 
     const executionProcedures = await client.query<{ readonly procedures: number }>(`
@@ -7944,7 +7951,7 @@ describe('disposable SQL migration baseline', () => {
          and routine.proname ~ '(execution|reconciliation)'
          and routine.prorettype <> 'trigger'::regtype
     `);
-    expect(callableExecutionRoutines.rows).toEqual([{ routines: 0 }]);
+    expect(callableExecutionRoutines.rows).toEqual([{ routines: 8 }]);
 
     const indexRows = await client.query<{
       readonly indexdef: string;
@@ -7985,9 +7992,11 @@ describe('disposable SQL migration baseline', () => {
        where not trigger.tgisinternal
          and trigger.tgname in (
            'deposit_execution_attempts_enforce',
+           'deposit_execution_attempts_modal_fact_immutable',
            'deposit_execution_attempts_no_delete',
            'deposit_execution_attempts_no_truncate',
            'execution_reconciliations_enforce_insert',
+           'execution_reconciliations_require_modal_fact',
            'execution_reconciliations_immutable',
            'execution_reconciliations_no_truncate',
            'deposit_jobs_enforce_execution_safety',
@@ -7997,6 +8006,7 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(triggerRows.rows.map((row) => row.trigger_name)).toEqual([
       'deposit_execution_attempts_enforce',
+      'deposit_execution_attempts_modal_fact_immutable',
       'deposit_execution_attempts_no_delete',
       'deposit_execution_attempts_no_truncate',
       'deposit_intents_require_execution_correspondence',
@@ -8004,6 +8014,7 @@ describe('disposable SQL migration baseline', () => {
       'execution_reconciliations_enforce_insert',
       'execution_reconciliations_immutable',
       'execution_reconciliations_no_truncate',
+      'execution_reconciliations_require_modal_fact',
     ]);
 
     const guardSources = await client.query<{
@@ -8039,6 +8050,16 @@ describe('disposable SQL migration baseline', () => {
     );
     expect(guardSources.rows[0]!.reconciliation_guard).toContain(
       'new.matched_history_occurred_at > attempt_row.reconciliation_required_at',
+    );
+
+    const modalFactGuard = await client.query<{ readonly source: string }>(`
+      select lower(pg_get_functiondef(
+               'app.enforce_deposit_execution_modal_fact()'::regprocedure
+             )) as source
+    `);
+    expect(modalFactGuard.rows[0]!.source).toContain('attempt.exact_player_credit_match is true');
+    expect(modalFactGuard.rows[0]!.source).toContain(
+      'exact player-credit fact is immutable after handoff',
     );
 
     const evidenceConstraint = await client.query<{ readonly definition: string }>(`
@@ -8196,7 +8217,8 @@ describe('disposable SQL migration baseline', () => {
 
       await client.query(
         `update app.deposit_execution_attempts
-            set status = 'reconciliation_required'
+            set status = 'reconciliation_required',
+                exact_player_credit_match = true
           where id = $1::uuid`,
         [executionAttemptId],
       );
@@ -8549,7 +8571,8 @@ describe('disposable SQL migration baseline', () => {
       );
       const ambiguousAttemptId = ambiguousAttempt.rows[0]!.id;
       await client.query(
-        `update app.deposit_execution_attempts set status = 'final_action_fenced'
+        `update app.deposit_execution_attempts
+            set status = 'final_action_fenced'
           where id = $1::uuid`,
         [ambiguousAttemptId],
       );
@@ -8559,7 +8582,9 @@ describe('disposable SQL migration baseline', () => {
         [ambiguous.depositIntentId],
       );
       await client.query(
-        `update app.deposit_execution_attempts set status = 'reconciliation_required'
+        `update app.deposit_execution_attempts
+            set status = 'reconciliation_required',
+                exact_player_credit_match = false
           where id = $1::uuid`,
         [ambiguousAttemptId],
       );
@@ -8852,3 +8877,11 @@ describe('disposable SQL migration baseline', () => {
     expect(blockingRows.rows).toEqual([{ blocking_attempts: 0 }]);
   });
 });
+
+registerDepositExecutionCommandSqlTests(() => client);
+registerLiveCustomerDepositIntakeSqlTests(() => client);
+registerLiveDepositExecutionLineageSqlTests(() => client);
+registerVerificationSettlementSqlTests(
+  () => client,
+  () => createSqlIntegrationClient(environment),
+);

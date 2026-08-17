@@ -8,6 +8,8 @@ const workflow = readFileSync(
   resolve(root, '.github/workflows/staging-beta-deploy-smoke.yml'),
   'utf8',
 );
+const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/quality.yml'), 'utf8');
+const compose = readFileSync(resolve(root, 'infra/compose.staging-beta.yaml'), 'utf8');
 const stagingRunbook = readFileSync(resolve(root, 'infra/staging-beta.md'), 'utf8');
 const provision = readFileSync(
   resolve(root, 'infra/sql/staging-runtimes-provision-for-deploy.sql'),
@@ -26,6 +28,18 @@ const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
+const retiredDepositReferenceProtection = new RegExp(
+  ['api', 'deposit', 'reference', 'protection'].join('[_-]'),
+  'iu',
+);
+
+for (const artifact of [workflow, qualityWorkflow, compose, helper, stagingRunbook]) {
+  assert.doesNotMatch(
+    artifact,
+    retiredDepositReferenceProtection,
+    'the retired single-key deposit-reference input must remain absent',
+  );
+}
 
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /pull_request:|pull_request_target:|push:|schedule:/);
@@ -316,12 +330,76 @@ assert.match(workflow, /BOT_TO_API_ACTION_HMAC_SECRET/);
 assert.match(workflow, /API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET/);
 assert.match(workflow, /API_TELEGRAM_CAPABILITY_HMAC_SECRET/);
 assert.match(workflow, /API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET/);
-assert.match(workflow, /API_DEPOSIT_REFERENCE_PROTECTION_SECRET/);
+assert.match(workflow, /CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET/);
+assert.match(workflow, /CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET/);
+assert.match(
+  workflow,
+  /CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: \$\{\{ vars\.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON \}\}/,
+);
 assert.match(workflow, /distinct_count/);
 assert.match(workflow, /STAGING_TELEGRAM_BOT_TOKEN/);
 assert.match(workflow, /STAGING_SUPABASE_PUBLISHABLE_KEY/);
 assert.match(workflow, /SUPABASE_CA_CERTIFICATE_PEM/);
 assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTIONS_MODE=live/);
+
+const protectedDeployInputs =
+  /- name: Validate protected deploy inputs([\s\S]*?)\n\s+- name: Stop any prior staging project/u.exec(
+    workflow,
+  )?.[1];
+assert.ok(protectedDeployInputs, 'The protected deployment input step must exist.');
+assert.match(
+  protectedDeployInputs,
+  /CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: \$\{\{ secrets\.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET \}\}/,
+);
+assert.match(
+  protectedDeployInputs,
+  /CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: \$\{\{ secrets\.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET \}\}/,
+);
+assert.match(protectedDeployInputs, /\[\[ "\$distinct_count" -eq 11 \]\]/);
+assert.match(
+  protectedDeployInputs,
+  /const encoded = process\.env\.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON/,
+);
+assert.match(
+  protectedDeployInputs,
+  /Object\.keys\(profile\)\.sort\(\)\.join\(','\) !==\s+'encryptionKeyFingerprint,fingerprintKeyFingerprint,version'/,
+);
+assert.match(protectedDeployInputs, /profile\.version !== 1/);
+assert.match(protectedDeployInputs, /\^sha256:\[0-9a-f\]\{64\}\$/);
+assert.match(
+  protectedDeployInputs,
+  /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" > "\$secret_dir\/cbe-deposit-reference-key-profile\.v1\.json"/,
+);
+const cbeProfileMaterialization =
+  /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"([\s\S]*?)printf '%s\\n' "\$STAGING_TELEGRAM_BOT_TOKEN"/u.exec(
+    protectedDeployInputs,
+  )?.[1];
+assert.ok(
+  cbeProfileMaterialization,
+  'The bounded CBE key/profile materialization block must exist.',
+);
+assert.doesNotMatch(
+  cbeProfileMaterialization,
+  /createHash|createHmac|sha256sum|openssl|xxd|digest\s*\(/,
+  'ordinary deployment must never derive or self-approve the immutable key profile',
+);
+for (const releaseInput of [
+  'cbe-deposit-reference-encryption-key',
+  'cbe-deposit-reference-fingerprint-key',
+  'cbe-deposit-reference-key-profile.v1.json',
+]) {
+  assert.match(workflow, new RegExp(`\\$SECRET_DIR/${releaseInput.replaceAll('.', '\\.')}`));
+  assert.match(helper, new RegExp(releaseInput.replaceAll('.', '\\.')));
+}
+
+for (const selector of [
+  'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE',
+  'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE',
+  'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE',
+]) {
+  assert.match(qualityWorkflow, new RegExp(`${selector}=/dev/null`));
+  assert.match(helper, new RegExp(selector));
+}
 
 for (const sql of [provision, disable]) {
   assert.match(sql, /fetanagent_beta_admission_runtime/);

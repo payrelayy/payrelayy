@@ -24,21 +24,62 @@ const executorFunctions = [
 
 const settlementFunction = 'app.finalize_verified_deposit_and_enqueue_execution';
 
+let savepointSequence = 0;
+
+async function withSavepoint<T>(client: Client, body: () => Promise<T>): Promise<T> {
+  const savepointName = `sql_test_savepoint_${(savepointSequence += 1)}`;
+  await client.query(`savepoint ${savepointName}`);
+
+  try {
+    const result = await body();
+    await client.query(`release savepoint ${savepointName}`);
+    return result;
+  } catch (error) {
+    try {
+      await client.query(`rollback to savepoint ${savepointName}`);
+    } catch {
+      // Preserve the original database error; the outer test rollback remains authoritative.
+    }
+    try {
+      await client.query(`release savepoint ${savepointName}`);
+    } catch {
+      // Preserve the original database error; the outer test rollback remains authoritative.
+    }
+    throw error;
+  }
+}
+
+async function withRollback<T>(client: Client, body: () => Promise<T>): Promise<T> {
+  await client.query('begin');
+  let bodyFailed = false;
+
+  try {
+    return await body();
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    try {
+      await client.query('rollback');
+    } catch (rollbackError) {
+      if (!bodyFailed) {
+        throw rollbackError;
+      }
+    }
+  }
+}
+
 async function queryAsExecutor<T extends QueryResultRow>(
   client: Client,
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
-  await client.query('begin');
-  try {
+  return withSavepoint(client, async () => {
     await client.query('set local role fetanagent_deposit_executor');
     const result = await client.query<T>(query, [...values]);
-    await client.query('commit');
+    await client.query('reset role');
     return result.rows;
-  } catch (error) {
-    await client.query('rollback');
-    throw error;
-  }
+  });
 }
 
 async function queryAsSettlement<T extends QueryResultRow>(
@@ -46,16 +87,12 @@ async function queryAsSettlement<T extends QueryResultRow>(
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
-  await client.query('begin');
-  try {
+  return withSavepoint(client, async () => {
     await client.query('set local role fetanagent_verification_settlement');
     const result = await client.query<T>(query, [...values]);
-    await client.query('commit');
+    await client.query('reset role');
     return result.rows;
-  } catch (error) {
-    await client.query('rollback');
-    throw error;
-  }
+  });
 }
 
 async function enableLiveDepositSwitches(client: Client): Promise<void> {
@@ -552,47 +589,16 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
 
     it('denies direct enqueue to the consume-only executor without mutating proof state', async () => {
       const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'DIRECT-ENQUEUE-DENIED');
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'DIRECT-ENQUEUE-DENIED');
 
-      await expect(
-        queryAsExecutor(client, `select * from app.enqueue_verified_deposit_execution($1::uuid)`, [
-          fixture.depositIntentId,
-        ]),
-      ).rejects.toThrow(/permission denied for function enqueue_verified_deposit_execution/u);
-
-      const state = await client.query<{
-        readonly claims: number;
-        readonly execution_jobs: number;
-        readonly status: string;
-      }>(
-        `select intent.status::text as status,
-                (select count(*)::integer from app.deposit_payment_claims claim
-                  where claim.deposit_intent_id = intent.id) as claims,
-                (select count(*)::integer from app.deposit_jobs job
-                  where job.deposit_intent_id = intent.id
-                    and job.job_kind = 'execute_deposit') as execution_jobs
-           from app.deposit_intents intent
-          where intent.id = $1::uuid`,
-        [fixture.depositIntentId],
-      );
-      expect(state.rows).toEqual([
-        { claims: 0, execution_jobs: 0, status: 'verification_pending' },
-      ]);
-    });
-
-    it('fails closed at settlement when a live switch is off without partial writes', async () => {
-      const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'SWITCH-GATE');
-      await client.query(`
-        update app.feature_switches
-           set mode = 'disabled'
-         where feature_key = 'deposit_execution'
-      `);
-
-      try {
-        await expect(settleVerifiedDeposit(client, fixture)).rejects.toThrow(
-          'Verified deposit settlement requires both live financial switches',
-        );
+        await expect(
+          queryAsExecutor(
+            client,
+            `select * from app.enqueue_verified_deposit_execution($1::uuid)`,
+            [fixture.depositIntentId],
+          ),
+        ).rejects.toThrow(/permission denied for function enqueue_verified_deposit_execution/u);
 
         const state = await client.query<{
           readonly claims: number;
@@ -612,98 +618,136 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
         expect(state.rows).toEqual([
           { claims: 0, execution_jobs: 0, status: 'verification_pending' },
         ]);
-      } finally {
-        await enableLiveDepositSwitches(client);
-      }
+      });
+    });
+
+    it('fails closed at settlement when a live switch is off without partial writes', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'SWITCH-GATE');
+        await client.query(`
+          update app.feature_switches
+             set mode = 'disabled'
+           where feature_key = 'deposit_execution'
+        `);
+
+        try {
+          await expect(settleVerifiedDeposit(client, fixture)).rejects.toThrow(
+            'Verified deposit settlement requires both live financial switches',
+          );
+
+          const state = await client.query<{
+            readonly claims: number;
+            readonly execution_jobs: number;
+            readonly status: string;
+          }>(
+            `select intent.status::text as status,
+                    (select count(*)::integer from app.deposit_payment_claims claim
+                      where claim.deposit_intent_id = intent.id) as claims,
+                    (select count(*)::integer from app.deposit_jobs job
+                      where job.deposit_intent_id = intent.id
+                        and job.job_kind = 'execute_deposit') as execution_jobs
+               from app.deposit_intents intent
+              where intent.id = $1::uuid`,
+            [fixture.depositIntentId],
+          );
+          expect(state.rows).toEqual([
+            { claims: 0, execution_jobs: 0, status: 'verification_pending' },
+          ]);
+        } finally {
+          await enableLiveDepositSwitches(client);
+        }
+      });
     });
 
     it('returns a recovery sentinel without leasing unrelated work in the same call', async () => {
       const client = getClient();
-      const expiredFixture = await createVerifiedDepositFixture(client, 'PRE-FENCE-CRASH');
-      const expiredExecution = await enqueueAndLease(
-        client,
-        expiredFixture,
-        '87777777-7777-4777-8777-777777777777',
-      );
-      const nextFixture = await createVerifiedDepositFixture(client, 'AFTER-PRE-FENCE-CRASH');
-      const nextSettlement = await settleVerifiedDeposit(client, nextFixture);
-      expect(nextSettlement.already_finalized).toBe(false);
+      await withRollback(client, async () => {
+        const expiredFixture = await createVerifiedDepositFixture(client, 'PRE-FENCE-CRASH');
+        const expiredExecution = await enqueueAndLease(
+          client,
+          expiredFixture,
+          '87777777-7777-4777-8777-777777777777',
+        );
+        const nextFixture = await createVerifiedDepositFixture(client, 'AFTER-PRE-FENCE-CRASH');
+        const nextSettlement = await settleVerifiedDeposit(client, nextFixture);
+        expect(nextSettlement.already_finalized).toBe(false);
 
-      await client.query(
-        `update app.deposit_jobs
-            set lease_expires_at = clock_timestamp() - interval '1 second'
-          where id = $1::uuid`,
-        [expiredExecution.executionJobId],
-      );
+        await client.query(
+          `update app.deposit_jobs
+              set lease_expires_at = clock_timestamp() - interval '1 second'
+            where id = $1::uuid`,
+          [expiredExecution.executionJobId],
+        );
 
-      const recoverySentinel = await queryAsExecutor<{
-        readonly deposit_intent_id: string;
-        readonly execution_attempt_id: string;
-        readonly execution_job_id: string | null;
-        readonly lease_disposition: string;
-        readonly lease_expires_at: Date | null;
-        readonly lease_token: string | null;
-        readonly player_id: string | null;
-      }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [
-        '88888888-8888-4888-8888-888888888888',
-      ]);
-      expect(recoverySentinel).toEqual([
-        {
-          amount_minor: null,
-          currency_code: null,
-          deposit_intent_id: expiredFixture.depositIntentId,
-          execution_attempt_id: expiredExecution.executionAttemptId,
-          execution_job_id: null,
-          lease_disposition: 'recovered_expired_prepared',
-          lease_expires_at: null,
-          lease_token: null,
-          platform_agent_account_id: null,
-          player_id: null,
-        },
-      ]);
+        const recoverySentinel = await queryAsExecutor<{
+          readonly deposit_intent_id: string;
+          readonly execution_attempt_id: string;
+          readonly execution_job_id: string | null;
+          readonly lease_disposition: string;
+          readonly lease_expires_at: Date | null;
+          readonly lease_token: string | null;
+          readonly player_id: string | null;
+        }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [
+          '88888888-8888-4888-8888-888888888888',
+        ]);
+        expect(recoverySentinel).toEqual([
+          {
+            amount_minor: null,
+            currency_code: null,
+            deposit_intent_id: expiredFixture.depositIntentId,
+            execution_attempt_id: expiredExecution.executionAttemptId,
+            execution_job_id: null,
+            lease_disposition: 'recovered_expired_prepared',
+            lease_expires_at: null,
+            lease_token: null,
+            platform_agent_account_id: null,
+            player_id: null,
+          },
+        ]);
 
-      const untouchedNext = await client.query<{
-        readonly attempts: number;
-        readonly job_status: string;
-      }>(
-        `select job.status::text as job_status,
-                (select count(*)::integer
-                   from app.deposit_execution_attempts attempt
-                  where attempt.deposit_intent_id = job.deposit_intent_id) as attempts
-           from app.deposit_jobs job
-          where job.id = $1::uuid`,
-        [nextSettlement.execution_job_id],
-      );
-      expect(untouchedNext.rows).toEqual([{ attempts: 0, job_status: 'queued' }]);
+        const untouchedNext = await client.query<{
+          readonly attempts: number;
+          readonly job_status: string;
+        }>(
+          `select job.status::text as job_status,
+                  (select count(*)::integer
+                     from app.deposit_execution_attempts attempt
+                    where attempt.deposit_intent_id = job.deposit_intent_id) as attempts
+             from app.deposit_jobs job
+            where job.id = $1::uuid`,
+          [nextSettlement.execution_job_id],
+        );
+        expect(untouchedNext.rows).toEqual([{ attempts: 0, job_status: 'queued' }]);
 
-      const nextLease = await queryAsExecutor<{
-        readonly deposit_intent_id: string;
-        readonly execution_job_id: string;
-        readonly lease_disposition: string;
-        readonly player_id: string;
-      }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [
-        '88888888-8888-4888-8888-888888888888',
-      ]);
-      expect(nextLease).toHaveLength(1);
-      expect(nextLease[0]).toMatchObject({
-        deposit_intent_id: nextFixture.depositIntentId,
-        execution_job_id: nextSettlement.execution_job_id,
-        lease_disposition: 'execution',
-        player_id: nextFixture.playerId,
-      });
+        const nextLease = await queryAsExecutor<{
+          readonly deposit_intent_id: string;
+          readonly execution_job_id: string;
+          readonly lease_disposition: string;
+          readonly player_id: string;
+        }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [
+          '88888888-8888-4888-8888-888888888888',
+        ]);
+        expect(nextLease).toHaveLength(1);
+        expect(nextLease[0]).toMatchObject({
+          deposit_intent_id: nextFixture.depositIntentId,
+          execution_job_id: nextSettlement.execution_job_id,
+          lease_disposition: 'execution',
+          player_id: nextFixture.playerId,
+        });
 
-      const recovered = await client.query<{
-        readonly attempt_status: string;
-        readonly deposit_status: string;
-        readonly execution_attempts: number;
-        readonly execution_jobs: number;
-        readonly job_error_code: string;
-        readonly job_status: string;
-        readonly lease_cleared: boolean;
-        readonly review_cases: number;
-        readonly retry_jobs: number;
-      }>(
-        `select attempt.status::text as attempt_status,
+        const recovered = await client.query<{
+          readonly attempt_status: string;
+          readonly deposit_status: string;
+          readonly execution_attempts: number;
+          readonly execution_jobs: number;
+          readonly job_error_code: string;
+          readonly job_status: string;
+          readonly lease_cleared: boolean;
+          readonly review_cases: number;
+          readonly retry_jobs: number;
+        }>(
+          `select attempt.status::text as attempt_status,
                 intent.status::text as deposit_status,
                 job.status::text as job_status,
                 job.last_error_code as job_error_code,
@@ -733,205 +777,233 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
              on attempt.deposit_intent_id = intent.id
            join app.deposit_jobs job on job.id = attempt.deposit_job_id
           where intent.id = $1::uuid`,
-        [expiredFixture.depositIntentId],
-      );
-      expect(recovered.rows).toEqual([
-        {
-          attempt_status: 'cancelled_before_action',
-          deposit_status: 'execution_review',
-          execution_attempts: 1,
-          execution_jobs: 1,
-          job_error_code: 'execution_lease_expired_before_action',
-          job_status: 'cancelled',
-          lease_cleared: true,
-          review_cases: 1,
-          retry_jobs: 0,
-        },
-      ]);
+          [expiredFixture.depositIntentId],
+        );
+        expect(recovered.rows).toEqual([
+          {
+            attempt_status: 'cancelled_before_action',
+            deposit_status: 'execution_review',
+            execution_attempts: 1,
+            execution_jobs: 1,
+            job_error_code: 'execution_lease_expired_before_action',
+            job_status: 'cancelled',
+            lease_cleared: true,
+            review_cases: 1,
+            retry_jobs: 0,
+          },
+        ]);
 
-      await expect(
-        queryAsExecutor(
-          client,
-          `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-          [expiredExecution.executionAttemptId, expiredExecution.executionLeaseToken],
-        ),
-      ).rejects.toThrow('one-shot deposit execution lease is unavailable for fencing');
+        await expect(
+          queryAsExecutor(
+            client,
+            `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
+            [expiredExecution.executionAttemptId, expiredExecution.executionLeaseToken],
+          ),
+        ).rejects.toThrow('one-shot deposit execution lease is unavailable for fencing');
+      });
     });
 
     it('persists the modal player-credit fact for a new reconciliation worker', async () => {
       const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'CRASH-RECOVERY');
-      const execution = await enqueueAndLease(
-        client,
-        fixture,
-        '81111111-1111-4111-8111-111111111111',
-      );
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'CRASH-RECOVERY');
+        const execution = await enqueueAndLease(
+          client,
+          fixture,
+          '81111111-1111-4111-8111-111111111111',
+        );
 
-      const firstFence = await queryAsExecutor<{
-        readonly final_action_fenced_at: Date;
-        readonly first_fence_acquired: boolean;
-      }>(
-        client,
-        `select final_action_fenced_at, first_fence_acquired
+        const firstFence = await queryAsExecutor<{
+          readonly final_action_fenced_at: Date;
+          readonly first_fence_acquired: boolean;
+        }>(
+          client,
+          `select final_action_fenced_at, first_fence_acquired
            from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      expect(firstFence).toEqual([
-        { final_action_fenced_at: expect.any(Date), first_fence_acquired: true },
-      ]);
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        expect(firstFence).toEqual([
+          { final_action_fenced_at: expect.any(Date), first_fence_acquired: true },
+        ]);
 
-      const fenceReplay = await queryAsExecutor<{ readonly first_fence_acquired: boolean }>(
-        client,
-        `select first_fence_acquired
+        const fenceReplay = await queryAsExecutor<{ readonly first_fence_acquired: boolean }>(
+          client,
+          `select first_fence_acquired
            from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      expect(fenceReplay).toEqual([{ first_fence_acquired: false }]);
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        expect(fenceReplay).toEqual([{ first_fence_acquired: false }]);
 
-      const required = await queryAsExecutor<{
-        readonly recovery_handoff: boolean;
-      }>(
-        client,
-        `select recovery_handoff
+        const required = await queryAsExecutor<{
+          readonly recovery_handoff: boolean;
+        }>(
+          client,
+          `select recovery_handoff
            from app.require_deposit_execution_reconciliation($1::uuid, $2::uuid, true)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      expect(required).toEqual([{ recovery_handoff: false }]);
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        expect(required).toEqual([{ recovery_handoff: false }]);
 
-      await expect(
-        client.query(
-          `update app.deposit_execution_attempts
-              set exact_player_credit_match = false
-            where id = $1::uuid`,
-          [execution.executionAttemptId],
-        ),
-      ).rejects.toThrow('exact player-credit fact is immutable');
+        await expect(
+          withSavepoint(client, () =>
+            client.query(
+              `update app.deposit_execution_attempts
+                  set exact_player_credit_match = false
+                where id = $1::uuid`,
+              [execution.executionAttemptId],
+            ),
+          ),
+        ).rejects.toThrow('exact player-credit fact is immutable');
 
-      const reconciliationLease = await queryAsExecutor<{
-        readonly amount_minor: string;
-        readonly deposit_intent_id: string;
-        readonly exact_player_credit_match: boolean;
-        readonly execution_attempt_id: string;
-        readonly final_action_fenced_at: Date;
-        readonly lease_expires_at: Date;
-        readonly lease_token: string;
-        readonly player_id: string;
-        readonly reconciliation_job_id: string;
-        readonly reconciliation_required_at: Date;
-      }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
-        '82222222-2222-4222-8222-222222222222',
-      ]);
-      expect(reconciliationLease).toHaveLength(1);
-      expect(reconciliationLease[0]).toMatchObject({
-        amount_minor: '2500',
-        deposit_intent_id: fixture.depositIntentId,
-        exact_player_credit_match: true,
-        execution_attempt_id: execution.executionAttemptId,
-        final_action_fenced_at: firstFence[0]!.final_action_fenced_at,
-        lease_token: expect.any(String),
-        player_id: fixture.playerId,
-        reconciliation_job_id: expect.any(String),
-      });
-      expect(reconciliationLease[0]!.final_action_fenced_at.getTime()).toBeLessThanOrEqual(
-        reconciliationLease[0]!.reconciliation_required_at.getTime(),
-      );
-      expect(reconciliationLease[0]!.reconciliation_required_at.getTime()).toBeLessThan(
-        reconciliationLease[0]!.lease_expires_at.getTime(),
-      );
+        const reconciliationLease = await queryAsExecutor<{
+          readonly amount_minor: string;
+          readonly deposit_intent_id: string;
+          readonly exact_player_credit_match: boolean;
+          readonly execution_attempt_id: string;
+          readonly final_action_fenced_at: Date;
+          readonly lease_expires_at: Date;
+          readonly lease_token: string;
+          readonly player_id: string;
+          readonly reconciliation_job_id: string;
+          readonly reconciliation_required_at: Date;
+        }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
+          '82222222-2222-4222-8222-222222222222',
+        ]);
+        expect(reconciliationLease).toHaveLength(1);
+        expect(reconciliationLease[0]).toMatchObject({
+          amount_minor: '2500',
+          deposit_intent_id: fixture.depositIntentId,
+          exact_player_credit_match: true,
+          execution_attempt_id: execution.executionAttemptId,
+          final_action_fenced_at: firstFence[0]!.final_action_fenced_at,
+          lease_token: expect.any(String),
+          player_id: fixture.playerId,
+          reconciliation_job_id: expect.any(String),
+        });
+        expect(reconciliationLease[0]!.final_action_fenced_at.getTime()).toBeLessThanOrEqual(
+          reconciliationLease[0]!.reconciliation_required_at.getTime(),
+        );
+        expect(reconciliationLease[0]!.reconciliation_required_at.getTime()).toBeLessThan(
+          reconciliationLease[0]!.lease_expires_at.getTime(),
+        );
 
-      const postRecoveryFenceReplay = await queryAsExecutor<{
-        readonly first_fence_acquired: boolean;
-      }>(
-        client,
-        `select first_fence_acquired
+        const postRecoveryFenceReplay = await queryAsExecutor<{
+          readonly first_fence_acquired: boolean;
+        }>(
+          client,
+          `select first_fence_acquired
            from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      expect(postRecoveryFenceReplay).toEqual([{ first_fence_acquired: false }]);
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        expect(postRecoveryFenceReplay).toEqual([{ first_fence_acquired: false }]);
 
-      const reconciled = await queryAsExecutor<{
-        readonly attempt_status: string;
-        readonly deposit_status: string;
-        readonly follow_up_job_id: string | null;
-        readonly outcome: string;
-        readonly reason_code: string;
-      }>(
-        client,
-        `select attempt_status, deposit_status, follow_up_job_id, outcome, reason_code
+        const reconciled = await queryAsExecutor<{
+          readonly attempt_status: string;
+          readonly deposit_status: string;
+          readonly follow_up_job_id: string | null;
+          readonly outcome: string;
+          readonly reason_code: string;
+        }>(
+          client,
+          `select attempt_status, deposit_status, follow_up_job_id, outcome, reason_code
            from app.record_deposit_execution_reconciliation(
              $1::uuid, $2::uuid, 'confirmed_executed', $3::text, 1::smallint,
              'deposit', $4::timestamptz, true, true, true, true
            )`,
-        [
-          reconciliationLease[0]!.reconciliation_job_id,
-          reconciliationLease[0]!.lease_token,
-          `hmac-sha256-v1:${'c'.repeat(64)}`,
-          reconciliationLease[0]!.final_action_fenced_at,
-        ],
-      );
-      expect(reconciled).toEqual([
-        {
-          attempt_status: 'confirmed_executed',
-          deposit_status: 'executed',
-          follow_up_job_id: null,
-          outcome: 'confirmed_executed',
-          reason_code: 'agent_deposit_history_in_window_and_player_credit_confirmed',
-        },
-      ]);
+          [
+            reconciliationLease[0]!.reconciliation_job_id,
+            reconciliationLease[0]!.lease_token,
+            `hmac-sha256-v1:${'c'.repeat(64)}`,
+            reconciliationLease[0]!.final_action_fenced_at,
+          ],
+        );
+        expect(reconciled).toEqual([
+          {
+            attempt_status: 'confirmed_executed',
+            deposit_status: 'executed',
+            follow_up_job_id: null,
+            outcome: 'confirmed_executed',
+            reason_code: 'agent_deposit_history_in_window_and_player_credit_confirmed',
+          },
+        ]);
 
-      const oneShot = await client.query<{
-        readonly execution_attempts: number;
-        readonly execution_jobs: number;
-      }>(
-        `select
+        const oneShot = await client.query<{
+          readonly execution_attempts: number;
+          readonly execution_jobs: number;
+        }>(
+          `select
            (select count(*)::integer from app.deposit_execution_attempts
              where deposit_intent_id = $1::uuid) as execution_attempts,
            (select count(*)::integer from app.deposit_jobs
              where deposit_intent_id = $1::uuid and job_kind = 'execute_deposit')
              as execution_jobs`,
-        [fixture.depositIntentId],
-      );
-      expect(oneShot.rows).toEqual([{ execution_attempts: 1, execution_jobs: 1 }]);
+          [fixture.depositIntentId],
+        );
+        expect(oneShot.rows).toEqual([{ execution_attempts: 1, execution_jobs: 1 }]);
+      });
     });
 
     it('fails closed when a fenced worker crashes before persisting the modal fact', async () => {
       const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'FENCED-FACT-CRASH');
-      const execution = await enqueueAndLease(
-        client,
-        fixture,
-        '89999999-9999-4999-8999-999999999999',
-      );
-      const fence = await queryAsExecutor<{ readonly final_action_fenced_at: Date }>(
-        client,
-        `select final_action_fenced_at
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'FENCED-FACT-CRASH');
+        const execution = await enqueueAndLease(
+          client,
+          fixture,
+          '89999999-9999-4999-8999-999999999999',
+        );
+        const fence = await queryAsExecutor<{ readonly final_action_fenced_at: Date }>(
+          client,
+          `select final_action_fenced_at
            from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
 
-      await client.query(
-        `update app.deposit_jobs
+        await client.query(
+          `update app.deposit_jobs
             set lease_expires_at = clock_timestamp() - interval '1 second'
           where id = $1::uuid`,
-        [execution.executionJobId],
-      );
+          [execution.executionJobId],
+        );
 
-      const lease = await queryAsExecutor<{
-        readonly exact_player_credit_match: boolean | null;
-        readonly lease_token: string;
-        readonly reconciliation_job_id: string;
-      }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
-        '8aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      ]);
-      expect(lease).toHaveLength(1);
-      expect(lease[0]!.exact_player_credit_match).toBeNull();
+        const lease = await queryAsExecutor<{
+          readonly exact_player_credit_match: boolean | null;
+          readonly lease_token: string;
+          readonly reconciliation_job_id: string;
+        }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
+          '8aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        ]);
+        expect(lease).toHaveLength(1);
+        expect(lease[0]!.exact_player_credit_match).toBeNull();
 
-      await expect(
-        queryAsExecutor(
-          client,
-          `select * from app.record_deposit_execution_reconciliation(
+        await expect(
+          queryAsExecutor(
+            client,
+            `select * from app.record_deposit_execution_reconciliation(
              $1::uuid, $2::uuid, 'confirmed_executed', $3::text, 1::smallint,
              'deposit', $4::timestamptz, true, true, true, true
+           )`,
+            [
+              lease[0]!.reconciliation_job_id,
+              lease[0]!.lease_token,
+              `hmac-sha256-v1:${'d'.repeat(64)}`,
+              fence[0]!.final_action_fenced_at,
+            ],
+          ),
+        ).rejects.toThrow('exact player-credit reconciliation fact does not match');
+
+        const failClosed = await queryAsExecutor<{
+          readonly attempt_status: string;
+          readonly deposit_status: string;
+          readonly follow_up_job_id: string | null;
+          readonly outcome: string;
+          readonly reason_code: string;
+        }>(
+          client,
+          `select attempt_status, deposit_status, follow_up_job_id, outcome, reason_code
+           from app.record_deposit_execution_reconciliation(
+             $1::uuid, $2::uuid, 'confirmed_executed', $3::text, 1::smallint,
+             'deposit', $4::timestamptz, null, true, true, true
            )`,
           [
             lease[0]!.reconciliation_job_id,
@@ -939,105 +1011,85 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
             `hmac-sha256-v1:${'d'.repeat(64)}`,
             fence[0]!.final_action_fenced_at,
           ],
-        ),
-      ).rejects.toThrow('exact player-credit reconciliation fact does not match');
+        );
+        expect(failClosed).toEqual([
+          {
+            attempt_status: 'review_required',
+            deposit_status: 'execution_review',
+            follow_up_job_id: null,
+            outcome: 'ambiguous',
+            reason_code: 'agent_history_ambiguous',
+          },
+        ]);
 
-      const failClosed = await queryAsExecutor<{
-        readonly attempt_status: string;
-        readonly deposit_status: string;
-        readonly follow_up_job_id: string | null;
-        readonly outcome: string;
-        readonly reason_code: string;
-      }>(
-        client,
-        `select attempt_status, deposit_status, follow_up_job_id, outcome, reason_code
-           from app.record_deposit_execution_reconciliation(
-             $1::uuid, $2::uuid, 'confirmed_executed', $3::text, 1::smallint,
-             'deposit', $4::timestamptz, null, true, true, true
-           )`,
-        [
-          lease[0]!.reconciliation_job_id,
-          lease[0]!.lease_token,
-          `hmac-sha256-v1:${'d'.repeat(64)}`,
-          fence[0]!.final_action_fenced_at,
-        ],
-      );
-      expect(failClosed).toEqual([
-        {
-          attempt_status: 'review_required',
-          deposit_status: 'execution_review',
-          follow_up_job_id: null,
-          outcome: 'ambiguous',
-          reason_code: 'agent_history_ambiguous',
-        },
-      ]);
-
-      const oneShot = await client.query<{
-        readonly execution_attempts: number;
-        readonly execution_jobs: number;
-      }>(
-        `select
+        const oneShot = await client.query<{
+          readonly execution_attempts: number;
+          readonly execution_jobs: number;
+        }>(
+          `select
            (select count(*)::integer from app.deposit_execution_attempts
              where deposit_intent_id = $1::uuid) as execution_attempts,
            (select count(*)::integer from app.deposit_jobs
              where deposit_intent_id = $1::uuid and job_kind = 'execute_deposit')
              as execution_jobs`,
-        [fixture.depositIntentId],
-      );
-      expect(oneShot.rows).toEqual([{ execution_attempts: 1, execution_jobs: 1 }]);
-      await rotateActiveKemerbetAgent(client, 'after-fenced-fact-crash');
+          [fixture.depositIntentId],
+        );
+        expect(oneShot.rows).toEqual([{ execution_attempts: 1, execution_jobs: 1 }]);
+        await rotateActiveKemerbetAgent(client, 'after-fenced-fact-crash');
+      });
     });
 
     it('turns an exhausted reconciliation lease into durable blocking review', async () => {
       const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'RECON-LEASE-EXHAUSTED');
-      const execution = await enqueueAndLease(
-        client,
-        fixture,
-        '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      );
-      await queryAsExecutor(
-        client,
-        `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      await queryAsExecutor(
-        client,
-        `select *
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'RECON-LEASE-EXHAUSTED');
+        const execution = await enqueueAndLease(
+          client,
+          fixture,
+          '8bbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        );
+        await queryAsExecutor(
+          client,
+          `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        await queryAsExecutor(
+          client,
+          `select *
            from app.require_deposit_execution_reconciliation($1::uuid, $2::uuid, false)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      const lease = await queryAsExecutor<{
-        readonly reconciliation_job_id: string;
-      }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
-        '8ccccccc-cccc-4ccc-8ccc-cccccccccccc',
-      ]);
-      expect(lease).toHaveLength(1);
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        const lease = await queryAsExecutor<{
+          readonly reconciliation_job_id: string;
+        }>(client, `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`, [
+          '8ccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        ]);
+        expect(lease).toHaveLength(1);
 
-      await client.query(
-        `update app.deposit_jobs
+        await client.query(
+          `update app.deposit_jobs
             set attempt_count = max_attempts,
                 lease_expires_at = clock_timestamp() - interval '1 second'
           where id = $1::uuid`,
-        [lease[0]!.reconciliation_job_id],
-      );
+          [lease[0]!.reconciliation_job_id],
+        );
 
-      const nextLease = await queryAsExecutor(
-        client,
-        `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
-        ['8ddddddd-dddd-4ddd-8ddd-dddddddddddd'],
-      );
-      expect(nextLease).toEqual([]);
+        const nextLease = await queryAsExecutor(
+          client,
+          `select * from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
+          ['8ddddddd-dddd-4ddd-8ddd-dddddddddddd'],
+        );
+        expect(nextLease).toEqual([]);
 
-      const reviewed = await client.query<{
-        readonly attempt_status: string;
-        readonly deposit_status: string;
-        readonly job_status: string;
-        readonly outcome: string;
-        readonly reason_code: string;
-        readonly review_cases: number;
-      }>(
-        `select attempt.status::text as attempt_status,
+        const reviewed = await client.query<{
+          readonly attempt_status: string;
+          readonly deposit_status: string;
+          readonly job_status: string;
+          readonly outcome: string;
+          readonly reason_code: string;
+          readonly review_cases: number;
+        }>(
+          `select attempt.status::text as attempt_status,
                 intent.status::text as deposit_status,
                 job.status::text as job_status,
                 reconciliation.outcome::text as outcome,
@@ -1056,137 +1108,142 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
              on reconciliation.deposit_execution_attempt_id = attempt.id
            join app.deposit_jobs job on job.id = reconciliation.deposit_job_id
           where intent.id = $1::uuid`,
-        [fixture.depositIntentId],
-      );
-      expect(reviewed.rows).toEqual([
-        {
-          attempt_status: 'review_required',
-          deposit_status: 'execution_review',
-          job_status: 'succeeded',
-          outcome: 'ambiguous',
-          reason_code: 'agent_history_ambiguous',
-          review_cases: 1,
-        },
-      ]);
-      await rotateActiveKemerbetAgent(client, 'after-reconciliation-exhaustion');
+          [fixture.depositIntentId],
+        );
+        expect(reviewed.rows).toEqual([
+          {
+            attempt_status: 'review_required',
+            deposit_status: 'execution_review',
+            job_status: 'succeeded',
+            outcome: 'ambiguous',
+            reason_code: 'agent_history_ambiguous',
+            review_cases: 1,
+          },
+        ]);
+        await rotateActiveKemerbetAgent(client, 'after-reconciliation-exhaustion');
+      });
     });
 
     it('cancels only before the fence and releases the agent lane into review', async () => {
       const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'CANCEL-BEFORE-FENCE');
-      const execution = await enqueueAndLease(
-        client,
-        fixture,
-        '83333333-3333-4333-8333-333333333333',
-      );
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'CANCEL-BEFORE-FENCE');
+        const execution = await enqueueAndLease(
+          client,
+          fixture,
+          '83333333-3333-4333-8333-333333333333',
+        );
 
-      const cancelled = await queryAsExecutor<{
-        readonly attempt_status: string;
-        readonly deposit_status: string;
-      }>(
-        client,
-        `select attempt_status, deposit_status
+        const cancelled = await queryAsExecutor<{
+          readonly attempt_status: string;
+          readonly deposit_status: string;
+        }>(
+          client,
+          `select attempt_status, deposit_status
            from app.cancel_deposit_execution_before_action(
              $1::uuid, $2::uuid, 'session_unavailable_before_action'
            )`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      expect(cancelled).toEqual([
-        { attempt_status: 'cancelled_before_action', deposit_status: 'execution_review' },
-      ]);
-
-      await expect(
-        queryAsExecutor(
-          client,
-          `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
           [execution.executionAttemptId, execution.executionLeaseToken],
-        ),
-      ).rejects.toThrow('one-shot deposit execution lease is unavailable for fencing');
+        );
+        expect(cancelled).toEqual([
+          { attempt_status: 'cancelled_before_action', deposit_status: 'execution_review' },
+        ]);
+
+        await expect(
+          queryAsExecutor(
+            client,
+            `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
+            [execution.executionAttemptId, execution.executionLeaseToken],
+          ),
+        ).rejects.toThrow('one-shot deposit execution lease is unavailable for fencing');
+      });
     });
 
     it('bounds absent observations and keeps ambiguous execution agent-blocking', async () => {
       const client = getClient();
-      const fixture = await createVerifiedDepositFixture(client, 'ABSENCE-CAP');
-      const execution = await enqueueAndLease(
-        client,
-        fixture,
-        '84444444-4444-4444-8444-444444444444',
-      );
-      await queryAsExecutor(
-        client,
-        `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-      await queryAsExecutor(
-        client,
-        `select *
-           from app.require_deposit_execution_reconciliation($1::uuid, $2::uuid, true)`,
-        [execution.executionAttemptId, execution.executionLeaseToken],
-      );
-
-      for (let observationNumber = 1; observationNumber <= 6; observationNumber += 1) {
-        if (observationNumber > 1) {
-          await client.query(`select pg_sleep(2.05)`);
-        }
-        const lease = await queryAsExecutor<{
-          readonly lease_token: string;
-          readonly reconciliation_job_id: string;
-        }>(
+      await withRollback(client, async () => {
+        const fixture = await createVerifiedDepositFixture(client, 'ABSENCE-CAP');
+        const execution = await enqueueAndLease(
           client,
-          `select reconciliation_job_id, lease_token
-             from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
-          [`85555555-5555-4555-8555-55555555555${observationNumber}`],
+          fixture,
+          '84444444-4444-4444-8444-444444444444',
         );
-        expect(lease).toHaveLength(1);
-
-        const observed = await queryAsExecutor<{
-          readonly attempt_status: string;
-          readonly deposit_status: string;
-          readonly follow_up_job_id: string | null;
-          readonly outcome: string;
-          readonly reason_code: string;
-        }>(
+        await queryAsExecutor(
           client,
-          `select attempt_status, deposit_status, follow_up_job_id, outcome, reason_code
+          `select * from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+        await queryAsExecutor(
+          client,
+          `select *
+           from app.require_deposit_execution_reconciliation($1::uuid, $2::uuid, true)`,
+          [execution.executionAttemptId, execution.executionLeaseToken],
+        );
+
+        for (let observationNumber = 1; observationNumber <= 6; observationNumber += 1) {
+          if (observationNumber > 1) {
+            await client.query(`select pg_sleep(2.05)`);
+          }
+          const lease = await queryAsExecutor<{
+            readonly lease_token: string;
+            readonly reconciliation_job_id: string;
+          }>(
+            client,
+            `select reconciliation_job_id, lease_token
+             from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
+            [`85555555-5555-4555-8555-55555555555${observationNumber}`],
+          );
+          expect(lease).toHaveLength(1);
+
+          const observed = await queryAsExecutor<{
+            readonly attempt_status: string;
+            readonly deposit_status: string;
+            readonly follow_up_job_id: string | null;
+            readonly outcome: string;
+            readonly reason_code: string;
+          }>(
+            client,
+            `select attempt_status, deposit_status, follow_up_job_id, outcome, reason_code
              from app.record_deposit_execution_reconciliation(
                $1::uuid, $2::uuid, 'not_observed',
                null, null, null, null, true, null, null, null
              )`,
-          [lease[0]!.reconciliation_job_id, lease[0]!.lease_token],
-        );
+            [lease[0]!.reconciliation_job_id, lease[0]!.lease_token],
+          );
 
-        if (observationNumber < 6) {
-          expect(observed).toEqual([
-            {
-              attempt_status: 'reconciliation_required',
-              deposit_status: 'execution_reconciliation',
-              follow_up_job_id: expect.any(String),
-              outcome: 'not_observed',
-              reason_code: 'agent_history_not_observed',
-            },
-          ]);
-        } else {
-          expect(observed).toEqual([
-            {
-              attempt_status: 'review_required',
-              deposit_status: 'execution_review',
-              follow_up_job_id: null,
-              outcome: 'ambiguous',
-              reason_code: 'agent_history_ambiguous',
-            },
-          ]);
+          if (observationNumber < 6) {
+            expect(observed).toEqual([
+              {
+                attempt_status: 'reconciliation_required',
+                deposit_status: 'execution_reconciliation',
+                follow_up_job_id: expect.any(String),
+                outcome: 'not_observed',
+                reason_code: 'agent_history_not_observed',
+              },
+            ]);
+          } else {
+            expect(observed).toEqual([
+              {
+                attempt_status: 'review_required',
+                deposit_status: 'execution_review',
+                follow_up_job_id: null,
+                outcome: 'ambiguous',
+                reason_code: 'agent_history_ambiguous',
+              },
+            ]);
+          }
         }
-      }
 
-      const blockedFixture = await createVerifiedDepositFixture(client, 'BLOCKED-AGENT-LANE');
-      const blockedSettlement = await settleVerifiedDeposit(client, blockedFixture);
-      expect(blockedSettlement.already_finalized).toBe(false);
-      const blockedLease = await queryAsExecutor(
-        client,
-        `select * from app.lease_next_deposit_execution($1::uuid, 300)`,
-        ['86666666-6666-4666-8666-666666666666'],
-      );
-      expect(blockedLease).toEqual([]);
+        const blockedFixture = await createVerifiedDepositFixture(client, 'BLOCKED-AGENT-LANE');
+        const blockedSettlement = await settleVerifiedDeposit(client, blockedFixture);
+        expect(blockedSettlement.already_finalized).toBe(false);
+        const blockedLease = await queryAsExecutor(
+          client,
+          `select * from app.lease_next_deposit_execution($1::uuid, 300)`,
+          ['86666666-6666-4666-8666-666666666666'],
+        );
+        expect(blockedLease).toEqual([]);
+      });
     });
   });
 }

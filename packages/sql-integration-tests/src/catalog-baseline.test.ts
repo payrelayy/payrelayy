@@ -1074,7 +1074,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly eight non-executing procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly eleven non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1111,9 +1111,12 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(functions.rows.map((row) => row.signature)).toEqual([
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
+      'app.capture_telegram_live_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
+      'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+      'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)',
       admittedPrivateInboundRecorder,
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
@@ -4304,7 +4307,7 @@ describe('disposable SQL migration baseline', () => {
     ).rejects.toThrow(/permission denied|row-level security/u);
   });
 
-  it('pins the private customer-web catalog, ACL, and source boundary exactly', async () => {
+  it('pins the private customer-web registration and live-deposit catalog, ACL, and source boundary exactly', async () => {
     const migrationSource = await readFile(
       join(environment.migrationsDirectory, '20260815020000_customer_web_player_registration.sql'),
       'utf8',
@@ -4461,8 +4464,11 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(effectiveFunctions.rows.map((row) => row.signature)).toEqual([
+      'app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)',
       'app.ensure_customer_web_account(uuid)',
+      'app.list_customer_web_deposits(uuid,integer)',
       'app.list_customer_web_player_registrations(uuid,integer)',
+      'app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)',
       'app.submit_customer_web_player_registration(uuid,uuid,text)',
     ]);
 
@@ -6388,7 +6394,7 @@ describe('disposable SQL migration baseline', () => {
     }
   });
 
-  it('installs a private ungranted Player-ID deposit-eligibility boundary', async () => {
+  it('installs a private Player-ID deposit-eligibility boundary and audits approved readers', async () => {
     const relationBoundary = await client.query<{
       readonly policies: number;
       readonly relforcerowsecurity: boolean;
@@ -6649,7 +6655,96 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(nonTriggerEligibilityReaders.rows).toEqual([
+      { signature: 'app.enqueue_verified_deposit_execution(uuid)' },
+      { signature: 'app.fence_deposit_execution_final_action(uuid,uuid)' },
+      { signature: 'app.lease_next_deposit_execution(uuid,integer)' },
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
+      { signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)' },
+    ]);
+
+    const eligibilityReaderPrivileges = await client.query<{
+      readonly customer_web_runtime: boolean;
+      readonly deposit_executor_runtime: boolean;
+      readonly player_actions_runtime: boolean;
+      readonly public_execute: boolean;
+      readonly settlement_runtime: boolean;
+      readonly signature: string;
+    }>(`
+      select procedure.oid::regprocedure::text as signature,
+             has_function_privilege(
+               'fetanagent_player_actions_runtime', procedure.oid, 'EXECUTE'
+             ) as player_actions_runtime,
+             has_function_privilege(
+               'fetanagent_customer_web_runtime', procedure.oid, 'EXECUTE'
+             ) as customer_web_runtime,
+             has_function_privilege(
+               'fetanagent_deposit_executor_runtime', procedure.oid, 'EXECUTE'
+             ) as deposit_executor_runtime,
+             has_function_privilege(
+               'fetanagent_verification_settlement_runtime', procedure.oid, 'EXECUTE'
+             ) as settlement_runtime,
+             exists (
+               select 1
+               from aclexplode(coalesce(
+                 procedure.proacl,
+                 acldefault('f', procedure.proowner)
+               )) privilege
+               where privilege.grantee = 0
+                 and privilege.privilege_type = 'EXECUTE'
+             ) as public_execute
+        from pg_proc procedure
+        join pg_namespace namespace on namespace.oid = procedure.pronamespace
+       where namespace.nspname = 'app'
+         and procedure.oid in (
+           'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
+           'app.fence_deposit_execution_final_action(uuid,uuid)'::regprocedure,
+           'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
+           'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
+           'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure
+         )
+       order by signature
+    `);
+    expect(eligibilityReaderPrivileges.rows).toEqual([
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.enqueue_verified_deposit_execution(uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: true,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.fence_deposit_execution_final_action(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: true,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_deposit_execution(uuid,integer)',
+      },
+      {
+        customer_web_runtime: true,
+        deposit_executor_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.list_customer_web_player_registrations(uuid,integer)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)',
+      },
     ]);
 
     const webOriginEligibility = await client.query<{ readonly decisions: number }>(`

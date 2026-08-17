@@ -165,19 +165,31 @@ async function createTelegramLineageFixture(client: Client): Promise<TelegramLin
     'update:9970000101',
     'lineage-admission',
   );
+  const issuingAdmin = await client.query<{ readonly id: string }>(`
+    select admin_user.id
+      from app.admin_users admin_user
+     where admin_user.role = 'owner'
+       and admin_user.status = 'active'
+     order by admin_user.id
+     limit 1
+  `);
+  expect(issuingAdmin.rows).toHaveLength(1);
+  const issuingAdminId = issuingAdmin.rows[0]!.id;
   await client.query(
     `insert into app.telegram_beta_invites (
-       token_digest, status, expires_at, created_at,
+       token_digest, status, expires_at, issued_by_admin_id, created_at,
        redeemed_telegram_user_id, redeemed_private_chat_id,
        redeemed_customer_id, redeemed_customer_identity_id,
        redeemed_inbound_event_id, redeemed_at
      ) values (
        $1::text, 'redeemed', clock_timestamp() + interval '1 hour',
-       clock_timestamp() - interval '10 minutes', $2::bigint, $2::bigint,
-       $3::uuid, $4::uuid, $5::uuid, clock_timestamp() - interval '5 minutes'
+       $2::uuid, clock_timestamp() - interval '10 minutes',
+       $3::bigint, $3::bigint, $4::uuid, $5::uuid, $6::uuid,
+       clock_timestamp() - interval '5 minutes'
      )`,
     [
       `sha256-v1:${sha256('lineage-invite')}`,
+      issuingAdminId,
       telegramUserId,
       customerId,
       telegramIdentityId,

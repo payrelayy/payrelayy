@@ -352,6 +352,7 @@ language plpgsql
 security definer
 set search_path = pg_catalog, app
 as $$
+#variable_conflict use_column
 declare
   claimed_attempt app.deposit_execution_attempts%rowtype;
   claimed_job app.deposit_jobs%rowtype;
@@ -607,6 +608,7 @@ language plpgsql
 security definer
 set search_path = pg_catalog, app
 as $$
+#variable_conflict use_column
 declare
   attempt_row app.deposit_execution_attempts%rowtype;
   intent_row app.deposit_intents%rowtype;
@@ -1134,6 +1136,7 @@ language plpgsql
 security definer
 set search_path = pg_catalog, app
 as $$
+#variable_conflict use_column
 declare
   adopt_attempt_id uuid;
   claimed_attempt app.deposit_execution_attempts%rowtype;

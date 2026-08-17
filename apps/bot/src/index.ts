@@ -7,6 +7,7 @@ import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admissio
 import {
   reduceTelegramDepositIntentCommand,
   reduceTelegramDepositReferenceCommand,
+  reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
@@ -114,7 +115,8 @@ if (config.telegramBetaAdmission.enabled) {
     }
     const depositAction =
       reduceTelegramDepositIntentCommand({ ...metadata, command: text }) ??
-      reduceTelegramDepositReferenceCommand({ ...metadata, command: text });
+      reduceTelegramDepositReferenceCommand({ ...metadata, command: text }) ??
+      reduceTelegramDepositStatusCommand({ ...metadata, command: text });
     if (depositAction) {
       await deliverPlayerAction(depositAction, (replyText, keyboard) =>
         context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),

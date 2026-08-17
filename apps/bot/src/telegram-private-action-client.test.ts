@@ -64,6 +64,44 @@ describe('Telegram private-action bot client', () => {
     expect(deliveredNonces).toEqual(nonces);
   });
 
+  it('accepts only the bounded customer projection on deposit instructions', async () => {
+    const safeResult = {
+      version: 1,
+      outcome: 'deposit_instructions',
+      depositToken: 'A'.repeat(22),
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      providerName: 'CBE Birr',
+      receiverAccountHolderName: 'FetanAgent staging',
+      receiverAccountMasked: '****1234',
+      customerInstruction: 'Simulation only.',
+      paymentDeadline: '2026-08-12T13:00:00.000Z',
+      depositStatus: { label: 'Preparing deposit', tone: 'working' },
+      financialMode: 'live',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => safeResult }),
+      }),
+    ).resolves.toEqual(safeResult);
+
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({
+            ...safeResult,
+            depositStatus: {
+              label: 'Preparing deposit',
+              tone: 'working',
+              executionAttemptId: 'not-customer-safe',
+            },
+          }),
+        }),
+      }),
+    ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+  });
+
   it('rejects malformed success bodies and never retries a 4xx response', async () => {
     let attempts = 0;
     await expect(
@@ -80,6 +118,41 @@ describe('Telegram private-action bot client', () => {
         fetch: async () => ({
           status: 200,
           json: async () => ({ version: 1, outcome: 'menu', callbackData: 'raw-player-id' }),
+        }),
+      }),
+    ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+  });
+
+  it('accepts only exact customer-safe reference and status results', async () => {
+    const referenceResult = {
+      version: 1,
+      outcome: 'deposit_reference_received',
+      depositStatus: { label: 'Checking payment', tone: 'working' },
+      financialMode: 'live',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => referenceResult }),
+      }),
+    ).resolves.toEqual(referenceResult);
+
+    const statusResult = {
+      version: 1,
+      outcome: 'deposit_status',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      depositStatus: { label: 'Completed', tone: 'success' },
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => statusResult }),
+      }),
+    ).resolves.toEqual(statusResult);
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({ ...statusResult, executionAttemptId: 'private' }),
         }),
       }),
     ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));

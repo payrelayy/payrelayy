@@ -26,7 +26,17 @@ must remain dormant: no authoritative proof source, challenge, evidence protocol
 result is selected, and no reviewed deposit-eligibility promotion boundary exists. A separate
 private eligibility ledger now quarantines every new deposit intent behind an explicit latest
 `eligible` decision, but no decision-writing procedure, writer grant, runtime, or UI can create that
-decision. The Stage 1E
+decision. Private KemerBet execution-attempt and reconciliation ledgers plus a reviewed callable
+SQL/runtime safety core now enforce a one-shot final-action fence, one blocking attempt per agent
+account, and positive reconciliation before `executed`. A dedicated executor role boundary exposes
+exactly six private consume-only transition commands, and `apps/executor` contains their database
+adapter, catalog preflight, guarded orchestration, concrete Playwright agent page, exact
+account-bound session registry, separate HMAC providers, polling/health entrypoint, and a hardened
+explicit-profile Docker/Compose boundary. The repository does not provision the selector, identity
+bindings, keys, profiles, runtime LOGIN, live database switches, deployed service, or
+authoritative-verifier caller, so the executor remains operationally disabled. The separate pure
+deterministic contract continues to model stop, uncertainty, reconciliation, review, and lane
+serialization without I/O or retry. The Stage 1E
 official-source policy is blocked with status `unproven`; no provider
 has a selected or permitted source, enabled adapter, credential, or runtime integration. The pure
 Stage 1F authoritative-lookup prerequisite inventory also remains blocked with every capability
@@ -53,29 +63,50 @@ The API and database constraints remain the source of truth for financial workfl
 
 `app` is a private PostgreSQL schema rather than a Supabase Data API schema. The implemented customer
 web BFF uses `@fetanagent/customer-web-workspace-runtime`, a dedicated direct-PostgreSQL identity
-with execute access to exactly three private functions and no table access. The browser never
+with execute access to exactly six private functions and no table access. Three cover account and
+Player-ID projection; three cover default-off owned deposit intake, protected reference capture,
+and customer-safe status. The browser never
 connects to PostgreSQL. The API, worker, and other reviewed server processes keep isolated runtime
 credentials. A separately reviewed maintenance-only identity is the sole narrow exception: it may
 eventually invoke the bounded expired-nonce purge, but it must never be shared with the API or worker.
-The bot and executor communicate with the API, not the database.
+The bot communicates with the API. The source-level executor boundary instead uses a dedicated
+direct-PostgreSQL runtime identity restricted to six private execution/reconciliation transition
+commands and no base-table, sequence, or direct-enqueue access. The runner and page driver now exist
+in source, but no production credential, reviewed session/profile bundle, live switch set, or
+deployed process currently activates them.
 
 ## Product deposit flow
 
 1. The signed-in customer selects one KemerBet Player ID with both proven ownership and a separate
    current deposit-eligibility decision. Only that combined state may eventually display `Ready`.
 2. The reviewed CBE Birr dry-run intake displays its configured masked receiver account and records
-   request with KemerBet's 25–25,000 ETB inclusive amount range for that one deposit.
+   a request with FetanAgent's current 25–25,000 ETB inclusive amount range for that one deposit.
    Customers may create unlimited separate deposits; FetanAgent has no customer, daily, or
    lifetime deposit-count quota.
 3. The customer submits a transaction ID and optional screenshot/PDF. Attachments assist
    extraction, but are never the sole approval evidence.
 4. A provider adapter retrieves authoritative evidence and normalizes a canonical reference,
    amount, receiver, timestamp, and verification outcome.
-5. The API enforces provider-reference uniqueness, amount/receiver/freshness checks, and a
-   single execution lease. Uncertainty becomes `Being checked` for the customer and `Review
-required` in the team workspace.
-6. Only a confirmed record may be sent to the KemerBet executor. The executor reconciles
-   before any retry. The current implementation cannot perform the final KemerBet transfer.
+5. The API and database enforce provider-reference uniqueness and the
+   amount/receiver/freshness checks. The private
+   `app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)` boundary additionally
+   requires the customer submission and authoritative evidence to carry the same keyed canonical
+   reference fingerprint. It atomically creates exactly one immutable payment claim and one
+   execution command only while the current policy, player eligibility, and both financial switches
+   remain valid. Exact complete replays return the same claim/job pair; partial or mismatched state
+   is never repaired. No checked-in provider worker or provisioned login invokes this boundary.
+6. Only a confirmed record may be enqueued for the KemerBet executor. The safety core permits one
+   execution attempt, keeps uncertainty and review agent-blocking, and requires both the exact
+   agent success-modal player-credit delta and one unique in-window `Approved` `EPOS` history row
+   before `executed`. The guarded runtime contains the single post-fence `Transfer` action, but its
+   fixed gates and missing operational inputs prevent startup in the checked-in state. No retry is
+   authorized.
+
+A controlled agent-system test established the reusable lookup, transfer, exact success-modal
+player-credit-delta, and unique `Approved` `EPOS` history workflow without becoming a FetanAgent
+transaction record or enabling a live executor. The workflow is sanitized in
+[kemerbet-agent-deposit-observation.md](kemerbet-agent-deposit-observation.md). It does not make the
+private UI a stable API or authorize an unattended transfer.
 
 ## Current implementation boundary
 
@@ -97,14 +128,18 @@ The staging-only simulation uses a fixed synthetic receiver labelled `DO NOT PAY
 instruction explicitly says `SIMULATION ONLY — DO NOT SEND MONEY`; no real payment destination is
 configured by that workflow.
 
-The disabled customer web slice has a separate non-financial boundary. After server-side Supabase
-Auth verification, its BFF supplies only the Auth UUID to
+The disabled customer web slice keeps account and Player-ID ownership separate from financial
+intake. After server-side Supabase Auth verification, its BFF supplies only the Auth UUID to
 `app.ensure_customer_web_account(uuid)`,
 `app.submit_customer_web_player_registration(uuid,uuid,text)`, and
 `app.list_customer_web_player_registrations(uuid,integer)`. These functions create or replay the
 immutable customer mapping, record a bounded non-claiming request, and return only that mapping's
 web-origin requests. They cannot prove ownership, create a validated player association, promote a
-Player ID to deposit eligibility, open a deposit, or execute any financial action.
+Player ID to deposit eligibility or execute any financial action. Three additional default-off
+functions may open an already-eligible customer's deposit intake, capture a protected reference,
+and list customer-safe status only while the independent payment, execution, and authoritative CBE
+switches are locked live. They cannot create ownership, eligibility, provider evidence, a payment
+claim, or KemerBet execution.
 The customer projection uses exactly `Checking`, `Ready`, and `Could not confirm`; `Ready` is
 unreachable because web-origin association remains rejected. The list SQL nevertheless enforces the
 complete future-facing display rule now: `Ready` additionally requires an active, validated,
@@ -131,6 +166,62 @@ ledger through its fixed security-definer projection to keep `Ready` fail-closed
 ledger fields or create a decision. The ledger therefore adds no positive eligibility, reachable
 `Ready`, deposit UI, provider call, or financial runtime capability.
 
+The reviewed execution safety core builds on `app.deposit_execution_attempts`, which records a
+single prepared attempt, a durable final-action fence, and any subsequent reconciliation or review
+requirement. Its partial unique indexes keep one intent and one agent account blocked throughout
+prepared, fenced, uncertain, reconciling, or review-required work. `app.execution_reconciliations`
+stores only closed outcomes and sanitized facts: a confirmed outcome requires the normalized
+operation `deposit`, exactly one `Approved` `EPOS` history match, a sanitized history timestamp
+inside the inclusive server-authored final-action/reconciliation window, exact player, amount, and
+currency matches, the exact success-modal player-credit delta, and a keyed external-reference
+fingerprint. Non-deposit, unknown, missing, or out-of-window facts cannot confirm execution.
+`not_observed` is not evidence of non-execution and never authorizes retry.
+Both tables are private, forced-RLS, policy-free, and ungranted. Reconciliation rows are append-only;
+attempt identity is immutable, while its closed lifecycle changes and all delete/truncate attempts
+are trigger-guarded. The migration adds the dedicated `fetanagent_deposit_executor` role boundary
+and exactly six security-definer transition commands: execution lease, pre-action cancel, one-shot
+final-action fence, reconciliation handoff, reconciliation lease, and reconciliation recording. The
+role receives no direct table, sequence, enqueue-function, or unrelated-function access; its
+separate runtime identity remains `NOLOGIN` until deployment provisioning.
+
+The separate `fetanagent_verification_settlement` role receives schema usage and execute on only
+`app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)`. The procedure holds the same
+intent-scoped advisory lock as verified enqueue, verifies the exact intent/submission/attempt/
+evidence/reference tuple, and calls the otherwise-ungranted claim and enqueue procedures inside one
+statement transaction. The direct enqueue function is an internal implementation detail of this
+atomic boundary and is not executable by either executor role. Any policy, eligibility, switch,
+claim, or enqueue failure rolls back all state. The settlement runtime scaffold is `NOLOGIN`, has no
+direct table, sequence, executor-transition, Data API, or Telegram access, and has no credential or
+operational caller. `apps/worker` contains a dormant, injection-only adapter that pins this one RPC
+and the exact future runtime-role catalog shape. It is not imported by worker startup, opens no
+database connection, and reads no environment, configuration, or credential; it therefore cannot
+make settlement reachable while the runtime role remains `NOLOGIN`.
+
+`apps/executor` implements the matching PostgreSQL command adapter, a startup catalog preflight for
+the exact role/function surface, guarded execution and reconciliation orchestration, and a strict
+agent-workflow adapter. That adapter validates the target and amount, permits the `Transfer` click
+only after the database returns the first fence, persists whether the immediate modal contained the
+exact player-credit delta, and reconciles only one matching `Approved` `EPOS` history row. A concrete
+Playwright implementation is bound through an exact-account persistent-session registry. It uses
+fixed route/selector contracts, side-effect-free authenticated identity/CAPTCHA readiness probes,
+separate keyed history and identity fingerprints, and a sandboxed persistent Chromium context.
+
+The production entrypoint composes that driver, registry, database adapter, serialized polling loop,
+private loopback health service, redacted logging, circuit opening, and graceful shutdown. A separate
+explicit-profile-only Compose artifact supplies a hardened single-replica container shape and a
+manual, no-database session provisioner. It supplies no selector, binding, HMAC key, profile,
+runtime credential, live database switch, or trusted provider-verification caller; those remain
+activation blockers documented in [`../infra/executor.md`](../infra/executor.md).
+
+The pure KemerBet contract mirrors that boundary with deterministic fake observations for lookup
+failure, selector drift, expired sessions, CAPTCHA, pre/post-action timeout, lost success feedback,
+delayed/missing/duplicate/non-approved history, non-deposit/unknown operations,
+before/after/unknown-window observations, other mismatches, and one exact in-window deposit with an
+exact success-modal player-credit delta. It can return only advisory stop, reconciliation, review,
+or lane-wait plans.
+Every plan has `retryAllowed: false`; it performs no I/O, and no application runtime invokes or
+composes these planners.
+
 ## Account, session, and optional Telegram-link boundary
 
 The pure `@fetanagent/customer-web-access-foundation` package is a historical, non-runtime record of
@@ -142,9 +233,11 @@ authentication are intent metadata in that pure package, not runtime permission.
 disabled-by-default `apps/customer-web` and `@fetanagent/customer-web-auth-runtime` source boundary
 implements the SSR/PWA account shell, server-handled Auth cookies, current-session sign-out, and a
 recovery operation whose cookie effects commit only after code exchange and password update succeed.
-The separate `@fetanagent/customer-web-workspace-runtime` implements only the three non-financial
-account/Player-ID procedures described above. Neither runtime is deployment-wired, and neither
-provides Player-ID ownership proof, association/deposit eligibility, or financial capability.
+The separate `@fetanagent/customer-web-workspace-runtime` implements the three non-financial
+account/Player-ID procedures described above plus three default-off deposit-intake/status
+procedures. Neither runtime is deployment-wired; neither provides Player-ID ownership proof or
+eligibility, and the deposit procedures remain unavailable unless all independent financial/source
+gates are live.
 
 ## Customer-web ownership-proof prerequisite boundary
 
@@ -159,9 +252,10 @@ decision.
 The prerequisite package is pure advisory metadata. It accepts no Player ID, identity, evidence,
 credential, token, provider session, or financial input; performs no I/O; and exports no positive
 proof state. It adds no migration, table, function, trigger, grant, role, RLS policy, route, UI,
-worker, adapter, secret, feature switch, deployment component, or financial action. The current
-three-function customer-web PostgreSQL surface and the database rejection of web-origin association
-remain unchanged.
+worker, adapter, secret, feature switch, deployment component, or financial action. The original
+three-function customer account/Player-ID surface and the database rejection of web-origin
+association remain unchanged. Three separate default-off deposit-intake/status functions do not
+create ownership proof or eligibility.
 
 A future proof flow must first create a non-financial ownership fact independent from deposit
 eligibility. Any later promotion to a financially usable player binding must write a separately
@@ -244,7 +338,8 @@ FetanAgent does not automate sending money in version 1.
   event, and a durable execution-attempt record.
 - Provider evidence is unique by provider and canonical reference.
 - Locks/leases prevent duplicate verification and execution jobs.
-- Reconciliation precedes retries after timeout, session change, CAPTCHA, or UI ambiguity.
+- Timeout, session change, CAPTCHA, or UI ambiguity requires reconciliation. The current execution
+  foundation exposes no retry path.
 - Team configuration, receipt files, and user data live in private Supabase resources
   protected by a private-schema boundary, least-privilege server roles, row-level security, and
   audit events.

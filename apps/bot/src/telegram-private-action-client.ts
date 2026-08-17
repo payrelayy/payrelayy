@@ -5,6 +5,7 @@ import {
   TELEGRAM_PRIVATE_ACTION_HEADERS,
   TELEGRAM_PRIVATE_ACTION_KEY_ID,
   TELEGRAM_PRIVATE_ACTION_PATH,
+  isCustomerDepositStatusProjection,
   parseTelegramPlayerRegistrationCapabilityCallback,
   telegramPrivateActionSignatureInput,
   type TelegramPrivateActionEnvelope,
@@ -48,7 +49,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   }
   if (
     value.outcome === 'deposit_instructions' &&
-    keys.length === 10 &&
+    keys.length === 12 &&
     typeof value.depositToken === 'string' &&
     /^[A-Za-z0-9_-]{22}$/u.test(value.depositToken) &&
     typeof value.amountMinor === 'string' &&
@@ -59,7 +60,27 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     typeof value.receiverAccountMasked === 'string' &&
     typeof value.customerInstruction === 'string' &&
     typeof value.paymentDeadline === 'string' &&
-    !Number.isNaN(Date.parse(value.paymentDeadline))
+    !Number.isNaN(Date.parse(value.paymentDeadline)) &&
+    isCustomerDepositStatusProjection(value.depositStatus) &&
+    (value.financialMode === 'dry_run' || value.financialMode === 'live')
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'deposit_reference_received' &&
+    keys.length === 4 &&
+    isCustomerDepositStatusProjection(value.depositStatus) &&
+    (value.financialMode === 'dry_run' || value.financialMode === 'live')
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'deposit_status' &&
+    keys.length === 5 &&
+    typeof value.amountMinor === 'string' &&
+    /^[1-9][0-9]*$/u.test(value.amountMinor) &&
+    value.currencyCode === 'ETB' &&
+    isCustomerDepositStatusProjection(value.depositStatus)
   ) {
     return value as unknown as TelegramPrivateActionResult;
   }
@@ -71,7 +92,6 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       'invalid_player_id',
       'restart_required',
       'menu_required',
-      'deposit_reference_received',
       'deposit_input_invalid',
       'deposit_unavailable',
     ].includes(value.outcome)

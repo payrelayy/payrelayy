@@ -1,8 +1,10 @@
 # Private database access boundary
 
 FetanAgent keeps all operational and financial tables in the private `app` PostgreSQL schema.
-It is deliberately not exposed through Supabase's Data API. A Telegram bot, browser executor,
-dashboard, and customer device must call the FetanAgent API; none may query `app` tables.
+It is deliberately not exposed through Supabase's Data API. The Telegram bot, dashboard, and
+customer device must call the FetanAgent API. The separately reviewed browser executor and future
+verification-settlement worker may use only their dedicated fixed-signature database procedures;
+none of these callers may query `app` tables.
 
 ## Planned server access
 
@@ -13,10 +15,12 @@ worker cannot change configuration, identity, conversations, or audit records. T
 role also cannot bootstrap Owners, read the audit log, or change configuration; those capabilities
 will require a separate, reviewed admin role and dashboard boundary.
 
-The only planned direct-connection exception is a distinct nonce-retention maintenance identity.
-It has its own non-shared credential boundary and can receive only the bounded expired-nonce purge
-procedure after a separate deployment review. It must never be used by the API or worker, and it
-has no direct table, sequence, inbox, audit, payment, configuration, or customer-data access.
+Every direct-connection exception has a distinct non-shared identity. Nonce retention receives only
+the bounded purge procedure. The executor receives only its six consume-only
+execution/reconciliation transition commands and cannot execute direct enqueue. The unprovisioned
+verification-settlement scaffold may eventually receive only the atomic claim-and-enqueue command,
+which alone calls the private enqueue helper. None may be reused by the API, worker, or another
+service, and none has direct table or sequence access.
 
 The API role receives only safe receiver-account display columns. The worker alone can read the
 encrypted receiver/verification references required for authoritative verification. Both roles use
@@ -36,6 +40,16 @@ cannot open a new intent.
 Both procedures run only when the payment-verification switch is explicitly live; the current Owner
 configuration procedure still deliberately refuses live, so both remain dormant until a later
 launch review.
+
+The unified customer intake adds a separate reviewed surface without reviving those broad legacy
+entry points. `fetanagent_player_actions` can open/capture/read only Telegram intents derived from an
+admitted private inbound event. `fetanagent_customer_web` can open/capture/list only intents derived
+from the server-verified Auth UUID. Both groups retain zero base-table access. Open and capture
+mutations require locked `payment_verification`, `deposit_execution`, and
+`cbe_birr_authoritative_verification` switches at `live`; the authoritative source switch is created
+disabled. Live capture atomically creates one private `verify_deposit` job and advances the
+submission/intent to `verification_enqueued`/`verification_pending`, but no worker or source
+credential is provisioned to consume it. Owned status reads remain available while intake is paused.
 
 The historic non-financial `app.record_telegram_private_inbound_event` procedure accepted
 allowlisted private-update metadata and an API-generated, versioned payload HMAC, but it could
@@ -60,9 +74,9 @@ privileges. The runtime login must not be able to `SET ROLE`. This is done outsi
 sharing a password in chat. Application code must never connect as `postgres`, `service_role`,
 `anon`, or `authenticated`.
 
-The direct connection URL is a server secret. It belongs only in the runtime secret store for the
-API and worker containers. It must never be committed, placed in a shared package, given to the
-bot or executor, or displayed in logs.
+Each direct connection URL is a service-specific server secret. It belongs only in that runtime's
+secret store and must never be committed, placed in a shared package, shared with the bot or another
+runtime, or displayed in logs. The verification-settlement scaffold has no URL or login credential.
 
 ## Stage 13A API connection preflight
 
@@ -206,10 +220,19 @@ a Supabase service-role key.
 
 The core and ledger migrations provide private deposit intake, untrusted receipt metadata,
 authoritative provider-evidence records, exact one-to-one payment claims, expiry, review, and
-queue foundations. They grant neither runtime role direct ledger-table access, create no KemerBet
-execution record, and provide no wallet/bank payout capability. The API has only the narrow,
-live-gated intake procedure described above; the payment-claim function remains ungranted to every
-runtime role. The API can also record an encrypted, untrusted customer transaction reference
+queue foundations. The dedicated verification-settlement group may execute only the private atomic
+claim-and-enqueue wrapper; its `NOLOGIN` runtime scaffold is unprovisioned and both roles retain zero
+direct table, sequence, executor-command, Data API, and Telegram access. The underlying payment-
+claim and enqueue functions are not directly granted to that role. The API has only the narrow,
+live-gated intake procedure described above and cannot invoke settlement. It can also record an
+encrypted, untrusted customer transaction reference
 through the separate capture procedure, but it cannot enqueue verification or change the intent to
-verified. All live feature switches are still rejected by the Owner configuration procedure, and
-the executor is physically incapable of a final KemerBet transfer in this release.
+verified. The Owner configuration procedure still rejects live financial switches, so settlement
+and execution remain disabled.
+
+The disposable SQL catalog preflight pins the settlement procedure's `postgres` owner,
+`SECURITY DEFINER` flag, exact three-UUID input/seven-column output signature, and fixed
+`pg_catalog, app` search path. It also proves that the runtime inherits the one intended grant,
+cannot `SET ROLE`, has zero relation or sequence privilege, and cannot execute any other `app`
+function. No settlement login may be provisioned until the same assertions pass against the target
+catalog through a separately reviewed, read-only deployment preflight.

@@ -7,15 +7,16 @@ KemerBet Player IDs, and enter through the same generic public sign-in and neutr
 authorized team members. Email ownership confirmation is requested only for forgot-password
 recovery, not account creation or routine sign-in. Product copy is English-only.
 
-The repository currently implements an earlier English-only, invite-only Telegram staging slice for
-a CBE Birr dry run, a disabled authoritative-shadow foundation with offline attempt and settlement
-planners, and a disabled-by-default customer web authentication and non-financial workspace
-foundation. The customer source now includes a responsive PWA shell, generic account creation and
+The repository currently implements an English-only, invite-only Telegram staging slice, a unified
+default-off customer deposit intake/status boundary for web and Telegram, a disabled authoritative
+CBE foundation, and a disabled-by-default customer web authentication/workspace foundation. The
+customer source includes a responsive PWA shell, generic account creation and
 sign-in, server-handled Supabase Auth cookies, sign-out, forgot-password recovery, an immutable Auth
-UUID-to-customer mapping, and non-claiming Player-ID submit/list actions. The customer workspace uses
-a dedicated direct-PostgreSQL BFF/runtime with only three exact private functions. It is not
+UUID-to-customer mapping, Player-ID submit/list actions, and protected deposit-reference/status
+routes. The customer workspace uses a dedicated direct-PostgreSQL BFF/runtime with six exact private
+functions. It is not
 deployment-wired or publicly enabled, and it has no Player-ID ownership proof, validated association,
-deposit eligibility, or financial capability. The pure
+eligibility writer, authoritative CBE transport, or live financial activation. The pure
 `@fetanagent/customer-web-player-ownership-proof-prerequisite` package freezes the next web
 ownership-proof boundary as advisory-only and blocked: no authoritative proof source, challenge,
 delivery path, evidence protocol, or positive result has been selected, and it adds no runtime or
@@ -27,6 +28,22 @@ official-source policy whose current source status is `unproven`; it neither sel
 provider source. Stage 1F records the remaining authoritative-lookup blockers and keeps every lookup
 capability false. Telegram is optional in the settled product and requires a separately reviewed
 legacy-history link rather than becoming web authentication or recovery.
+
+The source also contains a reviewed, disabled-by-default KemerBet execution safety core. A private
+SQL migration defines a consume-only executor role boundary with six callable transition commands
+for execution leasing, pre-action cancellation, one-shot final-action fencing, reconciliation
+handoff and leasing, and reconciliation recording. Direct execution enqueue is internal to
+`app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)`; neither executor role can
+execute the enqueue function directly. `apps/executor` provides the matching
+direct-PostgreSQL adapter and catalog preflight, one-shot runtime orchestration, and a strict
+KemerBet workflow adapter. It now also contains a concrete Playwright page driver, exact
+account-bound persistent-session registry, separate HMAC providers, polling/health entrypoint, and
+an explicit-profile-only hardened Docker/Compose boundary with an isolated manual session
+provisioner. `apps/worker` contains an injection-only, uncomposed settlement adapter and exact
+one-function catalog preflight; it opens no connection and reads no configuration or credential.
+The path remains operationally disabled: no selector, binding, HMAC key, browser profile, runtime
+login, live database switch, deployed service, or authoritative-verifier caller is provisioned by
+the repository.
 
 ## Current safety status
 
@@ -41,8 +58,10 @@ The current foundation is deliberately safe:
   password update both succeed;
 - `@fetanagent/customer-web-workspace-runtime` is the dedicated direct-PostgreSQL BFF boundary. It
   can ensure the server-verified Auth UUID's customer account, submit a non-claiming KemerBet Player
-  ID, and list only that identity's web-origin requests. Its exact role cannot read tables or call
-  unrelated functions, and the web slice has no financial operation;
+  ID, list that identity's web-origin requests, open an owned policy-bounded deposit, capture only a
+  server-protected reference, and list customer-safe deposit statuses. Its exact role cannot read
+  tables or call unrelated functions. Deposit writes additionally require three locked live
+  switches, including the new authoritative-CBE switch that is created disabled;
 - customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
   unreachable for a web-origin request until both a later proof-bearing ownership boundary and a
   separate financial eligibility-promotion boundary are reviewed and implemented. The list
@@ -69,7 +88,27 @@ The current foundation is deliberately safe:
 - the implemented workspace is customer-only; capability-based staff routing through the generic
   public entry remains a future boundary and must precede any staff use of this app;
 - all financial actions default to `dry_run`;
-- the KemerBet executor cannot perform a final transfer action;
+- private execution-attempt and reconciliation ledgers require one one-shot attempt per intent,
+  serialize blocking work per agent account, and prevent `executed` without a positive
+  reconciliation. A dedicated executor role has execute access to exactly six private transition
+  commands and no base-table, sequence, or direct-enqueue access. Only the separate atomic
+  verified-settlement function can create its execution job;
+- `apps/executor` now contains the corresponding database adapter and privilege preflight, guarded
+  execution/reconciliation orchestration, and an agent-workflow adapter. The adapter can express the
+  only post-fence `Transfer` click and requires both the exact success-modal player-credit delta and
+  one unique in-window `Approved` `EPOS` history row before confirmation;
+- the concrete browser/runtime composition is fail-closed behind fixed production paths, exact
+  identity binding, authenticated-session/CAPTCHA probes, two distinct HMAC keys, catalog preflight,
+  private loopback health, and explicit deployment profiles. The repository supplies none of the
+  operational secrets, profiles, selector asset, runtime LOGIN, live database switches, deployment,
+  or authoritative-verifier caller, so it cannot currently produce or execute a live job;
+- `@fetanagent/contracts` now includes only deterministic, advisory KemerBet attempt,
+  reconciliation, and agent-lane planning. Its network, browser, final-action, database, and retry
+  capabilities are all false;
+- the reusable KemerBet agent-system workflow learned from a controlled test is documented without
+  recording that test transaction. It preserves the exact success-modal player-credit-delta and
+  unique `Approved` `EPOS` history workflow, does not supply the missing production integration, and
+  does not change FetanAgent's configured amount policy;
 - Telegram polling is off until the bot is configured;
 - no provider credential, Supabase key, account number, or customer evidence belongs in Git;
 - reviewed private-schema migrations provide immutable deposit intents, provider evidence,
@@ -79,20 +118,22 @@ The current foundation is deliberately safe:
   no existing runtime can write a decision, and no ownership action promotes one;
 - the current API and worker database roles have no direct ledger access until narrow procedures
   and runtime login roles are reviewed; and
-- the only current ledger procedures for the API are live-gated: one can open an unverified intent
-  only after the separate latest-eligibility guard passes and then returns frozen display-safe
-  payment instructions, while the other records an already-encrypted customer transaction reference
-  without verifying it or exposing ledger tables. No API path can create the required eligibility
-  decision;
+- the reviewed Telegram and customer-web procedures derive the actor from an admitted private event
+  or server-verified Auth session, require current player eligibility, return display-safe payment
+  instructions, accept only server-protected references, and expose customer-safe status. Live
+  capture can enqueue one private authoritative verification job only when all three switches are
+  locked live; no API or web path can create the required eligibility decision or provider evidence;
 - the historical generic private Telegram inbox procedure is retired. The staging beta boundary is
   English-only and invite-only: only a one-time authorized team invitation may create an identity.
 - the staging bot can now show an admitted-user menu and record a non-claiming KemerBet Player-ID
   request as `pending` through a dedicated database role and durable action nonce store.
 - pending or merely found Player IDs are not usable for deposits; the legacy audited ownership
   confirmation creates only the validated association and does not grant financial eligibility;
-- the reviewed dry-run intake remains limited to `intake_received` intents and `received` protected
-  reference submissions, but every new intent also requires a separate latest `eligible` decision.
-  No runtime can write that decision, and all four financial feature switches remain disabled;
+- the reviewed dry-run intake remains limited to `intake_received`/`received`, while the default-off
+  live intake advances an exact protected submission to `verification_enqueued` and its intent to
+  `verification_pending` atomically with one private verify job. Every new intent still requires a
+  separate latest `eligible` decision; no current customer runtime can write that decision, and all
+  financial feature switches remain disabled;
 - the private staging operations service may append a redacted local-fixture assessment and one
   advisory review decision, but neither record is provider evidence or a payment approval; and
 - the Stage 1A CBE Birr shadow contract and private job/result boundary remain advisory and
@@ -111,21 +152,25 @@ The current foundation is deliberately safe:
   blocked-by-default: synthetic fixtures, browser visibility, known endpoints, and code flags are
   not permission, and the reserved `cbe_birr_official_receipt_lookup_v1` profile has no selected or
   permitted branch; and
-- the Stage 1F `@fetanagent/cbe-birr-authoritative-lookup-prerequisite` package is also pure and
-  blocked. Its 12 exact blockers cover five unresolved areas: source permission; receiver
-  protection, provenance, and fresh immutable provisioning; submitted-reference key lifecycle;
-  review of three distinct normalization profiles; and preflight-safe leasing. Every capability is
-  false, and the package carries no protected material or runtime integration; and
-- no provider evidence, payment claim, authoritative verification job, KemerBet call, withdrawal,
-  or financial execution is enabled by this flow.
+- the historical Stage 1F `@fetanagent/cbe-birr-authoritative-lookup-prerequisite` package remains a
+  pure blocked inventory, not an activation switch. The submitted-reference path now has two
+  distinct cross-process keys and a machine-checked immutable version-1 identity profile, but source
+  permission, receiver lookup provenance, authoritative transport/worker credentials, normalization,
+  and safe provider leasing remain unresolved; and
+- no provider evidence, payment claim, KemerBet call, withdrawal, or financial execution is enabled.
+  Authoritative verification-job creation exists only behind the disabled three-switch boundary and
+  there is no worker with permission to consume it.
 
 The private `app` database schema uses direct PostgreSQL connections only from reviewed server
 runtimes. These include the API, worker, beta-admission runtime, narrow Telegram Player-ID action
-runtime, dedicated customer-web workspace runtime, and nonce-retention maintenance process. Each
-credential belongs in its own VM runtime secret set, never Git or the bot, executor, dashboard,
-browser profile, or logs. The maintenance identity is limited to a future bounded nonce-digest purge
-and must never be reused by the API or worker. FetanAgent does not place a Supabase service-role key
-in application configuration.
+runtime, dedicated customer-web workspace runtime, nonce-retention maintenance process, and the
+source-level KemerBet deposit executor boundary. The executor migration creates separate
+`fetanagent_deposit_executor` and `fetanagent_deposit_executor_runtime` `NOLOGIN` roles; production
+login/password provisioning is deliberately outside Git and has not been deployed. Each database
+credential belongs in its own VM runtime secret set, never Git, a browser page or session object,
+the bot, dashboard, or logs. The maintenance identity is limited to a future bounded nonce-digest
+purge and must never be reused by the API or worker. FetanAgent does not place a Supabase
+service-role key in application configuration.
 
 Each runtime has a dedicated configuration entry point. The API, worker, and executor do not
 read or receive `TELEGRAM_BOT_TOKEN`; only the bot runtime reads it, and only when polling is
@@ -136,13 +181,13 @@ environment file.
 
 | Component                                                   | Responsibility                                                                      |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/customer-web`                                         | Disabled SSR/PWA account and non-financial Player-ID shell                          |
-| `apps/api`                                                  | Transaction orchestration, validation, future web boundary, and audit boundaries    |
+| `apps/customer-web`                                         | Disabled unified SSR/PWA account, Player-ID, deposit-intake, and status workspace   |
+| `apps/api`                                                  | Private Telegram actions, protected deposit intake/status, and audit boundaries     |
 | `apps/admin`                                                | Existing private staging operations service; not the public neutral workspace       |
 | `apps/bot`                                                  | Optional private Telegram legacy transport; not customer authentication or recovery |
 | `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner             |
 | `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command         |
-| `apps/executor`                                             | Isolated, supervised KemerBet browser adapter; dry-run first                        |
+| `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
 | `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
@@ -150,9 +195,9 @@ environment file.
 | `packages/cbe-birr-authoritative-lookup-prerequisite`       | Pure blocked lookup-prerequisite inventory; every capability is false               |
 | `packages/customer-web-access-foundation`                   | Historical pure web/PWA decision record; no runtime or authentication               |
 | `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                        |
-| `packages/customer-web-workspace-runtime`                   | Exact direct-PostgreSQL account and Player-ID BFF; disabled by configuration        |
+| `packages/customer-web-workspace-runtime`                   | Six-function account, Player-ID, deposit-intake, and status BFF; default-off        |
 | `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
-| `packages/contracts`                                        | Provider, executor, notifier, and storage interfaces                                |
+| `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                        |
 | `packages/config`                                           | Safe environment parsing and feature switches                                       |
 | `packages/i18n`                                             | Shared English message keys and safe locale normalization                           |
 
@@ -175,7 +220,8 @@ Copy `.env.example` to `.env` only for local use. Do not add a real `.env` file 
    uniquely recorded before it can reach execution.
 3. Every uncertain provider or KemerBet outcome goes to review and reconciliation;
    it is never retried blindly.
-4. The executor must reconcile wallet/history before retrying an uncertain collection.
+4. The current execution foundation authorizes no retry. Any later retry boundary must first prove
+   non-execution through a separately reviewed reconciliation policy.
 5. External withdrawal payout remains manual in version 1.
 
 ## Language policy
@@ -188,7 +234,8 @@ See [docs/standalone-web-pwa.md](docs/standalone-web-pwa.md) for the settled cus
 session/recovery safety status, optional Telegram-history link, PWA lifecycle, and canonical
 vocabulary. See [docs/architecture.md](docs/architecture.md),
 [docs/database-access.md](docs/database-access.md),
-[docs/deposit-ledger.md](docs/deposit-ledger.md), and
+[docs/deposit-ledger.md](docs/deposit-ledger.md),
+[docs/kemerbet-agent-deposit-observation.md](docs/kemerbet-agent-deposit-observation.md),
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See

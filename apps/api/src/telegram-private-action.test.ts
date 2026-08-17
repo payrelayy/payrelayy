@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
+import { createHash } from 'node:crypto';
 
 import { loadApiConfig } from '@fetanagent/config/api';
 import {
@@ -26,6 +27,15 @@ const fixedNow = new Date('2026-08-09T12:00:00.000Z');
 const fixedTimestamp = Math.floor(fixedNow.getTime() / 1000).toString();
 const fixedNonce = 'n'.repeat(32);
 const callbackData = 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w';
+const referenceKeyProfile = JSON.stringify({
+  encryptionKeyFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('e'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  fingerprintKeyFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('f'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  version: 1,
+});
 const callbackAction: TelegramPrivateActionEnvelope = {
   version: 1,
   kind: 'player_registration_callback',
@@ -251,15 +261,15 @@ describe('private Telegram action transport contract', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('accepts only strict dry-run deposit commands and protected references', async () => {
+  it('accepts only strict deposit, protected-reference, and status commands', async () => {
     const depositAction: TelegramPrivateActionEnvelope = {
       version: 1,
       kind: 'deposit_intent_command',
       updateId: '123456',
-      telegramUserId: '28379330',
-      privateChatId: '28379330',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
       preferredLocale: 'en',
-      playerId: '28379330',
+      playerId: 'PLAYER-DEMO-42',
       amountEtb: '25.00',
     };
     const deposit = signedRequest(depositAction);
@@ -280,8 +290,8 @@ describe('private Telegram action transport contract', () => {
       version: 1,
       kind: 'deposit_reference_command',
       updateId: '123457',
-      telegramUserId: '28379330',
-      privateChatId: '28379330',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
       preferredLocale: 'en',
       depositToken: 'AAAAAAAAAAAAAAAAAAAAAA',
       transactionReference: 'CBE-TEST-7890',
@@ -306,6 +316,32 @@ describe('private Telegram action transport contract', () => {
         verificationOptions(),
       ),
     ).resolves.toBeUndefined();
+
+    const fullyRevealedReference = signedRequest(
+      { ...referenceAction, transactionReference: 'ABCD' },
+      { nonce: 'r'.repeat(32) },
+    );
+    await expect(
+      verifyTelegramPrivateActionRequest(
+        fullyRevealedReference.request,
+        fullyRevealedReference.rawBody,
+        verificationOptions(),
+      ),
+    ).resolves.toBeUndefined();
+
+    const statusAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'deposit_status_command',
+      updateId: '123458',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
+      preferredLocale: 'en',
+      depositToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+    };
+    const status = signedRequest(statusAction, { nonce: 'q'.repeat(32) });
+    await expect(
+      verifyTelegramPrivateActionRequest(status.request, status.rawBody, verificationOptions()),
+    ).resolves.toEqual(statusAction);
   });
 
   it('redacts opaque callback tokens and Player ID text from the only log projection', () => {
@@ -358,7 +394,9 @@ describe('private Telegram action transport contract', () => {
       API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
       API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
       API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
-      API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
+      CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
+      CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
+      CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceKeyProfile,
       PLAYER_ACTION_DATABASE_URL:
         'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
     });

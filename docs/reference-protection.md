@@ -2,27 +2,29 @@
 
 ## Current scope
 
-`app.capture_telegram_dry_run_deposit_reference` is the current database boundary for a
-customer-entered CBE Birr transaction ID. It records an untrusted `received` submission only after
-the exact intake was opened by the same admitted customer through the dry-run procedure. It
-requires all financial switches to remain disabled and cannot contact CBE Birr, queue verification,
-create provider evidence, approve or claim a payment, or start a KemerBet deposit.
+The reviewed database boundaries accept a customer-entered CBE Birr transaction ID only after the
+same authenticated customer opened the exact intake. The dry-run Telegram path records an untrusted
+`received` submission while every financial switch remains disabled. The default-off live Telegram
+and customer-web paths require all three locked live switches and atomically create one private
+authoritative verification job. No path in this repository contacts CBE Birr, creates provider
+evidence, approves or claims a payment, or starts a KemerBet deposit without the still-unprovisioned
+authoritative worker and later settlement boundary.
 
 The current capture path accepts a transaction reference only. Screenshot/PDF ingestion is
 intentionally deferred until the bot-to-API-to-private-Storage path can validate file bytes, create
 an opaque object key server-side, and prove the object exists before the database records metadata.
 
-## API-only cryptographic contract
+## Server-side cryptographic contract
 
 The Telegram bot must forward the raw reference only to the internal API. It never receives an
 encryption key, blind-index key, direct PostgreSQL credential, or private Storage credential. The
-API handles the bounded ASCII value in memory, then the current Node-only dry-run protection module
-applies this stored ciphertext format before the database procedure:
+authenticated customer-web BFF applies the same rule and never gives either key to the browser.
+The two server processes handle the bounded ASCII value in memory, then the shared Node-only
+protection module applies this stored ciphertext format before the database procedure:
 
-1. Normalize only through a server-selected, provider-specific profile. There is no generic
-   fallback: the profile may trim outer ASCII whitespace and uppercase ASCII only where that
-   provider's documented identifier format is case-insensitive. It rejects internal whitespace,
-   Unicode/confusables, URLs, labels, controls, and unsupported patterns rather than guessing.
+1. Normalize only through the fixed CBE Birr profile. There is no generic fallback: the current
+   profile rejects outer or internal whitespace, Unicode/confusables, URLs, labels, controls, and
+   unsupported patterns, then uppercases the accepted ASCII identifier for case-stable matching.
 2. Encrypt the normalized value with AES-256-GCM using a fresh 12-byte nonce. The stored ciphertext
    is v<encryption-key-version>.<nonce>.<tag>.<ciphertext> using base64url fields.
 3. Produce a separate HMAC-SHA-256 blind index over a domain-separated value containing the fixed
@@ -30,19 +32,25 @@ applies this stored ciphertext format before the database procedure:
    hexadecimal fingerprint. Any later provider must receive a distinct reviewed profile before it
    can use this boundary.
 4. Store only three asterisks plus the final four normalized characters for customer-safe display.
+   Every web, bot, API, and protection-module parser requires more than four characters, so this
+   suffix can never equal the complete accepted reference.
 
-The encryption and fingerprint subkeys are independently domain-separated from one dedicated
-32-byte runtime master secret. It belongs only to the API secret store, never Git, the database,
-the bot, the dashboard, migrations, audit metadata, conversation state, or logs. A later
-verification worker must receive separately reviewed key access rather than reusing a bot
-credential. The current CBE Birr observations remain fixture research rather than authoritative
-provider evidence; TeleBirr needs its own approved adapter and fixtures first.
+Encryption and blind indexing use two distinct dedicated 32-byte roots. Both are independently
+domain-separated and must be identical across the API, customer-web BFF, and future authoritative
+CBE verification worker. They never enter Git, PostgreSQL, the bot, the browser, the dashboard,
+migrations, audit metadata, conversation state, or logs. Each process loads the same immutable
+version-1 nonsecret profile containing the approved SHA-256 identity of both keys and compares the
+actual key bytes with timing-safe equality before readiness. A different key under version 1 is a
+startup failure, so channel drift cannot silently bypass the global reference-fingerprint
+uniqueness boundary. The two roots must also differ from each other and from every transport,
+capability, or semantic HMAC key.
 
-The version 1 master secret and both derived subkeys stay stable together. Rotating that master
-requires a separately reviewed ciphertext re-encryption and fingerprint reindex migration so that a
-duplicate reference cannot evade an existing uniqueness index. The leading ciphertext value is only
-the current API format's key selector. It does not by itself prove protection provenance, a complete
-lifecycle, or worker suitability.
+The version-1 encryption and fingerprint roots stay stable as one approved profile. Encryption-key
+rotation requires a reviewed ciphertext migration. Fingerprint-key rotation additionally requires a
+complete fingerprint reindex under a new version so a duplicate reference cannot evade the active
+uniqueness index. The leading ciphertext value and stored smallint are selectors only; startup
+profile verification supplies the machine-checked key identity, and authoritative worker readiness
+must enforce the same profile before the source switch may become live.
 
 ## Authoritative-lookup prerequisite finding
 
@@ -56,8 +64,8 @@ Two protection lifecycles remain unresolved. First, the receiver verification ci
 protection metadata and key provenance. Those facts must not be inferred or backfilled onto the
 existing immutable receiver-account revision. A future lookup requires a fresh new immutable
 revision with fresh, explicit protection provenance. Second, the submitted-reference encryption and
-fingerprint subkeys are domain-separated but share one API master provisioning and rotation root.
-No independently provisioned worker decrypt lifecycle exists.
+fingerprint keys now have distinct roots and one machine-checked cross-process profile, but no
+authoritative worker credential or live CBE transport has been provisioned yet.
 
 Normalization is also unresolved across three separate profiles: lookup-reference,
 receiver-lookup, and canonical-reference normalization. The current capture normalization is not
@@ -73,18 +81,19 @@ request, or financial action. See
 
 ## Database safeguards
 
-The capture procedure:
+Every capture procedure:
 
-- proves the Telegram-originated inbound event belongs to the active customer who owns the intent;
-- locks the Telegram event/customer scope, proves all financial switches are disabled, then locks
-  the exact intake;
+- derives the active customer from either an admitted private Telegram event or the server-verified
+  Supabase Auth binding, then proves ownership of the exact intent;
+- locks the channel receipt/customer scope and the required switch set before mutating the intake;
 - accepts only an intake_received intent before its immutable deadline and without an open
   verification review;
-- is idempotent for a repeated Telegram event and refuses to silently replace an active proof;
+- is idempotent only for an exact same-channel lost-response replay and refuses to replace an active
+  proof or reopen payment instructions after the intent advances;
 - uses the existing active fingerprint uniqueness index to reject cross-intent duplicate claims
   without revealing another customer's record; and
-- returns only a submission ID, intent ID, state, timestamp, and replay boolean; never an encrypted
-  value, fingerprint, mask, provider detail, or object key.
+- returns only the owned intent/state/timestamp and replay fact; never an encrypted value,
+  fingerprint, mask, verification-job ID, evidence ID, execution ID, or object key.
 
 The submitted transaction ID is not the provider's canonical transaction reference. A later
 provider adapter must extract a canonical reference from authoritative provider evidence and apply

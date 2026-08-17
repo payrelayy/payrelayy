@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   reduceTelegramDepositIntentCommand,
   reduceTelegramDepositReferenceCommand,
+  reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
@@ -10,9 +11,9 @@ import {
 
 const privateMetadata = {
   updateId: 123456,
-  chat: { id: 28379330, type: 'private' },
+  chat: { id: 123456789, type: 'private' },
   from: {
-    id: 28379330,
+    id: 123456789,
     isBot: false,
     languageCode: 'am-ET',
   },
@@ -26,8 +27,8 @@ describe('private Telegram action reducers', () => {
       version: 1,
       kind: 'root_menu',
       updateId: '123456',
-      telegramUserId: '28379330',
-      privateChatId: '28379330',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
       preferredLocale: 'en',
     });
     expect(reduceTelegramRootMenuAction({ ...privateMetadata, command: '/start extra' })).toBe(
@@ -74,7 +75,7 @@ describe('private Telegram action reducers', () => {
     expect(
       reduceTelegramPlayerIdTextAction({
         ...privateMetadata,
-        chat: { id: 28379331, type: 'private' },
+        chat: { id: 123456788, type: 'private' },
         text: 'player-123',
       }),
     ).toBeUndefined();
@@ -90,25 +91,44 @@ describe('private Telegram action reducers', () => {
     });
   });
 
-  it('reduces only exact dry-run deposit commands', () => {
+  it('reduces only exact deposit commands', () => {
     expect(
       reduceTelegramDepositIntentCommand({
         ...privateMetadata,
-        command: '/deposit 28379330 25.00',
+        command: '/deposit PLAYER-DEMO-42 25.00',
       }),
     ).toMatchObject({
       kind: 'deposit_intent_command',
-      playerId: '28379330',
+      playerId: 'PLAYER-DEMO-42',
       amountEtb: '25.00',
     });
     expect(
       reduceTelegramDepositIntentCommand({
         ...privateMetadata,
-        command: '/deposit 28379330 25 extra',
+        command: '/deposit PLAYER-DEMO-42 25 extra',
       }),
     ).toBeUndefined();
     expect(
-      reduceTelegramDepositIntentCommand({ ...privateMetadata, command: '/deposit 28379330 0' }),
+      reduceTelegramDepositIntentCommand({
+        ...privateMetadata,
+        command: '/deposit PLAYER-DEMO-42 0',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('reduces a status command to the same non-authoritative compact token presentation', () => {
+    const depositToken = 'AAAAAAAAAAAAAAAAAAAAAA';
+    expect(
+      reduceTelegramDepositStatusCommand({
+        ...privateMetadata,
+        command: `/deposit_status ${depositToken}`,
+      }),
+    ).toMatchObject({ kind: 'deposit_status_command', depositToken });
+    expect(
+      reduceTelegramDepositStatusCommand({
+        ...privateMetadata,
+        command: `/deposit_status ${depositToken} extra`,
+      }),
     ).toBeUndefined();
   });
 
@@ -134,6 +154,12 @@ describe('private Telegram action reducers', () => {
       reduceTelegramDepositReferenceCommand({
         ...privateMetadata,
         command: '/reference invalid TX-ABC-7890',
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositReferenceCommand({
+        ...privateMetadata,
+        command: `/reference ${depositToken} ABCD`,
       }),
     ).toBeUndefined();
   });

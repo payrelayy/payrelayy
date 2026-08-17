@@ -16,7 +16,9 @@ export type TelegramActionSemanticConsumer =
   | 'submit_player_registration_input'
   | 'expire_player_registration_action'
   | 'open_dry_run_deposit_intent'
-  | 'capture_dry_run_deposit_reference';
+  | 'capture_dry_run_deposit_reference'
+  | 'open_live_deposit_intent'
+  | 'capture_live_deposit_reference';
 
 type CapabilityBoundSemanticInput = {
   readonly consumer: 'issue_player_registration_capability' | 'start_player_registration';
@@ -44,16 +46,16 @@ type PlayerIdExpirySemanticInput = {
   readonly semanticHmacSecret: string;
 };
 
-type DryRunDepositIntentSemanticInput = {
-  readonly consumer: 'open_dry_run_deposit_intent';
+type DepositIntentSemanticInput = {
+  readonly consumer: 'open_dry_run_deposit_intent' | 'open_live_deposit_intent';
   readonly originInboundEventId: string;
   readonly playerId: string;
   readonly expectedAmountMinor: string;
   readonly semanticHmacSecret: string;
 };
 
-type DryRunDepositReferenceSemanticInput = {
-  readonly consumer: 'capture_dry_run_deposit_reference';
+type DepositReferenceSemanticInput = {
+  readonly consumer: 'capture_dry_run_deposit_reference' | 'capture_live_deposit_reference';
   readonly originInboundEventId: string;
   readonly depositIntentId: string;
   readonly referenceFingerprint: string;
@@ -66,8 +68,8 @@ export type TelegramActionSemanticHmacInput =
   | CapabilityBoundSemanticInput
   | PlayerIdSubmissionSemanticInput
   | PlayerIdExpirySemanticInput
-  | DryRunDepositIntentSemanticInput
-  | DryRunDepositReferenceSemanticInput;
+  | DepositIntentSemanticInput
+  | DepositReferenceSemanticInput;
 
 export interface TelegramActionCapabilityKeys {
   /** API-only 32-byte hexadecimal key; never send it to the bot or database. */
@@ -246,6 +248,7 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
       });
       break;
     case 'open_dry_run_deposit_intent':
+    case 'open_live_deposit_intent':
       if (!/^[1-9][0-9]*$/u.test(input.expectedAmountMinor)) {
         throw new Error('The expected deposit amount must be canonical positive minor units.');
       }
@@ -255,10 +258,11 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
         providerCode: 'cbe_birr',
         normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
         expectedAmountMinor: input.expectedAmountMinor,
-        financialMode: 'dry_run',
+        financialMode: input.consumer === 'open_live_deposit_intent' ? 'live' : 'dry_run',
       });
       break;
     case 'capture_dry_run_deposit_reference':
+    case 'capture_live_deposit_reference':
       if (
         !/^[0-9a-f]{64}$/u.test(input.referenceFingerprint) ||
         !/^\*{3}[A-Z0-9._-]{4}$/u.test(input.referenceMasked) ||
@@ -273,7 +277,7 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
         referenceFingerprint: input.referenceFingerprint,
         referenceMasked: input.referenceMasked,
         keyVersion: input.keyVersion,
-        financialMode: 'dry_run',
+        financialMode: input.consumer === 'capture_live_deposit_reference' ? 'live' : 'dry_run',
       });
       break;
     default:

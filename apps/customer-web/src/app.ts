@@ -10,14 +10,26 @@ import type {
   CustomerWebResponseCookie,
 } from '@fetanagent/customer-web-auth-runtime';
 import type {
+  CustomerDepositInstructions,
+  CustomerDepositSummary,
   CustomerWorkspaceDisplayStatus,
   CustomerWorkspaceRegistration,
   CustomerWorkspaceRuntime,
 } from '@fetanagent/customer-web-workspace-runtime';
+import {
+  isCustomerDepositStatusProjection,
+  TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
+} from '@fetanagent/contracts';
+import {
+  protectCbeBirrDepositReference,
+  type DepositReferenceProtectionSecrets,
+} from '@fetanagent/deposit-reference-protection';
 import Fastify, { LogController, type FastifyReply, type FastifyRequest } from 'fastify';
 
 import {
   createAccountPage,
+  depositInstructionsPage,
   forgotPasswordPage,
   genericErrorPage,
   homePage,
@@ -41,6 +53,10 @@ const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
 const NO_STORE = 'private, no-store, max-age=0, must-revalidate';
 const PUBLIC_CONTENT_POLICY =
   "default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self'; manifest-src 'self'; object-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'; upgrade-insecure-requests";
+const LOOPBACK_PREVIEW_CONTENT_POLICY = PUBLIC_CONTENT_POLICY.replace(
+  '; upgrade-insecure-requests',
+  '',
+);
 
 const SECURITY_HEADERS = {
   'content-security-policy': PUBLIC_CONTENT_POLICY,
@@ -65,6 +81,8 @@ const NO_STORE_PATHS = new Set([
   '/update-password',
   '/workspace',
   '/player-ids',
+  '/deposits',
+  '/deposits/reference',
 ]);
 
 const MUTATION_PATHS = new Set([
@@ -74,6 +92,8 @@ const MUTATION_PATHS = new Set([
   '/forgot-password',
   '/update-password',
   '/player-ids',
+  '/deposits',
+  '/deposits/reference',
 ]);
 
 const RATE_LIMITED_ROUTES = new Set([
@@ -102,7 +122,9 @@ export interface CustomerWebRateLimitOptions {
 export interface CustomerWebAppOptions {
   readonly auth: CustomerWebAuthPort;
   readonly csrfTokenFactory?: () => string;
+  readonly depositReferenceProtectionSecrets?: DepositReferenceProtectionSecrets;
   readonly now?: () => number;
+  readonly productPreviewMode?: boolean;
   readonly publicOrigin?: string;
   readonly rateLimit?: CustomerWebRateLimitOptions;
   readonly requestKeyFactory?: () => string;
@@ -116,10 +138,13 @@ interface RateLimitBucket {
 
 type FormBody = Readonly<Record<string, string>>;
 
-function exactOrigin(origin: string): string {
+function exactOrigin(origin: string, loopbackPreview: boolean): string {
   const parsed = new URL(origin);
+  const allowedProtocol =
+    parsed.protocol === 'https:' ||
+    (loopbackPreview && parsed.protocol === 'http:' && parsed.hostname === '127.0.0.1');
   if (
-    parsed.protocol !== 'https:' ||
+    !allowedProtocol ||
     parsed.origin !== origin ||
     parsed.pathname !== '/' ||
     parsed.search !== '' ||
@@ -134,6 +159,10 @@ function exactOrigin(origin: string): string {
 
 function responsePath(request: FastifyRequest): string {
   return request.url.split('?', 1)[0] ?? '/';
+}
+
+function isNoStorePath(path: string): boolean {
+  return NO_STORE_PATHS.has(path);
 }
 
 function appendHeader(reply: FastifyReply, name: string, value: string): void {
@@ -362,6 +391,53 @@ function validDisplayStatus(value: unknown): value is CustomerWorkspaceDisplaySt
   return value === 'checking' || value === 'ready' || value === 'needs_attention';
 }
 
+function amountEtbToMinor(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = /^([1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$/u.exec(value);
+  const major = match?.[1];
+  if (!major) return undefined;
+  const minor = `${match?.[2] ?? ''}00`.slice(0, 2);
+  const amountMinor = BigInt(major) * 100n + BigInt(minor);
+  return amountMinor >= 2_500n && amountMinor <= 2_500_000n ? amountMinor.toString() : undefined;
+}
+
+function validTransactionReference(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value === value.trim() &&
+    Array.from(value).length >= TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS &&
+    Array.from(value).length <= TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS &&
+    /^[A-Za-z0-9._-]+$/u.test(value)
+  );
+}
+
+function encodeDepositToken(depositIntentId: string): string {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      depositIntentId,
+    )
+  ) {
+    throw new Error();
+  }
+  return Buffer.from(depositIntentId.replaceAll('-', ''), 'hex').toString('base64url');
+}
+
+function decodeDepositToken(token: unknown): string | undefined {
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{22}$/u.test(token)) return undefined;
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(token, 'base64url');
+  } catch {
+    return undefined;
+  }
+  if (bytes.byteLength !== 16 || bytes.toString('base64url') !== token) return undefined;
+  const hex = bytes.toString('hex');
+  const uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(uuid)
+    ? uuid
+    : undefined;
+}
+
 function safeRegistrations(value: unknown): readonly CustomerWorkspaceRegistration[] | undefined {
   if (!Array.isArray(value) || value.length > 20) return undefined;
   try {
@@ -390,6 +466,92 @@ function safeRegistrations(value: unknown): readonly CustomerWorkspaceRegistrati
   }
 }
 
+function safeDeposits(value: unknown): readonly CustomerDepositSummary[] | undefined {
+  if (!Array.isArray(value) || value.length > 20) return undefined;
+  try {
+    return Object.freeze(
+      value.map((deposit) => {
+        if (typeof deposit !== 'object' || deposit === null || Array.isArray(deposit))
+          throw new Error();
+        const record = deposit as Record<string, unknown>;
+        if (
+          Object.keys(record).sort().join(',') !==
+            'amountMinor,createdAt,currencyCode,depositIntentId,status,updatedAt' ||
+          typeof record.amountMinor !== 'string' ||
+          !/^[1-9][0-9]*$/u.test(record.amountMinor) ||
+          record.currencyCode !== 'ETB' ||
+          typeof record.depositIntentId !== 'string' ||
+          decodeDepositToken(encodeDepositToken(record.depositIntentId)) !==
+            record.depositIntentId ||
+          !isCustomerDepositStatusProjection(record.status) ||
+          typeof record.createdAt !== 'string' ||
+          Number.isNaN(Date.parse(record.createdAt)) ||
+          typeof record.updatedAt !== 'string' ||
+          Number.isNaN(Date.parse(record.updatedAt))
+        ) {
+          throw new Error();
+        }
+        return Object.freeze({
+          amountMinor: record.amountMinor,
+          createdAt: record.createdAt,
+          currencyCode: 'ETB' as const,
+          depositIntentId: record.depositIntentId,
+          status: Object.freeze({ ...record.status }),
+          updatedAt: record.updatedAt,
+        });
+      }),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function safeDepositInstructions(value: unknown): CustomerDepositInstructions | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  try {
+    const record = value as Record<string, unknown>;
+    if (
+      Object.keys(record).sort().join(',') !==
+        'amountMinor,currencyCode,customerInstruction,depositIntentId,paymentDeadline,providerName,receiverAccountHolderName,receiverAccountMasked,replayed,status' ||
+      typeof record.amountMinor !== 'string' ||
+      !/^[1-9][0-9]*$/u.test(record.amountMinor) ||
+      record.currencyCode !== 'ETB' ||
+      typeof record.customerInstruction !== 'string' ||
+      record.customerInstruction.length < 1 ||
+      record.customerInstruction.length > 500 ||
+      typeof record.depositIntentId !== 'string' ||
+      decodeDepositToken(encodeDepositToken(record.depositIntentId)) !== record.depositIntentId ||
+      typeof record.paymentDeadline !== 'string' ||
+      new Date(record.paymentDeadline).toISOString() !== record.paymentDeadline ||
+      record.providerName !== 'CBE Birr' ||
+      typeof record.receiverAccountHolderName !== 'string' ||
+      record.receiverAccountHolderName.length < 1 ||
+      record.receiverAccountHolderName.length > 160 ||
+      typeof record.receiverAccountMasked !== 'string' ||
+      record.receiverAccountMasked.length < 1 ||
+      record.receiverAccountMasked.length > 128 ||
+      typeof record.replayed !== 'boolean' ||
+      !isCustomerDepositStatusProjection(record.status)
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      amountMinor: record.amountMinor,
+      currencyCode: 'ETB',
+      customerInstruction: record.customerInstruction,
+      depositIntentId: record.depositIntentId,
+      paymentDeadline: record.paymentDeadline,
+      providerName: 'CBE Birr',
+      receiverAccountHolderName: record.receiverAccountHolderName,
+      receiverAccountMasked: record.receiverAccountMasked,
+      replayed: record.replayed,
+      status: Object.freeze({ ...record.status }),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function html(reply: FastifyReply, statusCode: number, body: string): FastifyReply {
   return reply.code(statusCode).type(HTML_CONTENT_TYPE).send(body);
 }
@@ -413,7 +575,26 @@ function validRateLimitOptions(options: CustomerWebRateLimitOptions): CustomerWe
 }
 
 export function buildCustomerWebApp(options: CustomerWebAppOptions) {
-  const publicOrigin = exactOrigin(options.publicOrigin ?? DEFAULT_PUBLIC_ORIGIN);
+  if (options.productPreviewMode !== undefined && typeof options.productPreviewMode !== 'boolean') {
+    throw new Error('Customer web product preview option is invalid.');
+  }
+  if (
+    options.depositReferenceProtectionSecrets !== undefined &&
+    (!/^[0-9a-f]{64}$/u.test(options.depositReferenceProtectionSecrets.encryptionSecret) ||
+      !/^[0-9a-f]{64}$/u.test(options.depositReferenceProtectionSecrets.fingerprintSecret) ||
+      options.depositReferenceProtectionSecrets.encryptionSecret ===
+        options.depositReferenceProtectionSecrets.fingerprintSecret)
+  ) {
+    throw new Error('Customer web deposit reference protection is invalid.');
+  }
+  const productPreviewMode = options.productPreviewMode ?? false;
+  const publicOrigin = exactOrigin(
+    options.publicOrigin ?? DEFAULT_PUBLIC_ORIGIN,
+    productPreviewMode,
+  );
+  const securityHeaders = productPreviewMode
+    ? { ...SECURITY_HEADERS, 'content-security-policy': LOOPBACK_PREVIEW_CONTENT_POLICY }
+    : SECURITY_HEADERS;
   const now = options.now ?? Date.now;
   const rateLimit = validRateLimitOptions(
     options.rateLimit ?? {
@@ -455,9 +636,9 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   );
 
   app.addHook('onSend', async (request, reply, payload) => {
-    reply.headers(SECURITY_HEADERS);
+    reply.headers(securityHeaders);
     const path = responsePath(request);
-    if (request.method !== 'GET' || NO_STORE_PATHS.has(path)) {
+    if (request.method !== 'GET' || isNoStorePath(path)) {
       reply.header('cache-control', NO_STORE).header('pragma', 'no-cache').header('expires', '0');
       appendVaryCookie(reply);
     } else if (!reply.hasHeader('cache-control')) {
@@ -742,8 +923,17 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
       if (!listed.ok) return html(reply, 503, genericErrorPage(503));
       const registrations = safeRegistrations(listed.registrations);
       if (!registrations) return html(reply, 503, genericErrorPage(503));
+      const listedDeposits = await options.workspace.listDeposits({
+        authUserId: customer.account.authUserId,
+        limit: 20,
+      });
+      if (!listedDeposits.ok) return html(reply, 503, genericErrorPage(503));
+      const deposits = safeDeposits(listedDeposits.deposits);
+      if (!deposits) return html(reply, 503, genericErrorPage(503));
       const query = request.query as Record<string, unknown>;
       const submitted = Object.keys(query).length === 1 && query.submitted === '1';
+      const depositSubmitted =
+        Object.keys(query).length === 1 && query['deposit-submitted'] === '1';
       return html(
         reply,
         200,
@@ -752,9 +942,115 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
           issueCsrfCookie(request, reply, options.csrfTokenFactory),
           newRequestKey(options.requestKeyFactory),
           registrations,
-          submitted ? { kind: 'info', message: 'Your Player ID request was received.' } : undefined,
+          deposits,
+          submitted
+            ? { kind: 'info', message: 'Your Player ID request was received.' }
+            : depositSubmitted
+              ? {
+                  kind: 'info',
+                  message: 'Your payment reference was received and is being checked.',
+                }
+              : undefined,
         ),
       );
+    } catch {
+      return html(reply, 503, genericErrorPage(503));
+    }
+  });
+
+  app.post('/deposits', async (request, reply) => {
+    const form = exactForm(request.body, ['_csrf', 'amountEtb', 'playerId', 'requestKey']);
+    const amountMinor = amountEtbToMinor(form?.amountEtb);
+    const playerId = form?.playerId;
+    const requestKey = form?.requestKey;
+    if (!form || !amountMinor || !validPlayerId(playerId) || !validRequestKey(requestKey)) {
+      return html(reply, 400, genericErrorPage(400));
+    }
+    if (!options.depositReferenceProtectionSecrets) {
+      return html(reply, 503, genericErrorPage(503));
+    }
+    try {
+      const customer = await options.auth.getCurrentCustomer(authContext(request, reply));
+      if (!customer.ok) return html(reply, 503, genericErrorPage(503));
+      if (customer.status === 'anonymous') return redirect(reply, '/sign-in');
+      const ensured = await options.workspace.ensureAccount({
+        authUserId: customer.account.authUserId,
+      });
+      if (!ensured.ok || ensured.status !== 'active') {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      const opened = await options.workspace.openDeposit({
+        amountMinor,
+        authUserId: customer.account.authUserId,
+        playerId,
+        requestKey,
+      });
+      if (!opened.ok) return html(reply, 503, genericErrorPage(503));
+      const instructions = safeDepositInstructions(opened.instructions);
+      if (!instructions || instructions.amountMinor !== amountMinor) {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      return html(
+        reply,
+        200,
+        depositInstructionsPage(
+          customer.account.email,
+          issueCsrfCookie(request, reply, options.csrfTokenFactory),
+          newRequestKey(options.requestKeyFactory),
+          encodeDepositToken(instructions.depositIntentId),
+          instructions,
+        ),
+      );
+    } catch {
+      return html(reply, 503, genericErrorPage(503));
+    }
+  });
+
+  app.post('/deposits/reference', async (request, reply) => {
+    const form = exactForm(request.body, [
+      '_csrf',
+      'depositToken',
+      'requestKey',
+      'transactionReference',
+    ]);
+    const depositIntentId = decodeDepositToken(form?.depositToken);
+    const requestKey = form?.requestKey;
+    const transactionReference = form?.transactionReference;
+    if (
+      !form ||
+      !depositIntentId ||
+      !validRequestKey(requestKey) ||
+      !validTransactionReference(transactionReference) ||
+      !options.depositReferenceProtectionSecrets
+    ) {
+      return html(reply, 400, genericErrorPage(400));
+    }
+    try {
+      const customer = await options.auth.getCurrentCustomer(authContext(request, reply));
+      if (!customer.ok) return html(reply, 503, genericErrorPage(503));
+      if (customer.status === 'anonymous') return redirect(reply, '/sign-in');
+      const ensured = await options.workspace.ensureAccount({
+        authUserId: customer.account.authUserId,
+      });
+      if (!ensured.ok || ensured.status !== 'active') {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      const protectedReference = protectCbeBirrDepositReference(
+        transactionReference,
+        options.depositReferenceProtectionSecrets,
+      );
+      const captured = await options.workspace.captureDepositReference({
+        authUserId: customer.account.authUserId,
+        ciphertext: protectedReference.ciphertext,
+        depositIntentId,
+        fingerprint: protectedReference.fingerprint,
+        keyVersion: protectedReference.keyVersion,
+        masked: protectedReference.masked,
+        requestKey,
+      });
+      return captured.ok && captured.depositIntentId === depositIntentId
+        ? redirect(reply, '/workspace?deposit-submitted=1')
+        : html(reply, 503, genericErrorPage(503));
     } catch {
       return html(reply, 503, genericErrorPage(503));
     }

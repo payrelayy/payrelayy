@@ -8,8 +8,10 @@ calls.
 ## Security boundary
 
 - Account and workspace responses are private and `no-store`.
-- Every form mutation requires the exact public origin, `Sec-Fetch-Site: same-origin`, and a
-  matching host-only double-submit CSRF cookie.
+- Every form mutation requires the exact configured origin, `Sec-Fetch-Site: same-origin`, and a
+  matching host-only double-submit CSRF cookie. Production configuration accepts only HTTPS. The
+  explicit product-preview option permits HTTP only on exact `127.0.0.1` so its deterministic GET
+  pages can render locally; it does not relax mutation origin or CSRF validation.
 - Authentication responses own session-cookie semantics. The application preserves every ordered
   cookie effect without logging credentials, sessions, or recovery codes.
 - Recovery links are redirected immediately to a clean URL. The one-time code is held for at most
@@ -35,6 +37,11 @@ calls.
 - The separate private eligibility ledger is not reachable from this application. New deposit
   intents require a latest explicit `eligible` decision, but this app has no decision route,
   procedure grant, table access, UI, or financial runtime capability.
+- Deposit reference entry is handled only by the authenticated server-side BFF. The browser sends
+  the raw value over its CSRF-protected same-origin form; the BFF immediately normalizes, masks,
+  fingerprints, and encrypts it, and only those protected fields cross the PostgreSQL boundary.
+  Deposit status renders through the shared customer-safe projection and exposes no submission,
+  verification, agent-account, execution-attempt, or external-reference identifier.
 
 ## Deployment gate
 
@@ -53,15 +60,28 @@ Runtime composition requires:
 - `CUSTOMER_WEB_DATABASE_URL_FILE=/run/secrets/customer_web_database_url` in production, containing
   only the dedicated `fetanagent_customer_web_runtime` direct-Postgres URL for the exact staging
   host with `sslmode=verify-full`; and
+- `INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true` plus
+  `CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE`,
+  `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE`, and
+  `CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE` at their fixed production paths when the
+  protected-reference deposit routes are composed. The same profile and two keys must be mounted
+  into the API and future authoritative verification worker; every process verifies the approved
+  nonsecret key fingerprints before readiness; and
 - optional `CUSTOMER_WEB_PORT` (defaults to loopback port `3003`).
 
 The workspace runtime can execute only these exact functions after its catalog preflight:
 
 - `app.ensure_customer_web_account(uuid)`;
 - `app.submit_customer_web_player_registration(uuid,uuid,text)`; and
-- `app.list_customer_web_player_registrations(uuid,integer)`.
+- `app.list_customer_web_player_registrations(uuid,integer)`;
+- `app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)`;
+- `app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)`; and
+- `app.list_customer_web_deposits(uuid,integer)`.
 
-It has no table, sequence, schema-create, or unrelated function capability.
+It has no table, sequence, schema-create, or unrelated function capability. Deposit mutations still
+fail closed unless `payment_verification`, `deposit_execution`, and
+`cbe_birr_authoritative_verification` are all locked at `live`; the last switch is created disabled,
+and this repository does not provision an authoritative CBE Birr verification worker or credential.
 
 The ownership-proof prerequisite adds no route, page, form, button, environment variable, database
 object, role, runtime composition, provider adapter, network call, or deployment wiring. No
@@ -71,6 +91,18 @@ reject web-origin ownership association. The separate financial ledger has no pr
 `Ready` remains unreachable and ownership could not silently enable deposits even if later proven.
 The list projection is advisory display only; the deposit-intent trigger remains the independent
 financial authorization boundary.
+
+## Local product preview
+
+`pnpm --filter @fetanagent/customer-web preview:product` starts the deterministic loopback product
+preview. Open `http://127.0.0.1:4173/preview/dashboard` for the complete customer workspace or
+`http://127.0.0.1:4173/preview/telegram` for the matching planned Telegram interaction.
+
+The preview includes Dashboard, Deposits, Player IDs, Activity, and Account. The deposit walkthrough
+uses the normal 25 to 25,000 ETB policy and a Ready Player ID, then shows review, masked CBE Birr
+instructions, reference entry, payment checking, deposit preparation, and customer-safe outcome
+states. Every interactive result is explicitly marked Preview. It is deterministic and never calls
+PostgreSQL, KemerBet, Supabase, Telegram, or another network service.
 
 The database migration deliberately leaves `fetanagent_customer_web_runtime` as `NOLOGIN` with no
 password. A separate reviewed role-and-secret provisioning phase must enable that runtime login and

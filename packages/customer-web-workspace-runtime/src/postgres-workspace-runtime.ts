@@ -4,6 +4,8 @@ import {
   CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   type CustomerWebWorkspaceConfig,
 } from '@fetanagent/config/customer-web';
+import { projectCustomerDepositStatus } from '@fetanagent/contracts';
+import type { DepositStatus } from '@fetanagent/domain';
 import { Pool, type PoolConfig } from 'pg';
 
 import { customerWorkspaceCatalogPreflightPassed } from './workspace-catalog-preflight.js';
@@ -24,6 +26,25 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const REQUEST_KEY_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PLAYER_ID_PATTERN = /^[^\s\u0000-\u001f\u007f]+$/u;
+const CIPHERTEXT_PATTERN = /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
+const MASKED_REFERENCE_PATTERN = /^\*\*\*[A-Z0-9._-]{4}$/u;
+const AMOUNT_MINOR_PATTERN = /^[1-9][0-9]*$/u;
+const DEPOSIT_STATUSES = new Set<DepositStatus>([
+  'intake_received',
+  'verification_pending',
+  'verification_review',
+  'verified',
+  'execution_pending',
+  'execution_in_progress',
+  'execution_review',
+  'execution_reconciliation',
+  'executed',
+  'rejected',
+  'expired',
+  'cancelled',
+  'execution_uncertain',
+]);
 const DISPLAY_STATUSES = new Set<CustomerWorkspaceDisplayStatus>([
   'checking',
   'ready',
@@ -49,6 +70,27 @@ export const LIST_CUSTOMER_WEB_PLAYER_REGISTRATIONS_SQL = `
   select platform_code, submitted_player_id, request_status,
          request_created_at, request_updated_at
   from app.list_customer_web_player_registrations($1::uuid, $2::integer)
+`;
+
+export const OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL = `
+  select deposit_intent_id, provider_code, receiver_account_holder_name,
+         receiver_account_masked, receiver_customer_instruction, expected_amount_minor,
+         currency_code, payment_deadline_at, deposit_status, request_key_already_used
+  from app.open_customer_web_deposit_intent($1::uuid, $2::uuid, $3::text, $4::bigint)
+`;
+
+export const CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL = `
+  select result_deposit_intent_id, submission_status, deposit_status, submitted_at,
+         request_key_already_used
+  from app.capture_customer_web_deposit_reference(
+    $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::smallint
+  )
+`;
+
+export const LIST_CUSTOMER_WEB_DEPOSITS_SQL = `
+  select deposit_intent_id, expected_amount_minor, currency_code, deposit_status,
+         created_at, updated_at
+  from app.list_customer_web_deposits($1::uuid, $2::integer)
 `;
 
 type DataRecord = Readonly<Record<string, unknown>>;
@@ -148,6 +190,29 @@ function validDate(value: unknown): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
+function validDepositStatus(value: unknown): value is DepositStatus {
+  return typeof value === 'string' && DEPOSIT_STATUSES.has(value as DepositStatus);
+}
+
+function validAmountMinor(value: unknown): value is string {
+  if (typeof value !== 'string' || !AMOUNT_MINOR_PATTERN.test(value)) return false;
+  const amount = BigInt(value);
+  return amount >= 2_500n && amount <= 2_500_000n;
+}
+
+function validProtectedReference(input: DataRecord): boolean {
+  return (
+    typeof input.ciphertext === 'string' &&
+    input.ciphertext.length <= 512 &&
+    CIPHERTEXT_PATTERN.test(input.ciphertext) &&
+    typeof input.fingerprint === 'string' &&
+    FINGERPRINT_PATTERN.test(input.fingerprint) &&
+    typeof input.masked === 'string' &&
+    MASKED_REFERENCE_PATTERN.test(input.masked) &&
+    input.keyVersion === 1
+  );
+}
+
 function registrationFromRow(row: DataRecord): CustomerWorkspaceRegistration {
   if (
     row.platform_code !== 'kemerbet' ||
@@ -208,6 +273,73 @@ function createWorkspacePort(
   markUnhealthy: () => void,
 ): CustomerWorkspacePort {
   return Object.freeze({
+    async captureDepositReference(
+      input: Parameters<CustomerWorkspacePort['captureDepositReference']>[0],
+    ) {
+      if (isUnavailable()) return GENERIC_FAILURE;
+      return dispatch(async () => {
+        let databaseQueryCompleted = false;
+        try {
+          if (isUnavailable()) return GENERIC_FAILURE;
+          const record = readExactRecord(input, [
+            'authUserId',
+            'ciphertext',
+            'depositIntentId',
+            'fingerprint',
+            'keyVersion',
+            'masked',
+            'requestKey',
+          ]);
+          if (
+            !validAuthUserId(record.authUserId) ||
+            !validAuthUserId(record.depositIntentId) ||
+            !validRequestKey(record.requestKey) ||
+            !validProtectedReference(record)
+          ) {
+            return GENERIC_FAILURE;
+          }
+          const result = await database.query(CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL, [
+            record.authUserId,
+            record.requestKey,
+            record.depositIntentId,
+            record.ciphertext,
+            record.fingerprint,
+            record.masked,
+            record.keyVersion,
+          ]);
+          databaseQueryCompleted = true;
+          if (isTerminallyUnavailable()) return GENERIC_FAILURE;
+          const row = oneRow(result.rows, [
+            'result_deposit_intent_id',
+            'submission_status',
+            'deposit_status',
+            'submitted_at',
+            'request_key_already_used',
+          ]);
+          if (
+            row.result_deposit_intent_id !== record.depositIntentId ||
+            row.submission_status !== 'verification_enqueued' ||
+            row.deposit_status !== 'verification_pending' ||
+            !validDate(row.submitted_at) ||
+            typeof row.request_key_already_used !== 'boolean'
+          ) {
+            markUnhealthy();
+            return GENERIC_FAILURE;
+          }
+          return {
+            ok: true,
+            depositIntentId: record.depositIntentId,
+            replayed: row.request_key_already_used,
+            status: projectCustomerDepositStatus('verification_pending'),
+            submittedAt: row.submitted_at.toISOString(),
+          } as const;
+        } catch {
+          if (databaseQueryCompleted) markUnhealthy();
+          return GENERIC_FAILURE;
+        }
+      });
+    },
+
     async ensureAccount(input: Parameters<CustomerWorkspacePort['ensureAccount']>[0]) {
       if (isUnavailable()) return GENERIC_FAILURE;
       return dispatch(async () => {
@@ -226,6 +358,67 @@ function createWorkspacePort(
           }
           if (isUnavailable()) return GENERIC_FAILURE;
           return { ok: true, status: 'active' } as const;
+        } catch {
+          if (databaseQueryCompleted) markUnhealthy();
+          return GENERIC_FAILURE;
+        }
+      });
+    },
+
+    async listDeposits(input: Parameters<CustomerWorkspacePort['listDeposits']>[0]) {
+      if (isUnavailable()) return GENERIC_FAILURE;
+      return dispatch(async () => {
+        let databaseQueryCompleted = false;
+        try {
+          if (isUnavailable()) return GENERIC_FAILURE;
+          const record = readExactRecord(input, ['authUserId', 'limit']);
+          if (
+            !validAuthUserId(record.authUserId) ||
+            !Number.isSafeInteger(record.limit) ||
+            (record.limit as number) < 1 ||
+            (record.limit as number) > 20
+          ) {
+            return GENERIC_FAILURE;
+          }
+          const result = await database.query(LIST_CUSTOMER_WEB_DEPOSITS_SQL, [
+            record.authUserId,
+            record.limit,
+          ]);
+          databaseQueryCompleted = true;
+          if (isTerminallyUnavailable()) return GENERIC_FAILURE;
+          if (result.rows.length > (record.limit as number)) {
+            markUnhealthy();
+            return GENERIC_FAILURE;
+          }
+          const deposits = result.rows.map((value) => {
+            const row = readExactRecord(value, [
+              'deposit_intent_id',
+              'expected_amount_minor',
+              'currency_code',
+              'deposit_status',
+              'created_at',
+              'updated_at',
+            ]);
+            if (
+              !validAuthUserId(row.deposit_intent_id) ||
+              !validAmountMinor(row.expected_amount_minor) ||
+              row.currency_code !== 'ETB' ||
+              !validDepositStatus(row.deposit_status) ||
+              !validDate(row.created_at) ||
+              !validDate(row.updated_at)
+            ) {
+              throw new Error();
+            }
+            return Object.freeze({
+              amountMinor: row.expected_amount_minor,
+              createdAt: row.created_at.toISOString(),
+              currencyCode: 'ETB' as const,
+              depositIntentId: row.deposit_intent_id,
+              status: projectCustomerDepositStatus(row.deposit_status),
+              updatedAt: row.updated_at.toISOString(),
+            });
+          });
+          return { ok: true, deposits: Object.freeze(deposits) } as const;
         } catch {
           if (databaseQueryCompleted) markUnhealthy();
           return GENERIC_FAILURE;
@@ -326,6 +519,89 @@ function createWorkspacePort(
             registration: Object.freeze({
               playerId: record.playerId,
               status: row.request_status,
+            }),
+          } as const;
+        } catch {
+          if (databaseQueryCompleted) markUnhealthy();
+          return GENERIC_FAILURE;
+        }
+      });
+    },
+
+    async openDeposit(input: Parameters<CustomerWorkspacePort['openDeposit']>[0]) {
+      if (isUnavailable()) return GENERIC_FAILURE;
+      return dispatch(async () => {
+        let databaseQueryCompleted = false;
+        try {
+          if (isUnavailable()) return GENERIC_FAILURE;
+          const record = readExactRecord(input, [
+            'amountMinor',
+            'authUserId',
+            'playerId',
+            'requestKey',
+          ]);
+          if (
+            !validAmountMinor(record.amountMinor) ||
+            !validAuthUserId(record.authUserId) ||
+            !validPlayerId(record.playerId) ||
+            !validRequestKey(record.requestKey)
+          ) {
+            return GENERIC_FAILURE;
+          }
+          const result = await database.query(OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL, [
+            record.authUserId,
+            record.requestKey,
+            record.playerId,
+            record.amountMinor,
+          ]);
+          databaseQueryCompleted = true;
+          if (isTerminallyUnavailable()) return GENERIC_FAILURE;
+          const row = oneRow(result.rows, [
+            'deposit_intent_id',
+            'provider_code',
+            'receiver_account_holder_name',
+            'receiver_account_masked',
+            'receiver_customer_instruction',
+            'expected_amount_minor',
+            'currency_code',
+            'payment_deadline_at',
+            'deposit_status',
+            'request_key_already_used',
+          ]);
+          if (
+            !validAuthUserId(row.deposit_intent_id) ||
+            row.provider_code !== 'cbe_birr' ||
+            typeof row.receiver_account_holder_name !== 'string' ||
+            row.receiver_account_holder_name.length < 1 ||
+            row.receiver_account_holder_name.length > 160 ||
+            typeof row.receiver_account_masked !== 'string' ||
+            row.receiver_account_masked.length < 1 ||
+            row.receiver_account_masked.length > 128 ||
+            typeof row.receiver_customer_instruction !== 'string' ||
+            row.receiver_customer_instruction.length < 1 ||
+            row.receiver_customer_instruction.length > 500 ||
+            row.expected_amount_minor !== record.amountMinor ||
+            row.currency_code !== 'ETB' ||
+            !validDate(row.payment_deadline_at) ||
+            row.deposit_status !== 'intake_received' ||
+            typeof row.request_key_already_used !== 'boolean'
+          ) {
+            markUnhealthy();
+            return GENERIC_FAILURE;
+          }
+          return {
+            ok: true,
+            instructions: Object.freeze({
+              amountMinor: record.amountMinor,
+              currencyCode: 'ETB' as const,
+              customerInstruction: row.receiver_customer_instruction,
+              depositIntentId: row.deposit_intent_id,
+              paymentDeadline: row.payment_deadline_at.toISOString(),
+              providerName: 'CBE Birr' as const,
+              receiverAccountHolderName: row.receiver_account_holder_name,
+              receiverAccountMasked: row.receiver_account_masked,
+              replayed: row.request_key_already_used,
+              status: projectCustomerDepositStatus('intake_received'),
             }),
           } as const;
         } catch {

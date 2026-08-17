@@ -14,7 +14,7 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({
       kind: 'menu',
       menu: {
-        text: 'Manage your KemerBet Player ID, or start a dry-run deposit with /deposit PLAYER_ID AMOUNT.',
+        text: 'Manage your KemerBet Player ID, or start a deposit with /deposit PLAYER_ID AMOUNT.',
         buttons: [{ text: 'Add KemerBet Player ID', callbackData }],
       },
     });
@@ -44,6 +44,8 @@ describe('Telegram Player-ID flow presentation', () => {
       receiverAccountMasked: '****TEST',
       customerInstruction: 'SIMULATION ONLY — DO NOT SEND MONEY.',
       paymentDeadline: '2026-08-12T13:00:00.000Z',
+      depositStatus: { label: 'Ready to start', tone: 'neutral' },
+      financialMode: 'dry_run',
     });
 
     expect(presentation).toEqual({
@@ -54,21 +56,60 @@ describe('Telegram Player-ID flow presentation', () => {
     });
     if (presentation.kind === 'message') {
       expect(presentation.text).toContain('25.00 ETB');
+      expect(presentation.text).toContain('Status: Ready to start.');
       expect(presentation.text).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
       expect(presentation.text).toContain('Synthetic receiver:');
-      expect(presentation.text).toContain(
-        'No payment is verified or executed, and KemerBet execution remains disabled',
-      );
+      expect(presentation.text).toContain('No payment is verified or executed in this simulation');
     }
   });
 
   it.each([
-    ['deposit_reference_received', 'has not been verified'],
     ['deposit_input_invalid', 'Use /deposit PLAYER_ID AMOUNT'],
     ['deposit_unavailable', 'No payment action was started'],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
     expect(presentation.kind).toBe('message');
     if (presentation.kind === 'message') expect(presentation.text).toContain(expected);
+  });
+
+  it('renders live instructions and customer-safe reference/status updates', () => {
+    const live = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'deposit_instructions',
+      depositToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      providerName: 'CBE Birr',
+      receiverAccountHolderName: 'FetanAgent',
+      receiverAccountMasked: '***1234',
+      customerInstruction: 'Send the exact amount.',
+      paymentDeadline: '2026-08-16T13:00:00.000Z',
+      depositStatus: { label: 'Ready to start', tone: 'neutral' },
+      financialMode: 'live',
+    });
+    expect(live.kind).toBe('message');
+    if (live.kind === 'message') {
+      expect(live.text).toContain('CBE Birr deposit: 25.00 ETB');
+      expect(live.text).toContain('/deposit_status AAAAAAAAAAAAAAAAAAAAAA');
+      expect(live.text).not.toMatch(/simulation|test reference/iu);
+    }
+
+    expect(
+      presentTelegramPlayerIdFlowResult({
+        version: 1,
+        outcome: 'deposit_reference_received',
+        depositStatus: { label: 'Checking payment', tone: 'working' },
+        financialMode: 'live',
+      }),
+    ).toEqual({ kind: 'message', text: 'Reference received. Status: Checking payment.' });
+    expect(
+      presentTelegramPlayerIdFlowResult({
+        version: 1,
+        outcome: 'deposit_status',
+        amountMinor: '2500',
+        currencyCode: 'ETB',
+        depositStatus: { label: 'Preparing deposit', tone: 'working' },
+      }),
+    ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — Preparing deposit.' });
   });
 });

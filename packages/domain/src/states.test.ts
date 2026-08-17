@@ -8,6 +8,17 @@ describe('deposit state machine', () => {
     expect(canTransitionDeposit('execution_uncertain', 'execution_reconciliation')).toBe(true);
     expect(canTransitionDeposit('execution_reconciliation', 'executed')).toBe(true);
   });
+
+  it('does not expose a positive execution retry path', () => {
+    expect(canTransitionDeposit('execution_pending', 'execution_uncertain')).toBe(false);
+    expect(canTransitionDeposit('execution_pending', 'execution_review')).toBe(false);
+    expect(canTransitionDeposit('execution_in_progress', 'executed')).toBe(false);
+    expect(canTransitionDeposit('execution_in_progress', 'execution_review')).toBe(false);
+    expect(canTransitionDeposit('execution_uncertain', 'execution_review')).toBe(false);
+    expect(canTransitionDeposit('execution_review', 'execution_pending')).toBe(false);
+    expect(canTransitionDeposit('execution_review', 'rejected')).toBe(false);
+    expect(canTransitionDeposit('execution_reconciliation', 'execution_pending')).toBe(false);
+  });
 });
 
 describe('withdrawal state machine', () => {

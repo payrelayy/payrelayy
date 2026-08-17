@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 import { loadApiConfig } from '@fetanagent/config/api';
 import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
@@ -13,6 +13,15 @@ import { encodeTelegramCapabilityId } from './telegram-action-capability.js';
 const inboundEventId = '64b27169-c249-4d2e-b312-d2ed9d6661ea';
 const depositIntentId = '3d8af16e-87e0-4a17-9098-b0907defd95f';
 const depositSubmissionId = 'a7cfdc2e-360f-47f1-836f-e65c9239e57b';
+const referenceKeyProfile = JSON.stringify({
+  encryptionKeyFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('e'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  fingerprintKeyFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('f'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  version: 1,
+});
 const actionConfig = loadApiConfig({
   NODE_ENV: 'test',
   INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
@@ -22,7 +31,9 @@ const actionConfig = loadApiConfig({
   API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
   API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
   API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
-  API_DEPOSIT_REFERENCE_PROTECTION_SECRET: 'e'.repeat(64),
+  CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
+  CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
+  CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceKeyProfile,
   PLAYER_ACTION_DATABASE_URL:
     'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
 });
@@ -141,7 +152,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
           };
         }
         if (query.includes('open_telegram_dry_run_deposit_intent')) {
-          expect(values.slice(0, 3)).toEqual([inboundEventId, '28379330', '2500']);
+          expect(values.slice(0, 3)).toEqual([inboundEventId, 'PLAYER-DEMO-42', '2500']);
           expect(values[3]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
           return {
             rows: [
@@ -167,7 +178,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const action: TelegramPrivateActionEnvelope = {
       ...rootAction,
       kind: 'deposit_intent_command',
-      playerId: '28379330',
+      playerId: 'PLAYER-DEMO-42',
       amountEtb: '25',
     };
 
@@ -187,6 +198,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       receiverAccountMasked: '****1234',
       customerInstruction: 'Send only CBE Birr to the shown account.',
       paymentDeadline: '2026-08-12T13:00:00.000Z',
+      depositStatus: { label: 'Ready to start', tone: 'neutral' },
+      financialMode: 'dry_run',
     });
     expect(calls).toHaveLength(2);
   });
@@ -216,7 +229,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       const action: TelegramPrivateActionEnvelope = {
         ...rootAction,
         kind: 'deposit_intent_command',
-        playerId: '28379330',
+        playerId: 'PLAYER-DEMO-42',
         amountEtb,
       };
 
@@ -232,7 +245,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
 
   it('protects a raw reference before the database call and returns no reference material', async () => {
     const transactionReference = 'tx-abc-7890';
-    const fingerprintKey = createHmac('sha256', Buffer.from('e'.repeat(64), 'hex'))
+    const fingerprintKey = createHmac('sha256', Buffer.from('f'.repeat(64), 'hex'))
       .update('fetanagent:deposit-reference:fingerprint-key:v1', 'utf8')
       .digest();
     const expectedFingerprint = createHmac('sha256', fingerprintKey)
@@ -292,7 +305,96 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         action,
         Buffer.from(JSON.stringify(action), 'utf8'),
       ),
-    ).resolves.toEqual({ version: 1, outcome: 'deposit_reference_received' });
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'deposit_reference_received',
+      depositStatus: { label: 'Ready to start', tone: 'neutral' },
+      financialMode: 'dry_run',
+    });
     expect(calls.map((call) => call.query).join('\n')).not.toContain(transactionReference);
+  });
+
+  it('selects the live SQL boundary only in live mode and reads customer-owned status', async () => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2030-01-01T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('open_telegram_live_deposit_intent')) {
+          return {
+            rows: [
+              {
+                deposit_intent_id: depositIntentId,
+                provider_code: 'cbe_birr',
+                receiver_account_holder_name: 'FetanAgent',
+                receiver_account_masked: '***1234',
+                receiver_customer_instruction: 'Send the exact amount.',
+                expected_amount_minor: '2500',
+                currency_code: 'ETB',
+                payment_deadline_at: new Date('2030-01-01T12:30:00.000Z'),
+                deposit_status: 'intake_received',
+                origin_inbound_event_already_consumed: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('get_telegram_customer_deposit')) {
+          return {
+            rows: [
+              {
+                deposit_intent_id: depositIntentId,
+                expected_amount_minor: '2500',
+                currency_code: 'ETB',
+                deposit_status: 'execution_pending',
+                created_at: new Date('2030-01-01T12:00:00.000Z'),
+                updated_at: new Date('2030-01-01T12:10:00.000Z'),
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const runtime = createPostgresTelegramPlayerActionRuntime(
+      { ...actionConfig, financialActionsMode: 'live' },
+      database,
+    );
+    const openAction: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_intent_command',
+      playerId: 'PLAYER-DEMO-42',
+      amountEtb: '25',
+    };
+    await expect(
+      runtime.handle(openAction, Buffer.from(JSON.stringify(openAction), 'utf8')),
+    ).resolves.toMatchObject({ outcome: 'deposit_instructions', financialMode: 'live' });
+    const statusAction: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      updateId: '11',
+      kind: 'deposit_status_command',
+      depositToken: encodeTelegramCapabilityId(depositIntentId),
+    };
+    await expect(
+      runtime.handle(statusAction, Buffer.from(JSON.stringify(statusAction), 'utf8')),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'deposit_status',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      depositStatus: { label: 'Preparing deposit', tone: 'working' },
+    });
+    expect(calls.join('\n')).toContain('open_telegram_live_deposit_intent');
+    expect(calls.join('\n')).not.toContain('open_telegram_dry_run_deposit_intent');
   });
 });

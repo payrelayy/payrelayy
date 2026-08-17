@@ -8,6 +8,16 @@ const compose = await readFile(`${infraDirectory}compose.staging-beta.yaml`, 'ut
 const dockerfile = await readFile(`${repositoryRoot}Dockerfile`, 'utf8');
 const caddyfile = await readFile(`${infraDirectory}gateway/Caddyfile`, 'utf8');
 const landingPage = await readFile(`${infraDirectory}gateway/site/index.html`, 'utf8');
+const retiredDepositReferenceProtection = new RegExp(
+  ['api', 'deposit', 'reference', 'protection'].join('[_-]'),
+  'iu',
+);
+
+assert.doesNotMatch(
+  compose,
+  retiredDepositReferenceProtection,
+  'the retired single-key deposit-reference input must remain absent',
+);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -175,13 +185,28 @@ assert.match(
 );
 assert.match(
   apiService,
-  /API_DEPOSIT_REFERENCE_PROTECTION_SECRET_FILE: \/run\/secrets\/api_deposit_reference_protection/,
+  /CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: \/run\/secrets\/cbe_deposit_reference_encryption_key/,
+);
+assert.match(
+  apiService,
+  /CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE: \/run\/secrets\/cbe_deposit_reference_fingerprint_key/,
+);
+assert.match(
+  apiService,
+  /CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE: \/etc\/fetanagent\/cbe-deposit-reference-key-profile\.v1\.json/,
 );
 assert.match(apiService, /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/);
 assert.match(apiService, /http:\/\/127\.0\.0\.1:3000\/readyz/);
 assert.match(apiService, /networks:\s*\r?\n\s+- staging_service/);
 assert.doesNotMatch(apiService, /^\s+ports:/m);
 assert.doesNotMatch(apiService, /owner_control_service/);
+for (const service of [ownerService, gatewayService, betaService, botService]) {
+  assert.doesNotMatch(
+    service,
+    /CBE_DEPOSIT_REFERENCE|cbe_deposit_reference|cbe-deposit-reference/,
+    'CBE deposit-reference key material and its profile must remain API-only',
+  );
+}
 
 assert.match(betaService, /target: beta-admission/);
 assert.match(betaService, /INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'/);
@@ -273,14 +298,15 @@ assert.deepEqual(
     'api_player_action_payload_hmac',
     'api_player_action_capability_hmac',
     'api_player_action_semantic_hmac',
-    'api_deposit_reference_protection',
+    'cbe_deposit_reference_encryption_key',
+    'cbe_deposit_reference_fingerprint_key',
   ],
-  'the API must receive only its six dedicated Player-ID and deposit-intake secrets',
+  'the API must receive only its seven dedicated Player-ID and deposit-intake secrets',
 );
 assert.deepEqual(
   [...apiConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
-  ['supabase_ca_certificate'],
-  'the API must receive the verified staging Supabase CA',
+  ['supabase_ca_certificate', 'cbe_deposit_reference_key_profile'],
+  'the API must receive only the verified staging Supabase CA and immutable key profile',
 );
 const betaConfigSources = [...betaConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
   (match) => match[1],
@@ -292,16 +318,20 @@ assert.deepEqual(
 );
 assert.doesNotMatch(botService, /supabase_ca_certificate|NODE_EXTRA_CA_CERTS/);
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 14, 'every secret mount must be 0400');
-assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 3, 'each public CA mount must be 0444');
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 15, 'every secret mount must be 0400');
+assert.equal(
+  countMatches(compose, /^\s+mode: 0444$/gm),
+  4,
+  'each immutable config mount must be 0444',
+);
 assert.equal(
   countMatches(compose, /^\s+uid: '10001'$/gm),
-  17,
+  19,
   'every mounted input must target UID 10001',
 );
 assert.equal(
   countMatches(compose, /^\s+gid: '10001'$/gm),
-  17,
+  19,
   'every mounted input must target GID 10001',
 );
 
@@ -313,7 +343,8 @@ const expectedSecrets = [
   'api_player_action_payload_hmac',
   'api_player_action_semantic_hmac',
   'api_player_action_transport_hmac',
-  'api_deposit_reference_protection',
+  'cbe_deposit_reference_encryption_key',
+  'cbe_deposit_reference_fingerprint_key',
   'bot_beta_admission_transport_hmac',
   'bot_player_action_transport_hmac',
   'player_action_database_url',
@@ -333,12 +364,28 @@ for (const secret of expectedSecrets) {
 
 assert.deepEqual(
   [...configs.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1]),
-  ['supabase_ca_certificate'],
-  'only the staging Supabase CA config is allowed',
+  ['supabase_ca_certificate', 'cbe_deposit_reference_key_profile'],
+  'only the staging Supabase CA and immutable CBE key-profile configs are allowed',
 );
 assert.match(
   configs,
   /FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE:\?set the verified staging Supabase CA file/,
+);
+assert.match(
+  configs,
+  /FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE:\?set the immutable CBE deposit-reference key-profile file/,
+);
+assert.match(
+  apiSecrets,
+  /source: cbe_deposit_reference_encryption_key\s*\r?\n\s+target: cbe_deposit_reference_encryption_key/,
+);
+assert.match(
+  apiSecrets,
+  /source: cbe_deposit_reference_fingerprint_key\s*\r?\n\s+target: cbe_deposit_reference_fingerprint_key/,
+);
+assert.match(
+  apiConfigs,
+  /source: cbe_deposit_reference_key_profile\s*\r?\n\s+target: \/etc\/fetanagent\/cbe-deposit-reference-key-profile\.v1\.json/,
 );
 
 for (const directSecretName of [
@@ -353,7 +400,9 @@ for (const directSecretName of [
   'API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET',
   'API_TELEGRAM_CAPABILITY_HMAC_SECRET',
   'API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET',
-  'API_DEPOSIT_REFERENCE_PROTECTION_SECRET',
+  'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
+  'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
+  'CBE_DEPOSIT_REFERENCE_KEY_PROFILE',
 ]) {
   assert.doesNotMatch(
     compose,

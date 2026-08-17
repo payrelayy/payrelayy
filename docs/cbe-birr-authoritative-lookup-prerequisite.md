@@ -77,6 +77,32 @@ They cover five P0 areas, all unresolved:
    redesigned so a non-mutating metadata preflight completes first and any later acquisition uses
    an opaque handle rather than returning protected material in the lease payload.
 
+## Normalization ownership inventory
+
+The package now includes a metadata-only inventory of the three normalization boundaries already
+present in the repository. It records observed code behavior; it does not assign an authoritative
+owner, establish compatibility, select an official-lookup profile, or execute normalization.
+
+| Existing boundary                     | Current version status                                                                                | Observed behavior only                                                                                                                                                                          |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `submitted_reference_capture`         | No normalization version exists. The reference-protection key version is not a normalization version. | Rejects values changed by trimming, requires 5--128 ASCII alphanumeric, dot, underscore, or hyphen code points, then maps accepted ASCII lowercase to uppercase inside the protection boundary. |
+| `offline_synthetic_fixture_reduction` | `fixture-normalizer-v1` is an offline fixture-only label.                                             | Strictly reduces exact synthetic fixture shapes and allowlisted values to redacted advisory safe facts; it is not a provider adapter or live normalization profile.                             |
+| `shadow_settlement_metadata_label`    | `cbe-birr-normalization-v1` is a shadow-settlement metadata label with no bound normalizer.           | Supplies no transformation and cannot be treated as proof that canonical-reference normalization exists.                                                                                        |
+
+Every boundary reports `authoritativeOwner: unassigned` and `jointReviewStatus: not_completed`.
+All three pairwise compatibility relationships remain `not_established`; equivalence and
+cross-profile transformation reuse are false. The exact current-metadata request pins the related
+protection, fixture-schema, fixture-normalizer, and shadow-settlement contract versions; the exact
+fixture schema and adapter labels; and normalized source attestations for the two boundaries that
+perform transformations. Any unknown version, label, attestation, field, or request shape returns
+only the fixed invalid result, and implicit version upgrades are false.
+
+This inventory does not resolve `lookup_reference_normalization_unreviewed`,
+`receiver_lookup_normalization_unreviewed`, or `canonical_reference_normalization_unreviewed`.
+Normalization execution, runtime wiring, provider requests, profile selection, decryption,
+protected-material access, database grants, evidence creation, claims, and every financial action
+remain unavailable.
+
 ## Stage 1G containment
 
 The database now exposes a metadata-only preflight for an existing shadow job. It returns only the
@@ -119,8 +145,10 @@ live transport. The next reviews must produce reproducible evidence for:
   lifecycle;
 - a non-mutating metadata preflight plus an opaque-handle acquisition design that reveals protected
   material only inside a separately reviewed, callback-scoped boundary; and
-- one explicit normalization ownership model covering all three existing profiles, with exact
-  transformations, compatibility tests, and fail-closed upgrade rules.
+- a completed joint review of the metadata-only normalization inventory that assigns an
+  authoritative owner, establishes exact compatibility rules, and approves fail-closed upgrades;
+  the current inventory documents observed behavior but leaves all three normalization blockers
+  unresolved.
 
 Completing those designs would permit another review only. It would not select a source, enable
 decryption or transport, make a provider call, create authoritative evidence, or authorize any

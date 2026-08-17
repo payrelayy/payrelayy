@@ -52,13 +52,22 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires the two dry-run deposit procedures in the exact private surface', () => {
+  it('requires the dry-run and live customer deposit procedures in the exact private surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
     );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 8');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.capture_telegram_live_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.get_telegram_customer_deposit(uuid,uuid)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 11');
   });
 });

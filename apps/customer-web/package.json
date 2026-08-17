@@ -5,13 +5,16 @@
   "type": "module",
   "dependencies": {
     "@fetanagent/config": "workspace:*",
+    "@fetanagent/contracts": "workspace:*",
     "@fetanagent/customer-web-auth-runtime": "workspace:*",
     "@fetanagent/customer-web-workspace-runtime": "workspace:*",
+    "@fetanagent/deposit-reference-protection": "workspace:*",
     "fastify": "5.11.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
+    "preview:product": "tsx src/product-preview.ts",
     "start": "node dist/index.js",
     "test": "vitest run --passWithNoTests"
   }

@@ -495,7 +495,7 @@ describe('dependency and production-source boundary', () => {
     expect(manifest.peerDependencies).toBeUndefined();
   });
 
-  it('imports only the Stage 1E policy and trap-free proxy detector', () => {
+  it('imports only the Stage 1E policy, trap-free proxy detector, and pure inventory module', () => {
     const source = oneRawSource(
       import.meta.glob('./index.ts', {
         eager: true,
@@ -511,6 +511,7 @@ describe('dependency and production-source boundary', () => {
     expect(staticSpecifiers).toEqual([
       '@fetanagent/cbe-birr-official-source-policy',
       'node:util/types',
+      './normalization-ownership.js',
     ]);
     expect(source).not.toMatch(/\bimport\s*\(/u);
     expect(source).not.toMatch(/\brequire\s*\(/u);
@@ -649,7 +650,7 @@ describe('read-only repository prerequisite regressions', () => {
     expect(leaseFunction).not.toContain('authoritative_lookup_prerequisites_incomplete');
   });
 
-  it('pins shared API-master derivation and treats uppercasing as submission-only behavior', () => {
+  it('pins distinct shared protection roots and treats uppercasing as submission-only behavior', () => {
     const apiSource = oneRawSource(
       import.meta.glob('../../../apps/api/src/postgres-telegram-player-action-runtime.ts', {
         eager: true,
@@ -657,20 +658,43 @@ describe('read-only repository prerequisite regressions', () => {
         query: '?raw',
       }),
     );
-    const protectReference =
-      /function protectReference\([\s\S]*?(?=\nasync function recordInbound\()/u.exec(
-        apiSource,
-      )?.[0];
-    expect(protectReference).toBeTypeOf('string');
-    expect(protectReference).toContain('const normalizedReference = reference.toUpperCase();');
-    expect(protectReference).toContain("const master = Buffer.from(secret, 'hex');");
-    expect(protectReference!.match(/createHmac\('sha256', master\)/gu)).toHaveLength(2);
-    expect(protectReference).toContain('fetanagent:deposit-reference:encryption-key:v1');
-    expect(protectReference).toContain('fetanagent:deposit-reference:fingerprint-key:v1');
-    expect(apiSource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
+    const protectionSource = oneRawSource(
+      import.meta.glob('../../../packages/deposit-reference-protection/src/index.ts', {
+        eager: true,
+        import: 'default',
+        query: '?raw',
+      }),
+    );
+    const profileSource = oneRawSource(
+      import.meta.glob('../../../packages/config/src/deposit-reference-profile.ts', {
+        eager: true,
+        import: 'default',
+        query: '?raw',
+      }),
+    );
+    expect(protectionSource).toContain('const normalizedReference = reference.toUpperCase();');
+    expect(protectionSource).toContain(
+      "encryptionMaster = Buffer.from(secrets.encryptionSecret, 'hex');",
+    );
+    expect(protectionSource).toContain(
+      "fingerprintMaster = Buffer.from(secrets.fingerprintSecret, 'hex');",
+    );
+    expect(protectionSource).toContain("createHmac('sha256', encryptionMaster)");
+    expect(protectionSource).toContain("createHmac('sha256', fingerprintMaster)");
+    expect(protectionSource).toContain('secrets.encryptionSecret === secrets.fingerprintSecret');
+    expect(protectionSource).toContain('fetanagent:deposit-reference:encryption-key:v1');
+    expect(protectionSource).toContain('fetanagent:deposit-reference:fingerprint-key:v1');
+    expect(protectionSource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
+    expect(apiSource).toContain(
+      "import { protectCbeBirrDepositReference } from '@fetanagent/deposit-reference-protection';",
+    );
+    expect(apiSource).not.toContain('reference.toUpperCase()');
+    expect(profileSource).toContain('timingSafeEqual(actualEncryption, expectedEncryption)');
+    expect(profileSource).toContain('timingSafeEqual(actualFingerprint, expectedFingerprint)');
+    expect(profileSource).toContain('version !== CBE_DEPOSIT_REFERENCE_KEY_VERSION');
     expect(apiSource).not.toContain('cbe_birr_official_receipt_lookup_v1');
     expect(apiSource).not.toContain('@fetanagent/cbe-birr-official-source-policy');
-    expect(protectReference).not.toMatch(/authoritative|provider_receipt_lookup/iu);
+    expect(protectionSource).not.toMatch(/authoritative|provider_receipt_lookup/iu);
   });
 
   it('keeps later migrations from silently satisfying receiver or lease blockers', () => {

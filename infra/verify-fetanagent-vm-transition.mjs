@@ -970,8 +970,8 @@ assertInOrder(
   'Every direct private start must prove the commit-bound stopped receipt and all live stopped-state gates',
 );
 assert.doesNotMatch(privateStartGate, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
-const startArm = /(?:^|\n)\s*start\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
-assert.ok(startArm, 'The helper must expose a guarded direct private start command.');
+const startArm = /(?:^|\n)\s*start\|fresh-start\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
+assert.ok(startArm, 'The helper must expose guarded direct private and fresh-host start commands.');
 assertInOrder(
   startArm,
   [
@@ -984,7 +984,27 @@ assertInOrder(
     'run_bounded_database_preflight',
     'up -d --no-build --wait --wait-timeout 90',
   ],
-  'The direct start gate must run before deploy inputs, database preflights, and container start',
+  'The start gates must run before deploy inputs, database preflights, and container start',
+);
+const freshStartGate = functionBody(deployHelper, 'require_fresh_host_start_ready');
+assertInOrder(
+  freshStartGate,
+  [
+    'local commit_sha="$1"',
+    'validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"',
+    'require_ipv6_host_ready',
+    'require_port_3002_free',
+    'docker_local container ls',
+    'docker_local network ls',
+  ],
+  'Fresh-host start must prove the exact commit, host network, free Owner port, and empty Compose project before launch',
+);
+assert.doesNotMatch(freshStartGate, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+assert.match(startArm, /if \[\[ "\$command" == \'fresh-start\' \]\]/);
+assert.match(
+  startArm,
+  /up -d --no-build --wait --wait-timeout 90 owner-control api beta-admission/,
+  'Fresh-host start must keep Telegram and the public gateway out of the initial launch.',
 );
 const cutoverArm = /cutover-ready\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
 assert.ok(cutoverArm, 'The helper must expose the cutover-ready command.');

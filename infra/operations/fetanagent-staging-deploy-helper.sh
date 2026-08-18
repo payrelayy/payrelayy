@@ -443,6 +443,25 @@ require_private_start_cutover_ready() {
   require_port_3002_free
 }
 
+require_fresh_host_start_ready() {
+  local commit_sha="$1"
+  local containers networks
+
+  validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"
+  require_ipv6_host_ready
+  require_port_3002_free
+
+  containers="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
+    die 'the fresh-host FetanAgent container inventory could not be inspected'
+  [[ -z "$containers" ]] || die 'fresh-host startup requires an empty FetanAgent project'
+
+  networks="$(docker_local network ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
+    die 'the fresh-host FetanAgent network inventory could not be inspected'
+  [[ -z "$networks" ]] || die 'fresh-host startup requires no existing FetanAgent networks'
+}
+
 require_transition_retired() {
   local commit_sha="$1"
   local current_helper_sha
@@ -596,15 +615,19 @@ case "$command" in
     rm -rf -- "$incoming"
     ;;
 
-  start)
-    [[ $# -eq 3 ]] || die 'start requires a commit and image tag'
+  start|fresh-start)
+    [[ $# -eq 3 ]] || die 'start and fresh-start require a commit and image tag'
     commit_sha="$2"
     image_tag="$3"
     validate_commit_and_tag "$commit_sha" "$image_tag"
     # This command is an independently callable privileged boundary. Prove the
-    # commit-bound transition receipt and live stopped state before reading
-    # deploy inputs, running database preflights, or starting any container.
-    require_private_start_cutover_ready "$commit_sha"
+    # reviewed transition (legacy cutover or clean fresh-host state) before
+    # reading deploy inputs, running database preflights, or starting a container.
+    if [[ "$command" == 'fresh-start' ]]; then
+      require_fresh_host_start_ready "$commit_sha"
+    else
+      require_private_start_cutover_ready "$commit_sha"
+    fi
     compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
     [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
       die 'the sealed Compose contract is absent or unsafe'
@@ -683,8 +706,16 @@ case "$command" in
     run_bounded_database_preflight \
       beta-admission apps/beta-admission/dist/catalog-preflight-cli.js ||
       die 'the beta-admission database preflight failed after three bounded attempts'
-    env -i "${compose_environment[@]}" "${compose_command[@]}" \
-      up -d --no-build --wait --wait-timeout 90
+    if [[ "$command" == 'fresh-start' ]]; then
+      # Fresh-host staging remains Telegram-disabled until its separately approved
+      # token and end-to-end smoke gate are complete. The historical start path
+      # retains the reviewed full beta profile behavior.
+      env -i "${compose_environment[@]}" "${compose_command[@]}" \
+        up -d --no-build --wait --wait-timeout 90 owner-control api beta-admission
+    else
+      env -i "${compose_environment[@]}" "${compose_command[@]}" \
+        up -d --no-build --wait --wait-timeout 90
+    fi
     ;;
 
   public-edge-ready)
@@ -781,6 +812,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, cutover-ready, network-ready, public-edge-ready, discard, install, start, start-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, cutover-ready, network-ready, public-edge-ready, discard, install, start, fresh-start, start-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

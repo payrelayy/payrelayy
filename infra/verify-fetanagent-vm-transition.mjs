@@ -1117,7 +1117,7 @@ assertInOrder(
 assert.match(deployWorkflow, /workflow_dispatch:/);
 assert.doesNotMatch(deployWorkflow, /pull_request:|pull_request_target:|push:|schedule:/);
 assert.match(deployWorkflow, /GITHUB_REF" == 'refs\/heads\/main'/);
-assert.match(deployWorkflow, /STAGING_DROPLET_ID: '590666364'/);
+assert.match(deployWorkflow, /STAGING_DROPLET_ID: '593344964'/);
 assert.doesNotMatch(deployWorkflow, /root@|StrictHostKeyChecking=no/);
 assert.match(publicWorkflow, /fetanagent-staging-deploy-helper public-edge-ready '\$GITHUB_SHA'/);
 assert.doesNotMatch(publicWorkflow, /public-edge-ready(?:\s|'|\")*(?:\r?\n|&&)/);

@@ -43,7 +43,7 @@ concurrency:
 env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
-  STAGING_DROPLET_ID: '590666364'
+  STAGING_DROPLET_ID: '593344964'
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
   STAGING_BANNED_IP: 2a05:d018:135e:1602:5210:739d:5667:fee4
@@ -567,7 +567,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
           echo 'started=true' >> "$GITHUB_OUTPUT"

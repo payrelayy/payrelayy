@@ -46,7 +46,7 @@ assert.doesNotMatch(workflow, /pull_request:|pull_request_target:|push:|schedule
 assert.match(workflow, /permissions:\s*\r?\n\s+contents: read/);
 assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
-assert.match(workflow, /STAGING_DROPLET_ID: '590666364'/);
+assert.match(workflow, /STAGING_DROPLET_ID: '593344964'/);
 assert.match(workflow, /STAGING_DIRECT_DATABASE_HOST: db\.spzpiyxheappsfyswewl\.supabase\.co/);
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/);
 assert.match(workflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
@@ -69,7 +69,12 @@ assert.match(workflow, /StrictHostKeyChecking=yes/g);
 assert.match(workflow, /UserKnownHostsFile=/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper verify/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper install/g);
-assert.match(workflow, /fetanagent-staging-deploy-helper start/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper fresh-start/g);
+assert.doesNotMatch(
+  workflow,
+  /fetanagent-staging-deploy-helper start '\$GITHUB_SHA'/,
+  'Fresh-host staging must not invoke the retired cutover-only start path.',
+);
 assert.match(workflow, /fetanagent-staging-deploy-helper network-ready/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper diagnose-owner-startup/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper stop/g);

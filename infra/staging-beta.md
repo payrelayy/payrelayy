@@ -188,27 +188,27 @@ The protected `staging` environment must hold these deploy inputs before `deploy
 `transition-stop-legacy` mode use only the three `STAGING_VM_*` SSH inputs. Never paste any
 protected value into a task, repository file, workflow input, or VM command line.
 
-| Protected environment input                      | Required boundary                                                     |
-| ------------------------------------------------ | --------------------------------------------------------------------- |
-| `SUPABASE_DB_PASSWORD`                           | staging database administrator password                               |
-| `SUPABASE_CA_CERTIFICATE_PEM`                    | verified staging database CA PEM                                      |
-| `BETA_ADMISSION_RUNTIME_PASSWORD`                | independent 32-byte lowercase hex                                     |
-| `OWNER_CONTROL_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex                           |
-| `PLAYER_ACTION_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex                           |
-| `BOT_TO_BETA_ADMISSION_HMAC_SECRET`              | independent 32-byte lowercase hex                                     |
-| `BETA_ADMISSION_PAYLOAD_HMAC_SECRET`             | different independent 32-byte lowercase hex                           |
-| `BOT_TO_API_ACTION_HMAC_SECRET`                  | distinct 32-byte lowercase hex; shared bot/API value                  |
-| `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET` | distinct 32-byte lowercase hex                                        |
-| `API_TELEGRAM_CAPABILITY_HMAC_SECRET`            | distinct 32-byte lowercase hex                                        |
-| `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET`       | distinct 32-byte lowercase hex                                        |
-| `CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET`        | distinct 32-byte lowercase hex; retain for decrypts                   |
-| `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET`       | distinct 32-byte lowercase hex; stable blind index                    |
-| `CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON`      | protected nonsecret variable; independently approved exact v1 profile |
-| `STAGING_TELEGRAM_BOT_TOKEN`                     | newly rotated staging-only BotFather token                            |
-| `STAGING_SUPABASE_PUBLISHABLE_KEY`               | staging publishable key; never `service_role`                         |
-| `STAGING_VM_HOST`                                | exact approved staging VM host                                        |
-| `STAGING_VM_KNOWN_HOSTS`                         | pinned OpenSSH known-hosts entry                                      |
-| `STAGING_VM_SSH_PRIVATE_KEY`                     | dedicated non-root deployment identity private key                    |
+| Protected environment input                      | Required boundary                                                                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `SUPABASE_DB_PASSWORD`                           | staging database administrator password                                                                                        |
+| `SUPABASE_CA_CERTIFICATE_PEM`                    | verified staging database CA PEM                                                                                               |
+| `BETA_ADMISSION_RUNTIME_PASSWORD`                | independent 32-byte lowercase hex                                                                                              |
+| `OWNER_CONTROL_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex                                                                                    |
+| `PLAYER_ACTION_RUNTIME_PASSWORD`                 | different independent 32-byte lowercase hex                                                                                    |
+| `BOT_TO_BETA_ADMISSION_HMAC_SECRET`              | independent 32-byte lowercase hex                                                                                              |
+| `BETA_ADMISSION_PAYLOAD_HMAC_SECRET`             | different independent 32-byte lowercase hex                                                                                    |
+| `BOT_TO_API_ACTION_HMAC_SECRET`                  | distinct 32-byte lowercase hex; shared bot/API value                                                                           |
+| `API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET` | distinct 32-byte lowercase hex                                                                                                 |
+| `API_TELEGRAM_CAPABILITY_HMAC_SECRET`            | distinct 32-byte lowercase hex                                                                                                 |
+| `API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET`       | distinct 32-byte lowercase hex                                                                                                 |
+| `CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET`        | distinct 32-byte lowercase hex; retain for decrypts                                                                            |
+| `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET`       | distinct 32-byte lowercase hex; stable blind index                                                                             |
+| `CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON`      | protected nonsecret variable; independently approved exact v1 profile                                                          |
+| `STAGING_TELEGRAM_BOT_TOKEN`                     | reserved for the separate bot activation and smoke workflow; the fresh-host deploy writes an invalid disabled sentinel instead |
+| `STAGING_SUPABASE_PUBLISHABLE_KEY`               | staging publishable key; never `service_role`                                                                                  |
+| `STAGING_VM_HOST`                                | exact approved staging VM host                                                                                                 |
+| `STAGING_VM_KNOWN_HOSTS`                         | pinned OpenSSH known-hosts entry                                                                                               |
+| `STAGING_VM_SSH_PRIVATE_KEY`                     | dedicated non-root deployment identity private key                                                                             |
 
 The three runtime passwords, all independently purposed HMAC values, and both deposit-reference keys
 must differ. Keep both deposit-reference keys and their separately approved profile stable for the

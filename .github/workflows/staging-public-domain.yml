@@ -99,7 +99,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
           ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper public-edge-ready '$GITHUB_SHA'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-public-edge-ready '$GITHUB_SHA'"
 
       - name: Start only the reviewed public gateway
         id: publish
@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
           ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-public-edge '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-fresh-public-edge '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
           echo 'started=true' >> "$GITHUB_OUTPUT"
 
       - name: Verify public HTTPS and authenticated Owner page boundary

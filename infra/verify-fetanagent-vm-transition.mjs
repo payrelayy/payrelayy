@@ -757,6 +757,8 @@ assert.match(
 );
 assert.match(deployHelper, /readonly TRANSITION_VERSION='1'/);
 assert.match(deployHelper, /readonly STAGING_DROPLET_ID='590666364'/);
+assert.match(deployHelper, /readonly FRESH_STAGING_DROPLET_ID='593344964'/);
+assert.match(deployHelper, /readonly FRESH_PUBLIC_IPV4='161\.35\.41\.232'/);
 assert.match(deployHelper, new RegExp(`readonly LEGACY_HELPER_SHA='${legacyHelperSha}'`));
 
 const cutoverReady = functionBody(deployHelper, 'require_cutover_ready');
@@ -992,6 +994,7 @@ assertInOrder(
   [
     'local commit_sha="$1"',
     'validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"',
+    'require_fresh_host_identity',
     'require_ipv6_host_ready',
     'require_port_3002_free',
     'docker_local container ls',
@@ -1000,6 +1003,27 @@ assertInOrder(
   'Fresh-host start must prove the exact commit, host network, free Owner port, and empty Compose project before launch',
 );
 assert.doesNotMatch(freshStartGate, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+const freshHostIdentity = functionBody(deployHelper, 'require_fresh_host_identity');
+assertInOrder(
+  freshHostIdentity,
+  [
+    'command -v curl',
+    "--noproxy '*'",
+    'http://169.254.169.254/metadata/v1/id',
+    'http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address',
+    '[[ "$metadata_droplet_id" == "$FRESH_STAGING_DROPLET_ID" ]]',
+    '[[ "$metadata_ipv4" == "$FRESH_PUBLIC_IPV4" ]]',
+  ],
+  'Fresh-host operations must prove the exact DigitalOcean metadata identity.',
+);
+assert.deepEqual(
+  [...freshHostIdentity.matchAll(/https?:\/\/[^\s)"]+/gu)].map(([url]) => url),
+  [
+    'http://169.254.169.254/metadata/v1/id',
+    'http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address',
+  ],
+  'Fresh-host identity proof may contact only the two fixed DigitalOcean metadata paths.',
+);
 assert.match(startArm, /if \[\[ "\$command" == \'fresh-start\' \]\]/);
 assert.match(
   startArm,
@@ -1013,29 +1037,74 @@ assertInOrder(
   ['[[ $# -eq 2', 'require_legacy_stopped "$2"', 'require_cutover_ready', 'require_port_3002_free'],
   'The commit-bound stopped receipt and residue checks must pass before proving the pre-provision Owner port is free',
 );
+const freshHostReadyArm = /fresh-host-ready\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
+assert.ok(freshHostReadyArm, 'The helper must expose a read-only fresh-host readiness command.');
+assertInOrder(
+  freshHostReadyArm,
+  ['[[ $# -eq 2', 'require_fresh_host_start_ready "$2"'],
+  'Fresh-host readiness must reuse the same exact gate as fresh-start.',
+);
 
 const publicEdgeReady = functionBody(deployHelper, 'require_public_edge_ready');
 assertInOrder(
   publicEdgeReady,
-  ['local commit_sha="$1"', 'require_transition_retired "$commit_sha"', 'ufw status'],
-  'The retired receipt must pass before UFW and public-edge prerequisites',
+  [
+    'local commit_sha="$1"',
+    'require_transition_retired "$commit_sha"',
+    'require_public_network_ready "$PUBLIC_IPV4"',
+  ],
+  'The legacy public gate must retain the retired transition proof and reviewed IPv4.',
+);
+const publicNetworkReady = functionBody(deployHelper, 'require_public_network_ready');
+assertInOrder(
+  publicNetworkReady,
+  ['local public_ipv4="$1"', 'ufw status', 'ss -ltnH', 'getent ahostsv4 "$domain"'],
+  'The common public network gate must prove UFW, free ports, and exact DNS before publication.',
 );
 assert.ok(
-  publicEdgeReady.includes(
+  publicNetworkReady.includes(
     'grep -Eq "^${port}/tcp[[:blank:]]+ALLOW[[:blank:]]+Anywhere[[:blank:]]*$"',
   ),
   'The IPv4 UFW gate must allow only trailing horizontal whitespace.',
 );
 assert.ok(
-  publicEdgeReady.includes(
+  publicNetworkReady.includes(
     'grep -Eq "^${port}/tcp \\(v6\\)[[:blank:]]+ALLOW[[:blank:]]+Anywhere \\(v6\\)[[:blank:]]*$"',
   ),
   'The IPv6 UFW gate must allow only trailing horizontal whitespace.',
 );
 assert.doesNotMatch(
-  publicEdgeReady,
+  publicNetworkReady,
   /\[\[:space:\]\]/,
   'The UFW parser must not let vertical whitespace satisfy an exact rule line.',
+);
+const exactFreshRuntime = functionBody(deployHelper, 'require_exact_fresh_private_runtime');
+assertInOrder(
+  exactFreshRuntime,
+  [
+    'local -a expected_services=(api beta-admission owner-control)',
+    '[[ "$services" == $\'api\\nbeta-admission\\nowner-control\' ]]',
+    "'NODE_ENV=production'",
+    "'FINANCIAL_ACTIONS_MODE=dry_run'",
+    "'TELEGRAM_BOT_ENABLED=false'",
+    "'TELEGRAM_BETA_ADMISSION_ENABLED=false'",
+    "'KEMERBET_EXECUTOR_ENABLED=false'",
+    "'KEMERBET_FINAL_ACTION_ENABLED=false'",
+    'require_reviewed_owner_port_3002 "$commit_sha"',
+  ],
+  'The fresh-host public gate must pin the exact private services and fail-closed environment.',
+);
+assert.doesNotMatch(exactFreshRuntime, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+const freshPublicEdgeReady = functionBody(deployHelper, 'require_fresh_public_edge_ready');
+assertInOrder(
+  freshPublicEdgeReady,
+  [
+    'validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"',
+    'require_fresh_host_identity',
+    'require_exact_fresh_private_runtime "$commit_sha"',
+    'require_public_network_ready "$FRESH_PUBLIC_IPV4"',
+  ],
+  'The fresh public gate must bind the commit, Droplet identity, private runtime, and new IPv4.',
 );
 const ufwAllowsExactWebRules = (status) =>
   [
@@ -1072,21 +1141,31 @@ assert.equal(
   ),
   false,
 );
-const publicEdgeArm = /public-edge-ready\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
+const publicEdgeArm = /public-edge-ready\|fresh-public-edge-ready\)([\s\S]*?)\n\s*;;/u.exec(
+  helperMain,
+)?.[1];
 assert.ok(publicEdgeArm, 'The helper must expose a commit-bound public-edge readiness command.');
 assertInOrder(
   publicEdgeArm,
-  ['[[ $# -eq 2', 'require_public_edge_ready "$2"'],
-  'Public-edge readiness must validate the reviewed commit receipt',
+  [
+    '[[ $# -eq 2',
+    'if [[ "$command" == \'fresh-public-edge-ready\' ]]',
+    'require_fresh_public_edge_ready "$2"',
+    'require_public_edge_ready "$2"',
+  ],
+  'Public-edge readiness must select only the explicit fresh or legacy gate.',
 );
-const startPublicEdgeArm = /start-public-edge\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
+const startPublicEdgeArm = /start-public-edge\|start-fresh-public-edge\)([\s\S]*?)\n\s*;;/u.exec(
+  helperMain,
+)?.[1];
 assert.ok(startPublicEdgeArm, 'The helper must expose the guarded public-edge start command.');
 assertInOrder(
   startPublicEdgeArm,
   [
     'commit_sha="$2"',
-    'require_public_edge_ready "$commit_sha"',
-    'require_exact_private_runtime "$commit_sha"',
+    'if [[ "$command" == \'start-fresh-public-edge\' ]]',
+    'require_fresh_public_edge_ready "$commit_sha"',
+    'require_exact_fresh_private_runtime "$commit_sha"',
     'install -d -o root -g root -m 0755 "$GATEWAY_STATE_ROOT"',
     'compose_command=(',
     'require_public_edge_ready "$commit_sha"',
@@ -1095,20 +1174,21 @@ assertInOrder(
   'Starting the public edge must recheck the full commit, DNS, UFW, ports, and runtime gate before gateway activation',
 );
 
-const cutoverStep =
-  /- name: Verify legacy VM cutover residue is absent([\s\S]*?)\n\s+- name:/u.exec(
+const freshHostStep =
+  /- name: Verify the fresh-host deployment boundary is empty([\s\S]*?)\n\s+- name:/u.exec(
     deployWorkflow,
   )?.[1];
-assert.ok(cutoverStep, 'Deployment must have a distinct legacy cutover gate.');
-assert.match(cutoverStep, /fetanagent-admin@/);
-assert.match(cutoverStep, /fetanagent-staging-deploy-helper verify/);
-assert.match(cutoverStep, /fetanagent-staging-deploy-helper cutover-ready '\$GITHUB_SHA'/);
-assert.doesNotMatch(cutoverStep, /rm |docker |systemctl |sudo -n (?:bash|sh)\b/);
+assert.ok(freshHostStep, 'Deployment must have a distinct fresh-host readiness gate.');
+assert.match(freshHostStep, /fetanagent-admin@/);
+assert.match(freshHostStep, /fetanagent-staging-deploy-helper verify/);
+assert.match(freshHostStep, /fetanagent-staging-deploy-helper fresh-host-ready '\$GITHUB_SHA'/);
+assert.doesNotMatch(freshHostStep, /fetanagent-staging-deploy-helper cutover-ready/);
+assert.doesNotMatch(freshHostStep, /rm |docker |systemctl |sudo -n (?:bash|sh)\b/);
 assertInOrder(
   deployWorkflow,
   [
     'Stop any prior staging project and disable old logins',
-    'Verify legacy VM cutover residue is absent',
+    'Verify the fresh-host deployment boundary is empty',
     'Verify the VM has direct IPv6 database readiness',
     'Start the private staging profile and smoke readiness',
   ],
@@ -1119,8 +1199,18 @@ assert.doesNotMatch(deployWorkflow, /pull_request:|pull_request_target:|push:|sc
 assert.match(deployWorkflow, /GITHUB_REF" == 'refs\/heads\/main'/);
 assert.match(deployWorkflow, /STAGING_DROPLET_ID: '593344964'/);
 assert.doesNotMatch(deployWorkflow, /root@|StrictHostKeyChecking=no/);
-assert.match(publicWorkflow, /fetanagent-staging-deploy-helper public-edge-ready '\$GITHUB_SHA'/);
-assert.doesNotMatch(publicWorkflow, /public-edge-ready(?:\s|'|\")*(?:\r?\n|&&)/);
+assert.match(
+  publicWorkflow,
+  /fetanagent-staging-deploy-helper fresh-public-edge-ready '\$GITHUB_SHA'/,
+);
+assert.match(
+  publicWorkflow,
+  /fetanagent-staging-deploy-helper start-fresh-public-edge '\$GITHUB_SHA' '\$\{GITHUB_SHA:0:12\}'/,
+);
+assert.doesNotMatch(
+  publicWorkflow,
+  /fetanagent-staging-deploy-helper (?:public-edge-ready|start-public-edge)\b/,
+);
 
 for (const phase of [
   'inspect',

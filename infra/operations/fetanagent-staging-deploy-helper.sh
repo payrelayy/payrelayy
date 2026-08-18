@@ -22,6 +22,7 @@ readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
 readonly PUBLIC_IPV4='178.128.39.89'
+readonly FRESH_PUBLIC_IPV4='161.35.41.232'
 readonly PUBLIC_DOMAINS=('fetanagent.com' 'www.fetanagent.com' 'owner.fetanagent.com')
 readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
 readonly LEGACY_STOPPED_RECEIPT='/var/lib/fetanagent-vm-transition/legacy-stopped-v1'
@@ -29,6 +30,7 @@ readonly TRANSITION_RECEIPT='/var/lib/fetanagent-vm-transition/retired-v1'
 readonly HELPER_ROTATION_RECEIPT='/var/lib/fetanagent-vm-transition/helper-rotation-v1'
 readonly TRANSITION_VERSION='1'
 readonly STAGING_DROPLET_ID='590666364'
+readonly FRESH_STAGING_DROPLET_ID='593344964'
 readonly LEGACY_HELPER_SHA='4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69'
 readonly BASE_HELPER_SHA='e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af'
 readonly BASE_REVIEWED_COMMIT='e636de89be179514af3aae3972ee0b086cd8c816'
@@ -228,6 +230,58 @@ require_exact_private_runtime() {
       health="$(docker_local container inspect "$ids" --format '{{.State.Health.Status}}')"
       [[ "$health" == 'healthy' ]] || die "$service is not healthy"
     fi
+  done
+
+  require_reviewed_owner_port_3002 "$commit_sha"
+}
+
+require_exact_fresh_private_runtime() {
+  local commit_sha="$1"
+  local container_id environment health ids revision service services state
+  local expected_environment
+  local -a expected_services=(api beta-admission owner-control)
+
+  services="$({
+    docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" |
+      while IFS= read -r container_id; do
+        [[ -n "$container_id" ]] || continue
+        docker_local container inspect "$container_id" \
+          --format '{{ index .Config.Labels "com.docker.compose.service" }}'
+      done
+  } | sort)" || die 'the fresh-host private FetanAgent service inventory could not be inspected'
+  [[ "$services" == $'api\nbeta-admission\nowner-control' ]] ||
+    die 'the fresh-host private FetanAgent service set is not exact'
+
+  for service in "${expected_services[@]}"; do
+    ids="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter "label=com.docker.compose.service=$service")" ||
+      die "the fresh-host $service container inventory could not be inspected"
+    [[ "$ids" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die "the fresh-host $service container inventory is not singular"
+    state="$(docker_local container inspect "$ids" --format '{{.State.Status}}')"
+    [[ "$state" == 'running' ]] || die "the fresh-host $service service is not running"
+    health="$(docker_local container inspect "$ids" --format '{{.State.Health.Status}}')"
+    [[ "$health" == 'healthy' ]] || die "the fresh-host $service service is not healthy"
+    revision="$(docker_local container inspect "$ids" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+    [[ "$revision" == "$commit_sha" ]] ||
+      die "the fresh-host $service service does not run the reviewed commit"
+
+    environment="$(docker_local container inspect "$ids" \
+      --format '{{range .Config.Env}}{{println .}}{{end}}')" ||
+      die "the fresh-host $service environment could not be inspected"
+    for expected_environment in \
+      'NODE_ENV=production' \
+      'FINANCIAL_ACTIONS_MODE=dry_run' \
+      'TELEGRAM_BOT_ENABLED=false' \
+      'TELEGRAM_BETA_ADMISSION_ENABLED=false' \
+      'KEMERBET_EXECUTOR_ENABLED=false' \
+      'KEMERBET_FINAL_ACTION_ENABLED=false'; do
+      grep -Fxq "$expected_environment" <<<"$environment" ||
+        die "the fresh-host $service safety environment is not exact"
+    done
   done
 
   require_reviewed_owner_port_3002 "$commit_sha"
@@ -448,6 +502,7 @@ require_fresh_host_start_ready() {
   local containers networks
 
   validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"
+  require_fresh_host_identity
   require_ipv6_host_ready
   require_port_3002_free
 
@@ -460,6 +515,22 @@ require_fresh_host_start_ready() {
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
     die 'the fresh-host FetanAgent network inventory could not be inspected'
   [[ -z "$networks" ]] || die 'fresh-host startup requires no existing FetanAgent networks'
+}
+
+require_fresh_host_identity() {
+  local metadata_droplet_id metadata_ipv4
+
+  command -v curl >/dev/null 2>&1 || die 'curl is unavailable for fresh-host identity proof'
+  metadata_droplet_id="$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
+    http://169.254.169.254/metadata/v1/id)" ||
+    die 'the fresh-host DigitalOcean identity could not be read'
+  metadata_ipv4="$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
+    http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)" ||
+    die 'the fresh-host DigitalOcean public IPv4 could not be read'
+  [[ "$metadata_droplet_id" == "$FRESH_STAGING_DROPLET_ID" ]] ||
+    die 'the fresh-host DigitalOcean identity is not the reviewed staging Droplet'
+  [[ "$metadata_ipv4" == "$FRESH_PUBLIC_IPV4" ]] ||
+    die 'the fresh-host DigitalOcean public IPv4 is not the reviewed staging address'
 }
 
 require_transition_retired() {
@@ -484,15 +555,13 @@ require_transition_retired() {
   require_exact_private_runtime "$commit_sha"
 }
 
-require_public_edge_ready() {
-  local commit_sha="$1"
+require_public_network_ready() {
+  local public_ipv4="$1"
   local domain port resolved_output status
   local -a resolved
   command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
   command -v ss >/dev/null 2>&1 || die 'the ss utility is unavailable'
   command -v ufw >/dev/null 2>&1 || die 'UFW is unavailable'
-
-  require_transition_retired "$commit_sha"
 
   status="$(ufw status)"
   grep -Fxq 'Status: active' <<<"$status" || die 'UFW is not active'
@@ -510,9 +579,25 @@ require_public_edge_ready() {
   for domain in "${PUBLIC_DOMAINS[@]}"; do
     resolved_output="$(getent ahostsv4 "$domain")" || die "$domain is not resolvable over IPv4"
     mapfile -t resolved <<<"$(awk '{ print $1 }' <<<"$resolved_output" | sort -u)"
-    [[ "${#resolved[@]}" -eq 1 && "${resolved[0]}" == "$PUBLIC_IPV4" ]] ||
+    [[ "${#resolved[@]}" -eq 1 && "${resolved[0]}" == "$public_ipv4" ]] ||
       die "$domain does not resolve only to the reviewed staging IPv4 address"
   done
+}
+
+require_public_edge_ready() {
+  local commit_sha="$1"
+
+  require_transition_retired "$commit_sha"
+  require_public_network_ready "$PUBLIC_IPV4"
+}
+
+require_fresh_public_edge_ready() {
+  local commit_sha="$1"
+
+  validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"
+  require_fresh_host_identity
+  require_exact_fresh_private_runtime "$commit_sha"
+  require_public_network_ready "$FRESH_PUBLIC_IPV4"
 }
 
 [[ $EUID -eq 0 ]] || die 'the helper must run as root through sudo'
@@ -540,6 +625,11 @@ case "$command" in
     require_legacy_stopped "$2"
     require_cutover_ready
     require_port_3002_free
+    ;;
+
+  fresh-host-ready)
+    [[ $# -eq 2 ]] || die 'fresh-host-ready requires one reviewed main commit'
+    require_fresh_host_start_ready "$2"
     ;;
 
   network-ready)
@@ -718,13 +808,17 @@ case "$command" in
     fi
     ;;
 
-  public-edge-ready)
-    [[ $# -eq 2 ]] || die 'public-edge-ready requires one reviewed main commit'
-    require_public_edge_ready "$2"
+  public-edge-ready|fresh-public-edge-ready)
+    [[ $# -eq 2 ]] || die 'public-edge readiness requires one reviewed main commit'
+    if [[ "$command" == 'fresh-public-edge-ready' ]]; then
+      require_fresh_public_edge_ready "$2"
+    else
+      require_public_edge_ready "$2"
+    fi
     ;;
 
-  start-public-edge)
-    [[ $# -eq 3 ]] || die 'start-public-edge requires a commit and image tag'
+  start-public-edge|start-fresh-public-edge)
+    [[ $# -eq 3 ]] || die 'public-edge start requires a commit and image tag'
     commit_sha="$2"
     image_tag="$3"
     validate_commit_and_tag "$commit_sha" "$image_tag"
@@ -733,8 +827,13 @@ case "$command" in
       die 'the sealed Compose contract is absent or unsafe'
     [[ "$(docker_local image inspect "fetanagent-gateway:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
       die 'the gateway image revision does not match the reviewed commit'
-    require_public_edge_ready "$commit_sha"
-    require_exact_private_runtime "$commit_sha"
+    if [[ "$command" == 'start-fresh-public-edge' ]]; then
+      require_fresh_public_edge_ready "$commit_sha"
+      require_exact_fresh_private_runtime "$commit_sha"
+    else
+      require_public_edge_ready "$commit_sha"
+      require_exact_private_runtime "$commit_sha"
+    fi
 
     [[ ! -L "$GATEWAY_STATE_ROOT" && ! -L "$GATEWAY_STATE_ROOT/data" && ! -L "$GATEWAY_STATE_ROOT/config" ]] ||
       die 'a gateway state path is a symbolic link'
@@ -775,7 +874,11 @@ case "$command" in
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
       --project-name "$PROJECT_NAME" --profile staging-manual --profile public-domain -f "$compose_file"
     )
-    require_public_edge_ready "$commit_sha"
+    if [[ "$command" == 'start-fresh-public-edge' ]]; then
+      require_fresh_public_edge_ready "$commit_sha"
+    else
+      require_public_edge_ready "$commit_sha"
+    fi
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       up -d --no-build --wait --wait-timeout 90 gateway
     ;;
@@ -812,6 +915,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, cutover-ready, network-ready, public-edge-ready, discard, install, start, fresh-start, start-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

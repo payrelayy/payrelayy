@@ -21,7 +21,7 @@ Official references:
 
 ## Required firewall gate
 
-Before changing DNS, attach a DigitalOcean Cloud Firewall to Droplet `590666364` with inbound TCP
+Before changing DNS, attach a DigitalOcean Cloud Firewall to Droplet `593344964` with inbound TCP
 rules for 80 and 443 from all IPv4 and IPv6 addresses. Retain the existing SSH rule; do not expose a
 database, Docker daemon, or application port. Add matching UFW rules for `80/tcp` and `443/tcp` on
 the VM. Docker-published ports can bypass ordinary UFW forwarding rules, so the DigitalOcean Cloud
@@ -42,8 +42,8 @@ Delete only the Porkbun parking records that conflict with the explicit hosts, t
 
 | Type  | Host    | Answer / value   | TTL |
 | ----- | ------- | ---------------- | --- |
-| A     | blank   | `178.128.39.89`  | 600 |
-| A     | `owner` | `178.128.39.89`  | 600 |
+| A     | blank   | `161.35.41.232`  | 600 |
+| A     | `owner` | `161.35.41.232`  | 600 |
 | CNAME | `www`   | `fetanagent.com` | 600 |
 
 Do not add an AAAA record during the initial cutover. Add IPv6 only after public HTTPS has been
@@ -57,9 +57,11 @@ with the explicit `owner` or `www` records; it is not needed by FetanAgent.
    belongs only to the `public-domain` profile.
 2. Configure the DigitalOcean Cloud Firewall and UFW rules.
 3. Add the three Porkbun DNS records and wait until all three names resolve only to
-   `178.128.39.89`.
+   `161.35.41.232`.
 4. Run `Staging public domain edge` in `inspect` mode with the exact main commit, domain, and
-   Droplet ID. It makes no container change.
+   Droplet ID. It proves the fresh-host private service set, exact fail-closed runtime environment,
+   Droplet metadata identity, DNS, UFW rules, free public ports, and gateway image without making a
+   container change.
 5. Only after inspection passes, run the same workflow in `publish` mode. It starts only the
    secret-free gateway and performs bounded public TLS smoke checks.
 6. If the smoke fails, the workflow removes the gateway automatically. The private bot and Owner

@@ -371,7 +371,6 @@ jobs:
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
-          STAGING_TELEGRAM_BOT_TOKEN: ${{ secrets.STAGING_TELEGRAM_BOT_TOKEN }}
           STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
           STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
@@ -401,7 +400,6 @@ jobs:
             "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" \
             "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" | sort -u | wc -l)"
           [[ "$distinct_count" -eq 11 ]]
-          [[ "$STAGING_TELEGRAM_BOT_TOKEN" =~ ^[0-9]{6,12}:[A-Za-z0-9_-]{30,80}$ ]]
           [[ -n "$SUPABASE_DB_PASSWORD" ]]
           [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
           [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -453,7 +451,10 @@ jobs:
           }
           NODE
           printf '%s\n' "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" > "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
-          printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" > "$secret_dir/bot-token"
+          # The fresh-host profile never starts the Telegram bot. A deliberately
+          # invalid sentinel keeps accidental bot startup fail-closed until the
+          # separate token-provision and end-to-end smoke gate is approved.
+          printf '%s\n' 'telegram-disabled-until-separate-smoke' > "$secret_dir/bot-token"
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
           chmod 0644 "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
@@ -488,7 +489,7 @@ jobs:
             exit "$remote_status"
           fi
 
-      - name: Verify legacy VM cutover residue is absent
+      - name: Verify the fresh-host deployment boundary is empty
         shell: bash
         env:
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
@@ -497,7 +498,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper cutover-ready '$GITHUB_SHA'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-host-ready '$GITHUB_SHA'"
 
       - name: Verify the VM has direct IPv6 database readiness
         shell: bash

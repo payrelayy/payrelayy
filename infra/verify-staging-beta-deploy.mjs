@@ -174,7 +174,7 @@ assert.equal(
 );
 assert.doesNotMatch(
   transitionSshVerify,
-  /\bpsql\b|\bsupabase\b|\bdocker\b|\bcompose\b|\bscp\b|\bcurl\b|\bwget\b|staging-runtimes|fetanagent-staging-deploy-helper (?:stop|discard|install|start|cutover-ready|network-ready|diagnose-owner-startup)/,
+  /\bpsql\b|\bsupabase\b|\bdocker\b|\bcompose\b|\bscp\b|\bcurl\b|\bwget\b|staging-runtimes|fetanagent-staging-deploy-helper (?:stop|discard|install|start|cutover-ready|fresh-host-ready|network-ready|diagnose-owner-startup)/,
 );
 
 const transitionStopLegacy = /\n  transition-stop-legacy:\n([\s\S]*?)\n  deploy:\n/u.exec(
@@ -301,7 +301,9 @@ assert.match(workflow, /stop-and-disable/);
 assert.match(workflow, /infra\/sql\/staging-runtimes-disable\.sql/g);
 assert.ok(
   workflow.indexOf('Stop any prior staging project and disable old logins') <
-    workflow.indexOf('Verify the VM has direct IPv6 database readiness') &&
+    workflow.indexOf('Verify the fresh-host deployment boundary is empty') &&
+    workflow.indexOf('Verify the fresh-host deployment boundary is empty') <
+      workflow.indexOf('Verify the VM has direct IPv6 database readiness') &&
     workflow.indexOf('Verify the VM has direct IPv6 database readiness') <
       workflow.indexOf('Provision three narrow 24-hour staging logins') &&
     workflow.indexOf('Provision three narrow 24-hour staging logins') <
@@ -310,6 +312,16 @@ assert.ok(
       workflow.indexOf('Start the private staging profile and smoke readiness'),
   'Old runtimes must stop, then direct IPv6 readiness must pass before new logins are provisioned.',
 );
+const freshHostReadinessStep =
+  /- name: Verify the fresh-host deployment boundary is empty([\s\S]*?)\n\s+- name: Verify the VM has direct IPv6 database readiness/u.exec(
+    workflow,
+  )?.[1];
+assert.ok(freshHostReadinessStep, 'Deployment must prove the exact empty fresh-host boundary.');
+assert.match(
+  freshHostReadinessStep,
+  /fetanagent-staging-deploy-helper fresh-host-ready '\$GITHUB_SHA'/,
+);
+assert.doesNotMatch(freshHostReadinessStep, /fetanagent-staging-deploy-helper cutover-ready/);
 const networkReadinessStep =
   /- name: Verify the VM has direct IPv6 database readiness([\s\S]*?)\n\s+- name: Provision three narrow 24-hour staging logins/u.exec(
     workflow,
@@ -342,7 +354,16 @@ assert.match(
   /CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: \$\{\{ vars\.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON \}\}/,
 );
 assert.match(workflow, /distinct_count/);
-assert.match(workflow, /STAGING_TELEGRAM_BOT_TOKEN/);
+assert.doesNotMatch(
+  workflow,
+  /secrets\.STAGING_TELEGRAM_BOT_TOKEN|\$STAGING_TELEGRAM_BOT_TOKEN/,
+  'Fresh-host deploy must not read or materialize a Telegram token before the separate bot gate.',
+);
+assert.match(
+  workflow,
+  /printf '%s\\n' 'telegram-disabled-until-separate-smoke' > "\$secret_dir\/bot-token"/,
+  'Fresh-host deploy must install a deliberately invalid bot-token sentinel.',
+);
 assert.match(workflow, /STAGING_SUPABASE_PUBLISHABLE_KEY/);
 assert.match(workflow, /SUPABASE_CA_CERTIFICATE_PEM/);
 assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTIONS_MODE=live/);
@@ -376,7 +397,7 @@ assert.match(
   /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" > "\$secret_dir\/cbe-deposit-reference-key-profile\.v1\.json"/,
 );
 const cbeProfileMaterialization =
-  /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"([\s\S]*?)printf '%s\\n' "\$STAGING_TELEGRAM_BOT_TOKEN"/u.exec(
+  /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"([\s\S]*?)printf '%s\\n' 'telegram-disabled-until-separate-smoke'/u.exec(
     protectedDeployInputs,
   )?.[1];
 assert.ok(
@@ -484,7 +505,14 @@ assert.ok(
   'All three one-shot runtime preflights must pass before long-lived services start.',
 );
 assert.match(helper, /docker_local network rm \$networks/);
-assert.doesNotMatch(helper, /curl|wget|git |\.env|xzztugbgtulptnbpoelr/);
+const freshHostIdentity = /require_fresh_host_identity\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(freshHostIdentity, 'The helper must define the exact fresh-host identity gate.');
+assert.match(freshHostIdentity, /curl --fail --silent --show-error --noproxy '\*' --max-time 3/);
+assert.match(freshHostIdentity, /http:\/\/169\.254\.169\.254\/metadata\/v1\/id/);
+assert.doesNotMatch(
+  helper.replace(freshHostIdentity, ''),
+  /curl|wget|git |\.env|xzztugbgtulptnbpoelr/,
+);
 
 const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
 assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');

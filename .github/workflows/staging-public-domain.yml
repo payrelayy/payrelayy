@@ -38,7 +38,7 @@ concurrency:
 
 env:
   PUBLIC_DOMAIN: fetanagent.com
-  STAGING_DROPLET_ID: '590666364'
+  STAGING_DROPLET_ID: '593344964'
 
 jobs:
   edge:

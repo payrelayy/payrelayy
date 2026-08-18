@@ -11,16 +11,21 @@ later expose only the reviewed Caddy gateway after the firewall and DNS gates in
 The repository provides:
 
 - [`../Dockerfile`](../Dockerfile): locked dependency builds and distinct non-root API,
-  API, Owner-control, beta-admission, bot, and secret-free gateway runtime targets with no secret copied into them. Their shared Linux/amd64
-  base image is pinned to a reviewed immutable digest for the London VM and must be reverified before
-  a real deployment;
-- [`compose.inactive.yaml`](compose.inactive.yaml): an API-only, explicitly `inactive` Compose
-  profile on an internal Docker network, with neither an image-exposed nor published host port;
+  customer-web, Owner-control, beta-admission, bot, executor, and secret-free gateway runtime targets
+  with no secret copied into them. Their shared Linux/amd64 base image is pinned to a reviewed
+  immutable digest for the London VM and must be reverified before a real deployment;
+- [`compose.inactive.yaml`](compose.inactive.yaml): an explicitly `inactive` Compose profile on an
+  internal Docker network, with neither an image-exposed nor published host port; it contains the
+  API and customer-web fail-closed runtime containers.
 - [`compose.executor.yaml`](compose.executor.yaml): a separate, explicit-profile-only, non-root
   deposit-executor activation composition plus an isolated manual session provisioner. Both consume
   one immutable image reference; the executor requires an explicit staging/production target and a
   lifetime database singleton. It publishes no port, changes no database switch, and remains
   unprovisioned; see [`executor.md`](executor.md);
+- [`.github/workflows/customer-web-image-smoke.yml`](../.github/workflows/customer-web-image-smoke.yml):
+  builds the real customer-web image, verifies its non-root identity and immutable revision label,
+  requires the credential-free production entrypoint to fail closed, and probes the built app only
+  through inert Auth and PostgreSQL ports with every runtime gate disabled;
 - [`.dockerignore`](../.dockerignore): excludes local configuration, Git metadata, credentials,
   runtime data, and generated output from the image context; and
 - [`operations/fetanagent-staging-deploy-helper.sh`](operations/fetanagent-staging-deploy-helper.sh):
@@ -48,8 +53,11 @@ enable a customer-facing service:
 ```powershell
 docker build --target api --build-arg VCS_REF=<reviewed-commit> `
   --tag fetanagent-api:inactive-<short-commit> .
+docker build --target customer-web --build-arg VCS_REF=<reviewed-commit> `
+  --tag fetanagent-customer-web:inactive-<short-commit> .
 docker compose -f infra/compose.inactive.yaml config
 node infra/verify-executor-deployment.mjs
+node infra/verify-customer-web-image.mjs
 ```
 
 Do not run `docker compose up`, publish a port, attach a secret file, or set an enable switch from

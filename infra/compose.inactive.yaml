@@ -1,6 +1,6 @@
 name: fetanagent-inactive
 
-# Stage 14A is an intentionally inactive, API-only container contract. It has no host port,
+# Stage 14A is an intentionally inactive launch contract. It has no host port,
 # credential, bot, worker, executor, reverse proxy, or public ingress. Do not run it as a service.
 services:
   api:
@@ -38,6 +38,54 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:3000/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+  customer-web:
+    profiles: [inactive]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: customer-web
+    init: true
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'false'
+      INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'false'
+      INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'
+      # fail-closed and inert in this launch profile
+      CUSTOMER_WEB_HOST: 127.0.0.1
+      CUSTOMER_WEB_PORT: '3003'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    networks:
+      - fetanagent_internal
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3003/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
       interval: 30s
       timeout: 3s
       start_period: 10s

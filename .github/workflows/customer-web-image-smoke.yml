@@ -1,0 +1,143 @@
+name: Customer web image smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  customer-web-image-smoke:
+    name: Build and smoke fail-closed customer web startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build and inspect the customer web image
+        shell: bash
+        env:
+          CUSTOMER_WEB_IMAGE: fetanagent-customer-web:ci
+        run: |
+          set -euo pipefail
+          docker build --pull=false --target customer-web \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --tag "$CUSTOMER_WEB_IMAGE" .
+
+          test "$(docker image inspect "$CUSTOMER_WEB_IMAGE" --format '{{.Config.User}}')" = \
+            '10001:10001'
+          test "$(docker image inspect "$CUSTOMER_WEB_IMAGE" --format '{{json .Config.Cmd}}')" = \
+            '["node","apps/customer-web/dist/index.js"]'
+          test "$(docker image inspect "$CUSTOMER_WEB_IMAGE" \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
+            "$GITHUB_SHA"
+          docker image inspect "$CUSTOMER_WEB_IMAGE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | grep -Fx 'NODE_ENV=production'
+
+      - name: Verify the real entrypoint fails closed without runtime credentials
+        shell: bash
+        env:
+          CUSTOMER_WEB_IMAGE: fetanagent-customer-web:ci
+        run: |
+          set -euo pipefail
+          set +e
+          startup_output="$(
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --env NODE_ENV=production \
+              --env FINANCIAL_ACTIONS_MODE=dry_run \
+              --env INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=false \
+              --env INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=false \
+              --env INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false \
+              "$CUSTOMER_WEB_IMAGE" 2>&1
+          )"
+          startup_status=$?
+          set -e
+
+          test "$startup_status" -eq 1
+          grep -F 'The customer web Auth runtime gate is disabled.' <<<"$startup_output"
+
+      - name: Probe the real built app with inert ports only
+        shell: bash
+        env:
+          CUSTOMER_WEB_IMAGE: fetanagent-customer-web:ci
+        run: |
+          set -euo pipefail
+          container_name='fetanagent-customer-web-image-smoke'
+          trap 'docker rm --force "$container_name" >/dev/null 2>&1 || true' EXIT
+
+          docker run --detach --name "$container_name" --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges --no-healthcheck \
+            --env NODE_ENV=production \
+            --env FINANCIAL_ACTIONS_MODE=dry_run \
+            --env INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=false \
+            --env INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=false \
+            --env INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false \
+            "$CUSTOMER_WEB_IMAGE" node --input-type=module --eval "
+              const { buildCustomerWebApp } = await import(
+                './apps/customer-web/dist/app.js'
+              );
+              const forbidden = async () => {
+                throw new Error('The inert image smoke must not call Auth or PostgreSQL.');
+              };
+              const auth = new Proxy(Object.create(null), {
+                get: () => forbidden,
+              });
+              const workspace = new Proxy(
+                {
+                  close: async () => undefined,
+                  ready: async () => false,
+                },
+                {
+                  get: (target, property, receiver) =>
+                    Reflect.has(target, property)
+                      ? Reflect.get(target, property, receiver)
+                      : forbidden,
+                },
+              );
+              const app = buildCustomerWebApp({
+                auth,
+                publicOrigin: 'https://fetanagent.com',
+                workspace,
+              });
+              await app.listen({ host: '127.0.0.1', port: 3003 });
+              const stop = async () => {
+                await app.close();
+              };
+              process.once('SIGINT', () => void stop());
+              process.once('SIGTERM', () => void stop());
+            "
+
+          for attempt in {1..20}; do
+            if docker exec "$container_name" node --input-type=module --eval \
+              "const response = await fetch('http://127.0.0.1:3003/healthz');
+               if (response.status !== 200) process.exit(1);"; then
+              break
+            fi
+            test "$(docker inspect "$container_name" --format '{{.State.Running}}')" = 'true'
+            if [[ "$attempt" -eq 20 ]]; then
+              docker logs "$container_name"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker exec "$container_name" node --input-type=module --eval \
+            "const health = await fetch('http://127.0.0.1:3003/healthz');
+             const healthBody = await health.json();
+             if (health.status !== 200 || healthBody.status !== 'ok') process.exit(1);
+             const readiness = await fetch('http://127.0.0.1:3003/readyz');
+             const readinessBody = await readiness.json();
+             if (readiness.status !== 503 || readinessBody.status !== 'unavailable') process.exit(1);"

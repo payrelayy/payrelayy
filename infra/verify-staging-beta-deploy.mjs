@@ -8,6 +8,10 @@ const workflow = readFileSync(
   resolve(root, '.github/workflows/staging-beta-deploy-smoke.yml'),
   'utf8',
 );
+const botWorkflow = readFileSync(
+  resolve(root, '.github/workflows/staging-telegram-bot.yml'),
+  'utf8',
+);
 const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/quality.yml'), 'utf8');
 const compose = readFileSync(resolve(root, 'infra/compose.staging-beta.yaml'), 'utf8');
 const stagingRunbook = readFileSync(resolve(root, 'infra/staging-beta.md'), 'utf8');
@@ -33,7 +37,7 @@ const retiredDepositReferenceProtection = new RegExp(
   'iu',
 );
 
-for (const artifact of [workflow, qualityWorkflow, compose, helper, stagingRunbook]) {
+for (const artifact of [workflow, botWorkflow, qualityWorkflow, compose, helper, stagingRunbook]) {
   assert.doesNotMatch(
     artifact,
     retiredDepositReferenceProtection,
@@ -81,6 +85,73 @@ assert.match(workflow, /fetanagent-staging-deploy-helper stop/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper discard/g);
 assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
+
+assert.match(botWorkflow, /workflow_dispatch:/);
+assert.doesNotMatch(botWorkflow, /pull_request:|pull_request_target:|push:|schedule:/);
+assert.match(botWorkflow, /permissions:\s*\r?\n\s+contents: read/);
+assert.match(botWorkflow, /concurrency:\s*\r?\n\s+group: fetanagent-staging-beta-deploy/);
+assert.match(botWorkflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
+assert.match(botWorkflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
+assert.match(botWorkflow, /STAGING_DROPLET_ID: '593344964'/);
+assert.match(botWorkflow, /STAGING_BOT_USERNAME: fetanagentbot/);
+assert.match(botWorkflow, /GITHUB_REF" == 'refs\/heads\/main'/);
+assert.match(botWorkflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
+assert.match(botWorkflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
+assert.match(botWorkflow, /CONFIRMED_PROJECT.*PRODUCTION_PROJECT_REF/);
+assert.match(botWorkflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
+assert.match(botWorkflow, /CONFIRMED_BOT_USERNAME.*STAGING_BOT_USERNAME/);
+assert.match(botWorkflow, /activate-staging-telegram-bot/);
+assert.match(botWorkflow, /\^\(activate-and-smoke\|stop-and-disable\)\$/);
+assert.match(botWorkflow, /environment: staging/);
+assert.match(botWorkflow, /contents: read/);
+assert.match(botWorkflow, /persist-credentials: false/);
+assert.match(
+  botWorkflow,
+  /STAGING_TELEGRAM_BOT_TOKEN: \$\{\{ secrets\.STAGING_TELEGRAM_BOT_TOKEN \}\}/,
+);
+assert.match(
+  botWorkflow,
+  /EXPECTED_TOKEN_SHA256: \$\{\{ vars\.STAGING_TELEGRAM_BOT_TOKEN_SHA256 \}\}/,
+);
+assert.match(botWorkflow, /createHash\('sha256'\)\.update\(token\)\.digest\('hex'\)/);
+assert.match(botWorkflow, /telegram\('getMe'\)/);
+assert.match(botWorkflow, /telegram\('getWebhookInfo'\)/);
+assert.match(botWorkflow, /identity\.username\.toLowerCase\(\) !== 'fetanagentbot'/);
+assert.match(botWorkflow, /webhook\.url !== ''/);
+assert.match(botWorkflow, /webhook\.pending_update_count !== 0/);
+assert.doesNotMatch(botWorkflow, /deleteWebhook|drop_pending_updates|setWebhook/);
+assert.match(botWorkflow, /StrictHostKeyChecking=yes/g);
+assert.match(botWorkflow, /UserKnownHostsFile=/g);
+assert.match(botWorkflow, /fetanagent-admin@/g);
+assert.match(botWorkflow, /fetanagent-staging-deploy-helper verify/g);
+for (const botCommand of [
+  'bot-disabled-ready',
+  'install-bot-token',
+  'start-bot',
+  'bot-ready',
+  'stop-bot',
+]) {
+  assert.match(botWorkflow, new RegExp(`fetanagent-staging-deploy-helper ${botCommand}`));
+  assert.match(helper, new RegExp(`\\n  ${botCommand.replace('-', '\\-')}\\)`));
+}
+assert.match(botWorkflow, /for attempt in \{1\.\.12\}/);
+assert.match(botWorkflow, /sleep 5/);
+assert.match(botWorkflow, /staging_telegram_bot_smoke=pass/);
+assert.match(botWorkflow, /steps\.install-token\.outcome == 'success'/);
+assert.match(botWorkflow, /rm -rf -- "\$secret_dir"/);
+assert.doesNotMatch(
+  botWorkflow,
+  /root@|ssh-keyscan|StrictHostKeyChecking=no|sudo -n (?:docker|bash)|docker\.sock/,
+);
+assert.doesNotMatch(
+  botWorkflow,
+  /SUPABASE_DB_PASSWORD|SUPABASE_ACCESS_TOKEN|service_role|FINANCIAL_ACTIONS_MODE=live|KEMERBET_EXECUTOR_ENABLED=true|KEMERBET_FINAL_ACTION_ENABLED=true|\bdoctl\b|porkbun|fetanagent\.com/iu,
+);
+assert.doesNotMatch(
+  botWorkflow,
+  /echo[^\n]*\$STAGING_TELEGRAM_BOT_TOKEN|set\s+-x|printenv|env\s*$/imu,
+  'The bot activation gate must never print the protected token or its environment.',
+);
 
 const legacyStopInput = /\n      confirm_legacy_stop:\n([\s\S]*?)\n\npermissions:/u.exec(
   workflow,
@@ -513,6 +584,49 @@ assert.doesNotMatch(
   helper.replace(freshHostIdentity, ''),
   /curl|wget|git |\.env|xzztugbgtulptnbpoelr/,
 );
+
+const freshBotRuntime = /require_exact_fresh_bot_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(freshBotRuntime, 'The helper must define an exact fresh-host Telegram runtime gate.');
+assert.match(freshBotRuntime, /api beta-admission bot owner-control/);
+assert.match(freshBotRuntime, /NODE_ENV=production/);
+assert.match(freshBotRuntime, /FINANCIAL_ACTIONS_MODE=dry_run/);
+assert.match(freshBotRuntime, /TELEGRAM_BOT_ENABLED=true/);
+assert.match(freshBotRuntime, /TELEGRAM_BETA_ADMISSION_ENABLED=true/);
+assert.match(freshBotRuntime, /KEMERBET_EXECUTOR_ENABLED=false/);
+assert.match(freshBotRuntime, /KEMERBET_FINAL_ACTION_ENABLED=false/);
+assert.match(freshBotRuntime, /RestartCount/);
+assert.match(freshBotRuntime, /Telegram bot started in private beta admission mode\./);
+assert.doesNotMatch(freshBotRuntime, /container logs(?! --tail 80)|cat|token|password|secret/);
+
+const disabledBotReady = /require_fresh_bot_disabled_ready\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(disabledBotReady, 'The helper must define the fresh-host disabled-bot gate.');
+assert.match(disabledBotReady, /require_exact_fresh_private_runtime "\$commit_sha"/);
+assert.match(disabledBotReady, /telegram-disabled-until-separate-smoke/);
+
+const installBotToken = /\n  install-bot-token\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(installBotToken, 'The helper must define exact protected bot-token installation.');
+assert.match(installBotToken, /\/tmp\/fetanagent-bot-token-\$commit_sha/);
+assert.match(installBotToken, /\$EXPECTED_SUDO_USER:600/);
+assert.match(installBotToken, /\^\[0-9\]\{8,12\}:\[A-Za-z0-9_-\]\{35,\}\$/);
+assert.match(installBotToken, /install -o 10001 -g 10001 -m 0400/);
+assert.match(installBotToken, /rm -f -- "\$incoming"/);
+assert.doesNotMatch(installBotToken, /echo|cat|docker|curl|wget/);
+
+const startBot = /\n  start-bot\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(startBot, 'The helper must define the isolated Telegram bot start boundary.');
+assert.match(startBot, /require_exact_fresh_private_runtime "\$commit_sha"/);
+assert.match(startBot, /fetanagent-bot:\$image_tag/);
+assert.match(startBot, /--env-file \/dev\/null/);
+assert.match(startBot, /up -d --no-build --no-deps bot/);
+assert.doesNotMatch(startBot, /gateway|FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
+
+const stopBot = /\n  stop-bot\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(stopBot, 'The helper must define a fail-closed Telegram bot stop boundary.');
+assert.match(stopBot, /com\.docker\.compose\.service=bot/);
+assert.match(stopBot, /container rm --force/);
+assert.match(stopBot, /telegram-disabled-until-separate-smoke/);
+assert.match(stopBot, /require_fresh_bot_disabled_ready "\$commit_sha"/);
+assert.doesNotMatch(stopBot, /stop_project|network rm|owner-control|api|beta-admission/);
 
 const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
 assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');

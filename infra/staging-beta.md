@@ -205,6 +205,7 @@ protected value into a task, repository file, workflow input, or VM command line
 | `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET`       | distinct 32-byte lowercase hex; stable blind index                                                                             |
 | `CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON`      | protected nonsecret variable; independently approved exact v1 profile                                                          |
 | `STAGING_TELEGRAM_BOT_TOKEN`                     | reserved for the separate bot activation and smoke workflow; the fresh-host deploy writes an invalid disabled sentinel instead |
+| `STAGING_TELEGRAM_BOT_TOKEN_SHA256`              | protected nonsecret variable; SHA-256 fingerprint approved only after a fresh BotFather rotation                               |
 | `STAGING_SUPABASE_PUBLISHABLE_KEY`               | staging publishable key; never `service_role`                                                                                  |
 | `STAGING_VM_HOST`                                | exact approved staging VM host                                                                                                 |
 | `STAGING_VM_KNOWN_HOSTS`                         | pinned OpenSSH known-hosts entry                                                                                               |
@@ -244,8 +245,10 @@ runtime, or claim that the boundary is sealed.
 `deploy-and-smoke` additionally requires the
 protected `staging` environment, a dedicated `fetanagent-admin` SSH identity with noninteractive
 sudo access only to the root-owned `/usr/local/sbin/fetanagent-staging-deploy-helper`, pinned
-`known_hosts`, a rotated staging bot token, the public Supabase client key, and three distinct narrow
-database passwords. It rejects root SSH and fails if the installed helper checksum differs from the
+`known_hosts`, the public Supabase client key, and three distinct narrow database passwords. It does
+not read the Telegram token; it always installs the invalid
+`telegram-disabled-until-separate-smoke` sentinel and starts only Owner-control, API, and
+beta-admission. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
 
 Deployment gives the beta-admission, Owner-control, and Player-ID action roles 24-hour staging
@@ -263,6 +266,20 @@ four cleanup attempts, 15 seconds apart, and then fails visibly rather than clai
 and must be run before the 24-hour login expiry; credential expiry does not itself stop the
 containers. A successful deployment is a beta demo, not financial launch approval; all payment,
 provider, validation, deposit, withdrawal, and KemerBet execution gates remain off.
+
+`Staging Telegram bot activation and smoke` is the only supported fresh-host bot boundary. Run it
+only after the private deployment passes on the same exact `main` commit. A fresh BotFather token
+must replace the compromised historical token, and its independently recorded
+`STAGING_TELEGRAM_BOT_TOKEN_SHA256` value must match before the workflow contacts Telegram. The
+workflow accepts only the exact `fetanagentbot` identity, requires no webhook and zero pending
+updates, and refuses to mutate or clear Telegram's queue. It then proves that exactly the three
+reviewed private services are healthy and Telegram-disabled, transfers the token through the pinned
+non-root SSH identity, installs it as a `10001:10001` mode-`0400` service file, and starts only the
+bot container without dependencies or builds. Readiness requires the exact reviewed revision, zero
+container restarts, genuine bot startup output, `FINANCIAL_ACTIONS_MODE=dry_run`, and both KemerBet
+flags false. A failed activation removes the bot and restores the invalid sentinel. The explicit
+`stop-and-disable` mode performs the same fail-closed removal without stopping the three private
+services.
 
 If activation fails, the root-owned helper reports only the Owner-control container state and at
 most 80 startup-log lines for the exact reviewed image before rollback removes the container. The

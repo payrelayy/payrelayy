@@ -287,6 +287,86 @@ require_exact_fresh_private_runtime() {
   require_reviewed_owner_port_3002 "$commit_sha"
 }
 
+require_exact_fresh_bot_runtime() {
+  local commit_sha="$1"
+  local container_id environment health ids restart_count revision service services state
+  local expected_environment
+  local -a expected_services=(api beta-admission bot owner-control)
+
+  services="$({
+    docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" |
+      while IFS= read -r container_id; do
+        [[ -n "$container_id" ]] || continue
+        docker_local container inspect "$container_id" \
+          --format '{{ index .Config.Labels "com.docker.compose.service" }}'
+      done
+  } | sort)" || die 'the fresh-host Telegram service inventory could not be inspected'
+  [[ "$services" == $'api\nbeta-admission\nbot\nowner-control' ]] ||
+    die 'the fresh-host Telegram service set is not exact'
+
+  for service in "${expected_services[@]}"; do
+    ids="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter "label=com.docker.compose.service=$service")" ||
+      die "the fresh-host $service container inventory could not be inspected"
+    [[ "$ids" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die "the fresh-host $service container inventory is not singular"
+    state="$(docker_local container inspect "$ids" --format '{{.State.Status}}')"
+    [[ "$state" == 'running' ]] || die "the fresh-host $service service is not running"
+    revision="$(docker_local container inspect "$ids" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+    [[ "$revision" == "$commit_sha" ]] ||
+      die "the fresh-host $service service does not run the reviewed commit"
+
+    environment="$(docker_local container inspect "$ids" \
+      --format '{{range .Config.Env}}{{println .}}{{end}}')" ||
+      die "the fresh-host $service environment could not be inspected"
+    for expected_environment in \
+      'NODE_ENV=production' \
+      'FINANCIAL_ACTIONS_MODE=dry_run' \
+      'KEMERBET_EXECUTOR_ENABLED=false' \
+      'KEMERBET_FINAL_ACTION_ENABLED=false'; do
+      grep -Fxq "$expected_environment" <<<"$environment" ||
+        die "the fresh-host $service safety environment is not exact"
+    done
+
+    if [[ "$service" == 'bot' ]]; then
+      for expected_environment in \
+        'TELEGRAM_BOT_ENABLED=true' \
+        'TELEGRAM_BETA_ADMISSION_ENABLED=true'; do
+        grep -Fxq "$expected_environment" <<<"$environment" ||
+          die 'the fresh-host Telegram bot activation environment is not exact'
+      done
+      restart_count="$(docker_local container inspect "$ids" --format '{{.RestartCount}}')"
+      [[ "$restart_count" == '0' ]] || die 'the fresh-host Telegram bot restarted unexpectedly'
+      docker_local container logs --tail 80 "$ids" 2>&1 |
+        grep -Fq 'Telegram bot started in private beta admission mode.' ||
+        die 'the fresh-host Telegram bot did not report its genuine startup contract'
+    else
+      health="$(docker_local container inspect "$ids" --format '{{.State.Health.Status}}')"
+      [[ "$health" == 'healthy' ]] || die "the fresh-host $service service is not healthy"
+      for expected_environment in \
+        'TELEGRAM_BOT_ENABLED=false' \
+        'TELEGRAM_BETA_ADMISSION_ENABLED=false'; do
+        grep -Fxq "$expected_environment" <<<"$environment" ||
+          die "the fresh-host $service Telegram safety environment is not exact"
+      done
+    fi
+  done
+
+  require_reviewed_owner_port_3002 "$commit_sha"
+}
+
+require_fresh_bot_disabled_ready() {
+  local commit_sha="$1"
+
+  require_exact_fresh_private_runtime "$commit_sha"
+  require_service_file "$SECRET_ROOT/bot-token"
+  grep -Fxq 'telegram-disabled-until-separate-smoke' "$SECRET_ROOT/bot-token" ||
+    die 'the fresh-host Telegram token is not the reviewed disabled sentinel'
+}
+
 require_ipv6_host_ready() {
   command -v ip >/dev/null 2>&1 || die 'the ip utility is unavailable'
   command -v getent >/dev/null 2>&1 || die 'the getent utility is unavailable'
@@ -808,6 +888,108 @@ case "$command" in
     fi
     ;;
 
+  bot-disabled-ready)
+    [[ $# -eq 2 ]] || die 'bot-disabled-ready requires one reviewed main commit'
+    require_fresh_bot_disabled_ready "$2"
+    ;;
+
+  install-bot-token)
+    [[ $# -eq 3 ]] || die 'install-bot-token requires one reviewed main commit and one incoming file'
+    commit_sha="$2"
+    incoming="$3"
+    [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    [[ "$incoming" == "/tmp/fetanagent-bot-token-$commit_sha" ]] ||
+      die 'the incoming Telegram token path is outside the approved boundary'
+    require_fresh_bot_disabled_ready "$commit_sha"
+    [[ ! -L "$incoming" && -f "$incoming" ]] ||
+      die 'the incoming Telegram token is absent or symbolic'
+    [[ "$(stat --format='%U:%a' "$incoming")" == "$EXPECTED_SUDO_USER:600" ]] ||
+      die 'the incoming Telegram token ownership or mode is unsafe'
+    [[ "$(wc -c <"$incoming")" -le 128 ]] || die 'the incoming Telegram token is too large'
+    [[ "$(awk 'END { print NR + 0 }' "$incoming")" == '1' ]] ||
+      die 'the incoming Telegram token must contain exactly one line'
+    grep -Eq '^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$' "$incoming" ||
+      die 'the incoming Telegram token shape is invalid'
+    grep -q $'\r' "$incoming" && die 'the incoming Telegram token contains a carriage return'
+    install -o 10001 -g 10001 -m 0400 "$incoming" "$SECRET_ROOT/bot-token"
+    rm -f -- "$incoming"
+    require_service_file "$SECRET_ROOT/bot-token"
+    ;;
+
+  start-bot)
+    [[ $# -eq 3 ]] || die 'start-bot requires one reviewed main commit and image tag'
+    commit_sha="$2"
+    image_tag="$3"
+    validate_commit_and_tag "$commit_sha" "$image_tag"
+    require_exact_fresh_private_runtime "$commit_sha"
+    require_service_file "$SECRET_ROOT/bot-token"
+    grep -Eq '^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$' "$SECRET_ROOT/bot-token" ||
+      die 'the installed Telegram token shape is invalid'
+    [[ "$(docker_local image inspect "fetanagent-bot:$image_tag" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+      die 'the Telegram bot image does not match the reviewed commit'
+
+    compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
+    [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
+      die 'the sealed Compose contract is absent or unsafe'
+    compose_environment=(
+      PATH="$SAFE_PATH"
+      HOME='/root'
+      DOCKER_HOST="$LOCAL_DOCKER_SOCKET"
+      FETANAGENT_VCS_REF="$commit_sha"
+      FETANAGENT_IMAGE_TAG="$image_tag"
+      FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
+      FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
+      FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
+      FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+      FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
+      FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
+      FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
+      FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+    )
+    compose_command=(
+      docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
+      --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file"
+    )
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      up -d --no-build --no-deps bot
+    ;;
+
+  bot-ready)
+    [[ $# -eq 2 ]] || die 'bot-ready requires one reviewed main commit'
+    require_exact_fresh_bot_runtime "$2"
+    ;;
+
+  stop-bot)
+    [[ $# -eq 2 ]] || die 'stop-bot requires one reviewed main commit'
+    commit_sha="$2"
+    [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    bot_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=bot')"
+    if [[ -n "$bot_container" ]]; then
+      [[ "$bot_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+        die 'the Telegram bot container inventory is ambiguous'
+      docker_local container rm --force "$bot_container" >/dev/null
+    fi
+    disabled_token="$(mktemp "$SECRET_ROOT/.bot-token-disabled.XXXXXX")"
+    printf '%s\n' 'telegram-disabled-until-separate-smoke' >"$disabled_token"
+    install -o 10001 -g 10001 -m 0400 "$disabled_token" "$SECRET_ROOT/bot-token"
+    rm -f -- "$disabled_token"
+    require_fresh_bot_disabled_ready "$commit_sha"
+    ;;
+
   public-edge-ready|fresh-public-edge-ready)
     [[ $# -eq 2 ]] || die 'public-edge readiness requires one reviewed main commit'
     if [[ "$command" == 'fresh-public-edge-ready' ]]; then
@@ -915,6 +1097,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

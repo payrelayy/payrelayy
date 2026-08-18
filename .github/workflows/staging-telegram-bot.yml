@@ -1,0 +1,272 @@
+name: Staging Telegram bot activation and smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Activate and smoke the exact staging bot, or stop it and restore the disabled sentinel
+        required: true
+        default: activate-and-smoke
+        type: choice
+        options:
+          - activate-and-smoke
+          - stop-and-disable
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_bot_username:
+        description: Type the exact Telegram bot username without @
+        required: true
+        type: string
+      confirm_activation:
+        description: For activation only, type activate-staging-telegram-bot
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_DROPLET_ID: '593344964'
+  STAGING_BOT_USERNAME: fetanagentbot
+
+jobs:
+  validate-target:
+    name: Validate exact staging bot target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_ACTIVATION: ${{ inputs.confirm_activation }}
+      CONFIRMED_BOT_USERNAME: ${{ inputs.confirm_bot_username }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      REQUESTED_MODE: ${{ inputs.mode }}
+    steps:
+      - name: Reject every non-staging target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$CONFIRMED_BOT_USERNAME" == "$STAGING_BOT_USERNAME" ]]
+          [[ "$REQUESTED_MODE" =~ ^(activate-and-smoke|stop-and-disable)$ ]]
+          if [[ "$REQUESTED_MODE" == 'activate-and-smoke' ]]; then
+            [[ "$CONFIRMED_ACTIVATION" == 'activate-staging-telegram-bot' ]]
+          else
+            [[ -z "$CONFIRMED_ACTIVATION" ]]
+          fi
+
+  bot-action:
+    name: Activate, smoke, or stop the exact staging bot
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact activation contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Prepare the protected SSH boundary
+        id: protected
+        shell: bash
+        env:
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+          secret_dir="$RUNNER_TEMP/protected-bot"
+          install -d -m 0700 "$secret_dir"
+          umask 077
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$secret_dir/known-hosts"
+          chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts"
+          ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
+
+          helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
+          [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
+          echo "secret_dir=$secret_dir" >> "$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the rotated token and genuine Telegram identity
+        if: inputs.mode == 'activate-and-smoke'
+        id: token
+        shell: bash
+        env:
+          EXPECTED_TOKEN_SHA256: ${{ vars.STAGING_TELEGRAM_BOT_TOKEN_SHA256 }}
+          STAGING_TELEGRAM_BOT_TOKEN: ${{ secrets.STAGING_TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+
+          const token = process.env.STAGING_TELEGRAM_BOT_TOKEN;
+          const expectedFingerprint = process.env.EXPECTED_TOKEN_SHA256;
+          if (typeof token !== 'string' || !/^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$/u.test(token)) {
+            throw new Error('The protected staging Telegram token shape is invalid.');
+          }
+          if (
+            typeof expectedFingerprint !== 'string' ||
+            !/^sha256:[0-9a-f]{64}$/u.test(expectedFingerprint)
+          ) {
+            throw new Error('The independently approved staging Telegram token fingerprint is absent.');
+          }
+          const actualFingerprint = `sha256:${createHash('sha256').update(token).digest('hex')}`;
+          if (actualFingerprint !== expectedFingerprint) {
+            throw new Error('The protected staging Telegram token does not match its approved fingerprint.');
+          }
+
+          async function telegram(method) {
+            const signal = AbortSignal.timeout(10_000);
+            const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+              method: 'POST',
+              signal,
+            });
+            if (!response.ok) throw new Error(`Telegram ${method} returned a non-success status.`);
+            const body = await response.json();
+            if (body?.ok !== true || typeof body.result !== 'object' || body.result === null) {
+              throw new Error(`Telegram ${method} returned an invalid result.`);
+            }
+            return body.result;
+          }
+
+          const identity = await telegram('getMe');
+          if (
+            identity.is_bot !== true ||
+            typeof identity.username !== 'string' ||
+            identity.username.toLowerCase() !== 'fetanagentbot'
+          ) {
+            throw new Error('The protected token does not belong to the exact staging bot identity.');
+          }
+          const webhook = await telegram('getWebhookInfo');
+          if (
+            webhook.url !== '' ||
+            !Number.isSafeInteger(webhook.pending_update_count) ||
+            webhook.pending_update_count !== 0
+          ) {
+            throw new Error('The staging bot must have no webhook and no pending updates before polling starts.');
+          }
+          console.log('telegram_identity_and_empty_queue=pass');
+          NODE
+
+          token_file="${{ steps.protected.outputs.secret_dir }}/telegram-bot-token"
+          umask 077
+          printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" > "$token_file"
+          chmod 0600 "$token_file"
+          echo "token_file=$token_file" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the exact disabled bot boundary
+        if: inputs.mode == 'activate-and-smoke'
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          vm_host='${{ steps.protected.outputs.vm_host }}'
+          ssh -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
+            "fetanagent-admin@$vm_host" \
+            "test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper bot-disabled-ready '$GITHUB_SHA'"
+
+      - name: Transfer and install the exact protected token
+        if: inputs.mode == 'activate-and-smoke'
+        id: install-token
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          vm_host='${{ steps.protected.outputs.vm_host }}'
+          incoming="/tmp/fetanagent-bot-token-$GITHUB_SHA"
+          scp -F /dev/null -p -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
+            '${{ steps.token.outputs.token_file }}' "fetanagent-admin@$vm_host:$incoming"
+          ssh -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
+            "fetanagent-admin@$vm_host" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper install-bot-token '$GITHUB_SHA' '$incoming'"
+
+      - name: Start and smoke the genuine staging bot
+        if: inputs.mode == 'activate-and-smoke'
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          vm_host='${{ steps.protected.outputs.vm_host }}'
+          ssh_options=(
+            -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts"
+          )
+          prefix="test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}'"
+          ssh "${ssh_options[@]}" "fetanagent-admin@$vm_host" \
+            "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-bot '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          for attempt in {1..12}; do
+            if ssh "${ssh_options[@]}" "fetanagent-admin@$vm_host" \
+              "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper bot-ready '$GITHUB_SHA'"; then
+              echo 'staging_telegram_bot_smoke=pass'
+              exit 0
+            fi
+            if [[ "$attempt" -lt 12 ]]; then sleep 5; fi
+          done
+          echo '::error::The genuine staging Telegram bot startup contract did not become ready.'
+          exit 1
+
+      - name: Stop the bot and restore its disabled sentinel
+        if: inputs.mode == 'stop-and-disable'
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          vm_host='${{ steps.protected.outputs.vm_host }}'
+          ssh -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
+            "fetanagent-admin@$vm_host" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop-bot '$GITHUB_SHA'"
+
+      - name: Roll back a failed bot activation
+        if: failure() && inputs.mode == 'activate-and-smoke' && steps.install-token.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          vm_host='${{ steps.protected.outputs.vm_host }}'
+          ssh -F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts" \
+            "fetanagent-admin@$vm_host" \
+            "sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop-bot '$GITHUB_SHA'"
+
+      - name: Remove runner-local protected material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir='${{ steps.protected.outputs.secret_dir }}'
+          if [[ -n "$secret_dir" && "$secret_dir" == "$RUNNER_TEMP/protected-bot" ]]; then
+            rm -rf -- "$secret_dir"
+          fi

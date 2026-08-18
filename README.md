@@ -50,8 +50,10 @@ the repository.
 The current foundation is deliberately safe:
 
 - `apps/customer-web` and `@fetanagent/customer-web-auth-runtime` implement a reviewed SSR/PWA Auth
-  foundation, but its internal gate defaults off and no Compose, Caddy, DNS, firewall, secret, or
-  live route enables it;
+  foundation. A pinned non-root Docker target and isolated image smoke now build the real service,
+  prove its credential-free entrypoint fails closed, and probe only its inert health boundary. Its
+  internal gates still default off, and no Compose, Caddy, DNS, firewall, secret, or live route
+  enables it;
 - the source provides self-service email/password account creation, generic sign-in, sign-out,
   ordered Supabase cookie refresh effects hardened to Secure/HttpOnly host-only cookies, CSRF
   protection, and a recovery operation that commits cookie effects only after code exchange and
@@ -181,7 +183,7 @@ environment file.
 
 | Component                                                   | Responsibility                                                                      |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/customer-web`                                         | Disabled unified SSR/PWA account, Player-ID, deposit-intake, and status workspace   |
+| `apps/customer-web`                                         | Disabled SSR/PWA workspace with a non-root image and fail-closed CI smoke           |
 | `apps/api`                                                  | Private Telegram actions, protected deposit intake/status, and audit boundaries     |
 | `apps/admin`                                                | Existing private staging operations service; not the public neutral workspace       |
 | `apps/bot`                                                  | Optional private Telegram legacy transport; not customer authentication or recovery |

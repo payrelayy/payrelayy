@@ -31,6 +31,10 @@ FROM build-base AS api-build
 
 RUN pnpm --filter @fetanagent/api... run build
 
+FROM build-base AS customer-web-build
+
+RUN pnpm --filter @fetanagent/customer-web... run build
+
 FROM build-base AS executor-build
 
 RUN pnpm --filter @fetanagent/executor... run build
@@ -103,6 +107,20 @@ USER fetanagent:fetanagent
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3000/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
 CMD ["node", "apps/api/dist/index.js"]
+
+FROM runtime-base AS customer-web
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="fetanagent-customer-web" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+COPY --from=customer-web-build --chown=10001:10001 /workspace/node_modules ./node_modules
+COPY --from=customer-web-build --chown=10001:10001 /workspace/packages ./packages
+COPY --from=customer-web-build --chown=10001:10001 /workspace/apps/customer-web ./apps/customer-web
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+
+CMD ["node", "apps/customer-web/dist/index.js"]
 
 # The executor uses the distribution-provided Chromium at the production-pinned
 # /usr/bin/chromium path. playwright-core does not download or bundle another browser.

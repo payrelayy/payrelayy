@@ -63,6 +63,12 @@ const workspace = Object.freeze({
     submittedAt: '2026-08-16T00:00:00.000Z',
   }),
   close: async () => undefined,
+  consumeRateLimit: async () => ({
+    allowed: true,
+    currentCount: 1,
+    ok: true as const,
+    retryAfterSeconds: 0,
+  }),
   ensureAccount: async () => ({ ok: true, status: 'active' }),
   listDeposits: async () => ({ ok: true as const, deposits: [] }),
   listPlayerRegistrations: async () => ({

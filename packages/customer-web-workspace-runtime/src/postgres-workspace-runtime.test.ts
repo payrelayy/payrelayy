@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL,
+  CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL,
   createCustomerWorkspacePoolConfig,
   createCustomerWorkspacePostgresRuntime,
   CustomerWorkspaceRuntimeUnavailableError,
@@ -107,6 +108,14 @@ async function expectAllOperationsUnavailableWithoutQueries(
   const failure = { error: 'customer_workspace_unavailable', ok: false } as const;
 
   expect(await runtime.ensureAccount({ authUserId })).toEqual(failure);
+  expect(
+    await runtime.consumeRateLimit({
+      bucketKey: 'a'.repeat(64),
+      maxRequests: 8,
+      routeKey: 'POST /sign-in',
+      windowSeconds: 60,
+    }),
+  ).toEqual(failure);
   expect(await runtime.listDeposits({ authUserId, limit: 20 })).toEqual(failure);
   expect(await runtime.listPlayerRegistrations({ authUserId, limit: 20 })).toEqual(failure);
   expect(
@@ -220,6 +229,9 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       "pg_catalog.to_regprocedure('app.list_customer_web_deposits(uuid,integer)')",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "pg_catalog.to_regprocedure('app.consume_customer_web_rate_limit(bytea,text,integer,integer)')",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
       "routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain("owner.rolname = 'postgres'");
@@ -274,7 +286,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     expect(database.end).toHaveBeenCalledTimes(1);
   });
 
-  it('uses only the six exact parameterized function calls and returns customer-safe projections', async () => {
+  it('uses only the seven exact parameterized function calls and returns customer-safe projections', async () => {
     const database = databaseWithOperations((query) => {
       if (query === ENSURE_CUSTOMER_WEB_ACCOUNT_SQL) {
         return [{ account_status: 'active', account_created: true }];
@@ -340,11 +352,22 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
           },
         ];
       }
+      if (query === CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL) {
+        return [{ allowed: true, retry_after_seconds: 0, current_count: 1 }];
+      }
       throw new Error('unexpected query');
     });
     const runtime = await createCustomerWorkspacePostgresRuntime(config, { database });
 
     expect(await runtime.ensureAccount({ authUserId })).toEqual({ ok: true, status: 'active' });
+    expect(
+      await runtime.consumeRateLimit({
+        bucketKey: 'a'.repeat(64),
+        maxRequests: 8,
+        routeKey: 'POST /sign-in',
+        windowSeconds: 60,
+      }),
+    ).toEqual({ allowed: true, currentCount: 1, ok: true, retryAfterSeconds: 0 });
     expect(await runtime.listPlayerRegistrations({ authUserId, limit: 20 })).toEqual({
       ok: true,
       registrations: [{ playerId: 'PLAYER-42', status: 'checking' }],
@@ -403,6 +426,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
 
     expect(database.queries.slice(1).map(({ query }) => query)).toEqual([
       ENSURE_CUSTOMER_WEB_ACCOUNT_SQL,
+      CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL,
       LIST_CUSTOMER_WEB_PLAYER_REGISTRATIONS_SQL,
       SUBMIT_CUSTOMER_WEB_PLAYER_REGISTRATION_SQL,
       OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL,
@@ -410,10 +434,11 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       LIST_CUSTOMER_WEB_DEPOSITS_SQL,
     ]);
     expect(database.queries[1]?.values).toEqual([authUserId]);
-    expect(database.queries[2]?.values).toEqual([authUserId, 20]);
-    expect(database.queries[3]?.values).toEqual([authUserId, requestKey, 'PLAYER-42']);
-    expect(database.queries[4]?.values).toEqual([authUserId, requestKey, 'PLAYER-42', '2500']);
-    expect(database.queries[5]?.values).toEqual([
+    expect(database.queries[2]?.values).toEqual(['a'.repeat(64), 'POST /sign-in', 8, 60]);
+    expect(database.queries[3]?.values).toEqual([authUserId, 20]);
+    expect(database.queries[4]?.values).toEqual([authUserId, requestKey, 'PLAYER-42']);
+    expect(database.queries[5]?.values).toEqual([authUserId, requestKey, 'PLAYER-42', '2500']);
+    expect(database.queries[6]?.values).toEqual([
       authUserId,
       requestKey,
       depositIntentId,
@@ -422,7 +447,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       '***1234',
       1,
     ]);
-    expect(database.queries[6]?.values).toEqual([authUserId, 20]);
+    expect(database.queries[7]?.values).toEqual([authUserId, 20]);
     await runtime.close();
   });
 
@@ -485,6 +510,17 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       readonly row: unknown;
       readonly sql: string;
     }[] = [
+      {
+        invoke: (runtime) =>
+          runtime.consumeRateLimit({
+            bucketKey: 'a'.repeat(64),
+            maxRequests: 8,
+            routeKey: 'POST /sign-in',
+            windowSeconds: 60,
+          }),
+        row: { allowed: false, retry_after_seconds: 0, current_count: 9 },
+        sql: CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL,
+      },
       {
         invoke: (runtime) => runtime.ensureAccount({ authUserId }),
         row: { account_status: 'suspended', account_created: false },

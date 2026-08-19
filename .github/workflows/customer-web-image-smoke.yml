@@ -60,6 +60,7 @@ jobs:
               --env INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=false \
               --env INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=false \
               --env INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false \
+              --env INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=false \
               "$CUSTOMER_WEB_IMAGE" 2>&1
           )"
           startup_status=$?
@@ -85,6 +86,7 @@ jobs:
             --env INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=false \
             --env INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=false \
             --env INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false \
+            --env INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=false \
             "$CUSTOMER_WEB_IMAGE" node --input-type=module --eval "
               const { buildCustomerWebApp } = await import(
                 './apps/customer-web/dist/app.js'

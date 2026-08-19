@@ -93,6 +93,13 @@ export const LIST_CUSTOMER_WEB_DEPOSITS_SQL = `
   from app.list_customer_web_deposits($1::uuid, $2::integer)
 `;
 
+export const CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL = `
+  select allowed, retry_after_seconds, current_count
+  from app.consume_customer_web_rate_limit(
+    decode($1::text, 'hex'), $2::text, $3::integer, $4::integer
+  )
+`;
+
 type DataRecord = Readonly<Record<string, unknown>>;
 
 export interface CustomerWorkspaceDatabase {
@@ -199,6 +206,22 @@ function validAmountMinor(value: unknown): value is string {
   const amount = BigInt(value);
   return amount >= 2_500n && amount <= 2_500_000n;
 }
+
+function validRateLimitBucketKey(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
+}
+
+const RATE_LIMIT_ROUTE_KEYS = new Set([
+  'GET /auth/recovery',
+  'POST /create-account',
+  'POST /deposits',
+  'POST /deposits/reference',
+  'POST /forgot-password',
+  'POST /player-ids',
+  'POST /sign-in',
+  'POST /sign-out',
+  'POST /update-password',
+]);
 
 function validProtectedReference(input: DataRecord): boolean {
   return (
@@ -332,6 +355,67 @@ function createWorkspacePort(
             replayed: row.request_key_already_used,
             status: projectCustomerDepositStatus('verification_pending'),
             submittedAt: row.submitted_at.toISOString(),
+          } as const;
+        } catch {
+          if (databaseQueryCompleted) markUnhealthy();
+          return GENERIC_FAILURE;
+        }
+      });
+    },
+
+    async consumeRateLimit(input: Parameters<CustomerWorkspacePort['consumeRateLimit']>[0]) {
+      if (isUnavailable()) return GENERIC_FAILURE;
+      return dispatch(async () => {
+        let databaseQueryCompleted = false;
+        try {
+          if (isUnavailable()) return GENERIC_FAILURE;
+          const record = readExactRecord(input, [
+            'bucketKey',
+            'maxRequests',
+            'routeKey',
+            'windowSeconds',
+          ]);
+          if (
+            !validRateLimitBucketKey(record.bucketKey) ||
+            typeof record.routeKey !== 'string' ||
+            !RATE_LIMIT_ROUTE_KEYS.has(record.routeKey) ||
+            !Number.isSafeInteger(record.maxRequests) ||
+            (record.maxRequests as number) < 1 ||
+            (record.maxRequests as number) > 1000 ||
+            !Number.isSafeInteger(record.windowSeconds) ||
+            (record.windowSeconds as number) < 1 ||
+            (record.windowSeconds as number) > 3600
+          ) {
+            return GENERIC_FAILURE;
+          }
+          const result = await database.query(CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL, [
+            record.bucketKey,
+            record.routeKey,
+            record.maxRequests,
+            record.windowSeconds,
+          ]);
+          databaseQueryCompleted = true;
+          if (isTerminallyUnavailable()) return GENERIC_FAILURE;
+          const row = oneRow(result.rows, ['allowed', 'retry_after_seconds', 'current_count']);
+          if (
+            typeof row.allowed !== 'boolean' ||
+            !Number.isSafeInteger(row.retry_after_seconds) ||
+            (row.retry_after_seconds as number) < 0 ||
+            (row.retry_after_seconds as number) > 3600 ||
+            !Number.isSafeInteger(row.current_count) ||
+            (row.current_count as number) < 1 ||
+            (row.current_count as number) > (record.maxRequests as number) + 1 ||
+            (row.allowed && row.retry_after_seconds !== 0) ||
+            (!row.allowed && (row.retry_after_seconds as number) < 1)
+          ) {
+            markUnhealthy();
+            return GENERIC_FAILURE;
+          }
+          return {
+            allowed: row.allowed,
+            currentCount: row.current_count as number,
+            ok: true,
+            retryAfterSeconds: row.retry_after_seconds as number,
           } as const;
         } catch {
           if (databaseQueryCompleted) markUnhealthy();

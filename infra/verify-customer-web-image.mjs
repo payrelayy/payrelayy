@@ -116,6 +116,7 @@ const requiredEnvironment = new Map([
   ['INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED', 'false'],
   ['INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED', 'false'],
   ['INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED', 'false'],
+  ['INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED', 'false'],
 ]);
 const dockerRuns = continuedDockerRunCommands(workflow);
 assert.equal(dockerRuns.length, 2, 'unexpected customer web image smoke container');
@@ -159,12 +160,12 @@ for (const dockerRun of dockerRuns) {
 assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./);
 assert.doesNotMatch(
   workflow,
-  /FINANCIAL_ACTIONS_MODE\s*[:=]\s*live\b|INTERNAL_CUSTOMER_WEB_(?:AUTH|WORKSPACE|DEPOSIT)_RUNTIME_ENABLED\s*[:=]\s*true\b/,
+  /FINANCIAL_ACTIONS_MODE\s*[:=]\s*live\b|INTERNAL_CUSTOMER_WEB_(?:AUTH|WORKSPACE|DEPOSIT)_RUNTIME_ENABLED\s*[:=]\s*true\b|INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED\s*[:=]\s*true\b/,
   'the customer web image smoke must never enable a live runtime',
 );
 assert.doesNotMatch(
   workflow,
-  /CUSTOMER_WEB_(?:DATABASE_URL|SUPABASE_PUBLISHABLE_KEY)|CBE_DEPOSIT_REFERENCE_(?:ENCRYPTION|FINGERPRINT)_SECRET/,
+  /CUSTOMER_WEB_(?:DATABASE_URL|SUPABASE_PUBLISHABLE_KEY|RATE_LIMIT_HMAC_SECRET)|CBE_DEPOSIT_REFERENCE_(?:ENCRYPTION|FINGERPRINT)_SECRET/,
   'the customer web image smoke must not receive a project, database, or reference-protection secret',
 );
 assert.doesNotMatch(

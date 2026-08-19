@@ -12,6 +12,15 @@ export type CustomerWorkspaceFailure = {
   readonly ok: false;
 };
 
+export type CustomerWebRateLimitResult =
+  | {
+      readonly allowed: boolean;
+      readonly currentCount: number;
+      readonly ok: true;
+      readonly retryAfterSeconds: number;
+    }
+  | CustomerWorkspaceFailure;
+
 export type CustomerWorkspaceEnsureResult =
   | {
       readonly ok: true;
@@ -83,6 +92,12 @@ export interface CustomerWorkspacePort {
     readonly masked: string;
     readonly requestKey: string;
   }): Promise<CustomerDepositCaptureResult>;
+  consumeRateLimit(input: {
+    readonly bucketKey: string;
+    readonly maxRequests: number;
+    readonly routeKey: string;
+    readonly windowSeconds: number;
+  }): Promise<CustomerWebRateLimitResult>;
   ensureAccount(input: { readonly authUserId: string }): Promise<CustomerWorkspaceEnsureResult>;
   listDeposits(input: {
     readonly authUserId: string;

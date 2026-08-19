@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import type {
@@ -119,6 +119,19 @@ export interface CustomerWebRateLimitOptions {
   readonly windowMs: number;
 }
 
+export type CustomerWebRateLimitDecision =
+  | { readonly allowed: boolean; readonly ok: true; readonly retryAfterSeconds: number }
+  | { readonly ok: false };
+
+export interface CustomerWebRateLimiter {
+  consume(input: {
+    readonly clientAddress: string;
+    readonly maxRequests: number;
+    readonly routeKey: string;
+    readonly windowSeconds: number;
+  }): Promise<CustomerWebRateLimitDecision>;
+}
+
 export interface CustomerWebAppOptions {
   readonly auth: CustomerWebAuthPort;
   readonly csrfTokenFactory?: () => string;
@@ -127,13 +140,62 @@ export interface CustomerWebAppOptions {
   readonly productPreviewMode?: boolean;
   readonly publicOrigin?: string;
   readonly rateLimit?: CustomerWebRateLimitOptions;
+  readonly rateLimiter?: CustomerWebRateLimiter;
   readonly requestKeyFactory?: () => string;
+  readonly trustProxy?: false | 1;
   readonly workspace: CustomerWorkspaceRuntime;
 }
 
 interface RateLimitBucket {
   count: number;
   resetAt: number;
+}
+
+export function createDurableCustomerWebRateLimiter(
+  workspace: Pick<CustomerWorkspaceRuntime, 'consumeRateLimit'>,
+  hmacSecret: string,
+): CustomerWebRateLimiter {
+  if (!/^[0-9a-f]{64}$/u.test(hmacSecret)) {
+    throw new Error('Customer web rate-limit HMAC secret is invalid.');
+  }
+  const key = Buffer.from(hmacSecret, 'hex');
+  return Object.freeze({
+    async consume(input: Parameters<CustomerWebRateLimiter['consume']>[0]) {
+      if (
+        input.clientAddress.length < 1 ||
+        input.clientAddress.length > 128 ||
+        /[\u0000-\u001f\u007f]/u.test(input.clientAddress) ||
+        !RATE_LIMITED_ROUTES.has(input.routeKey) ||
+        !Number.isSafeInteger(input.maxRequests) ||
+        input.maxRequests < 1 ||
+        input.maxRequests > 1_000 ||
+        !Number.isSafeInteger(input.windowSeconds) ||
+        input.windowSeconds < 1 ||
+        input.windowSeconds > 3_600
+      ) {
+        return { ok: false } as const;
+      }
+      const bucketKey = createHmac('sha256', key)
+        .update('fetanagent:customer-web-rate-limit:v1\u0000', 'utf8')
+        .update(input.clientAddress, 'utf8')
+        .update('\u0000', 'utf8')
+        .update(input.routeKey, 'utf8')
+        .digest('hex');
+      const result = await workspace.consumeRateLimit({
+        bucketKey,
+        maxRequests: input.maxRequests,
+        routeKey: input.routeKey,
+        windowSeconds: input.windowSeconds,
+      });
+      return result.ok
+        ? {
+            allowed: result.allowed,
+            ok: true as const,
+            retryAfterSeconds: result.retryAfterSeconds,
+          }
+        : ({ ok: false } as const);
+    },
+  });
 }
 
 type FormBody = Readonly<Record<string, string>>;
@@ -567,7 +629,8 @@ function validRateLimitOptions(options: CustomerWebRateLimitOptions): CustomerWe
     options.maxRequests > 1_000 ||
     !Number.isSafeInteger(options.windowMs) ||
     options.windowMs < 1_000 ||
-    options.windowMs > 60 * 60 * 1_000
+    options.windowMs > 60 * 60 * 1_000 ||
+    options.windowMs % 1_000 !== 0
   ) {
     throw new Error('Customer web rate-limit options are invalid.');
   }
@@ -577,6 +640,13 @@ function validRateLimitOptions(options: CustomerWebRateLimitOptions): CustomerWe
 export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   if (options.productPreviewMode !== undefined && typeof options.productPreviewMode !== 'boolean') {
     throw new Error('Customer web product preview option is invalid.');
+  }
+  if (
+    options.trustProxy !== undefined &&
+    options.trustProxy !== false &&
+    options.trustProxy !== 1
+  ) {
+    throw new Error('Customer web trusted-proxy configuration is invalid.');
   }
   if (
     options.depositReferenceProtectionSecrets !== undefined &&
@@ -608,7 +678,7 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
     bodyLimit: DEFAULT_BODY_LIMIT,
     logController: new LogController({ disableRequestLogging: true }),
     logger: false,
-    trustProxy: false,
+    trustProxy: options.trustProxy ?? false,
   });
 
   app.addHook('onClose', async () => {
@@ -657,6 +727,37 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
 
     const routeKey = `${request.method} ${routeUrl}`;
     if (RATE_LIMITED_ROUTES.has(routeKey)) {
+      if (options.rateLimiter) {
+        let decision: CustomerWebRateLimitDecision;
+        try {
+          decision = await options.rateLimiter.consume({
+            clientAddress: request.ip,
+            maxRequests: rateLimit.maxRequests,
+            routeKey,
+            windowSeconds: rateLimit.windowMs / 1_000,
+          });
+        } catch {
+          decision = { ok: false };
+        }
+        if (!decision.ok) return html(reply, 503, genericErrorPage(503));
+        if (
+          !Number.isSafeInteger(decision.retryAfterSeconds) ||
+          decision.retryAfterSeconds < 0 ||
+          decision.retryAfterSeconds > 3_600 ||
+          (decision.allowed && decision.retryAfterSeconds !== 0) ||
+          (!decision.allowed && decision.retryAfterSeconds < 1)
+        ) {
+          return html(reply, 503, genericErrorPage(503));
+        }
+        if (!decision.allowed) {
+          return html(
+            reply.header('retry-after', String(decision.retryAfterSeconds)),
+            429,
+            genericErrorPage(429),
+          );
+        }
+        return;
+      }
       const key = `${request.ip}\u0000${routeKey}`;
       const timestamp = now();
       let bucket = rateLimitBuckets.get(key);

@@ -89,6 +89,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     [
       'awaiting_player_id',
       'player_id_pending',
+      'player_id_exists',
       'invalid_player_id',
       'restart_required',
       'menu_required',

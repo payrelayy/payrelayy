@@ -340,6 +340,9 @@ async function handlePlayerId(
   if (row.result_outcome === 'completed' && row.request_status === 'pending_validation') {
     return { version: 1, outcome: 'player_id_pending' };
   }
+  if (row.result_outcome === 'completed' && row.request_status === 'exists') {
+    return { version: 1, outcome: 'player_id_exists' };
+  }
   if (row.result_outcome === 'rejected' && row.result_reason_code === 'invalid_player_id') {
     return { version: 1, outcome: 'invalid_player_id' };
   }

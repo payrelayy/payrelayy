@@ -21,6 +21,8 @@ export function presentTelegramPlayerIdFlowResult(
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'enterKemerBetPlayerId') };
     case 'player_id_pending':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerIdPending') };
+    case 'player_id_exists':
+      return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerIdExists') };
     case 'deposit_instructions':
       return {
         kind: 'message',

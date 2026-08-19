@@ -95,6 +95,10 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      readonly outcome: 'player_id_exists';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'deposit_instructions';
       readonly depositToken: string;
       readonly amountMinor: string;

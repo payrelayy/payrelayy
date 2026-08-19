@@ -23,6 +23,7 @@ describe('Telegram Player-ID flow presentation', () => {
   it.each([
     ['awaiting_player_id', 'Send your KemerBet Player ID now.'],
     ['player_id_pending', 'Player ID saved — pending validation.'],
+    ['player_id_exists', 'That Player ID is already registered on your FetanAgent account.'],
     ['invalid_player_id', 'That Player ID format is not accepted.'],
     ['restart_required', 'That action expired or is no longer available.'],
     ['menu_required', 'Send /menu, then choose Add KemerBet Player ID.'],

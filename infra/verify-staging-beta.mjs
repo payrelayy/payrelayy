@@ -60,6 +60,7 @@ function sorted(values) {
 
 const services = topLevelSection(compose, 'services');
 const ownerService = childBlock(services, 'owner-control');
+const customerWebService = childBlock(services, 'customer-web');
 const gatewayService = childBlock(services, 'gateway');
 const apiService = childBlock(services, 'api');
 const betaService = childBlock(services, 'beta-admission');
@@ -71,12 +72,13 @@ const secrets = topLevelSection(compose, 'secrets');
 const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gm)].map((match) => match[1]);
 assert.deepEqual(
   serviceNames,
-  ['owner-control', 'gateway', 'api', 'beta-admission', 'bot'],
-  'only Owner control, the gated public gateway, Player-ID API, beta-admission, and bot are allowed',
+  ['owner-control', 'customer-web', 'gateway', 'api', 'beta-admission', 'bot'],
+  'only Owner control, customer web, the gated public gateway, Player-ID API, beta-admission, and bot are allowed',
 );
 
 for (const [name, service] of [
   ['owner-control', ownerService],
+  ['customer-web', customerWebService],
   ['api', apiService],
   ['beta-admission', betaService],
   ['bot', botService],
@@ -157,6 +159,35 @@ assert.doesNotMatch(ownerService, /staging_service/);
 assert.match(ownerService, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.doesNotMatch(ownerService, /TELEGRAM_BOT_ENABLED: 'true'/);
 
+assert.match(customerWebService, /target: customer-web/);
+assert.match(customerWebService, /CUSTOMER_WEB_HOST: 0\.0\.0\.0/);
+assert.match(customerWebService, /CUSTOMER_WEB_PORT: '3003'/);
+assert.match(
+  customerWebService,
+  /CUSTOMER_WEB_SUPABASE_URL: https:\/\/spzpiyxheappsfyswewl\.supabase\.co/,
+);
+assert.match(
+  customerWebService,
+  /CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: \/run\/secrets\/customer_web_supabase_publishable_key/,
+);
+assert.match(
+  customerWebService,
+  /CUSTOMER_WEB_DATABASE_URL_FILE: \/run\/secrets\/customer_web_database_url/,
+);
+assert.match(
+  customerWebService,
+  /CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: \/run\/secrets\/customer_web_rate_limit_hmac/,
+);
+assert.match(customerWebService, /INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true'/);
+assert.match(customerWebService, /INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true'/);
+assert.match(customerWebService, /INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'/);
+assert.match(customerWebService, /INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true'/);
+assert.match(customerWebService, /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/);
+assert.match(customerWebService, /http:\/\/127\.0\.0\.1:3003\/readyz/);
+assert.match(customerWebService, /networks:\s*\r?\n\s+- owner_control_service/);
+assert.doesNotMatch(customerWebService, /^\s+ports:/m);
+assert.doesNotMatch(customerWebService, /staging_service/);
+
 assert.match(apiService, /target: api/);
 assert.match(apiService, /API_HOST: 0\.0\.0\.0/);
 assert.match(apiService, /API_PORT: '3000'/);
@@ -200,7 +231,7 @@ assert.match(apiService, /http:\/\/127\.0\.0\.1:3000\/readyz/);
 assert.match(apiService, /networks:\s*\r?\n\s+- staging_service/);
 assert.doesNotMatch(apiService, /^\s+ports:/m);
 assert.doesNotMatch(apiService, /owner_control_service/);
-for (const service of [ownerService, gatewayService, betaService, botService]) {
+for (const service of [ownerService, customerWebService, gatewayService, betaService, botService]) {
   assert.doesNotMatch(
     service,
     /CBE_DEPOSIT_REFERENCE|cbe_deposit_reference|cbe-deposit-reference/,
@@ -259,12 +290,32 @@ const apiSecrets = servicePropertyBlock(apiService, 'secrets');
 const apiConfigs = servicePropertyBlock(apiService, 'configs');
 const ownerSecrets = servicePropertyBlock(ownerService, 'secrets');
 const ownerConfigs = servicePropertyBlock(ownerService, 'configs');
+const customerWebSecrets = servicePropertyBlock(customerWebService, 'secrets');
+const customerWebConfigs = servicePropertyBlock(customerWebService, 'configs');
 const botSecrets = servicePropertyBlock(botService, 'secrets');
 const betaSecretSources = [...betaSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
   (match) => match[1],
 );
 const botSecretSources = [...botSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
   (match) => match[1],
+);
+assert.deepEqual(
+  [...customerWebSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
+    (match) => match[1],
+  ),
+  [
+    'customer_web_database_url',
+    'customer_web_supabase_publishable_key',
+    'customer_web_rate_limit_hmac',
+  ],
+  'customer web must receive only its database URL, public Auth client key, and rate-limit HMAC',
+);
+assert.deepEqual(
+  [...customerWebConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map(
+    (match) => match[1],
+  ),
+  ['supabase_ca_certificate'],
+  'customer web must receive only the verified staging Supabase CA',
 );
 assert.deepEqual(
   [...ownerSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
@@ -318,20 +369,20 @@ assert.deepEqual(
 );
 assert.doesNotMatch(botService, /supabase_ca_certificate|NODE_EXTRA_CA_CERTS/);
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 15, 'every secret mount must be 0400');
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 18, 'every secret mount must be 0400');
 assert.equal(
   countMatches(compose, /^\s+mode: 0444$/gm),
-  4,
+  5,
   'each immutable config mount must be 0444',
 );
 assert.equal(
   countMatches(compose, /^\s+uid: '10001'$/gm),
-  19,
+  23,
   'every mounted input must target UID 10001',
 );
 assert.equal(
   countMatches(compose, /^\s+gid: '10001'$/gm),
-  19,
+  23,
   'every mounted input must target GID 10001',
 );
 
@@ -345,6 +396,9 @@ const expectedSecrets = [
   'api_player_action_transport_hmac',
   'cbe_deposit_reference_encryption_key',
   'cbe_deposit_reference_fingerprint_key',
+  'customer_web_database_url',
+  'customer_web_rate_limit_hmac',
+  'customer_web_supabase_publishable_key',
   'bot_beta_admission_transport_hmac',
   'bot_player_action_transport_hmac',
   'player_action_database_url',
@@ -403,6 +457,9 @@ for (const directSecretName of [
   'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
   'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
   'CBE_DEPOSIT_REFERENCE_KEY_PROFILE',
+  'CUSTOMER_WEB_DATABASE_URL',
+  'CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET',
+  'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY',
 ]) {
   assert.doesNotMatch(
     compose,
@@ -434,10 +491,11 @@ assert.equal(
   'Owner control and the separately gated HTTPS gateway are the only services that may bind ports',
 );
 assert.doesNotMatch(compose, /^\s+(expose|devices|privileged|network_mode):/m);
-for (const service of [ownerService, apiService, betaService, botService]) {
+for (const service of [ownerService, customerWebService, apiService, betaService, botService]) {
   assert.doesNotMatch(service, /^\s+volumes:/m);
 }
 assert.doesNotMatch(betaService, /^\s+ports:/m);
+assert.doesNotMatch(customerWebService, /^\s+ports:/m);
 assert.doesNotMatch(apiService, /^\s+ports:/m);
 assert.doesNotMatch(botService, /^\s+ports:/m);
 assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker/i);
@@ -456,13 +514,16 @@ assert.equal(
 assert.match(dockerfile, /pnpm --filter @fetanagent\/beta-admission\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/bot\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/admin\.\.\. run build/);
+assert.match(dockerfile, /pnpm --filter @fetanagent\/customer-web\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/api\.\.\. run build/);
 assert.match(dockerfile, /FROM build-base AS beta-admission-build/);
 assert.match(dockerfile, /FROM build-base AS bot-build/);
 assert.match(dockerfile, /FROM build-base AS admin-build/);
+assert.match(dockerfile, /FROM build-base AS customer-web-build/);
 assert.match(dockerfile, /FROM runtime-base AS beta-admission/);
 assert.match(dockerfile, /FROM runtime-base AS bot/);
 assert.match(dockerfile, /FROM runtime-base AS admin/);
+assert.match(dockerfile, /FROM runtime-base AS customer-web/);
 assert.match(dockerfile, /USER 10001:10001/);
 assert.match(
   dockerfile,
@@ -486,6 +547,11 @@ assert.match(adminImage, /127\.0\.0\.1:3002\/readyz/);
 assert.match(adminImage, /CMD \["node", "apps\/admin\/dist\/index\.js"\]/);
 const apiImage = dockerfile.split('FROM runtime-base AS api')[1];
 assert.match(apiImage, /USER fetanagent:fetanagent/);
+const customerWebImage = dockerfile
+  .split('FROM runtime-base AS customer-web')[1]
+  .split('FROM runtime-base AS beta-admission')[0];
+assert.match(customerWebImage, /127\.0\.0\.1:3003\/readyz/);
+assert.match(customerWebImage, /CMD \["node", "apps\/customer-web\/dist\/index\.js"\]/);
 
 const gatewayImage = dockerfile.split(' AS gateway')[1];
 assert.match(gatewayImage, /org\.opencontainers\.image\.title="fetanagent-gateway"/);
@@ -499,14 +565,15 @@ assert.match(caddyfile, /protocols h1 h2/);
 assert.doesNotMatch(caddyfile, /\bh3\b|:80\s*\{|tls internal|on_demand_tls|acme_dns/i);
 assert.match(caddyfile, /fetanagent\.com, www\.fetanagent\.com/);
 assert.match(caddyfile, /owner\.fetanagent\.com/);
+assert.match(caddyfile, /reverse_proxy customer-web:3003/);
 assert.match(caddyfile, /reverse_proxy owner-control:3002/);
 assert.match(caddyfile, /Strict-Transport-Security "max-age=86400"/);
-assert.match(caddyfile, /Content-Security-Policy/);
+assert.doesNotMatch(caddyfile, /file_server|root \* \/srv/);
 assert.doesNotMatch(caddyfile, /api:3000|beta-admission:3001|docker\.sock/);
 assert.match(landingPage, /https:\/\/t\.me\/FetanAgentBot/);
 assert.match(landingPage, /https:\/\/owner\.fetanagent\.com\/owner/);
 assert.doesNotMatch(landingPage, /\bPayRe(?:layy?|playy)\b/i);
 
 console.log(
-  'staging beta artifacts verified: four private services, a separately gated HTTPS gateway, isolated inputs, and locked financial/provider gates',
+  'staging beta artifacts verified: five private services, a separately gated HTTPS gateway, isolated inputs, and locked financial/provider gates',
 );

@@ -4,6 +4,10 @@ alter role fetanagent_beta_admission_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password null valid until 'infinity';
 
+alter role fetanagent_customer_web_runtime with
+  nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
+  connection limit 1 password null valid until 'infinity';
+
 alter role fetanagent_owner_control_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password null valid until 'infinity';
@@ -23,6 +27,7 @@ begin
     from pg_catalog.pg_stat_activity as activity
     where activity.usename = any (array[
       'fetanagent_beta_admission_runtime',
+      'fetanagent_customer_web_runtime',
       'fetanagent_owner_control_runtime',
       'fetanagent_player_actions_runtime'
     ])
@@ -43,6 +48,7 @@ begin
     from pg_catalog.pg_stat_activity as activity
     where activity.usename = any (array[
       'fetanagent_beta_admission_runtime',
+      'fetanagent_customer_web_runtime',
       'fetanagent_owner_control_runtime',
       'fetanagent_player_actions_runtime'
     ])
@@ -53,6 +59,7 @@ begin
 
   foreach expected_role in array array[
     'fetanagent_beta_admission_runtime',
+    'fetanagent_customer_web_runtime',
     'fetanagent_owner_control_runtime',
     'fetanagent_player_actions_runtime'
   ]

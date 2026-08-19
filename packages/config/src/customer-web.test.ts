@@ -14,6 +14,7 @@ import {
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
   CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE,
   CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE,
+  CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE,
   CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   loadCustomerWebAuthConfig,
@@ -48,7 +49,8 @@ describe('customer web auth configuration', () => {
         get(target, property, receiver) {
           if (
             property === 'CUSTOMER_WEB_SUPABASE_URL' ||
-            property === 'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY'
+            property === 'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY' ||
+            property === 'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE'
           ) {
             throw new Error(`disabled auth configuration read ${String(property)}`);
           }
@@ -87,6 +89,78 @@ describe('customer web auth configuration', () => {
     expect(JSON.stringify(redactedCustomerWebAuthConfigForLog(config))).not.toContain(
       publishableKey,
     );
+  });
+
+  it('loads and redacts only the fixed production publishable-key secret file', () => {
+    const readSecretFile = vi.fn(() => `${publishableKey}\n`);
+    const config = loadCustomerWebAuthConfig(
+      {
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE:
+          CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE,
+        CUSTOMER_WEB_SUPABASE_URL: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+        INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
+        NODE_ENV: 'production',
+      },
+      { readSecretFile },
+    );
+
+    expect(config.supabasePublishableKey).toBe(publishableKey);
+    expect(readSecretFile).toHaveBeenCalledWith(
+      CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE,
+    );
+    expect(JSON.stringify(redactedCustomerWebAuthConfigForLog(config))).not.toContain(
+      publishableKey,
+    );
+  });
+
+  it('rejects direct, wrong, dual, relative, unreadable, and multiline production key inputs', () => {
+    const enabled = {
+      CUSTOMER_WEB_SUPABASE_URL: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+      INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
+    } as const;
+    expect(() =>
+      loadCustomerWebAuthConfig({
+        ...enabled,
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('required in the production customer-web container');
+    expect(() =>
+      loadCustomerWebAuthConfig({
+        ...enabled,
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: '/tmp/wrong',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('approved private runtime secret path');
+    expect(() =>
+      loadCustomerWebAuthConfig({
+        ...enabled,
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: 'C:\\secret',
+      }),
+    ).toThrow('must not both be configured');
+    expect(() =>
+      loadCustomerWebAuthConfig({
+        ...enabled,
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: 'relative',
+      }),
+    ).toThrow('absolute path');
+    expect(() =>
+      loadCustomerWebAuthConfig(
+        { ...enabled, CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: 'C:\\secret' },
+        {
+          readSecretFile: () => {
+            throw new Error('private');
+          },
+        },
+      ),
+    ).toThrow('could not be read');
+    expect(() =>
+      loadCustomerWebAuthConfig(
+        { ...enabled, CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: 'C:\\secret' },
+        { readSecretFile: () => `${publishableKey}\nsecond` },
+      ),
+    ).toThrow('exactly one secret value');
   });
 
   it('rejects alternate origins, secret keys, service-role material, and malformed keys', () => {

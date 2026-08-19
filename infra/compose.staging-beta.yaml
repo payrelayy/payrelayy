@@ -88,6 +88,98 @@ services:
       start_period: 15s
       retries: 3
 
+  customer-web:
+    profiles: [staging-manual]
+    platform: linux/amd64
+    image: fetanagent-customer-web:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: customer-web
+      args:
+        VCS_REF: ${FETANAGENT_VCS_REF:?set the reviewed full commit SHA}
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      CUSTOMER_WEB_HOST: 0.0.0.0
+      CUSTOMER_WEB_PORT: '3003'
+      CUSTOMER_WEB_SUPABASE_URL: https://spzpiyxheappsfyswewl.supabase.co
+      CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/customer_web_supabase_publishable_key
+      CUSTOMER_WEB_DATABASE_URL_FILE: /run/secrets/customer_web_database_url
+      CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: /run/secrets/customer_web_rate_limit_hmac
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true'
+      INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true'
+      INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'
+      INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true'
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: customer_web_database_url
+        target: customer_web_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: customer_web_supabase_publishable_key
+        target: customer_web_supabase_publishable_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: customer_web_rate_limit_hmac
+        target: customer_web_rate_limit_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - owner_control_service
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
   gateway:
     profiles: [public-domain]
     platform: linux/amd64
@@ -133,6 +225,9 @@ services:
     networks:
       - owner_control_service
     depends_on:
+      customer-web:
+        condition: service_healthy
+        restart: true
       owner-control:
         condition: service_healthy
         restart: true
@@ -456,6 +551,12 @@ configs:
 # Every source is an operator-owned file outside the repository. The two transport-HMAC files
 # contain the same value but remain separate mounts so neither service can read the other's file.
 secrets:
+  customer_web_database_url:
+    file: ${FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE:?set an external customer-web database URL file}
+  customer_web_supabase_publishable_key:
+    file: ${FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE:?set an external customer-web publishable-key file}
+  customer_web_rate_limit_hmac:
+    file: ${FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE:?set an external customer-web rate-limit HMAC file}
   owner_control_database_url:
     file: ${FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE:?set an external Owner-control database URL file}
   owner_control_supabase_publishable_key:

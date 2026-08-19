@@ -49,6 +49,7 @@ env:
   STAGING_BANNED_IP: 2a05:d018:135e:1602:5210:739d:5667:fee4
   SUPABASE_CLI_VERSION: 2.113.0
   BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
+  CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
   OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
   PLAYER_ACTION_RUNTIME_ROLE: fetanagent_player_actions_runtime
 
@@ -107,6 +108,8 @@ jobs:
           tag="${GITHUB_SHA:0:12}"
           docker build --pull=false --target admin \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-owner-control:$tag" .
+          docker build --pull=false --target customer-web \
+            --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-customer-web:$tag" .
           docker build --pull=false --target api \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-api:$tag" .
           docker build --pull=false --target beta-admission \
@@ -115,7 +118,7 @@ jobs:
             --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-bot:$tag" .
           docker build --pull=false --target gateway \
             --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-gateway:$tag" .
-          for image in owner-control api beta-admission bot gateway; do
+          for image in owner-control customer-web api beta-admission bot gateway; do
             test "$(docker image inspect "fetanagent-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
           done
 
@@ -127,6 +130,7 @@ jobs:
           tag="${GITHUB_SHA:0:12}"
           docker save --output "$RUNNER_TEMP/fetanagent-staging-images.tar" \
             "fetanagent-owner-control:$tag" \
+            "fetanagent-customer-web:$tag" \
             "fetanagent-api:$tag" \
             "fetanagent-beta-admission:$tag" \
             "fetanagent-bot:$tag" \
@@ -368,6 +372,8 @@ jobs:
           CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
           CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
           CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
+          CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: ${{ secrets.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET }}
+          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
@@ -380,6 +386,8 @@ jobs:
           set -euo pipefail
           [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
           [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CUSTOMER_WEB_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$PLAYER_ACTION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
@@ -392,6 +400,7 @@ jobs:
           [[ -n "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" ]]
           distinct_count="$(printf '%s\n' \
             "$BETA_ADMISSION_RUNTIME_PASSWORD" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
+            "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" \
             "$PLAYER_ACTION_RUNTIME_PASSWORD" "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" \
             "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" "$BOT_TO_API_ACTION_HMAC_SECRET" \
             "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" \
@@ -399,7 +408,7 @@ jobs:
             "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" \
             "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" \
             "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" | sort -u | wc -l)"
-          [[ "$distinct_count" -eq 11 ]]
+          [[ "$distinct_count" -eq 13 ]]
           [[ -n "$SUPABASE_DB_PASSWORD" ]]
           [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
           [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -417,6 +426,10 @@ jobs:
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_DIRECT_DATABASE_HOST" \
             > "$secret_dir/owner-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$CUSTOMER_WEB_RUNTIME_ROLE" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$STAGING_DIRECT_DATABASE_HOST" \
+            > "$secret_dir/customer-web-database-url"
+          printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" > "$secret_dir/customer-web-rate-limit-hmac"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$STAGING_DIRECT_DATABASE_HOST" \
             > "$secret_dir/player-action-database-url"
@@ -456,6 +469,7 @@ jobs:
           # separate token-provision and end-to-end smoke gate is approved.
           printf '%s\n' 'telegram-disabled-until-separate-smoke' > "$secret_dir/bot-token"
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
+          printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/customer-web-publishable-key"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
           chmod 0644 "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
           openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
@@ -511,11 +525,12 @@ jobs:
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper network-ready"
 
-      - name: Provision three narrow 24-hour staging logins
+      - name: Provision four narrow 24-hour staging logins
         id: provision
         shell: bash
         env:
           BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -545,6 +560,9 @@ jobs:
           scp "${ssh_opts[@]}" "$RUNNER_TEMP/release/fetanagent-staging-images.tar" \
             infra/compose.staging-beta.yaml "$SECRET_DIR/supabase-ca.crt" \
             "$SECRET_DIR/beta-database-url" "$SECRET_DIR/owner-database-url" \
+            "$SECRET_DIR/customer-web-database-url" \
+            "$SECRET_DIR/customer-web-publishable-key" \
+            "$SECRET_DIR/customer-web-rate-limit-hmac" \
             "$SECRET_DIR/player-action-database-url" \
             "$SECRET_DIR/beta-transport-hmac" "$SECRET_DIR/bot-transport-hmac" \
             "$SECRET_DIR/api-action-transport-hmac" "$SECRET_DIR/bot-action-transport-hmac" \

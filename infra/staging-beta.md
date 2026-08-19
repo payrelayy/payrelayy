@@ -111,6 +111,10 @@ The application must support these exact file-valued variables before activation
 - bot additionally: `BOT_TO_API_ACTION_HMAC_SECRET_FILE`;
 - owner-control: `OWNER_CONTROL_DATABASE_URL_FILE` and
   `OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`; a Supabase service-role key is forbidden.
+- customer-web: `CUSTOMER_WEB_DATABASE_URL_FILE`,
+  `CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE`, and
+  `CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE`; deposits remain disabled while Auth, workspace, and
+  the durable limiter run against staging only.
 
 If any adapter is absent or accepts both a direct value and file value simultaneously, deployment is
 blocked. Do not work around that condition by copying secret contents into ordinary environment
@@ -125,14 +129,14 @@ Supabase, GitHub, Telegram, or the VM:
 node infra/verify-staging-beta.mjs
 ```
 
-It enforces the four private-service topology, separately gated secret-free gateway, pinned
+It enforces the five private-service topology, separately gated secret-free gateway, pinned
 architecture and build targets, hardening settings, isolated file-secret set, network separation,
 disabled generic action/provider gates, and absence of the production ref.
 
 Before any separately approved build, set `FETANAGENT_VCS_REF` to the reviewed full commit SHA and
 `FETANAGENT_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
 that contains no `.env`/`.env.*` file and from a cleared process environment with no inherited
-direct secret variable. Supply only the two non-secret image selectors, fifteen external secret-file
+direct secret variable. Supply only the two non-secret image selectors, eighteen external secret-file
 selectors, the immutable key-profile selector, and the verified public CA path selector explicitly.
 The future render must disable Compose's implicit checkout `.env` loading:
 
@@ -142,6 +146,9 @@ env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   FETANAGENT_IMAGE_TAG=<commit-derived-tag> \
   FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE=<external-path> \
   FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE=<external-path> \
+  FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE=<external-path> \
+  FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE=<external-path> \
+  FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE=<external-path> \
   FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE=<external-path> \
   FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE=<external-path> \
   FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE=<external-path> \
@@ -245,21 +252,21 @@ runtime, or claim that the boundary is sealed.
 `deploy-and-smoke` additionally requires the
 protected `staging` environment, a dedicated `fetanagent-admin` SSH identity with noninteractive
 sudo access only to the root-owned `/usr/local/sbin/fetanagent-staging-deploy-helper`, pinned
-`known_hosts`, the public Supabase client key, and three distinct narrow database passwords. It does
+`known_hosts`, the public Supabase client key, and four distinct narrow database passwords. It does
 not read the Telegram token; it always installs the invalid
-`telegram-disabled-until-separate-smoke` sentinel and starts only Owner-control, API, and
-beta-admission. It rejects root SSH and fails if the installed helper checksum differs from the
+`telegram-disabled-until-separate-smoke` sentinel and starts only Owner-control, customer-web, API,
+and beta-admission. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
 
-Deployment gives the beta-admission, Owner-control, and Player-ID action roles 24-hour staging
-LOGIN credentials, installs service-separated `0400` files, and then creates three disposable
+Deployment gives the beta-admission, customer-web, Owner-control, and Player-ID action roles 24-hour
+staging LOGIN credentials, installs service-separated `0400` files, and then creates four disposable
 `--no-deps` preflight containers. Each connects through the direct IPv6 endpoint and proves the
 dedicated catalog and privilege contract before any long-lived container starts. The helper removes
 each preflight container. A preflight may make at most three strict read-only attempts, 15 seconds
 apart, to tolerate a transient direct-database connection failure; it never relaxes a catalog
-assertion or starts another service during those attempts. Only after all three preflights pass does
+assertion or starts another service during those attempts. Only after all four preflights pass does
 it start the private Compose project without building on the VM and check readiness without
-submitting a payment or provider request. Failure disables all three logins. If the administrator
+submitting a payment or provider request. Failure disables all four logins. If the administrator
 cleanup connection is temporarily refused after a failed activation, the workflow makes at most
 four cleanup attempts, 15 seconds apart, and then fails visibly rather than claiming cleanup.
 `stop-and-disable` is the explicit cleanup mode
@@ -272,13 +279,13 @@ only after the private deployment passes on the same exact `main` commit. A fres
 must replace the compromised historical token, and its independently recorded
 `STAGING_TELEGRAM_BOT_TOKEN_SHA256` value must match before the workflow contacts Telegram. The
 workflow accepts only the exact `fetanagentbot` identity, requires no webhook and zero pending
-updates, and refuses to mutate or clear Telegram's queue. It then proves that exactly the three
+updates, and refuses to mutate or clear Telegram's queue. It then proves that exactly the four
 reviewed private services are healthy and Telegram-disabled, transfers the token through the pinned
 non-root SSH identity, installs it as a `10001:10001` mode-`0400` service file, and starts only the
 bot container without dependencies or builds. Readiness requires the exact reviewed revision, zero
 container restarts, genuine bot startup output, `FINANCIAL_ACTIONS_MODE=dry_run`, and both KemerBet
 flags false. A failed activation removes the bot and restores the invalid sentinel. The explicit
-`stop-and-disable` mode performs the same fail-closed removal without stopping the three private
+`stop-and-disable` mode performs the same fail-closed removal without stopping the four private
 services.
 
 If activation fails, the root-owned helper reports only the Owner-control container state and at

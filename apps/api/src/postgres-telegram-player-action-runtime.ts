@@ -216,16 +216,34 @@ async function handleRootMenu(
     originInboundEventId,
     keys: config.telegramActionCapability,
   });
-  const row = oneRow(
-    (
-      await database.query(ISSUE_CAPABILITY_SQL, [
+  let row: Record<string, unknown>;
+  try {
+    row = oneRow(
+      (
+        await database.query(ISSUE_CAPABILITY_SQL, [
+          originInboundEventId,
+          presentation.capabilityId,
+          presentation.tokenFingerprint,
+          presentation.issueSemanticInputHmac,
+        ])
+      ).rows,
+    );
+  } catch (error) {
+    if (!isPgRejection(error)) throw error;
+    const expiryHmac = validateSemanticHmac(
+      createTelegramActionSemanticHmac({
+        consumer: 'expire_player_registration_action',
         originInboundEventId,
-        presentation.capabilityId,
-        presentation.tokenFingerprint,
-        presentation.issueSemanticInputHmac,
-      ])
-    ).rows,
-  );
+        semanticHmacSecret: config.telegramActionCapability.semanticHmacSecret,
+      }),
+    );
+    try {
+      oneRow((await database.query(EXPIRE_ACTION_SQL, [originInboundEventId, expiryHmac])).rows);
+    } catch {
+      throw error;
+    }
+    return { version: 1, outcome: 'restart_required' };
+  }
   if (
     row.result_capability_id !== presentation.capabilityId ||
     !(row.capability_expires_at instanceof Date) ||

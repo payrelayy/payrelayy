@@ -314,7 +314,7 @@ receipt. The fixed base and helper pins are:
 ```text
 old_reviewed_commit=e636de89be179514af3aae3972ee0b086cd8c816
 old_helper_sha=e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af
-new_helper_sha=d1132b2a1bb842ece003bfcb5727d7a7d4f6dfe51ad93e483a65b3e657ac1231
+new_helper_sha=3f916aa89398399f0a07ce0dc9ed6684c72d659bb66d0a005fcd8aa18ec2ff2e
 new_reviewed_commit=<exact-40-lowercase-C1-from-reviewed-main>
 ```
 
@@ -331,7 +331,7 @@ TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper
 git show "$C1:infra/operations/fetanagent-vm-transition.sh" > fetanagent-vm-transition
 test "$(sha256sum fetanagent-staging-deploy-helper | awk '{ print $1 }')" = \
-  'd1132b2a1bb842ece003bfcb5727d7a7d4f6dfe51ad93e483a65b3e657ac1231'
+  '3f916aa89398399f0a07ce0dc9ed6684c72d659bb66d0a005fcd8aa18ec2ff2e'
 test "$(sha256sum fetanagent-vm-transition | awk '{ print $1 }')" = "$TRANSITION_SHA"
 bash -n fetanagent-staging-deploy-helper
 bash -n fetanagent-vm-transition
@@ -351,7 +351,7 @@ install -o root -g root -m 0600 ./fetanagent-vm-transition \
 TRANSITION_SHA='<out-of-band-reviewed-LF-C1-transition-sha256>'
 [[ "$TRANSITION_SHA" =~ ^[0-9a-f]{64}$ ]]
 test "$(sha256sum /root/fetanagent-vm-transition-input/fetanagent-staging-deploy-helper | awk '{ print $1 }')" = \
-  'd1132b2a1bb842ece003bfcb5727d7a7d4f6dfe51ad93e483a65b3e657ac1231'
+  '3f916aa89398399f0a07ce0dc9ed6684c72d659bb66d0a005fcd8aa18ec2ff2e'
 test "$(sha256sum /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next | awk '{ print $1 }')" = \
   "$TRANSITION_SHA"
 bash -n /root/fetanagent-vm-transition-input/fetanagent-vm-transition.next
@@ -390,7 +390,7 @@ then writes `/var/lib/fetanagent-vm-transition/helper-rotation-v1` atomically as
 transition_version=1
 droplet_id=590666364
 old_helper_sha=e530efcc0781be8d298c0527f1a27bf1b7c97f9e0c9584adc0dd6ced0a7770af
-new_helper_sha=d1132b2a1bb842ece003bfcb5727d7a7d4f6dfe51ad93e483a65b3e657ac1231
+new_helper_sha=3f916aa89398399f0a07ce0dc9ed6684c72d659bb66d0a005fcd8aa18ec2ff2e
 old_reviewed_commit=e636de89be179514af3aae3972ee0b086cd8c816
 new_reviewed_commit=<exact-40-lowercase-C1-from-reviewed-main>
 rotation_pending=true

@@ -58,10 +58,11 @@ with the explicit `owner` or `www` records; it is not needed by FetanAgent.
 2. Configure the DigitalOcean Cloud Firewall and UFW rules.
 3. Add the three Porkbun DNS records and wait until all three names resolve only to
    `161.35.41.232`.
-4. Run `Staging public domain edge` in `inspect` mode with the exact main commit, domain, and
-   Droplet ID. It proves the fresh-host private service set, exact fail-closed runtime environment,
-   Droplet metadata identity, DNS, UFW rules, free public ports, and gateway image without making a
-   container change.
+4. After the separately reviewed Telegram activation gate passes, run `Staging public domain edge`
+   in `inspect` mode with the exact main commit, domain, and Droplet ID. It proves the exact
+   four-service private set, the genuine zero-restart bot startup contract, every fail-closed runtime
+   value, Droplet metadata identity, DNS, UFW rules, free public ports, and gateway image without
+   making a container change.
 5. Only after inspection passes, run the same workflow in `publish` mode. It starts only the
    secret-free gateway and performs bounded public TLS smoke checks.
 6. If the smoke fails, the workflow removes the gateway automatically. The private bot and Owner

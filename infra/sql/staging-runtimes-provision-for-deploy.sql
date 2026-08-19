@@ -29,6 +29,7 @@ begin
         and not role.rolreplication
         and not role.rolbypassrls
         and role.rolconnlimit = case expected_role
+          when 'fetanagent_customer_web_runtime' then 2
           when 'fetanagent_player_actions_runtime' then 2
           else 1
         end
@@ -106,7 +107,7 @@ alter role fetanagent_beta_admission_runtime with
 
 alter role fetanagent_customer_web_runtime with
   login noinherit nocreatedb nocreaterole noreplication nobypassrls
-  connection limit 1 password :'customer_web_runtime_password';
+  connection limit 2 password :'customer_web_runtime_password';
 
 alter role fetanagent_owner_control_runtime with
   login noinherit nocreatedb nocreaterole noreplication nobypassrls

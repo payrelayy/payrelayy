@@ -512,11 +512,23 @@ for (const sql of [provision, disable]) {
   assert.match(sql, /fetanagent_customer_web_runtime/);
   assert.match(sql, /fetanagent_owner_control_runtime/);
   assert.match(sql, /fetanagent_player_actions_runtime/);
+  assert.match(
+    sql,
+    /fetanagent_customer_web_runtime'[\s\S]*?then 2[\s\S]*?fetanagent_player_actions_runtime'[\s\S]*?then 2/u,
+  );
   assert.doesNotMatch(sql, /fetanagent_api_runtime|fetanagent_worker|service_role|kemerbet/i);
 }
 assert.match(provision, /interval '24 hours'/g);
+assert.match(
+  provision,
+  /alter role fetanagent_customer_web_runtime with[\s\S]*?connection limit 2 password :'customer_web_runtime_password';/u,
+);
 assert.match(disable, /nologin/g);
 assert.match(disable, /password null/g);
+assert.match(
+  disable,
+  /alter role fetanagent_customer_web_runtime with[\s\S]*?connection limit 2 password null valid until 'infinity';/u,
+);
 assert.match(disable, /pg_catalog\.pg_terminate_backend\(activity_pid, 5000\)/);
 assert.match(disable, /from pg_catalog\.pg_stat_activity as activity/g);
 assert.match(disable, /perform pg_catalog\.pg_stat_clear_snapshot\(\)/);

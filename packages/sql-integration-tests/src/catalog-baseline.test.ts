@@ -7054,7 +7054,7 @@ describe('disposable SQL migration baseline', () => {
            )`,
           [nonOwnerAuthUserId, playerAccountId],
         ),
-      ).rejects.toThrow(/only an active owner/u);
+      ).rejects.toThrow(/only an active owner/iu);
       await client.query('rollback to savepoint rejected_non_owner_eligibility');
       await client.query('release savepoint rejected_non_owner_eligibility');
       await client.query('reset role');

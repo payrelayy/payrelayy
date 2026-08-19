@@ -68,8 +68,8 @@ The current foundation is deliberately safe:
   additionally require three locked live
   switches, including the new authoritative-CBE switch that is created disabled;
 - customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
-  unreachable for a web-origin request until both a later proof-bearing ownership boundary and a
-  separate financial eligibility-promotion boundary are reviewed and implemented. The list
+  unreachable for a web-origin request until a later proof-bearing ownership boundary is reviewed
+  and implemented and an Owner separately records deposit eligibility. The list
   projection now also requires the exact current `eligible` decision and fails closed for missing,
   revoked, stale, future-dated, or malformed histories. It remains advisory display only; the
   deposit-intent trigger is the financial authorization boundary, and submit/list does not make a
@@ -77,8 +77,8 @@ The current foundation is deliberately safe:
 - `@fetanagent/customer-web-player-ownership-proof-prerequisite` records the exact nine unresolved
   ownership-proof blockers and returns only
   `blocked / customer_web_player_ownership_proof_prerequisites_incomplete` for its valid metadata.
-  Contract version 2 replaces the resolved coupling blocker with
-  `deposit_eligibility_promotion_boundary_absent` while keeping all 19 capabilities false. It cannot
+  Contract version 3 records `owner_deposit_eligibility_decision_required` while keeping all 19
+  capabilities false. It cannot
   represent proof success, `Ready`, association, or deposit eligibility; it adds no database, role,
   app, runtime, network, configuration, or infrastructure capability;
 - the intended long-lived routine experience is not a claim of an infinite or irrevocable session:
@@ -120,7 +120,8 @@ The current foundation is deliberately safe:
   duplicate-payment claims, expiry, review, retention, and queue foundations;
 - `app.player_deposit_eligibility_decisions` now isolates ownership from financial eligibility. Its
   append-only latest-decision guard snapshots the exact `eligible` decision on every new intent;
-  no existing runtime can write a decision, and no ownership action promotes one;
+  only the authenticated Owner-control runtime can append an audited approval or revocation for an
+  already associated KemerBet Player ID; ownership actions never promote one automatically;
 - the current API and worker database roles have no direct ledger access until narrow procedures
   and runtime login roles are reviewed; and
 - the reviewed Telegram and customer-web procedures derive the actor from an admitted private event

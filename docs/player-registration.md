@@ -20,8 +20,9 @@ in customer copy:
 2. FetanAgent creates a non-claiming request and displays `Checking`.
 3. An existence result remains insufficient; a separately reviewed control must prove the
    customer-to-player-account association.
-4. A successful proof-bearing association remains non-financial. A separate reviewed financial
-   boundary must promote the player account to deposit eligibility; neither boundary exists today.
+4. A successful proof-bearing association remains non-financial. The separate reviewed Owner
+   boundary must explicitly approve the player account for deposit eligibility; that command does
+   not run automatically from proof success.
 5. Only a player account with both proven ownership and current financial eligibility may display
    `Ready`; a negative or closed ownership result displays `Could not confirm`.
 6. A customer may retain multiple `Ready` Player IDs and chooses one for each deposit or
@@ -66,8 +67,8 @@ existence-found, and review-required states remain `Checking`; negative or close
 aligned active/valid same-customer association and active platform, plus a contiguous latest
 `eligible` decision whose time is not in the future and whose player-state snapshot still matches.
 Missing, revoked, stale, or malformed eligibility remains `Checking`. `Ready` is still unreachable
-because the database rejects association of every web-origin request and no eligibility-promotion
-boundary exists. The list is an advisory projection, not a financial authorization check; every new
+for web-origin requests because their proof-bearing association boundary is absent; an Owner-only
+eligibility command cannot substitute for ownership proof. The list is an advisory projection, not a financial authorization check; every new
 intent independently rechecks and snapshots eligibility. This slice cannot validate ownership,
 promote deposit eligibility, open a deposit, or perform any financial action. It is customer-only;
 shared staff capability routing through the generic public entry remains a future boundary.
@@ -89,11 +90,11 @@ pins these nine ordered `remainingBlockers`:
 6. `verification_adapter_absent`
 7. `neutral_staff_proof_review_capability_absent`
 8. `ownership_conflict_recovery_and_reassignment_policy_unreviewed`
-9. `deposit_eligibility_promotion_boundary_absent`
+9. `owner_deposit_eligibility_decision_required`
 
 The prerequisite package adds no proof input, customer route, UI, staff workflow, provider adapter,
 database record, schema change, grant, role, runtime configuration, deployment wiring, association,
-`Ready` projection, deposit eligibility, or financial action. Its contract version 2 keeps all 19
+`Ready` projection, deposit eligibility, or financial action. Its contract version 3 keeps all 19
 capability flags false. The existing web-origin association rejection and exact three-function
 ownership/account surface remain unchanged. The customer-web role now has three additional
 default-off deposit-intake/status functions, but they cannot create ownership or eligibility and

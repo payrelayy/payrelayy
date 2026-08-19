@@ -23,10 +23,10 @@ and submit/list that identity's web-origin KemerBet Player-ID requests through a
 direct-PostgreSQL BFF boundary. Capability-based staff routing through the generic public entry is
 not implemented. A pure customer-web ownership-proof prerequisite now records why that next phase
 must remain dormant: no authoritative proof source, challenge, evidence protocol, or positive
-result is selected, and no reviewed deposit-eligibility promotion boundary exists. A separate
-private eligibility ledger now quarantines every new deposit intent behind an explicit latest
-`eligible` decision, but no decision-writing procedure, writer grant, runtime, or UI can create that
-decision. Private KemerBet execution-attempt and reconciliation ledgers plus a reviewed callable
+result is selected. A separate private eligibility ledger quarantines every new deposit intent
+behind an explicit latest `eligible` decision. The authenticated Owner-control runtime now provides
+the only reviewed approval/revocation command and UI; ownership never promotes eligibility
+automatically. Private KemerBet execution-attempt and reconciliation ledgers plus a reviewed callable
 SQL/runtime safety core now enforce a one-shot final-action fence, one blocking attempt per agent
 account, and positive reconciliation before `executed`. A dedicated executor role boundary exposes
 exactly six private consume-only transition commands, and `apps/executor` contains their database
@@ -153,8 +153,8 @@ independently rechecks and snapshots eligibility.
 The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package does not change
 that boundary. Its only valid disposition is
 `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`, with a fixed ordered
-nine-item `remainingBlockers` inventory. Contract version 2 names the remaining financial blocker
-`deposit_eligibility_promotion_boundary_absent` and keeps all 19 capabilities false. It cannot
+nine-item `remainingBlockers` inventory. Contract version 3 names the financial requirement
+`owner_deposit_eligibility_decision_required` and keeps all 19 capabilities false. It cannot
 represent proof success, associate a customer to a Player ID, create `Ready`, or grant deposit
 eligibility. It has no database, schema, role, application, runtime, environment, network, or
 infrastructure wiring.
@@ -247,9 +247,9 @@ No reviewed authoritative KemerBet control signal exists for the customer-web fl
 profile, challenge delivery path, evidence profile, freshness/replay/attempt/abuse policy,
 verification adapter, neutral staff proof-review capability, and ownership conflict/recovery policy
 are also unselected or absent. The ninth blocker is
-`deposit_eligibility_promotion_boundary_absent`: the database now separates ownership from
-financial eligibility, but nothing is authorized to promote an association into an `eligible`
-decision.
+`owner_deposit_eligibility_decision_required`: proof success cannot promote financial eligibility;
+an authenticated Owner must independently approve or revoke the associated Player ID through the
+audited private command.
 
 The prerequisite package is pure advisory metadata. It accepts no Player ID, identity, evidence,
 credential, token, provider session, or financial input; performs no I/O; and exports no positive
@@ -260,9 +260,8 @@ association remain unchanged. Three separate default-off deposit-intake/status f
 create ownership proof or eligibility.
 
 A future proof flow must first create a non-financial ownership fact independent from deposit
-eligibility. Any later promotion to a financially usable player binding must write a separately
-authorized and audited eligibility decision through a new reviewed boundary; proof success must
-never silently enable deposits. See
+eligibility. The existing Owner-only financial boundary must then record a separate audited
+eligibility decision; proof success must never silently enable deposits. See
 [customer-web-player-ownership-proof.md](customer-web-player-ownership-proof.md).
 
 The canonical public paths are generic `/sign-in`, `/create-account`, and `/workspace` paths. The

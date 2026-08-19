@@ -49,6 +49,21 @@ function runtime(
     deposits: {
       list: async () => [],
     },
+    eligibility: {
+      decide: async (_actor, playerAccountId, decision) => ({
+        alreadyRecorded: false,
+        decidedAt: '2026-08-19T16:30:00.000Z',
+        decision,
+        decisionId: '44444444-4444-4444-8444-444444444444',
+        decisionVersion: 1,
+        playerAccountId,
+        reasonCode:
+          decision === 'eligible'
+            ? 'financial_eligibility_approved'
+            : 'financial_eligibility_revoked',
+      }),
+      list: async () => [],
+    },
     invites: {
       issue: async () => ({
         expiresAt: '2026-08-11T12:00:00.000Z',
@@ -104,8 +119,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('This does not prove ownership');
     expect(response.body).toContain('Explicit ownership confirmation');
     expect(response.body).toContain('Player ID ownership associations');
-    expect(response.body).toMatch(/Deposit\s+eligibility is a separate financial decision/u);
-    expect(response.body).not.toContain('Deposit-eligible Player IDs');
+    expect(response.body).toContain('Deposit eligibility decisions');
+    expect(response.body).toMatch(/does not open a deposit[\s\S]*or move money/u);
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
@@ -139,13 +154,15 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(response.body).toContain('/v1/owner/dry-run-deposit-intake?limit=25');
     expect(response.body).toContain('/v1/owner/dry-run-fixture-assessments?limit=50');
+    expect(response.body).toContain('/v1/owner/player-deposit-eligibility?limit=50');
     expect(response.body).toContain('Run advisory fixture');
     expect(response.body).toContain('does not verify, approve, credit, or execute a payment');
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
     expect(response.body).toContain('Confirm ownership only');
     expect(response.body).toContain('does not grant deposit eligibility');
     expect(response.body).not.toContain('enable deposit intake');
-    expect(response.body).not.toContain('eligible for deposit intake');
+    expect(response.body).toContain('Approve deposit eligibility');
+    expect(response.body).toContain('Revoke deposit eligibility');
     expect(response.body).not.toContain('innerHTML');
     expect(response.body).toContain("url.pathname !== '/fetanagentbot'");
     expect(response.body).not.toContain('/FetanAgentBot');
@@ -471,6 +488,83 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(associateResponse.statusCode).toBe(200);
     expect(associated).toEqual([authUserId, inviteId]);
+    await app.close();
+  });
+
+  it('lists and explicitly decides deposit eligibility without starting a financial action', async () => {
+    const playerAccountId = '33333333-3333-4333-8333-333333333333';
+    let observedDecision: readonly string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        eligibility: {
+          list: async (actor, limit) => {
+            expect([actor, limit]).toEqual([authUserId, 50]);
+            return [
+              {
+                playerAccountId,
+                playerId: '28379330',
+                playerStatus: 'active',
+                platformCode: 'kemerbet',
+                validationStatus: 'valid',
+              },
+            ];
+          },
+          decide: async (actor, id, decision) => {
+            observedDecision = [actor, id, decision];
+            return {
+              alreadyRecorded: false,
+              decidedAt: '2026-08-19T16:30:00.000Z',
+              decision,
+              decisionId: '44444444-4444-4444-8444-444444444444',
+              decisionVersion: 1,
+              playerAccountId: id,
+              reasonCode: 'financial_eligibility_approved',
+            };
+          },
+        },
+      }),
+    });
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/player-deposit-eligibility?limit=50',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toMatchObject({ players: [{ playerId: '28379330' }] });
+
+    const decideResponse = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/player-deposit-eligibility/${playerAccountId}/decide`,
+      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+      payload: {
+        confirmation: 'owner_confirmed_financial_eligibility',
+        decision: 'eligible',
+      },
+    });
+    expect(decideResponse.statusCode).toBe(200);
+    expect(observedDecision).toEqual([authUserId, playerAccountId, 'eligible']);
+    await app.close();
+  });
+
+  it('rejects a mismatched deposit-eligibility confirmation before authentication', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: async () => {
+        throw new Error('authentication must not run');
+      },
+      runtime: runtime(),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/player-deposit-eligibility/33333333-3333-4333-8333-333333333333/decide',
+      payload: {
+        confirmation: 'owner_confirmed_financial_revocation',
+        decision: 'eligible',
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'invalid_request' });
     await app.close();
   });
 

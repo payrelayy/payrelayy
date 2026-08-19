@@ -97,10 +97,25 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </div>
           <p class="receipt-label">
             Confirm only after independently verifying that this Telegram customer controls the
-            KemerBet account. This records the legacy ownership association only. Deposit
-            eligibility is a separate financial decision and remains unavailable here.
+            KemerBet account. This records the ownership association only. Deposit eligibility is
+            a separate financial decision below.
           </p>
           <div class="request-list" id="player-association-list"></div>
+        </section>
+
+        <section class="review-section" aria-labelledby="player-eligibility-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Audited financial gate</p>
+              <h2 id="player-eligibility-title">Deposit eligibility decisions</h2>
+            </div>
+          </div>
+          <p class="receipt-label">
+            Approve only an active, validated, Owner-associated Player ID after financial review.
+            Revocation blocks future deposit intents. A decision does not open a deposit, verify a
+            payment, credit KemerBet, or move money; all staging financial switches remain off.
+          </p>
+          <div class="request-list" id="player-eligibility-list"></div>
         </section>
 
         <section class="review-section" aria-labelledby="deposit-intake-title">
@@ -185,6 +200,7 @@ const revokeButton = document.querySelector('#revoke-button');
 const refreshRequestsButton = document.querySelector('#refresh-requests-button');
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
+const playerEligibilityList = document.querySelector('#player-eligibility-list');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
@@ -214,6 +230,10 @@ function clearAssociationCandidates() {
   playerAssociationList.replaceChildren();
 }
 
+function clearPlayerEligibility() {
+  playerEligibilityList.replaceChildren();
+}
+
 function clearDepositIntake() {
   depositIntakeList.replaceChildren();
 }
@@ -224,6 +244,7 @@ function signOut(message = 'Signed out.') {
   clearInvite();
   clearPlayerRequests();
   clearAssociationCandidates();
+  clearPlayerEligibility();
   clearDepositIntake();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
@@ -302,6 +323,27 @@ function validAssociationCandidate(value) {
       value.platformCode !== 'kemerbet' || !playerId || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(playerId) ||
       typeof value.reviewedAt !== 'string' || !Number.isFinite(Date.parse(value.reviewedAt))) return undefined;
   return { playerId, requestId, reviewedAt: value.reviewedAt };
+}
+
+function validPlayerEligibility(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const playerAccountId = typeof value.playerAccountId === 'string' ? value.playerAccountId : undefined;
+  const playerId = typeof value.playerId === 'string' ? value.playerId : undefined;
+  const decisionAbsent = value.decision === undefined && value.decisionId === undefined &&
+    value.decisionVersion === undefined && value.reasonCode === undefined && value.decidedAt === undefined;
+  const decisionPresent = (value.decision === 'eligible' || value.decision === 'revoked') &&
+    typeof value.decisionId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.decisionId) &&
+    Number.isSafeInteger(value.decisionVersion) && value.decisionVersion > 0 &&
+    value.reasonCode === (value.decision === 'eligible' ? 'financial_eligibility_approved' : 'financial_eligibility_revoked') &&
+    typeof value.decidedAt === 'string' && Number.isFinite(Date.parse(value.decidedAt));
+  if (!playerAccountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(playerAccountId) ||
+      value.platformCode !== 'kemerbet' || !playerId || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(playerId) ||
+      !['active', 'inactive', 'blocked', 'archived'].includes(value.playerStatus) ||
+      !['unverified', 'valid', 'invalid', 'review_required'].includes(value.validationStatus) ||
+      !(decisionAbsent || decisionPresent)) return undefined;
+  return { decidedAt: value.decidedAt, decision: value.decision, decisionVersion: value.decisionVersion,
+    playerAccountId, playerId, playerStatus: value.playerStatus, validationStatus: value.validationStatus };
 }
 
 function validDepositIntake(value) {
@@ -503,6 +545,75 @@ function renderAssociationCandidates(candidates) {
   }
 }
 
+async function decidePlayerEligibility(player, decision) {
+  const approving = decision === 'eligible';
+  const warning = approving
+    ? 'Approve this exact Player ID for future deposit intake? Confirm that ownership, validation, and financial review are complete. This does not open a deposit or move money.'
+    : 'Revoke this exact Player ID from future deposit intake? Existing immutable records remain retained.';
+  if (!window.confirm(warning)) return;
+  setNotice(approving ? 'Recording deposit-eligibility approval\u2026' : 'Recording deposit-eligibility revocation\u2026');
+  try {
+    const response = await ownerRequest('/v1/owner/player-deposit-eligibility/' +
+      encodeURIComponent(player.playerAccountId) + '/decide', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        confirmation: approving
+          ? 'owner_confirmed_financial_eligibility'
+          : 'owner_confirmed_financial_revocation',
+        decision,
+      }),
+    });
+    if (!response.ok) throw new Error('eligibility_decision');
+    setNotice(approving
+      ? 'Deposit eligibility approved. No deposit or financial action was started.'
+      : 'Deposit eligibility revoked for future deposits.');
+    await loadPlayerEligibility();
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Deposit-eligibility decision failed. No financial action was started.');
+  }
+}
+
+function renderPlayerEligibility(players) {
+  clearPlayerEligibility();
+  if (players.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No Owner-associated Player IDs.';
+    playerEligibilityList.append(empty);
+    return;
+  }
+  for (const player of players) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = player.playerId;
+    const metadata = document.createElement('p');
+    metadata.className = 'request-meta';
+    metadata.textContent = player.playerStatus + ' \u00b7 validation ' + player.validationStatus +
+      ' \u00b7 eligibility ' + (player.decision || 'not decided') +
+      (player.decisionVersion ? ' v' + player.decisionVersion : '') +
+      (player.decidedAt ? ' \u00b7 ' + new Date(player.decidedAt).toLocaleString() : '');
+    const actions = document.createElement('div');
+    actions.className = 'review-actions';
+    const approve = document.createElement('button');
+    approve.type = 'button';
+    approve.textContent = 'Approve deposit eligibility';
+    approve.disabled = player.playerStatus !== 'active' || player.validationStatus !== 'valid' ||
+      player.decision === 'eligible';
+    approve.addEventListener('click', () => decidePlayerEligibility(player, 'eligible'));
+    const revoke = document.createElement('button');
+    revoke.type = 'button';
+    revoke.className = 'danger';
+    revoke.textContent = 'Revoke deposit eligibility';
+    revoke.disabled = player.decision === 'revoked';
+    revoke.addEventListener('click', () => decidePlayerEligibility(player, 'revoked'));
+    actions.append(approve, revoke);
+    card.append(title, metadata, actions);
+    playerEligibilityList.append(card);
+  }
+}
+
 function reviewButton(label, requestId, decision, className) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -581,6 +692,24 @@ async function loadAssociationCandidates() {
   }
 }
 
+async function loadPlayerEligibility() {
+  try {
+    const response = await ownerRequest('/v1/owner/player-deposit-eligibility?limit=50', {
+      method: 'GET',
+      headers: {},
+    });
+    if (!response.ok) throw new Error('eligibility_queue');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.players) || payload.players.length > 50) throw new Error('eligibility_queue');
+    const players = payload.players.map(validPlayerEligibility);
+    if (players.some((player) => !player)) throw new Error('eligibility_queue');
+    renderPlayerEligibility(players);
+  } catch (error) {
+    clearPlayerEligibility();
+    if (!isSignedOutError(error)) setNotice('Player-ID deposit eligibility is unavailable.');
+  }
+}
+
 async function loadDepositIntake() {
   const [response, assessmentResponse] = await Promise.all([
     ownerRequest('/v1/owner/dry-run-deposit-intake?limit=25', { method: 'GET', headers: {} }),
@@ -600,7 +729,12 @@ async function loadDepositIntake() {
 async function loadOwnerPlayerQueues() {
   refreshRequestsButton.disabled = true;
   try {
-    await Promise.all([loadPlayerRequests(), loadAssociationCandidates(), loadDepositIntake()]);
+    await Promise.all([
+      loadPlayerRequests(),
+      loadAssociationCandidates(),
+      loadPlayerEligibility(),
+      loadDepositIntake(),
+    ]);
   } finally {
     refreshRequestsButton.disabled = false;
   }

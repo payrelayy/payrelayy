@@ -47,7 +47,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows only invite, Player-ID, deposit, fixture, and advisory shadow procedures', () => {
+  it('allows only reviewed Owner invite, Player-ID, eligibility, and advisory procedures', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -78,6 +78,12 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.list_owner_player_deposit_eligibility(uuid,integer)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
   });

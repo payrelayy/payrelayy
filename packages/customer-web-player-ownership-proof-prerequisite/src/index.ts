@@ -7,7 +7,7 @@ import { isProxy } from 'node:util/types';
  * mutate schema, wire a runtime, or perform a financial action. It only records why the separately
  * reviewed proof boundary cannot begin.
  */
-export const CUSTOMER_WEB_PLAYER_OWNERSHIP_PROOF_PREREQUISITE_CONTRACT_VERSION = 2 as const;
+export const CUSTOMER_WEB_PLAYER_OWNERSHIP_PROOF_PREREQUISITE_CONTRACT_VERSION = 3 as const;
 
 export const CUSTOMER_WEB_PLAYER_OWNERSHIP_PROOF_REMAINING_BLOCKERS = Object.freeze([
   'authoritative_platform_control_signal_unproven',
@@ -18,7 +18,7 @@ export const CUSTOMER_WEB_PLAYER_OWNERSHIP_PROOF_REMAINING_BLOCKERS = Object.fre
   'verification_adapter_absent',
   'neutral_staff_proof_review_capability_absent',
   'ownership_conflict_recovery_and_reassignment_policy_unreviewed',
-  'deposit_eligibility_promotion_boundary_absent',
+  'owner_deposit_eligibility_decision_required',
 ] as const);
 
 export type CustomerWebPlayerOwnershipProofRemainingBlocker =

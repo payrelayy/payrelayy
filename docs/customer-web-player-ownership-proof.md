@@ -37,7 +37,7 @@ Its `remainingBlockers` field is the following fixed, ordered nine-item inventor
 6. `verification_adapter_absent`
 7. `neutral_staff_proof_review_capability_absent`
 8. `ownership_conflict_recovery_and_reassignment_policy_unreviewed`
-9. `deposit_eligibility_promotion_boundary_absent`
+9. `owner_deposit_eligibility_decision_required`
 
 The blocked result and blocker tuple are fixed metadata. They do not become true merely because a
 route, runtime, database role, feature flag, or deployment configuration exists elsewhere. A later
@@ -51,7 +51,7 @@ eligibility. Its evaluator returns only the frozen blocked contract for its exac
 a frozen invalid result for any other input. Its fixed redacted log projection contains controlled
 metadata only and must never echo caller-controlled values.
 
-Contract version 2 preserves all 19 literal-false capability flags. Separating the database's
+Contract version 3 preserves all 19 literal-false capability flags. Separating the database's
 financial eligibility gate does not turn any proof, review, association, database, runtime,
 network, `Ready`, deposit-eligibility, or financial capability on in this package.
 
@@ -109,12 +109,11 @@ decision whose time and player-state snapshot are current. Missing, revoked, sta
 malformed eligibility stays `Checking`. No ledger identifier, version, actor, or reason is returned,
 and the deposit-intent trigger remains the financial authorization boundary.
 
-This is a financial quarantine, not a proof or promotion implementation. There is no seed,
-backfill, decision-writing procedure, runtime grant, application route, staff control, or customer
-projection that can create an eligibility decision. The ledger therefore contains no positive path
-from ownership to financial use. The ninth blocker is now the absent, separately reviewed promotion
-boundary. Proof success must never silently insert an `eligible` decision or make a Player ID
-financially usable.
+This is a financial quarantine, not a proof implementation. There is no seed, backfill, automatic
+promotion, or customer-writable decision. Only the authenticated Owner-control boundary can append
+an audited approval or revocation for an already associated Player ID. The ninth blocker therefore
+requires that independent Owner decision. Proof success must never silently insert an `eligible`
+decision or make a Player ID financially usable.
 
 ## Required future sequence
 
@@ -128,8 +127,8 @@ Before any positive result can exist, a later phase must:
 5. add append-only proof-attempt and evidence receipts through a separately reviewed private
    database boundary;
 6. create a non-financial ownership binding that is independent from deposit eligibility; and
-7. implement and review any promotion from proven ownership to an `eligible` ledger decision as
-   its own financial phase, including revocation, authorization, and audit rules.
+7. require the existing Owner-only eligibility approval/revocation after proven ownership, with no
+   automatic coupling from proof success.
 
 Until all of those boundaries are implemented and reviewed, the only supported ownership-proof
 decision remains `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`.

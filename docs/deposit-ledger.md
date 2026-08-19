@@ -68,9 +68,10 @@ ID. A same-player composite foreign key and an update guard make the snapshot im
 `revoked` decision blocks later intents without rewriting historical ones. Existing legacy intents
 may retain a null snapshot only for compatibility; null is not current eligibility.
 
-This is fail-closed financial quarantine, not an eligibility-promotion feature. The migration adds
-no seed, backfill, view, enum, decision-writing procedure, policy, runtime grant, feature-switch
-change, route, UI, or provider adapter. The fixed customer list projection can read only enough
+This is fail-closed financial quarantine, not automatic eligibility promotion. The original ledger
+migration adds no seed or backfill. A later Owner-only security-definer command now appends audited
+approvals and revocations for already associated Player IDs without direct table access, a feature-
+switch change, a deposit, or a provider call. The fixed customer list projection can read only enough
 private state to keep `Ready` aligned with a well-formed current `eligible` decision; it returns no
 ledger fields and cannot write one. Consequently there is no supported way for an application to
 create an `eligible` decision, no reachable customer `Ready`, and ownership confirmation cannot

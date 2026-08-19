@@ -73,10 +73,27 @@ export const CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL = `
       and not pg_catalog.pg_has_role(current_user, '${CUSTOMER_WEB_GROUP_ROLE}', 'SET')
       as group_usage_allowed_set_denied,
     (
-      select count(*) = 1 and pg_catalog.bool_and(
-        member.rolname = '${CUSTOMER_WEB_RUNTIME_ROLE}' and membership.inherit_option
-        and not membership.set_option and not membership.admin_option
-      )
+      select
+        count(*) filter (
+          where member.rolname = '${CUSTOMER_WEB_RUNTIME_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+        ) = 1
+        and count(*) filter (where member.rolname = 'postgres') <= 1
+        and pg_catalog.bool_and(
+          (
+            member.rolname = '${CUSTOMER_WEB_RUNTIME_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+          ) or (
+            member.rolname = 'postgres'
+            and not membership.inherit_option
+            and not membership.set_option
+            and membership.admin_option
+          )
+        )
       from pg_catalog.pg_auth_members as membership
       join pg_catalog.pg_roles as granted on granted.oid = membership.roleid
       join pg_catalog.pg_roles as member on member.oid = membership.member

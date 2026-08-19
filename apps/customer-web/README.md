@@ -32,7 +32,7 @@ calls.
 - The pure `@fetanagent/customer-web-player-ownership-proof-prerequisite` package is not imported by
   this application and is not a permission switch. Its only valid result is
   `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`; it cannot represent a
-  positive proof, association, `Ready`, or deposit eligibility. Contract version 2 preserves all
+  positive proof, association, `Ready`, or deposit eligibility. Contract version 3 preserves all
   19 false capabilities and records the absent financial promotion boundary.
 - The separate private eligibility ledger is not reachable from this application. New deposit
   intents require a latest explicit `eligible` decision, but this app has no decision route,

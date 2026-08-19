@@ -2,6 +2,7 @@ import type { OwnerControlRuntimeConfig } from '@fetanagent/config/owner-control
 import { Pool, type PoolConfig } from 'pg';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
+import { PostgresOwnerPlayerDepositEligibility } from './owner-player-deposit-eligibility.js';
 import { PostgresOwnerDryRunDepositIntake } from './owner-deposit-intake.js';
 import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-assessments.js';
 import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
@@ -9,6 +10,7 @@ import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registrat
 export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
+  readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
   readonly playerRegistrations: Pick<
     PostgresOwnerPlayerRegistrationReviews,
@@ -114,6 +116,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.list_owner_dry_run_fixture_assessments(uuid,integer)', 'execute') as fixture_assessment_list_allowed,
     has_function_privilege(current_user, 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)', 'execute') as shadow_enqueue_allowed,
     has_function_privilege(current_user, 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)', 'execute') as shadow_list_allowed,
+    has_function_privilege(current_user, 'app.list_owner_player_deposit_eligibility(uuid,integer)', 'execute') as player_eligibility_list_allowed,
+    has_function_privilege(current_user, 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)', 'execute') as player_eligibility_decide_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -142,7 +146,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)'::regprocedure,
           'app.list_owner_dry_run_fixture_assessments(uuid,integer)'::regprocedure,
           'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)'::regprocedure,
-          'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure
+          'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure,
+          'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
+          'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -191,6 +197,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     deposits: new PostgresOwnerDryRunDepositIntake({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    eligibility: new PostgresOwnerPlayerDepositEligibility({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     invites: new PostgresOwnerInviteControl({

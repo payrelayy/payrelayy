@@ -23,6 +23,11 @@ import {
   type BetaInviteRevocationReason,
 } from './owner-invites.js';
 import {
+  OwnerPlayerDepositEligibilityRejectedError,
+  OwnerPlayerDepositEligibilityUnavailableError,
+  type OwnerPlayerDepositEligibilityDecision,
+} from './owner-player-deposit-eligibility.js';
+import {
   OwnerPlayerRegistrationReviewRejectedError,
   OwnerPlayerRegistrationReviewUnavailableError,
   type OwnerPlayerRegistrationDecision,
@@ -62,6 +67,10 @@ const PLAYER_REGISTRATION_DECISIONS = new Set<OwnerPlayerRegistrationDecision>([
   'not_found',
   'review_required',
   'cancelled',
+]);
+const PLAYER_DEPOSIT_ELIGIBILITY_DECISIONS = new Set<OwnerPlayerDepositEligibilityDecision>([
+  'eligible',
+  'revoked',
 ]);
 const DRY_RUN_FIXTURE_IDS = new Set<string>(OWNER_DRY_RUN_FIXTURE_IDS);
 const DRY_RUN_FIXTURE_REVIEW_DECISIONS = new Set<OwnerDryRunFixtureReviewDecision>([
@@ -459,6 +468,75 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner Player ID association is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/player-deposit-eligibility',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const players = await dependencies.runtime.eligibility.list(authUserId, limit);
+        return reply.code(200).send({ players });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPlayerDepositEligibilityRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner Player-ID deposit-eligibility list is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { playerAccountId: string } }>(
+    '/v1/owner/player-deposit-eligibility/:playerAccountId/decide',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['confirmation', 'decision']);
+        const decision = body?.decision;
+        if (
+          typeof decision !== 'string' ||
+          !PLAYER_DEPOSIT_ELIGIBILITY_DECISIONS.has(
+            decision as OwnerPlayerDepositEligibilityDecision,
+          ) ||
+          body?.confirmation !==
+            (decision === 'eligible'
+              ? 'owner_confirmed_financial_eligibility'
+              : 'owner_confirmed_financial_revocation')
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receipt = await dependencies.runtime.eligibility.decide(
+          authUserId,
+          request.params.playerAccountId,
+          decision as OwnerPlayerDepositEligibilityDecision,
+        );
+        return reply.code(200).send(receipt);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPlayerDepositEligibilityRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerPlayerDepositEligibilityUnavailableError) {
+          request.log.warn('Owner Player-ID deposit-eligibility decision is unavailable.');
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        request.log.warn('Owner Player-ID deposit-eligibility decision is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

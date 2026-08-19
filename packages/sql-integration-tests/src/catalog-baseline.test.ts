@@ -6698,6 +6698,51 @@ describe('disposable SQL migration baseline', () => {
     expect(insertGuardSource).toContain('new.decided_at := decision_time');
     expect(insertGuardSource).toContain('new.created_at := decision_time');
 
+    const ownerDecisionBoundary = await client.query<{
+      readonly group_execute: boolean;
+      readonly hardened: boolean;
+      readonly public_execute: boolean;
+      readonly signature: string;
+    }>(`
+      select procedure.oid::regprocedure::text as signature,
+             procedure.prosecdef
+               and procedure.proowner = 'postgres'::regrole
+               and procedure.proconfig =
+                 array['search_path=pg_catalog, app, pg_temp']::text[] as hardened,
+             has_function_privilege(
+               'fetanagent_owner_control', procedure.oid, 'EXECUTE'
+             ) as group_execute,
+             exists (
+               select 1
+                 from aclexplode(coalesce(
+                   procedure.proacl,
+                   acldefault('f', procedure.proowner)
+                 )) privilege
+                where privilege.grantee = 0
+                  and privilege.privilege_type = 'EXECUTE'
+             ) as public_execute
+        from pg_proc procedure
+       where procedure.oid in (
+         'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
+         'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure
+       )
+       order by signature
+    `);
+    expect(ownerDecisionBoundary.rows).toEqual([
+      {
+        group_execute: true,
+        hardened: true,
+        public_execute: false,
+        signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
+      },
+      {
+        group_execute: true,
+        hardened: true,
+        public_execute: false,
+        signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)',
+      },
+    ]);
+
     const nonTriggerEligibilityReaders = await client.query<{ readonly signature: string }>(`
       with ordinary_routines as materialized (
         select procedure.oid
@@ -6714,16 +6759,19 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(nonTriggerEligibilityReaders.rows).toEqual([
+      { signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)' },
       { signature: 'app.enqueue_verified_deposit_execution(uuid)' },
       { signature: 'app.fence_deposit_execution_final_action(uuid,uuid)' },
       { signature: 'app.lease_next_deposit_execution(uuid,integer)' },
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
+      { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       { signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)' },
     ]);
 
     const eligibilityReaderPrivileges = await client.query<{
       readonly customer_web_runtime: boolean;
       readonly deposit_executor_runtime: boolean;
+      readonly owner_control_runtime: boolean;
       readonly player_actions_runtime: boolean;
       readonly public_execute: boolean;
       readonly settlement_runtime: boolean;
@@ -6736,9 +6784,12 @@ describe('disposable SQL migration baseline', () => {
              has_function_privilege(
                'fetanagent_customer_web_runtime', procedure.oid, 'EXECUTE'
              ) as customer_web_runtime,
-             has_function_privilege(
-               'fetanagent_deposit_executor_runtime', procedure.oid, 'EXECUTE'
-             ) as deposit_executor_runtime,
+              has_function_privilege(
+                'fetanagent_deposit_executor_runtime', procedure.oid, 'EXECUTE'
+              ) as deposit_executor_runtime,
+              has_function_privilege(
+                'fetanagent_owner_control_runtime', procedure.oid, 'EXECUTE'
+              ) as owner_control_runtime,
              has_function_privilege(
                'fetanagent_verification_settlement_runtime', procedure.oid, 'EXECUTE'
              ) as settlement_runtime,
@@ -6755,10 +6806,12 @@ describe('disposable SQL migration baseline', () => {
         join pg_namespace namespace on namespace.oid = procedure.pronamespace
        where namespace.nspname = 'app'
          and procedure.oid in (
+           'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
            'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
            'app.fence_deposit_execution_final_action(uuid,uuid)'::regprocedure,
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
+           'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
            'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure
          )
        order by signature
@@ -6767,6 +6820,16 @@ describe('disposable SQL migration baseline', () => {
       {
         customer_web_runtime: false,
         deposit_executor_runtime: false,
+        owner_control_runtime: true,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
         settlement_runtime: false,
@@ -6775,6 +6838,7 @@ describe('disposable SQL migration baseline', () => {
       {
         customer_web_runtime: false,
         deposit_executor_runtime: true,
+        owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
         settlement_runtime: false,
@@ -6783,6 +6847,7 @@ describe('disposable SQL migration baseline', () => {
       {
         customer_web_runtime: false,
         deposit_executor_runtime: true,
+        owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
         settlement_runtime: false,
@@ -6791,6 +6856,7 @@ describe('disposable SQL migration baseline', () => {
       {
         customer_web_runtime: true,
         deposit_executor_runtime: false,
+        owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
         settlement_runtime: false,
@@ -6799,6 +6865,16 @@ describe('disposable SQL migration baseline', () => {
       {
         customer_web_runtime: false,
         deposit_executor_runtime: false,
+        owner_control_runtime: true,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
         settlement_runtime: false,
@@ -6844,6 +6920,188 @@ describe('disposable SQL migration baseline', () => {
     expect(migrationSource).not.toMatch(
       /(?:insert\s+into|update|delete\s+from)\s+app\.feature_switches/iu,
     );
+  });
+
+  it('records only serialized audited Owner deposit-eligibility decisions', async () => {
+    const nonOwnerAuthUserId = '33333333-3333-4333-8333-444444444444';
+    await client.query('begin');
+    try {
+      await client.query(
+        `insert into auth.users (id, email)
+         values ($1::uuid, 'eligibility-administrator@example.invalid')`,
+        [nonOwnerAuthUserId],
+      );
+      await client.query(
+        `insert into app.admin_users (auth_user_id, role, status)
+         values ($1::uuid, 'administrator', 'active')`,
+        [nonOwnerAuthUserId],
+      );
+      const customer = await client.query<{ readonly customer_id: string }>(
+        `insert into app.customers default values returning id::text as customer_id`,
+      );
+      const registrationRequest = await client.query<{ readonly request_id: string }>(
+        `insert into app.player_registration_requests (customer_id, platform_id, player_id)
+         select $1::uuid, platform.id, 'OWNER-ELIGIBILITY-01'
+           from app.platforms platform
+          where platform.code = 'kemerbet'
+         returning id::text as request_id`,
+        [customer.rows[0]!.customer_id],
+      );
+      const requestId = registrationRequest.rows[0]!.request_id;
+
+      await client.query('set local role fetanagent_owner_control');
+      await client.query(
+        `select * from app.review_owner_player_registration_request(
+           $1::uuid, $2::uuid, 'exists', 'owner_platform_lookup'
+         )`,
+        [ownerAuthUserId, requestId],
+      );
+      const association = await client.query<{
+        readonly associated_player_account_id: string;
+      }>(
+        `select associated_player_account_id::text
+           from app.associate_owner_validated_player_registration_request(
+             $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+           )`,
+        [ownerAuthUserId, requestId],
+      );
+      expect(association.rows).toHaveLength(1);
+      const playerAccountId = association.rows[0]!.associated_player_account_id;
+
+      const beforeDecision = await client.query<{
+        readonly decision_id: string | null;
+        readonly player_account_id: string;
+        readonly player_id: string;
+      }>(
+        `select player_account_id::text, player_id, decision_id::text
+           from app.list_owner_player_deposit_eligibility($1::uuid, 50)
+          where player_account_id = $2::uuid`,
+        [ownerAuthUserId, playerAccountId],
+      );
+      expect(beforeDecision.rows).toEqual([
+        {
+          decision_id: null,
+          player_account_id: playerAccountId,
+          player_id: 'OWNER-ELIGIBILITY-01',
+        },
+      ]);
+
+      const eligible = await client.query<{
+        readonly decided_decision_id: string;
+        readonly decided_version: number;
+        readonly decision_already_recorded: boolean;
+      }>(
+        `select decided_decision_id::text, decided_version, decision_already_recorded
+           from app.decide_owner_player_deposit_eligibility(
+             $1::uuid, $2::uuid, 'eligible', 'financial_eligibility_approved'
+           )`,
+        [ownerAuthUserId, playerAccountId],
+      );
+      expect(eligible.rows).toEqual([
+        {
+          decided_decision_id: expect.any(String),
+          decided_version: 1,
+          decision_already_recorded: false,
+        },
+      ]);
+      const eligibleReplay = await client.query<{
+        readonly decided_decision_id: string;
+        readonly decided_version: number;
+        readonly decision_already_recorded: boolean;
+      }>(
+        `select decided_decision_id::text, decided_version, decision_already_recorded
+           from app.decide_owner_player_deposit_eligibility(
+             $1::uuid, $2::uuid, 'eligible', 'financial_eligibility_approved'
+           )`,
+        [ownerAuthUserId, playerAccountId],
+      );
+      expect(eligibleReplay.rows).toEqual([
+        {
+          decided_decision_id: eligible.rows[0]!.decided_decision_id,
+          decided_version: 1,
+          decision_already_recorded: true,
+        },
+      ]);
+
+      const revoked = await client.query<{
+        readonly decided_version: number;
+        readonly decision_already_recorded: boolean;
+      }>(
+        `select decided_version, decision_already_recorded
+           from app.decide_owner_player_deposit_eligibility(
+             $1::uuid, $2::uuid, 'revoked', 'financial_eligibility_revoked'
+           )`,
+        [ownerAuthUserId, playerAccountId],
+      );
+      expect(revoked.rows).toEqual([{ decided_version: 2, decision_already_recorded: false }]);
+      const revokedReplay = await client.query<{
+        readonly decided_version: number;
+        readonly decision_already_recorded: boolean;
+      }>(
+        `select decided_version, decision_already_recorded
+           from app.decide_owner_player_deposit_eligibility(
+             $1::uuid, $2::uuid, 'revoked', 'financial_eligibility_revoked'
+           )`,
+        [ownerAuthUserId, playerAccountId],
+      );
+      expect(revokedReplay.rows).toEqual([{ decided_version: 2, decision_already_recorded: true }]);
+
+      await client.query('savepoint rejected_non_owner_eligibility');
+      await expect(
+        client.query(
+          `select * from app.decide_owner_player_deposit_eligibility(
+             $1::uuid, $2::uuid, 'eligible', 'financial_eligibility_approved'
+           )`,
+          [nonOwnerAuthUserId, playerAccountId],
+        ),
+      ).rejects.toThrow(/only an active owner/u);
+      await client.query('rollback to savepoint rejected_non_owner_eligibility');
+      await client.query('release savepoint rejected_non_owner_eligibility');
+      await client.query('reset role');
+
+      const persisted = await client.query<{
+        readonly audits: number;
+        readonly decisions: number;
+        readonly deposits: number;
+        readonly latest_decision: string;
+        readonly versions: number[];
+      }>(
+        `select
+           (select count(*)::integer
+              from app.player_deposit_eligibility_decisions decision
+             where decision.player_account_id = $1::uuid) as decisions,
+           (select array_agg(decision.decision_version order by decision.decision_version)
+              from app.player_deposit_eligibility_decisions decision
+             where decision.player_account_id = $1::uuid) as versions,
+           (select decision.decision
+              from app.player_deposit_eligibility_decisions decision
+             where decision.player_account_id = $1::uuid
+             order by decision.decision_version desc limit 1) as latest_decision,
+           (select count(*)::integer from app.deposit_intents intent
+             where intent.player_account_id = $1::uuid) as deposits,
+           (select count(*)::integer from app.audit_events audit
+             where audit.action = 'player_deposit_eligibility.owner_decision_recorded'
+               and audit.resource_id = $1::uuid) as audits`,
+        [playerAccountId],
+      );
+      expect(persisted.rows).toEqual([
+        {
+          audits: 2,
+          decisions: 2,
+          deposits: 0,
+          latest_decision: 'revoked',
+          versions: [1, 2],
+        },
+      ]);
+
+      const featureModes = await client.query<{ readonly non_disabled: number }>(`
+        select count(*) filter (where mode <> 'disabled')::integer as non_disabled
+          from app.feature_switches
+      `);
+      expect(featureModes.rows).toEqual([{ non_disabled: 0 }]);
+    } finally {
+      await client.query('rollback');
+    }
   });
 
   it('requires exact append-only decisions and snapshots only current eligibility', async () => {

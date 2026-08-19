@@ -22,12 +22,13 @@ inside the SSH tunnel. Review decisions use fixed reason codes and append-only a
 never contain the raw Player ID. "Found" means existence only: it does not establish customer
 ownership, create a validated player binding, enable a deposit, or contact KemerBet automatically.
 
-The legacy ownership-confirmation action records only the customer-to-player association. It no
-longer claims or grants deposit eligibility. Financial eligibility is isolated in the private,
-append-only `app.player_deposit_eligibility_decisions` ledger, and new intents must snapshot its
-latest `eligible` decision. This service has no decision-writing route, adapter, procedure grant,
-or UI; no decision is seeded or promoted by an ownership association, so the new guard remains a
-fail-closed financial quarantine rather than an operational deposit capability.
+The ownership-confirmation action records only the customer-to-player association and never grants
+deposit eligibility automatically. Financial eligibility is isolated in the private, append-only
+`app.player_deposit_eligibility_decisions` ledger, and new intents must snapshot its latest
+`eligible` decision. The service exposes the only reviewed decision route and UI: an authenticated
+active Owner may explicitly approve or revoke an already associated KemerBet Player ID. The command
+has no direct table grant, is serialized with new intents, writes fixed reason codes and safe audit
+metadata, and does not open a deposit, change a feature switch, call KemerBet, or move money.
 
 The runtime remains disabled by default. Its staging container binds only to host loopback for an
 SSH-forwarded operator session; there is no public proxy or Internet-facing Owner endpoint. The

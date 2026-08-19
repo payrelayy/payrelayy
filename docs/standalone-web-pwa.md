@@ -32,8 +32,8 @@ next boundary. No authoritative KemerBet proof source, challenge, delivery path,
 or positive proof result has been selected. Its only valid decision is
 `blocked / customer_web_player_ownership_proof_prerequisites_incomplete`; it does not add an app
 route, runtime, database object, role, configuration, infrastructure wiring, association, `Ready`,
-deposit eligibility, or financial action. Contract version 2 keeps all 19 capabilities false and
-records `deposit_eligibility_promotion_boundary_absent` as the ninth blocker.
+deposit eligibility, or financial action. Contract version 3 keeps all 19 capabilities false and
+records `owner_deposit_eligibility_decision_required` as the ninth blocker.
 
 A separate private eligibility ledger now prevents ownership association from being sufficient for
 new deposit intents. Every new intent must snapshot the latest explicit `eligible` decision, but no
@@ -108,7 +108,7 @@ web-origin request, so `Ready` is unreachable until a later proof-bearing associ
 reviewed and implemented. The list projection also requires an aligned active/valid association,
 active platform, and an exact current `eligible` history with a matching player-state snapshot;
 missing, revoked, stale, future-dated, or malformed eligibility remains `Checking`. The frozen
-prerequisite cannot produce a positive ownership result, and no eligibility-promotion path exists.
+prerequisite cannot produce a positive ownership result or an Owner financial decision.
 The projection is advisory display only: the private intent guard independently authorizes and
 snapshots eligibility, so submit/list does not enable a deposit.
 

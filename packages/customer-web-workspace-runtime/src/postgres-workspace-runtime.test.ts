@@ -207,7 +207,13 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       'not membership.set_option and not membership.admin_option',
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
-      "select count(*) = 1 and pg_catalog.bool_and(\n        member.rolname = 'fetanagent_customer_web_runtime'",
+      "count(*) filter (\n          where member.rolname = 'fetanagent_customer_web_runtime'",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "count(*) filter (where member.rolname = 'postgres') <= 1",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "member.rolname = 'postgres'\n            and not membership.inherit_option\n            and not membership.set_option\n            and membership.admin_option",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain('no_app_base_object_access');
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(

@@ -92,6 +92,85 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls.map((call) => call.query).join('\n')).not.toContain(rawBody.toString('utf8'));
   });
 
+  it('expires an already-stale Player-ID prompt before asking the root menu caller to restart', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-11T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('issue_telegram_player_registration_capability')) {
+          throw { code: 'P0001' };
+        }
+        if (query.includes('expire_telegram_player_registration_action')) {
+          return {
+            rows: [
+              {
+                player_registration_action_id: '8392154c-85b2-47b2-b84d-2aee97cd468f',
+                action_status: 'expired',
+                conversation_version: '2',
+                origin_inbound_event_already_consumed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        rootAction,
+        Buffer.from(JSON.stringify(rootAction), 'utf8'),
+      ),
+    ).resolves.toEqual({ version: 1, outcome: 'restart_required' });
+    expect(calls).toHaveLength(3);
+    expect(calls[2]?.query).toContain('expire_telegram_player_registration_action');
+    expect(calls[2]?.values[0]).toBe(inboundEventId);
+    expect(calls[2]?.values[1]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+  });
+
+  it('keeps an unrelated root-menu database failure fail-closed without attempting expiry', async () => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-11T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        throw new Error('synthetic database failure');
+      },
+      async end() {},
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        rootAction,
+        Buffer.from(JSON.stringify(rootAction), 'utf8'),
+      ),
+    ).rejects.toMatchObject({ name: 'TelegramPlayerActionRuntimeUnavailableError' });
+    expect(calls).toHaveLength(2);
+    expect(calls.join('\n')).not.toContain('expire_telegram_player_registration_action');
+  });
+
   it('creates only a pending validation request for admitted Player-ID text', async () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {

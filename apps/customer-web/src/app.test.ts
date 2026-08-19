@@ -1384,7 +1384,7 @@ describe('customer web SSR and PWA boundary', () => {
                   group_usage_allowed_set_denied: true,
                   no_app_base_object_access: true,
                   only_expected_direct_membership: true,
-                  runtime_has_no_members: true,
+                  runtime_only_trusted_members: true,
                   runtime_login_identity_allowed: true,
                   runtime_login_is_safe: true,
                 },

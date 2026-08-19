@@ -87,6 +87,9 @@ stop_project() {
   rm -f -- \
     "$SECRET_ROOT/owner-database-url" \
     "$SECRET_ROOT/publishable-key" \
+    "$SECRET_ROOT/customer-web-database-url" \
+    "$SECRET_ROOT/customer-web-publishable-key" \
+    "$SECRET_ROOT/customer-web-rate-limit-hmac" \
     "$SECRET_ROOT/beta-database-url" \
     "$SECRET_ROOT/beta-transport-hmac" \
     "$SECRET_ROOT/bot-transport-hmac" \
@@ -201,7 +204,7 @@ require_reviewed_owner_port_3002() {
 require_exact_private_runtime() {
   local commit_sha="$1"
   local container_id health ids revision service services state
-  local -a expected_services=(api beta-admission bot owner-control)
+  local -a expected_services=(api beta-admission bot customer-web owner-control)
 
   services="$({
     docker_local container ls --all --quiet \
@@ -212,7 +215,7 @@ require_exact_private_runtime() {
           --format '{{ index .Config.Labels "com.docker.compose.service" }}'
       done
   } | sort)" || die 'the private FetanAgent service inventory could not be inspected'
-  [[ "$services" == $'api\nbeta-admission\nbot\nowner-control' ]] ||
+  [[ "$services" == $'api\nbeta-admission\nbot\ncustomer-web\nowner-control' ]] ||
     die 'the private FetanAgent service set is not exact'
 
   for service in "${expected_services[@]}"; do
@@ -239,7 +242,7 @@ require_exact_fresh_private_runtime() {
   local commit_sha="$1"
   local container_id environment health ids revision service services state
   local expected_environment
-  local -a expected_services=(api beta-admission owner-control)
+  local -a expected_services=(api beta-admission customer-web owner-control)
 
   services="$({
     docker_local container ls --all --quiet \
@@ -250,7 +253,7 @@ require_exact_fresh_private_runtime() {
           --format '{{ index .Config.Labels "com.docker.compose.service" }}'
       done
   } | sort)" || die 'the fresh-host private FetanAgent service inventory could not be inspected'
-  [[ "$services" == $'api\nbeta-admission\nowner-control' ]] ||
+  [[ "$services" == $'api\nbeta-admission\ncustomer-web\nowner-control' ]] ||
     die 'the fresh-host private FetanAgent service set is not exact'
 
   for service in "${expected_services[@]}"; do
@@ -282,6 +285,16 @@ require_exact_fresh_private_runtime() {
       grep -Fxq "$expected_environment" <<<"$environment" ||
         die "the fresh-host $service safety environment is not exact"
     done
+    if [[ "$service" == 'customer-web' ]]; then
+      for expected_environment in \
+        'INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true' \
+        'INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true' \
+        'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false' \
+        'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=true'; do
+        grep -Fxq "$expected_environment" <<<"$environment" ||
+          die 'the fresh-host customer-web capability environment is not exact'
+      done
+    fi
   done
 
   require_reviewed_owner_port_3002 "$commit_sha"
@@ -291,7 +304,7 @@ require_exact_fresh_bot_runtime() {
   local commit_sha="$1"
   local container_id environment health ids restart_count revision service services state
   local expected_environment
-  local -a expected_services=(api beta-admission bot owner-control)
+  local -a expected_services=(api beta-admission bot customer-web owner-control)
 
   services="$({
     docker_local container ls --all --quiet \
@@ -302,7 +315,7 @@ require_exact_fresh_bot_runtime() {
           --format '{{ index .Config.Labels "com.docker.compose.service" }}'
       done
   } | sort)" || die 'the fresh-host Telegram service inventory could not be inspected'
-  [[ "$services" == $'api\nbeta-admission\nbot\nowner-control' ]] ||
+  [[ "$services" == $'api\nbeta-admission\nbot\ncustomer-web\nowner-control' ]] ||
     die 'the fresh-host Telegram service set is not exact'
 
   for service in "${expected_services[@]}"; do
@@ -330,6 +343,17 @@ require_exact_fresh_bot_runtime() {
       grep -Fxq "$expected_environment" <<<"$environment" ||
         die "the fresh-host $service safety environment is not exact"
     done
+
+    if [[ "$service" == 'customer-web' ]]; then
+      for expected_environment in \
+        'INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true' \
+        'INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true' \
+        'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false' \
+        'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=true'; do
+        grep -Fxq "$expected_environment" <<<"$environment" ||
+          die 'the fresh-host customer-web capability environment is not exact'
+      done
+    fi
 
     if [[ "$service" == 'bot' ]]; then
       for expected_environment in \
@@ -743,6 +767,7 @@ case "$command" in
       api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
       cbe-deposit-reference-encryption-key cbe-deposit-reference-fingerprint-key \
       cbe-deposit-reference-key-profile.v1.json \
+      customer-web-database-url customer-web-publishable-key customer-web-rate-limit-hmac \
       api-action-transport-hmac \
       beta-database-url beta-payload-hmac beta-transport-hmac bot-token bot-transport-hmac \
       bot-action-transport-hmac player-action-database-url \
@@ -761,6 +786,9 @@ case "$command" in
       "$incoming/compose.staging-beta.yaml" "$release/infra/compose.staging-beta.yaml"
     install -o 10001 -g 10001 -m 0400 "$incoming/beta-database-url" "$SECRET_ROOT/beta-database-url"
     install -o 10001 -g 10001 -m 0400 "$incoming/owner-database-url" "$SECRET_ROOT/owner-database-url"
+    install -o 10001 -g 10001 -m 0400 "$incoming/customer-web-database-url" "$SECRET_ROOT/customer-web-database-url"
+    install -o 10001 -g 10001 -m 0400 "$incoming/customer-web-publishable-key" "$SECRET_ROOT/customer-web-publishable-key"
+    install -o 10001 -g 10001 -m 0400 "$incoming/customer-web-rate-limit-hmac" "$SECRET_ROOT/customer-web-rate-limit-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/beta-transport-hmac" "$SECRET_ROOT/beta-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-transport-hmac" "$SECRET_ROOT/bot-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/beta-payload-hmac" "$SECRET_ROOT/beta-payload-hmac"
@@ -778,7 +806,7 @@ case "$command" in
     install -o root -g root -m 0444 "$incoming/supabase-ca.crt" "$SECRET_ROOT/supabase-ca.crt"
 
     docker_local image load --input "$incoming/fetanagent-staging-images.tar" >/dev/null
-    for image in owner-control api beta-admission bot gateway; do
+    for image in owner-control customer-web api beta-admission bot gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'a loaded image revision does not match the reviewed commit'
     done
@@ -803,6 +831,7 @@ case "$command" in
       die 'the sealed Compose contract is absent or unsafe'
     for service_file in \
       owner-database-url publishable-key beta-database-url beta-transport-hmac \
+      customer-web-database-url customer-web-publishable-key customer-web-rate-limit-hmac \
       bot-transport-hmac beta-payload-hmac bot-token player-action-database-url \
       api-action-transport-hmac api-action-payload-hmac api-action-capability-hmac \
       api-action-semantic-hmac cbe-deposit-reference-encryption-key \
@@ -812,7 +841,7 @@ case "$command" in
     require_immutable_config_file "$SECRET_ROOT/supabase-ca.crt"
     require_immutable_config_file "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
 
-    for image in owner-control api beta-admission bot gateway; do
+    for image in owner-control customer-web api beta-admission bot gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'an image revision does not match the reviewed commit'
     done
@@ -827,6 +856,9 @@ case "$command" in
       FETANAGENT_IMAGE_TAG="$image_tag"
       FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
       FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE="$SECRET_ROOT/customer-web-database-url"
+      FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/customer-web-publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE="$SECRET_ROOT/customer-web-rate-limit-hmac"
       FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
       FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
       FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
@@ -871,6 +903,9 @@ case "$command" in
       owner-control apps/admin/dist/database-preflight-cli.js ||
       die 'the Owner-control database preflight failed after three bounded attempts'
     run_bounded_database_preflight \
+      customer-web apps/customer-web/dist/database-preflight-cli.js ||
+      die 'the customer-web database preflight failed after three bounded attempts'
+    run_bounded_database_preflight \
       api apps/api/dist/player-action-database-preflight-cli.js ||
       die 'the Player-ID action database preflight failed after three bounded attempts'
     run_bounded_database_preflight \
@@ -881,7 +916,7 @@ case "$command" in
       # token and end-to-end smoke gate are complete. The historical start path
       # retains the reviewed full beta profile behavior.
       env -i "${compose_environment[@]}" "${compose_command[@]}" \
-        up -d --no-build --wait --wait-timeout 90 owner-control api beta-admission
+        up -d --no-build --wait --wait-timeout 90 owner-control customer-web api beta-admission
     else
       env -i "${compose_environment[@]}" "${compose_command[@]}" \
         up -d --no-build --wait --wait-timeout 90
@@ -941,6 +976,9 @@ case "$command" in
       FETANAGENT_IMAGE_TAG="$image_tag"
       FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
       FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE="$SECRET_ROOT/customer-web-database-url"
+      FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/customer-web-publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE="$SECRET_ROOT/customer-web-rate-limit-hmac"
       FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
       FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
       FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
@@ -1036,6 +1074,9 @@ case "$command" in
       FETANAGENT_IMAGE_TAG="$image_tag"
       FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
       FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE="$SECRET_ROOT/customer-web-database-url"
+      FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/customer-web-publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE="$SECRET_ROOT/customer-web-rate-limit-hmac"
       FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
       FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
       FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"

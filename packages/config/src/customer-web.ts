@@ -18,6 +18,8 @@ export const CUSTOMER_WEB_DATABASE_DIRECT_HOST =
   `db.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
 export const CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE =
   '/run/secrets/customer_web_database_url' as const;
+export const CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE =
+  '/run/secrets/customer_web_supabase_publishable_key' as const;
 export const CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE =
   '/run/secrets/customer_web_rate_limit_hmac' as const;
 
@@ -88,6 +90,10 @@ export interface CustomerWebRateLimitConfigDependencies {
   readonly readSecretFile?: (path: string) => string;
 }
 
+export interface CustomerWebAuthConfigDependencies {
+  readonly readSecretFile?: (path: string) => string;
+}
+
 export interface CustomerWebDepositConfigDependencies {
   readonly readSecretFile?: (path: string) => string;
 }
@@ -122,6 +128,49 @@ function requiredPublishableKey(value: string | undefined): string {
     );
   }
   return value;
+}
+
+function publishableKeyFromEnvironmentOrFile(
+  environment: NodeJS.ProcessEnv,
+  dependencies: CustomerWebAuthConfigDependencies,
+): string | undefined {
+  const direct = environment.CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY;
+  const file = environment.CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE;
+  if (environment.NODE_ENV === 'production') {
+    if (direct !== undefined) {
+      throw new Error(
+        'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE is required in the production customer-web container.',
+      );
+    }
+    if (file !== CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE) {
+      throw new Error(
+        'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE must use the approved private runtime secret path.',
+      );
+    }
+  }
+  if (direct !== undefined && file !== undefined) {
+    throw new Error(
+      'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY and CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE must not both be configured.',
+    );
+  }
+  if (direct !== undefined) return direct;
+  if (file === undefined) return undefined;
+  if (!posix.isAbsolute(file) && !win32.isAbsolute(file)) {
+    throw new Error('CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE must be an absolute path.');
+  }
+  let value: string;
+  try {
+    value = (dependencies.readSecretFile ?? ((path) => readFileSync(path, 'utf8')))(file);
+  } catch {
+    throw new Error('CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE could not be read.');
+  }
+  const withoutOneTerminalNewline = value.replace(/\r?\n$/u, '');
+  if (withoutOneTerminalNewline === '' || /[\r\n]/u.test(withoutOneTerminalNewline)) {
+    throw new Error(
+      'CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE must contain exactly one secret value.',
+    );
+  }
+  return withoutOneTerminalNewline;
 }
 
 function depositReferenceSecretFromEnvironmentOrFile(
@@ -336,6 +385,7 @@ function parseCustomerWebDatabaseConnection(
 
 export function loadCustomerWebAuthConfig(
   environment: NodeJS.ProcessEnv = process.env,
+  dependencies: CustomerWebAuthConfigDependencies = {},
 ): CustomerWebAuthConfig {
   const enabled = booleanFromEnv(
     environment.INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED,
@@ -362,7 +412,7 @@ export function loadCustomerWebAuthConfig(
     enabled: true,
     passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
     supabasePublishableKey: requiredPublishableKey(
-      environment.CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY,
+      publishableKeyFromEnvironmentOrFile(environment, dependencies),
     ),
     supabaseUrl: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   };

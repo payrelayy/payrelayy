@@ -941,10 +941,10 @@ const exactPrivateRuntime = functionBody(deployHelper, 'require_exact_private_ru
 assertInOrder(
   exactPrivateRuntime,
   [
-    'expected_services=(api beta-admission bot owner-control)',
+    'expected_services=(api beta-admission bot customer-web owner-control)',
     'label=com.docker.compose.project=$PROJECT_NAME',
     'com.docker.compose.service',
-    "$'api\\nbeta-admission\\nbot\\nowner-control'",
+    "$'api\\nbeta-admission\\nbot\\ncustomer-web\\nowner-control'",
     'label=com.docker.compose.service=$service',
     '[[ "$ids" =~ ^[0-9a-f]{12,64}$ ]]',
     '[[ "$state" == \'running\' ]]',
@@ -954,7 +954,7 @@ assertInOrder(
     '[[ "$health" == \'healthy\' ]]',
     'require_reviewed_owner_port_3002 "$commit_sha"',
   ],
-  'Public activation must classify exactly the four private services and validate every revision and health state',
+  'Public activation must classify exactly the five private services and validate every revision and health state',
 );
 assert.doesNotMatch(exactPrivateRuntime, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
 
@@ -1027,7 +1027,7 @@ assert.deepEqual(
 assert.match(startArm, /if \[\[ "\$command" == \'fresh-start\' \]\]/);
 assert.match(
   startArm,
-  /up -d --no-build --wait --wait-timeout 90 owner-control api beta-admission/,
+  /up -d --no-build --wait --wait-timeout 90 owner-control customer-web api beta-admission/,
   'Fresh-host start must keep Telegram and the public gateway out of the initial launch.',
 );
 const cutoverArm = /cutover-ready\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
@@ -1082,14 +1082,18 @@ const exactFreshRuntime = functionBody(deployHelper, 'require_exact_fresh_privat
 assertInOrder(
   exactFreshRuntime,
   [
-    'local -a expected_services=(api beta-admission owner-control)',
-    '[[ "$services" == $\'api\\nbeta-admission\\nowner-control\' ]]',
+    'local -a expected_services=(api beta-admission customer-web owner-control)',
+    '[[ "$services" == $\'api\\nbeta-admission\\ncustomer-web\\nowner-control\' ]]',
     "'NODE_ENV=production'",
     "'FINANCIAL_ACTIONS_MODE=dry_run'",
     "'TELEGRAM_BOT_ENABLED=false'",
     "'TELEGRAM_BETA_ADMISSION_ENABLED=false'",
     "'KEMERBET_EXECUTOR_ENABLED=false'",
     "'KEMERBET_FINAL_ACTION_ENABLED=false'",
+    "'INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true'",
+    "'INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true'",
+    "'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false'",
+    "'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=true'",
     'require_reviewed_owner_port_3002 "$commit_sha"',
   ],
   'The fresh-host public gate must pin the exact private services and fail-closed environment.',

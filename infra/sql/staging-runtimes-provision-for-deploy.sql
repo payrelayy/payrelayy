@@ -1,5 +1,6 @@
 \set ON_ERROR_STOP on
 \getenv beta_runtime_password BETA_ADMISSION_RUNTIME_PASSWORD
+\getenv customer_web_runtime_password CUSTOMER_WEB_RUNTIME_PASSWORD
 \getenv owner_runtime_password OWNER_CONTROL_RUNTIME_PASSWORD
 \getenv player_action_runtime_password PLAYER_ACTION_RUNTIME_PASSWORD
 
@@ -11,6 +12,7 @@ declare
 begin
   foreach expected_role in array array[
     'fetanagent_beta_admission_runtime',
+    'fetanagent_customer_web_runtime',
     'fetanagent_owner_control_runtime',
     'fetanagent_player_actions_runtime'
   ]
@@ -50,6 +52,16 @@ begin
     from pg_catalog.pg_auth_members membership
     join pg_catalog.pg_roles granted_role on granted_role.oid = membership.roleid
     join pg_catalog.pg_roles member_role on member_role.oid = membership.member
+    where granted_role.rolname = 'fetanagent_customer_web'
+      and member_role.rolname = 'fetanagent_customer_web_runtime'
+      and membership.inherit_option
+      and not membership.set_option
+      and not membership.admin_option
+  ) or not exists (
+    select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles granted_role on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles member_role on member_role.oid = membership.member
     where granted_role.rolname = 'fetanagent_owner_control'
       and member_role.rolname = 'fetanagent_owner_control_runtime'
       and membership.inherit_option
@@ -76,6 +88,8 @@ begin
     join pg_catalog.pg_roles member_role on member_role.oid = membership.member
     where (member_role.rolname = 'fetanagent_beta_admission_runtime'
            and granted_role.rolname <> 'fetanagent_beta_admission')
+       or (member_role.rolname = 'fetanagent_customer_web_runtime'
+           and granted_role.rolname <> 'fetanagent_customer_web')
        or (member_role.rolname = 'fetanagent_owner_control_runtime'
            and granted_role.rolname <> 'fetanagent_owner_control')
        or (member_role.rolname = 'fetanagent_player_actions_runtime'
@@ -90,6 +104,10 @@ alter role fetanagent_beta_admission_runtime with
   login noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password :'beta_runtime_password';
 
+alter role fetanagent_customer_web_runtime with
+  login noinherit nocreatedb nocreaterole noreplication nobypassrls
+  connection limit 1 password :'customer_web_runtime_password';
+
 alter role fetanagent_owner_control_runtime with
   login noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password :'owner_runtime_password';
@@ -100,6 +118,10 @@ alter role fetanagent_player_actions_runtime with
 
 do $fetanagent$
 begin
+  execute pg_catalog.format(
+    'alter role fetanagent_customer_web_runtime valid until %L',
+    pg_catalog.clock_timestamp() + interval '24 hours'
+  );
   execute pg_catalog.format(
     'alter role fetanagent_beta_admission_runtime valid until %L',
     pg_catalog.clock_timestamp() + interval '24 hours'

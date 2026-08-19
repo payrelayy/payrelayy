@@ -363,6 +363,7 @@ assert.match(
   /do not deploy, migrate, restore the old\s+runtime, or claim that the boundary is sealed/u,
 );
 assert.match(workflow, /docker build --pull=false --target admin/);
+assert.match(workflow, /docker build --pull=false --target customer-web/);
 assert.match(workflow, /docker build --pull=false --target api/);
 assert.match(workflow, /docker build --pull=false --target beta-admission/);
 assert.match(workflow, /docker build --pull=false --target bot/);
@@ -376,8 +377,8 @@ assert.ok(
     workflow.indexOf('Verify the fresh-host deployment boundary is empty') <
       workflow.indexOf('Verify the VM has direct IPv6 database readiness') &&
     workflow.indexOf('Verify the VM has direct IPv6 database readiness') <
-      workflow.indexOf('Provision three narrow 24-hour staging logins') &&
-    workflow.indexOf('Provision three narrow 24-hour staging logins') <
+      workflow.indexOf('Provision four narrow 24-hour staging logins') &&
+    workflow.indexOf('Provision four narrow 24-hour staging logins') <
       workflow.indexOf('Transfer and install sealed release inputs') &&
     workflow.indexOf('Transfer and install sealed release inputs') <
       workflow.indexOf('Start the private staging profile and smoke readiness'),
@@ -394,7 +395,7 @@ assert.match(
 );
 assert.doesNotMatch(freshHostReadinessStep, /fetanagent-staging-deploy-helper cutover-ready/);
 const networkReadinessStep =
-  /- name: Verify the VM has direct IPv6 database readiness([\s\S]*?)\n\s+- name: Provision three narrow 24-hour staging logins/u.exec(
+  /- name: Verify the VM has direct IPv6 database readiness([\s\S]*?)\n\s+- name: Provision four narrow 24-hour staging logins/u.exec(
     workflow,
   )?.[1];
 assert.ok(networkReadinessStep, 'The deployment must verify exact VM IPv6 readiness.');
@@ -412,6 +413,8 @@ assert.ok(
   'Bounded startup and count-only database diagnostics must run before rollback removes the runtime state.',
 );
 assert.match(workflow, /BETA_ADMISSION_RUNTIME_PASSWORD/);
+assert.match(workflow, /CUSTOMER_WEB_RUNTIME_PASSWORD/);
+assert.match(workflow, /CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET/);
 assert.match(workflow, /OWNER_CONTROL_RUNTIME_PASSWORD/);
 assert.match(workflow, /PLAYER_ACTION_RUNTIME_PASSWORD/);
 assert.match(workflow, /BOT_TO_API_ACTION_HMAC_SECRET/);
@@ -452,7 +455,7 @@ assert.match(
   protectedDeployInputs,
   /CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: \$\{\{ secrets\.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET \}\}/,
 );
-assert.match(protectedDeployInputs, /\[\[ "\$distinct_count" -eq 11 \]\]/);
+assert.match(protectedDeployInputs, /\[\[ "\$distinct_count" -eq 13 \]\]/);
 assert.match(
   protectedDeployInputs,
   /const encoded = process\.env\.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON/,
@@ -484,6 +487,9 @@ for (const releaseInput of [
   'cbe-deposit-reference-encryption-key',
   'cbe-deposit-reference-fingerprint-key',
   'cbe-deposit-reference-key-profile.v1.json',
+  'customer-web-database-url',
+  'customer-web-publishable-key',
+  'customer-web-rate-limit-hmac',
 ]) {
   assert.match(workflow, new RegExp(`\\$SECRET_DIR/${releaseInput.replaceAll('.', '\\.')}`));
   assert.match(helper, new RegExp(releaseInput.replaceAll('.', '\\.')));
@@ -493,6 +499,9 @@ for (const selector of [
   'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE',
   'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE',
   'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE',
+  'FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE',
+  'FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE',
+  'FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE',
 ]) {
   assert.match(qualityWorkflow, new RegExp(`${selector}=/dev/null`));
   assert.match(helper, new RegExp(selector));
@@ -500,6 +509,7 @@ for (const selector of [
 
 for (const sql of [provision, disable]) {
   assert.match(sql, /fetanagent_beta_admission_runtime/);
+  assert.match(sql, /fetanagent_customer_web_runtime/);
   assert.match(sql, /fetanagent_owner_control_runtime/);
   assert.match(sql, /fetanagent_player_actions_runtime/);
   assert.doesNotMatch(sql, /fetanagent_api_runtime|fetanagent_worker|service_role|kemerbet/i);
@@ -525,6 +535,7 @@ assert.ok(
 assert.match(diagnostics, /from pg_catalog\.pg_stat_activity as activity/);
 assert.match(diagnostics, /count\(\*\)::integer as session_count/);
 assert.match(diagnostics, /fetanagent_player_actions_runtime/);
+assert.match(diagnostics, /fetanagent_customer_web_runtime/);
 assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/i);
 
 const rollbackStep = /- name: Roll back failed activation([\s\S]*?)\n\s+stop:/u.exec(workflow)?.[1];
@@ -554,6 +565,10 @@ assert.match(
 );
 assert.match(
   helper,
+  /run_bounded_database_preflight \\\s+customer-web apps\/customer-web\/dist\/database-preflight-cli\.js/,
+);
+assert.match(
+  helper,
   /run_bounded_database_preflight \\\s+api apps\/api\/dist\/player-action-database-preflight-cli\.js/,
 );
 assert.match(
@@ -570,10 +585,12 @@ assert.doesNotMatch(boundedPreflight, /up -d|password|secret|psql|curl|wget/);
 const longLivedStart = helper.indexOf('up -d --no-build --wait --wait-timeout 90');
 assert.ok(
   helper.indexOf('owner-control apps/admin/dist/database-preflight-cli.js') < longLivedStart &&
+    helper.indexOf('customer-web apps/customer-web/dist/database-preflight-cli.js') <
+      longLivedStart &&
     helper.indexOf('api apps/api/dist/player-action-database-preflight-cli.js') < longLivedStart &&
     helper.indexOf('beta-admission apps/beta-admission/dist/catalog-preflight-cli.js') <
       longLivedStart,
-  'All three one-shot runtime preflights must pass before long-lived services start.',
+  'All four one-shot runtime preflights must pass before long-lived services start.',
 );
 assert.match(helper, /docker_local network rm \$networks/);
 const freshHostIdentity = /require_fresh_host_identity\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
@@ -587,7 +604,7 @@ assert.doesNotMatch(
 
 const freshBotRuntime = /require_exact_fresh_bot_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(freshBotRuntime, 'The helper must define an exact fresh-host Telegram runtime gate.');
-assert.match(freshBotRuntime, /api beta-admission bot owner-control/);
+assert.match(freshBotRuntime, /api beta-admission bot customer-web owner-control/);
 assert.match(freshBotRuntime, /NODE_ENV=production/);
 assert.match(freshBotRuntime, /FINANCIAL_ACTIONS_MODE=dry_run/);
 assert.match(freshBotRuntime, /TELEGRAM_BOT_ENABLED=true/);

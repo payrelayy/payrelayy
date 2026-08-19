@@ -63,9 +63,11 @@ The API and database constraints remain the source of truth for financial workfl
 
 `app` is a private PostgreSQL schema rather than a Supabase Data API schema. The implemented customer
 web BFF uses `@fetanagent/customer-web-workspace-runtime`, a dedicated direct-PostgreSQL identity
-with execute access to exactly six private functions and no table access. Three cover account and
+with execute access to exactly seven private functions and no table access. Three cover account and
 Player-ID projection; three cover default-off owned deposit intake, protected reference capture,
-and customer-safe status. The browser never
+and customer-safe status. The seventh atomically consumes a bounded fixed-window throttle keyed by
+a server HMAC of the client address and exact route; it stores no raw address or submitted value.
+The browser never
 connects to PostgreSQL. The API, worker, and other reviewed server processes keep isolated runtime
 credentials. A separately reviewed maintenance-only identity is the sole narrow exception: it may
 eventually invoke the bounded expired-nonce purge, but it must never be shared with the API or worker.
@@ -274,7 +276,7 @@ or step-up authentication, until explicit sign-out or a server-side security rev
 confirmation is requested only for forgot-password recovery. The source implements a bounded,
 server-handled session-cookie and short-lived recovery-code boundary, but it is disabled and must not
 be called an infinite session. Per-device visibility, remote sign-out, explicit post-recovery global
-revocation, hosted Auth/SMTP settings, exact trusted-proxy handling, shared fail-closed rate limiting,
+revocation, hosted Auth/SMTP settings, and reviewed proxy/deploy configuration,
 and an audit of effective Data API grants, exposed RPCs, and RLS remain deployment gates. Private data
 does not enter the service-worker cache. The decision against step-up prompts does not authorize an
 unsafe account change or financial action.
@@ -353,8 +355,9 @@ FetanAgent does not automate sending money in version 1.
 ## Deployment path
 
 The public responsive web/PWA and generic workspace exist in source but are not part of the current
-deployment. Adding them requires a reviewed customer-web image, runtime secret boundary, exact
-trusted-proxy chain, shared fail-closed limiter, Compose/Caddy routing, and a staging health check.
+deployment. Adding them requires the reviewed customer-web image, runtime secret boundary, exact
+one-hop trusted-proxy chain, durable limiter migration and secret, Compose/Caddy routing, and a
+staging health check.
 The London DigitalOcean VM otherwise continues to run the reviewed private services. Supabase
 remains in Ireland; London is the closest practical DigitalOcean region and a good latency/security
 tradeoff for this deployment.

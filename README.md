@@ -62,7 +62,10 @@ The current foundation is deliberately safe:
   can ensure the server-verified Auth UUID's customer account, submit a non-claiming KemerBet Player
   ID, list that identity's web-origin requests, open an owned policy-bounded deposit, capture only a
   server-protected reference, and list customer-safe deposit statuses. Its exact role cannot read
-  tables or call unrelated functions. Deposit writes additionally require three locked live
+  tables or call unrelated functions. A seventh private function provides a bounded, durable,
+  HMAC-pseudonymous fixed-window throttle for sensitive public routes; production startup now
+  requires its fixed secret mount and fails closed when PostgreSQL cannot decide. Deposit writes
+  additionally require three locked live
   switches, including the new authoritative-CBE switch that is created disabled;
 - customer Player-ID copy is limited to `Checking`, `Ready`, and `Could not confirm`. `Ready` is
   unreachable for a web-origin request until both a later proof-bearing ownership boundary and a
@@ -80,8 +83,8 @@ The current foundation is deliberately safe:
   app, runtime, network, configuration, or infrastructure capability;
 - the intended long-lived routine experience is not a claim of an infinite or irrevocable session:
   per-device visibility, remote sign-out, and explicit global session revocation after recovery are
-  not implemented, and production enablement still requires exact hosted Auth, SMTP, trusted-proxy,
-  shared fail-closed rate-limit configuration, plus an audit of effective `anon` and `authenticated`
+  not implemented, and production enablement still requires exact hosted Auth, SMTP, proxy/deploy
+  configuration, plus an audit of effective `anon` and `authenticated`
   grants, exposed RPC/PostgREST surfaces, and RLS before issuing customer principals;
 - `@fetanagent/customer-web-access-foundation` remains a historical, pure, non-runtime record of the
   settled product intent. Its blocked result does not enable or configure either implemented runtime;
@@ -197,7 +200,7 @@ environment file.
 | `packages/cbe-birr-authoritative-lookup-prerequisite`       | Pure blocked lookup-prerequisite inventory; every capability is false               |
 | `packages/customer-web-access-foundation`                   | Historical pure web/PWA decision record; no runtime or authentication               |
 | `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                        |
-| `packages/customer-web-workspace-runtime`                   | Six-function account, Player-ID, deposit-intake, and status BFF; default-off        |
+| `packages/customer-web-workspace-runtime`                   | Seven-function account, Player-ID, deposit, status, and durable throttle BFF        |
 | `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
 | `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                        |
 | `packages/config`                                           | Safe environment parsing and feature switches                                       |

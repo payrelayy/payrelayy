@@ -18,6 +18,8 @@ export const CUSTOMER_WEB_DATABASE_DIRECT_HOST =
   `db.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
 export const CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE =
   '/run/secrets/customer_web_database_url' as const;
+export const CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE =
+  '/run/secrets/customer_web_rate_limit_hmac' as const;
 
 export type CustomerWebAuthConfig =
   | {
@@ -78,6 +80,14 @@ export type CustomerWebDepositConfig =
       readonly referenceKeyProfileVersion: 1;
     };
 
+export type CustomerWebRateLimitConfig =
+  | { readonly enabled: false; readonly hmacSecret: undefined }
+  | { readonly enabled: true; readonly hmacSecret: string };
+
+export interface CustomerWebRateLimitConfigDependencies {
+  readonly readSecretFile?: (path: string) => string;
+}
+
 export interface CustomerWebDepositConfigDependencies {
   readonly readSecretFile?: (path: string) => string;
 }
@@ -86,6 +96,11 @@ export interface RedactedCustomerWebDepositConfig {
   readonly enabled: boolean;
   readonly referenceProtectionConfigured: boolean;
   readonly referenceKeyProfileVersion: 1 | undefined;
+}
+
+export interface RedactedCustomerWebRateLimitConfig {
+  readonly enabled: boolean;
+  readonly hmacConfigured: boolean;
 }
 
 export interface CustomerWebWorkspaceConfigDependencies {
@@ -192,6 +207,60 @@ function databaseUrlFromEnvironmentOrFile(
     throw new Error('CUSTOMER_WEB_DATABASE_URL_FILE must contain exactly one secret value.');
   }
   return withoutOneTerminalNewline;
+}
+
+export function loadCustomerWebRateLimitConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: CustomerWebRateLimitConfigDependencies = {},
+): CustomerWebRateLimitConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED,
+    false,
+    'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED',
+  );
+  if (!enabled) return { enabled: false, hmacSecret: undefined };
+
+  const direct = environment.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET;
+  const file = environment.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE;
+  if (environment.NODE_ENV === 'production') {
+    if (direct !== undefined) {
+      throw new Error('CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE is required in production.');
+    }
+    if (file !== CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE) {
+      throw new Error(
+        'CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE must use the approved private path.',
+      );
+    }
+  }
+  if (direct !== undefined && file !== undefined) {
+    throw new Error(
+      'CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET and CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE are mutually exclusive.',
+    );
+  }
+  let value = direct;
+  if (value === undefined && file !== undefined) {
+    if (!posix.isAbsolute(file) && !win32.isAbsolute(file)) {
+      throw new Error('CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE must be an absolute path.');
+    }
+    try {
+      value = (dependencies.readSecretFile ?? ((path) => readFileSync(path, 'utf8')))(file).replace(
+        /\r?\n$/u,
+        '',
+      );
+    } catch {
+      throw new Error('CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE could not be read.');
+    }
+  }
+  if (value === undefined || !/^[0-9a-f]{64}$/u.test(value)) {
+    throw new Error('CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET must be exactly 32 lowercase-hex bytes.');
+  }
+  return { enabled: true, hmacSecret: value };
+}
+
+export function redactedCustomerWebRateLimitConfigForLog(
+  config: CustomerWebRateLimitConfig,
+): RedactedCustomerWebRateLimitConfig {
+  return { enabled: config.enabled, hmacConfigured: config.enabled };
 }
 
 function decodeDatabaseUrlComponent(value: string): string {

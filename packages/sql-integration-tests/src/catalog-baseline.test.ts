@@ -4319,6 +4319,10 @@ describe('disposable SQL migration baseline', () => {
       ),
       'utf8',
     );
+    const rateLimitMigrationSource = await readFile(
+      join(environment.migrationsDirectory, '20260819124846_customer_web_durable_rate_limit.sql'),
+      'utf8',
+    );
     expect(migrationSource).toContain(
       'create function app.submit_customer_web_player_registration(\n  p_actor_auth_user_id uuid,\n  p_request_key uuid,\n  p_player_id text',
     );
@@ -4363,6 +4367,14 @@ describe('disposable SQL migration baseline', () => {
     expect(readyProjectionMigrationSource).not.toMatch(
       /\b(?:create|alter|drop)\s+(?:table|policy|role)\b/iu,
     );
+    expect(rateLimitMigrationSource).toContain(
+      'create function app.consume_customer_web_rate_limit(',
+    );
+    expect(rateLimitMigrationSource).toContain('security definer');
+    expect(rateLimitMigrationSource).toContain('set search_path = pg_catalog, app, pg_temp');
+    expect(rateLimitMigrationSource).not.toMatch(
+      /\bgrant\s+execute[\s\S]{0,300}\bto\s+(?:public|anon|authenticated|service_role)\b/iu,
+    );
 
     const procedures = await client.query<{
       readonly direct_runtime_execute: boolean;
@@ -4405,6 +4417,7 @@ describe('disposable SQL migration baseline', () => {
         ) as public_execute
       from pg_proc procedure
       where procedure.oid in (
+        'app.consume_customer_web_rate_limit(bytea,text,integer,integer)'::regprocedure,
         'app.ensure_customer_web_account(uuid)'::regprocedure,
         'app.submit_customer_web_player_registration(uuid,uuid,text)'::regprocedure,
         'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure
@@ -4412,6 +4425,15 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(procedures.rows).toEqual([
+      {
+        direct_runtime_execute: false,
+        group_execute: true,
+        hardened: true,
+        output_names: ['allowed', 'retry_after_seconds', 'current_count'],
+        public_execute: false,
+        runtime_effective_execute: true,
+        signature: 'app.consume_customer_web_rate_limit(bytea,text,integer,integer)',
+      },
       {
         direct_runtime_execute: false,
         group_execute: true,
@@ -4465,12 +4487,49 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(effectiveFunctions.rows.map((row) => row.signature)).toEqual([
       'app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)',
+      'app.consume_customer_web_rate_limit(bytea,text,integer,integer)',
       'app.ensure_customer_web_account(uuid)',
       'app.list_customer_web_deposits(uuid,integer)',
       'app.list_customer_web_player_registrations(uuid,integer)',
       'app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)',
       'app.submit_customer_web_player_registration(uuid,uuid,text)',
     ]);
+
+    const rateLimitStatement = `
+      select allowed, retry_after_seconds, current_count
+      from app.consume_customer_web_rate_limit(
+        decode($1::text, 'hex'), $2::text, $3::integer, $4::integer
+      )
+    `;
+    const bucketKey = 'd'.repeat(64);
+    const first = await queryAsRole<{
+      readonly allowed: boolean;
+      readonly current_count: number;
+      readonly retry_after_seconds: number;
+    }>('fetanagent_customer_web', rateLimitStatement, [bucketKey, 'POST /sign-in', 2, 60]);
+    const second = await queryAsRole<{
+      readonly allowed: boolean;
+      readonly current_count: number;
+      readonly retry_after_seconds: number;
+    }>('fetanagent_customer_web', rateLimitStatement, [bucketKey, 'POST /sign-in', 2, 60]);
+    const denied = await queryAsRole<{
+      readonly allowed: boolean;
+      readonly current_count: number;
+      readonly retry_after_seconds: number;
+    }>('fetanagent_customer_web', rateLimitStatement, [bucketKey, 'POST /sign-in', 2, 60]);
+    expect(first).toEqual([{ allowed: true, current_count: 1, retry_after_seconds: 0 }]);
+    expect(second).toEqual([{ allowed: true, current_count: 2, retry_after_seconds: 0 }]);
+    expect(denied).toEqual([
+      {
+        allowed: false,
+        current_count: 3,
+        retry_after_seconds: expect.any(Number),
+      },
+    ]);
+    expect(denied[0]!.retry_after_seconds).toBeGreaterThanOrEqual(1);
+    await expect(
+      queryAsRole('fetanagent_customer_web', 'select * from app.customer_web_rate_limit_buckets'),
+    ).rejects.toThrow(/permission denied|row-level security/u);
 
     const customerWebRoles = await client.query<RoleRow & { readonly rolconnlimit: number }>(`
       select rolname, rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole,

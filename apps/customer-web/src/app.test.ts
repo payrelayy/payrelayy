@@ -1,3 +1,5 @@
+import { createHmac } from 'node:crypto';
+
 import {
   createCustomerWebAuthPort,
   type CustomerWebAuthPort,
@@ -16,6 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildCustomerWebApp as buildCustomerWebAppImplementation,
+  createDurableCustomerWebRateLimiter,
   type CustomerWebAppOptions,
 } from './app.js';
 
@@ -52,6 +55,12 @@ function fakeWorkspace(
       submittedAt: '2026-08-16T00:00:00.000Z',
     }),
     close: async () => undefined,
+    consumeRateLimit: async () => ({
+      allowed: true,
+      currentCount: 1,
+      ok: true,
+      retryAfterSeconds: 0,
+    }),
     ensureAccount: async () => ({ ok: true, status: 'active' }),
     listDeposits: async () => ({ ok: true, deposits: [] }),
     listPlayerRegistrations: async () => ({ ok: true, registrations: [] }),
@@ -653,6 +662,70 @@ describe('customer web SSR and PWA boundary', () => {
     expect((await app.inject(request)).statusCode).toBe(400);
     expect(signIn).toHaveBeenCalledTimes(3);
     await app.close();
+  });
+
+  it('uses the durable limiter with an HMAC pseudonym and one trusted proxy hop', async () => {
+    const consumeRateLimit = vi.fn<CustomerWorkspaceRuntime['consumeRateLimit']>(async () => ({
+      allowed: true,
+      currentCount: 1,
+      ok: true,
+      retryAfterSeconds: 0,
+    }));
+    const workspace = fakeWorkspace({ consumeRateLimit });
+    const app = buildCustomerWebApp({
+      auth: fakeAuth(),
+      rateLimit: { maxRequests: 8, windowMs: 60_000 },
+      rateLimiter: createDurableCustomerWebRateLimiter(workspace, 'a'.repeat(64)),
+      trustProxy: 1,
+      workspace,
+    });
+    await app.inject({
+      headers: { 'x-forwarded-for': '203.0.113.10' },
+      method: 'GET',
+      remoteAddress: '10.0.0.5',
+      url: '/auth/recovery',
+    });
+
+    expect(consumeRateLimit).toHaveBeenCalledTimes(1);
+    const input = consumeRateLimit.mock.calls[0]![0];
+    expect(input).toMatchObject({
+      maxRequests: 8,
+      routeKey: 'GET /auth/recovery',
+      windowSeconds: 60,
+    });
+    expect(input.bucketKey).toMatch(/^[0-9a-f]{64}$/u);
+    expect(input.bucketKey).toBe(
+      createHmac('sha256', Buffer.from('a'.repeat(64), 'hex'))
+        .update('fetanagent:customer-web-rate-limit:v1\u0000', 'utf8')
+        .update('203.0.113.10', 'utf8')
+        .update('\u0000GET /auth/recovery', 'utf8')
+        .digest('hex'),
+    );
+    expect(JSON.stringify(input)).not.toContain('203.0.113.10');
+    expect(JSON.stringify(input)).not.toContain('10.0.0.5');
+    await app.close();
+  });
+
+  it('fails closed when the durable limiter is unavailable and returns its exact retry delay', async () => {
+    const unavailable = buildCustomerWebApp({
+      auth: fakeAuth(),
+      rateLimiter: { consume: async () => ({ ok: false }) },
+    });
+    expect((await unavailable.inject({ method: 'GET', url: '/auth/recovery' })).statusCode).toBe(
+      503,
+    );
+    await unavailable.close();
+
+    const limited = buildCustomerWebApp({
+      auth: fakeAuth(),
+      rateLimiter: {
+        consume: async () => ({ allowed: false, ok: true, retryAfterSeconds: 17 }),
+      },
+    });
+    const response = await limited.inject({ method: 'GET', url: '/auth/recovery' });
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe('17');
+    await limited.close();
   });
 
   it('does not consume a rate-limit bucket until mutation security checks pass', async () => {

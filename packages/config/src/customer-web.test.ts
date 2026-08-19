@@ -13,13 +13,16 @@ import {
   CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
   CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE,
+  CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE,
   CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   loadCustomerWebAuthConfig,
   loadCustomerWebDepositConfig,
+  loadCustomerWebRateLimitConfig,
   loadCustomerWebWorkspaceConfig,
   redactedCustomerWebAuthConfigForLog,
   redactedCustomerWebDepositConfigForLog,
+  redactedCustomerWebRateLimitConfigForLog,
   redactedCustomerWebWorkspaceConfigForLog,
 } from './customer-web.js';
 
@@ -118,6 +121,93 @@ describe('customer web auth configuration', () => {
     expect(() =>
       loadWith(CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN, `sb_publishable_${'a'.repeat(257)}`),
     ).toThrow('current Supabase publishable key');
+  });
+});
+
+describe('customer web durable rate-limit configuration', () => {
+  const hmacSecret = 'c'.repeat(64);
+
+  it('is disabled by default without reading secret inputs', () => {
+    const environment = new Proxy(
+      { INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'false' },
+      {
+        get(target, property, receiver) {
+          if (String(property).includes('RATE_LIMIT_HMAC')) throw new Error('unexpected read');
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+    expect(loadCustomerWebRateLimitConfig(environment)).toEqual({
+      enabled: false,
+      hmacSecret: undefined,
+    });
+  });
+
+  it('requires and redacts the fixed production secret file', () => {
+    const readSecretFile = vi.fn(() => `${hmacSecret}\n`);
+    const config = loadCustomerWebRateLimitConfig(
+      {
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE:
+          CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE,
+        INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true',
+        NODE_ENV: 'production',
+      },
+      { readSecretFile },
+    );
+    expect(config).toEqual({ enabled: true, hmacSecret });
+    expect(readSecretFile).toHaveBeenCalledWith(
+      CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE,
+    );
+    const redacted = redactedCustomerWebRateLimitConfigForLog(config);
+    expect(redacted).toEqual({ enabled: true, hmacConfigured: true });
+    expect(JSON.stringify(redacted)).not.toContain(hmacSecret);
+  });
+
+  it('rejects direct production, wrong, dual, relative, unreadable, and malformed inputs', () => {
+    const enabled = { INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true' } as const;
+    expect(() =>
+      loadCustomerWebRateLimitConfig({
+        ...enabled,
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: hmacSecret,
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('required in production');
+    expect(() =>
+      loadCustomerWebRateLimitConfig({
+        ...enabled,
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: '/tmp/wrong',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('approved private path');
+    expect(() =>
+      loadCustomerWebRateLimitConfig({
+        ...enabled,
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: hmacSecret,
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: 'C:\\secret',
+      }),
+    ).toThrow('mutually exclusive');
+    expect(() =>
+      loadCustomerWebRateLimitConfig({
+        ...enabled,
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: 'relative',
+      }),
+    ).toThrow('absolute path');
+    expect(() =>
+      loadCustomerWebRateLimitConfig(
+        { ...enabled, CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: 'C:\\secret' },
+        {
+          readSecretFile: () => {
+            throw new Error('private');
+          },
+        },
+      ),
+    ).toThrow('could not be read');
+    expect(() =>
+      loadCustomerWebRateLimitConfig({
+        ...enabled,
+        CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: 'C'.repeat(64),
+      }),
+    ).toThrow('exactly 32 lowercase-hex bytes');
   });
 });
 

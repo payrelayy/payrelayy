@@ -1101,10 +1101,10 @@ assertInOrder(
   [
     'validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"',
     'require_fresh_host_identity',
-    'require_exact_fresh_private_runtime "$commit_sha"',
+    'require_exact_fresh_bot_runtime "$commit_sha"',
     'require_public_network_ready "$FRESH_PUBLIC_IPV4"',
   ],
-  'The fresh public gate must bind the commit, Droplet identity, private runtime, and new IPv4.',
+  'The fresh public gate must bind the commit, Droplet identity, activated private bot runtime, and new IPv4.',
 );
 const ufwAllowsExactWebRules = (status) =>
   [
@@ -1165,7 +1165,7 @@ assertInOrder(
     'commit_sha="$2"',
     'if [[ "$command" == \'start-fresh-public-edge\' ]]',
     'require_fresh_public_edge_ready "$commit_sha"',
-    'require_exact_fresh_private_runtime "$commit_sha"',
+    'require_exact_fresh_bot_runtime "$commit_sha"',
     'install -d -o root -g root -m 0755 "$GATEWAY_STATE_ROOT"',
     'compose_command=(',
     'require_public_edge_ready "$commit_sha"',

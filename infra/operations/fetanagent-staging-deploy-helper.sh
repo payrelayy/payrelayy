@@ -676,7 +676,7 @@ require_fresh_public_edge_ready() {
 
   validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"
   require_fresh_host_identity
-  require_exact_fresh_private_runtime "$commit_sha"
+  require_exact_fresh_bot_runtime "$commit_sha"
   require_public_network_ready "$FRESH_PUBLIC_IPV4"
 }
 
@@ -1011,7 +1011,7 @@ case "$command" in
       die 'the gateway image revision does not match the reviewed commit'
     if [[ "$command" == 'start-fresh-public-edge' ]]; then
       require_fresh_public_edge_ready "$commit_sha"
-      require_exact_fresh_private_runtime "$commit_sha"
+      require_exact_fresh_bot_runtime "$commit_sha"
     else
       require_public_edge_ready "$commit_sha"
       require_exact_private_runtime "$commit_sha"

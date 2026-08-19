@@ -50,7 +50,7 @@ const passingPreflightRow = Object.freeze({
   group_usage_allowed_set_denied: true,
   no_app_base_object_access: true,
   only_expected_direct_membership: true,
-  runtime_has_no_members: true,
+  runtime_only_trusted_members: true,
   runtime_login_identity_allowed: true,
   runtime_login_is_safe: true,
 });
@@ -201,7 +201,10 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain('role.rolconnlimit = 2');
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain('membership.inherit_option');
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
-      "where granted.rolname = 'fetanagent_customer_web_runtime'\n    ) as runtime_has_no_members",
+      "where granted.rolname = 'fetanagent_customer_web_runtime'\n    ) as runtime_only_trusted_members",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "select count(*) <= 1 and coalesce(pg_catalog.bool_and(\n        member.rolname = 'postgres'\n        and not membership.inherit_option\n        and not membership.set_option\n        and membership.admin_option\n      ), true)",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
       'not membership.set_option and not membership.admin_option',
@@ -250,7 +253,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     for (const row of [
       { ...passingPreflightRow, runtime_login_is_safe: false },
       { ...passingPreflightRow, group_only_expected_members: false },
-      { ...passingPreflightRow, runtime_has_no_members: false },
+      { ...passingPreflightRow, runtime_only_trusted_members: false },
       { ...passingPreflightRow, unexpected: true },
       Object.fromEntries(Object.entries(passingPreflightRow).slice(1)),
     ]) {

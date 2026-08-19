@@ -43,6 +43,9 @@ export const messages = {
   playerIdPending: {
     en: 'Player ID saved — pending validation. It cannot be used for a deposit yet.',
   },
+  playerIdExists: {
+    en: 'That Player ID is already registered on your FetanAgent account.',
+  },
   invalidPlayerId: {
     en: 'That Player ID format is not accepted. Send one value without spaces, up to 64 characters.',
   },

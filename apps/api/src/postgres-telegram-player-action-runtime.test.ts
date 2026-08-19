@@ -214,6 +214,50 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toEqual({ version: 1, outcome: 'player_id_pending' });
   });
 
+  it('reports a previously validated Player ID as already registered', async () => {
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-11T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('submit_telegram_player_registration_input')) {
+          expect(values[1]).toBe('KM12345');
+          return {
+            rows: [
+              {
+                result_outcome: 'completed',
+                result_reason_code: 'player_registration_requested',
+                request_status: 'exists',
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'player_id_text',
+      playerId: 'KM12345',
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
+  });
+
   it('opens only a CBE Birr dry-run intake for an inclusive in-range amount', async () => {
     const calls: { query: string; values: readonly unknown[] }[] = [];
     const database: TelegramPlayerActionDatabase = {

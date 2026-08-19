@@ -64,6 +64,17 @@ describe('Telegram private-action bot client', () => {
     expect(deliveredNonces).toEqual(nonces);
   });
 
+  it('accepts the bounded already-registered Player ID result', async () => {
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({ version: 1, outcome: 'player_id_exists' }),
+        }),
+      }),
+    ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
+  });
+
   it('accepts only the bounded customer projection on deposit instructions', async () => {
     const safeResult = {
       version: 1,

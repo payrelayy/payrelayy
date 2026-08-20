@@ -9,6 +9,7 @@ import {
   type SqlIntegrationEnvironment,
 } from './environment.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
+import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
@@ -1074,7 +1075,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly eleven non-executing procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly twelve non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1110,6 +1111,7 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(functions.rows.map((row) => row.signature)).toEqual([
+      'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.capture_telegram_live_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
@@ -4487,6 +4489,7 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(effectiveFunctions.rows.map((row) => row.signature)).toEqual([
       'app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)',
+      'app.capture_customer_web_dry_run_deposit_proof(uuid,uuid,text,text,text,text,text,smallint,smallint)',
       'app.consume_customer_web_rate_limit(bytea,text,integer,integer)',
       'app.ensure_customer_web_account(uuid)',
       'app.list_customer_web_deposits(uuid,integer)',
@@ -6766,6 +6769,7 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       { signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)' },
+      { signature: 'app.resolve_dry_run_deposit_proof_boundary(text,text)' },
     ]);
 
     const eligibilityReaderPrivileges = await client.query<{
@@ -6812,7 +6816,8 @@ describe('disposable SQL migration baseline', () => {
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
-           'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure
+           'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure,
+           'app.resolve_dry_run_deposit_proof_boundary(text,text)'::regprocedure
          )
        order by signature
     `);
@@ -6879,6 +6884,15 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.resolve_dry_run_deposit_proof_boundary(text,text)',
       },
     ]);
 
@@ -9291,6 +9305,7 @@ describe('disposable SQL migration baseline', () => {
 });
 
 registerDepositExecutionCommandSqlTests(() => client);
+registerDryRunDepositProofIntakeSqlTests(() => client);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
 registerVerificationSettlementSqlTests(

@@ -23,6 +23,28 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@24.13.3)(tsx@4.23.9)
 
+  apps/admin:
+    dependencies:
+      '@fetanagent/cbe-birr-fixtures':
+        specifier: workspace:*
+        version: link:../../packages/cbe-birr-fixtures
+      '@fetanagent/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      fastify:
+        specifier: ^5.0.0
+        version: 5.11.2
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   apps/api:
     dependencies:
       '@fetanagent/config':
@@ -37,28 +59,6 @@ importers:
       '@fetanagent/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      fastify:
-        specifier: ^5.0.0
-        version: 5.11.2
-      pg:
-        specifier: 8.22.0
-        version: 8.22.0
-    devDependencies:
-      '@types/pg':
-        specifier: 8.21.0
-        version: 8.21.0
-
-  apps/admin:
-    dependencies:
-      '@fetanagent/cbe-birr-fixtures':
-        specifier: workspace:*
-        version: link:../../packages/cbe-birr-fixtures
-      '@fetanagent/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@fetanagent/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
       fastify:
         specifier: ^5.0.0
         version: 5.11.2
@@ -162,20 +162,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/contracts
 
-  packages/config:
-    dependencies:
-      '@fetanagent/domain':
-        specifier: workspace:*
-        version: link:../domain
-
-  packages/contracts:
-    dependencies:
-      '@fetanagent/domain':
-        specifier: workspace:*
-        version: link:../domain
-
-  packages/domain: {}
-
   packages/cbe-birr-authoritative-fixtures:
     dependencies:
       '@fetanagent/contracts':
@@ -188,13 +174,27 @@ importers:
         specifier: workspace:*
         version: link:../cbe-birr-official-source-policy
 
-  packages/cbe-birr-official-source-policy: {}
-
   packages/cbe-birr-fixtures: {}
 
-  packages/customer-web-access-foundation: {}
+  packages/cbe-birr-official-source-policy:
+    dependencies:
+      parse5:
+        specifier: 8.0.1
+        version: 8.0.1
 
-  packages/customer-web-player-ownership-proof-prerequisite: {}
+  packages/config:
+    dependencies:
+      '@fetanagent/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/contracts:
+    dependencies:
+      '@fetanagent/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/customer-web-access-foundation: {}
 
   packages/customer-web-auth-runtime:
     dependencies:
@@ -208,7 +208,7 @@ importers:
         specifier: 2.112.3
         version: 2.112.3
 
-  packages/deposit-reference-protection: {}
+  packages/customer-web-player-ownership-proof-prerequisite: {}
 
   packages/customer-web-workspace-runtime:
     dependencies:
@@ -228,6 +228,12 @@ importers:
       '@types/pg':
         specifier: 8.21.0
         version: 8.21.0
+
+  packages/deposit-proof-assessment: {}
+
+  packages/deposit-reference-protection: {}
+
+  packages/domain: {}
 
   packages/i18n: {}
 
@@ -252,6 +258,8 @@ importers:
       vitest:
         specifier: 3.2.7
         version: 3.2.7(@types/node@24.13.3)(tsx@4.23.9)
+
+  packages/telebirr-verification-foundation: {}
 
 packages:
   '@esbuild/aix-ppc64@0.28.1':
@@ -1010,6 +1018,13 @@ packages:
       }
     engines: { node: '>=6' }
 
+  entities@8.0.0:
+    resolution:
+      {
+        integrity: sha512-zwfzJecQ/Uej6tusMqwAqU/6KL2XaB2VZ2Jg54Je6ahNBGNH6Ek6g3jjNCF0fG9EWQKGZNddNjU5F1ZQn/sBnA==,
+      }
+    engines: { node: '>=20.19.0' }
+
   es-module-lexer@1.7.0:
     resolution:
       {
@@ -1208,6 +1223,12 @@ packages:
         integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==,
       }
     engines: { node: '>=14.0.0' }
+
+  parse5@8.0.1:
+    resolution:
+      {
+        integrity: sha512-z1e/HMG90obSGeidlli3hj7cbocou0/wa5HacvI3ASx34PecNjNQeaHNo5WIZpWofN9kgkqV1q5YvXe3F0FoPw==,
+      }
 
   pathe@2.0.3:
     resolution:
@@ -2036,6 +2057,8 @@ snapshots:
 
   dequal@2.0.3: {}
 
+  entities@8.0.0: {}
+
   es-module-lexer@1.7.0: {}
 
   esbuild@0.28.1:
@@ -2174,6 +2197,10 @@ snapshots:
       whatwg-url: 5.0.0
 
   on-exit-leak-free@2.1.2: {}
+
+  parse5@8.0.1:
+    dependencies:
+      entities: 8.0.0
 
   pathe@2.0.3: {}
 

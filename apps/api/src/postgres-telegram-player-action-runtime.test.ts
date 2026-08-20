@@ -13,6 +13,7 @@ import { encodeTelegramCapabilityId } from './telegram-action-capability.js';
 const inboundEventId = '64b27169-c249-4d2e-b312-d2ed9d6661ea';
 const depositIntentId = '3d8af16e-87e0-4a17-9098-b0907defd95f';
 const depositSubmissionId = 'a7cfdc2e-360f-47f1-836f-e65c9239e57b';
+const depositProofRequestId = '6e41f167-b917-4417-92f1-38b1951d6ce3';
 const referenceKeyProfile = JSON.stringify({
   encryptionKeyFingerprint: `sha256:${createHash('sha256')
     .update(Buffer.from('e'.repeat(64), 'hex'))
@@ -21,6 +22,15 @@ const referenceKeyProfile = JSON.stringify({
     .update(Buffer.from('f'.repeat(64), 'hex'))
     .digest('hex')}`,
   version: 1,
+});
+const proofReferenceProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('1'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('2'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  version: 2,
 });
 const actionConfig = loadApiConfig({
   NODE_ENV: 'test',
@@ -34,6 +44,9 @@ const actionConfig = loadApiConfig({
   CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
   CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
   CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceKeyProfile,
+  DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: '1'.repeat(64),
+  DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: '2'.repeat(64),
+  DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile,
   PLAYER_ACTION_DATABASE_URL:
     'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
 });
@@ -366,6 +379,135 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     },
   );
 
+  it.each(['cbe_birr', 'telebirr'] as const)(
+    'protects an amount-free %s proof before the dry-run database call',
+    async (providerCode) => {
+      const transactionReference = 'SYNTHETICREF7890';
+      const fingerprintKey = createHmac('sha256', Buffer.from('2'.repeat(64), 'hex'))
+        .update(
+          `fetanagent:deposit-proof-reference:fingerprint-key:v2\nprovider:${providerCode}`,
+          'utf8',
+        )
+        .digest();
+      const expectedFingerprint = createHmac('sha256', fingerprintKey)
+        .update(
+          `fetanagent:deposit-proof-reference:fingerprint-input:v2\nprovider:${providerCode}\n`,
+          'utf8',
+        )
+        .update(transactionReference, 'utf8')
+        .digest('hex');
+      const calls: { query: string; values: readonly unknown[] }[] = [];
+      const database: TelegramPlayerActionDatabase = {
+        async query(query, values) {
+          calls.push({ query, values });
+          if (query.includes('record_admitted_telegram_private_inbound_event')) {
+            return {
+              rows: [
+                {
+                  inbound_event_id: inboundEventId,
+                  received_at: new Date('2026-08-20T12:00:00.000Z'),
+                  inbound_event_already_recorded: false,
+                },
+              ],
+            };
+          }
+          if (query.includes('capture_telegram_dry_run_deposit_proof')) {
+            expect(values[0]).toBe(inboundEventId);
+            expect(values[1]).toBe('PLAYER-DEMO-42');
+            expect(values[2]).toBe(providerCode);
+            expect(values[3]).toMatch(
+              new RegExp(
+                `^v2\\.${providerCode}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$`,
+                'u',
+              ),
+            );
+            expect(values[4]).toBe(expectedFingerprint);
+            expect(values[5]).toBe('***7890');
+            expect(values[6]).toBe(2);
+            expect(values[7]).toBe(2);
+            expect(values[8]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+            expect(JSON.stringify(values)).not.toContain(transactionReference);
+            return {
+              rows: [
+                {
+                  deposit_proof_request_id: depositProofRequestId,
+                  provider_code: providerCode,
+                  proof_status: 'proof_received',
+                  submitted_at: new Date('2026-08-20T12:00:00.000Z'),
+                  request_replayed: false,
+                },
+              ],
+            };
+          }
+          throw new Error('unexpected statement');
+        },
+        async end() {},
+      };
+      const action: TelegramPrivateActionEnvelope = {
+        ...rootAction,
+        kind: 'deposit_proof_command',
+        providerCode,
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference,
+      };
+
+      await expect(
+        createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+          action,
+          Buffer.from(JSON.stringify(action), 'utf8'),
+        ),
+      ).resolves.toEqual({
+        version: 1,
+        outcome: 'deposit_proof_received',
+        proofToken: encodeTelegramCapabilityId(depositProofRequestId),
+        providerCode,
+        providerName: providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr',
+        proofStatus: 'proof_received',
+        financialMode: 'dry_run',
+      });
+      expect(calls).toHaveLength(2);
+      expect(calls.map((call) => call.query).join('\n')).not.toContain(transactionReference);
+    },
+  );
+
+  it('keeps amount-free proof intake unavailable outside dry-run mode', async () => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-20T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference: 'SYNTHETICREF7890',
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(
+        { ...actionConfig, financialActionsMode: 'live' },
+        database,
+      ).handle(action, Buffer.from(JSON.stringify(action), 'utf8')),
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_unavailable' });
+    expect(calls).toHaveLength(1);
+    expect(calls.join('\n')).not.toContain('capture_telegram_dry_run_deposit_proof');
+  });
+
   it('protects a raw reference before the database call and returns no reference material', async () => {
     const transactionReference = 'tx-abc-7890';
     const fingerprintKey = createHmac('sha256', Buffer.from('f'.repeat(64), 'hex'))
@@ -437,7 +579,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls.map((call) => call.query).join('\n')).not.toContain(transactionReference);
   });
 
-  it('selects the live SQL boundary only in live mode and reads customer-owned status', async () => {
+  it('blocks legacy amount and reference commands from every live financial path', async () => {
     const calls: string[] = [];
     const database: TelegramPlayerActionDatabase = {
       async query(query) {
@@ -449,38 +591,6 @@ describe('Postgres Telegram Player-ID action runtime', () => {
                 inbound_event_id: inboundEventId,
                 received_at: new Date('2030-01-01T12:00:00.000Z'),
                 inbound_event_already_recorded: false,
-              },
-            ],
-          };
-        }
-        if (query.includes('open_telegram_live_deposit_intent')) {
-          return {
-            rows: [
-              {
-                deposit_intent_id: depositIntentId,
-                provider_code: 'cbe_birr',
-                receiver_account_holder_name: 'FetanAgent',
-                receiver_account_masked: '***1234',
-                receiver_customer_instruction: 'Send the exact amount.',
-                expected_amount_minor: '2500',
-                currency_code: 'ETB',
-                payment_deadline_at: new Date('2030-01-01T12:30:00.000Z'),
-                deposit_status: 'intake_received',
-                origin_inbound_event_already_consumed: false,
-              },
-            ],
-          };
-        }
-        if (query.includes('get_telegram_customer_deposit')) {
-          return {
-            rows: [
-              {
-                deposit_intent_id: depositIntentId,
-                expected_amount_minor: '2500',
-                currency_code: 'ETB',
-                deposit_status: 'execution_pending',
-                created_at: new Date('2030-01-01T12:00:00.000Z'),
-                updated_at: new Date('2030-01-01T12:10:00.000Z'),
               },
             ],
           };
@@ -501,23 +611,20 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     };
     await expect(
       runtime.handle(openAction, Buffer.from(JSON.stringify(openAction), 'utf8')),
-    ).resolves.toMatchObject({ outcome: 'deposit_instructions', financialMode: 'live' });
-    const statusAction: TelegramPrivateActionEnvelope = {
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_unavailable' });
+    const referenceAction: TelegramPrivateActionEnvelope = {
       ...rootAction,
       updateId: '11',
-      kind: 'deposit_status_command',
+      kind: 'deposit_reference_command',
       depositToken: encodeTelegramCapabilityId(depositIntentId),
+      transactionReference: 'LEGACYREF7890',
     };
     await expect(
-      runtime.handle(statusAction, Buffer.from(JSON.stringify(statusAction), 'utf8')),
-    ).resolves.toEqual({
-      version: 1,
-      outcome: 'deposit_status',
-      amountMinor: '2500',
-      currencyCode: 'ETB',
-      depositStatus: { label: 'Preparing deposit', tone: 'working' },
-    });
-    expect(calls.join('\n')).toContain('open_telegram_live_deposit_intent');
-    expect(calls.join('\n')).not.toContain('open_telegram_dry_run_deposit_intent');
+      runtime.handle(referenceAction, Buffer.from(JSON.stringify(referenceAction), 'utf8')),
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_unavailable' });
+    expect(calls).toHaveLength(2);
+    expect(calls.join('\n')).not.toMatch(
+      /open_telegram_(?:dry_run|live)_deposit_intent|capture_telegram_(?:dry_run|live)_deposit_reference/u,
+    );
   });
 });

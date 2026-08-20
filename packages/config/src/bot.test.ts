@@ -223,3 +223,40 @@ describe('Telegram beta admission bot configuration', () => {
     }
   });
 });
+
+describe('Telegram admission and action transport composition', () => {
+  it.each([
+    { betaAdmissionEnabled: false, actionChannelEnabled: false },
+    { betaAdmissionEnabled: true, actionChannelEnabled: false },
+    { betaAdmissionEnabled: false, actionChannelEnabled: true },
+    { betaAdmissionEnabled: true, actionChannelEnabled: true },
+  ])(
+    'loads beta=$betaAdmissionEnabled and action=$actionChannelEnabled independently',
+    ({ betaAdmissionEnabled, actionChannelEnabled }) => {
+      const environment: NodeJS.ProcessEnv = {
+        NODE_ENV: 'test',
+        TELEGRAM_BOT_ENABLED: 'true',
+        TELEGRAM_BOT_TOKEN: '123456:test-token',
+        TELEGRAM_BETA_ADMISSION_ENABLED: String(betaAdmissionEnabled),
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: String(actionChannelEnabled),
+      };
+
+      if (betaAdmissionEnabled) {
+        environment.BOT_TO_BETA_ADMISSION_BASE_URL = 'http://beta-admission:3001/';
+        environment.BOT_TO_BETA_ADMISSION_HMAC_SECRET = 'b'.repeat(64);
+      } else {
+        environment.BOT_TO_API_INGRESS_BASE_URL = 'http://api:3000/';
+        environment.BOT_TO_API_INGRESS_HMAC_SECRET = 'a'.repeat(64);
+      }
+      if (actionChannelEnabled) {
+        environment.BOT_TO_API_ACTION_BASE_URL = 'http://api:3000/';
+        environment.BOT_TO_API_ACTION_HMAC_SECRET = 'c'.repeat(64);
+      }
+
+      const config = loadBotConfig(environment);
+      expect(config.telegramBetaAdmission.enabled).toBe(betaAdmissionEnabled);
+      expect(config.telegramActionChannel.enabled).toBe(actionChannelEnabled);
+      expect(config.apiIngress.enabled).toBe(!betaAdmissionEnabled);
+    },
+  );
+});

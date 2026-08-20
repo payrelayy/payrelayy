@@ -7,6 +7,11 @@ import {
   CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
   CBE_DEPOSIT_REFERENCE_PRODUCTION_KEY_PROFILE_FILE,
 } from './deposit-reference-profile.js';
+import {
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_PROFILE_FILE,
+} from './deposit-proof-reference-profile.js';
 
 import {
   CUSTOMER_WEB_DATABASE_DIRECT_HOST,
@@ -19,10 +24,12 @@ import {
   CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   loadCustomerWebAuthConfig,
   loadCustomerWebDepositConfig,
+  loadCustomerWebDryRunDepositProofConfig,
   loadCustomerWebRateLimitConfig,
   loadCustomerWebWorkspaceConfig,
   redactedCustomerWebAuthConfigForLog,
   redactedCustomerWebDepositConfigForLog,
+  redactedCustomerWebDryRunDepositProofConfigForLog,
   redactedCustomerWebRateLimitConfigForLog,
   redactedCustomerWebWorkspaceConfigForLog,
 } from './customer-web.js';
@@ -39,6 +46,17 @@ const referenceProfile = (
     encryptionKeyFingerprint: `sha256:${createHash('sha256').update(Buffer.from(encryption, 'hex')).digest('hex')}`,
     fingerprintKeyFingerprint: `sha256:${createHash('sha256').update(Buffer.from(fingerprint, 'hex')).digest('hex')}`,
     version: 1,
+  });
+const proofEncryptionMasterSecret = 'c'.repeat(64);
+const proofFingerprintMasterSecret = 'd'.repeat(64);
+const proofReferenceProfile = (
+  encryption = proofEncryptionMasterSecret,
+  fingerprint = proofFingerprintMasterSecret,
+) =>
+  JSON.stringify({
+    encryptionMasterFingerprint: `sha256:${createHash('sha256').update(Buffer.from(encryption, 'hex')).digest('hex')}`,
+    fingerprintMasterFingerprint: `sha256:${createHash('sha256').update(Buffer.from(fingerprint, 'hex')).digest('hex')}`,
+    version: 2,
   });
 
 describe('customer web auth configuration', () => {
@@ -460,6 +478,187 @@ describe('customer web deposit-reference configuration', () => {
         }),
       }),
     ).toThrow('profile is invalid');
+  });
+});
+
+describe('customer web amount-free dry-run deposit proof configuration', () => {
+  const failClosedEnvironment = {
+    DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: proofEncryptionMasterSecret,
+    DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: proofFingerprintMasterSecret,
+    DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile(),
+    FINANCIAL_ACTIONS_MODE: 'dry_run',
+    INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false',
+    INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'true',
+    KEMERBET_EXECUTOR_ENABLED: 'false',
+    KEMERBET_FINAL_ACTION_ENABLED: 'false',
+    NODE_ENV: 'test',
+  } as const;
+
+  it('is disabled by default without reading proof roots or financial switches', () => {
+    const environment = new Proxy(
+      { INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'false' },
+      {
+        get(target, property, receiver) {
+          if (
+            String(property).startsWith('DEPOSIT_PROOF_REFERENCE_') ||
+            property === 'FINANCIAL_ACTIONS_MODE' ||
+            property === 'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED' ||
+            property === 'KEMERBET_EXECUTOR_ENABLED' ||
+            property === 'KEMERBET_FINAL_ACTION_ENABLED'
+          ) {
+            throw new Error(`disabled proof configuration read ${String(property)}`);
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+
+    expect(loadCustomerWebDryRunDepositProofConfig(environment)).toEqual({
+      enabled: false,
+      financialActionsMode: undefined,
+      liveFinancialActionsEnabled: undefined,
+      referenceEncryptionMasterSecret: undefined,
+      referenceFingerprintMasterSecret: undefined,
+      referenceProfileVersion: undefined,
+    });
+  });
+
+  it('loads only the provider-neutral v2 roots under the exact fail-closed state', () => {
+    const config = loadCustomerWebDryRunDepositProofConfig(failClosedEnvironment);
+    expect(config).toEqual({
+      enabled: true,
+      financialActionsMode: 'dry_run',
+      liveFinancialActionsEnabled: false,
+      referenceEncryptionMasterSecret: proofEncryptionMasterSecret,
+      referenceFingerprintMasterSecret: proofFingerprintMasterSecret,
+      referenceProfileVersion: 2,
+    });
+    expect(redactedCustomerWebDryRunDepositProofConfigForLog(config)).toEqual({
+      enabled: true,
+      financialActionsMode: 'dry_run',
+      liveFinancialActionsEnabled: false,
+      referenceMastersConfigured: true,
+      referenceProfileVersion: 2,
+    });
+    const redacted = JSON.stringify(redactedCustomerWebDryRunDepositProofConfigForLog(config));
+    expect(redacted).not.toContain(proofEncryptionMasterSecret);
+    expect(redacted).not.toContain(proofFingerprintMasterSecret);
+  });
+
+  it.each([
+    ['an implicit financial mode', { FINANCIAL_ACTIONS_MODE: undefined }],
+    [
+      'an enabled legacy deposit runtime',
+      { INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'true' },
+    ],
+    [
+      'an implicit legacy deposit gate',
+      { INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: undefined },
+    ],
+    ['an enabled executor', { KEMERBET_EXECUTOR_ENABLED: 'true' }],
+    ['an implicit executor gate', { KEMERBET_EXECUTOR_ENABLED: undefined }],
+    ['an enabled final action', { KEMERBET_FINAL_ACTION_ENABLED: 'true' }],
+    ['an implicit final-action gate', { KEMERBET_FINAL_ACTION_ENABLED: undefined }],
+  ] as const)('rejects %s before composing proof intake', (_label, override) => {
+    expect(() =>
+      loadCustomerWebDryRunDepositProofConfig({ ...failClosedEnvironment, ...override }),
+    ).toThrow('exact dry-run mode');
+  });
+
+  it('rejects live financial mode before reading proof material', () => {
+    const environment = new Proxy(
+      {
+        FINANCIAL_ACTIONS_MODE: 'live',
+        INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false',
+        INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'true',
+        KEMERBET_EXECUTOR_ENABLED: 'false',
+        KEMERBET_FINAL_ACTION_ENABLED: 'false',
+        NODE_ENV: 'production',
+      },
+      {
+        get(target, property, receiver) {
+          if (String(property).startsWith('DEPOSIT_PROOF_REFERENCE_')) {
+            throw new Error('live mode must not read proof roots');
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+    expect(() => loadCustomerWebDryRunDepositProofConfig(environment)).toThrow(
+      'exact dry-run mode',
+    );
+  });
+
+  it('loads only the three immutable production v2 files', () => {
+    const readSecretFile = vi.fn((path: string) => {
+      if (path === DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE) {
+        return `${proofEncryptionMasterSecret}\n`;
+      }
+      if (path === DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE) {
+        return `${proofFingerprintMasterSecret}\n`;
+      }
+      if (path === DEPOSIT_PROOF_REFERENCE_PRODUCTION_PROFILE_FILE) {
+        return proofReferenceProfile();
+      }
+      throw new Error('unexpected path');
+    });
+    const config = loadCustomerWebDryRunDepositProofConfig(
+      {
+        DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE:
+          DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+        DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE:
+          DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+        DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: DEPOSIT_PROOF_REFERENCE_PRODUCTION_PROFILE_FILE,
+        FINANCIAL_ACTIONS_MODE: 'dry_run',
+        INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false',
+        INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'true',
+        KEMERBET_EXECUTOR_ENABLED: 'false',
+        KEMERBET_FINAL_ACTION_ENABLED: 'false',
+        NODE_ENV: 'production',
+      },
+      { readSecretFile },
+    );
+    expect(config).toMatchObject({ enabled: true, referenceProfileVersion: 2 });
+    expect(readSecretFile).toHaveBeenCalledWith(
+      DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+    );
+    expect(readSecretFile).toHaveBeenCalledWith(
+      DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+    );
+    expect(readSecretFile).toHaveBeenCalledWith(DEPOSIT_PROOF_REFERENCE_PRODUCTION_PROFILE_FILE);
+  });
+
+  it('rejects inline production masters, unsafe paths, duplicate roots, and mismatched profiles', () => {
+    expect(() =>
+      loadCustomerWebDryRunDepositProofConfig({
+        ...failClosedEnvironment,
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('required in production');
+    expect(() =>
+      loadCustomerWebDryRunDepositProofConfig({
+        ...failClosedEnvironment,
+        DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: undefined,
+        DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE: '/tmp/wrong',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow('approved private path');
+    expect(() =>
+      loadCustomerWebDryRunDepositProofConfig({
+        ...failClosedEnvironment,
+        DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: proofEncryptionMasterSecret,
+        DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile(
+          proofEncryptionMasterSecret,
+          proofEncryptionMasterSecret,
+        ),
+      }),
+    ).toThrow('valid and distinct');
+    expect(() =>
+      loadCustomerWebDryRunDepositProofConfig({
+        ...failClosedEnvironment,
+        DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile('e'.repeat(64)),
+      }),
+    ).toThrow('do not match');
   });
 });
 

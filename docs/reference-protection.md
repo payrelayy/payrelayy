@@ -2,25 +2,34 @@
 
 ## Current scope
 
-The reviewed database boundaries accept a customer-entered CBE Birr transaction ID only after the
-same authenticated customer opened the exact intake. The dry-run Telegram path records an untrusted
-`received` submission while every financial switch remains disabled. The default-off live Telegram
-and customer-web paths require all three locked live switches and atomically create one private
-authoritative verification job. No path in this repository contacts CBE Birr, creates provider
-evidence, approves or claims a payment, or starts a KemerBet deposit without the still-unprovisioned
-authoritative worker and later settlement boundary.
+Two reviewed protection contracts coexist and must not be confused:
+
+- the legacy CBE Birr v1 boundary protects a reference for an already-opened amount-first deposit
+  intent; and
+- the provider-bound v2 proof boundary accepts only an amount-free direct transaction ID for
+  `cbe_birr` or `telebirr` and records an untrusted `proof_received` candidate while every financial
+  switch remains disabled.
+
+The default-off legacy live Telegram and customer-web paths require all three locked live switches
+and atomically create one private authoritative verification job. The v2 proof boundary has no live
+branch. No v2 proof path contacts either provider, creates authoritative evidence, approves or
+claims a payment, creates a settlement or execution command, or starts a KemerBet financial action.
 
 The current capture path accepts a transaction reference only. Screenshot/PDF ingestion is
 intentionally deferred until the bot-to-API-to-private-Storage path can validate file bytes, create
 an opaque object key server-side, and prove the object exists before the database records metadata.
 
-## Server-side cryptographic contract
+## Server-side trust boundary
 
 The Telegram bot must forward the raw reference only to the internal API. It never receives an
 encryption key, blind-index key, direct PostgreSQL credential, or private Storage credential. The
 authenticated customer-web BFF applies the same rule and never gives either key to the browser.
-The two server processes handle the bounded ASCII value in memory, then the shared Node-only
-protection module applies this stored ciphertext format before the database procedure:
+The two server processes handle the bounded ASCII value in trusted memory and call the shared
+Node-only protection module before invoking a database procedure.
+
+### Legacy CBE Birr v1 stored-reference contract
+
+The legacy amount-first CBE Birr boundary applies this stored ciphertext contract:
 
 1. Normalize only through the fixed CBE Birr profile. There is no generic fallback: the current
    profile rejects outer or internal whitespace, Unicode/confusables, URLs, labels, controls, and
@@ -52,6 +61,47 @@ uniqueness index. The leading ciphertext value and stored smallint are selectors
 profile verification supplies the machine-checked key identity, and authoritative worker readiness
 must enforce the same profile before the source switch may become live.
 
+### Provider-bound proof v2 contract
+
+The amount-free dry-run proof boundary is a separate versioned contract:
+
+1. The provider must be exactly `cbe_birr` or `telebirr`. No alias, case folding, generic provider,
+   or submitted URL host is accepted as a provider identity.
+2. A direct transaction ID must contain exactly 8 to 32 ASCII alphanumeric characters. Whitespace,
+   punctuation, labels, URLs, controls, Unicode, and confusable characters are rejected. The
+   accepted value is uppercased inside the protection boundary for stable matching.
+3. Encryption uses AES-256-GCM with a fresh 12-byte nonce and provider-separated key derivation. The
+   encryption key is HMAC-SHA-256 derived from the encryption root with the v2 encryption domain and
+   exact provider. The AES-GCM additional authenticated data contains the same v2 domain and exact
+   provider.
+4. The stored ciphertext has exactly five dot-separated segments:
+   `v2.<provider>.<nonce>.<tag>.<payload>`. The provider segment must equal the separately supplied
+   provider. The unpadded base64url nonce and tag are exactly 16 and 22 characters. Because the
+   plaintext is 8 to 32 ASCII bytes, the unpadded base64url payload is exactly 11 to 43 characters.
+5. The blind index is a lowercase 64-character HMAC-SHA-256 fingerprint. Its key is separately
+   derived from the distinct fingerprint root with the v2 fingerprint-key domain and exact
+   provider. Its input also contains a v2 fingerprint-input domain, the exact provider, and the
+   normalized reference. The same transaction text under different providers therefore cannot
+   share a fingerprint.
+6. The protected value reports encryption-key version `2` and protection-profile version `2`. The
+   database requires both values and independently rechecks the ciphertext provider segment.
+7. Customer-safe masking stores only `***` plus the final four uppercase alphanumeric characters.
+   The minimum input length ensures the mask can never equal the complete accepted transaction ID.
+
+The raw value must not enter PostgreSQL, an audit event, Telegram conversation state, a customer
+response, a dashboard, a capability token, or a log. Database rows contain only the ciphertext,
+fingerprint, mask, provider, version selectors, eligible destination snapshot, channel binding, and
+non-financial replay metadata. Customer and bot responses expose only a generic proof receipt and
+the allowlisted provider; they do not return the ciphertext, fingerprint, mask, raw transaction ID,
+amount, receiver, or destination.
+
+Version `2` in the ciphertext and database is an envelope/protection selector; it does not by itself
+prove root-key identity or authorize decryption. Before any authoritative adapter, worker, or live
+deployment can consume v2 material, FetanAgent must define an explicit immutable v2 root-key profile
+with approved nonsecret key identities, verify it in every producing and consuming process, bind it
+to the deployment manifest and source profile, and fail readiness on any mismatch. The current
+dry-run proof contract does not satisfy or bypass that activation gate.
+
 ## Authoritative-lookup prerequisite finding
 
 The pure Stage 1F prerequisite contract classifies the current protected lookup-material shape as
@@ -81,7 +131,9 @@ request, or financial action. See
 
 ## Database safeguards
 
-Every capture procedure:
+### Legacy intent-reference capture
+
+Every legacy intent-reference capture procedure:
 
 - derives the active customer from either an admitted private Telegram event or the server-verified
   Supabase Auth binding, then proves ownership of the exact intent;
@@ -94,6 +146,29 @@ Every capture procedure:
   without revealing another customer's record; and
 - returns only the owned intent/state/timestamp and replay fact; never an encrypted value,
   fingerprint, mask, verification-job ID, evidence ID, execution ID, or object key.
+
+### Provider-bound dry-run proof capture
+
+Every v2 proof capture procedure:
+
+- derives an active customer from an admitted private Telegram event or the server-verified Supabase
+  Auth binding;
+- accepts only an active, valid KemerBet Player ID whose latest complete decision snapshot is exactly
+  current and eligible; the proof may target another eligible Player ID and does not assert Player-ID
+  ownership;
+- locks and requires all four financial switches—CBE Birr authoritative verification, TeleBirr
+  authoritative verification, payment verification, and deposit execution—to remain disabled;
+- validates the exact provider-bound ciphertext, fingerprint, mask, encryption-key version, and
+  protection-profile version before inserting an append-only untrusted candidate;
+- binds a Telegram event to exactly one semantic result and marks that event processed atomically,
+  or binds a customer-web request to one UUIDv4 replay receipt;
+- replays only the exact same channel/customer/provider/destination/protected-reference semantics and
+  rejects conflicting request-key, event, or destination reuse;
+- keeps candidate reuse customer-scoped and provider-separated; it does not create or claim the later
+  global authoritative provider-reference uniqueness boundary; and
+- returns only an opaque proof ID internally, provider, `proof_received` status, timestamp, and replay
+  fact. It creates no amount, receiver snapshot, deposit intent, verification job, evidence, claim,
+  settlement, execution command, or KemerBet action.
 
 The submitted transaction ID is not the provider's canonical transaction reference. A later
 provider adapter must extract a canonical reference from authoritative provider evidence and apply

@@ -7,6 +7,7 @@ const ALLOWED_FUNCTIONS = [
   'app.list_customer_web_player_registrations(uuid,integer)',
   'app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)',
   'app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)',
+  'app.capture_customer_web_dry_run_deposit_proof(uuid,uuid,text,text,text,text,text,smallint,smallint)',
   'app.list_customer_web_deposits(uuid,integer)',
   'app.consume_customer_web_rate_limit(bytea,text,integer,integer)',
 ] as const;
@@ -133,7 +134,7 @@ export const CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL = `
       )
     ) as no_app_base_object_access,
     (
-      select count(*) = 7
+      select count(*) = 8
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname = 'app'
@@ -148,7 +149,7 @@ export const CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_FUNCTION_SQL})
     ) as exact_function_surface_allowed,
     (
-      select count(*) = 7 and pg_catalog.bool_and(
+      select count(*) = 8 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
         and owner.rolname = 'postgres'

@@ -1,22 +1,12 @@
 # CBE Birr authoritative-lookup prerequisite
 
 `@fetanagent/cbe-birr-authoritative-lookup-prerequisite` is a pure, fail-closed inventory of the
-work that must be completed before an authoritative CBE Birr lookup can be designed. It does not
-perform a lookup and does not make the reserved `cbe_birr_official_receipt_lookup_v1` source profile
-permitted, reachable, or authoritative.
+remaining work before authoritative CBE Birr lookup can begin. It imports the Stage 1E source
+profile label but does not call its synthetic parser or add transport, protected-material access,
+database access, persistence, runtime wiring, evidence, claims, settlement, or financial actions.
 
-The only valid-request disposition is `blocked`, with reason
-`authoritative_lookup_prerequisites_incomplete`. Every capability reported by the contract is
-false. That includes source permission, protected-material eligibility, preflight-safe job
-acquisition, normalization readiness, decryption, transport, provider request, provider evidence,
-and payment-claim capability. Hostile, incomplete, or unknown input cannot select a positive path.
-
-The only valid request consists of `contractVersion: 1`, `providerCode: cbe_birr`,
-`sourceProfile: cbe_birr_official_receipt_lookup_v1`, and
-`legacyMaterialShape: cbe_birr_shadow_protected_lookup_material_legacy`. These are public policy
-labels only; unknown fields or values fail closed.
-
-The result fixes all 16 capability fields to literal `false`:
+The only valid-request disposition remains `blocked`, with reason
+`authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:
 
 - `ciphertextAcceptanceAllowed`
 - `plaintextAcceptanceAllowed`
@@ -35,123 +25,77 @@ The result fixes all 16 capability fields to literal `false`:
 - `runtimeWiringAllowed`
 - `financialClaimAllowed`
 
-## Exact blocked prerequisites
+## Exact remaining blockers
 
-The contract returns these 12 blockers in this fixed order:
+The contract returns these 13 blockers in this fixed order:
 
-1. `source_permission_unproven`
-2. `receiver_lookup_protection_metadata_absent`
-3. `receiver_lookup_key_provenance_unproven`
-4. `receiver_lookup_new_revision_and_fresh_provisioning_required`
-5. `receiver_lookup_metadata_inference_or_backfill_forbidden`
-6. `submitted_reference_encryption_and_fingerprint_subkeys_share_api_master_provisioning_root`
-7. `submitted_reference_independent_worker_decrypt_lifecycle_absent`
-8. `lookup_reference_normalization_unreviewed`
-9. `receiver_lookup_normalization_unreviewed`
-10. `canonical_reference_normalization_unreviewed`
-11. `prelease_prerequisite_gate_absent`
-12. `lease_boundary_returns_protected_material`
+1. `official_receipt_live_response_contract_unattested`
+2. `official_receipt_live_transport_absent`
+3. `receiver_lookup_protection_metadata_absent`
+4. `receiver_lookup_key_provenance_unproven`
+5. `receiver_lookup_new_revision_and_fresh_provisioning_required`
+6. `receiver_lookup_metadata_inference_or_backfill_forbidden`
+7. `submitted_reference_encryption_and_fingerprint_subkeys_share_api_master_provisioning_root`
+8. `submitted_reference_independent_worker_decrypt_lifecycle_absent`
+9. `lookup_reference_normalization_unreviewed`
+10. `receiver_lookup_normalization_unreviewed`
+11. `canonical_reference_normalization_unreviewed`
+12. `prelease_prerequisite_gate_absent`
+13. `lease_boundary_returns_protected_material`
 
-They cover five P0 areas, all unresolved:
+The obsolete broad `source_permission_unproven` blocker has been replaced, not merely removed. The
+offline route and synthetic parser are now explicit, while the exact live response contract and
+the live transport remain independently blocked.
 
-1. **Official-source permission.** There is no independently reviewed permission artifact proving
-   the exact source, purpose, caller, authentication method, deployment context, limits, data use,
-   and revocation rules. Browser visibility, observed behavior, synthetic fixtures, and the reserved
-   source-profile name are not permission.
-2. **Receiver protection and provenance.** The current receiver verification ciphertext lacks
-   protection metadata and key provenance. It cannot be treated as worker-ready material. Metadata
-   must not be inferred or backfilled onto an existing receiver record. A fresh new immutable
-   receiver-account revision must be created under a separately reviewed protection and provenance
-   design.
-3. **Submitted-reference key lifecycle.** The submitted-reference encryption and fingerprint
-   subkeys are domain-separated, but they share one API master provisioning and rotation root.
-   There is no independently provisioned worker decryption lifecycle. A future worker boundary must
-   not inherit the API root or infer a worker-safe lifecycle from the current stored value.
-4. **Normalization review.** Three distinct normalization profiles or version labels currently
-   participate across reference capture, synthetic authoritative-fixture reduction, and shadow
-   settlement metadata. Their equivalence, ownership, allowed transformations, and upgrade rules
-   have not been jointly reviewed. None may be assumed to be the official-lookup normalization
-   profile.
-5. **Preflight-safe acquisition.** The current shadow lease operation mutates durable job state and
-   returns protected material before the prerequisite check could run. The boundary must be
-   redesigned so a non-mutating metadata preflight completes first and any later acquisition uses
-   an opaque handle rather than returning protected material in the lease payload.
+## What the two new source blockers mean
+
+`official_receipt_live_response_contract_unattested` means the parse5 fixture proves only offline
+mechanics. No real customer receipt, phone, transaction ID, screenshot, SMS, PDF, account, or
+provider response is embedded in the package. Controlled privacy-reviewed samples still have to
+attest exact live labels, status/type vocabulary, money fields, fee arithmetic, timestamps,
+encoding, content type, maximum size, and drift behavior.
+
+`official_receipt_live_transport_absent` means there is deliberately no HTTP/browser client. The
+compiled route has HTTPS, an exact host/port/path, ordered `TID` and `PH`, and zero redirects, but no
+code performs that request. A future transport remains separate work and must fail closed on TLS,
+redirect, timeout, size, content-type, outage, and incident-stop failures.
+
+## Other unresolved prerequisite groups
+
+The remaining blockers preserve the existing safety design:
+
+1. **Receiver protection and provenance.** Existing receiver lookup material lacks independently
+   established protection metadata and key provenance. Metadata cannot be inferred or backfilled;
+   a fresh immutable receiver revision is required.
+2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
+   separated, but independently provisioned worker decryption and rotation are not established.
+3. **Normalization ownership.** Submitted capture, synthetic fixture reduction, receiver lookup,
+   and canonical settlement profiles require an exact joint compatibility review. No label implies
+   equivalence.
+4. **Prelease-safe acquisition.** Metadata preflight must complete before lease mutation or any
+   protected-material return. Later work requires an opaque handle and a narrow callback-scoped
+   decrypt boundary.
 
 ## Normalization ownership inventory
 
-The package now includes a metadata-only inventory of the three normalization boundaries already
-present in the repository. It records observed code behavior; it does not assign an authoritative
-owner, establish compatibility, select an official-lookup profile, or execute normalization.
+The metadata-only inventory still records three existing boundaries:
 
-| Existing boundary                     | Current version status                                                                                | Observed behavior only                                                                                                                                                                          |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `submitted_reference_capture`         | No normalization version exists. The reference-protection key version is not a normalization version. | Rejects values changed by trimming, requires 5--128 ASCII alphanumeric, dot, underscore, or hyphen code points, then maps accepted ASCII lowercase to uppercase inside the protection boundary. |
-| `offline_synthetic_fixture_reduction` | `fixture-normalizer-v1` is an offline fixture-only label.                                             | Strictly reduces exact synthetic fixture shapes and allowlisted values to redacted advisory safe facts; it is not a provider adapter or live normalization profile.                             |
-| `shadow_settlement_metadata_label`    | `cbe-birr-normalization-v1` is a shadow-settlement metadata label with no bound normalizer.           | Supplies no transformation and cannot be treated as proof that canonical-reference normalization exists.                                                                                        |
+| Boundary                              | Current status                                                                                                 |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `submitted_reference_capture`         | Strict bounded ASCII input and uppercase mapping inside protection; its key version is not a normalization ID. |
+| `offline_synthetic_fixture_reduction` | Fixture-only safe-fact reduction; not a live provider normalizer.                                              |
+| `shadow_settlement_metadata_label`    | Metadata label only; no bound canonical normalizer.                                                            |
 
-Every boundary reports `authoritativeOwner: unassigned` and `jointReviewStatus: not_completed`.
-All three pairwise compatibility relationships remain `not_established`; equivalence and
-cross-profile transformation reuse are false. The exact current-metadata request pins the related
-protection, fixture-schema, fixture-normalizer, and shadow-settlement contract versions; the exact
-fixture schema and adapter labels; and normalized source attestations for the two boundaries that
-perform transformations. Any unknown version, label, attestation, field, or request shape returns
-only the fixed invalid result, and implicit version upgrades are false.
-
-This inventory does not resolve `lookup_reference_normalization_unreviewed`,
-`receiver_lookup_normalization_unreviewed`, or `canonical_reference_normalization_unreviewed`.
-Normalization execution, runtime wiring, provider requests, profile selection, decryption,
-protected-material access, database grants, evidence creation, claims, and every financial action
-remain unavailable.
-
-## Stage 1G containment
-
-The database now exposes a metadata-only preflight for an existing shadow job. It returns only the
-job identifier, fixed version labels, a fixed `blocked` result,
-`legacy_protected_lookup_material_ineligible`, and literal-false lease and protected-material flags.
-It does not return deposit, submission, receiver, key, fingerprint, ciphertext, or provider data and
-does not lock or mutate the job.
-
-The shadow-worker role can execute only this preflight. Its execution rights on the legacy lease,
-completion, and retry procedures are revoked. The legacy procedures remain in the schema solely for
-migration continuity; their presence is not permission to call them. This containment does not
-resolve any prerequisite below, create an opaque acquisition handle, or permit a provider lookup.
-
-The legacy-shape label `cbe_birr_shadow_protected_lookup_material_legacy` identifies the blocked
-shape only. It does not call the current ciphertext an envelope or protection profile, approve its
-format, bless a `v1`, establish provenance, or authorize migration by inference.
+Every boundary remains `authoritativeOwner: unassigned` and `jointReviewStatus: not_completed`.
+All pairwise compatibility relationships remain `not_established` and implicit upgrades remain
+false.
 
 ## Pure boundary
 
-The prerequisite package contains no raw transaction reference, receiver identifier, ciphertext,
-secret, encryption or fingerprint key, protected-material version, algorithm selection, KMS value,
-URL, host, route, credential, session, authorization data, lease identifier or token, opaque handle,
-provider request or response, or provider payload. It also has no network, filesystem, database,
-SQL, migration, schema, queue, worker, or other runtime integration.
+The prerequisite package accepts only exact public metadata labels. It contains no raw reference,
+receiver identifier, ciphertext, secret, key, URL, credential, session, lease token, provider
+payload, SQL, network, filesystem, queue, or runtime integration. It cannot acquire or settle a
+job, create evidence, claim a payment, call KemerBet, execute a deposit, or change a feature switch.
 
-It cannot acquire or settle a job, decrypt material, normalize a provider response, create provider
-evidence, transition verification state, claim a payment, call KemerBet, execute a deposit, validate
-or collect a withdrawal, pay out funds, or change a feature switch. Logs and errors are limited to
-fixed public policy labels and blocker status; they cannot include protected material or operational
-secrets.
-
-## Required next work
-
-The five areas are P0 design and migration prerequisites, not an implementation checklist for a
-live transport. The next reviews must produce reproducible evidence for:
-
-- an independently reviewed source-permission artifact and exact access rules;
-- a fresh immutable receiver-account revision with explicit, non-inferred protection provenance;
-- separately provisioned and rotated lookup-material protection with an independent worker decrypt
-  lifecycle;
-- a non-mutating metadata preflight plus an opaque-handle acquisition design that reveals protected
-  material only inside a separately reviewed, callback-scoped boundary; and
-- a completed joint review of the metadata-only normalization inventory that assigns an
-  authoritative owner, establishes exact compatibility rules, and approves fail-closed upgrades;
-  the current inventory documents observed behavior but leaves all three normalization blockers
-  unresolved.
-
-Completing those designs would permit another review only. It would not select a source, enable
-decryption or transport, make a provider call, create authoritative evidence, or authorize any
-financial action. The official-source policy in
-[cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md) remains independently
-blocked.
+The Stage 1E offline profile reduces uncertainty but does not satisfy any operational blocker.
+Migration and deployment remain separate, explicitly reviewed steps.

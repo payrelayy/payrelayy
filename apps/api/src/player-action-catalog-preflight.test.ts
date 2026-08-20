@@ -60,6 +60,9 @@ describe('Player-ID action catalog preflight', () => {
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
     );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)',
     );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
@@ -68,6 +71,6 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 11');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 12');
   });
 });

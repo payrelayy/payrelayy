@@ -240,6 +240,7 @@ export function workspacePage(
   registrations: readonly CustomerWorkspaceRegistration[],
   deposits: readonly CustomerDepositSummary[],
   notice?: PageNotice,
+  dryRunProofAvailable = false,
 ): string {
   const readyOptions = depositPlayerOptions(registrations);
   return layout(
@@ -252,22 +253,30 @@ export function workspacePage(
         ${noticeMarkup(notice)}
         <div class="workspace-grid">
           <article class="workspace-panel">
-            <h3>Deposit</h3>
-            <p>Deposit from 25 to 25,000 ETB to a ready KemerBet Player ID.</p>
+            <h3>Submit deposit proof</h3>
+            <p>Choose a provider and submit only its transaction ID for a saved KemerBet Player ID. To deposit to another Player ID, type that eligible ID below instead.</p>
+            <p class="quiet">Simulation only. This does not verify a payment or issue credit.</p>
             ${
-              readyOptions === ''
-                ? '<p class="empty-state">Add and confirm a Player ID before depositing.</p>'
-                : `<form method="post" action="/deposits" accept-charset="utf-8">
+              dryRunProofAvailable
+                ? `<form method="post" action="/deposits/proof" accept-charset="utf-8">
               ${csrfField(csrfToken)}
               <input type="hidden" name="requestKey" value="${escapeHtml(requestKey)}">
-              <label>Player ID
-                <select name="playerId" required>${readyOptions}</select>
+              <label>Payment provider
+                <select name="provider" required>
+                  <option value="cbe_birr">CBE Birr</option>
+                  <option value="telebirr">TeleBirr</option>
+                </select>
               </label>
-              <label>Amount (ETB)
-                <input name="amountEtb" type="number" inputmode="decimal" min="25" max="25000" step="0.01" required>
+              <label>Destination KemerBet Player ID
+                <input name="playerId" type="text" list="ready-player-ids" autocomplete="off" maxlength="64" required>
               </label>
-              <button type="submit">Continue deposit</button>
+              <datalist id="ready-player-ids">${readyOptions}</datalist>
+              <label>Transaction ID
+                <input name="transactionId" type="text" inputmode="text" autocomplete="off" minlength="8" maxlength="32" pattern="[A-Za-z0-9]{8,32}" required>
+              </label>
+              <button type="submit">Submit simulation proof</button>
             </form>`
+                : '<p class="empty-state">Deposit proof intake is temporarily unavailable.</p>'
             }
           </article>
           <article class="workspace-panel">

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL,
+  CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL,
   CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL,
   createCustomerWorkspacePoolConfig,
   createCustomerWorkspacePostgresRuntime,
@@ -22,6 +23,7 @@ import {
 const authUserId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0184';
 const requestKey = '4f8e2a44-58ef-4cb7-b274-6202e01ed341';
 const depositIntentId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0185';
+const depositProofRequestId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0186';
 const createdAt = new Date('2026-08-15T12:00:00.000Z');
 
 const config = {
@@ -123,6 +125,19 @@ async function expectAllOperationsUnavailableWithoutQueries(
       amountMinor: '2500',
       authUserId,
       playerId: 'PLAYER-42',
+      requestKey,
+    }),
+  ).toEqual(failure);
+  expect(
+    await runtime.captureDryRunDepositProof({
+      authUserId,
+      ciphertext: 'v2.cbe_birr.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAA',
+      fingerprint: 'b'.repeat(64),
+      keyVersion: 2,
+      masked: '***AB12',
+      playerId: 'PLAYER-42',
+      profileVersion: 2,
+      provider: 'cbe_birr',
       requestKey,
     }),
   ).toEqual(failure);
@@ -235,6 +250,9 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       "pg_catalog.to_regprocedure('app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)')",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+      "pg_catalog.to_regprocedure('app.capture_customer_web_dry_run_deposit_proof(uuid,uuid,text,text,text,text,text,smallint,smallint)')",
+    );
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
       "pg_catalog.to_regprocedure('app.list_customer_web_deposits(uuid,integer)')",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
@@ -295,7 +313,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     expect(database.end).toHaveBeenCalledTimes(1);
   });
 
-  it('uses only the seven exact parameterized function calls and returns customer-safe projections', async () => {
+  it('uses only the eight exact parameterized function calls and returns customer-safe projections', async () => {
     const database = databaseWithOperations((query) => {
       if (query === ENSURE_CUSTOMER_WEB_ACCOUNT_SQL) {
         return [{ account_status: 'active', account_created: true }];
@@ -349,6 +367,17 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
           },
         ];
       }
+      if (query === CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL) {
+        return [
+          {
+            deposit_proof_request_id: depositProofRequestId,
+            provider_code: 'cbe_birr',
+            proof_status: 'proof_received',
+            submitted_at: createdAt,
+            request_replayed: false,
+          },
+        ];
+      }
       if (query === LIST_CUSTOMER_WEB_DEPOSITS_SQL) {
         return [
           {
@@ -373,7 +402,7 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       await runtime.consumeRateLimit({
         bucketKey: 'a'.repeat(64),
         maxRequests: 8,
-        routeKey: 'POST /sign-in',
+        routeKey: 'POST /deposits/proof',
         windowSeconds: 60,
       }),
     ).toEqual({ allowed: true, currentCount: 1, ok: true, retryAfterSeconds: 0 });
@@ -419,6 +448,27 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       ok: true,
       status: { label: 'Checking payment', tone: 'working' },
     });
+    const proofCaptured = await runtime.captureDryRunDepositProof({
+      authUserId,
+      ciphertext: 'v2.cbe_birr.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAA',
+      fingerprint: 'b'.repeat(64),
+      keyVersion: 2,
+      masked: '***AB12',
+      playerId: 'PLAYER-42',
+      profileVersion: 2,
+      provider: 'cbe_birr',
+      requestKey,
+    });
+    expect(proofCaptured).toEqual({
+      ok: true,
+      provider: 'cbe_birr',
+      replayed: false,
+      status: 'proof_received',
+      submittedAt: createdAt.toISOString(),
+    });
+    expect(JSON.stringify(proofCaptured)).not.toContain(depositProofRequestId);
+    expect(JSON.stringify(proofCaptured)).not.toContain('PLAYER-42');
+    expect(JSON.stringify(proofCaptured)).not.toContain('AB12');
     expect(await runtime.listDeposits({ authUserId, limit: 20 })).toEqual({
       ok: true,
       deposits: [
@@ -440,10 +490,11 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       SUBMIT_CUSTOMER_WEB_PLAYER_REGISTRATION_SQL,
       OPEN_CUSTOMER_WEB_DEPOSIT_INTENT_SQL,
       CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL,
+      CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL,
       LIST_CUSTOMER_WEB_DEPOSITS_SQL,
     ]);
     expect(database.queries[1]?.values).toEqual([authUserId]);
-    expect(database.queries[2]?.values).toEqual(['a'.repeat(64), 'POST /sign-in', 8, 60]);
+    expect(database.queries[2]?.values).toEqual(['a'.repeat(64), 'POST /deposits/proof', 8, 60]);
     expect(database.queries[3]?.values).toEqual([authUserId, 20]);
     expect(database.queries[4]?.values).toEqual([authUserId, requestKey, 'PLAYER-42']);
     expect(database.queries[5]?.values).toEqual([authUserId, requestKey, 'PLAYER-42', '2500']);
@@ -456,7 +507,81 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       '***1234',
       1,
     ]);
-    expect(database.queries[7]?.values).toEqual([authUserId, 20]);
+    expect(database.queries[7]?.values).toEqual([
+      authUserId,
+      requestKey,
+      'PLAYER-42',
+      'cbe_birr',
+      'v2.cbe_birr.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAA',
+      'b'.repeat(64),
+      '***AB12',
+      2,
+      2,
+    ]);
+    expect(database.queries[8]?.values).toEqual([authUserId, 20]);
+    await runtime.close();
+  });
+
+  it('rejects malformed, cross-provider, extra, accessor, and proxy proof inputs before SQL', async () => {
+    const database = databaseWithOperations((query) => {
+      if (query !== CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL) throw new Error();
+      return [
+        {
+          deposit_proof_request_id: depositProofRequestId,
+          provider_code: 'cbe_birr',
+          proof_status: 'proof_received',
+          submitted_at: createdAt,
+          request_replayed: false,
+        },
+      ];
+    });
+    const runtime = await createCustomerWorkspacePostgresRuntime(config, { database });
+    const validInput = {
+      authUserId,
+      ciphertext: 'v2.cbe_birr.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAA',
+      fingerprint: 'b'.repeat(64),
+      keyVersion: 2,
+      masked: '***AB12',
+      playerId: 'PLAYER-42',
+      profileVersion: 2,
+      provider: 'cbe_birr',
+      requestKey,
+    } as const;
+    const accessor = Object.defineProperty({ ...validInput }, 'provider', {
+      enumerable: true,
+      get: () => 'cbe_birr',
+    });
+    const proxy = new Proxy({ ...validInput }, {});
+
+    for (const input of [
+      { ...validInput, unexpected: true },
+      { ...validInput, provider: 'telebirr' },
+      {
+        ...validInput,
+        ciphertext: 'v2.cbe_birr.AAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAA',
+      },
+      {
+        ...validInput,
+        ciphertext: 'v2.cbe_birr.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAA',
+      },
+      { ...validInput, keyVersion: 1 },
+      { ...validInput, profileVersion: 1 },
+      accessor,
+      proxy,
+    ]) {
+      expect(await runtime.captureDryRunDepositProof(input as never)).toEqual({
+        error: 'customer_workspace_unavailable',
+        ok: false,
+      });
+    }
+    expect(database.queries).toHaveLength(1);
+
+    expect(await runtime.captureDryRunDepositProof(validInput)).toMatchObject({
+      ok: true,
+      provider: 'cbe_birr',
+      status: 'proof_received',
+    });
+    expect(database.queries).toHaveLength(2);
     await runtime.close();
   });
 
@@ -519,6 +644,28 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       readonly row: unknown;
       readonly sql: string;
     }[] = [
+      {
+        invoke: (runtime) =>
+          runtime.captureDryRunDepositProof({
+            authUserId,
+            ciphertext: 'v2.cbe_birr.AAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAA',
+            fingerprint: 'b'.repeat(64),
+            keyVersion: 2,
+            masked: '***AB12',
+            playerId: 'PLAYER-42',
+            profileVersion: 2,
+            provider: 'cbe_birr',
+            requestKey,
+          }),
+        row: {
+          deposit_proof_request_id: depositProofRequestId,
+          provider_code: 'cbe_birr',
+          proof_status: 'verified',
+          submitted_at: createdAt,
+          request_replayed: false,
+        },
+        sql: CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL,
+      },
       {
         invoke: (runtime) =>
           runtime.consumeRateLimit({

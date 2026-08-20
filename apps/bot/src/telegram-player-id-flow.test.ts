@@ -14,7 +14,7 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({
       kind: 'menu',
       menu: {
-        text: 'Manage your KemerBet Player ID, or start a deposit with /deposit PLAYER_ID AMOUNT.',
+        text: 'Manage your KemerBet Player ID, or submit a dry-run proof with /deposit PROVIDER PLAYER_ID TRANSACTION_ID.',
         buttons: [{ text: 'Add KemerBet Player ID', callbackData }],
       },
     });
@@ -65,7 +65,7 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each([
-    ['deposit_input_invalid', 'Use /deposit PLAYER_ID AMOUNT'],
+    ['deposit_input_invalid', 'Use /deposit cbe_birr PLAYER_ID TRANSACTION_ID'],
     ['deposit_unavailable', 'No payment action was started'],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
@@ -112,5 +112,28 @@ describe('Telegram Player-ID flow presentation', () => {
         depositStatus: { label: 'Preparing deposit', tone: 'working' },
       }),
     ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — Preparing deposit.' });
+  });
+
+  it('renders a proof receipt without exposing a reference, amount, or destination', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'deposit_proof_received',
+      proofToken: 'A'.repeat(22),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'proof_received',
+      financialMode: 'dry_run',
+    });
+
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: [
+        'SIMULATION ONLY — proof received.',
+        'Provider: TeleBirr.',
+        'No payment was verified or credited.',
+      ].join('\n'),
+    });
+    expect(JSON.stringify(presentation)).not.toContain('AAAAAAAAAAAAAAAAAAAAAA');
+    expect(JSON.stringify(presentation)).not.toMatch(/amount|player/i);
   });
 });

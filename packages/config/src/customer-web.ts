@@ -1,12 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 
-import { booleanFromEnv } from './shared.js';
+import { booleanFromEnv, loadFinancialActionsMode } from './shared.js';
 import {
   CBE_DEPOSIT_REFERENCE_PRODUCTION_ENCRYPTION_SECRET_FILE,
   CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
   loadAndVerifyCbeDepositReferenceKeyProfile,
 } from './deposit-reference-profile.js';
+import {
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+  loadAndVerifyDepositProofReferenceProfile,
+} from './deposit-proof-reference-profile.js';
 
 export const CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN =
@@ -82,6 +87,24 @@ export type CustomerWebDepositConfig =
       readonly referenceKeyProfileVersion: 1;
     };
 
+export type CustomerWebDryRunDepositProofConfig =
+  | {
+      readonly enabled: false;
+      readonly financialActionsMode: undefined;
+      readonly liveFinancialActionsEnabled: undefined;
+      readonly referenceEncryptionMasterSecret: undefined;
+      readonly referenceFingerprintMasterSecret: undefined;
+      readonly referenceProfileVersion: undefined;
+    }
+  | {
+      readonly enabled: true;
+      readonly financialActionsMode: 'dry_run';
+      readonly liveFinancialActionsEnabled: false;
+      readonly referenceEncryptionMasterSecret: string;
+      readonly referenceFingerprintMasterSecret: string;
+      readonly referenceProfileVersion: 2;
+    };
+
 export type CustomerWebRateLimitConfig =
   | { readonly enabled: false; readonly hmacSecret: undefined }
   | { readonly enabled: true; readonly hmacSecret: string };
@@ -98,10 +121,20 @@ export interface CustomerWebDepositConfigDependencies {
   readonly readSecretFile?: (path: string) => string;
 }
 
+export type CustomerWebDryRunDepositProofConfigDependencies = CustomerWebDepositConfigDependencies;
+
 export interface RedactedCustomerWebDepositConfig {
   readonly enabled: boolean;
   readonly referenceProtectionConfigured: boolean;
   readonly referenceKeyProfileVersion: 1 | undefined;
+}
+
+export interface RedactedCustomerWebDryRunDepositProofConfig {
+  readonly enabled: boolean;
+  readonly financialActionsMode: 'dry_run' | undefined;
+  readonly liveFinancialActionsEnabled: false | undefined;
+  readonly referenceMastersConfigured: boolean;
+  readonly referenceProfileVersion: 2 | undefined;
 }
 
 export interface RedactedCustomerWebRateLimitConfig {
@@ -494,6 +527,116 @@ export function redactedCustomerWebDepositConfigForLog(
     enabled: config.enabled,
     referenceProtectionConfigured: config.enabled,
     referenceKeyProfileVersion: config.enabled ? config.referenceKeyProfileVersion : undefined,
+  };
+}
+
+/**
+ * Loads the provider-neutral v2 reference-protection capability for amount-free dry-run proof
+ * intake. It cannot compose while either live KemerBet gate or the legacy deposit gate is active.
+ */
+export function loadCustomerWebDryRunDepositProofConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: CustomerWebDryRunDepositProofConfigDependencies = {},
+): CustomerWebDryRunDepositProofConfig {
+  const enabled = booleanFromEnv(
+    environment.INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED,
+    false,
+    'INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED',
+  );
+  if (!enabled) {
+    return {
+      enabled: false,
+      financialActionsMode: undefined,
+      liveFinancialActionsEnabled: undefined,
+      referenceEncryptionMasterSecret: undefined,
+      referenceFingerprintMasterSecret: undefined,
+      referenceProfileVersion: undefined,
+    };
+  }
+
+  const financialActionsMode = loadFinancialActionsMode(environment);
+  const legacyDepositEnabled = booleanFromEnv(
+    environment.INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED,
+    false,
+    'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED',
+  );
+  const kemerbetExecutorEnabled = booleanFromEnv(
+    environment.KEMERBET_EXECUTOR_ENABLED,
+    false,
+    'KEMERBET_EXECUTOR_ENABLED',
+  );
+  const kemerbetFinalActionEnabled = booleanFromEnv(
+    environment.KEMERBET_FINAL_ACTION_ENABLED,
+    false,
+    'KEMERBET_FINAL_ACTION_ENABLED',
+  );
+  if (
+    environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
+    financialActionsMode !== 'dry_run' ||
+    environment.INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED !== 'false' ||
+    legacyDepositEnabled ||
+    environment.KEMERBET_EXECUTOR_ENABLED !== 'false' ||
+    kemerbetExecutorEnabled ||
+    environment.KEMERBET_FINAL_ACTION_ENABLED !== 'false' ||
+    kemerbetFinalActionEnabled
+  ) {
+    throw new Error(
+      'Customer-web dry-run deposit proof intake requires exact dry-run mode and all legacy/live financial gates explicitly false.',
+    );
+  }
+
+  const referenceEncryptionMasterSecret = depositReferenceSecretFromEnvironmentOrFile(
+    environment,
+    dependencies,
+    {
+      direct: 'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET',
+      file: 'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE',
+      productionFile: DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+    },
+  );
+  const referenceFingerprintMasterSecret = depositReferenceSecretFromEnvironmentOrFile(
+    environment,
+    dependencies,
+    {
+      direct: 'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET',
+      file: 'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE',
+      productionFile: DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+    },
+  );
+  if (!referenceEncryptionMasterSecret || !referenceFingerprintMasterSecret) {
+    throw new Error(
+      'Both provider-neutral deposit proof-reference master secret files are required when dry-run proof intake is enabled.',
+    );
+  }
+  const profile = loadAndVerifyDepositProofReferenceProfile(
+    environment,
+    environment.NODE_ENV,
+    {
+      encryptionMasterSecret: referenceEncryptionMasterSecret,
+      fingerprintMasterSecret: referenceFingerprintMasterSecret,
+    },
+    dependencies.readSecretFile === undefined ? {} : { readFile: dependencies.readSecretFile },
+  );
+
+  return {
+    enabled: true,
+    financialActionsMode,
+    liveFinancialActionsEnabled: false,
+    referenceEncryptionMasterSecret,
+    referenceFingerprintMasterSecret,
+    referenceProfileVersion: profile.version,
+  };
+}
+
+export function redactedCustomerWebDryRunDepositProofConfigForLog(
+  config: CustomerWebDryRunDepositProofConfig,
+): RedactedCustomerWebDryRunDepositProofConfig {
+  return {
+    enabled: config.enabled,
+    financialActionsMode: config.financialActionsMode,
+    liveFinancialActionsEnabled: config.liveFinancialActionsEnabled,
+    referenceMastersConfigured: config.enabled,
+    referenceProfileVersion: config.referenceProfileVersion,
   };
 }
 

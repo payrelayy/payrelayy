@@ -1,6 +1,6 @@
 import {
   loadCustomerWebAuthConfig,
-  loadCustomerWebDepositConfig,
+  loadCustomerWebDryRunDepositProofConfig,
   loadCustomerWebRateLimitConfig,
   loadCustomerWebWorkspaceConfig,
 } from '@fetanagent/config/customer-web';
@@ -31,7 +31,7 @@ const workspaceConfig = loadCustomerWebWorkspaceConfig();
 if (!workspaceConfig.enabled) {
   throw new Error('The customer workspace runtime gate is disabled.');
 }
-const depositConfig = loadCustomerWebDepositConfig();
+const depositProofConfig = loadCustomerWebDryRunDepositProofConfig();
 const rateLimitConfig = loadCustomerWebRateLimitConfig();
 if (!rateLimitConfig.enabled) {
   throw new Error('The durable customer-web rate-limit gate is disabled.');
@@ -40,11 +40,16 @@ const workspace = await createCustomerWorkspacePostgresRuntime(workspaceConfig);
 
 const app = buildCustomerWebApp({
   auth: createCustomerWebAuthPort(config),
-  ...(depositConfig.enabled
+  ...(depositProofConfig.enabled
     ? {
-        depositReferenceProtectionSecrets: {
-          encryptionSecret: depositConfig.referenceEncryptionSecret,
-          fingerprintSecret: depositConfig.referenceFingerprintSecret,
+        dryRunDepositProof: {
+          financialActionsMode: depositProofConfig.financialActionsMode,
+          liveFinancialActionsEnabled: depositProofConfig.liveFinancialActionsEnabled,
+          protectionProfileVersion: depositProofConfig.referenceProfileVersion,
+          secrets: {
+            encryptionSecret: depositProofConfig.referenceEncryptionMasterSecret,
+            fingerprintSecret: depositProofConfig.referenceFingerprintMasterSecret,
+          },
         },
       }
     : {}),

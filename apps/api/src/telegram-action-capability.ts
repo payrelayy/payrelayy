@@ -3,7 +3,12 @@ import { createHmac } from 'node:crypto';
 import {
   formatTelegramPlayerRegistrationCapabilityCallback,
   parseTelegramPlayerRegistrationCapabilityCallback,
+  type DepositProofProviderCode,
 } from '@fetanagent/contracts';
+import {
+  DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
+  DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
+} from '@fetanagent/deposit-reference-protection';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HMAC_SECRET_PATTERN = /^[0-9a-f]{64}$/;
@@ -17,6 +22,7 @@ export type TelegramActionSemanticConsumer =
   | 'expire_player_registration_action'
   | 'open_dry_run_deposit_intent'
   | 'capture_dry_run_deposit_reference'
+  | 'capture_dry_run_deposit_proof'
   | 'open_live_deposit_intent'
   | 'capture_live_deposit_reference';
 
@@ -64,12 +70,25 @@ type DepositReferenceSemanticInput = {
   readonly semanticHmacSecret: string;
 };
 
+type DepositProofSemanticInput = {
+  readonly consumer: 'capture_dry_run_deposit_proof';
+  readonly originInboundEventId: string;
+  readonly playerId: string;
+  readonly providerCode: DepositProofProviderCode;
+  readonly referenceFingerprint: string;
+  readonly referenceMasked: string;
+  readonly keyVersion: typeof DEPOSIT_PROOF_REFERENCE_KEY_VERSION;
+  readonly profileVersion: typeof DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION;
+  readonly semanticHmacSecret: string;
+};
+
 export type TelegramActionSemanticHmacInput =
   | CapabilityBoundSemanticInput
   | PlayerIdSubmissionSemanticInput
   | PlayerIdExpirySemanticInput
   | DepositIntentSemanticInput
-  | DepositReferenceSemanticInput;
+  | DepositReferenceSemanticInput
+  | DepositProofSemanticInput;
 
 export interface TelegramActionCapabilityKeys {
   /** API-only 32-byte hexadecimal key; never send it to the bot or database. */
@@ -278,6 +297,30 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
         referenceMasked: input.referenceMasked,
         keyVersion: input.keyVersion,
         financialMode: input.consumer === 'capture_live_deposit_reference' ? 'live' : 'dry_run',
+      });
+      break;
+    case 'capture_dry_run_deposit_proof':
+      if (
+        (input.providerCode !== 'cbe_birr' && input.providerCode !== 'telebirr') ||
+        !/^[0-9a-f]{64}$/u.test(input.referenceFingerprint) ||
+        !/^\*{3}[A-Z0-9]{4}$/u.test(input.referenceMasked) ||
+        !Number.isSafeInteger(input.keyVersion) ||
+        input.keyVersion !== DEPOSIT_PROOF_REFERENCE_KEY_VERSION ||
+        !Number.isSafeInteger(input.profileVersion) ||
+        input.profileVersion !== DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION
+      ) {
+        throw new Error('The protected deposit-proof semantics are invalid.');
+      }
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        platformCode: 'kemerbet',
+        normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
+        providerCode: input.providerCode,
+        referenceFingerprint: input.referenceFingerprint,
+        referenceMasked: input.referenceMasked,
+        keyVersion: input.keyVersion,
+        profileVersion: input.profileVersion,
+        financialMode: 'dry_run',
       });
       break;
     default:

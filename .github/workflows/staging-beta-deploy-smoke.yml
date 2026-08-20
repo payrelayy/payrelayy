@@ -372,6 +372,9 @@ jobs:
           CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
           CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
           CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
+          DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
           CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: ${{ secrets.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET }}
           CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
@@ -398,6 +401,9 @@ jobs:
           [[ "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" =~ ^[0-9a-f]{64}$ ]]
           [[ -n "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" ]]
+          [[ "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" ]]
           distinct_count="$(printf '%s\n' \
             "$BETA_ADMISSION_RUNTIME_PASSWORD" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
             "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" \
@@ -407,8 +413,10 @@ jobs:
             "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" \
             "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" \
             "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" \
-            "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" | sort -u | wc -l)"
-          [[ "$distinct_count" -eq 13 ]]
+            "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" \
+            "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" \
+            "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" | sort -u | wc -l)"
+          [[ "$distinct_count" -eq 15 ]]
           [[ -n "$SUPABASE_DB_PASSWORD" ]]
           [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
           [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -464,6 +472,29 @@ jobs:
           }
           NODE
           printf '%s\n' "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" > "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" > "$secret_dir/deposit-proof-reference-encryption-master"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" > "$secret_dir/deposit-proof-reference-fingerprint-master"
+          node --input-type=module <<'NODE'
+          const encoded = process.env.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON;
+          const masterFingerprint = /^sha256:[0-9a-f]{64}$/u;
+          const profile = JSON.parse(encoded);
+          if (typeof profile !== 'object' || profile === null || Array.isArray(profile)) {
+            throw new Error('the protected provider-proof v2 reference profile is invalid');
+          }
+          if (
+            Object.keys(profile).sort().join(',') !==
+              'encryptionMasterFingerprint,fingerprintMasterFingerprint,version' ||
+            profile.version !== 2 ||
+            typeof profile.encryptionMasterFingerprint !== 'string' ||
+            typeof profile.fingerprintMasterFingerprint !== 'string' ||
+            !masterFingerprint.test(profile.encryptionMasterFingerprint) ||
+            !masterFingerprint.test(profile.fingerprintMasterFingerprint) ||
+            profile.encryptionMasterFingerprint === profile.fingerprintMasterFingerprint
+          ) {
+            throw new Error('the protected provider-proof v2 reference profile is invalid');
+          }
+          NODE
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" > "$secret_dir/deposit-proof-reference-profile.v2.json"
           # The fresh-host profile never starts the Telegram bot. A deliberately
           # invalid sentinel keeps accidental bot startup fail-closed until the
           # separate token-provision and end-to-end smoke gate is approved.
@@ -471,7 +502,8 @@ jobs:
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/publishable-key"
           printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" > "$secret_dir/customer-web-publishable-key"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts" "$secret_dir"/*
-          chmod 0644 "$secret_dir/cbe-deposit-reference-key-profile.v1.json"
+          chmod 0644 "$secret_dir/cbe-deposit-reference-key-profile.v1.json" \
+            "$secret_dir/deposit-proof-reference-profile.v2.json"
           openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
           ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
           helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
@@ -571,6 +603,9 @@ jobs:
             "$SECRET_DIR/cbe-deposit-reference-encryption-key" \
             "$SECRET_DIR/cbe-deposit-reference-fingerprint-key" \
             "$SECRET_DIR/cbe-deposit-reference-key-profile.v1.json" \
+            "$SECRET_DIR/deposit-proof-reference-encryption-master" \
+            "$SECRET_DIR/deposit-proof-reference-fingerprint-master" \
+            "$SECRET_DIR/deposit-proof-reference-profile.v2.json" \
             "$SECRET_DIR/beta-payload-hmac" "$SECRET_DIR/bot-token" \
             "$SECRET_DIR/publishable-key" "fetanagent-admin@$VM_HOST:$incoming/"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
@@ -586,7 +621,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-start '$GITHUB_SHA' '${GITHUB_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper bot-disabled-ready '$GITHUB_SHA'"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
           echo 'started=true' >> "$GITHUB_OUTPUT"

@@ -15,6 +15,11 @@ export const TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS = 64;
 export const TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH = 22;
 export const TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS = 5;
 export const TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS = 128;
+export const TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS = 8;
+export const TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS = 32;
+
+export const DEPOSIT_PROOF_PROVIDER_CODES = ['cbe_birr', 'telebirr'] as const;
+export type DepositProofProviderCode = (typeof DEPOSIT_PROOF_PROVIDER_CODES)[number];
 
 export const TELEGRAM_PRIVATE_ACTION_HEADERS = {
   keyId: 'x-fetanagent-action-key-id',
@@ -73,6 +78,15 @@ export type TelegramPrivateActionEnvelope =
       readonly transactionReference: string;
     })
   | (TelegramPrivateActionIdentity & {
+      readonly kind: 'deposit_proof_command';
+      /** Exact allowlisted payment-provider identity; never inferred from customer material. */
+      readonly providerCode: DepositProofProviderCode;
+      /** Destination selection only. The submitting customer need not own this Player ID. */
+      readonly playerId: string;
+      /** Raw trusted-memory candidate; the API protects it before any database call. */
+      readonly transactionReference: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'deposit_status_command';
       /** Compact opaque UUID presentation. It is not authority and is never logged. */
       readonly depositToken: string;
@@ -116,6 +130,16 @@ export type TelegramPrivateActionResult =
       readonly outcome: 'deposit_reference_received';
       readonly depositStatus: CustomerDepositStatusProjection;
       readonly financialMode: 'dry_run' | 'live';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_proof_received';
+      /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
+      readonly proofToken: string;
+      readonly providerCode: DepositProofProviderCode;
+      readonly providerName: 'CBE Birr' | 'TeleBirr';
+      readonly proofStatus: 'proof_received';
+      readonly financialMode: 'dry_run';
     }
   | {
       readonly version: 1;

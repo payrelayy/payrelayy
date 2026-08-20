@@ -1,3 +1,5 @@
+import { types as nodeUtilTypes } from 'node:util';
+
 import {
   CUSTOMER_WEB_DATABASE_DIRECT_HOST,
   CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
@@ -10,6 +12,7 @@ import { Pool, type PoolConfig } from 'pg';
 
 import { customerWorkspaceCatalogPreflightPassed } from './workspace-catalog-preflight.js';
 import type {
+  CustomerDepositProofProvider,
   CustomerWorkspaceDisplayStatus,
   CustomerWorkspaceFailure,
   CustomerWorkspacePort,
@@ -27,8 +30,11 @@ const REQUEST_KEY_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PLAYER_ID_PATTERN = /^[^\s\u0000-\u001f\u007f]+$/u;
 const CIPHERTEXT_PATTERN = /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u;
+const PROOF_CIPHERTEXT_PATTERN =
+  /^v2\.(cbe_birr|telebirr)\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{11,43}$/u;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const MASKED_REFERENCE_PATTERN = /^\*\*\*[A-Z0-9._-]{4}$/u;
+const PROOF_MASKED_REFERENCE_PATTERN = /^\*\*\*[A-Z0-9]{4}$/u;
 const AMOUNT_MINOR_PATTERN = /^[1-9][0-9]*$/u;
 const DEPOSIT_STATUSES = new Set<DepositStatus>([
   'intake_received',
@@ -87,6 +93,15 @@ export const CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL = `
   )
 `;
 
+export const CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL = `
+  select deposit_proof_request_id, provider_code, proof_status, submitted_at,
+         request_replayed
+  from app.capture_customer_web_dry_run_deposit_proof(
+    $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::text,
+    $8::smallint, $9::smallint
+  )
+`;
+
 export const LIST_CUSTOMER_WEB_DEPOSITS_SQL = `
   select deposit_intent_id, expected_amount_minor, currency_code, deposit_status,
          created_at, updated_at
@@ -135,7 +150,14 @@ function createSerializedWorkspaceDispatch(): SerializedWorkspaceDispatch {
 }
 
 function readDataRecord(value: unknown): DataRecord {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error();
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    nodeUtilTypes.isProxy(value)
+  ) {
+    throw new Error();
+  }
   try {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) throw new Error();
@@ -215,6 +237,7 @@ const RATE_LIMIT_ROUTE_KEYS = new Set([
   'GET /auth/recovery',
   'POST /create-account',
   'POST /deposits',
+  'POST /deposits/proof',
   'POST /deposits/reference',
   'POST /forgot-password',
   'POST /player-ids',
@@ -234,6 +257,29 @@ function validProtectedReference(input: DataRecord): boolean {
     MASKED_REFERENCE_PATTERN.test(input.masked) &&
     input.keyVersion === 1
   );
+}
+
+function validProofProvider(value: unknown): value is CustomerDepositProofProvider {
+  return value === 'cbe_birr' || value === 'telebirr';
+}
+
+function validProtectedProofReference(input: DataRecord): boolean {
+  if (
+    !validProofProvider(input.provider) ||
+    typeof input.ciphertext !== 'string' ||
+    input.ciphertext.length > 512 ||
+    !PROOF_CIPHERTEXT_PATTERN.test(input.ciphertext) ||
+    input.ciphertext.split('.', 3)[1] !== input.provider ||
+    typeof input.fingerprint !== 'string' ||
+    !FINGERPRINT_PATTERN.test(input.fingerprint) ||
+    typeof input.masked !== 'string' ||
+    !PROOF_MASKED_REFERENCE_PATTERN.test(input.masked) ||
+    input.keyVersion !== 2 ||
+    input.profileVersion !== 2
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function registrationFromRow(row: DataRecord): CustomerWorkspaceRegistration {
@@ -296,6 +342,81 @@ function createWorkspacePort(
   markUnhealthy: () => void,
 ): CustomerWorkspacePort {
   return Object.freeze({
+    async captureDryRunDepositProof(
+      input: Parameters<CustomerWorkspacePort['captureDryRunDepositProof']>[0],
+    ) {
+      if (isUnavailable()) return GENERIC_FAILURE;
+      return dispatch(async () => {
+        let databaseQueryCompleted = false;
+        try {
+          if (isUnavailable()) return GENERIC_FAILURE;
+          const record = readExactRecord(input, [
+            'authUserId',
+            'ciphertext',
+            'fingerprint',
+            'keyVersion',
+            'masked',
+            'playerId',
+            'profileVersion',
+            'provider',
+            'requestKey',
+          ]);
+          if (
+            !validAuthUserId(record.authUserId) ||
+            !validPlayerId(record.playerId) ||
+            !validRequestKey(record.requestKey) ||
+            !validProtectedProofReference(record)
+          ) {
+            return GENERIC_FAILURE;
+          }
+          const provider = record.provider as CustomerDepositProofProvider;
+          const result = await database.query(CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL, [
+            record.authUserId,
+            record.requestKey,
+            record.playerId,
+            provider,
+            record.ciphertext,
+            record.fingerprint,
+            record.masked,
+            record.keyVersion,
+            record.profileVersion,
+          ]);
+          databaseQueryCompleted = true;
+          if (isTerminallyUnavailable()) return GENERIC_FAILURE;
+          const row = oneRow(result.rows, [
+            'deposit_proof_request_id',
+            'provider_code',
+            'proof_status',
+            'submitted_at',
+            'request_replayed',
+          ]);
+          if (
+            !validAuthUserId(row.deposit_proof_request_id) ||
+            row.provider_code !== provider ||
+            row.proof_status !== 'proof_received' ||
+            !validDate(row.submitted_at) ||
+            typeof row.request_replayed !== 'boolean'
+          ) {
+            markUnhealthy();
+            return GENERIC_FAILURE;
+          }
+          return Object.freeze({
+            ok: true,
+            provider,
+            replayed: row.request_replayed,
+            status: 'proof_received',
+            submittedAt: row.submitted_at.toISOString(),
+          }) as Extract<
+            Awaited<ReturnType<CustomerWorkspacePort['captureDryRunDepositProof']>>,
+            { readonly ok: true }
+          >;
+        } catch {
+          if (databaseQueryCompleted) markUnhealthy();
+          return GENERIC_FAILURE;
+        }
+      });
+    },
+
     async captureDepositReference(
       input: Parameters<CustomerWorkspacePort['captureDepositReference']>[0],
     ) {

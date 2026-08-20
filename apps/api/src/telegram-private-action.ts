@@ -10,6 +10,8 @@ import {
   TELEGRAM_PRIVATE_ACTION_MAX_TIMESTAMP_SKEW_SECONDS,
   TELEGRAM_PRIVATE_ACTION_PATH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
   parseTelegramPlayerRegistrationCapabilityCallback,
@@ -103,9 +105,16 @@ const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
 const DEPOSIT_INTENT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId', 'amountEtb']);
 const DEPOSIT_REFERENCE_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken', 'transactionReference']);
+const DEPOSIT_PROOF_KEYS = new Set([
+  ...ROOT_MENU_KEYS,
+  'providerCode',
+  'playerId',
+  'transactionReference',
+]);
 const DEPOSIT_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken']);
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
 const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
+const DIRECT_PROOF_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
 
 function oneHeaderValue(request: TelegramPrivateActionRequest, name: string): string | undefined {
   const values: string[] = [];
@@ -202,6 +211,16 @@ function validDepositReference(value: unknown): value is string {
   );
 }
 
+function validDepositProofReference(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value === value.trim() &&
+    Array.from(value).length >= TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS &&
+    Array.from(value).length <= TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS &&
+    DIRECT_PROOF_REFERENCE_PATTERN.test(value)
+  );
+}
+
 /**
  * Strictly parse the versioned action envelope after transport authentication. It intentionally
  * performs only structural safety validation; platform and database authorization do not exist at
@@ -283,6 +302,25 @@ export function parseTelegramPrivateActionEnvelope(
         ...identity,
         kind: 'deposit_reference_command',
         depositToken: parsed.depositToken,
+        transactionReference: parsed.transactionReference,
+      };
+    }
+    case 'deposit_proof_command': {
+      if (!hasOnlyKeys(parsed, DEPOSIT_PROOF_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (
+        !identity ||
+        (parsed.providerCode !== 'cbe_birr' && parsed.providerCode !== 'telebirr') ||
+        !validPlayerIdText(parsed.playerId) ||
+        !validDepositProofReference(parsed.transactionReference)
+      ) {
+        return undefined;
+      }
+      return {
+        ...identity,
+        kind: 'deposit_proof_command',
+        providerCode: parsed.providerCode,
+        playerId: parsed.playerId,
         transactionReference: parsed.transactionReference,
       };
     }

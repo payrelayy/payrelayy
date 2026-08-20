@@ -32,7 +32,7 @@ export const messages = {
     en: 'FetanAgent private beta is temporarily unavailable. Please try again shortly.',
   },
   playerRegistrationMenu: {
-    en: 'Manage your KemerBet Player ID, or start a deposit with /deposit PLAYER_ID AMOUNT.',
+    en: 'Manage your KemerBet Player ID, or submit a dry-run proof with /deposit PROVIDER PLAYER_ID TRANSACTION_ID.',
   },
   addKemerBetPlayerId: {
     en: 'Add KemerBet Player ID',
@@ -59,7 +59,7 @@ export const messages = {
     en: 'Player ID setup is temporarily unavailable. Please try again shortly.',
   },
   depositInputInvalid: {
-    en: 'Use /deposit PLAYER_ID AMOUNT, /reference DEPOSIT_CODE TRANSACTION_REFERENCE, or /deposit_status DEPOSIT_CODE.',
+    en: 'Use /deposit cbe_birr PLAYER_ID TRANSACTION_ID or /deposit telebirr PLAYER_ID TRANSACTION_ID.',
   },
   depositUnavailable: {
     en: 'Deposit intake is temporarily unavailable. No payment action was started.',

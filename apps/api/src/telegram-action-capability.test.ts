@@ -1,3 +1,7 @@
+import {
+  DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
+  DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
+} from '@fetanagent/deposit-reference-protection';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -174,6 +178,44 @@ describe('Telegram Player ID capability protection', () => {
         semanticHmacSecret: keys.semanticHmacSecret,
       } as unknown as Parameters<typeof createTelegramActionSemanticHmac>[0]),
     ).toThrow('semantic consumer is invalid');
+  });
+
+  it('binds amount-free proof semantics to the provider, destination, and v2 protected reference', () => {
+    const base = {
+      consumer: 'capture_dry_run_deposit_proof' as const,
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      providerCode: 'telebirr' as const,
+      referenceFingerprint: 'd'.repeat(64),
+      referenceMasked: '***7890',
+      keyVersion: DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
+      profileVersion: DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
+      semanticHmacSecret: keys.semanticHmacSecret,
+    };
+    const protectedSemanticHmac = createTelegramActionSemanticHmac(base);
+
+    expect(protectedSemanticHmac).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+    expect(createTelegramActionSemanticHmac({ ...base, providerCode: 'cbe_birr' })).not.toBe(
+      protectedSemanticHmac,
+    );
+    expect(createTelegramActionSemanticHmac({ ...base, playerId: 'PLAYER-DEMO-43' })).not.toBe(
+      protectedSemanticHmac,
+    );
+    expect(
+      createTelegramActionSemanticHmac({ ...base, referenceFingerprint: 'e'.repeat(64) }),
+    ).not.toBe(protectedSemanticHmac);
+    expect(() =>
+      createTelegramActionSemanticHmac({
+        ...base,
+        keyVersion: 1,
+      } as unknown as Parameters<typeof createTelegramActionSemanticHmac>[0]),
+    ).toThrow('protected deposit-proof semantics');
+    expect(() =>
+      createTelegramActionSemanticHmac({
+        ...base,
+        profileVersion: 1,
+      } as unknown as Parameters<typeof createTelegramActionSemanticHmac>[0]),
+    ).toThrow('protected deposit-proof semantics');
   });
 
   it('fails closed on malformed internal identifiers or secrets', () => {

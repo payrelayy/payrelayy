@@ -55,6 +55,17 @@ const auth = Object.freeze({
 } satisfies CustomerWebAuthPort);
 
 const workspace = Object.freeze({
+  captureDryRunDepositProof: async ({
+    provider,
+  }: {
+    readonly provider: 'cbe_birr' | 'telebirr';
+  }) => ({
+    ok: true as const,
+    provider,
+    replayed: false,
+    status: 'proof_received' as const,
+    submittedAt: '2026-08-20T00:00:00.000Z',
+  }),
   captureDepositReference: async ({ depositIntentId }: { readonly depositIntentId: string }) => ({
     ok: true as const,
     depositIntentId,

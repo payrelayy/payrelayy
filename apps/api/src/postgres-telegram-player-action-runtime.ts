@@ -6,7 +6,10 @@ import {
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
-import { protectCbeBirrDepositReference } from '@fetanagent/deposit-reference-protection';
+import {
+  protectCbeBirrDepositReference,
+  protectDepositProofReference,
+} from '@fetanagent/deposit-reference-protection';
 import type { DepositStatus } from '@fetanagent/domain';
 import { Pool, type PoolConfig } from 'pg';
 
@@ -67,18 +70,11 @@ const CAPTURE_DRY_RUN_REFERENCE_SQL = `
     $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::smallint, $7::text
   )
 `;
-const OPEN_LIVE_DEPOSIT_SQL = `
-  select deposit_intent_id, provider_code, receiver_account_holder_name,
-         receiver_account_masked, receiver_customer_instruction, expected_amount_minor,
-         currency_code, payment_deadline_at, deposit_status,
-         origin_inbound_event_already_consumed
-  from app.open_telegram_live_deposit_intent($1::uuid, $2::text, $3::bigint, $4::text)
-`;
-const CAPTURE_LIVE_REFERENCE_SQL = `
-  select result_deposit_intent_id, submission_status, deposit_status, submitted_at,
-         origin_inbound_event_already_consumed
-  from app.capture_telegram_live_deposit_reference(
-    $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::smallint, $7::text
+const CAPTURE_DRY_RUN_PROOF_SQL = `
+  select deposit_proof_request_id, provider_code, proof_status, submitted_at, request_replayed
+  from app.capture_telegram_dry_run_deposit_proof(
+    $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
+    $7::smallint, $8::smallint, $9::text
   )
 `;
 const GET_CUSTOMER_DEPOSIT_SQL = `
@@ -356,11 +352,13 @@ async function handleDepositIntent(
   action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_intent_command' }>,
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
+  if (config.financialActionsMode !== 'dry_run') {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
   const expectedAmountMinor = amountEtbToMinor(action.amountEtb);
   if (!expectedAmountMinor) return { version: 1, outcome: 'deposit_input_invalid' };
-  const financialMode = config.financialActionsMode;
   const semanticHmac = createTelegramActionSemanticHmac({
-    consumer: financialMode === 'live' ? 'open_live_deposit_intent' : 'open_dry_run_deposit_intent',
+    consumer: 'open_dry_run_deposit_intent',
     originInboundEventId,
     playerId: action.playerId,
     expectedAmountMinor,
@@ -368,10 +366,12 @@ async function handleDepositIntent(
   });
   const row = oneRow(
     (
-      await database.query(
-        financialMode === 'live' ? OPEN_LIVE_DEPOSIT_SQL : OPEN_DRY_RUN_DEPOSIT_SQL,
-        [originInboundEventId, action.playerId, expectedAmountMinor, semanticHmac],
-      )
+      await database.query(OPEN_DRY_RUN_DEPOSIT_SQL, [
+        originInboundEventId,
+        action.playerId,
+        expectedAmountMinor,
+        semanticHmac,
+      ])
     ).rows,
   );
   if (
@@ -400,7 +400,7 @@ async function handleDepositIntent(
     customerInstruction: row.receiver_customer_instruction,
     paymentDeadline: row.payment_deadline_at.toISOString(),
     depositStatus: projectCustomerDepositStatus(row.deposit_status),
-    financialMode,
+    financialMode: 'dry_run',
   };
 }
 
@@ -410,18 +410,17 @@ async function handleDepositReference(
   action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_reference_command' }>,
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
+  if (config.financialActionsMode !== 'dry_run') {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
   const depositIntentId = decodeTelegramCapabilityId(action.depositToken);
   if (!depositIntentId) return { version: 1, outcome: 'deposit_input_invalid' };
-  const financialMode = config.financialActionsMode;
   const protectedReference = protectCbeBirrDepositReference(action.transactionReference, {
     encryptionSecret: config.telegramPlayerActionRuntime.depositReferenceEncryptionSecret,
     fingerprintSecret: config.telegramPlayerActionRuntime.depositReferenceFingerprintSecret,
   });
   const semanticHmac = createTelegramActionSemanticHmac({
-    consumer:
-      financialMode === 'live'
-        ? 'capture_live_deposit_reference'
-        : 'capture_dry_run_deposit_reference',
+    consumer: 'capture_dry_run_deposit_reference',
     originInboundEventId,
     depositIntentId,
     referenceFingerprint: protectedReference.fingerprint,
@@ -431,43 +430,104 @@ async function handleDepositReference(
   });
   const row = oneRow(
     (
-      await database.query(
-        financialMode === 'live' ? CAPTURE_LIVE_REFERENCE_SQL : CAPTURE_DRY_RUN_REFERENCE_SQL,
-        [
-          originInboundEventId,
-          depositIntentId,
-          protectedReference.ciphertext,
-          protectedReference.fingerprint,
-          protectedReference.masked,
-          protectedReference.keyVersion,
-          semanticHmac,
-        ],
-      )
+      await database.query(CAPTURE_DRY_RUN_REFERENCE_SQL, [
+        originInboundEventId,
+        depositIntentId,
+        protectedReference.ciphertext,
+        protectedReference.fingerprint,
+        protectedReference.masked,
+        protectedReference.keyVersion,
+        semanticHmac,
+      ])
     ).rows,
   );
   if (
     row.result_deposit_intent_id !== depositIntentId ||
-    row.submission_status !== (financialMode === 'live' ? 'verification_enqueued' : 'received') ||
+    row.submission_status !== 'received' ||
     !(row.submitted_at instanceof Date) ||
     Number.isNaN(row.submitted_at.getTime())
   )
     throw new TelegramPlayerActionRuntimeUnavailableError();
   if (
-    financialMode === 'dry_run' &&
-    (typeof row.deposit_submission_id !== 'string' || !UUID_PATTERN.test(row.deposit_submission_id))
+    typeof row.deposit_submission_id !== 'string' ||
+    !UUID_PATTERN.test(row.deposit_submission_id)
   ) {
-    throw new TelegramPlayerActionRuntimeUnavailableError();
-  }
-  if (financialMode === 'live' && row.deposit_status !== 'verification_pending') {
     throw new TelegramPlayerActionRuntimeUnavailableError();
   }
   return {
     version: 1,
     outcome: 'deposit_reference_received',
-    depositStatus: projectCustomerDepositStatus(
-      financialMode === 'live' ? 'verification_pending' : 'intake_received',
-    ),
-    financialMode,
+    depositStatus: projectCustomerDepositStatus('intake_received'),
+    financialMode: 'dry_run',
+  };
+}
+
+async function handleDepositProof(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_proof_command' }>,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  if (config.financialActionsMode !== 'dry_run') {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
+
+  const protectedReference = protectDepositProofReference({
+    provider: action.providerCode,
+    reference: action.transactionReference,
+    secrets: {
+      encryptionSecret:
+        config.telegramPlayerActionRuntime.depositProofReferenceEncryptionMasterSecret,
+      fingerprintSecret:
+        config.telegramPlayerActionRuntime.depositProofReferenceFingerprintMasterSecret,
+    },
+  });
+  const semanticHmac = createTelegramActionSemanticHmac({
+    consumer: 'capture_dry_run_deposit_proof',
+    originInboundEventId,
+    playerId: action.playerId,
+    providerCode: action.providerCode,
+    referenceFingerprint: protectedReference.fingerprint,
+    referenceMasked: protectedReference.masked,
+    keyVersion: protectedReference.keyVersion,
+    profileVersion: config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion,
+    semanticHmacSecret: config.telegramActionCapability.semanticHmacSecret,
+  });
+  const row = oneRow(
+    (
+      await database.query(CAPTURE_DRY_RUN_PROOF_SQL, [
+        originInboundEventId,
+        action.playerId,
+        action.providerCode,
+        protectedReference.ciphertext,
+        protectedReference.fingerprint,
+        protectedReference.masked,
+        protectedReference.keyVersion,
+        config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion,
+        semanticHmac,
+      ])
+    ).rows,
+  );
+  if (
+    typeof row.deposit_proof_request_id !== 'string' ||
+    !UUID_PATTERN.test(row.deposit_proof_request_id) ||
+    row.provider_code !== action.providerCode ||
+    row.proof_status !== 'proof_received' ||
+    !(row.submitted_at instanceof Date) ||
+    Number.isNaN(row.submitted_at.getTime()) ||
+    typeof row.request_replayed !== 'boolean'
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+
+  return {
+    version: 1,
+    outcome: 'deposit_proof_received',
+    proofToken: encodeTelegramCapabilityId(row.deposit_proof_request_id),
+    providerCode: action.providerCode,
+    providerName: action.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr',
+    proofStatus: 'proof_received',
+    financialMode: 'dry_run',
   };
 }
 
@@ -581,6 +641,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleDepositIntent(pool, inboundEventId, action, config);
           case 'deposit_reference_command':
             return await handleDepositReference(pool, inboundEventId, action, config);
+          case 'deposit_proof_command':
+            return await handleDepositProof(pool, inboundEventId, action, config);
           case 'deposit_status_command':
             return await handleDepositStatus(pool, inboundEventId, action);
         }

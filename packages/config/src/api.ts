@@ -14,6 +14,11 @@ import {
   CBE_DEPOSIT_REFERENCE_PRODUCTION_FINGERPRINT_SECRET_FILE,
   loadAndVerifyCbeDepositReferenceKeyProfile,
 } from './deposit-reference-profile.js';
+import {
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+  DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+  loadAndVerifyDepositProofReferenceProfile,
+} from './deposit-proof-reference-profile.js';
 
 export type ApiTelegramIngressConfig =
   | {
@@ -79,6 +84,9 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly depositReferenceEncryptionSecret: undefined;
       readonly depositReferenceFingerprintSecret: undefined;
       readonly depositReferenceKeyProfileVersion: undefined;
+      readonly depositProofReferenceEncryptionMasterSecret: undefined;
+      readonly depositProofReferenceFingerprintMasterSecret: undefined;
+      readonly depositProofReferenceProfileVersion: undefined;
       readonly tlsMode: undefined;
     }
   | {
@@ -94,6 +102,9 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly depositReferenceEncryptionSecret: string;
       readonly depositReferenceFingerprintSecret: string;
       readonly depositReferenceKeyProfileVersion: 1;
+      readonly depositProofReferenceEncryptionMasterSecret: string;
+      readonly depositProofReferenceFingerprintMasterSecret: string;
+      readonly depositProofReferenceProfileVersion: 2;
       readonly tlsMode: 'verify-full';
     };
 
@@ -447,6 +458,9 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       depositReferenceEncryptionSecret: undefined,
       depositReferenceFingerprintSecret: undefined,
       depositReferenceKeyProfileVersion: undefined,
+      depositProofReferenceEncryptionMasterSecret: undefined,
+      depositProofReferenceFingerprintMasterSecret: undefined,
+      depositProofReferenceProfileVersion: undefined,
       tlsMode: undefined,
     };
   }
@@ -500,9 +514,14 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     nodeEnv === 'production' &&
     (environment.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET !== undefined ||
       environment.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET !== undefined ||
-      environment.CBE_DEPOSIT_REFERENCE_KEY_PROFILE !== undefined)
+      environment.CBE_DEPOSIT_REFERENCE_KEY_PROFILE !== undefined ||
+      environment.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET !== undefined ||
+      environment.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET !== undefined ||
+      environment.DEPOSIT_PROOF_REFERENCE_PROFILE !== undefined)
   ) {
-    throw new Error('CBE deposit-reference keys and profile must use fixed files in production.');
+    throw new Error(
+      'Deposit-reference roots and profiles must use their fixed versioned files in production.',
+    );
   }
 
   const depositReferenceEncryptionSecret = requiredHexHmacSecret(
@@ -535,6 +554,36 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       fingerprintSecret: depositReferenceFingerprintSecret,
     },
   );
+  const depositProofReferenceEncryptionMasterSecret = requiredHexHmacSecret(
+    secretFromEnvironmentOrFile(
+      environment.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET,
+      environment.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE,
+      'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET',
+      'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE',
+      DEPOSIT_PROOF_REFERENCE_PRODUCTION_ENCRYPTION_MASTER_SECRET_FILE,
+      nodeEnv,
+    ),
+    'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET',
+  );
+  const depositProofReferenceFingerprintMasterSecret = requiredHexHmacSecret(
+    secretFromEnvironmentOrFile(
+      environment.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET,
+      environment.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE,
+      'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET',
+      'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE',
+      DEPOSIT_PROOF_REFERENCE_PRODUCTION_FINGERPRINT_MASTER_SECRET_FILE,
+      nodeEnv,
+    ),
+    'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET',
+  );
+  const depositProofReferenceProfile = loadAndVerifyDepositProofReferenceProfile(
+    environment,
+    nodeEnv,
+    {
+      encryptionMasterSecret: depositProofReferenceEncryptionMasterSecret,
+      fingerprintMasterSecret: depositProofReferenceFingerprintMasterSecret,
+    },
+  );
 
   return {
     enabled: true,
@@ -559,6 +608,9 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     depositReferenceEncryptionSecret,
     depositReferenceFingerprintSecret,
     depositReferenceKeyProfileVersion: depositReferenceKeyProfile.version,
+    depositProofReferenceEncryptionMasterSecret,
+    depositProofReferenceFingerprintMasterSecret,
+    depositProofReferenceProfileVersion: depositProofReferenceProfile.version,
     tlsMode: 'verify-full',
   };
 }
@@ -603,6 +655,14 @@ function assertDistinctApiTelegramHmacSecrets(
       [
         'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
         telegramPlayerActionRuntime.depositReferenceFingerprintSecret,
+      ],
+      [
+        'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET',
+        telegramPlayerActionRuntime.depositProofReferenceEncryptionMasterSecret,
+      ],
+      [
+        'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET',
+        telegramPlayerActionRuntime.depositProofReferenceFingerprintMasterSecret,
       ],
     );
   }
@@ -698,6 +758,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly connectionConfigured: boolean;
     readonly depositReferenceKeysConfigured: boolean;
     readonly depositReferenceKeyProfileVersion: 1 | undefined;
+    readonly depositProofReferenceMastersConfigured: boolean;
+    readonly depositProofReferenceProfileVersion: 2 | undefined;
     readonly payloadHmacConfigured: boolean;
     readonly tlsMode: 'verify-full' | undefined;
   };
@@ -733,6 +795,9 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
       depositReferenceKeysConfigured: config.telegramPlayerActionRuntime.enabled,
       depositReferenceKeyProfileVersion:
         config.telegramPlayerActionRuntime.depositReferenceKeyProfileVersion,
+      depositProofReferenceMastersConfigured: config.telegramPlayerActionRuntime.enabled,
+      depositProofReferenceProfileVersion:
+        config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion,
       payloadHmacConfigured: config.telegramPlayerActionRuntime.enabled,
       tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },

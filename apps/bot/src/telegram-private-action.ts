@@ -1,6 +1,8 @@
 import {
   TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS,
+  TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
   parseTelegramPlayerRegistrationCapabilityCallback,
@@ -42,6 +44,7 @@ const MAXIMUM_TELEGRAM_IDENTIFIER = 9_007_199_254_740_991;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
 const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
+const DIRECT_PROOF_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
 
 function isSafeTelegramIdentifier(value: number, permitsZero: boolean): boolean {
   return (
@@ -85,6 +88,17 @@ function validPlayerIdText(value: unknown): value is string {
     value.trim().length > 0 &&
     Array.from(value).length <= TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS &&
     !CONTROL_CHARACTER_PATTERN.test(value)
+  );
+}
+
+/** Recognize only a private, exact `/deposit` command prefix for fixed invalid-input handling. */
+export function isRecognizedTelegramDepositCommand(
+  metadata: TelegramDepositCommandMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    typeof metadata.command === 'string' &&
+    /^\/deposit(?:\s|$)/u.test(metadata.command)
   );
 }
 
@@ -154,6 +168,39 @@ export function reduceTelegramDepositIntentCommand(
     return undefined;
   }
   return { ...identity, kind: 'deposit_intent_command', playerId, amountEtb };
+}
+
+/**
+ * Parse the amount-free, direct-reference proof-first dry-run command. The provider is an exact
+ * allowlist value, and the reference remains trusted-memory input until the API protects it.
+ */
+export function reduceTelegramDepositProofCommand(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.command !== 'string') return undefined;
+  const match = /^\/deposit (cbe_birr|telebirr) ([^\s]+) ([^\s]+)$/u.exec(metadata.command);
+  if (!match) return undefined;
+  const [, providerCode, playerId, transactionReference] = match;
+  if (
+    (providerCode !== 'cbe_birr' && providerCode !== 'telebirr') ||
+    !validPlayerIdText(playerId) ||
+    !transactionReference ||
+    Array.from(transactionReference).length <
+      TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS ||
+    Array.from(transactionReference).length >
+      TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS ||
+    !DIRECT_PROOF_REFERENCE_PATTERN.test(transactionReference)
+  ) {
+    return undefined;
+  }
+  return {
+    ...identity,
+    kind: 'deposit_proof_command',
+    providerCode,
+    playerId,
+    transactionReference,
+  };
 }
 
 /** Parse an exact compact deposit token and a bounded single-token transaction reference. */

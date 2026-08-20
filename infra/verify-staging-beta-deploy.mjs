@@ -74,6 +74,7 @@ assert.match(workflow, /UserKnownHostsFile=/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper verify/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper install/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper fresh-start/g);
+assert.match(workflow, /fetanagent-staging-deploy-helper bot-disabled-ready '\$GITHUB_SHA'/g);
 assert.doesNotMatch(
   workflow,
   /fetanagent-staging-deploy-helper start '\$GITHUB_SHA'/,
@@ -427,6 +428,12 @@ assert.match(
   workflow,
   /CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: \$\{\{ vars\.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON \}\}/,
 );
+assert.match(workflow, /DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET/);
+assert.match(workflow, /DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET/);
+assert.match(
+  workflow,
+  /DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: \$\{\{ vars\.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON \}\}/,
+);
 assert.match(workflow, /distinct_count/);
 assert.doesNotMatch(
   workflow,
@@ -440,7 +447,10 @@ assert.match(
 );
 assert.match(workflow, /STAGING_SUPABASE_PUBLISHABLE_KEY/);
 assert.match(workflow, /SUPABASE_CA_CERTIFICATE_PEM/);
-assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTIONS_MODE=live/);
+assert.doesNotMatch(
+  workflow,
+  /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTIONS_MODE=live|KEMERBET_EXECUTOR_ENABLED=true|KEMERBET_FINAL_ACTION_ENABLED=true/,
+);
 
 const protectedDeployInputs =
   /- name: Validate protected deploy inputs([\s\S]*?)\n\s+- name: Stop any prior staging project/u.exec(
@@ -455,7 +465,23 @@ assert.match(
   protectedDeployInputs,
   /CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: \$\{\{ secrets\.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET \}\}/,
 );
-assert.match(protectedDeployInputs, /\[\[ "\$distinct_count" -eq 13 \]\]/);
+assert.match(
+  protectedDeployInputs,
+  /DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: \$\{\{ secrets\.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET \}\}/,
+);
+assert.match(
+  protectedDeployInputs,
+  /DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: \$\{\{ secrets\.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET \}\}/,
+);
+assert.match(
+  protectedDeployInputs,
+  /\[\[ "\$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" =~ \^\[0-9a-f\]\{64\}\$ \]\]/,
+);
+assert.match(
+  protectedDeployInputs,
+  /\[\[ "\$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" =~ \^\[0-9a-f\]\{64\}\$ \]\]/,
+);
+assert.match(protectedDeployInputs, /\[\[ "\$distinct_count" -eq 15 \]\]/);
 assert.match(
   protectedDeployInputs,
   /const encoded = process\.env\.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON/,
@@ -470,6 +496,19 @@ assert.match(
   protectedDeployInputs,
   /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" > "\$secret_dir\/cbe-deposit-reference-key-profile\.v1\.json"/,
 );
+assert.match(
+  protectedDeployInputs,
+  /const encoded = process\.env\.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON/,
+);
+assert.match(
+  protectedDeployInputs,
+  /Object\.keys\(profile\)\.sort\(\)\.join\(','\) !==\s+'encryptionMasterFingerprint,fingerprintMasterFingerprint,version'/,
+);
+assert.match(protectedDeployInputs, /profile\.version !== 2/);
+assert.match(
+  protectedDeployInputs,
+  /printf '%s\\n' "\$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" > "\$secret_dir\/deposit-proof-reference-profile\.v2\.json"/,
+);
 const cbeProfileMaterialization =
   /printf '%s\\n' "\$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"([\s\S]*?)printf '%s\\n' 'telegram-disabled-until-separate-smoke'/u.exec(
     protectedDeployInputs,
@@ -483,10 +522,26 @@ assert.doesNotMatch(
   /createHash|createHmac|sha256sum|openssl|xxd|digest\s*\(/,
   'ordinary deployment must never derive or self-approve the immutable key profile',
 );
+const providerProofProfileMaterialization =
+  /printf '%s\\n' "\$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET"([\s\S]*?)printf '%s\\n' 'telegram-disabled-until-separate-smoke'/u.exec(
+    protectedDeployInputs,
+  )?.[1];
+assert.ok(
+  providerProofProfileMaterialization,
+  'The bounded provider-proof v2 roots/profile materialization block must exist.',
+);
+assert.doesNotMatch(
+  providerProofProfileMaterialization,
+  /createHash|createHmac|sha256sum|openssl|xxd|digest\s*\(/,
+  'ordinary deployment must never derive or self-approve the provider-proof v2 profile',
+);
 for (const releaseInput of [
   'cbe-deposit-reference-encryption-key',
   'cbe-deposit-reference-fingerprint-key',
   'cbe-deposit-reference-key-profile.v1.json',
+  'deposit-proof-reference-encryption-master',
+  'deposit-proof-reference-fingerprint-master',
+  'deposit-proof-reference-profile.v2.json',
   'customer-web-database-url',
   'customer-web-publishable-key',
   'customer-web-rate-limit-hmac',
@@ -499,6 +554,9 @@ for (const selector of [
   'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE',
   'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE',
   'FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE',
+  'FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE',
+  'FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE',
+  'FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE',
   'FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE',
   'FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE',
   'FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE',
@@ -623,9 +681,43 @@ assert.match(freshBotRuntime, /TELEGRAM_BOT_ENABLED=true/);
 assert.match(freshBotRuntime, /TELEGRAM_BETA_ADMISSION_ENABLED=true/);
 assert.match(freshBotRuntime, /KEMERBET_EXECUTOR_ENABLED=false/);
 assert.match(freshBotRuntime, /KEMERBET_FINAL_ACTION_ENABLED=false/);
+assert.match(freshBotRuntime, /INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false/);
+assert.match(freshBotRuntime, /INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=true/);
+assert.match(
+  freshBotRuntime,
+  /DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE=\/run\/secrets\/deposit_proof_reference_encryption_master/,
+);
+assert.match(
+  freshBotRuntime,
+  /DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE=\/run\/secrets\/deposit_proof_reference_fingerprint_master/,
+);
+assert.match(
+  freshBotRuntime,
+  /DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=\/etc\/fetanagent\/deposit-proof-reference-profile\.v2\.json/,
+);
+assert.match(freshBotRuntime, /depositProofReferenceMastersConfigured/);
+assert.match(freshBotRuntime, /depositProofReferenceProfileVersion/);
 assert.match(freshBotRuntime, /RestartCount/);
 assert.match(freshBotRuntime, /Telegram bot started in private beta admission mode\./);
-assert.doesNotMatch(freshBotRuntime, /container logs(?! --tail 80)|cat|token|password|secret/);
+assert.doesNotMatch(
+  freshBotRuntime,
+  /container logs(?! --tail 80)|\bcat\b|token=|password=|echo [^\n]*(?:SECRET|PROFILE)/,
+);
+
+const freshPrivateRuntime = /require_exact_fresh_private_runtime\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(freshPrivateRuntime, 'The helper must define an exact fresh-host private runtime gate.');
+assert.match(freshPrivateRuntime, /FINANCIAL_ACTIONS_MODE=dry_run/);
+assert.match(freshPrivateRuntime, /KEMERBET_EXECUTOR_ENABLED=false/);
+assert.match(freshPrivateRuntime, /KEMERBET_FINAL_ACTION_ENABLED=false/);
+assert.match(freshPrivateRuntime, /INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false/);
+assert.match(
+  freshPrivateRuntime,
+  /INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=true/,
+);
+assert.match(freshPrivateRuntime, /depositProofReferenceMastersConfigured/);
+assert.match(freshPrivateRuntime, /depositProofReferenceProfileVersion/);
 
 const disabledBotReady = /require_fresh_bot_disabled_ready\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(disabledBotReady, 'The helper must define the fresh-host disabled-bot gate.');

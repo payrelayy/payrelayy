@@ -128,10 +128,14 @@ services:
       CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/customer_web_supabase_publishable_key
       CUSTOMER_WEB_DATABASE_URL_FILE: /run/secrets/customer_web_database_url
       CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: /run/secrets/customer_web_rate_limit_hmac
+      DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE: /run/secrets/deposit_proof_reference_encryption_master
+      DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE: /run/secrets/deposit_proof_reference_fingerprint_master
+      DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
       INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true'
       INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true'
       INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'
+      INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'true'
       INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true'
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
@@ -161,9 +165,24 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
+      - source: deposit_proof_reference_encryption_master
+        target: deposit_proof_reference_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: deposit_proof_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
     configs:
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: deposit_proof_reference_profile
+        target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
         uid: '10001'
         gid: '10001'
         mode: 0444
@@ -293,6 +312,9 @@ services:
       CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: /run/secrets/cbe_deposit_reference_encryption_key
       CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE: /run/secrets/cbe_deposit_reference_fingerprint_key
       CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE: /etc/fetanagent/cbe-deposit-reference-key-profile.v1.json
+      DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE: /run/secrets/deposit_proof_reference_encryption_master
+      DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE: /run/secrets/deposit_proof_reference_fingerprint_master
+      DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
@@ -338,6 +360,16 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
+      - source: deposit_proof_reference_encryption_master
+        target: deposit_proof_reference_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: deposit_proof_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
     configs:
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
@@ -346,6 +378,11 @@ services:
         mode: 0444
       - source: cbe_deposit_reference_key_profile
         target: /etc/fetanagent/cbe-deposit-reference-key-profile.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: deposit_proof_reference_profile
+        target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
         uid: '10001'
         gid: '10001'
         mode: 0444
@@ -540,13 +577,15 @@ networks:
     attachable: false
 
 # This is the public CA downloaded for the staging Supabase project, verified out of band before
-# use. It is mounted only into the three database clients so Node extends (rather than replaces) its
+# use. It is mounted only into the four database clients so Node extends (rather than replaces) its
 # trust set.
 configs:
   supabase_ca_certificate:
     file: ${FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
   cbe_deposit_reference_key_profile:
     file: ${FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE:?set the immutable CBE deposit-reference key-profile file}
+  deposit_proof_reference_profile:
+    file: ${FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE:?set the immutable provider-proof v2 reference profile file}
 
 # Every source is an operator-owned file outside the repository. The two transport-HMAC files
 # contain the same value but remain separate mounts so neither service can read the other's file.
@@ -581,6 +620,10 @@ secrets:
     file: ${FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE:?set the external CBE deposit-reference encryption key file}
   cbe_deposit_reference_fingerprint_key:
     file: ${FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE:?set the external CBE deposit-reference fingerprint key file}
+  deposit_proof_reference_encryption_master:
+    file: ${FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE:?set the external provider-proof v2 encryption master file}
+  deposit_proof_reference_fingerprint_master:
+    file: ${FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE:?set the external provider-proof v2 fingerprint master file}
   telegram_bot_token:
     file: ${FETANAGENT_STAGING_BOT_TOKEN_FILE:?set an external staging bot token file}
   bot_beta_admission_transport_hmac:

@@ -36,7 +36,13 @@ function environmentThatRejectsTelegramReads(): NodeJS.ProcessEnv {
           property === 'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET' ||
           property === 'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE' ||
           property === 'CBE_DEPOSIT_REFERENCE_KEY_PROFILE' ||
-          property === 'CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE'
+          property === 'CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE' ||
+          property === 'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET' ||
+          property === 'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE' ||
+          property === 'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET' ||
+          property === 'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE' ||
+          property === 'DEPOSIT_PROOF_REFERENCE_PROFILE' ||
+          property === 'DEPOSIT_PROOF_REFERENCE_PROFILE_FILE'
         ) {
           throw new Error(`unexpected Telegram environment read: ${String(property)}`);
         }
@@ -56,6 +62,19 @@ describe('runtime configuration isolation', () => {
       .digest('hex')}`,
     version: 1,
   });
+  const proofReferenceProfile = (
+    encryptionMasterSecret = '1'.repeat(64),
+    fingerprintMasterSecret = '2'.repeat(64),
+  ) =>
+    JSON.stringify({
+      encryptionMasterFingerprint: `sha256:${createHash('sha256')
+        .update(Buffer.from(encryptionMasterSecret, 'hex'))
+        .digest('hex')}`,
+      fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+        .update(Buffer.from(fingerprintMasterSecret, 'hex'))
+        .digest('hex')}`,
+      version: 2,
+    });
   const playerActionEnvironment = {
     NODE_ENV: 'test',
     INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
@@ -68,6 +87,9 @@ describe('runtime configuration isolation', () => {
     CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
     CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
     CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceKeyProfile,
+    DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: '1'.repeat(64),
+    DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: '2'.repeat(64),
+    DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile(),
   } as const;
 
   it('defaults API financial actions to dry-run mode', () => {
@@ -88,6 +110,8 @@ describe('runtime configuration isolation', () => {
     });
     expect(config.telegramPlayerActionRuntime).toMatchObject({
       enabled: true,
+      depositReferenceKeyProfileVersion: 1,
+      depositProofReferenceProfileVersion: 2,
       tlsMode: 'verify-full',
       connection: {
         host: 'db.spzpiyxheappsfyswewl.supabase.co',
@@ -98,6 +122,8 @@ describe('runtime configuration isolation', () => {
     expect(redacted).not.toContain('password');
     expect(redacted).not.toContain('d'.repeat(64));
     expect(redacted).not.toContain('e'.repeat(64));
+    expect(redacted).not.toContain('1'.repeat(64));
+    expect(redacted).not.toContain('2'.repeat(64));
   });
 
   it('rejects a foreign project, a generic role, and shared Player-ID action HMACs', () => {
@@ -133,6 +159,15 @@ describe('runtime configuration isolation', () => {
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,
+        DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: 'c'.repeat(64),
+        DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile('c'.repeat(64), '2'.repeat(64)),
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('must be distinct');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
         CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'c'.repeat(64),
         CBE_DEPOSIT_REFERENCE_KEY_PROFILE: JSON.stringify({
           encryptionKeyFingerprint: `sha256:${createHash('sha256')
@@ -149,7 +184,7 @@ describe('runtime configuration isolation', () => {
     ).toThrow('must be distinct');
   });
 
-  it('rejects inline deposit-reference keys and profile in production', () => {
+  it('rejects inline legacy and proof-reference roots and profiles in production', () => {
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,
@@ -157,7 +192,7 @@ describe('runtime configuration isolation', () => {
         PLAYER_ACTION_DATABASE_URL:
           'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),
-    ).toThrow('must use fixed files in production');
+    ).toThrow('fixed versioned files in production');
   });
 
   it('keeps Telegram configuration out of the API process', () => {

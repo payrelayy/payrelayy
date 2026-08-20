@@ -75,6 +75,19 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
+    value.outcome === 'deposit_proof_received' &&
+    keys.length === 7 &&
+    typeof value.proofToken === 'string' &&
+    /^[A-Za-z0-9_-]{22}$/u.test(value.proofToken) &&
+    (value.providerCode === 'cbe_birr' || value.providerCode === 'telebirr') &&
+    ((value.providerCode === 'cbe_birr' && value.providerName === 'CBE Birr') ||
+      (value.providerCode === 'telebirr' && value.providerName === 'TeleBirr')) &&
+    value.proofStatus === 'proof_received' &&
+    value.financialMode === 'dry_run'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     value.outcome === 'deposit_status' &&
     keys.length === 5 &&
     typeof value.amountMinor === 'string' &&

@@ -168,4 +168,34 @@ describe('Telegram private-action bot client', () => {
       }),
     ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
   });
+
+  it('accepts only the exact amount-free dry-run proof projection', async () => {
+    const proofResult = {
+      version: 1,
+      outcome: 'deposit_proof_received',
+      proofToken: 'B'.repeat(22),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'proof_received',
+      financialMode: 'dry_run',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => proofResult }),
+      }),
+    ).resolves.toEqual(proofResult);
+
+    for (const unsafeResult of [
+      { ...proofResult, providerName: 'CBE Birr' },
+      { ...proofResult, financialMode: 'live' },
+      { ...proofResult, amountMinor: '2500' },
+      { ...proofResult, transactionReference: 'SYNTHETICREF7890' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => unsafeResult }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
 });

@@ -56,6 +56,38 @@ function normalizedSourceAttestation(source: string): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(canonicalSource, 'utf8').digest('hex')}`;
 }
 
+function exactSourceSlice(source: string, startMarker: string, endMarker: string): string {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  if (start < 0 || end <= start) throw new Error('The reviewed source boundary is unavailable.');
+  return source.slice(start, end).trimEnd();
+}
+
+function submittedReferenceCaptureSource(source: string): string {
+  return [
+    exactSourceSlice(source, 'import { createCipheriv', 'import { types as nodeUtilTypes'),
+    exactSourceSlice(source, 'const REFERENCE_PATTERN', 'const DIRECT_PROOF_REFERENCE_PATTERN'),
+    exactSourceSlice(source, 'const SECRET_PATTERN', 'export const DEPOSIT_REFERENCE_KEY_VERSION'),
+    exactSourceSlice(
+      source,
+      'export const DEPOSIT_REFERENCE_KEY_VERSION',
+      'export const DEPOSIT_PROOF_REFERENCE_KEY_VERSION',
+    ),
+    exactSourceSlice(
+      source,
+      'export class DepositReferenceProtectionError',
+      'function validReference',
+    ),
+    exactSourceSlice(source, 'function validReference', 'function validDepositProofReference'),
+    exactSourceSlice(source, 'function exactNonce', 'function exactDataProperties'),
+    exactSourceSlice(
+      source,
+      '/**\n * Protects a customer-entered CBE Birr reference',
+      '/**\n * Protects a provider receipt reference',
+    ),
+  ].join('\n\n');
+}
+
 describe('CBE Birr normalization ownership inventory', () => {
   it('returns one deeply frozen blocked inventory for the exact current metadata', () => {
     const result = evaluateCbeBirrNormalizationOwnership(
@@ -69,7 +101,7 @@ describe('CBE Birr normalization ownership inventory', () => {
       submittedReferenceNormalizationVersion: null,
       submittedReferenceProtectionKeyVersion: 1,
       submittedReferenceSourceAttestation:
-        'sha256:002f87dcaa46d0bc49189e21cceaca9d7ea841746edfd4efd520863c4a54b2a4',
+        'sha256:56a14b1b377a2d64de345ae03d390d0a01fa46f91a3af8017ed2137e74671195',
       fixtureSchemaLabel: 'FETANAGENT_CBE_BIRR_AUTHORITATIVE_FIXTURE_V1',
       fixtureSchemaVersion: 1,
       fixtureNormalizerVersion: 1,
@@ -120,7 +152,7 @@ describe('CBE Birr normalization ownership inventory', () => {
         authoritativeOwner: 'unassigned',
         jointReviewStatus: 'not_completed',
         sourceAttestation:
-          'sha256:002f87dcaa46d0bc49189e21cceaca9d7ea841746edfd4efd520863c4a54b2a4',
+          'sha256:56a14b1b377a2d64de345ae03d390d0a01fa46f91a3af8017ed2137e74671195',
         exactTransformations: [
           'reject_input_changed_by_trim',
           'require_5_to_128_ascii_alphanumeric_dot_underscore_or_hyphen_code_points',
@@ -355,14 +387,23 @@ describe('normalization inventory compatibility regressions', () => {
         query: '?raw',
       }),
     );
+    const submittedReferenceSource = submittedReferenceCaptureSource(protectionSource);
 
-    expect(protectionSource).toContain('value === value.trim()');
-    expect(protectionSource).toContain('const REFERENCE_PATTERN = /^[A-Za-z0-9._-]+$/u;');
-    expect(protectionSource).toContain('export const DEPOSIT_REFERENCE_MIN_CODE_POINTS = 5;');
-    expect(protectionSource).toContain('export const DEPOSIT_REFERENCE_MAX_CODE_POINTS = 128;');
-    expect(protectionSource).toContain('export const DEPOSIT_REFERENCE_KEY_VERSION = 1 as const;');
-    expect(protectionSource).toContain('const normalizedReference = reference.toUpperCase();');
-    expect(normalizedSourceAttestation(protectionSource)).toBe(
+    expect(submittedReferenceSource).toContain('value === value.trim()');
+    expect(submittedReferenceSource).toContain('const REFERENCE_PATTERN = /^[A-Za-z0-9._-]+$/u;');
+    expect(submittedReferenceSource).toContain(
+      'export const DEPOSIT_REFERENCE_MIN_CODE_POINTS = 5;',
+    );
+    expect(submittedReferenceSource).toContain(
+      'export const DEPOSIT_REFERENCE_MAX_CODE_POINTS = 128;',
+    );
+    expect(submittedReferenceSource).toContain(
+      'export const DEPOSIT_REFERENCE_KEY_VERSION = 1 as const;',
+    );
+    expect(submittedReferenceSource).toContain(
+      'const normalizedReference = reference.toUpperCase();',
+    );
+    expect(normalizedSourceAttestation(submittedReferenceSource)).toBe(
       CBE_BIRR_SUBMITTED_REFERENCE_CAPTURE_SOURCE_ATTESTATION,
     );
 

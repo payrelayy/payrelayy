@@ -102,6 +102,9 @@ stop_project() {
     "$SECRET_ROOT/cbe-deposit-reference-encryption-key" \
     "$SECRET_ROOT/cbe-deposit-reference-fingerprint-key" \
     "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json" \
+    "$SECRET_ROOT/deposit-proof-reference-encryption-master" \
+    "$SECRET_ROOT/deposit-proof-reference-fingerprint-master" \
+    "$SECRET_ROOT/deposit-proof-reference-profile.v2.json" \
     "$SECRET_ROOT/bot-action-transport-hmac" \
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
@@ -240,7 +243,7 @@ require_exact_private_runtime() {
 
 require_exact_fresh_private_runtime() {
   local commit_sha="$1"
-  local container_id environment health ids revision service services state
+  local api_logs container_id environment forbidden_environment health ids revision service services state
   local expected_environment
   local -a expected_services=(api beta-admission customer-web owner-control)
 
@@ -290,10 +293,44 @@ require_exact_fresh_private_runtime() {
         'INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true' \
         'INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true' \
         'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false' \
+        'INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=true' \
+        'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_encryption_master' \
+        'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_fingerprint_master' \
+        'DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=/etc/fetanagent/deposit-proof-reference-profile.v2.json' \
         'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=true'; do
         grep -Fxq "$expected_environment" <<<"$environment" ||
           die 'the fresh-host customer-web capability environment is not exact'
       done
+    fi
+    if [[ "$service" == 'api' ]]; then
+      for expected_environment in \
+        'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_encryption_master' \
+        'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_fingerprint_master' \
+        'DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=/etc/fetanagent/deposit-proof-reference-profile.v2.json'; do
+        grep -Fxq "$expected_environment" <<<"$environment" ||
+          die 'the fresh-host API provider-proof v2 environment is not exact'
+      done
+      api_logs="$(docker_local container logs --tail 80 "$ids" 2>&1)" ||
+        die 'the fresh-host API startup output could not be inspected'
+      grep -Fq '"financialActionsMode":"dry_run"' <<<"$api_logs" ||
+        die 'the fresh-host API did not report the dry-run startup contract'
+      grep -Fq '"depositProofReferenceMastersConfigured":true' <<<"$api_logs" ||
+        die 'the fresh-host API did not report configured provider-proof v2 roots'
+      grep -Fq '"depositProofReferenceProfileVersion":2' <<<"$api_logs" ||
+        die 'the fresh-host API did not report the provider-proof v2 profile identity'
+    fi
+    if [[ "$service" == 'api' || "$service" == 'customer-web' ]]; then
+      for forbidden_environment in \
+        DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET \
+        DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET \
+        DEPOSIT_PROOF_REFERENCE_PROFILE; do
+        ! grep -Eq "^${forbidden_environment}=" <<<"$environment" ||
+          die "the fresh-host $service provider-proof v2 material is exposed inline"
+      done
+    else
+      ! grep -Eq '^(DEPOSIT_PROOF_REFERENCE_|INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=)' \
+        <<<"$environment" ||
+        die "the fresh-host $service unexpectedly receives the provider-proof v2 contract"
     fi
   done
 
@@ -302,7 +339,7 @@ require_exact_fresh_private_runtime() {
 
 require_exact_fresh_bot_runtime() {
   local commit_sha="$1"
-  local container_id environment health ids restart_count revision service services state
+  local api_logs container_id environment forbidden_environment health ids restart_count revision service services state
   local expected_environment
   local -a expected_services=(api beta-admission bot customer-web owner-control)
 
@@ -349,10 +386,45 @@ require_exact_fresh_bot_runtime() {
         'INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true' \
         'INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true' \
         'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=false' \
+        'INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=true' \
+        'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_encryption_master' \
+        'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_fingerprint_master' \
+        'DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=/etc/fetanagent/deposit-proof-reference-profile.v2.json' \
         'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=true'; do
         grep -Fxq "$expected_environment" <<<"$environment" ||
           die 'the fresh-host customer-web capability environment is not exact'
       done
+    fi
+
+    if [[ "$service" == 'api' ]]; then
+      for expected_environment in \
+        'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_encryption_master' \
+        'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_fingerprint_master' \
+        'DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=/etc/fetanagent/deposit-proof-reference-profile.v2.json'; do
+        grep -Fxq "$expected_environment" <<<"$environment" ||
+          die 'the fresh-host API provider-proof v2 environment is not exact'
+      done
+      api_logs="$(docker_local container logs --tail 80 "$ids" 2>&1)" ||
+        die 'the fresh-host API startup output could not be inspected'
+      grep -Fq '"financialActionsMode":"dry_run"' <<<"$api_logs" ||
+        die 'the fresh-host API did not report the dry-run startup contract'
+      grep -Fq '"depositProofReferenceMastersConfigured":true' <<<"$api_logs" ||
+        die 'the fresh-host API did not report configured provider-proof v2 roots'
+      grep -Fq '"depositProofReferenceProfileVersion":2' <<<"$api_logs" ||
+        die 'the fresh-host API did not report the provider-proof v2 profile identity'
+    fi
+    if [[ "$service" == 'api' || "$service" == 'customer-web' ]]; then
+      for forbidden_environment in \
+        DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET \
+        DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET \
+        DEPOSIT_PROOF_REFERENCE_PROFILE; do
+        ! grep -Eq "^${forbidden_environment}=" <<<"$environment" ||
+          die "the fresh-host $service provider-proof v2 material is exposed inline"
+      done
+    else
+      ! grep -Eq '^(DEPOSIT_PROOF_REFERENCE_|INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=)' \
+        <<<"$environment" ||
+        die "the fresh-host $service unexpectedly receives the provider-proof v2 contract"
     fi
 
     if [[ "$service" == 'bot' ]]; then
@@ -767,6 +839,8 @@ case "$command" in
       api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
       cbe-deposit-reference-encryption-key cbe-deposit-reference-fingerprint-key \
       cbe-deposit-reference-key-profile.v1.json \
+      deposit-proof-reference-encryption-master deposit-proof-reference-fingerprint-master \
+      deposit-proof-reference-profile.v2.json \
       customer-web-database-url customer-web-publishable-key customer-web-rate-limit-hmac \
       api-action-transport-hmac \
       beta-database-url beta-payload-hmac beta-transport-hmac bot-token bot-transport-hmac \
@@ -800,6 +874,9 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$incoming/cbe-deposit-reference-encryption-key" "$SECRET_ROOT/cbe-deposit-reference-encryption-key"
     install -o 10001 -g 10001 -m 0400 "$incoming/cbe-deposit-reference-fingerprint-key" "$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
     install -o root -g root -m 0444 "$incoming/cbe-deposit-reference-key-profile.v1.json" "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+    install -o 10001 -g 10001 -m 0400 "$incoming/deposit-proof-reference-encryption-master" "$SECRET_ROOT/deposit-proof-reference-encryption-master"
+    install -o 10001 -g 10001 -m 0400 "$incoming/deposit-proof-reference-fingerprint-master" "$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+    install -o root -g root -m 0444 "$incoming/deposit-proof-reference-profile.v2.json" "$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-action-transport-hmac" "$SECRET_ROOT/bot-action-transport-hmac"
     install -o 10001 -g 10001 -m 0400 "$incoming/bot-token" "$SECRET_ROOT/bot-token"
     install -o 10001 -g 10001 -m 0400 "$incoming/publishable-key" "$SECRET_ROOT/publishable-key"
@@ -835,11 +912,13 @@ case "$command" in
       bot-transport-hmac beta-payload-hmac bot-token player-action-database-url \
       api-action-transport-hmac api-action-payload-hmac api-action-capability-hmac \
       api-action-semantic-hmac cbe-deposit-reference-encryption-key \
-      cbe-deposit-reference-fingerprint-key bot-action-transport-hmac; do
+      cbe-deposit-reference-fingerprint-key deposit-proof-reference-encryption-master \
+      deposit-proof-reference-fingerprint-master bot-action-transport-hmac; do
       require_service_file "$SECRET_ROOT/$service_file"
     done
     require_immutable_config_file "$SECRET_ROOT/supabase-ca.crt"
     require_immutable_config_file "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+    require_immutable_config_file "$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
 
     for image in owner-control customer-web api beta-admission bot gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
@@ -870,6 +949,9 @@ case "$command" in
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-encryption-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE="$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
       FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
       FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
@@ -990,6 +1072,9 @@ case "$command" in
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-encryption-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE="$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
       FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
       FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
@@ -1088,6 +1173,9 @@ case "$command" in
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
       FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-encryption-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE="$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
       FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
       FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"

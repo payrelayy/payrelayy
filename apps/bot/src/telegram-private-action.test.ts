@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isRecognizedTelegramDepositCommand,
   reduceTelegramDepositIntentCommand,
+  reduceTelegramDepositProofCommand,
   reduceTelegramDepositReferenceCommand,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
@@ -114,6 +116,75 @@ describe('private Telegram action reducers', () => {
         command: '/deposit PLAYER-DEMO-42 0',
       }),
     ).toBeUndefined();
+  });
+
+  it('reduces an amount-free proof command only for an approved provider and one safe reference', () => {
+    expect(
+      reduceTelegramDepositProofCommand({
+        ...privateMetadata,
+        command: '/deposit telebirr PLAYER-DEMO-42 SYNTHETICREF7890',
+      }),
+    ).toMatchObject({
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference: 'SYNTHETICREF7890',
+    });
+    expect(
+      reduceTelegramDepositProofCommand({
+        ...privateMetadata,
+        command: '/deposit cbe_birr PLAYER-DEMO-42 SYNTHETICCBE7890',
+      }),
+    ).toMatchObject({ kind: 'deposit_proof_command', providerCode: 'cbe_birr' });
+    expect(
+      reduceTelegramDepositProofCommand({
+        ...privateMetadata,
+        command: '/deposit unknown PLAYER-DEMO-42 SYNTHETICREF7890',
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositProofCommand({
+        ...privateMetadata,
+        command: '/deposit telebirr PLAYER-DEMO-42 raw reference',
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositProofCommand({
+        ...privateMetadata,
+        command: '/deposit telebirr PLAYER-DEMO-42 ABCD',
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositProofCommand({
+        ...privateMetadata,
+        command: '/deposit telebirr PLAYER-DEMO-42 SYNTHETIC-REF-7890',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('recognizes malformed and legacy amount-bearing deposit commands without echoing input', () => {
+    expect(
+      isRecognizedTelegramDepositCommand({
+        ...privateMetadata,
+        command: '/deposit PLAYER-DEMO-42 25.00',
+      }),
+    ).toBe(true);
+    expect(
+      isRecognizedTelegramDepositCommand({
+        ...privateMetadata,
+        command: '/deposit telebirr PLAYER-DEMO-42 INVALID-REFERENCE',
+      }),
+    ).toBe(true);
+    expect(
+      isRecognizedTelegramDepositCommand({ ...privateMetadata, command: '/deposit_status token' }),
+    ).toBe(false);
+    expect(
+      isRecognizedTelegramDepositCommand({
+        ...privateMetadata,
+        chat: { id: 123456788, type: 'private' },
+        command: '/deposit PLAYER-DEMO-42 25.00',
+      }),
+    ).toBe(false);
   });
 
   it('reduces a status command to the same non-authoritative compact token presentation', () => {

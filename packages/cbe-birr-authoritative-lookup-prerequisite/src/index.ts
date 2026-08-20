@@ -14,7 +14,8 @@ export const CBE_BIRR_LEGACY_LOOKUP_MATERIAL_SHAPE =
   'cbe_birr_shadow_protected_lookup_material_legacy' as const;
 
 export const CBE_BIRR_AUTHORITATIVE_LOOKUP_REMAINING_BLOCKERS = Object.freeze([
-  'source_permission_unproven',
+  'official_receipt_live_response_contract_unattested',
+  'official_receipt_live_transport_absent',
   'receiver_lookup_protection_metadata_absent',
   'receiver_lookup_key_provenance_unproven',
   'receiver_lookup_new_revision_and_fresh_provisioning_required',

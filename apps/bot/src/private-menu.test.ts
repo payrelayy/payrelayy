@@ -14,7 +14,7 @@ describe('English-only private Player ID menu', () => {
     const menu = renderPlayerRegistrationMenu(callbackData);
 
     expect(menu).toEqual({
-      text: 'Manage your KemerBet Player ID, or start a deposit with /deposit PLAYER_ID AMOUNT.',
+      text: 'Manage your KemerBet Player ID, or submit a dry-run proof with /deposit PROVIDER PLAYER_ID TRANSACTION_ID.',
       buttons: [{ text: 'Add KemerBet Player ID', callbackData }],
     });
     expect(JSON.stringify(menu)).not.toMatch(/withdrawal|language/i);

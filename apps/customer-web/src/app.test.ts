@@ -27,6 +27,15 @@ const recoveryCode = 'recovery_code_1234567890';
 const publicOrigin = 'https://fetanagent.com';
 const authUserId = '018f1f58-91bd-7cc0-9e5a-5bda1d0c0184';
 const requestKey = '4f8e2a44-58ef-4cb7-b274-6202e01ed341';
+const dryRunDepositProof = Object.freeze({
+  financialActionsMode: 'dry_run',
+  liveFinancialActionsEnabled: false,
+  protectionProfileVersion: 2,
+  secrets: Object.freeze({
+    encryptionSecret: 'd'.repeat(64),
+    fingerprintSecret: 'e'.repeat(64),
+  }),
+}) satisfies NonNullable<CustomerWebAppOptions['dryRunDepositProof']>;
 
 function fakeAuth(overrides: Partial<CustomerWebAuthPort> = {}): CustomerWebAuthPort {
   return {
@@ -47,6 +56,13 @@ function fakeWorkspace(
   overrides: Partial<CustomerWorkspaceRuntime> = {},
 ): CustomerWorkspaceRuntime {
   return {
+    captureDryRunDepositProof: async ({ provider }) => ({
+      ok: true,
+      provider,
+      replayed: false,
+      status: 'proof_received',
+      submittedAt: '2026-08-20T00:00:00.000Z',
+    }),
     captureDepositReference: async ({ depositIntentId }) => ({
       ok: true,
       depositIntentId,
@@ -1041,7 +1057,7 @@ describe('customer web SSR and PWA boundary', () => {
     expect(ensureAccount).toHaveBeenCalledWith({ authUserId });
     expect(listPlayerRegistrations).toHaveBeenCalledWith({ authUserId, limit: 20 });
     expect(response.body).not.toContain(authUserId);
-    expect(response.body.match(new RegExp(requestKey, 'gu'))).toHaveLength(2);
+    expect(response.body.match(new RegExp(requestKey, 'gu'))).toHaveLength(1);
     expect(response.body).toContain(`type="hidden" name="requestKey" value="${requestKey}"`);
     expect(response.body).toContain('&lt;script&gt;');
     expect(response.body).not.toContain('<script>');
@@ -1434,6 +1450,209 @@ describe('customer web deposit flow', () => {
       ok: true,
       status: 'authenticated',
     }),
+  });
+
+  it('makes the amount-free provider-selected proof simulation the customer-visible deposit flow', async () => {
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      dryRunDepositProof,
+      requestKeyFactory: () => requestKey,
+      workspace: fakeWorkspace({
+        listPlayerRegistrations: async () => ({
+          ok: true,
+          registrations: [{ playerId: 'PLAYER-SAVED-42', status: 'ready' }],
+        }),
+      }),
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/workspace' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('action="/deposits/proof"');
+    expect(response.body).toContain('<option value="cbe_birr">CBE Birr</option>');
+    expect(response.body).toContain('<option value="telebirr">TeleBirr</option>');
+    expect(response.body).toContain('name="transactionId"');
+    expect(response.body).toContain('pattern="[A-Za-z0-9]{8,32}"');
+    expect(response.body).toContain('list="ready-player-ids"');
+    expect(response.body).toContain('<option value="PLAYER-SAVED-42">');
+    expect(response.body).toContain('Simulation only.');
+    expect(response.body).not.toContain('name="amountEtb"');
+    expect(response.body).not.toContain('action="/deposits"');
+    await app.close();
+  });
+
+  it('protects a direct transaction ID with the provider-bound v2 profile and returns no submitted value', async () => {
+    const captureDryRunDepositProof = vi.fn<CustomerWorkspaceRuntime['captureDryRunDepositProof']>(
+      async ({ provider }) => ({
+        ok: true,
+        provider,
+        replayed: false,
+        status: 'proof_received',
+        submittedAt: '2026-08-20T00:05:00.000Z',
+      }),
+    );
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      dryRunDepositProof,
+      requestKeyFactory: () => requestKey,
+      workspace: fakeWorkspace({ captureDryRunDepositProof }),
+    });
+    const transactionId = 'TXNDEMO42';
+    const playerId = 'PLAYER-OTHER-42';
+    const response = await app.inject({
+      method: 'POST',
+      url: '/deposits/proof',
+      headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+      payload: form({
+        _csrf: csrfToken,
+        playerId,
+        provider: 'telebirr',
+        requestKey,
+        transactionId,
+      }),
+    });
+
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe('/workspace?proof-submitted=1');
+    expect(response.body).toBe('');
+    const input = captureDryRunDepositProof.mock.calls[0]?.[0];
+    expect(input).toMatchObject({
+      authUserId,
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      keyVersion: 2,
+      masked: '***MO42',
+      playerId,
+      profileVersion: 2,
+      provider: 'telebirr',
+      requestKey,
+    });
+    expect(input?.ciphertext).toMatch(/^v2\.telebirr\./u);
+    expect(JSON.stringify(input)).not.toContain(transactionId);
+    expect(JSON.stringify(response.headers)).not.toContain(transactionId);
+    expect(JSON.stringify(response.headers)).not.toContain(playerId);
+    expect(JSON.stringify(response.headers)).not.toContain(authUserId);
+
+    const receipt = await app.inject({ method: 'GET', url: '/workspace?proof-submitted=1' });
+    expect(receipt.statusCode).toBe(200);
+    expect(receipt.body).toContain('Simulation only:');
+    expect(receipt.body).toContain('unverified candidate');
+    expect(receipt.body).toContain('No payment was verified and no credit was issued.');
+    expect(receipt.body).not.toContain(transactionId);
+    expect(receipt.body).not.toContain(playerId);
+    expect(receipt.body).not.toContain(authUserId);
+    await app.close();
+  });
+
+  it('rejects unavailable, non-direct, unknown-provider, and extra proof fields before capture', async () => {
+    const captureDryRunDepositProof =
+      vi.fn<CustomerWorkspaceRuntime['captureDryRunDepositProof']>();
+    const baseOptions = {
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      workspace: fakeWorkspace({ captureDryRunDepositProof }),
+    } as const;
+    const unavailable = buildCustomerWebApp(baseOptions);
+    const validPayload = {
+      _csrf: csrfToken,
+      playerId: 'PLAYER-OTHER-42',
+      provider: 'cbe_birr',
+      requestKey,
+      transactionId: 'TXNDEMO42',
+    };
+    expect(
+      (
+        await unavailable.inject({
+          method: 'POST',
+          url: '/deposits/proof',
+          headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+          payload: form(validPayload),
+        })
+      ).statusCode,
+    ).toBe(503);
+    await unavailable.close();
+
+    const app = buildCustomerWebApp({ ...baseOptions, dryRunDepositProof });
+    for (const payload of [
+      { ...validPayload, provider: 'unknown' },
+      { ...validPayload, transactionId: 'SHORT' },
+      { ...validPayload, transactionId: 'TXN-DEMO-42' },
+      { ...validPayload, amountEtb: '25' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/deposits/proof',
+        headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+        payload: form(payload),
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.body).not.toContain(payload.transactionId);
+    }
+    expect(captureDryRunDepositProof).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('accepts only the exact fail-closed dry-run proof configuration shape', () => {
+    const accessor = Object.defineProperty({ ...dryRunDepositProof }, 'protectionProfileVersion', {
+      enumerable: true,
+      get: () => 2,
+    });
+    for (const dryRunDepositProofOption of [
+      { ...dryRunDepositProof, financialActionsMode: 'live' },
+      { ...dryRunDepositProof, liveFinancialActionsEnabled: true },
+      { ...dryRunDepositProof, protectionProfileVersion: 1 },
+      { ...dryRunDepositProof, unexpected: true },
+      accessor,
+      new Proxy({ ...dryRunDepositProof }, {}),
+    ]) {
+      expect(() =>
+        buildCustomerWebApp({
+          auth: authenticated,
+          dryRunDepositProof: dryRunDepositProofOption as never,
+        }),
+      ).toThrow('Customer web dry-run deposit proof configuration is invalid.');
+    }
+  });
+
+  it('keeps both legacy amount routes unavailable in a proof-first-only composition', async () => {
+    const openDeposit = vi.fn<CustomerWorkspaceRuntime['openDeposit']>();
+    const captureDepositReference = vi.fn<CustomerWorkspaceRuntime['captureDepositReference']>();
+    const app = buildCustomerWebApp({
+      auth: authenticated,
+      csrfTokenFactory: () => csrfToken,
+      dryRunDepositProof,
+      workspace: fakeWorkspace({ captureDepositReference, openDeposit }),
+    });
+    const headers = mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`);
+
+    const amountRoute = await app.inject({
+      method: 'POST',
+      url: '/deposits',
+      headers,
+      payload: form({
+        _csrf: csrfToken,
+        amountEtb: '25',
+        playerId: 'PLAYER-42',
+        requestKey,
+      }),
+    });
+    const referenceRoute = await app.inject({
+      method: 'POST',
+      url: '/deposits/reference',
+      headers,
+      payload: form({
+        _csrf: csrfToken,
+        depositToken,
+        requestKey,
+        transactionReference: 'LEGACYREF42',
+      }),
+    });
+
+    expect(amountRoute.statusCode).toBe(503);
+    expect(referenceRoute.statusCode).toBe(503);
+    expect(openDeposit).not.toHaveBeenCalled();
+    expect(captureDepositReference).not.toHaveBeenCalled();
+    await app.close();
   });
 
   it('opens an owned policy-bounded deposit and renders protected-reference instructions', async () => {

@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { types as nodeUtilTypes } from 'node:util';
 
 import type {
   CustomerWebAuthPort,
@@ -11,6 +12,7 @@ import type {
 } from '@fetanagent/customer-web-auth-runtime';
 import type {
   CustomerDepositInstructions,
+  CustomerDepositProofProvider,
   CustomerDepositSummary,
   CustomerWorkspaceDisplayStatus,
   CustomerWorkspaceRegistration,
@@ -22,7 +24,9 @@ import {
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
 } from '@fetanagent/contracts';
 import {
+  DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
   protectCbeBirrDepositReference,
+  protectDepositProofReference,
   type DepositReferenceProtectionSecrets,
 } from '@fetanagent/deposit-reference-protection';
 import Fastify, { LogController, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -82,6 +86,7 @@ const NO_STORE_PATHS = new Set([
   '/workspace',
   '/player-ids',
   '/deposits',
+  '/deposits/proof',
   '/deposits/reference',
 ]);
 
@@ -93,6 +98,7 @@ const MUTATION_PATHS = new Set([
   '/update-password',
   '/player-ids',
   '/deposits',
+  '/deposits/proof',
   '/deposits/reference',
 ]);
 
@@ -136,6 +142,7 @@ export interface CustomerWebAppOptions {
   readonly auth: CustomerWebAuthPort;
   readonly csrfTokenFactory?: () => string;
   readonly depositReferenceProtectionSecrets?: DepositReferenceProtectionSecrets;
+  readonly dryRunDepositProof?: CustomerWebDryRunDepositProofOptions;
   readonly now?: () => number;
   readonly productPreviewMode?: boolean;
   readonly publicOrigin?: string;
@@ -144,6 +151,13 @@ export interface CustomerWebAppOptions {
   readonly requestKeyFactory?: () => string;
   readonly trustProxy?: false | 1;
   readonly workspace: CustomerWorkspaceRuntime;
+}
+
+export interface CustomerWebDryRunDepositProofOptions {
+  readonly financialActionsMode: 'dry_run';
+  readonly liveFinancialActionsEnabled: false;
+  readonly protectionProfileVersion: typeof DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION;
+  readonly secrets: DepositReferenceProtectionSecrets;
 }
 
 interface RateLimitBucket {
@@ -637,6 +651,79 @@ function validRateLimitOptions(options: CustomerWebRateLimitOptions): CustomerWe
   return options;
 }
 
+function validDepositProofProvider(value: unknown): value is CustomerDepositProofProvider {
+  return value === 'cbe_birr' || value === 'telebirr';
+}
+
+function validDirectTransactionId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9]{8,32}$/u.test(value);
+}
+
+function exactDataRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+): Readonly<Record<string, unknown>> | undefined {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    nodeUtilTypes.isProxy(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return undefined;
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key) => typeof key !== 'string' || !expectedKeys.includes(key))
+  ) {
+    return undefined;
+  }
+  const record: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of expectedKeys) {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return undefined;
+    record[key] = descriptor.value;
+  }
+  return record;
+}
+
+function validDryRunDepositProofOptions(
+  value: unknown,
+): CustomerWebDryRunDepositProofOptions | undefined {
+  if (value === undefined) return undefined;
+  const record = exactDataRecord(value, [
+    'financialActionsMode',
+    'liveFinancialActionsEnabled',
+    'protectionProfileVersion',
+    'secrets',
+  ]);
+  const secrets = exactDataRecord(record?.secrets, ['encryptionSecret', 'fingerprintSecret']);
+  if (
+    record === undefined ||
+    secrets === undefined ||
+    record.financialActionsMode !== 'dry_run' ||
+    record.liveFinancialActionsEnabled !== false ||
+    record.protectionProfileVersion !== DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION ||
+    typeof secrets.encryptionSecret !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(secrets.encryptionSecret) ||
+    typeof secrets.fingerprintSecret !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(secrets.fingerprintSecret) ||
+    secrets.encryptionSecret === secrets.fingerprintSecret
+  ) {
+    throw new Error('Customer web dry-run deposit proof configuration is invalid.');
+  }
+  return Object.freeze({
+    financialActionsMode: 'dry_run',
+    liveFinancialActionsEnabled: false,
+    protectionProfileVersion: DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
+    secrets: Object.freeze({
+      encryptionSecret: secrets.encryptionSecret,
+      fingerprintSecret: secrets.fingerprintSecret,
+    }),
+  });
+}
+
 export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   if (options.productPreviewMode !== undefined && typeof options.productPreviewMode !== 'boolean') {
     throw new Error('Customer web product preview option is invalid.');
@@ -657,6 +744,7 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   ) {
     throw new Error('Customer web deposit reference protection is invalid.');
   }
+  const dryRunDepositProof = validDryRunDepositProofOptions(options.dryRunDepositProof);
   const productPreviewMode = options.productPreviewMode ?? false;
   const publicOrigin = exactOrigin(
     options.publicOrigin ?? DEFAULT_PUBLIC_ORIGIN,
@@ -1035,6 +1123,7 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
       const submitted = Object.keys(query).length === 1 && query.submitted === '1';
       const depositSubmitted =
         Object.keys(query).length === 1 && query['deposit-submitted'] === '1';
+      const proofSubmitted = Object.keys(query).length === 1 && query['proof-submitted'] === '1';
       return html(
         reply,
         200,
@@ -1051,7 +1140,14 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
                   kind: 'info',
                   message: 'Your payment reference was received and is being checked.',
                 }
-              : undefined,
+              : proofSubmitted
+                ? {
+                    kind: 'info',
+                    message:
+                      'Simulation only: a transaction ID was received as an unverified candidate. No payment was verified and no credit was issued.',
+                  }
+                : undefined,
+          dryRunDepositProof !== undefined,
         ),
       );
     } catch {
@@ -1107,6 +1203,64 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
     }
   });
 
+  app.post('/deposits/proof', async (request, reply) => {
+    const form = exactForm(request.body, [
+      '_csrf',
+      'playerId',
+      'provider',
+      'requestKey',
+      'transactionId',
+    ]);
+    const playerId = form?.playerId;
+    const provider = form?.provider;
+    const requestKey = form?.requestKey;
+    const transactionId = form?.transactionId;
+    if (
+      !form ||
+      !validPlayerId(playerId) ||
+      !validDepositProofProvider(provider) ||
+      !validRequestKey(requestKey) ||
+      !validDirectTransactionId(transactionId)
+    ) {
+      return html(reply, 400, genericErrorPage(400));
+    }
+    if (dryRunDepositProof === undefined) {
+      return html(reply, 503, genericErrorPage(503));
+    }
+    try {
+      const customer = await options.auth.getCurrentCustomer(authContext(request, reply));
+      if (!customer.ok) return html(reply, 503, genericErrorPage(503));
+      if (customer.status === 'anonymous') return redirect(reply, '/sign-in');
+      const ensured = await options.workspace.ensureAccount({
+        authUserId: customer.account.authUserId,
+      });
+      if (!ensured.ok || ensured.status !== 'active') {
+        return html(reply, 503, genericErrorPage(503));
+      }
+      const protectedReference = protectDepositProofReference({
+        provider,
+        reference: transactionId,
+        secrets: dryRunDepositProof.secrets,
+      });
+      const captured = await options.workspace.captureDryRunDepositProof({
+        authUserId: customer.account.authUserId,
+        ciphertext: protectedReference.ciphertext,
+        fingerprint: protectedReference.fingerprint,
+        keyVersion: protectedReference.keyVersion,
+        masked: protectedReference.masked,
+        playerId,
+        profileVersion: dryRunDepositProof.protectionProfileVersion,
+        provider: protectedReference.provider,
+        requestKey,
+      });
+      return captured.ok && captured.provider === provider && captured.status === 'proof_received'
+        ? redirect(reply, '/workspace?proof-submitted=1')
+        : html(reply, 503, genericErrorPage(503));
+    } catch {
+      return html(reply, 503, genericErrorPage(503));
+    }
+  });
+
   app.post('/deposits/reference', async (request, reply) => {
     const form = exactForm(request.body, [
       '_csrf',
@@ -1121,10 +1275,12 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
       !form ||
       !depositIntentId ||
       !validRequestKey(requestKey) ||
-      !validTransactionReference(transactionReference) ||
-      !options.depositReferenceProtectionSecrets
+      !validTransactionReference(transactionReference)
     ) {
       return html(reply, 400, genericErrorPage(400));
+    }
+    if (!options.depositReferenceProtectionSecrets) {
+      return html(reply, 503, genericErrorPage(503));
     }
     try {
       const customer = await options.auth.getCurrentCustomer(authContext(request, reply));

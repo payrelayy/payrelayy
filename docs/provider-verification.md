@@ -1,14 +1,24 @@
 # Provider-verification specification
 
-This is FetanAgent's independent verification contract. The current launch-preparation scope is
-**CBE Birr only**, using strictly local redacted fixtures and advisory dry-run outcomes. It is not
-a live integration: no provider verifier is enabled, no provider credential is configured, and no
-payment can reach a claim or KemerBet execution. The authoritative-lookup prerequisite contract is
-also blocked, with all capabilities false. TeleBirr and CBE bank are deferred.
+This is FetanAgent's independent verification contract. The implemented launch-preparation scope
+now includes provider-separated protected references, private amount-free dry-run proof intake,
+strictly local redacted CBE Birr fixtures, and a pure TeleBirr foundation for bounded candidate
+extraction, synthetic official-receipt normalization, and advisory Android-observation planning.
+It is still not a live integration: no official-source adapter or Android transport is enabled, no
+provider credential is configured, and no proof can reach authoritative evidence, a payment claim,
+settlement, or KemerBet execution. All advisory capabilities remain false.
+
+The approved product behavior for the future CBE Birr and TeleBirr implementations is recorded in
+[cbe-birr-deposit-product-contract.md](cbe-birr-deposit-product-contract.md) and
+[telebirr-deposit-product-contract.md](telebirr-deposit-product-contract.md). Both contracts derive
+the amount from a freshly retrieved official receipt, accept payments made up to one hour before
+submission, allow **Deposit to another Player ID**, and use a global one-use claim. They supersede
+the older amount-at-intake and post-intent-only assumptions for those providers, but they do not
+enable any current runtime capability.
 
 QHash is reference research only. FetanAgent does not use QHash code, databases, workers,
-credentials, accounts, or runtime services. TeleBirr and CBE bank are later, separate adapters;
-neither may reuse CBE Birr lookup or parsing assumptions.
+credentials, accounts, or runtime services. TeleBirr and CBE Birr require separate adapters;
+neither may reuse the other's lookup, receiver-matching, or parsing assumptions.
 
 ## Trust boundary
 
@@ -22,9 +32,10 @@ Only one of these independent sources can produce authoritative payment evidence
 - an official provider receipt lookup; or
 - verified provider account activity.
 
-These are categories of potentially authoritative sources, not a statement that FetanAgent has
-selected or received permission to use one. A visible page, known endpoint, synthetic fixture, or
-code flag does not establish permission or provider authority.
+These are categories of potentially authoritative sources, not proof that a particular adapter is
+correct or enabled. A visible page, known endpoint, synthetic fixture, user upload, or code flag
+does not establish a completed payment. Each adapter still needs an exact source profile, parser,
+evidence contract, fixture suite, and guarded deployment boundary.
 
 An adapter extracts the provider's canonical transaction reference from that source. It must not
 use the customer-entered ID as the final duplicate-protection key. The raw canonical reference is
@@ -33,38 +44,45 @@ in logs, audit metadata, Telegram state, or customer messages.
 
 ## Immutable intent and evidence
 
-When a deposit opens, the ledger snapshots the payment provider, receiver-account revision,
-displayed receiver instructions, Player ID, exact ETB minor-unit amount, and UTC payment deadline.
-The default policy window is one hour. A later change to a holder name or receiver account cannot
-change a pending intent.
+For providers whose customer flow supplies an amount before payment, a deposit intent may snapshot
+the provider, receiver-account revision, displayed receiver instructions, Player ID, exact ETB
+minor-unit amount, and UTC payment deadline when it opens. CBE Birr and TeleBirr now have different
+approved product contracts: the customer supplies no amount and may submit a payment made up to one
+hour earlier. Their implementations must first persist an untrusted proof submission and chosen
+Player ID, then derive and atomically snapshot the exact amount, receiver revision, evidence, and
+claim from a fresh official receipt. A later configuration change cannot rewrite either boundary.
 
 Every authoritative evidence record must include:
 
-| Fact                | Requirement                                                             |
-| ------------------- | ----------------------------------------------------------------------- |
-| Source              | Provider API, official receipt lookup, or verified account activity     |
-| Final status        | Explicitly `completed`                                                  |
-| Canonical reference | Extracted from the provider result and fingerprinted for uniqueness     |
-| Amount              | Exact ETB integer minor units; never floating point                     |
-| Receiver            | Match to the configured receiver-account ID and immutable version       |
-| Time                | Provider occurrence time and retrieval time, both UTC                   |
-| Provenance          | Adapter version, normalization version, and an official-evidence digest |
+| Fact                | Requirement                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| Source              | Provider API, official receipt lookup, or verified account activity      |
+| Final status        | Explicitly `completed`                                                   |
+| Canonical reference | Extracted from the provider result and fingerprinted for uniqueness      |
+| Amount              | Exact ETB integer minor units; never floating point                      |
+| Receiver            | Match the immutable receiver revision under the provider-specific policy |
+| Time                | Provider occurrence time and retrieval time, both UTC                    |
+| Provenance          | Adapter version, normalization version, and an official-evidence digest  |
 
 The database, not the adapter, assigns the permanent evidence ID and enforces the one-to-one
 payment claim. A canonical provider reference can fund only one deposit intent.
 
 ## Automatic-approval rule
 
-The worker can request an automatic claim only when all checks pass in one database transaction:
+The worker can request an automatic claim only when all provider-specific checks pass in one
+database transaction. For CBE Birr, the future implementation must prove:
 
-1. The source is authoritative and its final status is `completed`.
-2. The canonical reference, exact amount, currency, receiver-account revision, and timestamp match
-   the immutable deposit intent.
-3. The provider occurrence time is between intent opening and deadline, and is no more than five
-   minutes ahead of the verifier clock.
-4. The claim itself occurs no later than the payment deadline.
-5. The intent remains `verification_pending`, with no open verification review.
-6. The canonical-reference fingerprint has not funded another intent.
+1. A fresh official receipt is authoritative and its final status is exactly `completed`.
+2. The canonical reference, ETB currency, configured receiver revision, supported `Send Money`
+   type, principal amount, and occurrence timestamp are unambiguous.
+3. The principal amount, excluding fees, is between 25 ETB and 25,000 ETB inclusive.
+4. Submission occurs no more than one hour after the provider occurrence time. A provider time no
+   more than five minutes ahead may be tolerated only when every other fact is exact; older or more
+   future-dated receipts require review.
+5. The selected Player ID remains active and deposit-eligible at the settlement and execution
+   boundaries. The CBE sender, FetanAgent customer, and KemerBet account holder need not match.
+6. No open review or conflicting state exists, and the canonical-reference fingerprint has not
+   funded or been conclusively claimed by another deposit.
 
 The current database procedure is deliberately ungranted and dormant. It is the future final
 enforcement point; a TypeScript adapter can only make an advisory assessment. A stale payment,
@@ -77,25 +95,46 @@ credited.
 | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | Every automatic-approval condition is proven                                                                                          | `verified`         |
 | Official source confirms an invalid reference, wrong receiver, or already-claimed canonical reference                                 | `rejected`         |
-| Correct payment but wrong amount, late/future timestamp, incomplete status, or an open review                                         | `manual_review`    |
+| Correct payment but out-of-range or missing/conflicting official amount, late/future timestamp, incomplete status, or an open review  | `manual_review`    |
 | Network failure, provider outage, parser change, missing field, ambiguous timezone, unsupported receipt type, or conflicting evidence | `manual_review`    |
 
-This is intentionally conservative. An amount mismatch is not a silent credit and is not discarded:
-an administrator can resolve it through a separately audited review workflow.
+This is intentionally conservative. A missing or conflicting receipt amount, or an amount outside
+the CBE Birr range, is not a silent credit and is not discarded: an authorized reviewer can resolve
+it through a separately audited review workflow.
 
 ## TeleBirr adapter gate
 
-TeleBirr automatic verification remains disabled until FetanAgent has its own permitted and
-reliably reachable authoritative source, validated from the approved deployment infrastructure.
-Reference research found a geo-blocked receipt route in an older system; that does not authorize
-or prove a FetanAgent integration.
+The complete approved TeleBirr intake, official-receipt, receiver-revision, amount, time,
+uniqueness, Android-verifier, disclosure, and rollout rules are in
+[telebirr-deposit-product-contract.md](telebirr-deposit-product-contract.md). The fixed official
+receipt route is provider-specific and must be retrieved fresh; user-submitted SMS, URLs, images,
+PDFs, QR content, and OCR can supply candidate references only.
 
-The adapter must fail closed to `manual_review` if the source is inaccessible, requires CAPTCHA,
-is geo-blocked, changes format, or cannot prove every required fact. It must not bypass provider
-restrictions, CAPTCHA, geofencing, or access controls. A user proof, bot message, OCR worker, or
-device-held secret is never an approval authority.
+The approved source-observation design uses a dedicated Android phone kept powered and connected to
+Ethiopian Internet. The phone is a constrained, revocable observation relay. It holds no Supabase
+`service_role` key, database password, KemerBet credential, financial command, or authority to create
+evidence, claims, settlement, or execution. It returns a signed and versioned observation to a
+least-privilege backend boundary; PostgreSQL remains authoritative.
+
+Automatic verification requires an exact official `Completed` receipt, canonical invoice number,
+supported TeleBirr payment mode and reason, exact normalized configured credited-party name, ETB
+settled principal, official payment time, current eligible Player ID, and unused global reference.
+The credited amount is **Settled Amount**. Service fee, VAT, stamp duty, discount fields, and
+**Total Paid Amount** do not increase the credit.
+
+The adapter fails closed to `manual_review` when the official source or device is unavailable, the
+page changes, a required field is missing or ambiguous, the receiver name is not an exact
+conservatively normalized match, or any evidence conflicts. It must never treat a loaded page,
+customer upload, OCR result, or missing status as proof of completion.
 
 ## CBE Birr adapter gate
+
+The complete approved CBE Birr intake, lookup, Player-ID selection, amount, time, uniqueness, disclosure,
+and rollout rules are in
+[cbe-birr-deposit-product-contract.md](cbe-birr-deposit-product-contract.md). The product contract
+does not require a private provider API, provider credential, sender identity match, claimant
+identity match, or KemerBet ownership match. It does require fresh server retrieval of the fixed
+official receipt route and exact independent receipt evidence before a claim can exist.
 
 CBE Birr is a wallet provider, distinct from CBE bank. Existing genuine receipt research indicates
 that an official lookup is scoped by the transaction ID together with the configured receiver
@@ -139,22 +178,27 @@ canonical-reference, receiver, or provider-payload values. See
 [cbe-birr-authoritative-shadow.md](cbe-birr-authoritative-shadow.md) and
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
 
-Stage 1E is a pure official-source policy contract under the package name
-`@fetanagent/cbe-birr-official-source-policy`. Its reserved source profile,
-`cbe_birr_official_receipt_lookup_v1`, remains `unproven`; there is no selected or permitted branch.
-It does not contain a provider URL or host, credentials, protected lookup material, a decryptor,
-transport, lease or job handling, network or database access, claim or KemerBet logic, or runtime
-wiring. All financial switches remain off.
+Stage 1E is a pure offline official-source policy contract under the package name
+`@fetanagent/cbe-birr-official-source-policy`. Contract version 2 defines the exact compiled `GET`
+shape for `https://cbepay1.cbe.com.et:443/aureceipt`, ordered `TID` then `PH` query parameters, and a
+zero-redirect policy. Its disposition is `offline_profile_defined` with reason
+`live_transport_absent`. A parse5 8.0.1 parser is exercised only with an exact plain synthetic
+response data record and clearly synthetic fixtures; no callback or executable transport is
+accepted. There is no HTTP client, live response, credential,
+protected lookup material, lease, database, evidence claim, KemerBet logic, or runtime wiring. All
+financial switches remain off.
 
 Stage 1F implements the separate pure package
 `@fetanagent/cbe-birr-authoritative-lookup-prerequisite`. Its only valid-request disposition is
-`blocked`, with 12 exact blockers across five unresolved areas: source permission; receiver
-protection, provenance, and fresh immutable provisioning without inference or backfill; a
-submitted-reference key lifecycle independent from the API master; a joint review of the
-lookup-reference, receiver-lookup, and canonical-reference normalization profiles; and a
-non-mutating prerequisite preflight before any lease. The existing lease mutates durable state and
-returns protected material before such a preflight, so a future boundary needs metadata-only
-preflight and opaque-handle payloads.
+`blocked`, with 13 exact blockers. The former broad source-permission blocker is replaced by
+`official_receipt_live_response_contract_unattested` and `official_receipt_live_transport_absent`.
+The remaining areas cover receiver protection,
+provenance, and fresh immutable provisioning without inference or backfill; a submitted-reference
+key lifecycle independent from the API master; a joint review of the lookup-reference,
+receiver-lookup, and canonical-reference normalization profiles; and a non-mutating prerequisite
+preflight before any lease. The existing lease mutates durable state and returns protected material
+before such a preflight, so a future boundary needs metadata-only preflight and opaque-handle
+payloads.
 
 Every Stage 1F capability is false. The package contains no raw lookup material, ciphertext, key or
 protected-material version, algorithm or KMS selection, URL or credential, lease value, runtime or
@@ -162,16 +206,17 @@ schema wiring, provider evidence, financial claim, or KemerBet operation. Its le
 not an envelope or protection profile and does not bless the current `v1` stored value. See
 [cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).
 
-Before any positive source capability can be reviewed, FetanAgent needs an independently reviewed
-permission artifact with exact access rules, a key-split/KMS envelope design that does not share the
-API master or fingerprint key, receiver key-version and purpose metadata, an isolated
-callback-scoped decryptor, a strict compiled host/TLS/redirect policy, redacted telemetry with an
-incident stop, and deterministic fake-transport tests. See
+Before any positive source capability can replace the offline package, controlled privacy-reviewed
+samples must attest the exact live response contract and a separate transport must enforce the
+compiled route, TLS, zero redirects, bounds, redacted telemetry, and incident stop. FetanAgent also
+needs a key-split/KMS envelope design that does not share the API master or fingerprint key,
+receiver key-version and purpose metadata, an isolated callback-scoped decryptor, a strict compiled
+host/TLS/redirect policy, redacted telemetry with an incident stop, and deterministic
+offline-response tests. See
 [cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md). The Stage 1F blockers also
 require a fresh immutable receiver revision, an independently provisioned worker decrypt lifecycle,
 one reviewed normalization ownership model, and a metadata-preflight/opaque-handle lease redesign.
-Completing those P0 items would open another review; it would not itself authorize provider calls or
-financial action.
+Completing those items would open another review; it would not itself enable financial action.
 
 ## Privacy, operations, and rollout
 
@@ -183,8 +228,8 @@ financial action.
 - Use allowlisted provider hosts, TLS validation, bounded redirects, bounded response sizes, and
   bounded retries. A network or parsing uncertainty must stop automatic approval.
 - Maintain versioned, redacted fixture tests for success, duplicate reference, wrong receiver,
-  wrong amount, stale and future times, pending or failed status, malformed HTML/JSON/PDF,
-  changed layouts, and provider outage.
+  missing, conflicting, or out-of-range official amounts, stale and future times, pending or failed
+  status, malformed HTML/JSON/PDF, changed layouts, and provider outage.
 - Roll out each adapter in this order: fixture tests, dry-run/shadow verification with no claim,
   explicit feature enablement, then monitored production. Disable the adapter on parser or issuer
   anomalies rather than guessing.

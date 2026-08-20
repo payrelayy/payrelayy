@@ -56,6 +56,15 @@ export function presentTelegramPlayerIdFlowResult(
             ? `Reference received. Status: ${result.depositStatus.label}.`
             : `Simulation reference received. Status: ${result.depositStatus.label}.`,
       };
+    case 'deposit_proof_received':
+      return {
+        kind: 'message',
+        text: [
+          'SIMULATION ONLY — proof received.',
+          `Provider: ${result.providerName}.`,
+          'No payment was verified or credited.',
+        ].join('\n'),
+      };
     case 'deposit_status':
       return {
         kind: 'message',

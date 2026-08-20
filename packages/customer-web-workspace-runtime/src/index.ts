@@ -1,6 +1,7 @@
 export {
   createCustomerWorkspacePoolConfig,
   createCustomerWorkspacePostgresRuntime,
+  CAPTURE_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_SQL,
   CAPTURE_CUSTOMER_WEB_DEPOSIT_REFERENCE_SQL,
   CONSUME_CUSTOMER_WEB_RATE_LIMIT_SQL,
   CustomerWorkspaceRuntimeUnavailableError,
@@ -20,10 +21,12 @@ export type {
 } from './postgres-workspace-runtime.js';
 export type {
   CustomerDepositCaptureResult,
+  CustomerDepositProofProvider,
   CustomerDepositInstructions,
   CustomerDepositListResult,
   CustomerDepositOpenResult,
   CustomerDepositSummary,
+  CustomerDryRunDepositProofCaptureResult,
   CustomerWebRateLimitResult,
   CustomerWorkspaceDisplayStatus,
   CustomerWorkspaceEnsureResult,

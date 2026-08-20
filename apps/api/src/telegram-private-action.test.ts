@@ -36,6 +36,15 @@ const referenceKeyProfile = JSON.stringify({
     .digest('hex')}`,
   version: 1,
 });
+const proofReferenceProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('1'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from('2'.repeat(64), 'hex'))
+    .digest('hex')}`,
+  version: 2,
+});
 const callbackAction: TelegramPrivateActionEnvelope = {
   version: 1,
   kind: 'player_registration_callback',
@@ -329,6 +338,35 @@ describe('private Telegram action transport contract', () => {
       ),
     ).resolves.toBeUndefined();
 
+    const proofAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'deposit_proof_command',
+      updateId: '123459',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
+      preferredLocale: 'en',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference: 'SYNTHETICREF7890',
+    };
+    const proof = signedRequest(proofAction, { nonce: 's'.repeat(32) });
+    await expect(
+      verifyTelegramPrivateActionRequest(proof.request, proof.rawBody, verificationOptions()),
+    ).resolves.toEqual(proofAction);
+
+    for (const malformedProof of [
+      { ...proofAction, providerCode: 'unknown' },
+      { ...proofAction, transactionReference: 'raw reference' },
+      { ...proofAction, unexpected: true },
+    ]) {
+      const signed = signedRequest(malformedProof as unknown as TelegramPrivateActionEnvelope, {
+        nonce: 't'.repeat(32),
+      });
+      await expect(
+        verifyTelegramPrivateActionRequest(signed.request, signed.rawBody, verificationOptions()),
+      ).resolves.toBeUndefined();
+    }
+
     const statusAction: TelegramPrivateActionEnvelope = {
       version: 1,
       kind: 'deposit_status_command',
@@ -357,10 +395,22 @@ describe('private Telegram action transport contract', () => {
       playerId,
     };
     const redactedPlayer = JSON.stringify(redactTelegramPrivateActionForLog(playerAction));
+    const proofReference = 'SYNTHETICREF7890';
+    const proofPlayerId = 'PLAYER-DEMO-42';
+    const proofAction: TelegramPrivateActionEnvelope = {
+      ...playerAction,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: proofPlayerId,
+      transactionReference: proofReference,
+    };
+    const redactedProof = JSON.stringify(redactTelegramPrivateActionForLog(proofAction));
 
     expect(redactedCallback).not.toContain(callbackData);
     expect(redactedCallback).not.toContain('_____________________w');
     expect(redactedPlayer).not.toContain(playerId);
+    expect(redactedProof).not.toContain(proofPlayerId);
+    expect(redactedProof).not.toContain(proofReference);
     expect(redactedCallback).toContain('"preferredLocale":"en"');
   });
 
@@ -397,6 +447,9 @@ describe('private Telegram action transport contract', () => {
       CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
       CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
       CBE_DEPOSIT_REFERENCE_KEY_PROFILE: referenceKeyProfile,
+      DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: '1'.repeat(64),
+      DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: '2'.repeat(64),
+      DEPOSIT_PROOF_REFERENCE_PROFILE: proofReferenceProfile,
       PLAYER_ACTION_DATABASE_URL:
         'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
     });

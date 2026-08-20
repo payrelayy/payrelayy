@@ -1,6 +1,7 @@
 import type { CustomerDepositStatusProjection } from '@fetanagent/contracts';
 
 export type CustomerWorkspaceDisplayStatus = 'checking' | 'ready' | 'needs_attention';
+export type CustomerDepositProofProvider = 'cbe_birr' | 'telebirr';
 
 export interface CustomerWorkspaceRegistration {
   readonly playerId: string;
@@ -78,11 +79,32 @@ export type CustomerDepositCaptureResult =
     }
   | CustomerWorkspaceFailure;
 
+export type CustomerDryRunDepositProofCaptureResult =
+  | {
+      readonly ok: true;
+      readonly provider: CustomerDepositProofProvider;
+      readonly replayed: boolean;
+      readonly status: 'proof_received';
+      readonly submittedAt: string;
+    }
+  | CustomerWorkspaceFailure;
+
 export type CustomerDepositListResult =
   | { readonly ok: true; readonly deposits: readonly CustomerDepositSummary[] }
   | CustomerWorkspaceFailure;
 
 export interface CustomerWorkspacePort {
+  captureDryRunDepositProof(input: {
+    readonly authUserId: string;
+    readonly ciphertext: string;
+    readonly fingerprint: string;
+    readonly keyVersion: 2;
+    readonly masked: string;
+    readonly playerId: string;
+    readonly profileVersion: 2;
+    readonly provider: CustomerDepositProofProvider;
+    readonly requestKey: string;
+  }): Promise<CustomerDryRunDepositProofCaptureResult>;
   captureDepositReference(input: {
     readonly authUserId: string;
     readonly ciphertext: string;

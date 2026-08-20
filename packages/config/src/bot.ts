@@ -43,8 +43,8 @@ export type BotTelegramBetaAdmissionConfig =
     };
 
 /**
- * A reserved, independently authenticated action-channel transport. It is config-only in this
- * stage: no bot handler, polling, fetch client, or API route consumes it.
+ * An independently authenticated private action-channel transport. The bot consumes it separately
+ * from beta admission, so either feature can be enabled without implicitly enabling the other.
  */
 export type BotTelegramActionChannelConfig =
   | {

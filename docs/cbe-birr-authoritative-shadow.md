@@ -25,12 +25,13 @@ live financial job, or call KemerBet.
   Stage 1C plan. It maps that closed input to either an advisory-completion command or a bounded
   retry command. It returns structured data only: no SQL text, database client, network call,
   job acquisition, scheduling, persistence, or procedure execution is present.
-- The Stage 1E official-source policy is a separate pure gate whose current status is
-  `unproven`. Its reserved `cbe_birr_official_receipt_lookup_v1` profile does not select or permit a
-  source, and it cannot carry a URL, host, credential, raw lookup material, decryptor, lease, job,
-  transport, database operation, claim, KemerBet action, or runtime integration.
+- The Stage 1E official-source policy now defines an offline-only fixed route and static synthetic
+  parser. Its disposition is `offline_profile_defined / live_transport_absent`; it contains no live
+  transport, credential, protected lookup integration, lease, database operation, claim, KemerBet
+  action, or runtime integration.
 - The Stage 1F authoritative-lookup prerequisite package is a separate pure blocked inventory. It
-  records 12 exact blockers across source permission, receiver provenance/fresh provisioning,
+  records 13 exact blockers across live-response attestation and transport, receiver
+  provenance/fresh provisioning,
   submitted-reference key lifecycle, three-profile normalization review, and preflight-safe
   acquisition while keeping every capability false. It neither fixes nor composes any of those
   boundaries.
@@ -90,11 +91,11 @@ Stage 1A does not provide or authorize:
 Stage 1B supplies only versioned synthetic normalization fixtures, Stage 1C supplies pure offline
 attempt planning, and Stage 1D supplies pure offline settlement-command planning. None selects or
 contacts an official source, runs SQL, or acquires or settles a job. Before a provider transport can
-be added, Stage 1E must remain blocked while a separate review proves permitted official-source
-access and exact access rules. Synthetic fixtures, browser visibility, known endpoints, and code
-flags are not permission. A positive capability also requires reviewed key-split/KMS envelopes,
+be added, controlled privacy-reviewed samples must attest the exact response contract and a
+separate transport review must prove TLS, fixed-route, zero-redirect, bounds, outage, telemetry, and
+incident-stop behavior. A positive capability also requires reviewed key-split/KMS envelopes,
 receiver key-version and purpose metadata, an isolated callback-scoped decryptor, a strict compiled
-host/TLS/redirect policy, safe telemetry with an incident stop, and deterministic fake-transport
+host/TLS/redirect policy, safe telemetry with an incident stop, and deterministic offline-response
 tests. Stage 1E itself contains none of those runtime capabilities. See
 [cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md) and
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).

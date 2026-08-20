@@ -36,9 +36,9 @@ explicit-profile Docker/Compose boundary. The repository does not provision the 
 bindings, keys, profiles, runtime LOGIN, live database switches, deployed service, or
 authoritative-verifier caller, so the executor remains operationally disabled. The separate pure
 deterministic contract continues to model stop, uncertainty, reconciliation, review, and lane
-serialization without I/O or retry. The Stage 1E
-official-source policy is blocked with status `unproven`; no provider
-has a selected or permitted source, enabled adapter, credential, or runtime integration. The pure
+serialization without I/O or retry. The Stage 1E official-source policy defines only an
+`offline_profile_defined / live_transport_absent` CBE profile; no provider has an enabled live
+adapter, credential, or runtime integration. The pure
 Stage 1F authoritative-lookup prerequisite inventory also remains blocked with every capability
 false. TeleBirr and CBE bank are deferred.
 
@@ -289,19 +289,18 @@ No such link exists today. See
 
 ## Official-source and lookup-prerequisite boundary
 
-The Stage 1E package is `@fetanagent/cbe-birr-official-source-policy`, with the
-reserved source profile `cbe_birr_official_receipt_lookup_v1`. It is a pure policy boundary, not a
-provider adapter or transport. Synthetic fixtures, browser visibility, known endpoints, and code
-flags are not permission, so the current policy has no selected or permitted branch.
-
-The policy contains no URL, host, credential, raw transaction reference, receiver phone,
-ciphertext, key, decryptor, lease, job, network client, database client, payment claim, KemerBet
-operation, or runtime wiring. It cannot change any financial switch or state.
+The Stage 1E package is `@fetanagent/cbe-birr-official-source-policy`, with source profile
+`cbe_birr_official_receipt_lookup_v1`. Contract version 2 defines an offline-only compiled request:
+HTTPS, fixed host/port/path, exact `TID` then `PH` order, and zero redirects. A parse5 parser runs
+only against marked synthetic HTML supplied in an exact plain synthetic response data record. It
+accepts no executable transport or callback and has no HTTP client, credential, protected input
+integration, lease, database, payment claim, KemerBet
+operation, or runtime wiring and cannot change a financial switch or state.
 
 The Stage 1F package is
 `@fetanagent/cbe-birr-authoritative-lookup-prerequisite`. It is another pure, metadata-only blocked
-contract, not a provider adapter, decryptor, job runner, or transport. Its 12 exact blockers cover
-five unresolved areas: official-source permission; receiver protection, provenance, and fresh
+contract, not a provider adapter, decryptor, job runner, or transport. Its 13 exact blockers cover
+the unattested live receipt contract and absent live transport; receiver protection, provenance, and fresh
 immutable provisioning; submitted-reference key lifecycle; a joint review of the three distinct
 normalization profiles; and preflight-safe acquisition. Its only valid-request disposition is
 `blocked`, every capability is false, and it cannot carry raw or protected lookup material,
@@ -316,11 +315,11 @@ master provisioning and rotation root and have no independent worker decrypt lif
 lease operation also mutates and returns protected material before preflight, so it must be replaced
 by a non-mutating metadata preflight and a separately reviewed opaque-handle payload design.
 
-P0 work before any positive source capability includes an independently reviewed permission
-artifact and exact access rules; key-split/KMS envelope design that never shares the API master or
+P0 work before any positive source capability includes privacy-reviewed live response attestation
+and a bounded transport for the compiled route; key-split/KMS envelope design that never shares the API master or
 fingerprint key; receiver key-version and purpose metadata; an isolated callback-scoped decryptor;
 a strict compiled host/TLS/redirect policy; redacted telemetry and a tested incident stop; and
-deterministic fake-transport tests. Each later transport, adapter, database, duplicate-read, claim,
+deterministic offline-response tests. Each later transport, adapter, database, duplicate-read, claim,
 and rollout boundary remains a separate review. See
 [cbe-birr-official-source-policy.md](cbe-birr-official-source-policy.md) and
 [cbe-birr-authoritative-lookup-prerequisite.md](cbe-birr-authoritative-lookup-prerequisite.md).

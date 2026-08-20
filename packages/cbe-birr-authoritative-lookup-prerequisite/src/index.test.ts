@@ -98,7 +98,8 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
       disposition: 'blocked',
       reasonCode: 'authoritative_lookup_prerequisites_incomplete',
       remainingBlockers: [
-        'source_permission_unproven',
+        'official_receipt_live_response_contract_unattested',
+        'official_receipt_live_transport_absent',
         'receiver_lookup_protection_metadata_absent',
         'receiver_lookup_key_provenance_unproven',
         'receiver_lookup_new_revision_and_fresh_provisioning_required',
@@ -391,7 +392,7 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
       enumerable: true,
       get() {
         accessorReads += 1;
-        return 'source_permission_unproven';
+        return 'official_receipt_live_response_contract_unattested';
       },
     });
     const symbolResult = {
@@ -684,9 +685,24 @@ describe('read-only repository prerequisite regressions', () => {
     expect(protectionSource).toContain('secrets.encryptionSecret === secrets.fingerprintSecret');
     expect(protectionSource).toContain('fetanagent:deposit-reference:encryption-key:v1');
     expect(protectionSource).toContain('fetanagent:deposit-reference:fingerprint-key:v1');
-    expect(protectionSource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
+    const proofBoundaryStart = protectionSource.indexOf(
+      '/**\n * Protects a provider receipt reference',
+    );
+    const legacyBoundaryStart = protectionSource.indexOf(
+      'export function protectCbeBirrDepositReference',
+    );
+    const providerAwareBoundaryStart = protectionSource.indexOf(
+      'export function protectDepositProofReference',
+    );
+    expect(legacyBoundaryStart).toBeGreaterThanOrEqual(0);
+    expect(proofBoundaryStart).toBeGreaterThan(legacyBoundaryStart);
+    expect(providerAwareBoundaryStart).toBeGreaterThan(proofBoundaryStart);
+    const legacyBoundarySource = protectionSource.slice(legacyBoundaryStart, proofBoundaryStart);
+    const providerAwareBoundarySource = protectionSource.slice(providerAwareBoundaryStart);
+    expect(legacyBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
+    expect(providerAwareBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
     expect(apiSource).toContain(
-      "import { protectCbeBirrDepositReference } from '@fetanagent/deposit-reference-protection';",
+      "  protectCbeBirrDepositReference,\n  protectDepositProofReference,\n} from '@fetanagent/deposit-reference-protection';",
     );
     expect(apiSource).not.toContain('reference.toUpperCase()');
     expect(profileSource).toContain('timingSafeEqual(actualEncryption, expectedEncryption)');

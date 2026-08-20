@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 import type { Client, QueryResultRow } from 'pg';
 
@@ -163,7 +165,9 @@ async function createActor(
   `);
   expect(issuingAdmin.rows).toHaveLength(1);
 
-  const tokenDigest = `sha256-v1:${tokenCharacter.repeat(64)}`;
+  const tokenDigest = `sha256-v1:${createHash('sha256')
+    .update(`dry-run-proof-invite:${seed}`, 'utf8')
+    .digest('hex')}`;
 
   await client.query(
     `insert into app.telegram_beta_invites (

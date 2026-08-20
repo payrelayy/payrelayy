@@ -238,8 +238,9 @@ as $$
 declare
   decision_count integer;
   latest_decision app.player_deposit_eligibility_decisions%rowtype;
-  locked_platform app.platforms%rowtype;
-  locked_player app.customer_platform_players%rowtype;
+  locked_platform_id uuid;
+  locked_player_id uuid;
+  locked_player_updated_at timestamptz;
   maximum_decision_version integer;
   resolved_provider app.payment_providers%rowtype;
 begin
@@ -253,10 +254,12 @@ begin
     raise exception 'The dry-run deposit proof destination is invalid.';
   end if;
 
-  select player_account,
-         platform
-    into locked_player,
-         locked_platform
+  select player_account.id,
+         player_account.updated_at,
+         platform.id
+    into locked_player_id,
+         locked_player_updated_at,
+         locked_platform_id
     from app.customer_platform_players player_account
     join app.platforms platform
       on platform.id = player_account.platform_id
@@ -276,12 +279,12 @@ begin
     into decision_count,
          maximum_decision_version
     from app.player_deposit_eligibility_decisions decision
-   where decision.player_account_id = locked_player.id;
+   where decision.player_account_id = locked_player_id;
 
   select decision.*
     into latest_decision
     from app.player_deposit_eligibility_decisions decision
-   where decision.player_account_id = locked_player.id
+   where decision.player_account_id = locked_player_id
    order by decision.decision_version desc
    limit 1
    for key share;
@@ -292,7 +295,7 @@ begin
     or latest_decision.decision <> 'eligible'
     or latest_decision.reason_code <> 'financial_eligibility_approved'
     or latest_decision.player_account_updated_at_snapshot
-       is distinct from locked_player.updated_at
+       is distinct from locked_player_updated_at
     or latest_decision.decided_at > pg_catalog.clock_timestamp() then
     raise exception 'The dry-run deposit proof destination is not currently eligible.';
   end if;
@@ -309,8 +312,8 @@ begin
   end if;
 
   return query
-  select locked_platform.id,
-         locked_player.id,
+  select locked_platform_id,
+         locked_player_id,
          latest_decision.id,
          resolved_provider.id,
          resolved_provider.code;
@@ -770,8 +773,6 @@ declare
   resolved_processed_at timestamptz;
   resolved_proof app.deposit_proof_requests%rowtype;
   resolved_receipt app.telegram_dry_run_deposit_proof_receipts%rowtype;
-  resolved_provider_code text;
-  resolved_player_id text;
 begin
   if p_origin_inbound_event_id is null
     or p_semantic_input_hmac is null
@@ -838,19 +839,18 @@ begin
    where receipt.origin_inbound_event_id = p_origin_inbound_event_id;
 
   if found then
-    select proof_request,
-           payment_provider.code,
-           player_account.player_id
-      into resolved_proof,
-           resolved_provider_code,
-           resolved_player_id
+    select proof_request.*
+      into resolved_proof
       from app.deposit_proof_requests proof_request
       join app.payment_providers payment_provider
         on payment_provider.id = proof_request.payment_provider_id
+       and payment_provider.code = proof_request.provider_code
       join app.customer_platform_players player_account
         on player_account.id = proof_request.player_account_id
      where proof_request.id = resolved_receipt.deposit_proof_request_id
-       and proof_request.submitting_customer_id = resolved_customer_id;
+       and proof_request.submitting_customer_id = resolved_customer_id
+       and payment_provider.code = p_provider_code
+       and player_account.player_id = p_player_id;
 
     if not found
       or resolved_receipt.semantic_input_hmac is distinct from p_semantic_input_hmac
@@ -859,8 +859,6 @@ begin
       or resolved_receipt.conversation_id is distinct from resolved_conversation_id
       or resolved_receipt.created_at is distinct from resolved_processed_at
       or resolved_proof.origin_channel <> 'telegram'
-      or resolved_player_id is distinct from p_player_id
-      or resolved_provider_code is distinct from p_provider_code
       or resolved_proof.candidate_reference_fingerprint is distinct from p_reference_fingerprint
       or resolved_proof.candidate_reference_masked is distinct from p_reference_masked
       or resolved_proof.reference_encryption_key_version
@@ -873,7 +871,7 @@ begin
 
     return query
     select resolved_proof.id,
-           resolved_provider_code,
+           resolved_proof.provider_code,
            resolved_proof.status,
            resolved_proof.submitted_at,
            true;
@@ -967,9 +965,7 @@ declare
   resolved_customer_status app.record_status;
   resolved_identity_status app.record_status;
   resolved_proof app.deposit_proof_requests%rowtype;
-  resolved_provider_code text;
   resolved_receipt app.customer_web_dry_run_deposit_proof_receipts%rowtype;
-  resolved_player_id text;
 begin
   if p_actor_auth_user_id is null
     or p_request_key is null
@@ -1025,24 +1021,21 @@ begin
      and receipt.request_key = p_request_key;
 
   if found then
-    select proof_request,
-           payment_provider.code,
-           player_account.player_id
-      into resolved_proof,
-           resolved_provider_code,
-           resolved_player_id
+    select proof_request.*
+      into resolved_proof
       from app.deposit_proof_requests proof_request
       join app.payment_providers payment_provider
         on payment_provider.id = proof_request.payment_provider_id
+       and payment_provider.code = proof_request.provider_code
       join app.customer_platform_players player_account
         on player_account.id = proof_request.player_account_id
      where proof_request.id = resolved_receipt.deposit_proof_request_id
-       and proof_request.submitting_customer_id = resolved_customer_id;
+       and proof_request.submitting_customer_id = resolved_customer_id
+       and payment_provider.code = p_provider_code
+       and player_account.player_id = p_player_id;
 
     if not found
       or resolved_receipt.submitting_customer_id is distinct from resolved_customer_id
-      or resolved_player_id is distinct from p_player_id
-      or resolved_provider_code is distinct from p_provider_code
       or resolved_proof.candidate_reference_fingerprint is distinct from p_reference_fingerprint
       or resolved_proof.candidate_reference_masked is distinct from p_reference_masked
       or resolved_proof.reference_encryption_key_version
@@ -1055,7 +1048,7 @@ begin
 
     return query
     select resolved_proof.id,
-           resolved_provider_code,
+           resolved_proof.provider_code,
            resolved_proof.status,
            resolved_proof.submitted_at,
            true;

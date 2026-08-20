@@ -6769,6 +6769,7 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       { signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)' },
+      { signature: 'app.resolve_dry_run_deposit_proof_boundary(text,text)' },
     ]);
 
     const eligibilityReaderPrivileges = await client.query<{
@@ -6815,7 +6816,8 @@ describe('disposable SQL migration baseline', () => {
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
-           'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure
+           'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure,
+           'app.resolve_dry_run_deposit_proof_boundary(text,text)'::regprocedure
          )
        order by signature
     `);
@@ -6882,6 +6884,15 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.resolve_dry_run_deposit_proof_boundary(text,text)',
       },
     ]);
 

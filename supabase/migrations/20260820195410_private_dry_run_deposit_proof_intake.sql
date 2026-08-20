@@ -275,7 +275,7 @@ begin
   end if;
 
   select pg_catalog.count(*)::integer,
-         pg_catalog.coalesce(pg_catalog.max(decision.decision_version), 0)
+         coalesce(pg_catalog.max(decision.decision_version), 0)
     into decision_count,
          maximum_decision_version
     from app.player_deposit_eligibility_decisions decision

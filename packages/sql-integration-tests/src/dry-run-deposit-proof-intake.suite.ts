@@ -174,7 +174,7 @@ async function createActor(
      )`,
     [tokenDigest, issuingAdmin.rows[0]!.id],
   );
-  const redeemedInvite = await client.query<{ readonly id: string }>(
+  const redeemedInvite = await client.query<{ readonly token_digest: string }>(
     `update app.telegram_beta_invites
         set status = 'redeemed',
             redeemed_telegram_user_id = $2::bigint,
@@ -185,7 +185,7 @@ async function createActor(
             redeemed_at = clock_timestamp() - interval '5 minutes'
       where token_digest = $1::text
         and status = 'active'
-      returning id`,
+      returning token_digest`,
     [tokenDigest, telegramUserId, customerId, telegramIdentityId, admissionEvent.rows[0]!.id],
   );
   expect(redeemedInvite.rows).toHaveLength(1);

@@ -151,7 +151,7 @@ async function createActor(
        channel, external_event_id, customer_identity_id, payload_digest
      ) values ('telegram', $1::text, $2::uuid, $3::text)
      returning id`,
-    [`proof-admission:${telegramUserId}`, telegramIdentityId, payloadHmac(tokenCharacter)],
+    [`update:${telegramUserId}`, telegramIdentityId, payloadHmac(tokenCharacter)],
   );
   const issuingAdmin = await client.query<{ readonly id: string }>(`
     select admin_user.id
@@ -273,7 +273,7 @@ async function createFixture(client: Client, seed: string): Promise<ProofFixture
 async function createInboundEvent(
   client: Client,
   actor: ActorFixture,
-  externalEventId: string,
+  telegramUpdateId: number,
   hmacCharacter: string,
 ): Promise<string> {
   const event = await client.query<{ readonly id: string }>(
@@ -281,7 +281,7 @@ async function createInboundEvent(
        channel, external_event_id, customer_identity_id, payload_digest
      ) values ('telegram', $1::text, $2::uuid, $3::text)
      returning id`,
-    [externalEventId, actor.telegramIdentityId, payloadHmac(hmacCharacter)],
+    [`update:${telegramUpdateId}`, actor.telegramIdentityId, payloadHmac(hmacCharacter)],
   );
   return event.rows[0]!.id;
 }
@@ -800,12 +800,7 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
       const client = getClient();
       await withRollback(client, async () => {
         const fixture = await createFixture(client, '103');
-        const firstEvent = await createInboundEvent(
-          client,
-          fixture.actorA,
-          'proof-telegram:103:first',
-          '3',
-        );
+        const firstEvent = await createInboundEvent(client, fixture.actorA, 9_103_000_001, '3');
         const input = {
           eventId: firstEvent,
           fingerprint: '3'.repeat(64),
@@ -841,12 +836,7 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
           [fixture.playerAccountId],
         );
 
-        const secondEvent = await createInboundEvent(
-          client,
-          fixture.actorA,
-          'proof-telegram:103:second',
-          '4',
-        );
+        const secondEvent = await createInboundEvent(client, fixture.actorA, 9_103_000_002, '4');
         const reused = await captureTelegramProof(client, {
           ...input,
           eventId: secondEvent,
@@ -854,12 +844,7 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         });
         expect(reused).toEqual([{ ...first[0]!, request_replayed: true }]);
 
-        const thirdEvent = await createInboundEvent(
-          client,
-          fixture.actorA,
-          'proof-telegram:103:third',
-          '5',
-        );
+        const thirdEvent = await createInboundEvent(client, fixture.actorA, 9_103_000_003, '5');
         await expect(
           captureTelegramProof(client, {
             ...input,
@@ -896,12 +881,7 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
       await withRollback(client, async () => {
         const fixture = await createFixture(client, '107');
         const beforeFinancial = await readFinancialLedgerSnapshot(client);
-        const eventId = await createInboundEvent(
-          client,
-          fixture.actorA,
-          'proof-telegram:107:success',
-          '7',
-        );
+        const eventId = await createInboundEvent(client, fixture.actorA, 9_107_000_001, '7');
         await client.query(
           `update app.inbound_events
               set processing_error_code = 'synthetic_retry'
@@ -1053,12 +1033,7 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         );
         expect(competingResults.rows).toEqual([{ action_receipts: 0, live_deposit_receipts: 0 }]);
 
-        const failedEventId = await createInboundEvent(
-          client,
-          fixture.actorA,
-          'proof-telegram:107:failure',
-          '8',
-        );
+        const failedEventId = await createInboundEvent(client, fixture.actorA, 9_107_000_002, '8');
         await expect(
           captureTelegramProof(client, {
             ...input,

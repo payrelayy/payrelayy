@@ -2905,7 +2905,7 @@ declare
   settled_execution_job_status text;
   settlement_already_finalized boolean;
   settlement_updated_at timestamptz;
-  authorization record;
+  pilot_authorization_row record;
   checked_at timestamptz;
 begin
   perform app.require_private_live_deposit_pilot_settlement();
@@ -3293,17 +3293,17 @@ begin
   end if;
 
   select pilot_authorization.*
-    into authorization
+    into pilot_authorization_row
     from app.require_private_live_deposit_pilot_authorization(
       settled_deposit_intent_id,
       null
     ) pilot_authorization;
 
-  if authorization.pilot_reservation_id is null
+  if pilot_authorization_row.pilot_reservation_id is null
     or not exists (
       select 1
         from app.private_live_deposit_pilot_reservations reservation
-       where reservation.id = authorization.pilot_reservation_id
+       where reservation.id = pilot_authorization_row.pilot_reservation_id
          and reservation.deposit_payment_claim_id = settled_payment_claim_id
          and reservation.deposit_intent_id = settled_deposit_intent_id
          and reservation.verification_attempt_id = p_verification_attempt_id
@@ -3455,7 +3455,7 @@ declare
   leased_token uuid;
   leased_expires_at timestamptz;
   leased_disposition text;
-  authorization record;
+  pilot_authorization_row record;
   pilot app.private_live_deposit_pilot_revisions%rowtype;
   pilot_id uuid;
   checked_at timestamptz;
@@ -3591,13 +3591,13 @@ begin
   end if;
 
   select pilot_authorization.*
-    into authorization
+    into pilot_authorization_row
     from app.require_private_live_deposit_pilot_authorization(
       leased_deposit_intent_id,
       leased_execution_attempt_id
     ) pilot_authorization;
 
-  if authorization.pilot_reservation_id is null then
+  if pilot_authorization_row.pilot_reservation_id is null then
     raise exception 'The private pilot lease lacks database authorization.';
   end if;
 
@@ -3612,11 +3612,11 @@ begin
          leased_token,
          leased_expires_at,
          leased_disposition,
-         authorization.pilot_contract_version,
-         authorization.pilot_revision_id,
-         authorization.pilot_reservation_id,
-         authorization.pilot_configuration_digest,
-         authorization.pilot_authorization_token;
+         pilot_authorization_row.pilot_contract_version,
+         pilot_authorization_row.pilot_revision_id,
+         pilot_authorization_row.pilot_reservation_id,
+         pilot_authorization_row.pilot_configuration_digest,
+         pilot_authorization_row.pilot_authorization_token;
 end;
 $$;
 
@@ -3648,7 +3648,7 @@ declare
   fenced_execution_attempt_id uuid;
   fenced_at timestamptz;
   first_fence boolean;
-  authorization record;
+  pilot_authorization_row record;
 begin
   perform app.require_private_live_deposit_pilot_executor();
 
@@ -3670,15 +3670,15 @@ begin
   end if;
 
   select pilot_authorization.*
-    into authorization
+    into pilot_authorization_row
     from app.require_private_live_deposit_pilot_authorization(
       resolved_deposit_intent_id,
       p_execution_attempt_id
     ) pilot_authorization;
 
-  if authorization.pilot_revision_id is distinct from p_pilot_revision_id
-    or authorization.pilot_reservation_id is distinct from p_pilot_reservation_id
-    or authorization.pilot_authorization_token is distinct from p_pilot_authorization_token then
+  if pilot_authorization_row.pilot_revision_id is distinct from p_pilot_revision_id
+    or pilot_authorization_row.pilot_reservation_id is distinct from p_pilot_reservation_id
+    or pilot_authorization_row.pilot_authorization_token is distinct from p_pilot_authorization_token then
     raise exception 'The private pilot lease authorization does not match the final action.';
   end if;
 
@@ -3702,15 +3702,15 @@ begin
   end if;
 
   select pilot_authorization.*
-    into authorization
+    into pilot_authorization_row
     from app.require_private_live_deposit_pilot_authorization(
       fenced_deposit_intent_id,
       fenced_execution_attempt_id
     ) pilot_authorization;
 
-  if authorization.pilot_revision_id is distinct from p_pilot_revision_id
-    or authorization.pilot_reservation_id is distinct from p_pilot_reservation_id
-    or authorization.pilot_authorization_token is distinct from p_pilot_authorization_token then
+  if pilot_authorization_row.pilot_revision_id is distinct from p_pilot_revision_id
+    or pilot_authorization_row.pilot_reservation_id is distinct from p_pilot_reservation_id
+    or pilot_authorization_row.pilot_authorization_token is distinct from p_pilot_authorization_token then
     raise exception 'The private pilot authority changed while fencing final action.';
   end if;
 
@@ -3719,11 +3719,11 @@ begin
          fenced_execution_attempt_id,
          fenced_at,
          first_fence,
-         authorization.pilot_contract_version,
-         authorization.pilot_revision_id,
-         authorization.pilot_reservation_id,
-         authorization.pilot_configuration_digest,
-         authorization.pilot_authorization_token;
+         pilot_authorization_row.pilot_contract_version,
+         pilot_authorization_row.pilot_revision_id,
+         pilot_authorization_row.pilot_reservation_id,
+         pilot_authorization_row.pilot_configuration_digest,
+         pilot_authorization_row.pilot_authorization_token;
 end;
 $$;
 

@@ -833,48 +833,34 @@ alter function app.complete_private_live_telebirr_verification(
   text, timestamptz, text, text, text, timestamptz, bigint, timestamptz, text
 ) owner to postgres;
 
--- These roles are new and intentionally receive no direct user-database capabilities. Repeat the
--- revokes across every existing non-system schema so the migration is fail-closed even if a future
--- bootstrap changes role defaults. Inherited PUBLIC CONNECT/TEMP and public-schema USAGE are
--- catalog-audited by the runtime; only the exact app grant below is added by this migration.
+-- These roles are new and intentionally receive no direct user-database capabilities. Keep the
+-- revokes inside the database and the repository-owned app schema: hosted Supabase schemas contain
+-- provider-owned objects that the migration role must not mutate. Inherited PUBLIC CONNECT/TEMP and
+-- public-schema USAGE are catalog-audited by the runtime; only the exact app grants below are added.
 do $$
-declare
-  schema_name text;
 begin
   execute format(
     'revoke all privileges on database %I from fetanagent_trusted_telebirr_verifier, fetanagent_trusted_telebirr_verifier_runtime',
     current_database()
   );
-
-  for schema_name in
-    select namespace.nspname
-     from pg_catalog.pg_namespace namespace
-     where namespace.nspname not in ('pg_catalog', 'information_schema')
-       and namespace.nspname !~ '^pg_(toast|temp)'
-  loop
-    execute format(
-      'revoke all privileges on schema %I from fetanagent_trusted_telebirr_verifier, fetanagent_trusted_telebirr_verifier_runtime',
-      schema_name
-    );
-    execute format(
-      'revoke all privileges on all tables in schema %I from fetanagent_trusted_telebirr_verifier, fetanagent_trusted_telebirr_verifier_runtime',
-      schema_name
-    );
-    execute format(
-      'revoke all privileges on all sequences in schema %I from fetanagent_trusted_telebirr_verifier, fetanagent_trusted_telebirr_verifier_runtime',
-      schema_name
-    );
-    execute format(
-      'revoke all privileges on all functions in schema %I from fetanagent_trusted_telebirr_verifier, fetanagent_trusted_telebirr_verifier_runtime',
-      schema_name
-    );
-    execute format(
-      'revoke all privileges on all procedures in schema %I from fetanagent_trusted_telebirr_verifier, fetanagent_trusted_telebirr_verifier_runtime',
-      schema_name
-    );
-  end loop;
 end;
 $$;
+
+revoke all privileges on schema app
+from fetanagent_trusted_telebirr_verifier,
+     fetanagent_trusted_telebirr_verifier_runtime;
+revoke all privileges on all tables in schema app
+from fetanagent_trusted_telebirr_verifier,
+     fetanagent_trusted_telebirr_verifier_runtime;
+revoke all privileges on all sequences in schema app
+from fetanagent_trusted_telebirr_verifier,
+     fetanagent_trusted_telebirr_verifier_runtime;
+revoke all privileges on all functions in schema app
+from fetanagent_trusted_telebirr_verifier,
+     fetanagent_trusted_telebirr_verifier_runtime;
+revoke all privileges on all procedures in schema app
+from fetanagent_trusted_telebirr_verifier,
+     fetanagent_trusted_telebirr_verifier_runtime;
 
 revoke all on function
   app.require_private_live_deposit_pilot_settlement(),

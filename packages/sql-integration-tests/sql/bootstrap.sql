@@ -2,7 +2,8 @@
 -- PostgreSQL container. It deliberately contains no application users, payment data, credentials,
 -- or live Supabase objects.
 
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 do $bootstrap$
 declare

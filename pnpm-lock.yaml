@@ -153,6 +153,22 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  apps/trusted-telebirr-verifier:
+    dependencies:
+      '@fetanagent/telebirr-live-pilot-outcome-adapter':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-live-pilot-outcome-adapter
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-verification-foundation
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   apps/worker:
     dependencies:
       '@fetanagent/config':

@@ -229,6 +229,11 @@ export interface VerifiedDepositSettlementPostgresDatabase {
   query(query: string, values: readonly unknown[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
 
+/**
+ * These identifiers must come from a separately authenticated, database-bound completion
+ * boundary. A pure AuthoritativeDepositProofOutcomeCandidate is advisory-only and must never be
+ * cast to this input. No such provider-neutral handoff is composed today.
+ */
 export interface VerifiedDepositSettlementInput {
   readonly depositIntentId: string;
   readonly verificationAttemptId: string;
@@ -373,7 +378,9 @@ function resultFromRow(
 
 /**
  * Creates only an injected-database adapter. It opens no connection, reads no environment or
- * credential, owns no lifecycle, and is intentionally not composed into worker startup.
+ * credential, authenticates no upstream outcome, owns no retry/acknowledgement lifecycle, and is
+ * intentionally not composed into worker startup. TeleBirr's trusted completion function already
+ * invokes the private finalizer atomically and must never be routed through this adapter again.
  */
 export async function createVerifiedDepositSettlementPostgresAdapter(
   database: VerifiedDepositSettlementPostgresDatabase,

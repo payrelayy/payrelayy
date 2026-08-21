@@ -32,6 +32,13 @@ import {
   OwnerPlayerRegistrationReviewUnavailableError,
   type OwnerPlayerRegistrationDecision,
 } from './owner-player-registration-reviews.js';
+import {
+  OwnerPrivateLivePilotRejectedError,
+  OwnerPrivateLivePilotUnavailableError,
+  type PreparePrivateLivePilotRequest,
+  type PrivateLivePilotProviderCode,
+  type PrivateLivePilotStopReason,
+} from './owner-private-live-pilot.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 import {
   OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
@@ -77,6 +84,33 @@ const DRY_RUN_FIXTURE_REVIEW_DECISIONS = new Set<OwnerDryRunFixtureReviewDecisio
   'acknowledged',
   'manual_review_required',
 ]);
+const PRIVATE_LIVE_PILOT_STOP_REASONS = new Set<PrivateLivePilotStopReason>([
+  'cap_review',
+  'execution_uncertainty',
+  'owner_stop',
+  'parser_drift',
+  'pilot_complete',
+  'provider_incident',
+]);
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
+
+function exactRawHeader(rawHeaders: readonly string[], name: string): string | undefined {
+  const values: string[] = [];
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    if (rawHeaders[index]?.toLowerCase() === name) {
+      const value = rawHeaders[index + 1];
+      if (value !== undefined) values.push(value);
+    }
+  }
+  return values.length === 1 ? values[0] : undefined;
+}
+
+function exactIsoDate(value: unknown): Date | undefined {
+  if (typeof value !== 'string') return undefined;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value ? parsed : undefined;
+}
 
 function statusCode(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !('statusCode' in error)) return undefined;
@@ -89,6 +123,11 @@ export function buildOwnerControlApp(
 ) {
   if (!config.runtime.enabled) throw new Error('The Owner-control runtime is disabled.');
   const runtimeConfig = config.runtime;
+  const privatePilotMutationOrigins = new Set([
+    'https://owner.fetanagent.com',
+    `http://127.0.0.1:${config.server.port}`,
+    `http://localhost:${config.server.port}`,
+  ]);
   const app = Fastify({
     bodyLimit: 4 * 1024,
     logController: new LogController({ disableRequestLogging: true }),
@@ -152,6 +191,20 @@ export function buildOwnerControlApp(
       dependencies.fetch,
     );
     return verified.authUserId;
+  }
+
+  function validPrivatePilotMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_PILOT_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
   }
 
   app.post('/v1/owner/telegram-beta-invites', async (request, reply) => {
@@ -541,6 +594,174 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.post('/v1/owner/private-live-deposit-pilots/prepare', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, [
+        'activeFrom',
+        'confirmation',
+        'expiresAt',
+        'maximumAggregateMinor',
+        'maximumPerDepositMinor',
+        'maximumPerPlayerMinor',
+        'maximumReservationCount',
+        'minimumAmountMinor',
+        'playerIds',
+        'providerCodes',
+        'requestId',
+        'submittingCustomerIds',
+      ]);
+      const activeFrom = exactIsoDate(body?.activeFrom);
+      const expiresAt = exactIsoDate(body?.expiresAt);
+      const playerIds = body?.playerIds;
+      const providerCodes = body?.providerCodes;
+      const submittingCustomerIds = body?.submittingCustomerIds;
+      if (
+        !body ||
+        body.confirmation !== 'owner_confirmed_dormant_private_live_pilot' ||
+        !activeFrom ||
+        !expiresAt ||
+        !Array.isArray(playerIds) ||
+        playerIds.length !== 5 ||
+        playerIds.some((value) => typeof value !== 'string') ||
+        !Array.isArray(providerCodes) ||
+        providerCodes.some((value) => value !== 'cbe_birr' && value !== 'telebirr') ||
+        !Array.isArray(submittingCustomerIds) ||
+        submittingCustomerIds.some((value) => typeof value !== 'string') ||
+        typeof body.minimumAmountMinor !== 'number' ||
+        typeof body.maximumPerDepositMinor !== 'number' ||
+        typeof body.maximumPerPlayerMinor !== 'number' ||
+        typeof body.maximumAggregateMinor !== 'number' ||
+        typeof body.maximumReservationCount !== 'number' ||
+        !validPrivatePilotMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const status = await dependencies.runtime.privateLivePilot.prepare(authUserId, {
+        activeFrom,
+        expiresAt,
+        maximumAggregateMinor: body.maximumAggregateMinor,
+        maximumPerDepositMinor: body.maximumPerDepositMinor,
+        maximumPerPlayerMinor: body.maximumPerPlayerMinor,
+        maximumReservationCount: body.maximumReservationCount,
+        minimumAmountMinor: body.minimumAmountMinor as 2500,
+        playerIds: playerIds as unknown as PreparePrivateLivePilotRequest['playerIds'],
+        providerCodes: providerCodes as PrivateLivePilotProviderCode[],
+        requestId: body.requestId as string,
+        submittingCustomerIds: submittingCustomerIds as string[],
+      });
+      return reply.code(201).send({ pilot: status });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerPrivateLivePilotRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerPrivateLivePilotUnavailableError
+      ) {
+        request.log.warn('Owner private live-deposit pilot preparation is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post<{ Params: { pilotRevisionId: string } }>(
+    '/v1/owner/private-live-deposit-pilots/:pilotRevisionId/arm',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['confirmation', 'requestId']);
+        if (
+          body?.confirmation !== 'owner_confirmed_dry_run_only' ||
+          // Arm and stop use the immutable pilot UUID as their durable idempotency identity.
+          body.requestId !== request.params.pilotRevisionId ||
+          !validPrivatePilotMutationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receipt = await dependencies.runtime.privateLivePilot.arm(
+          authUserId,
+          request.params.pilotRevisionId,
+        );
+        return reply.code(200).send(receipt);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPrivateLivePilotRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner private live-deposit pilot arming is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { pilotRevisionId: string } }>(
+    '/v1/owner/private-live-deposit-pilots/:pilotRevisionId/stop',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['confirmation', 'reasonCode', 'requestId']);
+        const reasonCode = body?.reasonCode;
+        if (
+          body?.confirmation !== 'owner_confirmed_emergency_stop' ||
+          body.requestId !== request.params.pilotRevisionId ||
+          typeof reasonCode !== 'string' ||
+          !PRIVATE_LIVE_PILOT_STOP_REASONS.has(reasonCode as PrivateLivePilotStopReason) ||
+          !validPrivatePilotMutationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const status = await dependencies.runtime.privateLivePilot.stop(
+          authUserId,
+          request.params.pilotRevisionId,
+          reasonCode as PrivateLivePilotStopReason,
+        );
+        return reply.code(200).send({ pilot: status });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPrivateLivePilotRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner private live-deposit pilot emergency stop is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{
+    Params: { pilotRevisionId: string };
+    Querystring: Record<string, string>;
+  }>('/v1/owner/private-live-deposit-pilots/:pilotRevisionId/status', async (request, reply) => {
+    try {
+      if (Object.keys(request.query).length !== 0) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const status = await dependencies.runtime.privateLivePilot.status(
+        authUserId,
+        request.params.pilotRevisionId,
+      );
+      return reply.code(200).send({ pilot: status });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerPrivateLivePilotRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner private live-deposit pilot status is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.get('/healthz', async () => ({ status: 'ok', service: 'fetanagent-owner-control' }));
   app.get('/readyz', async (_request, reply) => {

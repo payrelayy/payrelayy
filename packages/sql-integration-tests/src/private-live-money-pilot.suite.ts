@@ -1630,7 +1630,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
                lower(pg_get_functiondef(procedure.oid)) as source
           from pg_proc procedure
          where procedure.oid in (
-           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
+           'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)'::regprocedure,
            'app.enforce_private_live_deposit_pilot_proof_insert()'::regprocedure,
            'app.reserve_private_live_deposit_pilot_claim(uuid)'::regprocedure,
            'app.require_private_live_deposit_pilot_authorization(uuid,uuid)'::regprocedure,
@@ -1657,7 +1657,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         const finalClockAssignment =
           row.function_name === 'enforce_private_live_deposit_pilot_proof_insert'
             ? row.source.lastIndexOf('captured_at := clock_timestamp()')
-            : row.function_name === 'arm_private_live_deposit_pilot'
+            : row.function_name === 'arm_private_live_deposit_pilot_by_admin_id'
               ? row.source.lastIndexOf('armed_time := clock_timestamp()')
               : row.source.lastIndexOf('checked_at := clock_timestamp()');
         expect(finalClockAssignment).toBeGreaterThan(orderedMutableLocks.at(-1)!);
@@ -1741,10 +1741,10 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           });
         } else {
           expect(row).toMatchObject({
-            direct_grantees: [],
+            direct_grantees: ['fetanagent_owner_control'],
             executor_allowed: false,
-            owner_allowed: false,
-            owner_runtime_allowed: false,
+            owner_allowed: true,
+            owner_runtime_allowed: true,
             settlement_allowed: false,
           });
         }

@@ -13,9 +13,11 @@ import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proo
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
+import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pilot-owner-control.suite.js';
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
+import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
 
@@ -6763,10 +6765,10 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(nonTriggerEligibilityReaders.rows).toEqual([
-      { signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)' },
+      { signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)' },
       {
         signature:
-          'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+          'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
       },
       { signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)' },
       { signature: 'app.enqueue_verified_deposit_execution(uuid)' },
@@ -6780,7 +6782,11 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       {
         signature:
-          'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
+          'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)',
+      },
+      {
+        signature:
+          'app.prepare_private_live_deposit_pilot_by_admin_id(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
       },
       { signature: 'app.require_private_live_deposit_pilot_authorization(uuid,uuid)' },
       { signature: 'app.reserve_private_live_deposit_pilot_claim(uuid)' },
@@ -6826,8 +6832,8 @@ describe('disposable SQL migration baseline', () => {
         join pg_namespace namespace on namespace.oid = procedure.pronamespace
        where namespace.nspname = 'app'
          and procedure.oid in (
-           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
-           'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure,
+           'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)'::regprocedure,
+           'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure,
            'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
            'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
            'app.fence_deposit_execution_final_action(uuid,uuid)'::regprocedure,
@@ -6835,7 +6841,8 @@ describe('disposable SQL migration baseline', () => {
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
-           'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)'::regprocedure,
+           'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamptz)'::regprocedure,
+           'app.prepare_private_live_deposit_pilot_by_admin_id(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)'::regprocedure,
            'app.require_private_live_deposit_pilot_authorization(uuid,uuid)'::regprocedure,
            'app.reserve_private_live_deposit_pilot_claim(uuid)'::regprocedure,
            'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure,
@@ -6851,7 +6858,7 @@ describe('disposable SQL migration baseline', () => {
         player_actions_runtime: false,
         public_execute: false,
         settlement_runtime: false,
-        signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)',
+        signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)',
       },
       {
         customer_web_runtime: false,
@@ -6861,7 +6868,7 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature:
-          'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+          'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
       },
       {
         customer_web_runtime: false,
@@ -6935,7 +6942,17 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature:
-          'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
+          'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.prepare_private_live_deposit_pilot_by_admin_id(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
       },
       {
         customer_web_runtime: false,
@@ -9482,7 +9499,15 @@ registerPrivateLiveMoneyPilotSqlTests(
   () => client,
   () => ownerAdminId,
 );
+registerPrivateLivePilotOwnerControlSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
 registerPrivateLiveTelebirrProofLineageSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerTrustedTelebirrVerifierRuntimeSqlTests(
   () => client,
   () => ownerAdminId,
 );

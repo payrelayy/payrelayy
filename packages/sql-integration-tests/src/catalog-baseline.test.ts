@@ -6764,9 +6764,17 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(nonTriggerEligibilityReaders.rows).toEqual([
       { signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)' },
+      {
+        signature:
+          'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+      },
       { signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)' },
       { signature: 'app.enqueue_verified_deposit_execution(uuid)' },
       { signature: 'app.fence_deposit_execution_final_action(uuid,uuid)' },
+      {
+        signature:
+          'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
       { signature: 'app.lease_next_deposit_execution(uuid,integer)' },
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
@@ -6819,9 +6827,11 @@ describe('disposable SQL migration baseline', () => {
        where namespace.nspname = 'app'
          and procedure.oid in (
            'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
+           'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure,
            'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
            'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
            'app.fence_deposit_execution_final_action(uuid,uuid)'::regprocedure,
+           'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)'::regprocedure,
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
@@ -6842,6 +6852,16 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
       },
       {
         customer_web_runtime: false,
@@ -6869,6 +6889,16 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.fence_deposit_execution_final_action(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: true,
+        signature:
+          'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
       },
       {
         customer_web_runtime: false,
@@ -8418,15 +8448,106 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(executionProcedures.rows).toEqual([{ procedures: 0 }]);
 
-    const callableExecutionRoutines = await client.query<{ readonly routines: number }>(`
-      select count(*)::integer as routines
+    const callableExecutionRoutines = await client.query<{
+      readonly deposit_executor_runtime: boolean;
+      readonly public_execute: boolean;
+      readonly settlement_runtime: boolean;
+      readonly signature: string;
+    }>(`
+      select routine.oid::regprocedure::text as signature,
+             has_function_privilege(
+               'fetanagent_deposit_executor_runtime', routine.oid, 'EXECUTE'
+             ) as deposit_executor_runtime,
+             has_function_privilege(
+               'fetanagent_verification_settlement_runtime', routine.oid, 'EXECUTE'
+             ) as settlement_runtime,
+             exists (
+               select 1
+                 from aclexplode(coalesce(
+                   routine.proacl,
+                   acldefault('f', routine.proowner)
+                 )) privilege
+                where privilege.grantee = 0
+                  and privilege.privilege_type = 'EXECUTE'
+             ) as public_execute
         from pg_proc routine
         join pg_namespace namespace on namespace.oid = routine.pronamespace
        where namespace.nspname = 'app'
          and routine.proname ~ '(execution|reconciliation)'
          and routine.prorettype <> 'trigger'::regtype
+       order by signature
     `);
-    expect(callableExecutionRoutines.rows).toEqual([{ routines: 8 }]);
+    expect(callableExecutionRoutines.rows).toEqual([
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.cancel_deposit_execution_before_action(uuid,uuid,text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.enqueue_verified_deposit_execution(uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.fence_deposit_execution_final_action(uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.fence_private_live_deposit_execution_final_action(uuid,uuid,uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: true,
+        signature:
+          'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_deposit_execution(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_deposit_execution_reconciliation(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_private_live_deposit_execution(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamp with time zone,boolean,boolean,boolean,boolean)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
+      },
+    ]);
 
     const indexRows = await client.query<{
       readonly indexdef: string;

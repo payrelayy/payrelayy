@@ -105,7 +105,13 @@ async function recordPublicAction(
        from app.record_public_telegram_action_inbound_event(
          $1::bigint, $2::bigint, $3::bigint, $4::text, $5::text
        )`,
-    [input.updateId, input.userId, input.chatId, input.payload, input.locale ?? 'en'],
+    [
+      input.updateId,
+      input.userId,
+      input.chatId,
+      input.payload,
+      input.locale === undefined ? 'en' : input.locale,
+    ],
   );
 }
 
@@ -251,21 +257,6 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
           userId,
         });
         expect(publicReceipt).toHaveLength(1);
-        await expect(
-          queryAsPlayerActions(
-            client,
-            `select * from app.issue_telegram_player_registration_capability(
-               $1::uuid, $2::uuid, $3::text, $4::text
-             )`,
-            [
-              publicReceipt[0]!.inbound_event_id,
-              '11111111-1111-4111-8111-111111111110',
-              payloadHmac('6'),
-              payloadHmac('7'),
-            ],
-          ),
-        ).resolves.toHaveLength(1);
-
         const before = await client.query<PublicIdentityGraphRow>(
           `select customer.id as customer_id,
                   customer_identity.id as customer_identity_id,

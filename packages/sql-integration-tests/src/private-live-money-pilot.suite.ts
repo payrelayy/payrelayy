@@ -763,7 +763,8 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           client,
           `select app.prepare_private_live_deposit_pilot(
              $1::uuid, $2::uuid, array['cbe_birr']::text[], $3::text[], $4::uuid[],
-             2500, 2500000, 2500000, 12500000, 5,
+             2500::bigint, 2500000::bigint, 2500000::bigint, 12500000::bigint,
+             5::smallint,
              $5::timestamptz, $6::timestamptz
            ) as pilot_revision_id`,
           [
@@ -781,7 +782,8 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           client,
           `select app.prepare_private_live_deposit_pilot(
              $1::uuid, $2::uuid, array['cbe_birr']::text[], $3::text[], $4::uuid[],
-             2500, 2500000, 2500000, 12500000, 5,
+             2500::bigint, 2500000::bigint, 2500000::bigint, 12500000::bigint,
+             5::smallint,
              $5::timestamptz, $6::timestamptz
            )`,
           [
@@ -798,7 +800,8 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           client,
           `select app.prepare_private_live_deposit_pilot(
              $1::uuid, $2::uuid, array['cbe_birr']::text[], $3::text[], $4::uuid[],
-             2500, 2500000, 2500000, 12500000, 5,
+             2500::bigint, 2500000::bigint, 2500000::bigint, 12500000::bigint,
+             5::smallint,
              $5::timestamptz, $6::timestamptz
            )`,
           [
@@ -815,7 +818,8 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           client,
           `select app.prepare_private_live_deposit_pilot(
              $1::uuid, $2::uuid, array['cbe_birr']::text[], $3::text[], $4::uuid[],
-             2500, 2500000, 2500000, 5000000, 1,
+             2500::bigint, 2500000::bigint, 2500000::bigint, 5000000::bigint,
+             1::smallint,
              $5::timestamptz, $6::timestamptz
            )`,
           [
@@ -878,7 +882,8 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           client,
           `select app.prepare_private_live_deposit_pilot(
              $1::uuid, $2::uuid, array['cbe_birr']::text[], $3::text[], $4::uuid[],
-             2500, 2500000, 2500000, 12500000, 5,
+             2500::bigint, 2500000::bigint, 2500000::bigint, 12500000::bigint,
+             5::smallint,
              $5::timestamptz, $6::timestamptz
            )`,
           [
@@ -1698,7 +1703,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
                   where acl.grantee <> procedure.proowner
                     and acl.privilege_type = 'EXECUTE'
                   order by coalesce(grantee.rolname, 'PUBLIC')
-               ) as direct_grantees
+               )::text[] as direct_grantees
           from pg_proc procedure
           join pg_namespace namespace on namespace.oid = procedure.pronamespace
          where namespace.nspname = 'app'

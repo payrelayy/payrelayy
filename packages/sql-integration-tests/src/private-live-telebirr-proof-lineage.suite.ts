@@ -1014,6 +1014,7 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
           /transcript replay conflicts/u,
         );
 
+        const expiredCompletionAt = new Date(firstLease.expires_at.getTime() + 1_000);
         await expectFailureAtSavepoint(
           client,
           `select *
@@ -1032,9 +1033,9 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
             digest('2'),
             digest('3'),
             digest('4'),
-            firstLease.expires_at,
+            expiredCompletionAt,
             digest('5'),
-            firstLease.expires_at,
+            expiredCompletionAt,
             digest('6'),
           ],
           /completion lineage is invalid/u,

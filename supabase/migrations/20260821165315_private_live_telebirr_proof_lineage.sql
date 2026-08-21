@@ -3329,11 +3329,11 @@ begin
     inserted_outcome.id
   );
 
-  update app.deposit_submissions
+  update app.deposit_submissions submission
      set status = 'verification_enqueued'
-   where id = new_submission_id
-     and deposit_intent_id = new_intent_id
-     and status = 'received';
+   where submission.id = new_submission_id
+     and submission.deposit_intent_id = new_intent_id
+     and submission.status = 'received';
   if not found then
     raise exception 'The receipt-derived private live TeleBirr submission is inconsistent.';
   end if;

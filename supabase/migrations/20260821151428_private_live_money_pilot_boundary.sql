@@ -3255,11 +3255,11 @@ begin
     or not exists (
       select 1
         from app.feature_switches provider_switch
-        join app.private_live_deposit_pilot_providers provider_member
-          on provider_member.pilot_revision_id = pilot.id
-         and provider_member.payment_provider_id = intent.payment_provider_id
+        join app.private_live_deposit_pilot_providers provider_switch_member
+          on provider_switch_member.pilot_revision_id = pilot.id
+         and provider_switch_member.payment_provider_id = intent.payment_provider_id
          and provider_switch.feature_key =
-             provider_member.provider_code_snapshot || '_authoritative_verification'
+             provider_switch_member.provider_code_snapshot || '_authoritative_verification'
        where provider_switch.mode = 'live'
     ) then
     raise exception 'The private pilot settlement proof is not authorized.';

@@ -49,16 +49,26 @@ the live transport remain independently blocked.
 
 ## What the two new source blockers mean
 
-`official_receipt_live_response_contract_unattested` means the parse5 fixture proves only offline
-mechanics. No real customer receipt, phone, transaction ID, screenshot, SMS, PDF, account, or
-provider response is embedded in the package. Controlled privacy-reviewed samples still have to
-attest exact live labels, status/type vocabulary, money fields, fee arithmetic, timestamps,
-encoding, content type, maximum size, and drift behavior.
+`official_receipt_live_response_contract_unattested` means the Stage 1E fixture proves only offline
+mechanics. A privacy-controlled envelope observation established `application/pdf`, not an exact
+semantic response contract. No real customer receipt, phone, transaction ID, screenshot, SMS, PDF,
+account, or provider response is embedded in either package. Controlled privacy-reviewed work must
+still attest exact PDF field layout, labels, status/type vocabulary, money fields, fee arithmetic,
+timestamps, encryption behavior, parsing behavior, size policy, and drift handling.
 
-`official_receipt_live_transport_absent` means there is deliberately no HTTP/browser client. The
-compiled route has HTTPS, an exact host/port/path, ordered `TID` and `PH`, and zero redirects, but no
-code performs that request. A future transport remains separate work and must fail closed on TLS,
-redirect, timeout, size, content-type, outage, and incident-stop failures.
+`official_receipt_live_transport_absent` means there is no permitted or reachable authoritative
+lookup HTTP/browser client. The compiled route has HTTPS, an exact host/port/path, ordered `TID` and
+`PH`, and zero redirects, but no application code performs that request. Any later runtime must fail
+closed on TLS, redirect, timeout, size, content-type, outage, and incident-stop failures.
+
+An isolated sibling package now implements those bounded one-shot transport mechanics plus an
+opaque PDF-envelope observation. It has no receipt-field parser, and its public success disposition
+is `opaque_pdf_observation`. This does not clear the blocker for the authoritative lookup: no
+application or worker imports the package, no protected material can reach it, no trusted source
+authorization or incident-stop owner is wired, and the exact PDF field contract remains
+unattested. The prerequisite package itself still contains no network client and every capability
+remains literal `false`. See
+[cbe-birr-authoritative-receipt-transport.md](cbe-birr-authoritative-receipt-transport.md).
 
 ## Other unresolved prerequisite groups
 

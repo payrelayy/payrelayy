@@ -210,6 +210,115 @@ labels, sealed service-file metadata, local Docker socket, and fixed Compose pro
 checks its SHA-256 before every privileged operation, so an absent, stale, writable, or broader
 helper fails closed.
 
+### Exact helper replacement on the current staging Droplet
+
+The VM-transition controller is permanently pinned to retired Droplet `590666364`; never run it on
+current staging Droplet `593344964`. The current Droplet uses a separate, bounded root-console helper
+replacement. Before publishing a commit that changes the helper, run `stop-and-disable` from the
+currently deployed reviewed commit so the containers are stopped and all four disposable database
+logins are disabled. Keep the runtime offline throughout replacement.
+
+For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
+
+```text
+installed_predecessor=4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e
+reviewed_successor=4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188
+```
+
+Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
+transfer, and stage those public script bytes through the root-console channel as the regular
+`root:root` mode-`0600` file
+`/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.next`. Do not accept another
+predecessor digest, fetch a moving branch, or put any credential in that directory.
+
+```bash
+C1='<exact-40-lowercase-reviewed-main-commit>'
+NEXT_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
+[[ "$C1" =~ ^[0-9a-f]{40}$ ]]
+git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
+test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
+bash -n fetanagent-staging-deploy-helper.next
+```
+
+At the DigitalOcean root console, use only the fixed paths and hashes below. The backup is accepted
+only after proving it is the exact predecessor. Installation occurs through a checked temporary file
+followed by one atomic rename; a mismatch aborts before replacing the installed helper.
+
+```bash
+bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
+TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
+STAGING_ROOT='/root/fetanagent-helper-rotation'
+STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous"
+SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
+PREVIOUS_SHA='4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e'
+NEXT_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
+METADATA='http://169.254.169.254/metadata/v1'
+test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
+test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
+  "$METADATA/interfaces/public/0/ipv4/address")" = '161.35.41.232'
+test ! -L "$SUDOERS" && test "$(stat --format='%U:%G:%a' "$SUDOERS")" = 'root:root:440'
+cmp -s -- "$SUDOERS" <(printf '%s\n' \
+  'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-staging-deploy-helper *')
+visudo -cf /etc/sudoers >/dev/null
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
+test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
+  --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$STAGING_ROOT" && test "$(stat --format='%U:%G:%a' "$STAGING_ROOT")" = 'root:root:700'
+test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
+test "$(sha256sum "$TARGET" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+test ! -L "$STAGED" && test "$(stat --format='%U:%G:%a' "$STAGED")" = 'root:root:600'
+test "$(sha256sum "$STAGED" | awk '{ print $1 }')" = "$NEXT_SHA"
+bash -n "$STAGED"
+test ! -e "$BACKUP" && test ! -L "$BACKUP"
+install -o root -g root -m 0600 "$TARGET" "$BACKUP"
+test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+INSTALL_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"
+trap 'rm -f -- "$INSTALL_TMP"' EXIT
+install -o root -g root -m 0755 "$STAGED" "$INSTALL_TMP"
+test "$(stat --format='%U:%G:%a' "$INSTALL_TMP")" = 'root:root:755'
+test "$(sha256sum "$INSTALL_TMP" | awk '{ print $1 }')" = "$NEXT_SHA"
+mv -f -- "$INSTALL_TMP" "$TARGET"
+test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
+test "$(sha256sum "$TARGET" | awk '{ print $1 }')" = "$NEXT_SHA"
+cmp -s -- "$SUDOERS" <(printf '%s\n' \
+  'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-staging-deploy-helper *')
+visudo -cf /etc/sudoers >/dev/null
+trap - EXIT
+FETANAGENT_HELPER_REPLACE
+```
+
+Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
+against successor SHA `4966c316…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+offline and use the root console to atomically restore only the checksum-proven `previous` file:
+
+```bash
+bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
+TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous'
+PREVIOUS_SHA='4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e'
+test ! -L "$BACKUP" && test "$(stat --format='%U:%G:%a' "$BACKUP")" = 'root:root:600'
+test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+RESTORE_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"
+trap 'rm -f -- "$RESTORE_TMP"' EXIT
+install -o root -g root -m 0755 "$BACKUP" "$RESTORE_TMP"
+test "$(sha256sum "$RESTORE_TMP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+mv -f -- "$RESTORE_TMP" "$TARGET"
+test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
+test "$(sha256sum "$TARGET" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+trap - EXIT
+FETANAGENT_HELPER_RESTORE
+```
+
+Do not hand-edit the installed helper or bypass its checksum gate. Remove both root staging files
+only after the read-only verification succeeds. This is a one-successor replacement, not ongoing
+credential rotation and not authority to enable financial actions.
+
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or
 `stop-and-disable` is selected. The permanent read-only `transition-ssh-verify` mode and the guarded
 `transition-stop-legacy` mode use only the three `STAGING_VM_*` SSH inputs. Never paste any
@@ -217,6 +326,7 @@ protected value into a task, repository file, workflow input, or VM command line
 
 | Protected environment input                         | Required boundary                                                                                                              |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `SUPABASE_ACCESS_TOKEN`                             | Supabase Management API token; ban-list reads in deploy, and exact-IP removal only in explicit unban mode                      |
 | `SUPABASE_DB_PASSWORD`                              | staging database administrator password                                                                                        |
 | `SUPABASE_CA_CERTIFICATE_PEM`                       | verified staging database CA PEM                                                                                               |
 | `BETA_ADMISSION_RUNTIME_PASSWORD`                   | independent 32-byte lowercase hex                                                                                              |
@@ -250,8 +360,8 @@ profile. The VM key must
 authenticate only the non-root `fetanagent-admin` identity. The historical BotFather token shown in
 an earlier screenshot is compromised and must never be reused.
 
-`Staging beta deploy and smoke` is manual-only and dormant unless dispatched from the exact
-reviewed `main` commit with the staging project ref and DigitalOcean droplet ID typed back. `plan`
+`Staging beta deploy and smoke` starts only when manually dispatched from the exact reviewed `main`
+commit with the staging project ref and DigitalOcean droplet ID typed back. `plan`
 only builds the five commit-labelled images. `transition-ssh-verify` checks out that exact commit,
 derives the reviewed helper SHA-256, and uses the protected private key and strict pinned
 `known_hosts` entry to connect as non-root `fetanagent-admin`. It invokes only the helper's
@@ -282,6 +392,45 @@ not read the Telegram token; it always installs the invalid
 and beta-admission. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
 
+`deploy-and-smoke` does not accept an operator-authored stop deadline. Immediately after provisioning,
+it reads only the four exact staging roles' `rolvaliduntil` values through the protected administrator
+connection. All four roles must exist, be login-enabled, have finite expiries within the expected
+24-hour window, and differ by no more than ten seconds. The workflow derives one canonical UTC stop
+time exactly two hours before the earliest expiry. It transfers no database password or administrator
+credential to the VM for this control.
+
+Before any long-lived container starts, the checksum-verified root helper installs and enables a
+fixed, root-owned systemd service and persistent timer for that derived time. The timer survives a VM
+reboot, stops only the exact `fetanagent-staging-beta` Compose project, removes its runtime secret
+files, and retries once per minute without a start limit if the stop fails. The helper permits the
+timer-only `expiry-stop` path only for a systemd service invocation with its fixed guard marker; the
+deployment identity cannot invoke that path directly. Any ordinary helper `stop` also removes the
+timer. If deriving or arming the timer fails, activation does not start and the workflow disables all
+four logins. A cancellation after provisioning also runs the same bounded VM stop/disarm and database
+login cleanup; cancellation before provisioning has no runtime login to remove. This is an automatic
+stop-before-expiry boundary, not credential rotation or continuous availability: staging intentionally
+goes offline about 22 hours after each successful deployment and must be redeployed with new
+disposable credentials to resume.
+
+DigitalOcean Droplet `593344964` has the exact current public IPv6 address
+`2a03:b0c0:1:e0:0:1:a8b4:2001`. It is the only address this workflow may remove from Supabase's
+temporary network-ban list. In deploy mode, the workflow first stops any prior staging project and
+disables its old logins, proves the empty host and direct IPv6 route, and then reads the current ban
+list without modifying it. An unavailable or malformed ban list fails closed. If the exact Droplet
+address is listed, deployment stops before any new runtime password is provisioned; deploy mode does
+not unban an address.
+
+Use this stop/check/unban-before-redeploy process after that failure:
+
+1. Keep staging stopped. Do not restore the old runtime, retry its database connection, or rerun
+   `deploy-and-smoke` while the exact address remains banned.
+2. Dispatch `unban-and-connectivity-check` from the same exact reviewed `main` commit, typing back the
+   staging project ref and Droplet ID. That explicit mode validates the current list, removes only
+   `2a03:b0c0:1:e0:0:1:a8b4:2001` when it is present, and performs one protected read-only
+   administrator connectivity check. It never removes every ban or another address.
+3. Only after that mode passes, dispatch `deploy-and-smoke` again. A successful unban check does not
+   itself start staging or provision a runtime credential.
+
 Deployment gives the beta-admission, customer-web, Owner-control, and Player-ID action roles 24-hour
 staging LOGIN credentials, installs service-separated `0400` files, and then creates four disposable
 `--no-deps` preflight containers. Each connects through the direct IPv6 endpoint and proves the
@@ -295,9 +444,12 @@ genuine API startup profile identity, health, and readiness without submitting a
 request. Missing, mismatched, or inline v2 material fails closed. Failure disables all four logins. If the administrator
 cleanup connection is temporarily refused after a failed activation, the workflow makes at most
 four cleanup attempts, 15 seconds apart, and then fails visibly rather than claiming cleanup.
-`stop-and-disable` is the explicit cleanup mode
-and must be run before the 24-hour login expiry; credential expiry does not itself stop the
-containers. A successful deployment is a beta demo, not financial launch approval; all payment,
+`stop-and-disable` remains the explicit immediate cleanup mode. Independently, the host-local timer
+stops the containers and deletes their runtime secret files two hours before the earliest 24-hour
+login expiry, preventing expired-password reconnect loops from causing another temporary network
+ban. The database roles remain unused until they expire naturally; an explicit stop disables them
+immediately. The workflow does not support in-place runtime-password rotation. A successful
+deployment is a time-bounded beta demo, not financial launch approval; all payment,
 provider, validation, deposit, withdrawal, and KemerBet execution gates remain off.
 
 `Staging Telegram bot activation and smoke` is the only supported fresh-host bot boundary. Run it

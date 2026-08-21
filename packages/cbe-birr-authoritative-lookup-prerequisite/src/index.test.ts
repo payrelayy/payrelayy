@@ -81,7 +81,7 @@ function oneRawSource(modules: Record<string, unknown>): string {
   const values = Object.values(modules);
   expect(values).toHaveLength(1);
   expect(values[0]).toBeTypeOf('string');
-  return values[0] as string;
+  return (values[0] as string).replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 }
 
 describe('CBE Birr authoritative lookup prerequisite contract', () => {

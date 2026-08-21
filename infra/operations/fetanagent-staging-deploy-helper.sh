@@ -25,6 +25,10 @@ readonly PUBLIC_IPV4='178.128.39.89'
 readonly FRESH_PUBLIC_IPV4='161.35.41.232'
 readonly PUBLIC_DOMAINS=('fetanagent.com' 'www.fetanagent.com' 'owner.fetanagent.com')
 readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
+readonly EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop.service'
+readonly EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop.timer'
+readonly EXPIRY_STOP_SERVICE_PATH="/etc/systemd/system/$EXPIRY_STOP_SERVICE"
+readonly EXPIRY_STOP_TIMER_PATH="/etc/systemd/system/$EXPIRY_STOP_TIMER"
 readonly LEGACY_STOPPED_RECEIPT='/var/lib/fetanagent-vm-transition/legacy-stopped-v1'
 readonly TRANSITION_RECEIPT='/var/lib/fetanagent-vm-transition/retired-v1'
 readonly HELPER_ROTATION_RECEIPT='/var/lib/fetanagent-vm-transition/helper-rotation-v1'
@@ -109,6 +113,98 @@ stop_project() {
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
 }
+
+disarm_expiry_stop() {
+  local timer_load_state
+
+  command -v systemctl >/dev/null 2>&1 || die 'systemctl is unavailable'
+  timer_load_state="$(systemctl show --property=LoadState --value "$EXPIRY_STOP_TIMER" 2>/dev/null || true)"
+  if [[ "$timer_load_state" != 'not-found' && -n "$timer_load_state" ]]; then
+    systemctl disable --now "$EXPIRY_STOP_TIMER" >/dev/null ||
+      die 'the staging runtime expiry-stop timer could not be disabled'
+  fi
+  rm -f -- "$EXPIRY_STOP_TIMER_PATH" "$EXPIRY_STOP_SERVICE_PATH"
+  systemctl daemon-reload || die 'systemd could not reload after removing the expiry-stop timer'
+  [[ "$(systemctl show --property=LoadState --value "$EXPIRY_STOP_TIMER" 2>/dev/null || true)" == 'not-found' ]] ||
+    die 'the staging runtime expiry-stop timer remains loaded'
+}
+
+arm_expiry_stop() (
+  local calendar_stop_at commit_sha compose_file now_epoch stop_at stop_epoch temp_dir
+
+  commit_sha="$1"
+  stop_at="$2"
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'arm-expiry-stop requires a reviewed 40-character commit'
+  [[ "$stop_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] ||
+    die 'arm-expiry-stop requires one canonical UTC stop time'
+  stop_epoch="$(date -u -d "$stop_at" +%s)" || die 'the expiry-stop time is invalid'
+  [[ "$(date -u -d "@$stop_epoch" '+%Y-%m-%dT%H:%M:%SZ')" == "$stop_at" ]] ||
+    die 'the expiry-stop time is not canonical UTC'
+  now_epoch="$(date -u +%s)"
+  (( stop_epoch > now_epoch + 21 * 60 * 60 )) ||
+    die 'the expiry-stop time does not retain the required lower safety bound'
+  (( stop_epoch <= now_epoch + 23 * 60 * 60 )) ||
+    die 'the expiry-stop time exceeds the required upper safety bound'
+
+  compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
+  [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
+    die 'the sealed Compose contract is absent or unsafe before arming expiry-stop'
+
+  command -v systemctl >/dev/null 2>&1 || die 'systemctl is unavailable'
+  command -v mktemp >/dev/null 2>&1 || die 'mktemp is unavailable'
+  temp_dir="$(mktemp -d /run/fetanagent-expiry-stop.XXXXXX)" ||
+    die 'the expiry-stop unit staging directory could not be created'
+  trap 'rm -rf -- "$temp_dir"' EXIT
+  calendar_stop_at="${stop_at/T/ }"
+  calendar_stop_at="${calendar_stop_at/Z/ UTC}"
+
+  cat >"$temp_dir/$EXPIRY_STOP_SERVICE" <<EOF
+[Unit]
+Description=Stop FetanAgent staging before disposable database credentials expire
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+Environment=FETANAGENT_STAGING_EXPIRY_GUARD=1
+ExecStart=$HELPER_PATH expiry-stop
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+EOF
+  cat >"$temp_dir/$EXPIRY_STOP_TIMER" <<EOF
+[Unit]
+Description=FetanAgent staging disposable-credential expiry guard
+
+[Timer]
+OnCalendar=$calendar_stop_at
+AccuracySec=1min
+Persistent=true
+Unit=$EXPIRY_STOP_SERVICE
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  disarm_expiry_stop
+  install -o root -g root -m 0644 \
+    "$temp_dir/$EXPIRY_STOP_SERVICE" "$EXPIRY_STOP_SERVICE_PATH"
+  install -o root -g root -m 0644 \
+    "$temp_dir/$EXPIRY_STOP_TIMER" "$EXPIRY_STOP_TIMER_PATH"
+  systemctl daemon-reload || die 'systemd could not load the expiry-stop units'
+  systemctl enable --now "$EXPIRY_STOP_TIMER" >/dev/null ||
+    die 'the staging runtime expiry-stop timer could not be enabled'
+  systemctl is-enabled --quiet "$EXPIRY_STOP_TIMER" ||
+    die 'the staging runtime expiry-stop timer is not enabled'
+  systemctl is-active --quiet "$EXPIRY_STOP_TIMER" ||
+    die 'the staging runtime expiry-stop timer is not active'
+  [[ "$(stat --format='%U:%G:%a' "$EXPIRY_STOP_SERVICE_PATH")" == 'root:root:644' ]] ||
+    die 'the expiry-stop service ownership or mode is unsafe'
+  [[ "$(stat --format='%U:%G:%a' "$EXPIRY_STOP_TIMER_PATH")" == 'root:root:644' ]] ||
+    die 'the expiry-stop timer ownership or mode is unsafe'
+)
 
 require_cutover_ready() {
   local legacy_containers legacy_networks legacy_secret_residue
@@ -776,14 +872,20 @@ require_fresh_public_edge_ready() {
   require_public_network_ready "$FRESH_PUBLIC_IPV4"
 }
 
-[[ $EUID -eq 0 ]] || die 'the helper must run as root through sudo'
-[[ "${SUDO_USER:-}" == "$EXPECTED_SUDO_USER" ]] || die 'the helper requires the dedicated deployment identity'
+command="${1:-}"
+[[ $EUID -eq 0 ]] || die 'the helper must run as root through sudo or the fixed systemd expiry guard'
+if [[ "$command" == 'expiry-stop' ]]; then
+  [[ -z "${SUDO_USER:-}" && -n "${INVOCATION_ID:-}" && "${FETANAGENT_STAGING_EXPIRY_GUARD:-}" == '1' ]] ||
+    die 'expiry-stop may run only from the fixed systemd guard'
+else
+  [[ "${SUDO_USER:-}" == "$EXPECTED_SUDO_USER" ]] ||
+    die 'the helper requires the dedicated deployment identity'
+fi
 [[ "$0" == "$HELPER_PATH" ]] || die 'the helper must run from its root-owned installed path'
 [[ ! -L "$HELPER_PATH" && "$(stat --format='%U:%G:%a' "$HELPER_PATH")" == 'root:root:755' ]] ||
   die 'the installed helper ownership or mode is unsafe'
 [[ -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] || die 'Docker overrides are forbidden'
 
-command="${1:-}"
 case "$command" in
   verify)
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{64}$ ]] || die 'verify requires one SHA-256 digest'
@@ -794,6 +896,18 @@ case "$command" in
   stop)
     [[ $# -eq 1 ]] || die 'stop accepts no additional arguments'
     stop_project
+    disarm_expiry_stop
+    ;;
+
+  arm-expiry-stop)
+    [[ $# -eq 3 ]] || die 'arm-expiry-stop requires a reviewed commit and canonical UTC stop time'
+    arm_expiry_stop "$2" "$3"
+    ;;
+
+  expiry-stop)
+    [[ $# -eq 1 ]] || die 'expiry-stop accepts no additional arguments'
+    stop_project
+    disarm_expiry_stop
     ;;
 
   cutover-ready)
@@ -1226,6 +1340,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

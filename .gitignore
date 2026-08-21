@@ -5,6 +5,9 @@ coverage/
 .turbo/
 .pnpm-store/
 .supabase-home/
+android/**/.gradle/
+android/**/.kotlin/
+android/**/build/
 
 # Local configuration and secrets
 .env

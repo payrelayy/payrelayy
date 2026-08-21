@@ -1,0 +1,22 @@
+{
+  "name": "@fetanagent/cbe-birr-authoritative-pdf-parser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0 || >=24.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm run build && vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.2.108"
+  }
+}

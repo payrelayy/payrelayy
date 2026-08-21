@@ -41,9 +41,14 @@ account-bound persistent-session registry, separate HMAC providers, polling/heal
 an explicit-profile-only hardened Docker/Compose boundary with an isolated manual session
 provisioner. `apps/worker` contains an injection-only, uncomposed settlement adapter and exact
 one-function catalog preflight; it opens no connection and reads no configuration or credential.
+TeleBirr's trusted completion function already calls that private finalizer atomically, so its
+outcomes must never be sent through a second generic settlement runtime. The remaining generic
+adapter has no authenticated provider-neutral producer and is disabled by construction; its exact
+activation dependency map is documented in
+[`infra/operations/verification-settlement-activation-dependencies.md`](infra/operations/verification-settlement-activation-dependencies.md).
 The path remains operationally disabled: no selector, binding, HMAC key, browser profile, runtime
-login, live database switch, deployed service, or authoritative-verifier caller is provisioned by
-the repository.
+login, live database switch, or authoritative-verifier service is deployed or provisioned with
+runtime credentials by the repository.
 
 ## Current safety status
 
@@ -194,6 +199,7 @@ environment file.
 | `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner             |
 | `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command         |
 | `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
+| `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
 | `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |

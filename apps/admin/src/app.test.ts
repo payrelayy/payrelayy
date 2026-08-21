@@ -7,11 +7,46 @@ import { describe, expect, it } from 'vitest';
 import { buildOwnerControlApp } from './app.js';
 import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
+import type { PrivateLivePilotStatus } from './owner-private-live-pilot.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 
 const authUserId = '11111111-1111-4111-8111-111111111111';
 const inviteId = '22222222-2222-4222-8222-222222222222';
+const pilotRevisionId = '33333333-3333-4333-8333-333333333333';
+const pilotRequestId = '55555555-5555-4555-8555-555555555555';
 const bearer = 'header.payload.signature-with-safe-characters';
+
+function pilotStatus(overrides: Partial<PrivateLivePilotStatus> = {}): PrivateLivePilotStatus {
+  return {
+    configurationDigest: `sha256:${'a'.repeat(64)}`,
+    contractVersion: 1 as const,
+    expiresAt: '2026-08-21T22:00:00.000Z',
+    financiallyActive: false,
+    maximumAggregateMinor: '12500',
+    maximumReservationCount: 5,
+    pilotRevisionId,
+    pilotStatus: 'draft' as const,
+    playerCount: 5,
+    providerCount: 1,
+    reservedAmountMinor: '0',
+    reservedDepositCount: 0,
+    revision: 1,
+    submittingCustomerCount: 1,
+    switchMode: 'disabled' as const,
+    withinActiveWindow: true,
+    ...overrides,
+  };
+}
+
+function pilotMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'private-live-pilot-v1',
+    'x-idempotency-key': requestId,
+  };
+}
 
 function config() {
   return loadOwnerControlConfig({
@@ -87,6 +122,20 @@ function runtime(
         reviewedAt: '2026-08-11T12:10:00.000Z',
         status: decision,
       }),
+    },
+    privateLivePilot: {
+      arm: async () => ({
+        alreadyApplied: false,
+        status: pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' }),
+      }),
+      prepare: async () => pilotStatus(),
+      status: async () => pilotStatus(),
+      stop: async () =>
+        pilotStatus({
+          pilotStatus: 'stopped',
+          stopReasonCode: 'owner_stop',
+          stoppedAt: '2026-08-21T20:30:00.000Z',
+        }),
     },
     ready: async () => true,
     close: async () => undefined,
@@ -582,6 +631,237 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'invalid_request' });
+    await app.close();
+  });
+
+  it('strongly authenticates and prepares only an exact dormant pilot request', async () => {
+    let observedActor = '';
+    let observedRequest: unknown;
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        privateLivePilot: {
+          arm: async () => {
+            throw new Error('not called');
+          },
+          prepare: async (actor, request) => {
+            observedActor = actor;
+            observedRequest = request;
+            return pilotStatus();
+          },
+          status: async () => {
+            throw new Error('not called');
+          },
+          stop: async () => {
+            throw new Error('not called');
+          },
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/private-live-deposit-pilots/prepare',
+      headers: pilotMutationHeaders(),
+      payload: {
+        activeFrom: '2026-08-21T20:00:00.000Z',
+        confirmation: 'owner_confirmed_dormant_private_live_pilot',
+        expiresAt: '2026-08-21T22:00:00.000Z',
+        maximumAggregateMinor: 12_500,
+        maximumPerDepositMinor: 2_500,
+        maximumPerPlayerMinor: 2_500,
+        maximumReservationCount: 5,
+        minimumAmountMinor: 2_500,
+        playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
+        providerCodes: ['telebirr'],
+        requestId: pilotRequestId,
+        submittingCustomerIds: ['44444444-4444-4444-8444-444444444444'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(observedActor).toBe(authUserId);
+    expect(observedRequest).toMatchObject({
+      maximumAggregateMinor: 12_500,
+      providerCodes: ['telebirr'],
+      requestId: pilotRequestId,
+    });
+    expect(response.json()).toEqual({ pilot: pilotStatus() });
+    expect(response.body).not.toContain('PLAYER-1');
+    expect(response.body).not.toContain('44444444-4444-4444-8444-444444444444');
+    await app.close();
+  });
+
+  it('rejects cross-origin, missing-CSRF, non-JSON, and mismatched idempotency requests before auth', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_dry_run_only',
+      requestId: pilotRevisionId,
+    };
+    const invalidHeaders = [
+      { ...pilotMutationHeaders(pilotRevisionId), origin: 'https://attacker.example' },
+      {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+        origin: 'http://127.0.0.1:3002',
+        'x-idempotency-key': pilotRevisionId,
+      },
+      { ...pilotMutationHeaders(pilotRevisionId), 'content-type': 'text/plain' },
+      {
+        ...pilotMutationHeaders(pilotRevisionId),
+        'content-type': 'application/json; charset=utf-8',
+      },
+      {
+        ...pilotMutationHeaders(pilotRevisionId),
+        'x-idempotency-key': '66666666-6666-4666-8666-666666666666',
+      },
+    ];
+
+    for (const headers of invalidHeaders) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+        headers,
+        payload: headers['content-type'] === 'text/plain' ? JSON.stringify(payload) : payload,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: 'invalid_request' });
+    }
+    const mismatchedResourceIdentity = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+      headers: pilotMutationHeaders(pilotRequestId),
+      payload: {
+        confirmation: 'owner_confirmed_dry_run_only',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(mismatchedResourceIdentity.statusCode).toBe(400);
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('returns a replay-safe dry-run arm receipt and rejects the wrong method', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        privateLivePilot: {
+          arm: async (actor, id) => {
+            expect([actor, id]).toEqual([authUserId, pilotRevisionId]);
+            return {
+              alreadyApplied: true,
+              status: pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' }),
+            };
+          },
+          prepare: async () => {
+            throw new Error('not called');
+          },
+          status: async () => {
+            throw new Error('not called');
+          },
+          stop: async () => {
+            throw new Error('not called');
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_dry_run_only',
+        requestId: pilotRevisionId,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      alreadyApplied: true,
+      status: { financiallyActive: false, pilotStatus: 'armed', switchMode: 'dry_run' },
+    });
+
+    const wrongMethod = await app.inject({
+      method: 'PUT',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_dry_run_only',
+        requestId: pilotRevisionId,
+      },
+    });
+    expect(wrongMethod.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('keeps the authenticated emergency stop directly reachable', async () => {
+    let stopped: readonly string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        privateLivePilot: {
+          arm: async () => {
+            throw new Error('not called');
+          },
+          prepare: async () => {
+            throw new Error('not called');
+          },
+          status: async () => {
+            throw new Error('not called');
+          },
+          stop: async (actor, id, reasonCode) => {
+            stopped = [actor, id, reasonCode];
+            return pilotStatus({
+              pilotStatus: 'stopped',
+              stopReasonCode: reasonCode,
+              stoppedAt: '2026-08-21T20:30:00.000Z',
+            });
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/stop`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_emergency_stop',
+        reasonCode: 'execution_uncertainty',
+        requestId: pilotRevisionId,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(stopped).toEqual([authUserId, pilotRevisionId, 'execution_uncertainty']);
+    expect(response.json()).toMatchObject({
+      pilot: { financiallyActive: false, pilotStatus: 'stopped', switchMode: 'disabled' },
+    });
+    await app.close();
+  });
+
+  it('requires the verified Owner bearer subject for status without exposing request inputs', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime(),
+    });
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/status`,
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const accepted = await app.inject({
+      method: 'GET',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/status`,
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toEqual({ pilot: pilotStatus() });
     await app.close();
   });
 });

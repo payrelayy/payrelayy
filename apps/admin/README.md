@@ -12,6 +12,24 @@ The service verifies the bearer token with the exact staging Supabase Auth proje
 Auth user ID from that verified response, and passes it to private database procedures. The
 database independently requires that subject to map to the one active Owner.
 
+The private live-pilot API exposes exactly four additional Owner operations: prepare one exact
+five-Player manifest, arm that manifest in `dry_run`, read an aggregate redacted status, and stop
+it. Mutations accept only exact JSON from the approved Owner origin (or the SSH loopback origin),
+require the explicit `x-fetanagent-owner-csrf` header, and bind `x-idempotency-key` to the JSON
+request ID. Prepare uses its UUID-v4 request ID as the durable database key; arm and stop use the
+immutable pilot UUID. The startup catalog preflight rejects any missing control routine, additional
+callable app routine, or direct app relation privilege. These routes do not make provider,
+verification, execution, or pilot switches live, and no Player ID, customer ID, receiver detail,
+payment reference, proof, or credential appears in their status response or logs.
+
+These four routes are currently API-only: the existing Owner dashboard does not expose pilot
+controls. Do not extract its in-memory bearer token or use ad-hoc `curl`/browser-console calls, and
+do not paste Player IDs or customer UUIDs into terminal history, logs, screenshots, or chat. Before
+any pilot can be provisioned or armed, add and review a same-origin dashboard client for the exact
+prepare/status/dry-run-arm contract plus an always-available emergency stop that never displays or
+copies the bearer token. The exact request headers, confirmations, idempotency binding, and stop
+reason allowlist are documented in `docs/private-live-money-pilot.md`.
+
 The raw 32-byte invite token is generated in process, returned once in a `Cache-Control: no-store`
 Telegram deep link, and discarded. PostgreSQL stores only its domain-separated SHA-256 digest;
 audit metadata contains only the opaque invite ID, expiry, or allowlisted revocation reason. The

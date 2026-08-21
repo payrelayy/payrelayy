@@ -36,11 +36,49 @@ An armed pilot revision contains all of the following, with no implicit defaults
 Creating or arming a pilot revision does not by itself enable payment verification, execution, or a
 KemerBet final action. Those remain separate reviewed gates.
 
-The database foundation in this slice deliberately grants none of its prepare, arm, status, or stop
-routines to the deployed Owner-control roles. The current Owner service has no typed pilot adapter,
-exact catalog preflight, strongly authenticated routes, or idempotent control audit surface. A
-forward-only control-plane slice providing all four is an activation blocker; operators must not
-substitute ad-hoc SQL for that missing boundary.
+The Owner-control runtime receives exactly four pilot routines through a forward-only boundary:
+prepare, dry-run arm, aggregate status, and emergency stop. The service verifies the Supabase bearer
+subject, the database independently resolves that Auth UUID to the active Owner, mutations require
+exact same-origin JSON plus an explicit anti-CSRF header, and the catalog preflight rejects any
+table access or additional routine. Prepare reuses one UUID-v4 request key only for an identical
+request; arm recovery is postcondition-based; and same-reason stop replay creates no second audit
+event. None of these controls can make a financial or provider switch live. Operators must not
+substitute ad-hoc SQL for this boundary.
+
+### Owner-control client contract
+
+The four server routes are an authenticated API boundary, not yet a supported human operator
+client. The current Owner dashboard does not render pilot preparation, status, arm, or stop
+controls. Consequently, this slice must remain unprovisioned and unarmed until a reviewed
+same-origin dashboard flow can perform all four operations while keeping the Supabase access token
+only in memory. Ad-hoc `curl`, copied bearer tokens, and browser-console snippets are not supported
+operator procedures. In particular, an always-visible emergency-stop control that does not require
+token extraction is an activation prerequisite.
+
+The future same-origin client must implement this exact transport contract:
+
+- `POST /v1/owner/private-live-deposit-pilots/prepare` accepts one exact JSON object containing a
+  canonical lowercase UUID-v4 `requestId`, confirmation
+  `owner_confirmed_dormant_private_live_pilot`, one or two explicit provider codes, exactly five
+  Player IDs, one to five submitting-customer UUIDs, the bounded amount and reservation caps, and
+  canonical ISO activation/expiry timestamps no more than 24 hours apart.
+- `POST /v1/owner/private-live-deposit-pilots/{pilotRevisionId}/arm` accepts only confirmation
+  `owner_confirmed_dry_run_only` and a `requestId` exactly equal to the path UUID. Success is valid
+  only when the returned aggregate status is `armed`, `dry_run`, and `financiallyActive: false`.
+- `GET /v1/owner/private-live-deposit-pilots/{pilotRevisionId}/status` accepts no query parameters
+  and returns only the reviewed aggregate projection.
+- `POST /v1/owner/private-live-deposit-pilots/{pilotRevisionId}/stop` accepts only confirmation
+  `owner_confirmed_emergency_stop`, a `requestId` exactly equal to the path UUID, and one allowlisted
+  reason: `owner_stop`, `provider_incident`, `parser_drift`, `execution_uncertainty`, `cap_review`, or
+  `pilot_complete`. Same-reason replay is the supported emergency retry.
+
+Every mutation must be exact `application/json` from the Owner origin (or reviewed SSH loopback
+origin), with `x-fetanagent-owner-csrf: private-live-pilot-v1` and exactly one
+`x-idempotency-key` equal to the JSON `requestId`. All four routes require the in-memory Owner bearer
+token; PostgreSQL independently maps its verified Auth UUID to the active Owner. The client must not
+put a bearer token, KemerBet Player ID, customer UUID, protected payment reference, receiver detail,
+or raw provider artifact into source control, terminal history, analytics, logs, screenshots, or
+chat. No response from these routes contains those cohort or payment inputs.
 
 The execution service also requires a fixed, root-managed canonical pilot manifest containing only
 contract version, pilot revision UUID, and database-computed configuration digest. The database

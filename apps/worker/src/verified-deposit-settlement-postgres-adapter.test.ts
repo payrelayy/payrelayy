@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -71,6 +72,17 @@ function databaseWithRows(rows: readonly unknown[]) {
   return { database: { query } satisfies VerifiedDepositSettlementPostgresDatabase, query };
 }
 
+function runtimeSourceFiles(directory: URL): readonly string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), directory);
+    if (entry.isDirectory()) return runtimeSourceFiles(child);
+    if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts'))
+      return [];
+    if (entry.name === 'verified-deposit-settlement-postgres-adapter.ts') return [];
+    return [fileURLToPath(child)];
+  });
+}
+
 describe('verified deposit settlement catalog boundary', () => {
   it('pins one hardened function and an uncomposed, injection-only worker surface', () => {
     expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).toContain(
@@ -112,24 +124,45 @@ describe('verified deposit settlement catalog boundary', () => {
     expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).toContain(
       'no_app_base_object_access',
     );
-    expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).not.toContain(
+    for (const forbiddenSurface of [
       'app.enqueue_verified_deposit_execution(',
-    );
-    expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).not.toContain(
       'app.claim_verified_deposit_payment(',
-    );
+      'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      'app.lease_next_deposit_execution(',
+      'app.lease_next_private_live_deposit_execution(',
+      'app.fence_deposit_execution_final_action(',
+      'app.fence_private_live_deposit_execution_final_action(',
+      'app.cancel_deposit_execution_before_action(',
+      'app.require_deposit_execution_reconciliation(',
+      'app.lease_next_deposit_execution_reconciliation(',
+      'app.record_deposit_execution_reconciliation(',
+      'app.stage_private_live_telebirr_verification_job(',
+      'app.lease_next_private_live_telebirr_verification(',
+      'app.record_private_live_telebirr_assignment_transcript(',
+      'app.complete_private_live_telebirr_verification(',
+      'app.load_private_live_telebirr_verification_authority(',
+    ]) {
+      expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).not.toContain(forbiddenSurface);
+    }
     expect(FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL).toContain(
       'from app.finalize_private_live_verified_deposit_and_enqueue_execution(',
     );
-    expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).not.toContain(
-      'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
-    );
-
-    const workerIndex = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+    const workerRuntimeSources = runtimeSourceFiles(new URL('./', import.meta.url)).map((file) => ({
+      file,
+      source: readFileSync(file, 'utf8'),
+    }));
     const workerPackage = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { readonly dependencies?: Readonly<Record<string, string>> };
-    expect(workerIndex).not.toContain('verified-deposit-settlement-postgres-adapter');
+    expect(workerRuntimeSources.length).toBeGreaterThan(0);
+    for (const runtimeSource of workerRuntimeSources) {
+      expect(runtimeSource.source, runtimeSource.file).not.toContain(
+        'verified-deposit-settlement-postgres-adapter',
+      );
+      expect(runtimeSource.source, runtimeSource.file).not.toContain(
+        'createVerifiedDepositSettlementPostgresAdapter',
+      );
+    }
     expect(workerPackage.dependencies).not.toHaveProperty('pg');
   });
 
@@ -258,6 +291,30 @@ describe('injected verified deposit settlement adapter', () => {
     }
     expect(fixture.query).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['telebirr', 'cbe_birr'] as const)(
+    'never treats a %s advisory verifier outcome as settlement authority',
+    async (providerCode) => {
+      const fixture = databaseWithRows([settlementRow()]);
+      const adapter = await createVerifiedDepositSettlementPostgresAdapter(fixture.database);
+      const advisoryOutcome = {
+        ...input,
+        contractVersion: 1,
+        providerCode,
+        disposition: 'settlement_candidate',
+        reasonCode: 'exact_proof_match',
+        advisoryOnly: true,
+        sqlAuthorizationAllowed: false,
+        settlementAllowed: false,
+        enqueueAllowed: false,
+      };
+
+      await expect(adapter.finalize(advisoryOutcome)).rejects.toBeInstanceOf(
+        VerifiedDepositSettlementPostgresAdapterUnavailableError,
+      );
+      expect(fixture.query).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each([
     { rows: [] },

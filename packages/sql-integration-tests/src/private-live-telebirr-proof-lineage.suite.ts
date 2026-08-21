@@ -12,7 +12,7 @@ import {
 
 type SqlValue = boolean | Date | number | string | readonly string[] | null;
 
-type TelebirrPilot = PreparedPilot & {
+export type TelebirrPilot = PreparedPilot & {
   readonly assignmentSignerId: string;
   readonly deviceEnrollmentId: string;
   readonly policyDigest: string;
@@ -88,14 +88,14 @@ type CompletionRow = {
   readonly verification_outcome_id: string;
 };
 
-type PreparedVerification = {
+export type PreparedVerification = {
   readonly assignment: AssignmentRow;
   readonly lease: LeaseRow;
   readonly proof: ProofRow;
   readonly stage: StageRow;
 };
 
-type CompletionOptions = {
+export type CompletionOptions = {
   readonly assessedAt?: Date;
   readonly completionRequestKey?: string;
   readonly disposition: 'definite_reject' | 'review_required' | 'settlement_candidate';
@@ -247,7 +247,7 @@ async function resolveTelebirrBoundary(
   };
 }
 
-async function prepareTelebirrPilot(
+export async function prepareTelebirrPilot(
   client: Client,
   ownerAdminId: string,
   options: {
@@ -547,7 +547,7 @@ async function recordAssignment(
   return { digests: exactDigests, row: assignment.rows[0]! };
 }
 
-async function prepareVerification(
+export async function prepareVerification(
   client: Client,
   pilot: TelebirrPilot,
   playerIndex = 0,
@@ -561,7 +561,7 @@ async function prepareVerification(
   return { assignment, lease, proof, stage };
 }
 
-async function completeVerification(
+export async function completeVerification(
   client: Client,
   pilot: TelebirrPilot,
   prepared: PreparedVerification,
@@ -750,6 +750,8 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
         readonly public_execute: boolean;
         readonly safe_search_path: boolean;
         readonly signature: string;
+        readonly trusted_verifier_execute: boolean;
+        readonly trusted_verifier_runtime_execute: boolean;
       }>(
         `select routine.oid::regprocedure::text as signature,
                 routine.prosecdef as is_security_definer,
@@ -762,6 +764,12 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
                 has_function_privilege(
                   'fetanagent_owner_control_runtime', routine.oid, 'EXECUTE'
                 ) as owner_control_runtime_execute,
+                has_function_privilege(
+                  'fetanagent_trusted_telebirr_verifier', routine.oid, 'EXECUTE'
+                ) as trusted_verifier_execute,
+                has_function_privilege(
+                  'fetanagent_trusted_telebirr_verifier_runtime', routine.oid, 'EXECUTE'
+                ) as trusted_verifier_runtime_execute,
                 (
                   select count(*)::integer
                     from aclexplode(coalesce(
@@ -777,15 +785,19 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
       );
       expect(routines.rows).toHaveLength(lineageFunctions.length);
       expect(
-        routines.rows.every(
-          (row) =>
+        routines.rows.every((row) => {
+          const isGuardedCompletion = row.signature === lineageFunctions.at(-1);
+          return (
             row.is_security_definer &&
             row.safe_search_path &&
             !row.public_execute &&
             !row.owner_control_execute &&
             !row.owner_control_runtime_execute &&
-            row.direct_grants === 0,
-        ),
+            row.trusted_verifier_execute === isGuardedCompletion &&
+            row.trusted_verifier_runtime_execute === isGuardedCompletion &&
+            row.direct_grants === (isGuardedCompletion ? 1 : 0)
+          );
+        }),
       ).toBe(true);
 
       const dryRunForeignKeys = await client.query<{ readonly count: number }>(

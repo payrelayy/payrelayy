@@ -47,7 +47,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows only reviewed Owner invite, Player-ID, eligibility, and advisory procedures', () => {
+  it('allows exactly eighteen reviewed Owner procedures including four dormant pilot controls', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -85,6 +85,20 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
     );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.arm_private_live_deposit_pilot(uuid,uuid)');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.stop_private_live_deposit_pilot(uuid,uuid,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.get_private_live_deposit_pilot_status(uuid,uuid)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 18');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_sequence_privilege');
   });
 });

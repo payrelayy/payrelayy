@@ -485,6 +485,14 @@ describe('private Telegram action transport contract', () => {
     expect(response.json()).toEqual({ version: 1, outcome: 'awaiting_player_id' });
     expect(handled).toEqual(callbackAction);
     expect((await app.inject({ method: 'GET', url: '/readyz' })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/healthz' })).json()).toMatchObject({
+      runtimeContract: {
+        financialActionsMode: 'dry_run',
+        playerActionRuntimeEnabled: true,
+        depositProofReferenceMastersConfigured: true,
+        depositProofReferenceProfileVersion: 2,
+      },
+    });
     await app.close();
     expect(closed).toBe(1);
   });

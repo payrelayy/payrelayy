@@ -221,8 +221,8 @@ logins are disabled. Keep the runtime offline throughout replacement.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e
-reviewed_successor=4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188
+installed_predecessor=4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188
+reviewed_successor=4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -233,7 +233,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
+NEXT_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -249,10 +249,10 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-4966c316"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
-PREVIOUS_SHA='4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e'
-NEXT_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
+PREVIOUS_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
+NEXT_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
 METADATA='http://169.254.169.254/metadata/v1'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
@@ -294,14 +294,14 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `4966c316…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+against successor SHA `4d3442cf…` before `deploy-and-smoke` is allowed. If it fails, keep staging
 offline and use the root console to atomically restore only the checksum-proven `previous` file:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous'
-PREVIOUS_SHA='4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-4966c316'
+PREVIOUS_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
 test ! -L "$BACKUP" && test "$(stat --format='%U:%G:%a' "$BACKUP")" = 'root:root:600'
 test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
 RESTORE_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"
@@ -440,8 +440,10 @@ apart, to tolerate a transient direct-database connection failure; it never rela
 assertion or starts another service during those attempts. Only after all four preflights pass does
 it start the private Compose project without building on the VM. The post-start gate proves the
 exact `dry_run`/false financial environment, the customer-web proof-only gate, fixed v2 file paths,
-genuine API startup profile identity, health, and readiness without submitting a payment or provider
-request. Missing, mismatched, or inline v2 material fails closed. Failure disables all four logins. If the administrator
+and the running API process's redacted in-memory v2 runtime contract through an exact-container,
+loopback-only health request, plus health and readiness, without submitting a payment or provider
+request. The gate does not depend on an aging startup-log tail. Missing, mismatched, or inline v2
+material fails closed. Failure disables all four logins. If the administrator
 cleanup connection is temporarily refused after a failed activation, the workflow makes at most
 four cleanup attempts, 15 seconds apart, and then fails visibly rather than claiming cleanup.
 `stop-and-disable` remains the explicit immediate cleanup mode. Independently, the host-local timer
@@ -462,7 +464,11 @@ reviewed private services are healthy and Telegram-disabled, transfers the token
 non-root SSH identity, installs it as a `10001:10001` mode-`0400` service file, and starts only the
 bot container without dependencies or builds. Readiness requires the exact reviewed revision, zero
 container restarts, genuine bot startup output, `FINANCIAL_ACTIONS_MODE=dry_run`, and both KemerBet
-flags false. A failed activation removes the bot and restores the invalid sentinel. The explicit
+flags false. Successful immediate readiness atomically seals a root-owned receipt bound to the exact
+reviewed commit, full bot container identity, start time, and zero restart count. Later public-edge
+gates require that receipt to match the same running container, so they do not depend on an aging
+startup-log tail and cannot accept a recreated or unverified bot. A failed activation removes the bot
+and restores the invalid sentinel. The explicit
 `stop-and-disable` mode performs the same fail-closed removal without stopping the four private
 services.
 

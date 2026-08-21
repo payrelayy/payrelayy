@@ -14,6 +14,12 @@ describe('health endpoint', () => {
     expect(response.json()).toMatchObject({
       status: 'ok',
       financialActionsMode: 'dry_run',
+      runtimeContract: {
+        financialActionsMode: 'dry_run',
+        playerActionRuntimeEnabled: false,
+        depositProofReferenceMastersConfigured: false,
+        depositProofReferenceProfileVersion: null,
+      },
     });
 
     await app.close();

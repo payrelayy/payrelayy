@@ -99,6 +99,12 @@ assert.match(
 );
 assert.match(transition, new RegExp(`readonly BASE_REVIEWED_COMMIT='${baseReviewedCommit}'`));
 assert.match(transition, /readonly STATE_ROOT='\/var\/lib\/fetanagent-vm-transition'/);
+assert.match(
+  deployHelper,
+  /readonly BOT_STARTUP_RECEIPT_ROOT='\/var\/lib\/fetanagent-bot-startup-receipt'/,
+);
+assert.match(deployHelper, /readonly BOT_STARTUP_RECEIPT="\$BOT_STARTUP_RECEIPT_ROOT\/bot-v1"/);
+assert.match(deployHelper, /readonly BOT_STARTUP_RECEIPT_VERSION='1'/);
 for (const [name, suffix] of [
   ['PREPARED_MARKER', 'prepared-v1'],
   ['ACKNOWLEDGED_MARKER', 'acknowledged-v1'],
@@ -1078,6 +1084,106 @@ assert.doesNotMatch(
   /\[\[:space:\]\]/,
   'The UFW parser must not let vertical whitespace satisfy an exact rule line.',
 );
+const liveApiRuntimeContract = functionBody(deployHelper, 'require_live_api_runtime_contract');
+assertInOrder(
+  liveApiRuntimeContract,
+  [
+    '[[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]]',
+    'docker_local container exec "$container_id"',
+    'node --input-type=module --eval',
+    'fetch("http://127.0.0.1:3000/healthz"',
+    'redirect: "error"',
+    'signal: AbortSignal.timeout(3000)',
+    'response.headers.get("content-type")',
+    'response.status !== 200',
+    'contentType?.startsWith("application/json")',
+    'health.status !== "ok"',
+    'health.service !== "fetanagent-api"',
+    'runtimeContract.financialActionsMode !== "dry_run"',
+    'runtimeContract.playerActionRuntimeEnabled !== true',
+    'runtimeContract.depositProofReferenceMastersConfigured !== true',
+    'runtimeContract.depositProofReferenceProfileVersion !== 2',
+    'process.exit(23)',
+    'process.stdout.write(JSON.stringify(runtimeContract))',
+    '[[ "$runtime_contract" ==',
+    '{"financialActionsMode":"dry_run","playerActionRuntimeEnabled":true,"depositProofReferenceMastersConfigured":true,"depositProofReferenceProfileVersion":2}',
+  ],
+  'The live API gate must re-evaluate only the redacted contract in the exact current container.',
+);
+assert.doesNotMatch(
+  liveApiRuntimeContract,
+  /container logs|console\.|process\.env|\.env|token|password|connection|secret|https?:\/\/(?!127\.0\.0\.1:3000\/healthz)|\b(?:rm|mv|stop|disable|kill|prune)\b/iu,
+);
+const clearBotStartupReceipt = functionBody(deployHelper, 'clear_bot_startup_receipt');
+assertInOrder(
+  clearBotStartupReceipt,
+  [
+    'root:root:700',
+    'root:root:600',
+    'rm -f -- "$BOT_STARTUP_RECEIPT"',
+    'rmdir -- "$BOT_STARTUP_RECEIPT_ROOT"',
+  ],
+  'Telegram startup receipt cleanup must remove only the exact validated receipt boundary.',
+);
+assert.doesNotMatch(clearBotStartupReceipt, /rm -rf|find|glob|\*/);
+const recordBotStartupReceipt = functionBody(deployHelper, 'record_fresh_bot_startup_receipt');
+assertInOrder(
+  recordBotStartupReceipt,
+  [
+    'label=com.docker.compose.project=$PROJECT_NAME',
+    'label=com.docker.compose.service=bot',
+    "--format '{{.Id}}'",
+    "--format '{{.State.StartedAt}}'",
+    'org.opencontainers.image.revision',
+    '[[ "$revision" == "$commit_sha" ]]',
+    "--format '{{.State.Status}}'",
+    "--format '{{.RestartCount}}'",
+    '[[ "$restart_count" == \'0\' ]]',
+    'docker_local container logs --tail 80 "$container_id"',
+    'Telegram bot started with configured private admission and action handlers.',
+    'install -d -o root -g root -m 0700 "$BOT_STARTUP_RECEIPT_ROOT"',
+    'mktemp "$BOT_STARTUP_RECEIPT_ROOT/.bot-v1.XXXXXX"',
+    '"receipt_version=$BOT_STARTUP_RECEIPT_VERSION"',
+    '"commit_sha=$commit_sha"',
+    '"container_id=$full_container_id"',
+    '"container_started_at=$container_started_at"',
+    "'restart_count=0'",
+    "'startup_contract=telegram-private-admission-actions-v1'",
+    'mv -fT -- "$temporary" "$BOT_STARTUP_RECEIPT"',
+    'rm -f -- "$temporary"',
+    'the Telegram startup receipt could not be sealed atomically',
+  ],
+  'Immediate Telegram readiness must seal the exact zero-restart container identity.',
+);
+assert.doesNotMatch(recordBotStartupReceipt, /token|password|secret/iu);
+assert.match(
+  recordBotStartupReceipt,
+  /if ! printf[\s\S]*! chown[\s\S]*! chmod[\s\S]*! mv[\s\S]*then\s+rm -f -- "\$temporary"/,
+);
+const requireBotStartupReceipt = functionBody(deployHelper, 'require_fresh_bot_startup_receipt');
+assertInOrder(
+  requireBotStartupReceipt,
+  [
+    'root:root:700',
+    'root:root:600',
+    "--format '{{.Id}}'",
+    "--format '{{.State.StartedAt}}'",
+    "--format '{{.RestartCount}}'",
+    '[[ "$restart_count" == \'0\' ]]',
+    'cmp -s -- "$BOT_STARTUP_RECEIPT"',
+    '"receipt_version=$BOT_STARTUP_RECEIPT_VERSION"',
+    '"commit_sha=$commit_sha"',
+    '"container_id=$full_container_id"',
+    '"container_started_at=$container_started_at"',
+    "'restart_count=0'",
+    "'startup_contract=telegram-private-admission-actions-v1'",
+  ],
+  'Steady Telegram readiness must match the receipt to the exact current container identity.',
+);
+assert.doesNotMatch(
+  requireBotStartupReceipt,
+  /container logs|token|password|secret|\b(?:rm|mv|stop|disable|kill|prune)\b/iu,
+);
 const exactFreshRuntime = functionBody(deployHelper, 'require_exact_fresh_private_runtime');
 assertInOrder(
   exactFreshRuntime,
@@ -1098,21 +1204,59 @@ assertInOrder(
     "'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE=/run/secrets/deposit_proof_reference_fingerprint_master'",
     "'DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=/etc/fetanagent/deposit-proof-reference-profile.v2.json'",
     "'INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED=true'",
-    '\'"financialActionsMode":"dry_run"\'',
-    '\'"depositProofReferenceMastersConfigured":true\'',
-    '\'"depositProofReferenceProfileVersion":2\'',
+    'require_live_api_runtime_contract "$ids"',
     'require_reviewed_owner_port_3002 "$commit_sha"',
   ],
   'The fresh-host public gate must pin the exact private services and fail-closed environment.',
 );
 assert.doesNotMatch(exactFreshRuntime, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+assert.doesNotMatch(exactFreshRuntime, /container logs/);
+const freshBotRuntime = functionBody(deployHelper, 'require_exact_fresh_bot_runtime');
+assertInOrder(
+  freshBotRuntime,
+  [
+    'local startup_contract_mode="$2"',
+    '"$startup_contract_mode" == \'immediate-startup\' || "$startup_contract_mode" == \'steady-state\'',
+    'require_live_api_runtime_contract "$ids"',
+    '[[ "$restart_count" == \'0\' ]]',
+    'if [[ "$startup_contract_mode" == \'immediate-startup\' ]]',
+    'container logs --tail 80 "$ids"',
+    'Telegram bot started with configured private admission and action handlers.',
+    'else',
+    'require_fresh_bot_startup_receipt "$commit_sha" "$ids"',
+  ],
+  'Telegram readiness must use the startup log only immediately and the exact receipt thereafter.',
+);
+assert.equal((freshBotRuntime.match(/container logs --tail 80/g) ?? []).length, 1);
+const botReadyArm = /(?:^|\n)\s*bot-ready\)([\s\S]*?)\n\s*;;/u.exec(helperMain)?.[1];
+assert.ok(botReadyArm, 'The helper must expose the immediate Telegram receipt boundary.');
+assertInOrder(
+  botReadyArm,
+  [
+    'require_exact_fresh_bot_runtime "$2" immediate-startup',
+    'record_fresh_bot_startup_receipt "$2"',
+    'require_exact_fresh_bot_runtime "$2" steady-state',
+  ],
+  'Telegram startup proof must pass before its exact receipt is written and rechecked.',
+);
+const botRuntimeCalls = [
+  ...deployHelper.matchAll(
+    /require_exact_fresh_bot_runtime "(\$(?:commit_sha|2))" (immediate-startup|steady-state)/gu,
+  ),
+].map((match) => `${match[1]} ${match[2]}`);
+assert.deepEqual(botRuntimeCalls, [
+  '$commit_sha steady-state',
+  '$2 immediate-startup',
+  '$2 steady-state',
+  '$commit_sha steady-state',
+]);
 const freshPublicEdgeReady = functionBody(deployHelper, 'require_fresh_public_edge_ready');
 assertInOrder(
   freshPublicEdgeReady,
   [
     'validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"',
     'require_fresh_host_identity',
-    'require_exact_fresh_bot_runtime "$commit_sha"',
+    'require_exact_fresh_bot_runtime "$commit_sha" steady-state',
     'require_public_network_ready "$FRESH_PUBLIC_IPV4"',
   ],
   'The fresh public gate must bind the commit, Droplet identity, activated private bot runtime, and new IPv4.',
@@ -1176,7 +1320,7 @@ assertInOrder(
     'commit_sha="$2"',
     'if [[ "$command" == \'start-fresh-public-edge\' ]]',
     'require_fresh_public_edge_ready "$commit_sha"',
-    'require_exact_fresh_bot_runtime "$commit_sha"',
+    'require_exact_fresh_bot_runtime "$commit_sha" steady-state',
     'install -d -o root -g root -m 0755 "$GATEWAY_STATE_ROOT"',
     'compose_command=(',
     'require_public_edge_ready "$commit_sha"',

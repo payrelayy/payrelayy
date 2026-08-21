@@ -1900,7 +1900,9 @@ $$;
 -- Receipt-derived intents have no customer-provided amount and may be created after the receipt
 -- occurred. This replacement preserves the historical path byte-for-byte in the ELSE branch,
 -- while the pilot branch derives amount/time/receiver facts only from one immutable settlement
--- candidate. Its 65-minute legacy window is the exact one-hour receipt age plus five-minute skew.
+-- candidate. The intent retains the active legacy policy's exact immutable amount and freshness
+-- vector; the receiver profile, verified outcome, and reservation independently enforce the
+-- narrower private-pilot intersection and receipt-time skew limits.
 create or replace function app.populate_deposit_intent_snapshot()
 returns trigger
 language plpgsql
@@ -2157,18 +2159,13 @@ begin
     new.receiver_instructions_snapshot := receiver_row.instructions;
     new.deposit_policy_version_id := policy_row.id;
     new.deposit_policy_version := policy_row.version;
-    new.minimum_amount_minor := greatest(
-      policy_row.minimum_amount_minor,
-      pilot.minimum_amount_minor
-    );
-    new.maximum_amount_minor := least(
-      policy_row.maximum_amount_minor,
-      pilot.maximum_per_deposit_minor
-    );
-    new.freshness_window_seconds := 3900;
+    new.minimum_amount_minor := policy_row.minimum_amount_minor;
+    new.maximum_amount_minor := policy_row.maximum_amount_minor;
+    new.freshness_window_seconds := policy_row.freshness_window_seconds;
     new.currency_code := 'ETB';
     new.opened_at := intent_opened_at;
-    new.payment_deadline_at := intent_opened_at + interval '65 minutes';
+    new.payment_deadline_at := intent_opened_at
+      + pg_catalog.make_interval(secs => policy_row.freshness_window_seconds);
     new.status := 'intake_received';
     new.status_changed_at := clock_timestamp();
     new.verified_at := null;

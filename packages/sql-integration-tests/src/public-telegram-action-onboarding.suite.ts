@@ -9,6 +9,8 @@ type PublicInboundRow = {
 
 type PublicIdentityGraphRow = {
   readonly conversation_id: string;
+  readonly conversation_state: { readonly kind: 'idle'; readonly v: 1 };
+  readonly conversation_version: string;
   readonly customer_id: string;
   readonly customer_identity_id: string;
   readonly private_chat_id: string;
@@ -159,7 +161,7 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
         const lineage = await client.query<{
           readonly audit_action: string;
           readonly audit_metadata: { readonly channel: string; readonly onboarding: string };
-          readonly conversation_state: Record<string, never>;
+          readonly conversation_state: { readonly kind: 'idle'; readonly v: 1 };
           readonly conversation_version: string;
           readonly customer_display_name: string | null;
           readonly customer_id: string;
@@ -209,7 +211,6 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
         expect(lineage.rows[0]).toMatchObject({
           audit_action: 'customer.telegram_public_action_identity_created',
           audit_metadata: { channel: 'telegram', onboarding: 'public_action' },
-          conversation_state: {},
           conversation_version: '0',
           customer_display_name: null,
           customer_status: 'active',
@@ -222,6 +223,7 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
           telegram_last_name: null,
           telegram_username: null,
         });
+        expect(lineage.rows[0]!.conversation_state).toEqual({ kind: 'idle', v: 1 });
 
         const financial = await client.query<{
           readonly deposit_intents: string;
@@ -262,7 +264,9 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
                   customer_identity.id as customer_identity_id,
                   telegram_identity.telegram_user_id::text as telegram_user_id,
                   telegram_identity.private_chat_id::text as private_chat_id,
-                  conversation.id as conversation_id
+                  conversation.id as conversation_id,
+                  conversation.state as conversation_state,
+                  conversation.version::text as conversation_version
              from app.customer_identities customer_identity
              join app.customers customer
                on customer.id = customer_identity.customer_id
@@ -275,6 +279,8 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
           [userId.toString()],
         );
         expect(before.rows).toHaveLength(1);
+        expect(before.rows[0]!.conversation_state).toEqual({ kind: 'idle', v: 1 });
+        expect(before.rows[0]!.conversation_version).toBe('0');
 
         const owner = await client.query<{ readonly id: string }>(
           `select admin_user.id
@@ -326,6 +332,8 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
                   telegram_identity.telegram_user_id::text as telegram_user_id,
                   telegram_identity.private_chat_id::text as private_chat_id,
                   conversation.id as conversation_id,
+                  conversation.state as conversation_state,
+                  conversation.version::text as conversation_version,
                   (select count(*)::text from app.customers scoped_customer
                     where scoped_customer.id = customer.id) as customers,
                   (select count(*)::text from app.customer_identities scoped_identity

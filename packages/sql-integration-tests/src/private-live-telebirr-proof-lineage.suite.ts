@@ -1134,7 +1134,7 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
           client,
           `truncate table app.private_live_telebirr_assignment_transcripts`,
           [],
-          /cannot be truncated/u,
+          /cannot truncate/u,
         );
       });
     });
@@ -1385,9 +1385,11 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
         expect(settled.row.execution_job_id).toEqual(expect.any(String));
 
         const exactLineage = await client.query<{
+          readonly intent_matches_active_policy: boolean;
           readonly intent_customer_id: string;
           readonly outcome_owner_customer_id: string;
           readonly outcome_submitting_customer_id: string;
+          readonly pilot_layers_enforce_narrower_policy: boolean;
           readonly reservation_owner_customer_id: string;
           readonly reservation_submitting_customer_id: string;
           readonly settled_amount: string;
@@ -1399,19 +1401,69 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
                     as reservation_owner_customer_id,
                   reservation.submitting_customer_id
                     as reservation_submitting_customer_id,
-                  outcome.principal_amount_minor::text as settled_amount
+                  outcome.principal_amount_minor::text as settled_amount,
+                  intent.deposit_policy_version_id = policy.id
+                    and intent.deposit_policy_version = policy.version
+                    and intent.minimum_amount_minor = policy.minimum_amount_minor
+                    and intent.maximum_amount_minor = policy.maximum_amount_minor
+                    and intent.freshness_window_seconds = policy.freshness_window_seconds
+                    and intent.payment_deadline_at = intent.opened_at
+                      + pg_catalog.make_interval(
+                          secs => policy.freshness_window_seconds
+                        ) as intent_matches_active_policy,
+                  profile.minimum_principal_amount_minor = greatest(
+                    policy.minimum_amount_minor,
+                    pilot.minimum_amount_minor
+                  )
+                    and profile.maximum_principal_amount_minor = least(
+                      policy.maximum_amount_minor,
+                      pilot.maximum_per_deposit_minor
+                    )
+                    and (
+                      profile.minimum_principal_amount_minor
+                        > policy.minimum_amount_minor
+                      or profile.maximum_principal_amount_minor
+                        < policy.maximum_amount_minor
+                    )
+                    and profile.automatic_freshness_seconds = 3600
+                    and outcome.principal_amount_minor
+                      between profile.minimum_principal_amount_minor
+                      and profile.maximum_principal_amount_minor
+                    and outcome.occurred_at >= proof.submitted_at
+                      - pg_catalog.make_interval(
+                          secs => profile.automatic_freshness_seconds
+                        )
+                    and outcome.occurred_at <= proof.submitted_at
+                      + pg_catalog.make_interval(
+                          secs => profile.maximum_future_skew_seconds
+                        )
+                    and reservation.amount_minor
+                      between profile.minimum_principal_amount_minor
+                      and profile.maximum_principal_amount_minor
+                    as pilot_layers_enforce_narrower_policy
              from app.private_live_telebirr_verification_outcomes outcome
              join app.deposit_intents intent on intent.id = outcome.deposit_intent_id
              join app.private_live_deposit_pilot_reservations reservation
                on reservation.deposit_intent_id = intent.id
+             join app.private_live_deposit_pilot_proofs proof
+               on proof.id = reservation.private_live_deposit_pilot_proof_id
+             join app.private_live_deposit_pilot_revisions pilot
+               on pilot.id = outcome.pilot_revision_id
+             join app.private_live_telebirr_receiver_profiles profile
+               on profile.id = outcome.receiver_profile_id
+             join app.deposit_policy_versions policy
+               on policy.id = intent.deposit_policy_version_id
+              and policy.version = intent.deposit_policy_version
             where outcome.id = $1::uuid`,
           [settled.row.verification_outcome_id],
         );
         expect(exactLineage.rows).toEqual([
           {
             intent_customer_id: pilot.ownerCustomerId,
+            intent_matches_active_policy: true,
             outcome_owner_customer_id: pilot.ownerCustomerId,
             outcome_submitting_customer_id: pilot.submittingCustomerId,
+            pilot_layers_enforce_narrower_policy: true,
             reservation_owner_customer_id: pilot.ownerCustomerId,
             reservation_submitting_customer_id: pilot.submittingCustomerId,
             settled_amount: '2500',

@@ -310,7 +310,7 @@ begin
      for update;
 
     if not found
-      or resolved_conversation_state is distinct from '{}'::jsonb
+      or resolved_conversation_state is distinct from '{"v": 1, "kind": "idle"}'::jsonb
       or resolved_conversation_version is distinct from 0 then
       raise exception 'The Telegram beta admission is not accepted.';
     end if;

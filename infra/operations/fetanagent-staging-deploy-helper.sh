@@ -437,7 +437,7 @@ require_exact_fresh_bot_runtime() {
       restart_count="$(docker_local container inspect "$ids" --format '{{.RestartCount}}')"
       [[ "$restart_count" == '0' ]] || die 'the fresh-host Telegram bot restarted unexpectedly'
       docker_local container logs --tail 80 "$ids" 2>&1 |
-        grep -Fq 'Telegram bot started in private beta admission mode.' ||
+        grep -Fq 'Telegram bot started with configured private admission and action handlers.' ||
         die 'the fresh-host Telegram bot did not report its genuine startup contract'
     else
       health="$(docker_local container inspect "$ids" --format '{{.State.Health.Status}}')"

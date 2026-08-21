@@ -12,6 +12,7 @@ const botWorkflow = readFileSync(
   resolve(root, '.github/workflows/staging-telegram-bot.yml'),
   'utf8',
 );
+const botSource = readFileSync(resolve(root, 'apps/bot/src/index.ts'), 'utf8');
 const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/quality.yml'), 'utf8');
 const compose = readFileSync(resolve(root, 'infra/compose.staging-beta.yaml'), 'utf8');
 const stagingRunbook = readFileSync(resolve(root, 'infra/staging-beta.md'), 'utf8');
@@ -698,7 +699,14 @@ assert.match(
 assert.match(freshBotRuntime, /depositProofReferenceMastersConfigured/);
 assert.match(freshBotRuntime, /depositProofReferenceProfileVersion/);
 assert.match(freshBotRuntime, /RestartCount/);
-assert.match(freshBotRuntime, /Telegram bot started in private beta admission mode\./);
+assert.match(
+  freshBotRuntime,
+  /Telegram bot started with configured private admission and action handlers\./,
+);
+assert.match(
+  botSource,
+  /Telegram bot started with configured private admission and action handlers\./,
+);
 assert.doesNotMatch(
   freshBotRuntime,
   /container logs(?! --tail 80)|\bcat\b|token=|password=|echo [^\n]*(?:SECRET|PROFILE)/,

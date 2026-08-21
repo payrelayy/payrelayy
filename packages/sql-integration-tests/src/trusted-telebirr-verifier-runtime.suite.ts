@@ -232,7 +232,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       ]);
     });
 
-    it('grants exactly two hardened routines and no base-object authority', async () => {
+    it('grants exactly two hardened routines with no base-object or extension authority', async () => {
       const client = getClient();
       const functions = await client.query<{
         readonly group_execute: boolean;
@@ -483,6 +483,22 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           can_create_schema_objects: false,
           usable_schemas: ['app', 'public'],
         },
+      ]);
+
+      const pgcryptoBoundary = await client.query<{
+        readonly extension_schema: string;
+        readonly runtime_schema_usage: boolean;
+      }>(`
+        select namespace.nspname::text as extension_schema,
+               has_schema_privilege(
+                 '${verifierRuntime}', namespace.oid, 'USAGE'
+               ) as runtime_schema_usage
+          from pg_extension extension_catalog
+          join pg_namespace namespace on namespace.oid = extension_catalog.extnamespace
+         where extension_catalog.extname = 'pgcrypto'
+      `);
+      expect(pgcryptoBoundary.rows).toEqual([
+        { extension_schema: 'extensions', runtime_schema_usage: false },
       ]);
 
       const baseObjects = await client.query<{ readonly capability_count: number }>(`

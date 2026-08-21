@@ -41,6 +41,9 @@ treated as explicit, exact preflight facts rather than hidden assumptions. They 
 single direct connection, connection limit, finite login validity, no arbitrary-SQL or public
 ingress surface, fully qualified queries, empty reachable `public` schema, and operation-time role
 guard; changing any audited catalog fact makes the runtime unavailable.
+The disposable PostgreSQL 17 tests mirror the hosted extension boundary by installing `pgcrypto`
+in the non-usable `extensions` schema. Installing its PUBLIC-executable routines in `public` would
+expand the runtime's effective routine surface and correctly fail the exact-two-routine preflight.
 
 There is deliberately no Compose service, deployment workflow, credential material, signer seed,
 device seed, receiver-profile seed, ingress listener, or health endpoint in this slice. The pin

@@ -13,6 +13,8 @@ import {
   KEMERBET_EXECUTOR_HEALTH_HOST,
   KEMERBET_EXECUTOR_HEALTH_PORT,
   KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE,
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION,
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
   KEMERBET_SELECTOR_CONTRACT_FILE,
   KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
   loadExecutorConfig,
@@ -24,16 +26,32 @@ function databaseUrlFor(target: 'staging' | 'production'): string {
 }
 
 const databaseUrl = databaseUrlFor('staging');
+const pilotRevisionId = '77777777-7777-4777-8777-777777777771';
+const pilotConfigurationDigest = `sha256:${'7'.repeat(64)}`;
+const pilotManifest = JSON.stringify({
+  contractVersion: KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION,
+  pilotRevisionId,
+  configurationDigest: pilotConfigurationDigest,
+});
 const enabledEnvironment = {
   NODE_ENV: 'production',
   FINANCIAL_ACTIONS_MODE: 'live',
   KEMERBET_EXECUTOR_ENABLED: 'true',
   KEMERBET_FINAL_ACTION_ENABLED: 'true',
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true',
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
   INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true',
   KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: 'staging',
   KEMERBET_EXECUTOR_DATABASE_URL_FILE: KEMERBET_EXECUTOR_DATABASE_SECRET_FILE,
   NODE_EXTRA_CA_CERTS: KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
 } as const;
+
+function enabledDependencies(databaseValue = databaseUrl, manifestValue = pilotManifest) {
+  return {
+    readSecretFile: () => databaseValue,
+    readPrivateLiveDepositPilotManifestFile: () => manifestValue,
+  };
+}
 
 interface FakeSecretFileStat {
   readonly dev: number;
@@ -89,6 +107,7 @@ function secureSecretFixture(
     dependencies: {
       effectiveUserId: 1_000,
       platform: 'linux' as const,
+      readPrivateLiveDepositPilotManifestFile: () => pilotManifest,
       secretFileSystem: fileSystem,
     },
     fileSystem,
@@ -98,18 +117,118 @@ function secureSecretFixture(
 
 describe('KemerBet deposit executor configuration', () => {
   it('is disabled by default and does not read a secret file', () => {
-    let reads = 0;
-    const config = loadExecutorConfig({ NODE_ENV: 'test' }, () => {
-      reads += 1;
-      return databaseUrl;
-    });
+    let databaseReads = 0;
+    let manifestReads = 0;
+    const config = loadExecutorConfig(
+      { NODE_ENV: 'test' },
+      {
+        readSecretFile: () => {
+          databaseReads += 1;
+          return databaseUrl;
+        },
+        readPrivateLiveDepositPilotManifestFile: () => {
+          manifestReads += 1;
+          return pilotManifest;
+        },
+      },
+    );
 
     expect(config.kemerBet.executionRuntime).toEqual({ enabled: false });
-    expect(reads).toBe(0);
+    expect(config.kemerBet.privateLiveDepositPilot).toEqual({ enabled: false });
+    expect(databaseReads).toBe(0);
+    expect(manifestReads).toBe(0);
+  });
+
+  it('requires the dedicated pilot independently from every global live gate', () => {
+    expect(() =>
+      loadExecutorConfig(
+        { ...enabledEnvironment, KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false' },
+        enabledDependencies(),
+      ),
+    ).toThrow('dedicated private pilot');
+
+    for (const environment of [
+      { ...enabledEnvironment, NODE_ENV: 'test' },
+      { ...enabledEnvironment, FINANCIAL_ACTIONS_MODE: 'dry_run' },
+      { ...enabledEnvironment, KEMERBET_EXECUTOR_ENABLED: 'false' },
+      { ...enabledEnvironment, KEMERBET_FINAL_ACTION_ENABLED: 'false' },
+    ]) {
+      expect(() => loadExecutorConfig(environment, enabledDependencies())).toThrow();
+    }
+  });
+
+  it('accepts only the canonical fixed-path manifest with no account membership', () => {
+    for (const [environment, manifest] of [
+      [
+        {
+          ...enabledEnvironment,
+          KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE: '/tmp/pilot.json',
+        },
+        pilotManifest,
+      ],
+      [enabledEnvironment, `${pilotManifest}\n`],
+      [
+        enabledEnvironment,
+        JSON.stringify({
+          contractVersion: 2,
+          pilotRevisionId,
+          configurationDigest: pilotConfigurationDigest,
+        }),
+      ],
+      [
+        enabledEnvironment,
+        JSON.stringify({
+          contractVersion: 1,
+          pilotRevisionId,
+          configurationDigest: pilotConfigurationDigest,
+          playerIds: ['must-not-live-in-executor-config'],
+        }),
+      ],
+      [
+        enabledEnvironment,
+        JSON.stringify({
+          pilotRevisionId,
+          contractVersion: 1,
+          configurationDigest: pilotConfigurationDigest,
+        }),
+      ],
+      [
+        enabledEnvironment,
+        JSON.stringify({
+          contractVersion: 1,
+          pilotRevisionId,
+          configurationDigest: 'sha256:UPPERCASE-OR-SHORT',
+        }),
+      ],
+    ] as const) {
+      expect(() =>
+        loadExecutorConfig(environment, enabledDependencies(databaseUrl, manifest)),
+      ).toThrow();
+    }
+  });
+
+  it('redacts pilot manifest contents and underlying read failures', () => {
+    const leakedDetail = `${pilotRevisionId}:${pilotConfigurationDigest}:private-path`;
+    let message = '';
+    try {
+      loadExecutorConfig(enabledEnvironment, {
+        readSecretFile: () => databaseUrl,
+        readPrivateLiveDepositPilotManifestFile: () => {
+          throw new Error(leakedDetail);
+        },
+      });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toBe('The private live-deposit pilot manifest is unavailable.');
+    expect(message).not.toContain(pilotRevisionId);
+    expect(message).not.toContain(pilotConfigurationDigest);
+    expect(message).not.toContain('private-path');
   });
 
   it('requires every live gate and the exact secret-file connection', () => {
-    const config = loadExecutorConfig(enabledEnvironment, () => databaseUrl);
+    const config = loadExecutorConfig(enabledEnvironment, enabledDependencies());
     expect(config.kemerBet.executionRuntime).toEqual({
       enabled: true,
       deploymentTarget: 'staging',
@@ -135,16 +254,26 @@ describe('KemerBet deposit executor configuration', () => {
       historyReferenceHmacKeyFile: KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE,
       agentIdentityHmacKeyFile: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
       supabaseCaCertificateFile: KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
+      privateLiveDepositPilotManifestFile: KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
       healthHost: KEMERBET_EXECUTOR_HEALTH_HOST,
       healthPort: KEMERBET_EXECUTOR_HEALTH_PORT,
     });
+    expect(config.kemerBet.privateLiveDepositPilot).toEqual({
+      enabled: true,
+      contractVersion: 1,
+      pilotRevisionId,
+      configurationDigest: pilotConfigurationDigest,
+    });
+    expect(Object.isFrozen(config.kemerBet.privateLiveDepositPilot)).toBe(true);
+    expect(redacted).not.toContain(pilotRevisionId);
+    expect(redacted).not.toContain(pilotConfigurationDigest);
   });
 
   it('requires an explicit deployment target and maps each target to its exact project', () => {
     for (const target of ['staging', 'production'] as const) {
       const config = loadExecutorConfig(
         { ...enabledEnvironment, KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: target },
-        () => databaseUrlFor(target),
+        enabledDependencies(databaseUrlFor(target)),
       );
       expect(config.kemerBet.executionRuntime).toMatchObject({
         enabled: true,
@@ -158,7 +287,7 @@ describe('KemerBet deposit executor configuration', () => {
       expect(() =>
         loadExecutorConfig(
           { ...enabledEnvironment, KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: target },
-          () => databaseUrl,
+          enabledDependencies(),
         ),
       ).toThrow('must be explicitly set to staging or production');
     }
@@ -168,13 +297,13 @@ describe('KemerBet deposit executor configuration', () => {
     expect(() =>
       loadExecutorConfig(
         { ...enabledEnvironment, KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: 'staging' },
-        () => databaseUrlFor('production'),
+        enabledDependencies(databaseUrlFor('production')),
       ),
     ).toThrow('must match the explicit deployment target');
     expect(() =>
       loadExecutorConfig(
         { ...enabledEnvironment, KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: 'production' },
-        () => databaseUrlFor('staging'),
+        enabledDependencies(databaseUrlFor('staging')),
       ),
     ).toThrow('must match the explicit deployment target');
   });
@@ -183,7 +312,7 @@ describe('KemerBet deposit executor configuration', () => {
     expect(() =>
       loadExecutorConfig(
         { ...enabledEnvironment, KEMERBET_EXECUTOR_DATABASE_URL_FILE: undefined },
-        () => databaseUrl,
+        enabledDependencies(),
       ),
     ).toThrow('KEMERBET_EXECUTOR_DATABASE_URL_FILE is required');
     expect(() =>
@@ -192,7 +321,7 @@ describe('KemerBet deposit executor configuration', () => {
           ...enabledEnvironment,
           KEMERBET_EXECUTOR_DATABASE_URL_FILE: '/run/secrets/unapproved_database_url',
         },
-        () => databaseUrl,
+        enabledDependencies(),
       ),
     ).toThrow('approved production secret path');
 
@@ -205,7 +334,7 @@ describe('KemerBet deposit executor configuration', () => {
       databaseUrl.replace('sslmode=verify-full', 'sslmode=require'),
       `${databaseUrl}&application_name=unsafe`,
     ]) {
-      expect(() => loadExecutorConfig(enabledEnvironment, () => invalid)).toThrow(
+      expect(() => loadExecutorConfig(enabledEnvironment, enabledDependencies(invalid))).toThrow(
         'exact direct host',
       );
     }
@@ -216,9 +345,10 @@ describe('KemerBet deposit executor configuration', () => {
       { ...enabledEnvironment, NODE_ENV: 'test', FINANCIAL_ACTIONS_MODE: 'dry_run' },
       { ...enabledEnvironment, KEMERBET_EXECUTOR_ENABLED: 'false' },
       { ...enabledEnvironment, KEMERBET_FINAL_ACTION_ENABLED: 'false' },
+      { ...enabledEnvironment, KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false' },
       { ...enabledEnvironment, NODE_EXTRA_CA_CERTS: undefined },
     ]) {
-      expect(() => loadExecutorConfig(environment, () => databaseUrl)).toThrow();
+      expect(() => loadExecutorConfig(environment, enabledDependencies())).toThrow();
     }
   });
 
@@ -231,11 +361,12 @@ describe('KemerBet deposit executor configuration', () => {
       ['KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE', '/tmp/key'],
       ['KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE', '/tmp/identity-key'],
       ['NODE_EXTRA_CA_CERTS', '/tmp/ca.pem'],
+      ['KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE', '/tmp/pilot.json'],
       ['EXECUTOR_HEALTH_HOST', '0.0.0.0'],
       ['EXECUTOR_HEALTH_PORT', '8080'],
     ] as const) {
       expect(() =>
-        loadExecutorConfig({ ...enabledEnvironment, [name]: value }, () => databaseUrl),
+        loadExecutorConfig({ ...enabledEnvironment, [name]: value }, enabledDependencies()),
       ).toThrow('cannot be overridden');
     }
   });
@@ -306,9 +437,9 @@ describe('KemerBet deposit executor configuration', () => {
         }).dependencies,
       ),
     ).toThrow('The KemerBet executor database secret is unavailable.');
-    expect(() => loadExecutorConfig(enabledEnvironment, () => `${databaseUrl}\nsecond`)).toThrow(
-      'The KemerBet executor database secret is unavailable.',
-    );
+    expect(() =>
+      loadExecutorConfig(enabledEnvironment, enabledDependencies(`${databaseUrl}\nsecond`)),
+    ).toThrow('The KemerBet executor database secret is unavailable.');
   });
 
   it('redacts secret material, paths, and underlying filesystem failures', () => {
@@ -330,7 +461,7 @@ describe('KemerBet deposit executor configuration', () => {
     const malformed = databaseUrl.replace('postgresql:', 'not-a-database:');
     let malformedMessage = '';
     try {
-      loadExecutorConfig(enabledEnvironment, () => malformed);
+      loadExecutorConfig(enabledEnvironment, enabledDependencies(malformed));
     } catch (error) {
       malformedMessage = error instanceof Error ? error.message : String(error);
     }

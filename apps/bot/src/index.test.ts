@@ -223,6 +223,36 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
+  it('routes a public /start through the action channel when beta admission ignores it', async () => {
+    await loadComposition(true, true);
+
+    await runtime.messageHandler!(messageContext('/start'));
+
+    expect(runtime.admissionCalls).toHaveLength(1);
+    expect(runtime.actionDeliveries).toEqual([
+      {
+        version: 1,
+        kind: 'root_menu',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+      },
+    ]);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('preserves beta invite-token admission as a handled short-circuit', async () => {
+    runtime.admissionOutcome = 'admitted';
+    await loadComposition(true, true);
+
+    await runtime.messageHandler!(messageContext(`/start ${'A'.repeat(43)}`));
+
+    expect(runtime.admissionCalls).toHaveLength(1);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
   it('falls through from an unknown command to ingress when admission is disabled', async () => {
     await loadComposition(false, true);
 

@@ -2,6 +2,7 @@ import {
   KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE,
   KEMERBET_EXECUTOR_DATABASE_SECRET_FILE,
   KEMERBET_EXECUTOR_DATABASE_TARGETS,
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
   KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
   loadExecutorConfig,
 } from '@fetanagent/config/executor';
@@ -21,6 +22,12 @@ import {
 import { LEASE_NEXT_DEPOSIT_EXECUTION_SQL } from './postgres-kemerbet-deposit-database.js';
 
 const WORKER_INSTANCE_ID = '11111111-1111-4111-8111-111111111111';
+const privateLiveDepositPilotManifest = Object.freeze({
+  contractVersion: 1 as const,
+  pilotRevisionId: '11111111-1111-4111-8111-111111111112',
+  configurationDigest: `sha256:${'1'.repeat(64)}`,
+});
+const privateLiveDepositPilotManifestJson = JSON.stringify(privateLiveDepositPilotManifest);
 
 const passingRow = {
   runtime_login_identity_allowed: true,
@@ -47,12 +54,17 @@ function enabledRuntimeConfig() {
       FINANCIAL_ACTIONS_MODE: 'live',
       KEMERBET_EXECUTOR_ENABLED: 'true',
       KEMERBET_FINAL_ACTION_ENABLED: 'true',
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true',
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
       INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true',
       KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: 'staging',
       KEMERBET_EXECUTOR_DATABASE_URL_FILE: KEMERBET_EXECUTOR_DATABASE_SECRET_FILE,
       NODE_EXTRA_CA_CERTS: KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
     },
-    () => databaseUrl,
+    {
+      readSecretFile: () => databaseUrl,
+      readPrivateLiveDepositPilotManifestFile: () => privateLiveDepositPilotManifestJson,
+    },
   );
   if (!config.kemerBet.executionRuntime.enabled) throw new Error('test setup failed');
   return config.kemerBet.executionRuntime;
@@ -135,9 +147,9 @@ describe('KemerBet deposit PostgreSQL startup preflight', () => {
       "current_user = 'fetanagent_deposit_executor_runtime'",
     );
     for (const signature of [
-      'lease_next_deposit_execution(uuid,integer)',
+      'lease_next_private_live_deposit_execution(uuid,integer)',
       'cancel_deposit_execution_before_action(uuid,uuid,text)',
-      'fence_deposit_execution_final_action(uuid,uuid)',
+      'fence_private_live_deposit_execution_final_action(uuid,uuid,uuid,uuid,uuid)',
       'require_deposit_execution_reconciliation(uuid,uuid,boolean)',
       'lease_next_deposit_execution_reconciliation(uuid,integer)',
       'record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamptz,boolean,boolean,boolean,boolean)',
@@ -152,6 +164,10 @@ describe('KemerBet deposit PostgreSQL startup preflight', () => {
     expect(KEMERBET_DEPOSIT_DATABASE_PREFLIGHT_SQL).toContain('exact_function_surface_allowed');
     expect(KEMERBET_DEPOSIT_DATABASE_PREFLIGHT_SQL).toContain(
       'allowed_functions_execution_private',
+    );
+    expect(KEMERBET_DEPOSIT_DATABASE_PREFLIGHT_SQL).toContain("array['search_path=pg_catalog']");
+    expect(KEMERBET_DEPOSIT_DATABASE_PREFLIGHT_SQL).toContain(
+      "array['search_path=pg_catalog, app']",
     );
   });
 
@@ -202,15 +218,35 @@ describe('KemerBet deposit PostgreSQL startup preflight', () => {
 });
 
 describe('KemerBet deposit PostgreSQL lifetime singleton', () => {
+  it('rejects an invalid pilot manifest before opening the database connection', async () => {
+    const fixture = clientFixture();
+
+    await expect(
+      createKemerBetDepositPostgresRuntime(
+        enabledRuntimeConfig(),
+        {
+          ...privateLiveDepositPilotManifest,
+          configurationDigest: 'sha256:invalid',
+        },
+        { createClient: () => fixture.client },
+      ),
+    ).rejects.toBeInstanceOf(KemerBetDepositPostgresRuntimeUnavailableError);
+    expect(fixture.events).toEqual([]);
+  });
+
   it('holds one direct client for singleton, catalog, RPC, readiness, and shutdown', async () => {
     const fixture = clientFixture();
     let receivedClientConfig: Readonly<Record<string, unknown>> | undefined;
-    const runtime = await createKemerBetDepositPostgresRuntime(enabledRuntimeConfig(), {
-      createClient(config) {
-        receivedClientConfig = config;
-        return fixture.client;
+    const runtime = await createKemerBetDepositPostgresRuntime(
+      enabledRuntimeConfig(),
+      privateLiveDepositPilotManifest,
+      {
+        createClient(config) {
+          receivedClientConfig = config;
+          return fixture.client;
+        },
       },
-    });
+    );
 
     expect(fixture.events).toEqual(['connect', 'singleton-acquire', 'catalog-preflight']);
     expect(receivedClientConfig).toMatchObject({
@@ -245,18 +281,24 @@ describe('KemerBet deposit PostgreSQL lifetime singleton', () => {
     const fixture = clientFixture({ singletonAcquired: false });
 
     await expect(
-      createKemerBetDepositPostgresRuntime(enabledRuntimeConfig(), {
-        createClient: () => fixture.client,
-      }),
+      createKemerBetDepositPostgresRuntime(
+        enabledRuntimeConfig(),
+        privateLiveDepositPilotManifest,
+        {
+          createClient: () => fixture.client,
+        },
+      ),
     ).rejects.toBeInstanceOf(KemerBetDepositPostgresRuntimeUnavailableError);
     expect(fixture.events).toEqual(['connect', 'singleton-acquire', 'end']);
   });
 
   it('turns readiness off and blocks every later RPC after the held session reports an error', async () => {
     const fixture = clientFixture();
-    const runtime = await createKemerBetDepositPostgresRuntime(enabledRuntimeConfig(), {
-      createClient: () => fixture.client,
-    });
+    const runtime = await createKemerBetDepositPostgresRuntime(
+      enabledRuntimeConfig(),
+      privateLiveDepositPilotManifest,
+      { createClient: () => fixture.client },
+    );
     const queryCountBeforeLoss = fixture.query.mock.calls.length;
 
     fixture.emitError();
@@ -272,9 +314,11 @@ describe('KemerBet deposit PostgreSQL lifetime singleton', () => {
 
   it('fails permanently if readiness can no longer prove the singleton lock is held', async () => {
     const fixture = clientFixture({ singletonHeld: false });
-    const runtime = await createKemerBetDepositPostgresRuntime(enabledRuntimeConfig(), {
-      createClient: () => fixture.client,
-    });
+    const runtime = await createKemerBetDepositPostgresRuntime(
+      enabledRuntimeConfig(),
+      privateLiveDepositPilotManifest,
+      { createClient: () => fixture.client },
+    );
 
     await expect(runtime.ready()).resolves.toBe(false);
     const queryCountAfterProbe = fixture.query.mock.calls.length;
@@ -294,9 +338,11 @@ describe('KemerBet deposit PostgreSQL lifetime singleton', () => {
 
   it('redacts a client query failure and never resumes leasing on that session', async () => {
     const fixture = clientFixture({ queryFailure: KEMERBET_EXECUTOR_SINGLETON_HELD_SQL });
-    const runtime = await createKemerBetDepositPostgresRuntime(enabledRuntimeConfig(), {
-      createClient: () => fixture.client,
-    });
+    const runtime = await createKemerBetDepositPostgresRuntime(
+      enabledRuntimeConfig(),
+      privateLiveDepositPilotManifest,
+      { createClient: () => fixture.client },
+    );
 
     await expect(runtime.ready()).resolves.toBe(false);
     let message = '';

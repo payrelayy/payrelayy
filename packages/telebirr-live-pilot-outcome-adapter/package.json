@@ -1,0 +1,21 @@
+{
+  "name": "@fetanagent/telebirr-live-pilot-outcome-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@fetanagent/contracts": "workspace:*",
+    "@fetanagent/deposit-proof-assessment": "workspace:*",
+    "@fetanagent/telebirr-verification-foundation": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  }
+}

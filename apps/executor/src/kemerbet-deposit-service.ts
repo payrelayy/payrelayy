@@ -40,6 +40,7 @@ export async function createKemerBetDepositService(
     config.financialActionsMode !== 'live' ||
     !config.kemerBet.executorEnabled ||
     !config.kemerBet.finalActionFeatureEnabled ||
+    !config.kemerBet.privateLiveDepositPilot.enabled ||
     !config.kemerBet.executionRuntime.enabled
   ) {
     throw new KemerBetDepositServiceUnavailableError();
@@ -47,13 +48,14 @@ export async function createKemerBetDepositService(
 
   const postgres: KemerBetDepositPostgresRuntime = await (
     dependencies.createPostgresRuntime ?? createKemerBetDepositPostgresRuntime
-  )(config.kemerBet.executionRuntime);
+  )(config.kemerBet.executionRuntime, config.kemerBet.privateLiveDepositPilot);
   const runtime = createKemerBetDepositRuntime({
     database: postgres.database,
     browserForAgentAccount: dependencies.browserForAgentAccount,
     workerInstanceId: dependencies.workerInstanceId,
     leaseSeconds: dependencies.leaseSeconds,
     finalActionEnabled: true,
+    privateLiveDepositPilotManifest: config.kemerBet.privateLiveDepositPilot,
     now: dependencies.now,
     log: dependencies.log,
   });

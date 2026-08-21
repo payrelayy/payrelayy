@@ -14,6 +14,7 @@ import {
   PostgresKemerBetDepositExecutionDatabase,
   RECORD_DEPOSIT_EXECUTION_RECONCILIATION_SQL,
   REQUIRE_DEPOSIT_EXECUTION_RECONCILIATION_SQL,
+  type KemerBetDepositPostgresQuery,
 } from './postgres-kemerbet-deposit-database.js';
 
 const ids = {
@@ -26,7 +27,30 @@ const ids = {
   reconciliationToken: '44444444-4444-4444-8444-444444444447',
   reconciliation: '44444444-4444-4444-8444-444444444448',
   worker: '44444444-4444-4444-8444-444444444449',
+  pilotRevision: '44444444-4444-4444-8444-444444444450',
+  pilotReservation: '44444444-4444-4444-8444-444444444451',
+  pilotAuthorization: '44444444-4444-4444-8444-444444444452',
 } as const;
+const pilotConfigurationDigest = `sha256:${'4'.repeat(64)}`;
+const pilotManifest = Object.freeze({
+  contractVersion: 1 as const,
+  pilotRevisionId: ids.pilotRevision,
+  configurationDigest: pilotConfigurationDigest,
+});
+
+function pilotEnvelope() {
+  return {
+    pilot_contract_version: 1,
+    pilot_revision_id: ids.pilotRevision,
+    pilot_reservation_id: ids.pilotReservation,
+    pilot_configuration_digest: pilotConfigurationDigest,
+    pilot_authorization_token: ids.pilotAuthorization,
+  };
+}
+
+function createDatabase(query: KemerBetDepositPostgresQuery) {
+  return new PostgresKemerBetDepositExecutionDatabase(query, pilotManifest);
+}
 
 const capturedAt = new Date('2030-01-02T03:04:05.000Z');
 const requiredAt = new Date('2030-01-02T03:04:15.000Z');
@@ -48,6 +72,13 @@ function executionLease(): KemerBetDepositExecutionLease {
     },
     leaseToken: ids.executionToken,
     leaseExpiresAt: expiresAt,
+    privateLiveDepositPilotAuthorization: {
+      contractVersion: 1,
+      pilotRevisionId: ids.pilotRevision,
+      pilotReservationId: ids.pilotReservation,
+      configurationDigest: pilotConfigurationDigest,
+      authorizationToken: ids.pilotAuthorization,
+    },
   };
 }
 
@@ -79,7 +110,7 @@ function reconciliationLease(
 describe('production KemerBet deposit PostgreSQL adapter', () => {
   it('leases an immutable dynamic target only within product limits', async () => {
     const calls: Array<{ query: string; values: readonly unknown[] }> = [];
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query(query, values) {
         calls.push({ query, values });
         return {
@@ -95,6 +126,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
               lease_token: ids.executionToken,
               lease_expires_at: expiresAt,
               lease_disposition: 'execution',
+              ...pilotEnvelope(),
             },
           ],
         };
@@ -110,7 +142,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
   });
 
   it('rejects a database target below the product minimum', async () => {
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query() {
         return {
           rows: [
@@ -125,6 +157,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
               lease_token: ids.executionToken,
               lease_expires_at: expiresAt,
               lease_disposition: 'execution',
+              ...pilotEnvelope(),
             },
           ],
         };
@@ -136,9 +169,45 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
     );
   });
 
+  it('rejects an execution lease without the exact configured pilot envelope', async () => {
+    for (const pilotOverride of [
+      { pilot_authorization_token: null },
+      { pilot_revision_id: '55555555-5555-4555-8555-555555555555' },
+      { pilot_configuration_digest: `sha256:${'5'.repeat(64)}` },
+      { pilot_contract_version: 2 },
+    ]) {
+      const database = createDatabase({
+        async query() {
+          return {
+            rows: [
+              {
+                deposit_intent_id: ids.intent,
+                execution_job_id: ids.executionJob,
+                execution_attempt_id: ids.attempt,
+                platform_agent_account_id: ids.agent,
+                player_id: 'PLAYER GAMMA',
+                amount_minor: String(DEPOSIT_MINIMUM_MINOR),
+                currency_code: 'ETB',
+                lease_token: ids.executionToken,
+                lease_expires_at: expiresAt,
+                lease_disposition: 'execution',
+                ...pilotEnvelope(),
+                ...pilotOverride,
+              },
+            ],
+          };
+        },
+      });
+
+      await expect(database.leaseNextExecution(ids.worker, 300)).rejects.toBeInstanceOf(
+        KemerBetDepositDatabaseUnavailableError,
+      );
+    }
+  });
+
   it('returns a strict recovery sentinel without constructing an execution lease', async () => {
     const calls: Array<{ query: string; values: readonly unknown[] }> = [];
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query(query, values) {
         calls.push({ query, values });
         return {
@@ -154,6 +223,11 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
               lease_token: null,
               lease_expires_at: null,
               lease_disposition: 'recovered_expired_prepared',
+              pilot_contract_version: null,
+              pilot_revision_id: null,
+              pilot_reservation_id: null,
+              pilot_configuration_digest: null,
+              pilot_authorization_token: null,
             },
           ],
         };
@@ -170,7 +244,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
 
   it('routes the exact execution-attempt ID into the durable first-only fence', async () => {
     const calls: Array<{ query: string; values: readonly unknown[] }> = [];
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query(query, values) {
         calls.push({ query, values });
         return {
@@ -180,6 +254,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
               execution_attempt_id: ids.attempt,
               final_action_fenced_at: capturedAt,
               first_fence_acquired: true,
+              ...pilotEnvelope(),
             },
           ],
         };
@@ -193,14 +268,43 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
     expect(calls).toEqual([
       {
         query: FENCE_DEPOSIT_EXECUTION_FINAL_ACTION_SQL,
-        values: [ids.attempt, ids.executionToken],
+        values: [
+          ids.attempt,
+          ids.executionToken,
+          ids.pilotRevision,
+          ids.pilotReservation,
+          ids.pilotAuthorization,
+        ],
       },
     ]);
   });
 
+  it('rejects a fence that does not repeat the leased reservation authorization', async () => {
+    const database = createDatabase({
+      async query() {
+        return {
+          rows: [
+            {
+              deposit_intent_id: ids.intent,
+              execution_attempt_id: ids.attempt,
+              final_action_fenced_at: capturedAt,
+              first_fence_acquired: true,
+              ...pilotEnvelope(),
+              pilot_authorization_token: '55555555-5555-4555-8555-555555555555',
+            },
+          ],
+        };
+      },
+    });
+
+    await expect(database.fenceFinalAction(executionLease())).rejects.toBeInstanceOf(
+      KemerBetDepositDatabaseUnavailableError,
+    );
+  });
+
   it('uses the execution-attempt ID for cancellation and reconciliation handoff', async () => {
     const calls: Array<{ query: string; values: readonly unknown[] }> = [];
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query(query, values) {
         calls.push({ query, values });
         return query === CANCEL_DEPOSIT_EXECUTION_BEFORE_ACTION_SQL
@@ -248,7 +352,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
 
   it('parses recovery evidence and sends only normalized exact-match facts', async () => {
     const calls: Array<{ query: string; values: readonly unknown[] }> = [];
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query(query, values) {
         calls.push({ query, values });
         if (query === LEASE_NEXT_DEPOSIT_EXECUTION_RECONCILIATION_SQL) {
@@ -327,7 +431,7 @@ describe('production KemerBet deposit PostgreSQL adapter', () => {
   });
 
   it('discards caller evidence for nonpositive observations and preserves a null crash fact', async () => {
-    const database = new PostgresKemerBetDepositExecutionDatabase({
+    const database = createDatabase({
       async query(_query, values) {
         expect(values.slice(3)).toEqual([null, null, null, null, null, null, null, null]);
         return {

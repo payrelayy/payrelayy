@@ -1,7 +1,10 @@
+import type { KemerBetPrivateLiveDepositPilotManifest } from '@fetanagent/config/executor';
+
 import {
   KEMERBET_DEPOSIT_CURRENCY_CODE,
   KEMERBET_DEPOSIT_OPERATION,
   isKemerBetDepositAmountMinor,
+  samePrivateLiveDepositPilotAuthorization,
   type KemerBetDepositCancellationRecord,
   type KemerBetDepositCancelReason,
   type KemerBetDepositExecutionDatabase,
@@ -12,13 +15,16 @@ import {
   type KemerBetDepositReconciliationLease,
   type KemerBetDepositReconciliationRecord,
   type KemerBetDepositReconciliationRequiredRecord,
+  type KemerBetPrivateLiveDepositPilotAuthorization,
 } from './kemerbet-deposit-types.js';
 
 export const LEASE_NEXT_DEPOSIT_EXECUTION_SQL = `
   select deposit_intent_id, execution_job_id, execution_attempt_id,
          platform_agent_account_id, player_id, amount_minor, currency_code,
-         lease_token, lease_expires_at, lease_disposition
-  from app.lease_next_deposit_execution($1::uuid, $2::integer)
+         lease_token, lease_expires_at, lease_disposition,
+         pilot_contract_version, pilot_revision_id, pilot_reservation_id,
+         pilot_configuration_digest, pilot_authorization_token
+  from app.lease_next_private_live_deposit_execution($1::uuid, $2::integer)
 `;
 
 export const CANCEL_DEPOSIT_EXECUTION_BEFORE_ACTION_SQL = `
@@ -29,8 +35,11 @@ export const CANCEL_DEPOSIT_EXECUTION_BEFORE_ACTION_SQL = `
 
 export const FENCE_DEPOSIT_EXECUTION_FINAL_ACTION_SQL = `
   select deposit_intent_id, execution_attempt_id, final_action_fenced_at,
-         first_fence_acquired
-  from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)
+         first_fence_acquired, pilot_contract_version, pilot_revision_id,
+         pilot_reservation_id, pilot_configuration_digest, pilot_authorization_token
+  from app.fence_private_live_deposit_execution_final_action(
+    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
+  )
 `;
 
 export const REQUIRE_DEPOSIT_EXECUTION_RECONCILIATION_SQL = `
@@ -69,6 +78,7 @@ export class KemerBetDepositDatabaseUnavailableError extends Error {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 
 function fail(): never {
   throw new KemerBetDepositDatabaseUnavailableError();
@@ -140,6 +150,34 @@ function leaseRequest(workerInstanceId: string, leaseSeconds: number): void {
   if (!Number.isInteger(leaseSeconds) || leaseSeconds < 30 || leaseSeconds > 600) fail();
 }
 
+function privateLiveDepositPilotAuthorization(
+  row: Record<string, unknown>,
+  expected: KemerBetPrivateLiveDepositPilotManifest,
+): KemerBetPrivateLiveDepositPilotAuthorization {
+  const contractVersion = integerMinor(row.pilot_contract_version, 1);
+  const pilotRevisionId = uuid(row.pilot_revision_id);
+  const pilotReservationId = uuid(row.pilot_reservation_id);
+  const configurationDigest = row.pilot_configuration_digest;
+  const authorizationToken = uuid(row.pilot_authorization_token);
+  if (
+    contractVersion !== 1 ||
+    pilotRevisionId !== expected.pilotRevisionId ||
+    typeof configurationDigest !== 'string' ||
+    !SHA256_DIGEST_PATTERN.test(configurationDigest) ||
+    configurationDigest !== expected.configurationDigest ||
+    expected.contractVersion !== 1
+  ) {
+    return fail();
+  }
+  return Object.freeze({
+    contractVersion: 1,
+    pilotRevisionId,
+    pilotReservationId,
+    configurationDigest,
+    authorizationToken,
+  });
+}
+
 function requireIds(
   row: Record<string, unknown>,
   expected: {
@@ -182,9 +220,25 @@ function targetFromRow(row: Record<string, unknown>) {
 
 export class PostgresKemerBetDepositExecutionDatabase implements KemerBetDepositExecutionDatabase {
   readonly #database: KemerBetDepositPostgresQuery;
+  readonly #privateLiveDepositPilotManifest: KemerBetPrivateLiveDepositPilotManifest;
 
-  constructor(database: KemerBetDepositPostgresQuery) {
+  constructor(
+    database: KemerBetDepositPostgresQuery,
+    privateLiveDepositPilotManifest: KemerBetPrivateLiveDepositPilotManifest,
+  ) {
+    const pilotRevisionId = uuid(privateLiveDepositPilotManifest.pilotRevisionId);
+    if (
+      privateLiveDepositPilotManifest.contractVersion !== 1 ||
+      !SHA256_DIGEST_PATTERN.test(privateLiveDepositPilotManifest.configurationDigest)
+    ) {
+      fail();
+    }
     this.#database = database;
+    this.#privateLiveDepositPilotManifest = Object.freeze({
+      contractVersion: 1,
+      pilotRevisionId,
+      configurationDigest: privateLiveDepositPilotManifest.configurationDigest,
+    });
   }
 
   async leaseNextExecution(
@@ -207,7 +261,12 @@ export class PostgresKemerBetDepositExecutionDatabase implements KemerBetDeposit
         row.amount_minor !== null ||
         row.currency_code !== null ||
         row.lease_token !== null ||
-        row.lease_expires_at !== null
+        row.lease_expires_at !== null ||
+        row.pilot_contract_version !== null ||
+        row.pilot_revision_id !== null ||
+        row.pilot_reservation_id !== null ||
+        row.pilot_configuration_digest !== null ||
+        row.pilot_authorization_token !== null
       ) {
         return fail();
       }
@@ -228,6 +287,10 @@ export class PostgresKemerBetDepositExecutionDatabase implements KemerBetDeposit
       target: targetFromRow(row),
       leaseToken: uuid(row.lease_token),
       leaseExpiresAt: date(row.lease_expires_at),
+      privateLiveDepositPilotAuthorization: privateLiveDepositPilotAuthorization(
+        row,
+        this.#privateLiveDepositPilotManifest,
+      ),
     };
   }
 
@@ -269,6 +332,9 @@ export class PostgresKemerBetDepositExecutionDatabase implements KemerBetDeposit
         await this.#database.query(FENCE_DEPOSIT_EXECUTION_FINAL_ACTION_SQL, [
           lease.executionAttemptId,
           lease.leaseToken,
+          lease.privateLiveDepositPilotAuthorization.pilotRevisionId,
+          lease.privateLiveDepositPilotAuthorization.pilotReservationId,
+          lease.privateLiveDepositPilotAuthorization.authorizationToken,
         ])
       ).rows,
     );
@@ -276,11 +342,24 @@ export class PostgresKemerBetDepositExecutionDatabase implements KemerBetDeposit
       depositIntentId: lease.depositIntentId,
       executionAttemptId: lease.executionAttemptId,
     });
+    const authorization = privateLiveDepositPilotAuthorization(
+      row,
+      this.#privateLiveDepositPilotManifest,
+    );
+    if (
+      !samePrivateLiveDepositPilotAuthorization(
+        lease.privateLiveDepositPilotAuthorization,
+        authorization,
+      )
+    ) {
+      return fail();
+    }
     return {
       depositIntentId: lease.depositIntentId,
       executionAttemptId: lease.executionAttemptId,
       finalActionFencedAt: date(row.final_action_fenced_at),
       firstFenceAcquired: exactBoolean(row.first_fence_acquired),
+      privateLiveDepositPilotAuthorization: authorization,
     };
   }
 

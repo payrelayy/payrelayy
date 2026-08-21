@@ -61,12 +61,12 @@ const rootAction: TelegramPrivateActionEnvelope = {
 };
 
 describe('Postgres Telegram Player-ID action runtime', () => {
-  it('records the admitted update before issuing a deterministic non-financial menu', async () => {
+  it('publicly onboards the action update before issuing a deterministic non-financial menu', async () => {
     const calls: { query: string; values: readonly unknown[] }[] = [];
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {
         calls.push({ query, values });
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -101,6 +101,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.values.slice(0, 3)).toEqual(['10', '20', '20']);
     expect(calls[0]?.values[3]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/);
+    expect(calls[0]?.query).toContain('record_public_telegram_action_inbound_event');
+    expect(calls[0]?.query).not.toContain('record_admitted_telegram_private_inbound_event');
     expect(calls[1]?.values[0]).toBe(inboundEventId);
     expect(calls.map((call) => call.query).join('\n')).not.toContain(rawBody.toString('utf8'));
   });
@@ -110,7 +112,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {
         calls.push({ query, values });
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -158,7 +160,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query) {
         calls.push(query);
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -184,10 +186,10 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls.join('\n')).not.toContain('expire_telegram_player_registration_action');
   });
 
-  it('creates only a pending validation request for admitted Player-ID text', async () => {
+  it('creates only a pending validation request for publicly onboarded Player-ID text', async () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -230,7 +232,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
   it('reports a previously validated Player ID as already registered', async () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -276,7 +278,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {
         calls.push({ query, values });
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -347,7 +349,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       const database: TelegramPlayerActionDatabase = {
         async query(query) {
           calls.push(query);
-          if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          if (query.includes('record_public_telegram_action_inbound_event')) {
             return {
               rows: [
                 {
@@ -400,7 +402,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       const database: TelegramPlayerActionDatabase = {
         async query(query, values) {
           calls.push({ query, values });
-          if (query.includes('record_admitted_telegram_private_inbound_event')) {
+          if (query.includes('record_public_telegram_action_inbound_event')) {
             return {
               rows: [
                 {
@@ -475,7 +477,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query) {
         calls.push(query);
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -522,7 +524,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query, values) {
         calls.push({ query, values });
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {
@@ -584,7 +586,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     const database: TelegramPlayerActionDatabase = {
       async query(query) {
         calls.push(query);
-        if (query.includes('record_admitted_telegram_private_inbound_event')) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
           return {
             rows: [
               {

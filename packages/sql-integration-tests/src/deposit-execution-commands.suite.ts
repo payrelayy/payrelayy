@@ -15,9 +15,9 @@ type VerifiedDepositFixture = {
 
 const executorFunctions = [
   'app.cancel_deposit_execution_before_action(uuid,uuid,text)',
-  'app.fence_deposit_execution_final_action(uuid,uuid)',
-  'app.lease_next_deposit_execution(uuid,integer)',
+  'app.fence_private_live_deposit_execution_final_action(uuid,uuid,uuid,uuid,uuid)',
   'app.lease_next_deposit_execution_reconciliation(uuid,integer)',
+  'app.lease_next_private_live_deposit_execution(uuid,integer)',
   'app.record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamp with time zone,boolean,boolean,boolean,boolean)',
   'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
 ] as const;
@@ -75,9 +75,17 @@ async function queryAsExecutor<T extends QueryResultRow>(
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
   return withSavepoint(client, async () => {
-    await client.query('set local role fetanagent_deposit_executor');
+    const historicalPilotPrimitive =
+      /app\.(?:lease_next_deposit_execution|fence_deposit_execution_final_action)\s*\(/u.test(
+        query,
+      );
+    if (!historicalPilotPrimitive) {
+      await client.query('set local role fetanagent_deposit_executor');
+    }
     const result = await client.query<T>(query, [...values]);
-    await client.query('reset role');
+    if (!historicalPilotPrimitive) {
+      await client.query('reset role');
+    }
     return result.rows;
   });
 }
@@ -87,10 +95,11 @@ async function queryAsSettlement<T extends QueryResultRow>(
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
+  // Historical non-pilot settlement semantics remain regression-tested as the disposable
+  // migration owner. The production settlement role is denied this primitive and the private
+  // pilot suite exercises the only granted strict wrapper.
   return withSavepoint(client, async () => {
-    await client.query('set local role fetanagent_verification_settlement');
     const result = await client.query<T>(query, [...values]);
-    await client.query('reset role');
     return result.rows;
   });
 }
@@ -465,6 +474,37 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
          order by signature
       `);
       expect(effectiveFunctions.rows.map((row) => row.signature)).toEqual(executorFunctions);
+
+      const revokedPilotPrimitives = await client.query<{
+        readonly allowed: boolean;
+        readonly role_name: string;
+        readonly signature: string;
+      }>(`
+        select candidate.role_name,
+               candidate.signature,
+               has_function_privilege(
+                 candidate.role_name,
+                 candidate.signature::regprocedure,
+                 'EXECUTE'
+               ) as allowed
+          from (values
+            ('fetanagent_deposit_executor',
+             'app.lease_next_deposit_execution(uuid,integer)'),
+            ('fetanagent_deposit_executor_runtime',
+             'app.lease_next_deposit_execution(uuid,integer)'),
+            ('fetanagent_deposit_executor',
+             'app.fence_deposit_execution_final_action(uuid,uuid)'),
+            ('fetanagent_deposit_executor_runtime',
+             'app.fence_deposit_execution_final_action(uuid,uuid)'),
+            ('fetanagent_verification_settlement',
+             'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)'),
+            ('fetanagent_verification_settlement_runtime',
+             'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)')
+          ) candidate(role_name, signature)
+         order by candidate.role_name, candidate.signature
+      `);
+      expect(revokedPilotPrimitives.rows).toHaveLength(6);
+      expect(revokedPilotPrimitives.rows.every((row) => !row.allowed)).toBe(true);
 
       const enqueuePrivileges = await client.query<{
         readonly allowed: boolean;

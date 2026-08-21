@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createDeterministicKemerBetDepositFixture,
   deterministicKemerBetDepositIds,
+  deterministicKemerBetPrivateLiveDepositPilotManifest,
 } from './deterministic-kemerbet-deposit-fixture.js';
 import {
   createKemerBetDepositRuntime,
@@ -25,6 +26,7 @@ function runtime(
       workerInstanceId: deterministicKemerBetDepositIds.workerInstanceId,
       leaseSeconds: 300,
       finalActionEnabled,
+      privateLiveDepositPilotManifest: deterministicKemerBetPrivateLiveDepositPilotManifest,
       now: fixture.now,
       log: (event) => logs.push(event),
     }),
@@ -47,6 +49,7 @@ describe('KemerBet deposit execution runtime', () => {
       workerInstanceId: deterministicKemerBetDepositIds.workerInstanceId,
       leaseSeconds: 300,
       finalActionEnabled: true,
+      privateLiveDepositPilotManifest: deterministicKemerBetPrivateLiveDepositPilotManifest,
       now: fixture.now,
       log: (event) => logs.push(event),
     });
@@ -80,6 +83,32 @@ describe('KemerBet deposit execution runtime', () => {
     expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 0, cancelled: true });
   });
 
+  it('opens to attention before browser preparation when the lease lacks the configured pilot', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture({
+      mismatchedLeasePilotAuthorization: true,
+    });
+
+    await expect(runtime(fixture).runtime.runOnce()).resolves.toMatchObject({
+      event: 'needs_attention',
+      phase: 'prepare',
+      actionRetryAllowed: false,
+    });
+    expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 0 });
+  });
+
+  it('never clicks when the fence does not repeat the exact leased pilot authorization', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture({
+      mismatchedFencePilotAuthorization: true,
+    });
+
+    await expect(runtime(fixture).runtime.runOnce()).resolves.toMatchObject({
+      event: 'needs_attention',
+      phase: 'execute',
+      actionRetryAllowed: false,
+    });
+    expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1 });
+  });
+
   it('uses the dynamic minimum product amount and completes only after exact reconciliation', async () => {
     const fixture = createDeterministicKemerBetDepositFixture({
       amountMinor: DEPOSIT_MINIMUM_MINOR,
@@ -98,6 +127,9 @@ describe('KemerBet deposit execution runtime', () => {
     const serializedLogs = JSON.stringify(executionWorker.logs);
     expect(serializedLogs).not.toContain(String(DEPOSIT_MINIMUM_MINOR));
     expect(serializedLogs).not.toContain('22222222');
+    expect(serializedLogs).not.toContain(
+      deterministicKemerBetPrivateLiveDepositPilotManifest.configurationDigest,
+    );
     expect(executionWorker.logs.every((entry) => entry.financialDetailsRedacted)).toBe(true);
 
     const reconciliationWorker = runtime(fixture, fixture.freshBrowser());

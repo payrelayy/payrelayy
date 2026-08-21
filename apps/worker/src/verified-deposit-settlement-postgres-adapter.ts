@@ -2,7 +2,8 @@ import { isProxy } from 'node:util/types';
 
 const SETTLEMENT_GROUP_ROLE = 'fetanagent_verification_settlement';
 const SETTLEMENT_RUNTIME_ROLE = 'fetanagent_verification_settlement_runtime';
-const SETTLEMENT_FUNCTION = 'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)';
+const SETTLEMENT_FUNCTION =
+  'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)';
 const SETTLEMENT_FUNCTION_SQL = `pg_catalog.to_regprocedure('${SETTLEMENT_FUNCTION}')`;
 
 const PREFLIGHT_RESULT_KEYS = [
@@ -139,7 +140,7 @@ export const VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL = `
       join pg_catalog.pg_roles as owner on owner.oid = routine.proowner
       where routine.oid = ${SETTLEMENT_FUNCTION_SQL}
         and routine.prosecdef and routine.prokind = 'f'
-        and routine.proconfig = array['search_path=pg_catalog, app']::text[]
+        and routine.proconfig = array['search_path=pg_catalog']::text[]
         and owner.rolname = 'postgres'
     ) as allowed_function_hardened,
     exists (
@@ -216,10 +217,12 @@ export const VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL = `
     ) as default_function_execution_private
 `;
 
-export const FINALIZE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL = `
+export const FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL = `
   select deposit_intent_id, payment_claim_id, execution_job_id,
          deposit_status, execution_job_status, already_finalized, updated_at
-  from app.finalize_verified_deposit_and_enqueue_execution($1::uuid, $2::uuid, $3::uuid)
+  from app.finalize_private_live_verified_deposit_and_enqueue_execution(
+    $1::uuid, $2::uuid, $3::uuid
+  )
 `;
 
 export interface VerifiedDepositSettlementPostgresDatabase {
@@ -390,11 +393,10 @@ export async function createVerifiedDepositSettlementPostgresAdapter(
       }
 
       try {
-        const result = await database.query(FINALIZE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL, [
-          record.depositIntentId,
-          record.verificationAttemptId,
-          record.providerPaymentEvidenceId,
-        ]);
+        const result = await database.query(
+          FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL,
+          [record.depositIntentId, record.verificationAttemptId, record.providerPaymentEvidenceId],
+        );
         if (result.rows.length !== 1) throw new Error();
         const settlement = resultFromRow(result.rows[0], record.depositIntentId);
         if (settlement === undefined) throw new Error();

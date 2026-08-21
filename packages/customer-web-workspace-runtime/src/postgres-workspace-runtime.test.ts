@@ -243,10 +243,10 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
       "pg_catalog.to_regprocedure('app.list_customer_web_player_registrations(uuid,integer)')",
     );
-    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).not.toContain(
       "pg_catalog.to_regprocedure('app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)')",
     );
-    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(
+    expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).not.toContain(
       "pg_catalog.to_regprocedure('app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)')",
     );
     expect(CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL).toContain(

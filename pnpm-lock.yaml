@@ -249,6 +249,8 @@ importers:
 
   packages/i18n: {}
 
+  packages/private-live-deposit-pilot-policy: {}
+
   packages/sql-integration-tests:
     dependencies:
       pg:
@@ -270,6 +272,18 @@ importers:
       vitest:
         specifier: 3.2.7
         version: 3.2.7(@types/node@24.13.3)(tsx@4.23.9)
+
+  packages/telebirr-live-pilot-outcome-adapter:
+    dependencies:
+      '@fetanagent/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@fetanagent/deposit-proof-assessment':
+        specifier: workspace:*
+        version: link:../deposit-proof-assessment
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../telebirr-verification-foundation
 
   packages/telebirr-verification-foundation: {}
 

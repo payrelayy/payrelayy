@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertVerifiedDepositSettlementCatalogPreflight,
   createVerifiedDepositSettlementPostgresAdapter,
-  FINALIZE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL,
+  FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL,
   probeVerifiedDepositSettlementCatalogReadiness,
   VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL,
   type VerifiedDepositSettlementPostgresDatabase,
@@ -63,7 +63,9 @@ function databaseWithRows(rows: readonly unknown[]) {
       expect(values).toEqual([]);
       return { rows: [passingPreflightRow] };
     }
-    if (statement === FINALIZE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL) return { rows };
+    if (statement === FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL) {
+      return { rows };
+    }
     throw new Error('unexpected query');
   });
   return { database: { query } satisfies VerifiedDepositSettlementPostgresDatabase, query };
@@ -79,10 +81,10 @@ describe('verified deposit settlement catalog boundary', () => {
       "role.rolname = 'fetanagent_verification_settlement'",
     );
     expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).toContain(
-      'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
     );
     expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).toContain(
-      "routine.proconfig = array['search_path=pg_catalog, app']::text[]",
+      "routine.proconfig = array['search_path=pg_catalog']::text[]",
     );
     expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).toContain(
       'routine.proallargtypes = array[',
@@ -116,8 +118,11 @@ describe('verified deposit settlement catalog boundary', () => {
     expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).not.toContain(
       'app.claim_verified_deposit_payment(',
     );
-    expect(FINALIZE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL).toContain(
-      'from app.finalize_verified_deposit_and_enqueue_execution($1::uuid, $2::uuid, $3::uuid)',
+    expect(FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL).toContain(
+      'from app.finalize_private_live_verified_deposit_and_enqueue_execution(',
+    );
+    expect(VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
     );
 
     const workerIndex = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
@@ -207,7 +212,7 @@ describe('injected verified deposit settlement adapter', () => {
     expect(fixture.query.mock.calls).toEqual([
       [VERIFIED_DEPOSIT_SETTLEMENT_CATALOG_PREFLIGHT_SQL, []],
       [
-        FINALIZE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL,
+        FINALIZE_PRIVATE_LIVE_VERIFIED_DEPOSIT_AND_ENQUEUE_EXECUTION_SQL,
         [DEPOSIT_INTENT_ID, VERIFICATION_ATTEMPT_ID, PROVIDER_PAYMENT_EVIDENCE_ID],
       ],
     ]);

@@ -71,6 +71,11 @@ const API_DATABASE_PREFLIGHT_SQL = `
     ) as admitted_inbox_recorder_execute_denied,
     not pg_catalog.has_function_privilege(
       current_user,
+      'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
+      'EXECUTE'
+    ) as public_action_inbox_recorder_execute_denied,
+    not pg_catalog.has_function_privilege(
+      current_user,
       'app.reserve_telegram_beta_invite_admission_nonce(text,timestamptz)',
       'EXECUTE'
     ) as beta_admission_nonce_reservation_execute_denied,
@@ -168,6 +173,7 @@ interface ApiDatabasePreflightRow {
   readonly legacy_inbox_recorder_execute_denied: boolean;
   readonly beta_invite_redemption_execute_denied: boolean;
   readonly admitted_inbox_recorder_execute_denied: boolean;
+  readonly public_action_inbox_recorder_execute_denied: boolean;
   readonly beta_admission_nonce_reservation_execute_denied: boolean;
   readonly nonce_reservation_execute_allowed: boolean;
   readonly nonce_reservation_execution_is_private: boolean;
@@ -191,6 +197,7 @@ export interface ApiDatabasePreflightResult {
   readonly legacyInboxRecorderExecuteDenied: boolean;
   readonly betaInviteRedemptionExecuteDenied: boolean;
   readonly admittedInboxRecorderExecuteDenied: boolean;
+  readonly publicActionInboxRecorderExecuteDenied: boolean;
   readonly betaAdmissionNonceReservationExecuteDenied: boolean;
   readonly nonceReservationExecuteAllowed: boolean;
   readonly nonceReservationExecutionIsPrivate: boolean;
@@ -236,6 +243,10 @@ function toPreflightResult(row: ApiDatabasePreflightRow): ApiDatabasePreflightRe
     legacyInboxRecorderExecuteDenied: asBoolean(row, 'legacy_inbox_recorder_execute_denied'),
     betaInviteRedemptionExecuteDenied: asBoolean(row, 'beta_invite_redemption_execute_denied'),
     admittedInboxRecorderExecuteDenied: asBoolean(row, 'admitted_inbox_recorder_execute_denied'),
+    publicActionInboxRecorderExecuteDenied: asBoolean(
+      row,
+      'public_action_inbox_recorder_execute_denied',
+    ),
     betaAdmissionNonceReservationExecuteDenied: asBoolean(
       row,
       'beta_admission_nonce_reservation_execute_denied',

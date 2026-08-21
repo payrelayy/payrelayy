@@ -2,6 +2,7 @@ import {
   KEMERBET_EXECUTOR_DATABASE_TARGETS,
   KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE,
   KEMERBET_EXECUTOR_DATABASE_SECRET_FILE,
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
   KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
   loadExecutorConfig,
 } from '@fetanagent/config/executor';
@@ -21,6 +22,11 @@ import {
 const AGENT_ACCOUNT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1';
 const SECOND_AGENT_ACCOUNT_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2';
 const databaseUrl = `postgresql://${KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE}:test-password@${KEMERBET_EXECUTOR_DATABASE_TARGETS.staging.host}:5432/postgres?sslmode=verify-full`;
+const pilotManifest = JSON.stringify({
+  contractVersion: 1,
+  pilotRevisionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3',
+  configurationDigest: `sha256:${'b'.repeat(64)}`,
+});
 
 function identityFingerprint(index: number): string {
   return `hmac-sha256-agent-identity-v1:${String(index + 1).repeat(64)}`;
@@ -33,12 +39,17 @@ function enabledConfig() {
       FINANCIAL_ACTIONS_MODE: 'live',
       KEMERBET_EXECUTOR_ENABLED: 'true',
       KEMERBET_FINAL_ACTION_ENABLED: 'true',
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true',
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
       INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true',
       KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: 'staging',
       KEMERBET_EXECUTOR_DATABASE_URL_FILE: KEMERBET_EXECUTOR_DATABASE_SECRET_FILE,
       NODE_EXTRA_CA_CERTS: KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
     },
-    () => databaseUrl,
+    {
+      readSecretFile: () => databaseUrl,
+      readPrivateLiveDepositPilotManifestFile: () => pilotManifest,
+    },
   );
 }
 

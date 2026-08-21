@@ -1,3 +1,5 @@
+import type { KemerBetPrivateLiveDepositPilotManifest } from '@fetanagent/config/executor';
+
 import type { KemerBetDepositBrowser } from './kemerbet-deposit-browser-adapter.js';
 import type {
   KemerBetDepositCancelReason,
@@ -8,6 +10,10 @@ import type {
   KemerBetDepositReconciliationLease,
   KemerBetDepositRedactedLog,
 } from './kemerbet-deposit-types.js';
+import {
+  privateLiveDepositPilotAuthorizationMatchesManifest,
+  samePrivateLiveDepositPilotAuthorization,
+} from './kemerbet-deposit-types.js';
 
 export interface KemerBetDepositRuntimeDependencies {
   readonly database: KemerBetDepositExecutionDatabase;
@@ -17,6 +23,7 @@ export interface KemerBetDepositRuntimeDependencies {
   readonly workerInstanceId: string;
   readonly leaseSeconds: number;
   readonly finalActionEnabled: boolean;
+  readonly privateLiveDepositPilotManifest: KemerBetPrivateLiveDepositPilotManifest;
   readonly now: () => Date;
   readonly log: (event: KemerBetDepositRunResult) => void;
 }
@@ -137,6 +144,16 @@ async function executeOnceAfterFreshPreparation(
   dependencies: KemerBetDepositRuntimeDependencies,
   lease: KemerBetDepositExecutionLease,
 ): Promise<KemerBetDepositRunResult> {
+  if (
+    !privateLiveDepositPilotAuthorizationMatchesManifest(
+      lease.privateLiveDepositPilotAuthorization,
+      dependencies.privateLiveDepositPilotManifest,
+    )
+  ) {
+    const result = redacted('needs_attention', 'prepare');
+    dependencies.log(result);
+    return result;
+  }
   if (leaseExpired(lease, dependencies.now())) {
     return cancelBeforeFence(dependencies, lease, 'execution_lease_expired_before_action');
   }
@@ -186,6 +203,20 @@ async function executeOnceAfterFreshPreparation(
   const fence = await dependencies.database.fenceFinalAction(lease);
   const fencedLog = redacted('final_action_fenced', 'execute');
   dependencies.log(fencedLog);
+  if (
+    !privateLiveDepositPilotAuthorizationMatchesManifest(
+      fence.privateLiveDepositPilotAuthorization,
+      dependencies.privateLiveDepositPilotManifest,
+    ) ||
+    !samePrivateLiveDepositPilotAuthorization(
+      lease.privateLiveDepositPilotAuthorization,
+      fence.privateLiveDepositPilotAuthorization,
+    )
+  ) {
+    const result = redacted('needs_attention', 'execute');
+    dependencies.log(result);
+    return result;
+  }
 
   let exactPlayerCreditMatch = false;
   if (fence.firstFenceAcquired) {

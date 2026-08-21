@@ -56,8 +56,10 @@ type PreparedSettlementExecution = {
 type SettlementTransitionKind = 'cancel' | 'fence' | 'handoff';
 type SettlementTransitionOrder = 'settlement-first' | 'transition-first';
 
-const settlementFunction = 'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)';
-const settlementRole = 'fetanagent_verification_settlement_runtime';
+const settlementFunction =
+  'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)';
+const legacySettlementFunction =
+  'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)';
 const executorRole = 'fetanagent_deposit_executor_runtime';
 
 function sha256(value: string): string {
@@ -87,14 +89,13 @@ function expectNoSensitiveReferenceMaterial(
   }
 }
 
-async function queryAsSettlement<T extends QueryResultRow>(
+async function queryLegacySettlementAsMigrationOwner<T extends QueryResultRow>(
   client: Client,
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
   await client.query('begin');
   try {
-    await client.query(`set local role ${settlementRole}`);
     const result = await client.query<T>(query, [...values]);
     await client.query('commit');
     return result.rows;
@@ -125,7 +126,10 @@ async function callSettlement(
   client: Client,
   input: SettlementInput,
 ): Promise<readonly SettlementRow[]> {
-  return queryAsSettlement<SettlementRow>(
+  // These legacy semantic tests execute as the disposable migration owner. The production
+  // settlement role is intentionally denied this RPC by the private-pilot boundary and is
+  // covered through the strict wrapper in the pilot suite.
+  return queryLegacySettlementAsMigrationOwner<SettlementRow>(
     client,
     `select *
        from app.finalize_verified_deposit_and_enqueue_execution(
@@ -166,7 +170,6 @@ async function captureSettlementFailureAtSavepoint(
   await client.query('savepoint expected_settlement_failure');
   let failure: unknown;
   try {
-    await client.query(`set local role ${settlementRole}`);
     await client.query(
       `select *
          from app.finalize_verified_deposit_and_enqueue_execution(
@@ -180,7 +183,6 @@ async function captureSettlementFailureAtSavepoint(
 
   await client.query('rollback to savepoint expected_settlement_failure');
   await client.query('release savepoint expected_settlement_failure');
-  await client.query('reset role');
 
   if (failure === undefined) {
     throw new Error('The hostile settlement call unexpectedly succeeded.');
@@ -529,13 +531,15 @@ async function prepareSettlementExecution(
     };
 
     if (kind === 'handoff') {
-      const fenced = await queryAsExecutor<{ readonly first_fence_acquired: boolean }>(
-        client,
+      // The live executor can fence only through the private-pilot wrapper now. This historical
+      // non-pilot regression invokes the revoked legacy primitive as the disposable migration
+      // owner; the private-pilot suite exercises the granted wrapper and its exact envelope.
+      const fenced = await client.query<{ readonly first_fence_acquired: boolean }>(
         `select first_fence_acquired
            from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
         [prepared.executionAttemptId, prepared.executionLeaseToken],
       );
-      expect(fenced).toEqual([{ first_fence_acquired: true }]);
+      expect(fenced.rows).toEqual([{ first_fence_acquired: true }]);
     }
 
     return prepared;
@@ -547,12 +551,14 @@ async function prepareSettlementExecution(
 
 async function beginRoleTransaction(
   client: Client,
-  role: typeof executorRole | typeof settlementRole,
+  role: typeof executorRole | null,
   applicationName: string,
 ): Promise<void> {
   await client.query(`select set_config('application_name', $1::text, false)`, [applicationName]);
   await client.query('begin');
-  await client.query(`set local role ${role}`);
+  if (role !== null) {
+    await client.query(`set local role ${role}`);
+  }
   await client.query(`set local lock_timeout = '5s'`);
   await client.query(`set local statement_timeout = '10s'`);
 }
@@ -784,11 +790,7 @@ async function runSettlementTransitionLockOrderRace(
     let pending: Promise<unknown> | null = null;
     try {
       if (order === 'settlement-first') {
-        await beginRoleTransaction(
-          settlementClient,
-          settlementRole,
-          `settlement_lock_${kind}_blocker`,
-        );
+        await beginRoleTransaction(settlementClient, null, `settlement_lock_${kind}_blocker`);
         const blockingReplay = await callSettlementInCurrentTransaction(
           settlementClient,
           settlementInput(prepared.fixture),
@@ -796,7 +798,11 @@ async function runSettlementTransitionLockOrderRace(
         expectExactSettlementReplay(blockingReplay, prepared, kind, false);
 
         const waiterName = `settlement_lock_${kind}_executor_waiter`;
-        await beginRoleTransaction(executorClient, executorRole, waiterName);
+        await beginRoleTransaction(
+          executorClient,
+          kind === 'fence' ? null : executorRole,
+          waiterName,
+        );
         const transitionPending = callExecutionTransitionInCurrentTransaction(
           executorClient,
           kind,
@@ -810,7 +816,11 @@ async function runSettlementTransitionLockOrderRace(
         expectExecutionTransitionResult(kind, transitionRows);
         await executorClient.query('commit');
       } else {
-        await beginRoleTransaction(executorClient, executorRole, `settlement_lock_${kind}_blocker`);
+        await beginRoleTransaction(
+          executorClient,
+          kind === 'fence' ? null : executorRole,
+          `settlement_lock_${kind}_blocker`,
+        );
         const blockingTransition = await callExecutionTransitionInCurrentTransaction(
           executorClient,
           kind,
@@ -819,7 +829,7 @@ async function runSettlementTransitionLockOrderRace(
         expectExecutionTransitionResult(kind, blockingTransition);
 
         const waiterName = `settlement_lock_${kind}_settlement_waiter`;
-        await beginRoleTransaction(settlementClient, settlementRole, waiterName);
+        await beginRoleTransaction(settlementClient, null, waiterName);
         const replayPending = callSettlementInCurrentTransaction(
           settlementClient,
           settlementInput(prepared.fixture),
@@ -980,12 +990,12 @@ export function registerVerificationSettlementSqlTests(
           arguments:
             'p_deposit_intent_id uuid, p_verification_attempt_id uuid, p_provider_payment_evidence_id uuid',
           description:
-            'Atomically claims one exact authoritative verified payment and enqueues one one-shot deposit execution command; exact complete replays return the existing pair and partial state fails closed.',
+            "The settlement runtime's only live-deposit settlement RPC. It preserves the legacy seven-column return contract, prelocks the complete pilot authority lineage, and returns only after one immutable reservation exists.",
           is_security_definer: true,
           owner_name: 'postgres',
           result_type:
             'table(deposit_intent_id uuid, payment_claim_id uuid, execution_job_id uuid, deposit_status text, execution_job_status text, already_finalized boolean, updated_at timestamp with time zone)',
-          runtime_config: ['search_path=pg_catalog, app'],
+          runtime_config: ['search_path=pg_catalog'],
         },
       ]);
 
@@ -1115,6 +1125,24 @@ export function registerVerificationSettlementSqlTests(
         [settlementFunction],
       );
       expect(publicExecute.rows).toEqual([{ allowed: false }]);
+
+      const legacyExecute = await client.query<{
+        readonly allowed: boolean;
+        readonly role_name: string;
+      }>(
+        `select role_name,
+                has_function_privilege(role_name, $1::regprocedure, 'EXECUTE') as allowed
+           from unnest(array[
+             'fetanagent_verification_settlement',
+             'fetanagent_verification_settlement_runtime'
+           ]) role_name
+          order by role_name`,
+        [legacySettlementFunction],
+      );
+      expect(legacyExecute.rows).toEqual([
+        { allowed: false, role_name: 'fetanagent_verification_settlement' },
+        { allowed: false, role_name: 'fetanagent_verification_settlement_runtime' },
+      ]);
 
       const relationAccess = await client.query<{
         readonly allowed_sequences: number;

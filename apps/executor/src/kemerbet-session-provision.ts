@@ -153,6 +153,7 @@ function assertProvisionEnvironment(environment: NodeJS.ProcessEnv): string {
     environment.FINANCIAL_ACTIONS_MODE === 'live' ||
     environment.KEMERBET_EXECUTOR_ENABLED === 'true' ||
     environment.KEMERBET_FINAL_ACTION_ENABLED === 'true' ||
+    environment.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED === 'true' ||
     environment.INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED === 'true' ||
     !validAccountId(environment.KEMERBET_SESSION_PROVISION_ACCOUNT_ID) ||
     typeof environment.DISPLAY !== 'string' ||

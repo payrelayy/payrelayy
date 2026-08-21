@@ -13,6 +13,9 @@ import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proo
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
+import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
+import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
+import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
 
@@ -111,6 +114,8 @@ const betaInviteRedemptionProcedure =
   'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)';
 const admittedPrivateInboundRecorder =
   'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)';
+const publicActionInboundRecorder =
+  'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)';
 const betaAdmissionNonceReservationProcedure =
   'app.reserve_telegram_beta_invite_admission_nonce(text,timestamptz)';
 const betaAdmissionNoncePurgeProcedure =
@@ -1075,7 +1080,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly twelve non-executing procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly ten non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1113,13 +1118,11 @@ describe('disposable SQL migration baseline', () => {
     expect(functions.rows.map((row) => row.signature)).toEqual([
       'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
-      'app.capture_telegram_live_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
-      'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)',
-      admittedPrivateInboundRecorder,
+      publicActionInboundRecorder,
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
       'app.submit_telegram_player_registration_input(uuid,text,text)',
@@ -1205,7 +1208,7 @@ describe('disposable SQL migration baseline', () => {
       'fetanagent_player_actions',
       `
         select *
-        from app.record_admitted_telegram_private_inbound_event(
+        from app.record_public_telegram_action_inbound_event(
           $1::bigint,
           $2::bigint,
           $3::bigint,
@@ -4309,7 +4312,7 @@ describe('disposable SQL migration baseline', () => {
     ).rejects.toThrow(/permission denied|row-level security/u);
   });
 
-  it('pins the private customer-web registration and live-deposit catalog, ACL, and source boundary exactly', async () => {
+  it('pins the private customer-web registration and dormant-deposit catalog, ACL, and source boundary exactly', async () => {
     const migrationSource = await readFile(
       join(environment.migrationsDirectory, '20260815020000_customer_web_player_registration.sql'),
       'utf8',
@@ -4488,13 +4491,11 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(effectiveFunctions.rows.map((row) => row.signature)).toEqual([
-      'app.capture_customer_web_deposit_reference(uuid,uuid,uuid,text,text,text,smallint)',
       'app.capture_customer_web_dry_run_deposit_proof(uuid,uuid,text,text,text,text,text,smallint,smallint)',
       'app.consume_customer_web_rate_limit(bytea,text,integer,integer)',
       'app.ensure_customer_web_account(uuid)',
       'app.list_customer_web_deposits(uuid,integer)',
       'app.list_customer_web_player_registrations(uuid,integer)',
-      'app.open_customer_web_deposit_intent(uuid,uuid,text,bigint)',
       'app.submit_customer_web_player_registration(uuid,uuid,text)',
     ]);
 
@@ -6762,12 +6763,27 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(nonTriggerEligibilityReaders.rows).toEqual([
+      { signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)' },
+      {
+        signature:
+          'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+      },
       { signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)' },
       { signature: 'app.enqueue_verified_deposit_execution(uuid)' },
       { signature: 'app.fence_deposit_execution_final_action(uuid,uuid)' },
+      {
+        signature:
+          'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
       { signature: 'app.lease_next_deposit_execution(uuid,integer)' },
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
+      {
+        signature:
+          'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
+      },
+      { signature: 'app.require_private_live_deposit_pilot_authorization(uuid,uuid)' },
+      { signature: 'app.reserve_private_live_deposit_pilot_claim(uuid)' },
       { signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)' },
       { signature: 'app.resolve_dry_run_deposit_proof_boundary(text,text)' },
     ]);
@@ -6810,18 +6826,43 @@ describe('disposable SQL migration baseline', () => {
         join pg_namespace namespace on namespace.oid = procedure.pronamespace
        where namespace.nspname = 'app'
          and procedure.oid in (
+           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
+           'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure,
            'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
            'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
            'app.fence_deposit_execution_final_action(uuid,uuid)'::regprocedure,
+           'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)'::regprocedure,
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
+           'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)'::regprocedure,
+           'app.require_private_live_deposit_pilot_authorization(uuid,uuid)'::regprocedure,
+           'app.reserve_private_live_deposit_pilot_claim(uuid)'::regprocedure,
            'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure,
            'app.resolve_dry_run_deposit_proof_boundary(text,text)'::regprocedure
          )
        order by signature
     `);
     expect(eligibilityReaderPrivileges.rows).toEqual([
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+      },
       {
         customer_web_runtime: false,
         deposit_executor_runtime: false,
@@ -6842,7 +6883,7 @@ describe('disposable SQL migration baseline', () => {
       },
       {
         customer_web_runtime: false,
-        deposit_executor_runtime: true,
+        deposit_executor_runtime: false,
         owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
@@ -6851,7 +6892,17 @@ describe('disposable SQL migration baseline', () => {
       },
       {
         customer_web_runtime: false,
-        deposit_executor_runtime: true,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: true,
+        signature:
+          'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
         owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
@@ -6875,6 +6926,34 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.require_private_live_deposit_pilot_authorization(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.reserve_private_live_deposit_pilot_claim(uuid)',
       },
       {
         customer_web_runtime: false,
@@ -8369,15 +8448,106 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(executionProcedures.rows).toEqual([{ procedures: 0 }]);
 
-    const callableExecutionRoutines = await client.query<{ readonly routines: number }>(`
-      select count(*)::integer as routines
+    const callableExecutionRoutines = await client.query<{
+      readonly deposit_executor_runtime: boolean;
+      readonly public_execute: boolean;
+      readonly settlement_runtime: boolean;
+      readonly signature: string;
+    }>(`
+      select routine.oid::regprocedure::text as signature,
+             has_function_privilege(
+               'fetanagent_deposit_executor_runtime', routine.oid, 'EXECUTE'
+             ) as deposit_executor_runtime,
+             has_function_privilege(
+               'fetanagent_verification_settlement_runtime', routine.oid, 'EXECUTE'
+             ) as settlement_runtime,
+             exists (
+               select 1
+                 from aclexplode(coalesce(
+                   routine.proacl,
+                   acldefault('f', routine.proowner)
+                 )) privilege
+                where privilege.grantee = 0
+                  and privilege.privilege_type = 'EXECUTE'
+             ) as public_execute
         from pg_proc routine
         join pg_namespace namespace on namespace.oid = routine.pronamespace
        where namespace.nspname = 'app'
          and routine.proname ~ '(execution|reconciliation)'
          and routine.prorettype <> 'trigger'::regtype
+       order by signature
     `);
-    expect(callableExecutionRoutines.rows).toEqual([{ routines: 8 }]);
+    expect(callableExecutionRoutines.rows).toEqual([
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.cancel_deposit_execution_before_action(uuid,uuid,text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.enqueue_verified_deposit_execution(uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.fence_deposit_execution_final_action(uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.fence_private_live_deposit_execution_final_action(uuid,uuid,uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: true,
+        signature:
+          'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.finalize_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_deposit_execution(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_deposit_execution_reconciliation(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_next_private_live_deposit_execution(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamp with time zone,boolean,boolean,boolean,boolean)',
+      },
+      {
+        deposit_executor_runtime: true,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
+      },
+    ]);
 
     const indexRows = await client.query<{
       readonly indexdef: string;
@@ -9308,6 +9478,15 @@ registerDepositExecutionCommandSqlTests(() => client);
 registerDryRunDepositProofIntakeSqlTests(() => client);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
+registerPrivateLiveMoneyPilotSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerPrivateLiveTelebirrProofLineageSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerPublicTelegramActionOnboardingSqlTests(() => client);
 registerVerificationSettlementSqlTests(
   () => client,
   () => createSqlIntegrationClient(environment),

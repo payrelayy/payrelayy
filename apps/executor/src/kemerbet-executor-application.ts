@@ -72,6 +72,7 @@ function assertEnabled(config: ExecutorConfig): void {
     config.financialActionsMode !== 'live' ||
     !config.kemerBet.executorEnabled ||
     !config.kemerBet.finalActionFeatureEnabled ||
+    !config.kemerBet.privateLiveDepositPilot.enabled ||
     !config.kemerBet.executionRuntime.enabled
   ) {
     throw new KemerBetExecutorApplicationUnavailableError();

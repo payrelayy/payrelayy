@@ -190,6 +190,8 @@ assert.deepEqual(environmentNames(executorEnvironment), [
   'FINANCIAL_ACTIONS_MODE',
   'KEMERBET_EXECUTOR_ENABLED',
   'KEMERBET_FINAL_ACTION_ENABLED',
+  'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+  'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE',
   'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
   'KEMERBET_EXECUTOR_DEPLOYMENT_TARGET',
   'KEMERBET_EXECUTOR_DATABASE_URL_FILE',
@@ -209,6 +211,8 @@ for (const requiredSetting of [
   /FINANCIAL_ACTIONS_MODE: live/,
   /KEMERBET_EXECUTOR_ENABLED: 'true'/,
   /KEMERBET_FINAL_ACTION_ENABLED: 'true'/,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true'/,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE: \/run\/configs\/private_live_deposit_pilot\.v1\.json/,
   /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true'/,
   /KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: \$\{FETANAGENT_EXECUTOR_DEPLOYMENT_TARGET:\?set staging or production\}/,
   /KEMERBET_EXECUTOR_DATABASE_URL_FILE: \/run\/secrets\/kemerbet_executor_database_url/,
@@ -244,9 +248,14 @@ for (const secretName of sourceNames(executorSecrets)) {
 
 const executorConfigs = servicePropertyBlock(executorService, 'configs');
 assert.deepEqual(sourceNames(executorConfigs), [
+  'private_live_deposit_pilot_manifest',
   'kemerbet_selector_contract',
   'supabase_ca_certificate',
 ]);
+assert.match(
+  executorConfigs,
+  /source: private_live_deposit_pilot_manifest\s*\r?\n\s+target: \/run\/configs\/private_live_deposit_pilot\.v1\.json\s*\r?\n\s+uid: '10001'\s*\r?\n\s+gid: '10001'\s*\r?\n\s+mode: 0444/,
+);
 assert.match(
   executorConfigs,
   /source: kemerbet_selector_contract\s*\r?\n\s+target: \/etc\/fetanagent\/kemerbet-selector-contract\.v1\.json\s*\r?\n\s+uid: '10001'\s*\r?\n\s+gid: '10001'\s*\r?\n\s+mode: 0444/,
@@ -298,7 +307,7 @@ assert.match(
 );
 assert.doesNotMatch(
   provisionEnvironment,
-  /DATABASE|HMAC|IDENTITY_BINDINGS|SELECTOR_CONTRACT|NODE_EXTRA_CA_CERTS|FINANCIAL_ACTIONS_MODE|KEMERBET_EXECUTOR_ENABLED|KEMERBET_FINAL_ACTION_ENABLED|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED|KEMERBET_EXECUTOR_DEPLOYMENT_TARGET/,
+  /DATABASE|HMAC|IDENTITY_BINDINGS|SELECTOR_CONTRACT|PRIVATE_LIVE_DEPOSIT_PILOT|NODE_EXTRA_CA_CERTS|FINANCIAL_ACTIONS_MODE|KEMERBET_EXECUTOR_ENABLED|KEMERBET_FINAL_ACTION_ENABLED|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED|KEMERBET_EXECUTOR_DEPLOYMENT_TARGET/,
 );
 
 const provisionSecrets = servicePropertyBlock(provisionService, 'secrets');
@@ -320,7 +329,7 @@ assert.match(
 );
 assert.doesNotMatch(
   provisionService,
-  /kemerbet_executor_database_url|kemerbet_agent_identity_bindings|kemerbet_history_reference_hmac_key|kemerbet_agent_identity_hmac_key|kemerbet_selector_contract|supabase_ca_certificate|NODE_EXTRA_CA_CERTS|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true'/,
+  /kemerbet_executor_database_url|kemerbet_agent_identity_bindings|kemerbet_history_reference_hmac_key|kemerbet_agent_identity_hmac_key|private_live_deposit_pilot_manifest|kemerbet_selector_contract|supabase_ca_certificate|NODE_EXTRA_CA_CERTS|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true'|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true'/,
   'session provisioning must have no database, HMAC, binding, selector, or live-action capability',
 );
 
@@ -364,7 +373,12 @@ assert.match(
 
 assert.deepEqual(
   [...configs.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1]),
-  ['kemerbet_selector_contract', 'supabase_ca_certificate'],
+  ['private_live_deposit_pilot_manifest', 'kemerbet_selector_contract', 'supabase_ca_certificate'],
+);
+assert.match(configs, /FETANAGENT_KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE/);
+assert.match(
+  configs,
+  /FETANAGENT_KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE:-\/etc\/fetanagent\/executor-config\/private_live_deposit_pilot\.v1\.json/,
 );
 assert.match(configs, /FETANAGENT_KEMERBET_SELECTOR_CONTRACT_FILE/);
 assert.match(
@@ -378,9 +392,9 @@ assert.match(
 );
 
 assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 5);
-assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 2);
-assert.equal(countMatches(compose, /^\s+uid: '10001'$/gm), 7);
-assert.equal(countMatches(compose, /^\s+gid: '10001'$/gm), 7);
+assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 3);
+assert.equal(countMatches(compose, /^\s+uid: '10001'$/gm), 8);
+assert.equal(countMatches(compose, /^\s+gid: '10001'$/gm), 8);
 assert.doesNotMatch(compose, /^volumes:\s*$/m, 'named volumes are forbidden');
 assert.doesNotMatch(compose, /^\s+(?:ports|expose|devices|privileged|network_mode|ipc):/m);
 assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker|service_role|telegram/i);
@@ -603,6 +617,10 @@ assert.match(provisionSource, /environment\.KEMERBET_EXECUTOR_ENABLED === 'true'
 assert.match(provisionSource, /environment\.KEMERBET_FINAL_ACTION_ENABLED === 'true'/);
 assert.match(
   provisionSource,
+  /environment\.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED === 'true'/,
+);
+assert.match(
+  provisionSource,
   /environment\.INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED === 'true'/,
 );
 assert.match(provisionSource, /environment\.XAUTHORITY !== FIXED_XAUTHORITY_PATH/);
@@ -619,7 +637,7 @@ assert.match(provisionSource, /accountDetailsRedacted: true/);
 assert.match(provisionSource, /financialActionAvailable: false/);
 assert.doesNotMatch(
   provisionSource,
-  /KEMERBET_EXECUTOR_DATABASE_(?:RUNTIME_ROLE|DIRECT_HOST|SECRET_FILE)|KEMERBET_AGENT_IDENTITY_BINDINGS_FILE|KEMERBET_SELECTOR_CONTRACT_FILE|KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE|KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE|loadExecutorConfig|createKemerBetDeposit|runOnce\(|enqueueVerifiedDeposit|fenceDeposit|\.goto\(|\.click\(|\.fill\(|\.selectOption\(/,
+  /KEMERBET_EXECUTOR_DATABASE_(?:RUNTIME_ROLE|DIRECT_HOST|SECRET_FILE)|KEMERBET_AGENT_IDENTITY_BINDINGS_FILE|KEMERBET_SELECTOR_CONTRACT_FILE|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE|KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE|KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE|loadExecutorConfig|createKemerBetDeposit|runOnce\(|enqueueVerifiedDeposit|fenceDeposit|\.goto\(|\.click\(|\.fill\(|\.selectOption\(/,
   'the manual provisioner must not acquire a database or automated financial-action surface',
 );
 assert.match(registrySource, /readonly chromiumSandbox: true/);
@@ -632,6 +650,22 @@ assert.match(
   executorConfigSource,
   /KEMERBET_SUPABASE_CA_CERTIFICATE_FILE\s*=\s*\r?\n\s*'\/run\/configs\/supabase_ca_certificate'/,
 );
+assert.match(
+  executorConfigSource,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE\s*=\s*\r?\n\s*'\/run\/configs\/private_live_deposit_pilot\.v1\.json'/,
+);
+assert.match(executorConfigSource, /environment\.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED/);
+assert.match(
+  executorConfigSource,
+  /environment\.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE/,
+);
+assert.match(
+  executorConfigSource,
+  /record\.contractVersion !== KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION/,
+);
+assert.match(executorConfigSource, /keys\[0\] !== 'contractVersion'/);
+assert.match(executorConfigSource, /keys\[1\] !== 'pilotRevisionId'/);
+assert.match(executorConfigSource, /keys\[2\] !== 'configurationDigest'/);
 assert.match(
   executorConfigSource,
   /environment\.NODE_EXTRA_CA_CERTS !== KEMERBET_SUPABASE_CA_CERTIFICATE_FILE/,
@@ -649,21 +683,40 @@ assert.match(postgresRuntimeSource, /pg_catalog\.pg_advisory_unlock/);
 assert.match(postgresRuntimeSource, /readonly Client: new/);
 assert.match(postgresRuntimeSource, /new Client\(clientConfig\)/);
 assert.doesNotMatch(postgresRuntimeSource, /new Pool\(|allowExitOnIdle|idleTimeoutMillis/);
-const executorAllowedFunctionsBlock = /const ALLOWED_FUNCTIONS = \[([\s\S]*?)\] as const;/u.exec(
+const privatePilotFunctionsBlock = /const PRIVATE_PILOT_FUNCTIONS = \[([\s\S]*?)\] as const;/u.exec(
   postgresRuntimeSource,
 );
-assert.ok(executorAllowedFunctionsBlock, 'missing executor function allowlist');
+assert.ok(privatePilotFunctionsBlock, 'missing private-pilot executor function allowlist');
 assert.deepEqual(
-  [...executorAllowedFunctionsBlock[1].matchAll(/'([^']+)'/gu)].map((match) => match[1]),
+  [...privatePilotFunctionsBlock[1].matchAll(/'([^']+)'/gu)].map((match) => match[1]),
   [
-    'app.lease_next_deposit_execution(uuid,integer)',
+    'app.lease_next_private_live_deposit_execution(uuid,integer)',
+    'app.fence_private_live_deposit_execution_final_action(uuid,uuid,uuid,uuid,uuid)',
+  ],
+  'the executor must use only the pilot-bound lease and final-action fence',
+);
+const recoveryFunctionsBlock = /const RECOVERY_FUNCTIONS = \[([\s\S]*?)\] as const;/u.exec(
+  postgresRuntimeSource,
+);
+assert.ok(recoveryFunctionsBlock, 'missing executor recovery function allowlist');
+assert.deepEqual(
+  [...recoveryFunctionsBlock[1].matchAll(/'([^']+)'/gu)].map((match) => match[1]),
+  [
     'app.cancel_deposit_execution_before_action(uuid,uuid,text)',
-    'app.fence_deposit_execution_final_action(uuid,uuid)',
     'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
     'app.lease_next_deposit_execution_reconciliation(uuid,integer)',
     'app.record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamptz,boolean,boolean,boolean,boolean)',
   ],
-  'the executor must expose exactly six consume-only transition procedures',
+  'the executor must expose exactly four recovery-only transition procedures',
+);
+assert.match(
+  postgresRuntimeSource,
+  /const ALLOWED_FUNCTIONS = \[\.\.\.PRIVATE_PILOT_FUNCTIONS, \.\.\.RECOVERY_FUNCTIONS\] as const;/,
+);
+assert.doesNotMatch(
+  postgresRuntimeSource,
+  /app\.lease_next_deposit_execution\(uuid,integer\)|app\.fence_deposit_execution_final_action\(uuid,uuid\)/,
+  'the executor must not retain either legacy unscoped lease or final-action fence',
 );
 assert.doesNotMatch(
   postgresRuntimeSource,

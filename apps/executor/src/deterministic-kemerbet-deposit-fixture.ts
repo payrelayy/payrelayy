@@ -22,6 +22,12 @@ const RECONCILIATION_JOB_ID = '22222222-2222-4222-8222-222222222226';
 const RECONCILIATION_LEASE_TOKEN = '22222222-2222-4222-8222-222222222227';
 const RECONCILIATION_ID = '22222222-2222-4222-8222-222222222228';
 const FOLLOW_UP_JOB_ID = '22222222-2222-4222-8222-222222222229';
+const PILOT_REVISION_ID = '22222222-2222-4222-8222-222222222231';
+const PILOT_RESERVATION_ID = '22222222-2222-4222-8222-222222222232';
+const PILOT_AUTHORIZATION_TOKEN = '22222222-2222-4222-8222-222222222233';
+const MISMATCHED_PILOT_AUTHORIZATION_TOKEN = '22222222-2222-4222-8222-222222222234';
+const PILOT_CONFIGURATION_DIGEST = `sha256:${'2'.repeat(64)}`;
+const MISMATCHED_PILOT_CONFIGURATION_DIGEST = `sha256:${'3'.repeat(64)}`;
 const PLAYER_ID = 'PLAYER-ALPHA';
 
 export interface DeterministicKemerBetDepositOptions {
@@ -31,6 +37,8 @@ export interface DeterministicKemerBetDepositOptions {
   readonly failPreparation?: boolean;
   readonly loseTransferResponse?: boolean;
   readonly mismatchedPreparedAmount?: boolean;
+  readonly mismatchedLeasePilotAuthorization?: boolean;
+  readonly mismatchedFencePilotAuthorization?: boolean;
   readonly recoveredExpiredPrepared?: boolean;
   readonly requireReconciliationFails?: boolean;
   readonly wrongPaymentMethod?: boolean;
@@ -61,7 +69,24 @@ interface World {
   history: HistoryRow[];
 }
 
-function executionLease(world: World, amountMinor: number): KemerBetDepositExecutionLease {
+function privateLiveDepositPilotAuthorization(
+  authorizationToken = PILOT_AUTHORIZATION_TOKEN,
+  configurationDigest = PILOT_CONFIGURATION_DIGEST,
+) {
+  return {
+    contractVersion: 1 as const,
+    pilotRevisionId: PILOT_REVISION_ID,
+    pilotReservationId: PILOT_RESERVATION_ID,
+    configurationDigest,
+    authorizationToken,
+  };
+}
+
+function executionLease(
+  world: World,
+  amountMinor: number,
+  configurationDigest = PILOT_CONFIGURATION_DIGEST,
+): KemerBetDepositExecutionLease {
   return {
     disposition: 'execution',
     phase: 'execute',
@@ -72,6 +97,10 @@ function executionLease(world: World, amountMinor: number): KemerBetDepositExecu
     target: { operation: 'deposit', playerId: PLAYER_ID, amountMinor, currencyCode: 'ETB' },
     leaseToken: EXECUTION_LEASE_TOKEN,
     leaseExpiresAt: new Date(world.now.getTime() + 300_000),
+    privateLiveDepositPilotAuthorization: privateLiveDepositPilotAuthorization(
+      PILOT_AUTHORIZATION_TOKEN,
+      configurationDigest,
+    ),
   };
 }
 
@@ -99,12 +128,14 @@ function reconciliationLease(
 export class DeterministicKemerBetDepositDatabase implements KemerBetDepositExecutionDatabase {
   readonly #world: World;
   readonly #amountMinor: number;
+  readonly #options: DeterministicKemerBetDepositOptions;
   readonly #recoveredExpiredPrepared: boolean;
   #requireFailureAvailable: boolean;
   #reconciliationCount = 0;
 
   constructor(world: World, options: DeterministicKemerBetDepositOptions) {
     this.#world = world;
+    this.#options = options;
     this.#amountMinor = options.amountMinor ?? DEPOSIT_MINIMUM_MINOR;
     this.#recoveredExpiredPrepared = options.recoveredExpiredPrepared === true;
     this.#requireFailureAvailable = options.requireReconciliationFails === true;
@@ -121,7 +152,13 @@ export class DeterministicKemerBetDepositDatabase implements KemerBetDepositExec
     }
     return this.#world.fenced || this.#world.cancelled
       ? null
-      : executionLease(this.#world, this.#amountMinor);
+      : executionLease(
+          this.#world,
+          this.#amountMinor,
+          this.#options.mismatchedLeasePilotAuthorization
+            ? MISMATCHED_PILOT_CONFIGURATION_DIGEST
+            : PILOT_CONFIGURATION_DIGEST,
+        );
   }
 
   async cancelBeforeAction(
@@ -154,6 +191,11 @@ export class DeterministicKemerBetDepositDatabase implements KemerBetDepositExec
       executionAttemptId: EXECUTION_ATTEMPT_ID,
       finalActionFencedAt: new Date(this.#world.finalActionFencedAt!),
       firstFenceAcquired,
+      privateLiveDepositPilotAuthorization: privateLiveDepositPilotAuthorization(
+        this.#options.mismatchedFencePilotAuthorization
+          ? MISMATCHED_PILOT_AUTHORIZATION_TOKEN
+          : lease.privateLiveDepositPilotAuthorization.authorizationToken,
+      ),
     };
   }
 
@@ -399,3 +441,9 @@ export const deterministicKemerBetDepositIds = {
   platformAgentAccountId: AGENT_ACCOUNT_ID,
   workerInstanceId: '22222222-2222-4222-8222-222222222230',
 } as const;
+
+export const deterministicKemerBetPrivateLiveDepositPilotManifest = Object.freeze({
+  contractVersion: 1 as const,
+  pilotRevisionId: PILOT_REVISION_ID,
+  configurationDigest: PILOT_CONFIGURATION_DIGEST,
+});

@@ -32,6 +32,13 @@ const lease: KemerBetDepositExecutionLease = {
   },
   leaseToken: '33333333-3333-4333-8333-333333333335',
   leaseExpiresAt: new Date('2030-01-02T03:10:00.000Z'),
+  privateLiveDepositPilotAuthorization: {
+    contractVersion: 1,
+    pilotRevisionId: '33333333-3333-4333-8333-333333333338',
+    pilotReservationId: '33333333-3333-4333-8333-333333333339',
+    configurationDigest: `sha256:${'3'.repeat(64)}`,
+    authorizationToken: '33333333-3333-4333-8333-333333333340',
+  },
 };
 
 function reconciliationLease(

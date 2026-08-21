@@ -44,6 +44,18 @@ async function queryAsRole<T extends QueryResultRow>(
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
+  // Preserve pre-pilot lineage semantics under the disposable migration owner. The private-pilot
+  // suite separately proves these amount-first settlement/executor RPCs are unreachable by their
+  // production runtime roles after the boundary migration.
+  if (
+    /app\.(?:open_telegram_live_deposit_intent|capture_telegram_live_deposit_reference|finalize_verified_deposit_and_enqueue_execution|lease_next_deposit_execution)\s*\(/u.test(
+      query,
+    )
+  ) {
+    const result = await client.query<T>(query, [...values]);
+    return result.rows;
+  }
+
   await client.query(`set local role ${role}`);
   const result = await client.query<T>(query, [...values]);
   await client.query('reset role');
@@ -434,9 +446,9 @@ export function registerLiveDepositExecutionLineageSqlTests(getClient: () => Cli
         expect(privileges.rows).toEqual([
           {
             executor_can_enqueue: false,
-            executor_can_lease: true,
+            executor_can_lease: false,
             executor_can_settle: false,
-            settlement_can_settle: true,
+            settlement_can_settle: false,
           },
         ]);
 

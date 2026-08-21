@@ -1,9 +1,18 @@
 import { DEPOSIT_MAXIMUM_MINOR, DEPOSIT_MINIMUM_MINOR } from '@fetanagent/domain';
+import type { KemerBetPrivateLiveDepositPilotManifest } from '@fetanagent/config/executor';
 
 export const KEMERBET_DEPOSIT_CURRENCY_CODE = 'ETB' as const;
 export const KEMERBET_DEPOSIT_OPERATION = 'deposit' as const;
 
 export type KemerBetDepositPhase = 'prepare' | 'execute' | 'reconcile';
+
+export interface KemerBetPrivateLiveDepositPilotAuthorization {
+  readonly contractVersion: 1;
+  readonly pilotRevisionId: string;
+  readonly pilotReservationId: string;
+  readonly configurationDigest: string;
+  readonly authorizationToken: string;
+}
 
 export interface KemerBetDepositTarget {
   readonly operation: typeof KEMERBET_DEPOSIT_OPERATION;
@@ -25,6 +34,7 @@ export interface KemerBetDepositExecutionLease extends KemerBetDepositLeaseBase 
   readonly disposition: 'execution';
   readonly phase: 'execute';
   readonly executionJobId: string;
+  readonly privateLiveDepositPilotAuthorization: KemerBetPrivateLiveDepositPilotAuthorization;
 }
 
 export interface KemerBetDepositExecutionRecoveryCircuit {
@@ -103,6 +113,7 @@ export interface KemerBetDepositFenceRecord {
   readonly executionAttemptId: string;
   readonly finalActionFencedAt: Date;
   readonly firstFenceAcquired: boolean;
+  readonly privateLiveDepositPilotAuthorization: KemerBetPrivateLiveDepositPilotAuthorization;
 }
 
 export interface KemerBetDepositReconciliationRequiredRecord {
@@ -175,5 +186,29 @@ export function isKemerBetDepositAmountMinor(value: unknown): value is number {
     Number.isSafeInteger(value) &&
     value >= DEPOSIT_MINIMUM_MINOR &&
     value <= DEPOSIT_MAXIMUM_MINOR
+  );
+}
+
+export function privateLiveDepositPilotAuthorizationMatchesManifest(
+  authorization: KemerBetPrivateLiveDepositPilotAuthorization,
+  manifest: KemerBetPrivateLiveDepositPilotManifest,
+): boolean {
+  return (
+    authorization.contractVersion === manifest.contractVersion &&
+    authorization.pilotRevisionId === manifest.pilotRevisionId &&
+    authorization.configurationDigest === manifest.configurationDigest
+  );
+}
+
+export function samePrivateLiveDepositPilotAuthorization(
+  left: KemerBetPrivateLiveDepositPilotAuthorization,
+  right: KemerBetPrivateLiveDepositPilotAuthorization,
+): boolean {
+  return (
+    left.contractVersion === right.contractVersion &&
+    left.pilotRevisionId === right.pilotRevisionId &&
+    left.pilotReservationId === right.pilotReservationId &&
+    left.configurationDigest === right.configurationDigest &&
+    left.authorizationToken === right.authorizationToken
   );
 }

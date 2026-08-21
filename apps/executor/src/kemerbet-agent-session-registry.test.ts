@@ -84,6 +84,13 @@ function executionLease(): KemerBetDepositExecutionLease {
     leaseToken: '55555555-5555-4555-8555-555555555555',
     leaseExpiresAt: new Date('2030-01-02T03:09:05.000Z'),
     target: { operation: 'deposit', playerId: '90210473', amountMinor: 2_500, currencyCode: 'ETB' },
+    privateLiveDepositPilotAuthorization: {
+      contractVersion: 1,
+      pilotRevisionId: '66666666-6666-4666-8666-666666666661',
+      pilotReservationId: '66666666-6666-4666-8666-666666666662',
+      configurationDigest: `sha256:${'6'.repeat(64)}`,
+      authorizationToken: '66666666-6666-4666-8666-666666666663',
+    },
   };
 }
 

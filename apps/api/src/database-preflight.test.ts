@@ -30,6 +30,7 @@ const passingRow = {
   legacy_inbox_recorder_execute_denied: true,
   beta_invite_redemption_execute_denied: true,
   admitted_inbox_recorder_execute_denied: true,
+  public_action_inbox_recorder_execute_denied: true,
   beta_admission_nonce_reservation_execute_denied: true,
   nonce_reservation_execute_allowed: true,
   nonce_reservation_execution_is_private: true,
@@ -93,6 +94,7 @@ describe('API database preflight', () => {
     expect(result.legacyInboxRecorderExecuteDenied).toBe(true);
     expect(result.betaInviteRedemptionExecuteDenied).toBe(true);
     expect(result.admittedInboxRecorderExecuteDenied).toBe(true);
+    expect(result.publicActionInboxRecorderExecuteDenied).toBe(true);
     expect(result.betaAdmissionNonceReservationExecuteDenied).toBe(true);
     expect(result.nonceReservationExecuteAllowed).toBe(true);
     expect(result.nonceReservationExecutionIsPrivate).toBe(true);
@@ -104,6 +106,12 @@ describe('API database preflight', () => {
     expect(fake.queries).toContain('set local search_path = pg_catalog');
     const catalogQuery = fake.queries.find((query) => query.includes('from pg_catalog.pg_roles'));
     expect(catalogQuery).toContain('pg_catalog.aclexplode');
+    expect(catalogQuery).toContain(
+      'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
+    );
+    expect(catalogQuery).toContain(
+      'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)',
+    );
     expect(catalogQuery).not.toMatch(/has_function_privilege\(\s*'public'/);
     expect(fake.queries.at(-1)).toBe('rollback');
     expect(
@@ -158,6 +166,17 @@ describe('API database preflight', () => {
 
     expect(result.passed).toBe(false);
     expect(result.admittedInboxRecorderExecuteDenied).toBe(false);
+  });
+
+  it('reports accidental public-action inbox execution without treating the preflight as successful', async () => {
+    const fake = createFakePool({
+      row: { ...passingRow, public_action_inbox_recorder_execute_denied: false },
+    });
+
+    const result = await runApiDatabasePreflight(enabledDatabaseConfig, { pool: fake.pool });
+
+    expect(result.passed).toBe(false);
+    expect(result.publicActionInboxRecorderExecuteDenied).toBe(false);
   });
 
   it('reports accidental beta-admission nonce-reservation execution without treating the preflight as successful', async () => {

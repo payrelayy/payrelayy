@@ -60,6 +60,18 @@ async function queryAsRole<T extends QueryResultRow>(
   query: string,
   values: readonly (number | string | null)[] = [],
 ): Promise<readonly T[]> {
+  // The private-pilot migration deliberately revokes these amount-first RPCs from both runtime
+  // groups. Retain their historical behavior regressions under the disposable migration owner;
+  // the pilot suite independently pins the production runtime denials.
+  if (
+    /app\.(?:open_telegram_live_deposit_intent|capture_telegram_live_deposit_reference|open_customer_web_deposit_intent|capture_customer_web_deposit_reference)\s*\(/u.test(
+      query,
+    )
+  ) {
+    const result = await client.query<T>(query, [...values]);
+    return result.rows;
+  }
+
   await client.query(`set local role ${role}`);
   const result = await client.query<T>(query, [...values]);
   await client.query('reset role');
@@ -403,11 +415,15 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
       for (const row of functions.rows) {
         expect(row.prosecdef).toBe(true);
         expect(row.search_path).toEqual(['search_path=pg_catalog, app, pg_temp']);
-        expect(row.direct_grantees).toEqual([
-          row.proname.includes('customer_web')
-            ? 'fetanagent_customer_web'
-            : 'fetanagent_player_actions',
-        ]);
+        expect(row.direct_grantees).toEqual(
+          row.proname.startsWith('open_') || row.proname.startsWith('capture_')
+            ? []
+            : [
+                row.proname.includes('customer_web')
+                  ? 'fetanagent_customer_web'
+                  : 'fetanagent_player_actions',
+              ],
+        );
       }
       expect(functions.rows.map((row) => row.function_result)).toEqual(
         expect.arrayContaining([

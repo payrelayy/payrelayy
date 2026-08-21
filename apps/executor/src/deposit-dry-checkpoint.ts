@@ -1,6 +1,7 @@
 import {
   createDeterministicKemerBetDepositFixture,
   deterministicKemerBetDepositIds,
+  deterministicKemerBetPrivateLiveDepositPilotManifest,
 } from './deterministic-kemerbet-deposit-fixture.js';
 import { createKemerBetDepositRuntime } from './kemerbet-deposit-runtime.js';
 
@@ -15,6 +16,7 @@ const runtime = createKemerBetDepositRuntime({
   workerInstanceId: deterministicKemerBetDepositIds.workerInstanceId,
   leaseSeconds: 300,
   finalActionEnabled: false,
+  privateLiveDepositPilotManifest: deterministicKemerBetPrivateLiveDepositPilotManifest,
   now: fixture.now,
   log: () => undefined,
 });

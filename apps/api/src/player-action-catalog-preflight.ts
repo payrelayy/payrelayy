@@ -3,7 +3,7 @@ const RUNTIME_ROLE = 'fetanagent_player_actions_runtime';
 
 const ALLOWED_FUNCTIONS = [
   'app.reserve_telegram_private_action_nonce(text,timestamptz)',
-  'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)',
+  'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
   'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
   'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
   'app.submit_telegram_player_registration_input(uuid,text,text)',
@@ -11,8 +11,6 @@ const ALLOWED_FUNCTIONS = [
   'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
   'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
   'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
-  'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)',
-  'app.capture_telegram_live_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
   'app.get_telegram_customer_deposit(uuid,uuid)',
 ] as const;
 
@@ -83,7 +81,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
       )
     ) as no_app_base_object_access,
     (
-      select count(*) = 12
+      select count(*) = 10
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname = 'app'
@@ -98,7 +96,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_FUNCTION_SQL})
     ) as exact_function_surface_allowed,
     (
-      select count(*) = 12 and pg_catalog.bool_and(
+      select count(*) = 10 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
         and owner.rolname = 'postgres'

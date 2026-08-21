@@ -46,14 +46,26 @@ export const KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE =
   '/run/secrets/kemerbet_agent_identity_hmac_key' as const;
 export const KEMERBET_SUPABASE_CA_CERTIFICATE_FILE =
   '/run/configs/supabase_ca_certificate' as const;
+export const KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE =
+  '/run/configs/private_live_deposit_pilot.v1.json' as const;
+export const KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION = 1 as const;
 export const KEMERBET_EXECUTOR_HEALTH_HOST = '127.0.0.1' as const;
 export const KEMERBET_EXECUTOR_HEALTH_PORT = 8090 as const;
+
+export interface KemerBetPrivateLiveDepositPilotManifest {
+  readonly contractVersion: typeof KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION;
+  readonly pilotRevisionId: string;
+  readonly configurationDigest: string;
+}
 
 export interface ExecutorConfig extends RuntimeConfig {
   readonly financialActionsMode: FinancialActionsMode;
   readonly kemerBet: {
     readonly executorEnabled: boolean;
     readonly finalActionFeatureEnabled: boolean;
+    readonly privateLiveDepositPilot:
+      | { readonly enabled: false }
+      | ({ readonly enabled: true } & KemerBetPrivateLiveDepositPilotManifest);
     readonly runtimeIsolation: {
       readonly agentIdentityBindingsFile: typeof KEMERBET_AGENT_IDENTITY_BINDINGS_FILE;
       readonly agentProfilesRoot: typeof KEMERBET_AGENT_PROFILES_ROOT;
@@ -62,6 +74,7 @@ export interface ExecutorConfig extends RuntimeConfig {
       readonly historyReferenceHmacKeyFile: typeof KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE;
       readonly agentIdentityHmacKeyFile: typeof KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE;
       readonly supabaseCaCertificateFile: typeof KEMERBET_SUPABASE_CA_CERTIFICATE_FILE;
+      readonly privateLiveDepositPilotManifestFile: typeof KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE;
       readonly healthHost: typeof KEMERBET_EXECUTOR_HEALTH_HOST;
       readonly healthPort: typeof KEMERBET_EXECUTOR_HEALTH_PORT;
     };
@@ -111,14 +124,19 @@ interface ExecutorConfigDependencies {
   readonly effectiveUserId?: number;
   readonly platform?: NodeJS.Platform;
   readonly readSecretFile?: ReadSecretFile;
+  readonly readPrivateLiveDepositPilotManifestFile?: ReadSecretFile;
   readonly secretFileSystem?: ExecutorDatabaseSecretFileSystem;
 }
 
 type ExecutorConfigDependenciesInput = ReadSecretFile | ExecutorConfigDependencies;
 
-const MAXIMUM_EXECUTOR_DATABASE_SECRET_BYTES = 4_096;
+const MAXIMUM_GUARDED_EXECUTOR_FILE_BYTES = 4_096;
 const EXECUTOR_DATABASE_SECRET_UNAVAILABLE_MESSAGE =
   'The KemerBet executor database secret is unavailable.';
+const PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_UNAVAILABLE_MESSAGE =
+  'The private live-deposit pilot manifest is unavailable.';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const SHA256_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 
 const nodeSecretFileSystem: ExecutorDatabaseSecretFileSystem = {
   lstat: lstatSync,
@@ -150,12 +168,17 @@ const FROZEN_PRODUCTION_SETTINGS = {
   KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE,
   KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
   NODE_EXTRA_CA_CERTS: KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
   EXECUTOR_HEALTH_HOST: KEMERBET_EXECUTOR_HEALTH_HOST,
   EXECUTOR_HEALTH_PORT: String(KEMERBET_EXECUTOR_HEALTH_PORT),
 } as const;
 
 function executorDatabaseSecretUnavailable(): never {
   throw new Error(EXECUTOR_DATABASE_SECRET_UNAVAILABLE_MESSAGE);
+}
+
+function privateLiveDepositPilotManifestUnavailable(): never {
+  throw new Error(PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_UNAVAILABLE_MESSAGE);
 }
 
 function normalizeDependencies(input: ExecutorConfigDependenciesInput): ExecutorConfigDependencies {
@@ -187,7 +210,7 @@ function validateSecretFileStat(
     stat.isSymbolicLink() ||
     !Number.isSafeInteger(stat.size) ||
     stat.size < 1 ||
-    stat.size > MAXIMUM_EXECUTOR_DATABASE_SECRET_BYTES ||
+    stat.size > MAXIMUM_GUARDED_EXECUTOR_FILE_BYTES ||
     (platform !== 'win32' &&
       ((stat.uid !== 0 && stat.uid !== effectiveUserId) || (stat.mode & 0o022) !== 0))
   ) {
@@ -227,7 +250,7 @@ function readVerifiedExecutorDatabaseSecret(
     validateSecretFileStat(opened, platform, effectiveUserId);
     if (!sameFile(before, opened)) executorDatabaseSecretUnavailable();
 
-    bytes = handle.read(MAXIMUM_EXECUTOR_DATABASE_SECRET_BYTES);
+    bytes = handle.read(MAXIMUM_GUARDED_EXECUTOR_FILE_BYTES);
     const afterRead = handle.stat();
     validateSecretFileStat(afterRead, platform, effectiveUserId);
     if (!sameFile(opened, afterRead) || bytes.length !== opened.size) {
@@ -252,7 +275,7 @@ function exactExecutorDatabaseSecretValue(value: unknown): string {
   if (
     typeof value !== 'string' ||
     value.length === 0 ||
-    Buffer.byteLength(value, 'utf8') > MAXIMUM_EXECUTOR_DATABASE_SECRET_BYTES ||
+    Buffer.byteLength(value, 'utf8') > MAXIMUM_GUARDED_EXECUTOR_FILE_BYTES ||
     value !== value.trim() ||
     /[\r\n\0]/u.test(value)
   ) {
@@ -304,6 +327,109 @@ function readExecutorDatabaseSecret(
   return exactExecutorDatabaseSecretValue(value);
 }
 
+function exactPrivateLiveDepositPilotManifest(
+  value: unknown,
+): KemerBetPrivateLiveDepositPilotManifest {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    Buffer.byteLength(value, 'utf8') > MAXIMUM_GUARDED_EXECUTOR_FILE_BYTES ||
+    /[\r\n\0]/u.test(value)
+  ) {
+    return privateLiveDepositPilotManifestUnavailable();
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return privateLiveDepositPilotManifestUnavailable();
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return privateLiveDepositPilotManifestUnavailable();
+  }
+  const record = parsed as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (
+    keys.length !== 3 ||
+    keys[0] !== 'contractVersion' ||
+    keys[1] !== 'pilotRevisionId' ||
+    keys[2] !== 'configurationDigest' ||
+    JSON.stringify(record) !== value ||
+    record.contractVersion !== KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION ||
+    typeof record.pilotRevisionId !== 'string' ||
+    !UUID_PATTERN.test(record.pilotRevisionId) ||
+    record.pilotRevisionId === '00000000-0000-0000-0000-000000000000' ||
+    typeof record.configurationDigest !== 'string' ||
+    !SHA256_DIGEST_PATTERN.test(record.configurationDigest)
+  ) {
+    return privateLiveDepositPilotManifestUnavailable();
+  }
+  return Object.freeze({
+    contractVersion: KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION,
+    pilotRevisionId: record.pilotRevisionId,
+    configurationDigest: record.configurationDigest,
+  });
+}
+
+function loadPrivateLiveDepositPilot(
+  environment: NodeJS.ProcessEnv,
+  financialActionsMode: FinancialActionsMode,
+  executorEnabled: boolean,
+  finalActionFeatureEnabled: boolean,
+  dependencies: ExecutorConfigDependencies,
+): ExecutorConfig['kemerBet']['privateLiveDepositPilot'] {
+  const enabled = booleanFromEnv(
+    environment.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED,
+    false,
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+  );
+  if (!enabled) return Object.freeze({ enabled: false });
+  if (
+    environment.NODE_ENV !== 'production' ||
+    financialActionsMode !== 'live' ||
+    !executorEnabled ||
+    !finalActionFeatureEnabled
+  ) {
+    throw new Error(
+      'The private live-deposit pilot requires production live mode and both independent executor switches.',
+    );
+  }
+
+  const filePath = environment.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE;
+  if (!filePath) {
+    throw new Error(
+      'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE is required when the private pilot is enabled.',
+    );
+  }
+  if (!isAbsolute(filePath)) {
+    throw new Error(
+      'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE must be an absolute guarded-file path.',
+    );
+  }
+  if (
+    environment.NODE_ENV === 'production' &&
+    filePath !== KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE
+  ) {
+    throw new Error(
+      'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE must use the approved production path.',
+    );
+  }
+
+  let value: unknown;
+  try {
+    value = dependencies.readPrivateLiveDepositPilotManifestFile
+      ? dependencies.readPrivateLiveDepositPilotManifestFile(filePath)
+      : readVerifiedExecutorDatabaseSecret(filePath, dependencies);
+  } catch {
+    return privateLiveDepositPilotManifestUnavailable();
+  }
+  return Object.freeze({
+    enabled: true,
+    ...exactPrivateLiveDepositPilotManifest(value),
+  });
+}
+
 function decodedUrlComponent(value: string): string {
   try {
     return decodeURIComponent(value);
@@ -327,6 +453,7 @@ function loadExecutionRuntime(
   financialActionsMode: FinancialActionsMode,
   executorEnabled: boolean,
   finalActionFeatureEnabled: boolean,
+  privateLiveDepositPilotEnabled: boolean,
   dependencies: ExecutorConfigDependencies,
 ): ExecutorConfig['kemerBet']['executionRuntime'] {
   const enabled = booleanFromEnv(
@@ -340,10 +467,11 @@ function loadExecutionRuntime(
     financialActionsMode !== 'live' ||
     !executorEnabled ||
     !finalActionFeatureEnabled ||
+    !privateLiveDepositPilotEnabled ||
     environment.NODE_EXTRA_CA_CERTS !== KEMERBET_SUPABASE_CA_CERTIFICATE_FILE
   ) {
     throw new Error(
-      'The KemerBet execution runtime requires production live mode, both executor switches, and the fixed verified database CA path.',
+      'The KemerBet execution runtime requires production live mode, both executor switches, the dedicated private pilot, and the fixed verified database CA path.',
     );
   }
 
@@ -409,12 +537,20 @@ export function loadExecutorConfig(
     false,
     'KEMERBET_FINAL_ACTION_ENABLED',
   );
+  const privateLiveDepositPilot = loadPrivateLiveDepositPilot(
+    environment,
+    financialActionsMode,
+    executorEnabled,
+    finalActionFeatureEnabled,
+    dependencies,
+  );
   return {
     ...loadRuntimeConfig(environment),
     financialActionsMode,
     kemerBet: {
       executorEnabled,
       finalActionFeatureEnabled,
+      privateLiveDepositPilot,
       runtimeIsolation: {
         agentIdentityBindingsFile: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,
         agentProfilesRoot: KEMERBET_AGENT_PROFILES_ROOT,
@@ -423,6 +559,7 @@ export function loadExecutorConfig(
         historyReferenceHmacKeyFile: KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE,
         agentIdentityHmacKeyFile: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
         supabaseCaCertificateFile: KEMERBET_SUPABASE_CA_CERTIFICATE_FILE,
+        privateLiveDepositPilotManifestFile: KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE,
         healthHost: KEMERBET_EXECUTOR_HEALTH_HOST,
         healthPort: KEMERBET_EXECUTOR_HEALTH_PORT,
       },
@@ -431,6 +568,7 @@ export function loadExecutorConfig(
         financialActionsMode,
         executorEnabled,
         finalActionFeatureEnabled,
+        privateLiveDepositPilot.enabled,
         dependencies,
       ),
     },
@@ -444,6 +582,12 @@ export function redactedExecutorConfigForLog(config: ExecutorConfig): {
   readonly kemerBet: {
     readonly executorEnabled: boolean;
     readonly finalActionFeatureEnabled: boolean;
+    readonly privateLiveDepositPilot: {
+      readonly enabled: boolean;
+      readonly manifestConfigured: boolean;
+      readonly contractVersion:
+        typeof KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_CONTRACT_VERSION | undefined;
+    };
     readonly executionRuntime: {
       readonly enabled: boolean;
       readonly connectionConfigured: boolean;
@@ -459,6 +603,13 @@ export function redactedExecutorConfigForLog(config: ExecutorConfig): {
     kemerBet: {
       executorEnabled: config.kemerBet.executorEnabled,
       finalActionFeatureEnabled: config.kemerBet.finalActionFeatureEnabled,
+      privateLiveDepositPilot: {
+        enabled: config.kemerBet.privateLiveDepositPilot.enabled,
+        manifestConfigured: config.kemerBet.privateLiveDepositPilot.enabled,
+        contractVersion: config.kemerBet.privateLiveDepositPilot.enabled
+          ? config.kemerBet.privateLiveDepositPilot.contractVersion
+          : undefined,
+      },
       executionRuntime: {
         enabled: config.kemerBet.executionRuntime.enabled,
         connectionConfigured: config.kemerBet.executionRuntime.enabled,

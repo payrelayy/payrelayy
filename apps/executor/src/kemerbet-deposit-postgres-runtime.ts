@@ -1,6 +1,9 @@
 import { createRequire } from 'node:module';
 
-import type { ExecutorConfig } from '@fetanagent/config/executor';
+import type {
+  ExecutorConfig,
+  KemerBetPrivateLiveDepositPilotManifest,
+} from '@fetanagent/config/executor';
 
 import {
   PostgresKemerBetDepositExecutionDatabase,
@@ -14,17 +17,24 @@ type EnabledExecutionRuntimeConfig = Extract<
 
 const EXECUTOR_GROUP_ROLE = 'fetanagent_deposit_executor';
 const EXECUTOR_RUNTIME_ROLE = 'fetanagent_deposit_executor_runtime';
-const ALLOWED_FUNCTIONS = [
-  'app.lease_next_deposit_execution(uuid,integer)',
+const PRIVATE_PILOT_FUNCTIONS = [
+  'app.lease_next_private_live_deposit_execution(uuid,integer)',
+  'app.fence_private_live_deposit_execution_final_action(uuid,uuid,uuid,uuid,uuid)',
+] as const;
+const RECOVERY_FUNCTIONS = [
   'app.cancel_deposit_execution_before_action(uuid,uuid,text)',
-  'app.fence_deposit_execution_final_action(uuid,uuid)',
   'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
   'app.lease_next_deposit_execution_reconciliation(uuid,integer)',
   'app.record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamptz,boolean,boolean,boolean,boolean)',
 ] as const;
+const ALLOWED_FUNCTIONS = [...PRIVATE_PILOT_FUNCTIONS, ...RECOVERY_FUNCTIONS] as const;
+const procedureSql = (signatures: readonly string[]) =>
+  signatures.map((signature) => `pg_catalog.to_regprocedure('${signature}')`).join(',\n        ');
 const ALLOWED_FUNCTION_SQL = ALLOWED_FUNCTIONS.map(
   (signature) => `pg_catalog.to_regprocedure('${signature}')`,
 ).join(',\n        ');
+const PRIVATE_PILOT_FUNCTION_SQL = procedureSql(PRIVATE_PILOT_FUNCTIONS);
+const RECOVERY_FUNCTION_SQL = procedureSql(RECOVERY_FUNCTIONS);
 const EXPECTED_PREFLIGHT_KEYS = [
   'runtime_login_identity_allowed',
   'runtime_login_is_safe',
@@ -167,7 +177,12 @@ export const KEMERBET_DEPOSIT_DATABASE_PREFLIGHT_SQL = `
     (
       select count(*) = ${ALLOWED_FUNCTIONS.length} and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
-        and routine.proconfig = array['search_path=pg_catalog, app']::text[]
+        and (
+          (routine.oid in (${PRIVATE_PILOT_FUNCTION_SQL})
+            and routine.proconfig = array['search_path=pg_catalog']::text[])
+          or (routine.oid in (${RECOVERY_FUNCTION_SQL})
+            and routine.proconfig = array['search_path=pg_catalog, app']::text[])
+        )
         and owner.rolname = 'postgres'
       )
       from pg_catalog.pg_proc as routine
@@ -300,6 +315,7 @@ export interface KemerBetDepositPostgresRuntime {
 
 export async function createKemerBetDepositPostgresRuntime(
   config: EnabledExecutionRuntimeConfig,
+  privateLiveDepositPilotManifest: KemerBetPrivateLiveDepositPilotManifest,
   dependencies: KemerBetDepositPostgresRuntimeDependencies = {},
 ): Promise<KemerBetDepositPostgresRuntime> {
   const clientConfig = Object.freeze({
@@ -341,6 +357,17 @@ export async function createKemerBetDepositPostgresRuntime(
       }
     },
   };
+  let database: PostgresKemerBetDepositExecutionDatabase;
+  try {
+    database = new PostgresKemerBetDepositExecutionDatabase(
+      guardedQuery,
+      privateLiveDepositPilotManifest,
+    );
+  } catch {
+    client.removeListener('error', markUnavailable);
+    client.removeListener('end', markUnavailable);
+    throw new KemerBetDepositPostgresRuntimeUnavailableError();
+  }
 
   try {
     await client.connect();
@@ -415,7 +442,7 @@ export async function createKemerBetDepositPostgresRuntime(
   }
 
   return {
-    database: new PostgresKemerBetDepositExecutionDatabase(guardedQuery),
+    database,
     ready,
     close,
   };

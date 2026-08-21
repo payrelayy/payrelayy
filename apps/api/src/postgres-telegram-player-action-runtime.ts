@@ -29,7 +29,7 @@ const HMAC_VALUE_PATTERN = /^hmac-sha256-v1:[0-9a-f]{64}$/;
 
 const RECORD_INBOUND_SQL = `
   select inbound_event_id, received_at, inbound_event_already_recorded
-  from app.record_admitted_telegram_private_inbound_event(
+  from app.record_public_telegram_action_inbound_event(
     $1::bigint, $2::bigint, $3::bigint, $4::text, $5::text
   )
 `;

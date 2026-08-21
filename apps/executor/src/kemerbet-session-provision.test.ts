@@ -209,6 +209,7 @@ describe('manual KemerBet agent session provisioning', () => {
     ['live mode', { FINANCIAL_ACTIONS_MODE: 'live' }],
     ['executor gate', { KEMERBET_EXECUTOR_ENABLED: 'true' }],
     ['final-action gate', { KEMERBET_FINAL_ACTION_ENABLED: 'true' }],
+    ['private-pilot gate', { KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true' }],
     ['runtime gate', { INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true' }],
     ['invalid account', { KEMERBET_SESSION_PROVISION_ACCOUNT_ID: '../escape' }],
     [

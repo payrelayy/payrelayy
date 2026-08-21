@@ -22,11 +22,18 @@ The two services have deliberately different capabilities:
 | `session-provision` | `executor-session-provision` | One transient, headed manual browser with only a single account UUID, X11 authorization, and the profile volume; no database URL, selector, binding map, HMAC key, or financial-action gate |
 
 The long-lived service is consume-only at the database boundary. Its executor group/runtime can
-execute exactly six transitions for leasing, pre-action cancellation, final-action fencing,
-reconciliation handoff, reconciliation leasing, and reconciliation recording. They cannot execute
-`app.enqueue_verified_deposit_execution(uuid)` or create work. Direct enqueue is internal to the
-separate atomic verified-settlement function, which must be called by an independently provisioned
-authoritative-verifier boundary.
+execute exactly six transitions: the private-pilot lease and final-action fence plus four recovery
+transitions for pre-action cancellation, reconciliation handoff, reconciliation leasing, and
+reconciliation recording. The legacy unscoped lease and final-action fence are not granted. The
+executor cannot execute `app.enqueue_verified_deposit_execution(uuid)` or create work. Enqueue is
+internal to the separate atomic private-pilot settlement boundary, which must be called by an
+independently provisioned authoritative-verifier boundary.
+
+The executor also requires one exact, externally approved pilot manifest. It contains only the
+contract version, pilot-revision UUID, and configuration digest—never a Player ID, customer ID,
+KemerBet agent-account ID, or credential. The database-issued lease and fence must repeat the exact
+manifest values and the same immutable reservation and authorization token before the browser can
+perform a Transfer action.
 
 The executor image uses the distribution Chromium at `/usr/bin/chromium`; Playwright downloads no
 browser. Both automated and manual persistent-context launchers require Chromium's sandbox and do
@@ -92,15 +99,16 @@ secret or configuration object.
 Nothing below belongs in Git or a shared `.env` file. Production paths inside the container are
 fixed by `@fetanagent/config`:
 
-| Container path                                       | Required content                                                                                                                                       |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/run/secrets/kemerbet_executor_database_url`        | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full` |
-| `/run/secrets/kemerbet_agent_identity_bindings`      | Unique lines of `<canonical UUID><single space><hmac-sha256-agent-identity-v1:64-lowercase-hex>`                                                       |
-| `/run/secrets/kemerbet_history_reference_hmac_key`   | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                            |
-| `/run/secrets/kemerbet_agent_identity_hmac_key`      | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                   |
-| `/etc/fetanagent/kemerbet-selector-contract.v1.json` | Separately reviewed selector contract v1                                                                                                               |
-| `/run/configs/supabase_ca_certificate`               | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                              |
-| `/var/lib/fetanagent/kemerbet-sessions`              | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                        |
+| Container path                                       | Required content                                                                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/run/secrets/kemerbet_executor_database_url`        | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`   |
+| `/run/secrets/kemerbet_agent_identity_bindings`      | Unique lines of `<canonical UUID><single space><hmac-sha256-agent-identity-v1:64-lowercase-hex>`                                                         |
+| `/run/secrets/kemerbet_history_reference_hmac_key`   | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                              |
+| `/run/secrets/kemerbet_agent_identity_hmac_key`      | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                     |
+| `/run/configs/private_live_deposit_pilot.v1.json`    | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers |
+| `/etc/fetanagent/kemerbet-selector-contract.v1.json` | Separately reviewed selector contract v1                                                                                                                 |
+| `/run/configs/supabase_ca_certificate`               | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                |
+| `/var/lib/fetanagent/kemerbet-sessions`              | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                          |
 
 The executor rejects symlinks, path substitution, unsafe owner/mode metadata, file replacement while
 reading, equal HMAC keys, malformed or duplicate bindings, missing profiles, unauthenticated or
@@ -148,20 +156,28 @@ Do not run `docker compose ... --profile executor up` until all of these are clo
    `no-new-privileges`, the read-only root filesystem, and no `--no-sandbox` fallback. A failed
    sandbox probe is a launch blocker, not a reason to disable the sandbox.
 3. Provision and review the fingerprint-verified public Supabase CA, selector contract, distinct
-   HMAC keys, identity-binding map, and one exact authenticated profile for every active database
-   agent account. Prove `/readyz` rejects a swapped, stale, logged-out, or CAPTCHA profile.
+   HMAC keys, identity-binding map, exact private-pilot manifest, and one exact authenticated
+   profile for every active database agent account. Prove the manifest exactly matches the armed
+   database revision/configuration digest and contains no Player, customer, or account identifier.
+   Prove `/readyz` rejects a swapped, stale, logged-out, or CAPTCHA profile.
 4. Provision a dedicated runtime LOGIN credential outside Git and prove the startup catalog
    preflight plus lifetime singleton acquisition and loss behavior. The checked-in runtime role
    scaffold is `NOLOGIN` and unprovisioned.
-5. Apply the reviewed database migrations through the separate database release process, then make
-   the two database feature switches live only through a separately approved operational change.
-   This Compose file does not make that change.
-6. Wire the authoritative verifier to the atomic verified-payment settlement/enqueue command. A
-   checked-in database command without a trusted caller cannot produce an execution job.
+5. Apply the reviewed database migrations through the separate database release process. Prepare
+   and arm exactly one five-Player pilot revision while every financial switch remains disabled,
+   then make only the pilot-scoped verification, execution, and final-action switches live through
+   a separately reviewed activation migration and Owner operation. This Compose file cannot arm a
+   pilot or change a database switch.
+6. Wire the authoritative verifier to the atomic private-pilot verified-payment
+   settlement/enqueue command. It must create only receipt-derived, independently verified proof
+   lineage and an immutable capped reservation. A checked-in database command or advisory outcome
+   without that trusted caller cannot produce an execution job.
 7. Prove incident stop, circuit-open alerting, redacted logs, database and browser shutdown under
    the 60-second stop grace, fenced-action crash recovery, backups, and rollback procedures.
-8. Validate the real Compose projection, file ownership, IPv6/direct-database reachability, and
-   internal `/healthz` and `/readyz` behavior on the target host without performing a transfer.
+8. Validate the real Compose projection, the manifest/config/secret ownership, IPv6/direct-database
+   reachability, and internal `/healthz` and `/readyz` behavior on the target host without
+   performing a transfer. Confirm the private-pilot gate, manifest contract version, and redacted
+   configured state in startup logs without logging its revision UUID or digest.
 
 The first long-lived start is a supervised `staging` go/no-go. A later `production` target requires
 a separate written go/no-go with the production database role, migrations, feature switches,

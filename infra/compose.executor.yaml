@@ -38,6 +38,8 @@ services:
       FINANCIAL_ACTIONS_MODE: live
       KEMERBET_EXECUTOR_ENABLED: 'true'
       KEMERBET_FINAL_ACTION_ENABLED: 'true'
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true'
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE: /run/configs/private_live_deposit_pilot.v1.json
       INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true'
       KEMERBET_EXECUTOR_DEPLOYMENT_TARGET: ${FETANAGENT_EXECUTOR_DEPLOYMENT_TARGET:?set staging or production}
       KEMERBET_EXECUTOR_DATABASE_URL_FILE: /run/secrets/kemerbet_executor_database_url
@@ -72,6 +74,11 @@ services:
         gid: '10001'
         mode: 0400
     configs:
+      - source: private_live_deposit_pilot_manifest
+        target: /run/configs/private_live_deposit_pilot.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
       - source: kemerbet_selector_contract
         target: /etc/fetanagent/kemerbet-selector-contract.v1.json
         uid: '10001'
@@ -157,8 +164,10 @@ networks:
     attachable: false
 
 # Every source is an operator-owned file outside Git. The two HMAC keys must be independently
-# generated and unequal. Session provisioning gets only an X11 authorization cookie and the
-# profile bind; it cannot read any executor secret or selector contract.
+# generated and unequal. The pilot manifest contains only its contract version, revision UUID, and
+# configuration digest; it contains no Player, customer, or account identifier. Session
+# provisioning gets only an X11 authorization cookie and the profile bind; it cannot read any
+# executor secret, pilot manifest, or selector contract.
 secrets:
   kemerbet_executor_database_url:
     file: ${FETANAGENT_EXECUTOR_DATABASE_URL_FILE:-/etc/fetanagent/executor-secrets/kemerbet_executor_database_url}
@@ -172,6 +181,8 @@ secrets:
     file: ${FETANAGENT_KEMERBET_SESSION_XAUTHORITY_FILE:-/etc/fetanagent/session-provision/kemerbet_session_xauthority}
 
 configs:
+  private_live_deposit_pilot_manifest:
+    file: ${FETANAGENT_KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE:-/etc/fetanagent/executor-config/private_live_deposit_pilot.v1.json}
   kemerbet_selector_contract:
     file: ${FETANAGENT_KEMERBET_SELECTOR_CONTRACT_FILE:-/etc/fetanagent/executor-config/kemerbet-selector-contract.v1.json}
   supabase_ca_certificate:

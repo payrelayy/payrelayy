@@ -501,6 +501,118 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         { extension_schema: 'extensions', runtime_schema_usage: false },
       ]);
 
+      const directAclSurface = await client.query<{
+        readonly grantee: string;
+        readonly is_grantable: boolean;
+        readonly object_identity: string;
+        readonly object_kind: string;
+        readonly privilege_type: string;
+      }>(
+        `
+        with verifier_roles as (
+          select role.oid, role.rolname::text
+            from pg_roles role
+           where role.rolname = any($1::text[])
+        ), direct_acl as (
+          select role.rolname as grantee,
+                 'database'::text as object_kind,
+                 database_catalog.datname::text as object_identity,
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_database database_catalog
+           cross join lateral aclexplode(database_catalog.datacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+          union all
+          select role.rolname,
+                 'schema',
+                 namespace.nspname::text,
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_namespace namespace
+           cross join lateral aclexplode(namespace.nspacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+          union all
+          select role.rolname,
+                 'relation',
+                 format('%I.%I', namespace.nspname, relation.relname),
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_class relation
+            join pg_namespace namespace on namespace.oid = relation.relnamespace
+           cross join lateral aclexplode(relation.relacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+          union all
+          select role.rolname,
+                 'column',
+                 format('%I.%I.%I', namespace.nspname, relation.relname, attribute.attname),
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_attribute attribute
+            join pg_class relation on relation.oid = attribute.attrelid
+            join pg_namespace namespace on namespace.oid = relation.relnamespace
+           cross join lateral aclexplode(attribute.attacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+           where attribute.attnum > 0
+             and not attribute.attisdropped
+          union all
+          select role.rolname,
+                 'routine',
+                 routine.oid::regprocedure::text,
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_proc routine
+           cross join lateral aclexplode(routine.proacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+          union all
+          select role.rolname,
+                 'type',
+                 format('%I.%I', namespace.nspname, type_catalog.typname),
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_type type_catalog
+            join pg_namespace namespace on namespace.oid = type_catalog.typnamespace
+           cross join lateral aclexplode(type_catalog.typacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+          union all
+          select role.rolname,
+                 'language',
+                 language.lanname::text,
+                 privilege.privilege_type,
+                 privilege.is_grantable
+            from pg_language language
+           cross join lateral aclexplode(language.lanacl) privilege
+            join verifier_roles role on role.oid = privilege.grantee
+        )
+        select grantee, object_kind, object_identity, privilege_type, is_grantable
+          from direct_acl
+         order by object_kind, object_identity, privilege_type, grantee
+      `,
+        [[verifierGroup, verifierRuntime]],
+      );
+      expect(directAclSurface.rows).toEqual([
+        {
+          grantee: verifierGroup,
+          object_kind: 'routine',
+          object_identity: completionFunction,
+          privilege_type: 'EXECUTE',
+          is_grantable: false,
+        },
+        {
+          grantee: verifierGroup,
+          object_kind: 'routine',
+          object_identity: authorityFunction,
+          privilege_type: 'EXECUTE',
+          is_grantable: false,
+        },
+        {
+          grantee: verifierGroup,
+          object_kind: 'schema',
+          object_identity: 'app',
+          privilege_type: 'USAGE',
+          is_grantable: false,
+        },
+      ]);
+
       const baseObjects = await client.query<{ readonly capability_count: number }>(`
         select count(*)::integer as capability_count
           from pg_class relation

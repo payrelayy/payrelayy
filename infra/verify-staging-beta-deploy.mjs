@@ -698,7 +698,10 @@ assert.match(
 assert.match(freshBotRuntime, /depositProofReferenceMastersConfigured/);
 assert.match(freshBotRuntime, /depositProofReferenceProfileVersion/);
 assert.match(freshBotRuntime, /RestartCount/);
-assert.match(freshBotRuntime, /Telegram bot started in private beta admission mode\./);
+assert.match(
+  freshBotRuntime,
+  /Telegram bot started with configured private admission and action handlers\./,
+);
 assert.doesNotMatch(
   freshBotRuntime,
   /container logs(?! --tail 80)|\bcat\b|token=|password=|echo [^\n]*(?:SECRET|PROFILE)/,

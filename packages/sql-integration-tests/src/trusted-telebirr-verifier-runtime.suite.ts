@@ -464,7 +464,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
                ) as can_create_schema_objects,
                (
                  select coalesce(
-                   array_agg(namespace.nspname order by namespace.nspname),
+                   array_agg(namespace.nspname::text order by namespace.nspname),
                    '{}'::text[]
                  )
                    from pg_namespace namespace
@@ -640,7 +640,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       }
     });
 
-    it('settles a real TeleBirr attempt through a valid trusted session with exact replay scope', async () => {
+    it('settles a real TeleBirr attempt, preserves exact replay, and rejects reference reuse', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -797,19 +797,17 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           receiptPrincipalAmountMinor: '2500',
         });
 
-        const crossAttempt = await prepareVerification(client, pilot, 0, {
-          fingerprint: prepared.proof.candidate_reference_fingerprint,
-        });
-        const conflicting = await readAuthorityAs(
-          client,
-          verifierRuntime,
-          crossAttempt.lease.verification_attempt_id,
-          crossAttempt.lease.lease_token,
-          crossAttempt.proof.submitted_at,
-        );
-        expect(conflicting.existing_completion).toBeNull();
-        expect(conflicting.duplicate_state).toBe('reused');
-        expect(conflicting.replay_identities).toEqual([replayIdentity]);
+        await client.query('savepoint duplicate_provider_reference');
+        try {
+          await expect(
+            prepareVerification(client, pilot, 0, {
+              fingerprint: prepared.proof.candidate_reference_fingerprint,
+            }),
+          ).rejects.toThrow(/private_live_deposit_pilot_proofs_provider_reference_key/u);
+        } finally {
+          await client.query('rollback to savepoint duplicate_provider_reference');
+          await client.query('release savepoint duplicate_provider_reference');
+        }
       } finally {
         await client.query('rollback');
       }
@@ -957,8 +955,8 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       expect(definition).toContain("provider_member.provider_code_snapshot = 'telebirr'");
       expect(definition).toContain("current_provider.code = 'telebirr'");
       expect(definition).toContain('assignment_signer.signer_key_id = device_enrollment.key_id');
-      expect(definition).toContain(
-        'assignment_signer.public_key_spki_sha256 = device_enrollment.public_key_spki_sha256',
+      expect(definition).toMatch(
+        /assignment_signer\.public_key_spki_sha256\s*=\s*device_enrollment\.public_key_spki_sha256/u,
       );
       expect(definition).toContain('observation.verification_attempt_id <> attempted.id');
       expect(definition).toContain('existing_current_outcome.id');

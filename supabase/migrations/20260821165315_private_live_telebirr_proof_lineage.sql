@@ -1055,8 +1055,8 @@ begin
    for share;
 
   expected_policy_digest := app.private_live_telebirr_policy_digest(
-    pg_catalog.greatest(pilot.minimum_amount_minor, policy.minimum_amount_minor),
-    pg_catalog.least(pilot.maximum_per_deposit_minor, policy.maximum_amount_minor)
+    greatest(pilot.minimum_amount_minor, policy.minimum_amount_minor),
+    least(pilot.maximum_per_deposit_minor, policy.maximum_amount_minor)
   );
 
   if pilot.id is null
@@ -1068,11 +1068,11 @@ begin
     or policy.freshness_window_seconds <> 3600
     or new.deposit_policy_version_id is distinct from policy.id
     or new.deposit_policy_version is distinct from policy.version
-    or new.minimum_principal_amount_minor is distinct from pg_catalog.greatest(
+    or new.minimum_principal_amount_minor is distinct from greatest(
       pilot.minimum_amount_minor,
       policy.minimum_amount_minor
     )
-    or new.maximum_principal_amount_minor is distinct from pg_catalog.least(
+    or new.maximum_principal_amount_minor is distinct from least(
       pilot.maximum_per_deposit_minor,
       policy.maximum_amount_minor
     )
@@ -1285,11 +1285,11 @@ begin
     or policy.freshness_window_seconds <> 3600
     or profile.deposit_policy_version_id is distinct from policy.id
     or profile.deposit_policy_version is distinct from policy.version
-    or profile.minimum_principal_amount_minor is distinct from pg_catalog.greatest(
+    or profile.minimum_principal_amount_minor is distinct from greatest(
       pilot.minimum_amount_minor,
       policy.minimum_amount_minor
     )
-    or profile.maximum_principal_amount_minor is distinct from pg_catalog.least(
+    or profile.maximum_principal_amount_minor is distinct from least(
       pilot.maximum_per_deposit_minor,
       policy.maximum_amount_minor
     )
@@ -1405,7 +1405,7 @@ begin
     proof.reference_profile_version,
     proof.submitted_at,
     proof.submitted_at,
-    pg_catalog.least(
+    least(
       proof.submitted_at + interval '5 minutes',
       pilot.expires_at,
       profile.valid_until
@@ -1570,11 +1570,11 @@ begin
     or policy.freshness_window_seconds <> 3600
     or profile.deposit_policy_version_id is distinct from policy.id
     or profile.deposit_policy_version is distinct from policy.version
-    or profile.minimum_principal_amount_minor is distinct from pg_catalog.greatest(
+    or profile.minimum_principal_amount_minor is distinct from greatest(
       pilot.minimum_amount_minor,
       policy.minimum_amount_minor
     )
-    or profile.maximum_principal_amount_minor is distinct from pg_catalog.least(
+    or profile.maximum_principal_amount_minor is distinct from least(
       pilot.maximum_per_deposit_minor,
       policy.maximum_amount_minor
     )
@@ -1777,7 +1777,7 @@ begin
       || challenge_material::text
   );
   inserted_attempt.issued_at := lease_at;
-  inserted_attempt.expires_at := pg_catalog.least(
+  inserted_attempt.expires_at := least(
     lease_at + pg_catalog.make_interval(secs => p_lease_seconds),
     job.expires_at,
     enrollment.valid_until
@@ -2120,11 +2120,11 @@ begin
       or policy_row.freshness_window_seconds <> 3600
       or profile.deposit_policy_version_id is distinct from policy_row.id
       or profile.deposit_policy_version is distinct from policy_row.version
-      or profile.minimum_principal_amount_minor is distinct from pg_catalog.greatest(
+      or profile.minimum_principal_amount_minor is distinct from greatest(
         policy_row.minimum_amount_minor,
         pilot.minimum_amount_minor
       )
-      or profile.maximum_principal_amount_minor is distinct from pg_catalog.least(
+      or profile.maximum_principal_amount_minor is distinct from least(
         policy_row.maximum_amount_minor,
         pilot.maximum_per_deposit_minor
       )
@@ -2132,11 +2132,11 @@ begin
         profile.minimum_principal_amount_minor,
         profile.maximum_principal_amount_minor
       )
-      or outcome.principal_amount_minor < pg_catalog.greatest(
+      or outcome.principal_amount_minor < greatest(
         policy_row.minimum_amount_minor,
         pilot.minimum_amount_minor
       )
-      or outcome.principal_amount_minor > pg_catalog.least(
+      or outcome.principal_amount_minor > least(
         policy_row.maximum_amount_minor,
         pilot.maximum_per_deposit_minor
       )
@@ -2157,11 +2157,11 @@ begin
     new.receiver_instructions_snapshot := receiver_row.instructions;
     new.deposit_policy_version_id := policy_row.id;
     new.deposit_policy_version := policy_row.version;
-    new.minimum_amount_minor := pg_catalog.greatest(
+    new.minimum_amount_minor := greatest(
       policy_row.minimum_amount_minor,
       pilot.minimum_amount_minor
     );
-    new.maximum_amount_minor := pg_catalog.least(
+    new.maximum_amount_minor := least(
       policy_row.maximum_amount_minor,
       pilot.maximum_per_deposit_minor
     );
@@ -2684,35 +2684,35 @@ begin
       || '|lease_token=' || p_lease_token::text
       || '|observation_body_digest=' || p_observation_body_digest
       || '|observation_signature_digest=' || p_observation_signature_digest
-      || '|replay_identity=' || pg_catalog.coalesce(p_replay_identity, '<null>')
+      || '|replay_identity=' || coalesce(p_replay_identity, '<null>')
       || '|source_document_digest=' || p_source_document_digest
       || '|normalized_facts_digest=' || p_normalized_facts_digest
       || '|observed_at_us=' || (
-        pg_catalog.extract(epoch from p_observed_at) * 1000000
+        extract(epoch from p_observed_at) * 1000000
       )::bigint::text
       || '|protocol_disposition=' || p_protocol_disposition
       || '|protocol_reason_code=' || p_protocol_reason_code
       || '|assessment_input_digest=' || p_assessment_input_digest
       || '|assessed_at_us=' || (
-        pg_catalog.extract(epoch from p_assessed_at) * 1000000
+        extract(epoch from p_assessed_at) * 1000000
       )::bigint::text
       || '|disposition=' || p_disposition
       || '|reason_code=' || p_reason_code
       || '|evidence_digest=' || p_evidence_digest
       || '|retrieved_at_us=' || (
-        pg_catalog.extract(epoch from p_retrieved_at) * 1000000
+        extract(epoch from p_retrieved_at) * 1000000
       )::bigint::text
-      || '|amount_minor=' || pg_catalog.coalesce(
+      || '|amount_minor=' || coalesce(
         p_receipt_principal_amount_minor::text,
         '<null>'
       )
       || '|occurred_at_us=' || case
         when p_occurred_at is null then '<null>'
         else (
-          pg_catalog.extract(epoch from p_occurred_at) * 1000000
+          extract(epoch from p_occurred_at) * 1000000
         )::bigint::text
       end
-      || '|receiver_identity_digest=' || pg_catalog.coalesce(
+      || '|receiver_identity_digest=' || coalesce(
         p_receiver_identity_digest,
         '<null>'
       )
@@ -3126,11 +3126,11 @@ begin
     or policy_row.freshness_window_seconds <> 3600
     or job.deposit_policy_version_id is distinct from policy_row.id
     or job.deposit_policy_version is distinct from policy_row.version
-    or job.minimum_principal_amount_minor is distinct from pg_catalog.greatest(
+    or job.minimum_principal_amount_minor is distinct from greatest(
       policy_row.minimum_amount_minor,
       pilot.minimum_amount_minor
     )
-    or job.maximum_principal_amount_minor is distinct from pg_catalog.least(
+    or job.maximum_principal_amount_minor is distinct from least(
       policy_row.maximum_amount_minor,
       pilot.maximum_per_deposit_minor
     )
@@ -3138,11 +3138,11 @@ begin
       job.minimum_principal_amount_minor,
       job.maximum_principal_amount_minor
     )
-    or p_receipt_principal_amount_minor < pg_catalog.greatest(
+    or p_receipt_principal_amount_minor < greatest(
       policy_row.minimum_amount_minor,
       pilot.minimum_amount_minor
     )
-    or p_receipt_principal_amount_minor > pg_catalog.least(
+    or p_receipt_principal_amount_minor > least(
       policy_row.maximum_amount_minor,
       pilot.maximum_per_deposit_minor
     )

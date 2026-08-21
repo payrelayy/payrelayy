@@ -876,7 +876,7 @@ begin
            'expires_at_epoch_microseconds',
              (pg_catalog.date_part('epoch', pilot.expires_at) * 1000000)::bigint,
            'players', (
-             select pg_catalog.coalesce(
+             select coalesce(
                pg_catalog.jsonb_agg(
                  pg_catalog.jsonb_build_object(
                    'player_account_id', member.player_account_id::text,
@@ -908,7 +908,7 @@ begin
             where member.pilot_revision_id = pilot.id
            ),
            'submitting_customers', (
-             select pg_catalog.coalesce(
+             select coalesce(
                pg_catalog.jsonb_agg(
                  pg_catalog.jsonb_build_object(
                    'customer_id', member.customer_id::text,
@@ -925,7 +925,7 @@ begin
             where member.pilot_revision_id = pilot.id
            ),
            'providers', (
-             select pg_catalog.coalesce(
+             select coalesce(
                pg_catalog.jsonb_agg(
                  pg_catalog.jsonb_build_object(
                    'payment_provider_id', member.payment_provider_id::text,
@@ -1946,7 +1946,7 @@ begin
             where reservation.pilot_revision_id = pilot.id
          ),
          (
-           select pg_catalog.coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint
+           select coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint
              from app.private_live_deposit_pilot_reservations reservation
             where reservation.pilot_revision_id = pilot.id
          ),
@@ -1973,7 +1973,7 @@ security definer
 set search_path = pg_catalog
 stable
 as $$
-  select pg_catalog.coalesce((
+  select coalesce((
     select feature_switch.mode = 'live'
       from app.feature_switches feature_switch
      where feature_switch.feature_key = 'private_live_deposit_pilot'
@@ -2393,14 +2393,14 @@ begin
     raise exception 'The private pilot submitting customer is no longer current.';
   end if;
 
-  select pg_catalog.coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint,
+  select coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint,
          pg_catalog.count(*)::integer
     into aggregate_reserved,
          reservation_count
     from app.private_live_deposit_pilot_reservations reservation
    where reservation.pilot_revision_id = pilot.id;
 
-  select pg_catalog.coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint
+  select coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint
     into player_reserved
     from app.private_live_deposit_pilot_reservations reservation
    where reservation.pilot_revision_id = pilot.id

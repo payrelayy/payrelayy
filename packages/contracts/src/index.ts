@@ -10,6 +10,7 @@ export * from './cbe-birr-authoritative-shadow-attempt.js';
 export * from './cbe-birr-authoritative-shadow-settlement.js';
 export * from './kemerbet-deposit-execution.js';
 export * from './customer-deposit-status.js';
+export * from './authoritative-deposit-proof-outcome.js';
 
 /**
  * Values are validated against database-backed registries. They are strings here so a newly

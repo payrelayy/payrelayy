@@ -33,6 +33,13 @@ const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
+const installedHelperPredecessorSha =
+  '4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e';
+const reviewedHelperSuccessorSha = createHash('sha256')
+  .update(helper.replaceAll('\r\n', '\n'))
+  .digest('hex');
+const stagingDropletIpv6 = '2a03:b0c0:1:e0:0:1:a8b4:2001';
+const staleStagingBannedIpv6 = '2a05:d018:135e:1602:5210:739d:5667:fee4';
 const retiredDepositReferenceProtection = new RegExp(
   ['api', 'deposit', 'reference', 'protection'].join('[_-]'),
   'iu',
@@ -53,6 +60,8 @@ assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
 assert.match(workflow, /STAGING_DROPLET_ID: '593344964'/);
 assert.match(workflow, /STAGING_DIRECT_DATABASE_HOST: db\.spzpiyxheappsfyswewl\.supabase\.co/);
+assert.match(workflow, new RegExp(`^  STAGING_BANNED_IP: ${stagingDropletIpv6}$`, 'mu'));
+assert.doesNotMatch(workflow, new RegExp(staleStagingBannedIpv6, 'u'));
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/);
 assert.match(workflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
 assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
@@ -85,8 +94,54 @@ assert.match(workflow, /fetanagent-staging-deploy-helper network-ready/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper diagnose-owner-startup/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper stop/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper discard/g);
+assert.match(
+  workflow,
+  /fetanagent-staging-deploy-helper arm-expiry-stop '\$GITHUB_SHA' '\$STOP_AT'/g,
+);
 assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
+assert.doesNotMatch(workflow, /confirm_stop_and_disable_deadline_utc|CONFIRMED_STOP_DEADLINE/);
+assert.equal(
+  (workflow.match(/uses: supabase\/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3/g) ?? [])
+    .length,
+  2,
+  'Both network-ban paths must use the same pinned Supabase CLI setup action.',
+);
+assert.equal(
+  (workflow.match(/^\s+version: 2\.113\.0$/gm) ?? []).length,
+  2,
+  'Both network-ban paths must install the exact reviewed Supabase CLI version.',
+);
+
+const connectivityJob = /\n  connectivity:\n([\s\S]*?)\n  transition-ssh-verify:\n/u.exec(
+  workflow,
+)?.[1];
+assert.ok(connectivityJob, 'The explicit staging unban and connectivity job must exist.');
+assert.match(connectivityJob, /if: inputs\.mode == 'unban-and-connectivity-check'/);
+assert.match(connectivityJob, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/);
+assert.match(
+  connectivityJob,
+  /current_bans="\$\(supabase network-bans get \\\r?\n\s+--project-ref "\$STAGING_PROJECT_REF" --experimental --output json\)"/u,
+);
+assert.match(connectivityJob, /type == "array" and all\(\.\[\]; type == "string"\)/);
+assert.match(connectivityJob, /jq -er --arg ip "\$STAGING_BANNED_IP"/);
+assert.match(connectivityJob, /if index\(\$ip\) == null then "clear" else "banned" end/);
+assert.match(connectivityJob, /case "\$ban_status" in/);
+assert.match(
+  connectivityJob,
+  /supabase network-bans remove --db-unban-ip "\$STAGING_BANNED_IP" \\\r?\n\s+--project-ref "\$STAGING_PROJECT_REF" --experimental/u,
+);
+assert.equal(
+  (workflow.match(/supabase network-bans remove --db-unban-ip/g) ?? []).length,
+  1,
+  'Only the explicit connectivity mode may remove one exact staging network ban.',
+);
+assert.equal(
+  (workflow.match(/--db-unban-ip "\$STAGING_BANNED_IP"/g) ?? []).length,
+  1,
+  'Network-ban removal must target only the one pinned staging IP.',
+);
+assert.doesNotMatch(connectivityJob, /--db-unban-ip (?!"\$STAGING_BANNED_IP")/u);
 
 assert.match(botWorkflow, /workflow_dispatch:/);
 assert.doesNotMatch(botWorkflow, /pull_request:|pull_request_target:|push:|schedule:/);
@@ -373,18 +428,33 @@ assert.match(workflow, /org\.opencontainers\.image\.revision/);
 assert.match(workflow, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.match(workflow, /stop-and-disable/);
 assert.match(workflow, /infra\/sql\/staging-runtimes-disable\.sql/g);
+const deployJob = /\n  deploy:\n([\s\S]*?)\n  stop:\n/u.exec(workflow)?.[1];
+assert.ok(deployJob, 'The guarded staging deployment job must exist.');
+assert.doesNotMatch(
+  deployJob,
+  /network-bans remove|--db-unban-ip/,
+  'Deploy mode must never mutate the Supabase network-ban list.',
+);
 assert.ok(
   workflow.indexOf('Stop any prior staging project and disable old logins') <
     workflow.indexOf('Verify the fresh-host deployment boundary is empty') &&
     workflow.indexOf('Verify the fresh-host deployment boundary is empty') <
       workflow.indexOf('Verify the VM has direct IPv6 database readiness') &&
     workflow.indexOf('Verify the VM has direct IPv6 database readiness') <
+      workflow.indexOf('Set up the pinned Supabase CLI for the read-only ban check') &&
+    workflow.indexOf('Set up the pinned Supabase CLI for the read-only ban check') <
+      workflow.indexOf('Check the exact staging network ban before provisioning') &&
+    workflow.indexOf('Check the exact staging network ban before provisioning') <
       workflow.indexOf('Provision four narrow 24-hour staging logins') &&
     workflow.indexOf('Provision four narrow 24-hour staging logins') <
+      workflow.indexOf('Derive the automatic stop time from exact database role expiries') &&
+    workflow.indexOf('Derive the automatic stop time from exact database role expiries') <
       workflow.indexOf('Transfer and install sealed release inputs') &&
     workflow.indexOf('Transfer and install sealed release inputs') <
+      workflow.indexOf('Arm the host-local stop before database credential expiry') &&
+    workflow.indexOf('Arm the host-local stop before database credential expiry') <
       workflow.indexOf('Start the private staging profile and smoke readiness'),
-  'Old runtimes must stop, then direct IPv6 readiness must pass before new logins are provisioned.',
+  'Old runtimes must stop, IPv6 and the exact ban list must pass, then the real role expiries must arm the host-local guard before startup.',
 );
 const freshHostReadinessStep =
   /- name: Verify the fresh-host deployment boundary is empty([\s\S]*?)\n\s+- name: Verify the VM has direct IPv6 database readiness/u.exec(
@@ -397,12 +467,141 @@ assert.match(
 );
 assert.doesNotMatch(freshHostReadinessStep, /fetanagent-staging-deploy-helper cutover-ready/);
 const networkReadinessStep =
-  /- name: Verify the VM has direct IPv6 database readiness([\s\S]*?)\n\s+- name: Provision four narrow 24-hour staging logins/u.exec(
+  /- name: Verify the VM has direct IPv6 database readiness([\s\S]*?)\n\s+- name: Set up the pinned Supabase CLI for the read-only ban check/u.exec(
     workflow,
   )?.[1];
 assert.ok(networkReadinessStep, 'The deployment must verify exact VM IPv6 readiness.');
 assert.match(networkReadinessStep, /fetanagent-staging-deploy-helper network-ready/);
 assert.doesNotMatch(networkReadinessStep, /\b(?:for|while|until)\b|\bsleep\b/);
+const deployBanGate =
+  /- name: Check the exact staging network ban before provisioning([\s\S]*?)\n\s+- name: Provision four narrow 24-hour staging logins/u.exec(
+    deployJob,
+  )?.[1];
+assert.ok(deployBanGate, 'Deploy must fail closed on its current exact network ban.');
+assert.match(deployBanGate, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/);
+assert.match(
+  deployBanGate,
+  /current_bans="\$\(supabase network-bans get \\\r?\n\s+--project-ref "\$STAGING_PROJECT_REF" --experimental --output json\)"/u,
+);
+assert.match(deployBanGate, /type == "array" and all\(\.\[\]; type == "string"\)/);
+assert.match(deployBanGate, /jq -er --arg ip "\$STAGING_BANNED_IP"/);
+assert.match(deployBanGate, /if index\(\$ip\) == null then "clear" else "banned" end/);
+assert.match(deployBanGate, /case "\$ban_status" in/);
+assert.match(
+  deployBanGate,
+  /The exact staging VM IP is currently banned; run the explicit unban-and-connectivity-check mode before redeploying\./,
+);
+assert.doesNotMatch(
+  deployBanGate,
+  /network-bans remove|--db-unban-ip|\bpsql\b|(?:BETA_ADMISSION|CUSTOMER_WEB|OWNER_CONTROL|PLAYER_ACTION)_RUNTIME_PASSWORD/,
+);
+assert.doesNotMatch(
+  deployBanGate,
+  /echo [^\n]*\$(?:SUPABASE_ACCESS_TOKEN|current_bans)/,
+  'The fail-closed ban gate must not print protected inputs or the returned ban list.',
+);
+const expiryDerivation =
+  /- name: Derive the automatic stop time from exact database role expiries([\s\S]*?)\n\s+- name: Transfer and install sealed release inputs/u.exec(
+    deployJob,
+  )?.[1];
+assert.ok(expiryDerivation, 'Deployment must derive one stop time from the exact role expiries.');
+for (const role of [
+  'fetanagent_beta_admission_runtime',
+  'fetanagent_customer_web_runtime',
+  'fetanagent_owner_control_runtime',
+  'fetanagent_player_actions_runtime',
+]) {
+  assert.match(expiryDerivation, new RegExp(role, 'u'));
+}
+assert.match(expiryDerivation, /pg_catalog\.count\(oid\) = 4/);
+assert.match(expiryDerivation, /pg_catalog\.count\(rolvaliduntil\) = 4/);
+assert.match(expiryDerivation, /pg_catalog\.bool_and\(rolcanlogin\)/);
+assert.match(expiryDerivation, /pg_catalog\.bool_and\(pg_catalog\.isfinite\(rolvaliduntil\)\)/);
+assert.match(expiryDerivation, /pg_catalog\.min\(rolvaliduntil\) - interval '2 hours'/);
+assert.match(expiryDerivation, /interval '23 hours 30 minutes'/);
+assert.match(expiryDerivation, /interval '24 hours 5 minutes'/);
+assert.match(expiryDerivation, /interval '10 seconds'/);
+assert.match(expiryDerivation, /stop_epoch > now_epoch \+ 21 \* 60 \* 60/);
+assert.match(expiryDerivation, /stop_epoch <= now_epoch \+ 23 \* 60 \* 60/);
+assert.doesNotMatch(
+  expiryDerivation,
+  /alter\s+role|network-bans|supabase\s|docker|echo[^\n]*(?:PGPASSWORD|SUPABASE_DB_PASSWORD)|FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/iu,
+);
+const expiryArming =
+  /- name: Arm the host-local stop before database credential expiry([\s\S]*?)\n\s+- name: Start the private staging profile and smoke readiness/u.exec(
+    deployJob,
+  )?.[1];
+assert.ok(expiryArming, 'Deployment must arm the host-local guard before long-lived startup.');
+assert.match(expiryArming, /STOP_AT: \$\{\{ steps\.expiry\.outputs\.stop_at \}\}/);
+assert.match(expiryArming, /fetanagent-staging-deploy-helper verify/);
+assert.match(
+  expiryArming,
+  /fetanagent-staging-deploy-helper arm-expiry-stop '\$GITHUB_SHA' '\$STOP_AT'/,
+);
+assert.doesNotMatch(expiryArming, /password|psql|supabase|docker|FINANCIAL_ACTIONS_MODE=live/iu);
+assert.match(
+  stagingRunbook,
+  /`SUPABASE_ACCESS_TOKEN`[\s\S]*?exact-IP removal only in explicit unban mode/u,
+);
+assert.doesNotMatch(stagingRunbook, /confirm_stop_and_disable_deadline_utc|operator attestation/);
+assert.match(stagingRunbook, /exactly two hours before the earliest expiry/);
+assert.match(stagingRunbook, /automatic\s+stop-before-expiry boundary/);
+assert.match(stagingRunbook, /not credential rotation or continuous\s+availability/u);
+const helperReplacementRunbook =
+  /### Exact helper replacement on the current staging Droplet([\s\S]*?)\nThe protected `staging` environment/u.exec(
+    stagingRunbook,
+  )?.[1];
+assert.ok(helperReplacementRunbook, 'The current staging helper replacement must be documented.');
+assert.match(helperReplacementRunbook, /retired Droplet `590666364`/);
+assert.match(helperReplacementRunbook, /current staging Droplet `593344964`/);
+assert.match(helperReplacementRunbook, /stop-and-disable/);
+assert.match(helperReplacementRunbook, new RegExp(installedHelperPredecessorSha, 'gu'));
+assert.match(helperReplacementRunbook, new RegExp(reviewedHelperSuccessorSha, 'gu'));
+assert.match(helperReplacementRunbook, /metadata\/v1/);
+assert.match(helperReplacementRunbook, /593344964/);
+assert.match(helperReplacementRunbook, /161\.35\.41\.232/);
+assert.match(helperReplacementRunbook, /root:root:755/);
+assert.match(helperReplacementRunbook, /root:root:440/);
+assert.match(
+  helperReplacementRunbook,
+  /fetanagent-admin ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/fetanagent-staging-deploy-helper \*/,
+);
+assert.match(helperReplacementRunbook, /visudo -cf \/etc\/sudoers/);
+assert.doesNotMatch(helperReplacementRunbook, /fetanagent-vm-transition (?:rotate|verify|inspect)/);
+const replacementInstall = helperReplacementRunbook.indexOf(
+  'install -o root -g root -m 0755 "$STAGED" "$INSTALL_TMP"',
+);
+const replacementHash = helperReplacementRunbook.indexOf(
+  'sha256sum "$INSTALL_TMP"',
+  replacementInstall,
+);
+const replacementRename = helperReplacementRunbook.indexOf(
+  'mv -f -- "$INSTALL_TMP" "$TARGET"',
+  replacementHash,
+);
+const replacementVerify = helperReplacementRunbook.indexOf('transition-ssh-verify');
+assert.ok(
+  replacementInstall >= 0 &&
+    replacementInstall < replacementHash &&
+    replacementHash < replacementRename &&
+    replacementRename < replacementVerify,
+  'The exact helper must be syntax/hash checked, atomically installed, and then verified through non-root SSH.',
+);
+assert.match(
+  stagingRunbook,
+  new RegExp(
+    'DigitalOcean Droplet `593344964` has the exact current public IPv6 address\\s+`' +
+      stagingDropletIpv6 +
+      '`',
+    'u',
+  ),
+);
+assert.doesNotMatch(stagingRunbook, new RegExp(staleStagingBannedIpv6, 'u'));
+assert.match(stagingRunbook, /stop\/check\/unban-before-redeploy process/);
+assert.match(stagingRunbook, /deploy mode does\s+not unban an address/u);
+assert.match(stagingRunbook, /host-local timer\s+stops the containers/u);
+assert.match(stagingRunbook, /another temporary network\s+ban/u);
+assert.match(stagingRunbook, /does not support in-place runtime-password rotation/);
 assert.doesNotMatch(workflow, /run: sleep 125|staging-runtime-login-preflight\.sql/);
 assert.match(workflow, /Capture count-only runtime session diagnostics after failed activation/);
 assert.match(workflow, /Capture bounded Owner-control startup diagnostics/);
@@ -611,6 +810,17 @@ assert.doesNotMatch(diagnostics, /\bpid\b|client_addr|\bquery\b|password|secret/
 
 const rollbackStep = /- name: Roll back failed activation([\s\S]*?)\n\s+stop:/u.exec(workflow)?.[1];
 assert.ok(rollbackStep, 'The failed-activation rollback must be present.');
+assert.match(
+  rollbackStep,
+  /if: always\(\) && \(failure\(\) \|\| cancelled\(\)\) && steps\.provision\.outputs\.attempted == 'true'/,
+);
+const rollbackVerify = rollbackStep.indexOf('fetanagent-staging-deploy-helper verify');
+const rollbackStop = rollbackStep.indexOf('fetanagent-staging-deploy-helper stop');
+const rollbackDiscard = rollbackStep.indexOf('fetanagent-staging-deploy-helper discard');
+assert.ok(
+  rollbackVerify >= 0 && rollbackVerify < rollbackStop && rollbackStop < rollbackDiscard,
+  'Any failure before activation completes must stop the project and disarm an armed expiry timer before discarding the release.',
+);
 assert.match(rollbackStep, /for attempt in 1 2 3 4/);
 assert.match(rollbackStep, /sleep 15/);
 assert.match(rollbackStep, /cleanup_status/);
@@ -664,6 +874,42 @@ assert.ok(
   'All four one-shot runtime preflights must pass before long-lived services start.',
 );
 assert.match(helper, /docker_local network rm \$networks/);
+assert.match(helper, /EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop\.service'/);
+assert.match(helper, /EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop\.timer'/);
+const expiryArmHelper = /arm_expiry_stop\(\) \(([\s\S]*?)\n\)/u.exec(helper)?.[1];
+assert.ok(expiryArmHelper, 'The helper must define the host-local expiry-stop arming boundary.');
+assert.match(expiryArmHelper, /stop_epoch > now_epoch \+ 21 \* 60 \* 60/);
+assert.match(expiryArmHelper, /stop_epoch <= now_epoch \+ 23 \* 60 \* 60/);
+assert.match(expiryArmHelper, /OnCalendar=\$calendar_stop_at/);
+assert.match(expiryArmHelper, /Persistent=true/);
+assert.match(expiryArmHelper, /AccuracySec=1min/);
+assert.match(expiryArmHelper, /Restart=on-failure/);
+assert.match(expiryArmHelper, /RestartSec=60/);
+assert.match(expiryArmHelper, /StartLimitIntervalSec=0/);
+assert.match(expiryArmHelper, /NoNewPrivileges=true/);
+assert.match(expiryArmHelper, /PrivateTmp=true/);
+assert.match(expiryArmHelper, /UMask=0077/);
+assert.match(expiryArmHelper, /install -o root -g root -m 0644/);
+assert.match(expiryArmHelper, /systemctl enable --now "\$EXPIRY_STOP_TIMER"/);
+assert.match(expiryArmHelper, /systemctl is-enabled --quiet "\$EXPIRY_STOP_TIMER"/);
+assert.match(expiryArmHelper, /systemctl is-active --quiet "\$EXPIRY_STOP_TIMER"/);
+assert.doesNotMatch(
+  expiryArmHelper,
+  /password|psql|supabase|curl|wget|FINANCIAL_ACTIONS_MODE=live/iu,
+);
+const expiryStopCommand = /\n  expiry-stop\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(expiryStopCommand, 'The helper must define the systemd-only expiry stop command.');
+assert.match(expiryStopCommand, /stop_project/);
+assert.match(expiryStopCommand, /disarm_expiry_stop/);
+assert.match(helper, /"\$command" == 'expiry-stop'/);
+assert.match(helper, /-z "\$\{SUDO_USER:-\}"/);
+assert.match(helper, /-n "\$\{INVOCATION_ID:-\}"/);
+assert.match(helper, /FETANAGENT_STAGING_EXPIRY_GUARD:-\}" == '1'/);
+assert.match(helper, /expiry-stop may run only from the fixed systemd guard/);
+const normalStopCommand = /\n  stop\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(normalStopCommand, 'The ordinary stop command must remain present.');
+assert.match(normalStopCommand, /stop_project/);
+assert.match(normalStopCommand, /disarm_expiry_stop/);
 const freshHostIdentity = /require_fresh_host_identity\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(freshHostIdentity, 'The helper must define the exact fresh-host identity gate.');
 assert.match(freshHostIdentity, /curl --fail --silent --show-error --noproxy '\*' --max-time 3/);
@@ -766,5 +1012,5 @@ assert.match(ownerDiagnostic, /container logs --tail 80/);
 assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container logs .*bot/);
 
 console.log(
-  'staging deploy workflow verified: manual exact-target guards, read-only transition SSH proof, sealed images, checksummed root helper, bounded runtime credentials, and stop path',
+  'staging deploy workflow verified: manual exact-target guards, read-only exact-IP ban gate, sealed images, bounded runtime credentials, host-local stop-before-expiry, checksummed root helper, and explicit stop path',
 );

@@ -68,12 +68,25 @@ reserve a transaction, credit a Player ID, or move money.
 
 The offline profile deliberately does not claim that the synthetic table labels match every real
 official response. Before a live adapter can be considered, controlled privacy-reviewed samples
-must attest the exact live response contract and parser behavior. A separately reviewed transport
-must then enforce TLS, request/response/time bounds, zero redirects, outage behavior, telemetry
-redaction, and an immediate stop. Those are two distinct remaining blockers:
+must attest the exact live response contract and parser behavior. A separately reviewed runtime
+composition must then preserve the isolated transport's TLS, request/response/time, zero-redirect,
+outage, telemetry-redaction, and immediate-stop controls. Those are two distinct remaining
+blockers:
 
 - `official_receipt_live_response_contract_unattested`
 - `official_receipt_live_transport_absent`
 
 Completing offline mechanics is not evidence, settlement, or activation. Financial mode and both
 KemerBet execution flags remain unchanged and disabled.
+
+## Separate unwired transport slice
+
+The sibling `@fetanagent/cbe-birr-authoritative-receipt-transport` package now implements bounded
+one-shot HTTPS mechanics and an opaque PDF-envelope observation without changing this package's
+pure offline contract. It has no receipt-field parser or diagnostic receiver-name input. No
+application imports that sibling package; its public results use disposition
+`opaque_pdf_observation` and fix response-contract attestation, receipt-field parsing, and every
+adapter, claim, persistence, runtime, settlement, and financial capability to `false`. Synthetic
+tests make no provider request. Consequently, `live_transport_absent` remains accurate for the
+authoritative lookup runtime even though the isolated transport mechanics now exist in source. See
+[cbe-birr-authoritative-receipt-transport.md](cbe-birr-authoritative-receipt-transport.md).

@@ -218,6 +218,13 @@ export function buildApp(config: ApiConfig = loadApiConfig(), dependencies: ApiD
     status: 'ok',
     service: 'fetanagent-api',
     financialActionsMode: config.financialActionsMode,
+    runtimeContract: {
+      financialActionsMode: config.financialActionsMode,
+      playerActionRuntimeEnabled: config.telegramPlayerActionRuntime.enabled,
+      depositProofReferenceMastersConfigured: config.telegramPlayerActionRuntime.enabled,
+      depositProofReferenceProfileVersion:
+        config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion ?? null,
+    },
   }));
 
   app.get('/readyz', async (_request, reply) => {

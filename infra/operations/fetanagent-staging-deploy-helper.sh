@@ -25,6 +25,9 @@ readonly PUBLIC_IPV4='178.128.39.89'
 readonly FRESH_PUBLIC_IPV4='161.35.41.232'
 readonly PUBLIC_DOMAINS=('fetanagent.com' 'www.fetanagent.com' 'owner.fetanagent.com')
 readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
+readonly BOT_STARTUP_RECEIPT_ROOT='/var/lib/fetanagent-bot-startup-receipt'
+readonly BOT_STARTUP_RECEIPT="$BOT_STARTUP_RECEIPT_ROOT/bot-v1"
+readonly BOT_STARTUP_RECEIPT_VERSION='1'
 readonly EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop.service'
 readonly EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop.timer'
 readonly EXPIRY_STOP_SERVICE_PATH="/etc/systemd/system/$EXPIRY_STOP_SERVICE"
@@ -67,6 +70,25 @@ require_service_file() {
   [[ ! -L "$path" && -f "$path" ]] || die 'a required service file is absent or symbolic'
   [[ "$(stat --format='%u:%g:%a' "$path")" == '10001:10001:400' ]] ||
     die 'a service secret does not have the required ownership and mode'
+}
+
+clear_bot_startup_receipt() {
+  if [[ ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]]; then
+    return
+  fi
+  [[ ! -L "$BOT_STARTUP_RECEIPT_ROOT" && -d "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
+    die 'the Telegram startup-receipt root is not a safe directory'
+  [[ "$(stat --format='%U:%G:%a' "$BOT_STARTUP_RECEIPT_ROOT")" == 'root:root:700' ]] ||
+    die 'the Telegram startup-receipt root ownership or mode is unsafe'
+  if [[ -e "$BOT_STARTUP_RECEIPT" || -L "$BOT_STARTUP_RECEIPT" ]]; then
+    [[ ! -L "$BOT_STARTUP_RECEIPT" && -f "$BOT_STARTUP_RECEIPT" ]] ||
+      die 'the Telegram startup receipt is not a safe regular file'
+    [[ "$(stat --format='%U:%G:%a' "$BOT_STARTUP_RECEIPT")" == 'root:root:600' ]] ||
+      die 'the Telegram startup receipt ownership or mode is unsafe'
+    rm -f -- "$BOT_STARTUP_RECEIPT"
+  fi
+  rmdir -- "$BOT_STARTUP_RECEIPT_ROOT" ||
+    die 'the Telegram startup-receipt root contains unexpected residue'
 }
 
 require_immutable_config_file() {
@@ -112,6 +134,7 @@ stop_project() {
     "$SECRET_ROOT/bot-action-transport-hmac" \
     "$SECRET_ROOT/bot-token" \
     "$SECRET_ROOT/supabase-ca.crt"
+  clear_bot_startup_receipt
 }
 
 disarm_expiry_stop() {
@@ -337,9 +360,134 @@ require_exact_private_runtime() {
   require_reviewed_owner_port_3002 "$commit_sha"
 }
 
+require_live_api_runtime_contract() {
+  local container_id="$1"
+  local runtime_contract
+
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the live API runtime-contract container identity is malformed'
+  runtime_contract="$(docker_local container exec "$container_id" \
+    node --input-type=module --eval '
+      try {
+        const response = await fetch("http://127.0.0.1:3000/healthz", {
+          redirect: "error",
+          signal: AbortSignal.timeout(3000),
+        });
+        const contentType = response.headers.get("content-type");
+        if (response.status !== 200 || !contentType?.startsWith("application/json")) {
+          process.exit(22);
+        }
+        const health = await response.json();
+        const runtimeContract = health.runtimeContract;
+        if (
+          health.status !== "ok" ||
+          health.service !== "fetanagent-api" ||
+          runtimeContract.financialActionsMode !== "dry_run" ||
+          runtimeContract.playerActionRuntimeEnabled !== true ||
+          runtimeContract.depositProofReferenceMastersConfigured !== true ||
+          runtimeContract.depositProofReferenceProfileVersion !== 2
+        ) {
+          process.exit(23);
+        }
+        process.stdout.write(JSON.stringify(runtimeContract));
+      } catch {
+        process.exit(24);
+      }
+    ')" || die 'the live API runtime contract could not be evaluated'
+  [[ "$runtime_contract" == \
+    '{"financialActionsMode":"dry_run","playerActionRuntimeEnabled":true,"depositProofReferenceMastersConfigured":true,"depositProofReferenceProfileVersion":2}' ]] ||
+    die 'the live API runtime contract is not the exact reviewed dry-run profile'
+}
+
+record_fresh_bot_startup_receipt() {
+  local commit_sha="$1"
+  local container_id container_started_at full_container_id restart_count revision temporary
+
+  container_id="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=bot')" ||
+    die 'the Telegram startup-receipt container inventory could not be inspected'
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the Telegram startup-receipt container inventory is not singular'
+  full_container_id="$(docker_local container inspect "$container_id" --format '{{.Id}}')" ||
+    die 'the Telegram startup-receipt container identity could not be inspected'
+  [[ "$full_container_id" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the Telegram startup-receipt container identity is malformed'
+  container_started_at="$(docker_local container inspect "$container_id" --format '{{.State.StartedAt}}')" ||
+    die 'the Telegram startup-receipt start time could not be inspected'
+  [[ "$container_started_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] ||
+    die 'the Telegram startup-receipt start time is not canonical UTC'
+  revision="$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" ||
+    die 'the Telegram startup-receipt revision could not be inspected'
+  [[ "$revision" == "$commit_sha" ]] ||
+    die 'the Telegram startup-receipt container does not run the reviewed commit'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.State.Status}}')" == 'running' ]] ||
+    die 'the Telegram startup-receipt container is not running'
+  restart_count="$(docker_local container inspect "$container_id" --format '{{.RestartCount}}')" ||
+    die 'the Telegram startup-receipt restart count could not be inspected'
+  [[ "$restart_count" == '0' ]] ||
+    die 'the Telegram startup-receipt container restarted unexpectedly'
+  docker_local container logs --tail 80 "$container_id" 2>&1 |
+    grep -Fq 'Telegram bot started with configured private admission and action handlers.' ||
+    die 'the Telegram startup-receipt container did not report its genuine startup contract'
+
+  [[ ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
+    die 'a Telegram startup receipt already exists before immediate attestation'
+  install -d -o root -g root -m 0700 "$BOT_STARTUP_RECEIPT_ROOT"
+  temporary="$(mktemp "$BOT_STARTUP_RECEIPT_ROOT/.bot-v1.XXXXXX")" ||
+    die 'the Telegram startup-receipt temporary file could not be created'
+  if ! printf '%s\n' \
+      "receipt_version=$BOT_STARTUP_RECEIPT_VERSION" \
+      "commit_sha=$commit_sha" \
+      "container_id=$full_container_id" \
+      "container_started_at=$container_started_at" \
+      'restart_count=0' \
+      'startup_contract=telegram-private-admission-actions-v1' >"$temporary" ||
+    ! chown root:root "$temporary" ||
+    ! chmod 0600 "$temporary" ||
+    ! mv -fT -- "$temporary" "$BOT_STARTUP_RECEIPT"; then
+    rm -f -- "$temporary"
+    die 'the Telegram startup receipt could not be sealed atomically'
+  fi
+}
+
+require_fresh_bot_startup_receipt() {
+  local commit_sha="$1"
+  local container_id="$2"
+  local container_started_at full_container_id restart_count
+
+  command -v cmp >/dev/null 2>&1 || die 'cmp is unavailable for Telegram startup receipt'
+  [[ ! -L "$BOT_STARTUP_RECEIPT_ROOT" && -d "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
+    die 'the Telegram startup-receipt root is absent or unsafe'
+  [[ "$(stat --format='%U:%G:%a' "$BOT_STARTUP_RECEIPT_ROOT")" == 'root:root:700' ]] ||
+    die 'the Telegram startup-receipt root ownership or mode is unsafe'
+  [[ ! -L "$BOT_STARTUP_RECEIPT" && -f "$BOT_STARTUP_RECEIPT" ]] ||
+    die 'the Telegram startup receipt is absent or unsafe'
+  [[ "$(stat --format='%U:%G:%a' "$BOT_STARTUP_RECEIPT")" == 'root:root:600' ]] ||
+    die 'the Telegram startup receipt ownership or mode is unsafe'
+  full_container_id="$(docker_local container inspect "$container_id" --format '{{.Id}}')" ||
+    die 'the receipted Telegram container identity could not be inspected'
+  [[ "$full_container_id" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the receipted Telegram container identity is malformed'
+  container_started_at="$(docker_local container inspect "$container_id" --format '{{.State.StartedAt}}')" ||
+    die 'the receipted Telegram start time could not be inspected'
+  restart_count="$(docker_local container inspect "$container_id" --format '{{.RestartCount}}')" ||
+    die 'the receipted Telegram restart count could not be inspected'
+  [[ "$restart_count" == '0' ]] || die 'the receipted Telegram bot restarted unexpectedly'
+  cmp -s -- "$BOT_STARTUP_RECEIPT" <(printf '%s\n' \
+    "receipt_version=$BOT_STARTUP_RECEIPT_VERSION" \
+    "commit_sha=$commit_sha" \
+    "container_id=$full_container_id" \
+    "container_started_at=$container_started_at" \
+    'restart_count=0' \
+    'startup_contract=telegram-private-admission-actions-v1') ||
+    die 'the Telegram startup receipt does not match this exact running container'
+}
+
 require_exact_fresh_private_runtime() {
   local commit_sha="$1"
-  local api_logs container_id environment forbidden_environment health ids revision service services state
+  local container_id environment forbidden_environment health ids revision service services state
   local expected_environment
   local -a expected_services=(api beta-admission customer-web owner-control)
 
@@ -406,14 +554,7 @@ require_exact_fresh_private_runtime() {
         grep -Fxq "$expected_environment" <<<"$environment" ||
           die 'the fresh-host API provider-proof v2 environment is not exact'
       done
-      api_logs="$(docker_local container logs --tail 80 "$ids" 2>&1)" ||
-        die 'the fresh-host API startup output could not be inspected'
-      grep -Fq '"financialActionsMode":"dry_run"' <<<"$api_logs" ||
-        die 'the fresh-host API did not report the dry-run startup contract'
-      grep -Fq '"depositProofReferenceMastersConfigured":true' <<<"$api_logs" ||
-        die 'the fresh-host API did not report configured provider-proof v2 roots'
-      grep -Fq '"depositProofReferenceProfileVersion":2' <<<"$api_logs" ||
-        die 'the fresh-host API did not report the provider-proof v2 profile identity'
+      require_live_api_runtime_contract "$ids"
     fi
     if [[ "$service" == 'api' || "$service" == 'customer-web' ]]; then
       for forbidden_environment in \
@@ -435,9 +576,13 @@ require_exact_fresh_private_runtime() {
 
 require_exact_fresh_bot_runtime() {
   local commit_sha="$1"
-  local api_logs container_id environment forbidden_environment health ids restart_count revision service services state
+  local startup_contract_mode="$2"
+  local container_id environment forbidden_environment health ids restart_count revision service services state
   local expected_environment
   local -a expected_services=(api beta-admission bot customer-web owner-control)
+
+  [[ "$startup_contract_mode" == 'immediate-startup' || "$startup_contract_mode" == 'steady-state' ]] ||
+    die 'the fresh-host Telegram startup-contract mode is invalid'
 
   services="$({
     docker_local container ls --all --quiet \
@@ -500,14 +645,7 @@ require_exact_fresh_bot_runtime() {
         grep -Fxq "$expected_environment" <<<"$environment" ||
           die 'the fresh-host API provider-proof v2 environment is not exact'
       done
-      api_logs="$(docker_local container logs --tail 80 "$ids" 2>&1)" ||
-        die 'the fresh-host API startup output could not be inspected'
-      grep -Fq '"financialActionsMode":"dry_run"' <<<"$api_logs" ||
-        die 'the fresh-host API did not report the dry-run startup contract'
-      grep -Fq '"depositProofReferenceMastersConfigured":true' <<<"$api_logs" ||
-        die 'the fresh-host API did not report configured provider-proof v2 roots'
-      grep -Fq '"depositProofReferenceProfileVersion":2' <<<"$api_logs" ||
-        die 'the fresh-host API did not report the provider-proof v2 profile identity'
+      require_live_api_runtime_contract "$ids"
     fi
     if [[ "$service" == 'api' || "$service" == 'customer-web' ]]; then
       for forbidden_environment in \
@@ -532,9 +670,13 @@ require_exact_fresh_bot_runtime() {
       done
       restart_count="$(docker_local container inspect "$ids" --format '{{.RestartCount}}')"
       [[ "$restart_count" == '0' ]] || die 'the fresh-host Telegram bot restarted unexpectedly'
-      docker_local container logs --tail 80 "$ids" 2>&1 |
-        grep -Fq 'Telegram bot started with configured private admission and action handlers.' ||
-        die 'the fresh-host Telegram bot did not report its genuine startup contract'
+      if [[ "$startup_contract_mode" == 'immediate-startup' ]]; then
+        docker_local container logs --tail 80 "$ids" 2>&1 |
+          grep -Fq 'Telegram bot started with configured private admission and action handlers.' ||
+          die 'the fresh-host Telegram bot did not report its genuine startup contract'
+      else
+        require_fresh_bot_startup_receipt "$commit_sha" "$ids"
+      fi
     else
       health="$(docker_local container inspect "$ids" --format '{{.State.Health.Status}}')"
       [[ "$health" == 'healthy' ]] || die "the fresh-host $service service is not healthy"
@@ -868,7 +1010,7 @@ require_fresh_public_edge_ready() {
 
   validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"
   require_fresh_host_identity
-  require_exact_fresh_bot_runtime "$commit_sha"
+  require_exact_fresh_bot_runtime "$commit_sha" steady-state
   require_public_network_ready "$FRESH_PUBLIC_IPV4"
 }
 
@@ -1014,6 +1156,7 @@ case "$command" in
     # reading deploy inputs, running database preflights, or starting a container.
     if [[ "$command" == 'fresh-start' ]]; then
       require_fresh_host_start_ready "$commit_sha"
+      clear_bot_startup_receipt
     else
       require_private_start_cutover_ready "$commit_sha"
     fi
@@ -1198,13 +1341,16 @@ case "$command" in
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
       --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file"
     )
+    clear_bot_startup_receipt
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       up -d --no-build --no-deps bot
     ;;
 
   bot-ready)
     [[ $# -eq 2 ]] || die 'bot-ready requires one reviewed main commit'
-    require_exact_fresh_bot_runtime "$2"
+    require_exact_fresh_bot_runtime "$2" immediate-startup
+    record_fresh_bot_startup_receipt "$2"
+    require_exact_fresh_bot_runtime "$2" steady-state
     ;;
 
   stop-bot)
@@ -1220,6 +1366,7 @@ case "$command" in
         die 'the Telegram bot container inventory is ambiguous'
       docker_local container rm --force "$bot_container" >/dev/null
     fi
+    clear_bot_startup_receipt
     disabled_token="$(mktemp "$SECRET_ROOT/.bot-token-disabled.XXXXXX")"
     printf '%s\n' 'telegram-disabled-until-separate-smoke' >"$disabled_token"
     install -o 10001 -g 10001 -m 0400 "$disabled_token" "$SECRET_ROOT/bot-token"
@@ -1248,7 +1395,7 @@ case "$command" in
       die 'the gateway image revision does not match the reviewed commit'
     if [[ "$command" == 'start-fresh-public-edge' ]]; then
       require_fresh_public_edge_ready "$commit_sha"
-      require_exact_fresh_bot_runtime "$commit_sha"
+      require_exact_fresh_bot_runtime "$commit_sha" steady-state
     else
       require_public_edge_ready "$commit_sha"
       require_exact_private_runtime "$commit_sha"

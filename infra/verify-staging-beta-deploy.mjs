@@ -13,6 +13,7 @@ const botWorkflow = readFileSync(
   'utf8',
 );
 const botSource = readFileSync(resolve(root, 'apps/bot/src/index.ts'), 'utf8');
+const apiSource = readFileSync(resolve(root, 'apps/api/src/app.ts'), 'utf8');
 const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/quality.yml'), 'utf8');
 const compose = readFileSync(resolve(root, 'infra/compose.staging-beta.yaml'), 'utf8');
 const stagingRunbook = readFileSync(resolve(root, 'infra/staging-beta.md'), 'utf8');
@@ -34,7 +35,9 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  '4f5ab957834bc5322e820d693c3348295fee4fb48bc816d6b50defa02ff22c3e';
+  '4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-4966c316';
+const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
 const reviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -557,6 +560,16 @@ assert.match(helperReplacementRunbook, /current staging Droplet `593344964`/);
 assert.match(helperReplacementRunbook, /stop-and-disable/);
 assert.match(helperReplacementRunbook, new RegExp(installedHelperPredecessorSha, 'gu'));
 assert.match(helperReplacementRunbook, new RegExp(reviewedHelperSuccessorSha, 'gu'));
+assert.ok(
+  helperReplacementRunbook.includes(`BACKUP="$STAGING_ROOT/${installedHelperBackupName}"`) &&
+    helperReplacementRunbook.includes(`BACKUP='${installedHelperBackupPath}'`),
+  'The replacement and restore blocks must use the same new fixed predecessor-versioned backup path.',
+);
+assert.doesNotMatch(
+  helperReplacementRunbook,
+  /BACKUP=(?:"\$STAGING_ROOT\/|')fetanagent-staging-deploy-helper\.previous(?:"|')/u,
+  'The current rotation must not reuse the prior unversioned backup evidence path.',
+);
 assert.match(helperReplacementRunbook, /metadata\/v1/);
 assert.match(helperReplacementRunbook, /593344964/);
 assert.match(helperReplacementRunbook, /161\.35\.41\.232/);
@@ -836,6 +849,9 @@ assert.match(helper, /DOCKER_HOST="\$LOCAL_DOCKER_SOCKET"/);
 assert.match(helper, /--env-file \/dev\/null/);
 assert.match(helper, /--project-name "\$PROJECT_NAME"/);
 assert.match(helper, /up -d --no-build --wait --wait-timeout 90/);
+assert.match(helper, /BOT_STARTUP_RECEIPT_ROOT='\/var\/lib\/fetanagent-bot-startup-receipt'/);
+assert.match(helper, /BOT_STARTUP_RECEIPT="\$BOT_STARTUP_RECEIPT_ROOT\/bot-v1"/);
+assert.match(helper, /BOT_STARTUP_RECEIPT_VERSION='1'/);
 assert.match(helper, /STAGING_DIRECT_DATABASE_HOST='db\.spzpiyxheappsfyswewl\.supabase\.co'/);
 assert.match(helper, /ip -6 address show scope global/);
 assert.match(helper, /ip -6 route show default/);
@@ -910,6 +926,13 @@ const normalStopCommand = /\n  stop\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(normalStopCommand, 'The ordinary stop command must remain present.');
 assert.match(normalStopCommand, /stop_project/);
 assert.match(normalStopCommand, /disarm_expiry_stop/);
+const stopProject = /stop_project\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(stopProject, 'The helper must define exact project cleanup.');
+assert.match(stopProject, /clear_bot_startup_receipt/);
+assert.match(
+  helper,
+  /if \[\[ "\$command" == 'fresh-start' \]\]; then\s+require_fresh_host_start_ready "\$commit_sha"\s+clear_bot_startup_receipt/,
+);
 const freshHostIdentity = /require_fresh_host_identity\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(freshHostIdentity, 'The helper must define the exact fresh-host identity gate.');
 assert.match(freshHostIdentity, /curl --fail --silent --show-error --noproxy '\*' --max-time 3/);
@@ -919,8 +942,139 @@ assert.doesNotMatch(
   /curl|wget|git |\.env|xzztugbgtulptnbpoelr/,
 );
 
+const liveApiRuntimeContract = /require_live_api_runtime_contract\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  liveApiRuntimeContract,
+  'The helper must re-evaluate the redacted contract inside the exact live API container.',
+);
+for (const expected of [
+  '[[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]]',
+  'docker_local container exec "$container_id"',
+  'node --input-type=module --eval',
+  'fetch("http://127.0.0.1:3000/healthz"',
+  'redirect: "error"',
+  'signal: AbortSignal.timeout(3000)',
+  'response.headers.get("content-type")',
+  'contentType?.startsWith("application/json")',
+  'response.status !== 200',
+  'health.status !== "ok"',
+  'health.service !== "fetanagent-api"',
+  'runtimeContract.financialActionsMode !== "dry_run"',
+  'runtimeContract.playerActionRuntimeEnabled !== true',
+  'runtimeContract.depositProofReferenceMastersConfigured !== true',
+  'runtimeContract.depositProofReferenceProfileVersion !== 2',
+  'process.exit(23)',
+  'process.stdout.write(JSON.stringify(runtimeContract))',
+  '[[ "$runtime_contract" ==',
+  '{"financialActionsMode":"dry_run","playerActionRuntimeEnabled":true,"depositProofReferenceMastersConfigured":true,"depositProofReferenceProfileVersion":2}',
+]) {
+  assert.ok(
+    liveApiRuntimeContract.includes(expected),
+    `Live API contract gate missing ${expected}.`,
+  );
+}
+assert.doesNotMatch(
+  liveApiRuntimeContract,
+  /container logs|console\.|process\.env|\.env|token|password|connection|secret|https?:\/\/(?!127\.0\.0\.1:3000\/healthz)|\b(?:rm|mv|stop|disable|kill|prune)\b/iu,
+);
+const apiHealthStart = apiSource.indexOf("app.get('/healthz'");
+const apiReadyStart = apiSource.indexOf("app.get('/readyz'", apiHealthStart);
+assert.ok(
+  apiHealthStart >= 0 && apiReadyStart > apiHealthStart,
+  'The API health route must exist.',
+);
+const apiHealthRoute = apiSource.slice(apiHealthStart, apiReadyStart);
+for (const expected of [
+  'runtimeContract:',
+  'financialActionsMode: config.financialActionsMode',
+  'playerActionRuntimeEnabled: config.telegramPlayerActionRuntime.enabled',
+  'depositProofReferenceMastersConfigured: config.telegramPlayerActionRuntime.enabled',
+  'config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion ?? null',
+]) {
+  assert.ok(apiHealthRoute.includes(expected), `API health runtime contract missing ${expected}.`);
+}
+assert.doesNotMatch(apiHealthRoute, /password|secret|connection|token/iu);
+
+const clearBotStartupReceipt = /clear_bot_startup_receipt\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(clearBotStartupReceipt, 'The helper must define exact Telegram receipt cleanup.');
+assert.match(clearBotStartupReceipt, /root:root:700/);
+assert.match(clearBotStartupReceipt, /root:root:600/);
+assert.match(clearBotStartupReceipt, /rm -f -- "\$BOT_STARTUP_RECEIPT"/);
+assert.match(clearBotStartupReceipt, /rmdir -- "\$BOT_STARTUP_RECEIPT_ROOT"/);
+assert.doesNotMatch(clearBotStartupReceipt, /rm -rf|find|glob|\*/);
+
+const recordBotStartupReceipt = /record_fresh_bot_startup_receipt\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(recordBotStartupReceipt, 'The helper must seal the immediate Telegram startup proof.');
+for (const expected of [
+  'label=com.docker.compose.project=$PROJECT_NAME',
+  'label=com.docker.compose.service=bot',
+  '{{.Id}}',
+  '{{.State.StartedAt}}',
+  'org.opencontainers.image.revision',
+  '[[ "$revision" == "$commit_sha" ]]',
+  '{{.State.Status}}',
+  '{{.RestartCount}}',
+  'docker_local container logs --tail 80 "$container_id"',
+  'Telegram bot started with configured private admission and action handlers.',
+  'install -d -o root -g root -m 0700 "$BOT_STARTUP_RECEIPT_ROOT"',
+  'mktemp "$BOT_STARTUP_RECEIPT_ROOT/.bot-v1.XXXXXX"',
+  '"receipt_version=$BOT_STARTUP_RECEIPT_VERSION"',
+  '"commit_sha=$commit_sha"',
+  '"container_id=$full_container_id"',
+  '"container_started_at=$container_started_at"',
+  "'restart_count=0'",
+  "'startup_contract=telegram-private-admission-actions-v1'",
+  'mv -fT -- "$temporary" "$BOT_STARTUP_RECEIPT"',
+  'rm -f -- "$temporary"',
+  'the Telegram startup receipt could not be sealed atomically',
+]) {
+  assert.ok(recordBotStartupReceipt.includes(expected), `Bot startup receipt missing ${expected}.`);
+}
+assert.doesNotMatch(recordBotStartupReceipt, /token|password|secret/iu);
+assert.match(
+  recordBotStartupReceipt,
+  /if ! printf[\s\S]*! chown[\s\S]*! chmod[\s\S]*! mv[\s\S]*then\s+rm -f -- "\$temporary"/,
+);
+
+const requireBotStartupReceipt = /require_fresh_bot_startup_receipt\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(requireBotStartupReceipt, 'The helper must bind steady Telegram state to its receipt.');
+for (const expected of [
+  'root:root:700',
+  'root:root:600',
+  '{{.Id}}',
+  '{{.State.StartedAt}}',
+  '{{.RestartCount}}',
+  'cmp -s -- "$BOT_STARTUP_RECEIPT"',
+  '"receipt_version=$BOT_STARTUP_RECEIPT_VERSION"',
+  '"commit_sha=$commit_sha"',
+  '"container_id=$full_container_id"',
+  '"container_started_at=$container_started_at"',
+  "'restart_count=0'",
+  "'startup_contract=telegram-private-admission-actions-v1'",
+]) {
+  assert.ok(
+    requireBotStartupReceipt.includes(expected),
+    `Bot startup receipt gate missing ${expected}.`,
+  );
+}
+assert.doesNotMatch(
+  requireBotStartupReceipt,
+  /container logs|token|password|secret|\b(?:rm|mv|stop|disable|kill|prune)\b/iu,
+);
+
 const freshBotRuntime = /require_exact_fresh_bot_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(freshBotRuntime, 'The helper must define an exact fresh-host Telegram runtime gate.');
+assert.match(freshBotRuntime, /local startup_contract_mode="\$2"/);
+assert.match(
+  freshBotRuntime,
+  /"\$startup_contract_mode" == 'immediate-startup' \|\| "\$startup_contract_mode" == 'steady-state'/,
+);
 assert.match(freshBotRuntime, /api beta-admission bot customer-web owner-control/);
 assert.match(freshBotRuntime, /NODE_ENV=production/);
 assert.match(freshBotRuntime, /FINANCIAL_ACTIONS_MODE=dry_run/);
@@ -942,21 +1096,26 @@ assert.match(
   freshBotRuntime,
   /DEPOSIT_PROOF_REFERENCE_PROFILE_FILE=\/etc\/fetanagent\/deposit-proof-reference-profile\.v2\.json/,
 );
-assert.match(freshBotRuntime, /depositProofReferenceMastersConfigured/);
-assert.match(freshBotRuntime, /depositProofReferenceProfileVersion/);
+assert.match(freshBotRuntime, /require_live_api_runtime_contract "\$ids"/);
 assert.match(freshBotRuntime, /RestartCount/);
 assert.match(
   freshBotRuntime,
   /Telegram bot started with configured private admission and action handlers\./,
 );
 assert.match(
+  freshBotRuntime,
+  /if \[\[ "\$startup_contract_mode" == 'immediate-startup' \]\]; then[\s\S]*container logs --tail 80[\s\S]*else[\s\S]*require_fresh_bot_startup_receipt "\$commit_sha" "\$ids"/,
+);
+assert.equal(
+  (freshBotRuntime.match(/container logs --tail 80/g) ?? []).length,
+  1,
+  'Only immediate Telegram activation may inspect the bounded startup log.',
+);
+assert.match(
   botSource,
   /Telegram bot started with configured private admission and action handlers\./,
 );
-assert.doesNotMatch(
-  freshBotRuntime,
-  /container logs(?! --tail 80)|\bcat\b|token=|password=|echo [^\n]*(?:SECRET|PROFILE)/,
-);
+assert.doesNotMatch(freshBotRuntime, /\bcat\b|token=|password=|echo [^\n]*(?:SECRET|PROFILE)/);
 
 const freshPrivateRuntime = /require_exact_fresh_private_runtime\(\) \{[\s\S]*?\n\}/u.exec(
   helper,
@@ -970,8 +1129,8 @@ assert.match(
   freshPrivateRuntime,
   /INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED=true/,
 );
-assert.match(freshPrivateRuntime, /depositProofReferenceMastersConfigured/);
-assert.match(freshPrivateRuntime, /depositProofReferenceProfileVersion/);
+assert.match(freshPrivateRuntime, /require_live_api_runtime_contract "\$ids"/);
+assert.doesNotMatch(freshPrivateRuntime, /container logs/);
 
 const disabledBotReady = /require_fresh_bot_disabled_ready\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(disabledBotReady, 'The helper must define the fresh-host disabled-bot gate.');
@@ -992,6 +1151,7 @@ assert.ok(startBot, 'The helper must define the isolated Telegram bot start boun
 assert.match(startBot, /require_exact_fresh_private_runtime "\$commit_sha"/);
 assert.match(startBot, /fetanagent-bot:\$image_tag/);
 assert.match(startBot, /--env-file \/dev\/null/);
+assert.match(startBot, /clear_bot_startup_receipt/);
 assert.match(startBot, /up -d --no-build --no-deps bot/);
 assert.doesNotMatch(startBot, /gateway|FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
 
@@ -999,9 +1159,30 @@ const stopBot = /\n  stop-bot\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(stopBot, 'The helper must define a fail-closed Telegram bot stop boundary.');
 assert.match(stopBot, /com\.docker\.compose\.service=bot/);
 assert.match(stopBot, /container rm --force/);
+assert.match(stopBot, /clear_bot_startup_receipt/);
 assert.match(stopBot, /telegram-disabled-until-separate-smoke/);
 assert.match(stopBot, /require_fresh_bot_disabled_ready "\$commit_sha"/);
 assert.doesNotMatch(stopBot, /stop_project|network rm|owner-control|api|beta-admission/);
+
+const botReady = /\n  bot-ready\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(
+  botReady,
+  'The helper must define the immediate Telegram readiness and receipt boundary.',
+);
+assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" immediate-startup/);
+assert.match(botReady, /record_fresh_bot_startup_receipt "\$2"/);
+assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" steady-state/);
+const botRuntimeCalls = [
+  ...helper.matchAll(
+    /require_exact_fresh_bot_runtime "(\$(?:commit_sha|2))" (immediate-startup|steady-state)/gu,
+  ),
+].map((match) => `${match[1]} ${match[2]}`);
+assert.deepEqual(botRuntimeCalls, [
+  '$commit_sha steady-state',
+  '$2 immediate-startup',
+  '$2 steady-state',
+  '$commit_sha steady-state',
+]);
 
 const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
 assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');

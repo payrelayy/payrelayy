@@ -4,7 +4,7 @@ import {
   OwnerPrivateLivePilotRejectedError,
   OwnerPrivateLivePilotUnavailableError,
   PostgresOwnerPrivateLivePilotControl,
-  type PreparePrivateLivePilotRequest,
+  type PrepareApprovedPrivateLivePilotRequest,
   type PrivateLivePilotDatabase,
 } from './owner-private-live-pilot.js';
 
@@ -13,20 +13,13 @@ const requestId = '22222222-22aa-4bbb-8ccc-222222222222';
 const pilotRevisionId = '33333333-3333-4333-8333-333333333333';
 
 function preparation(
-  overrides: Partial<PreparePrivateLivePilotRequest> = {},
-): PreparePrivateLivePilotRequest {
+  overrides: Partial<PrepareApprovedPrivateLivePilotRequest> = {},
+): PrepareApprovedPrivateLivePilotRequest {
   return {
     activeFrom: new Date('2026-08-21T20:00:00.000Z'),
     expiresAt: new Date('2026-08-21T22:00:00.000Z'),
-    maximumAggregateMinor: 12_500,
-    maximumPerDepositMinor: 2_500,
-    maximumPerPlayerMinor: 2_500,
-    maximumReservationCount: 5,
-    minimumAmountMinor: 2_500,
     playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
-    providerCodes: ['telebirr'],
     requestId,
-    submittingCustomerIds: ['44444444-4444-4444-8444-444444444444'],
     ...overrides,
   };
 }
@@ -58,18 +51,11 @@ function statusRow(overrides: Record<string, unknown> = {}): Record<string, unkn
 describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
   it('prepares with one UUID-v4 request key and returns only the redacted aggregate status', async () => {
     const query = vi.fn<PrivateLivePilotDatabase['query']>(async (sql, values) => {
-      if (sql.includes('prepare_private_live_deposit_pilot')) {
+      if (sql.includes('prepare_approved_private_live_telebirr_pilot')) {
         expect(values).toEqual([
           authUserId,
           requestId,
-          ['telebirr'],
           ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
-          ['44444444-4444-4444-8444-444444444444'],
-          2_500,
-          2_500,
-          2_500,
-          12_500,
-          5,
           new Date('2026-08-21T20:00:00.000Z'),
           new Date('2026-08-21T22:00:00.000Z'),
         ]);
@@ -111,15 +97,13 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
     expect(JSON.stringify(result)).not.toContain('PLAYER-1');
     expect(JSON.stringify(result)).not.toContain('PLAYER-SECRET');
     expect(JSON.stringify(result)).not.toContain('RAW-REFERENCE-SECRET');
-    expect(JSON.stringify(result)).not.toContain('44444444-4444-4444-8444-444444444444');
     expect(JSON.stringify(result)).not.toContain('77777777-7777-4777-8777-777777777777');
   });
 
-  it('rejects malformed, duplicated, or over-cap preparation before the database', async () => {
+  it('rejects malformed, duplicated, or non-two-hour preparation before the database', async () => {
     const query = vi.fn<PrivateLivePilotDatabase['query']>();
     const control = new PostgresOwnerPrivateLivePilotControl({ query });
     const invalid = preparation({
-      maximumAggregateMinor: 12_501,
       playerIds: ['PLAYER-1', 'PLAYER-1', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
     });
 
@@ -129,7 +113,30 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
     await expect(
       control.prepare(authUserId, preparation({ requestId: requestId.toUpperCase() })),
     ).rejects.toBeInstanceOf(OwnerPrivateLivePilotRejectedError);
+    await expect(
+      control.prepare(authUserId, preparation({ expiresAt: new Date('2026-08-21T22:00:00.001Z') })),
+    ).rejects.toBeInstanceOf(OwnerPrivateLivePilotRejectedError);
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it('returns no current pilot or validates the one aggregate current projection', async () => {
+    const empty = new PostgresOwnerPrivateLivePilotControl({
+      query: async (sql) => {
+        expect(sql).toContain('get_current_private_live_deposit_pilot_status');
+        return { rows: [] };
+      },
+    });
+    await expect(empty.current(authUserId)).resolves.toBeUndefined();
+
+    const current = new PostgresOwnerPrivateLivePilotControl({
+      query: async () => ({ rows: [statusRow({ pilot_status: 'armed', switch_mode: 'dry_run' })] }),
+    });
+    await expect(current.current(authUserId)).resolves.toMatchObject({
+      financiallyActive: false,
+      pilotRevisionId,
+      pilotStatus: 'armed',
+      switchMode: 'dry_run',
+    });
   });
 
   it('treats an already-armed pilot as a replay without invoking arm again', async () => {

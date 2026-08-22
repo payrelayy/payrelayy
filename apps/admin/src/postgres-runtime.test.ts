@@ -86,7 +86,10 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
-      'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)',
+      'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.get_current_private_live_deposit_pilot_status(uuid)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.arm_private_live_deposit_pilot(uuid,uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
@@ -95,7 +98,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.get_private_live_deposit_pilot_status(uuid,uuid)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 18');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 19');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');

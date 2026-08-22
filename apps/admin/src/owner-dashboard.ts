@@ -118,6 +118,53 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           <div class="request-list" id="player-eligibility-list"></div>
         </section>
 
+        <section class="review-section pilot-section" aria-labelledby="pilot-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Approved fixed private pilot</p>
+              <h2 id="pilot-title">TeleBirr five-Player pilot</h2>
+            </div>
+            <button class="secondary" id="pilot-refresh-button" type="button">Refresh status</button>
+          </div>
+          <p class="receipt-label">
+            Fixed contract: TeleBirr only, exactly five currently eligible KemerBet Players,
+            25 ETB maximum per deposit and Player, 125 ETB total, five permanent reservations,
+            and exactly two hours. Customer membership is derived from the selected Player owners
+            inside PostgreSQL; no customer UUID or credential is entered here.
+          </p>
+          <p class="pilot-warning">
+            Prepare and arm configure a dormant dry run only. They do not enable payment
+            verification, settlement, the executor, or a KemerBet final action.
+          </p>
+          <p class="request-meta" id="pilot-readiness">Loading eligible Players…</p>
+          <div class="request-list" id="pilot-candidate-list"></div>
+          <form id="pilot-prepare-form">
+            <label class="confirmation-row" for="pilot-confirmation">
+              <input id="pilot-confirmation" name="confirmation" type="checkbox" />
+              I approve this exact fixed two-hour TeleBirr cohort and understand it remains
+              financially disabled after preparation.
+            </label>
+            <button id="pilot-prepare-button" type="submit" disabled>Prepare fixed pilot</button>
+          </form>
+          <div class="pilot-status" id="pilot-status" hidden>
+            <h3>Current pilot status</h3>
+            <dl id="pilot-status-facts"></dl>
+            <div class="review-actions">
+              <button id="pilot-arm-button" type="button">Arm dry-run configuration</button>
+              <button class="danger" id="pilot-stop-button" type="button">Emergency stop</button>
+            </div>
+            <label for="pilot-stop-reason">Emergency-stop reason</label>
+            <select id="pilot-stop-reason">
+              <option value="owner_stop">Owner stop</option>
+              <option value="provider_incident">Provider incident</option>
+              <option value="parser_drift">Parser drift</option>
+              <option value="execution_uncertainty">Execution uncertainty</option>
+              <option value="cap_review">Cap review</option>
+              <option value="pilot_complete">Pilot complete</option>
+            </select>
+          </div>
+        </section>
+
         <section class="review-section" aria-labelledby="deposit-intake-title">
           <div class="panel-heading">
             <div>
@@ -177,6 +224,16 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
 .review-actions button { padding: 10px 12px; font-size: 0.83rem; }
 .empty-state { color: #a1a1aa; }
+.pilot-warning { border-left: 3px solid #fcd34d; color: #fde68a; background: #211b0e; padding: 12px 14px; line-height: 1.5; }
+.confirmation-row { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 10px; margin-top: 16px; line-height: 1.5; }
+.confirmation-row input { width: auto; margin-top: 4px; }
+.pilot-choice { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; }
+.pilot-choice input { width: auto; }
+.pilot-status { margin-top: 20px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
+.pilot-status h3 { margin-top: 0; }
+.pilot-status dl { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 8px 14px; }
+.pilot-status dt { color: #a1a1aa; }
+.pilot-status dd { margin: 0; overflow-wrap: anywhere; }
 output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #cffafe; background: #0c1d20; padding: 14px; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .notice { min-height: 24px; color: #fcd34d; font-weight: 700; }
@@ -201,10 +258,24 @@ const refreshRequestsButton = document.querySelector('#refresh-requests-button')
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
 const playerEligibilityList = document.querySelector('#player-eligibility-list');
+const pilotCandidateList = document.querySelector('#pilot-candidate-list');
+const pilotReadiness = document.querySelector('#pilot-readiness');
+const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
+const pilotConfirmation = document.querySelector('#pilot-confirmation');
+const pilotPrepareButton = document.querySelector('#pilot-prepare-button');
+const pilotRefreshButton = document.querySelector('#pilot-refresh-button');
+const pilotStatusPanel = document.querySelector('#pilot-status');
+const pilotStatusFacts = document.querySelector('#pilot-status-facts');
+const pilotArmButton = document.querySelector('#pilot-arm-button');
+const pilotStopButton = document.querySelector('#pilot-stop-button');
+const pilotStopReason = document.querySelector('#pilot-stop-reason');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
 let currentInvite;
+let currentPilot;
+let eligiblePilotPlayers = [];
+const selectedPilotPlayerIds = new Set();
 const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
 
 function setNotice(message) {
@@ -234,6 +305,18 @@ function clearPlayerEligibility() {
   playerEligibilityList.replaceChildren();
 }
 
+function clearPilot() {
+  currentPilot = undefined;
+  eligiblePilotPlayers = [];
+  selectedPilotPlayerIds.clear();
+  pilotCandidateList.replaceChildren();
+  pilotStatusFacts.replaceChildren();
+  pilotStatusPanel.hidden = true;
+  pilotConfirmation.checked = false;
+  pilotReadiness.textContent = 'Sign in to load the approved cohort.';
+  pilotPrepareButton.disabled = true;
+}
+
 function clearDepositIntake() {
   depositIntakeList.replaceChildren();
 }
@@ -245,6 +328,7 @@ function signOut(message = 'Signed out.') {
   clearPlayerRequests();
   clearAssociationCandidates();
   clearPlayerEligibility();
+  clearPilot();
   clearDepositIntake();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
@@ -344,6 +428,131 @@ function validPlayerEligibility(value) {
       !(decisionAbsent || decisionPresent)) return undefined;
   return { decidedAt: value.decidedAt, decision: value.decision, decisionVersion: value.decisionVersion,
     playerAccountId, playerId, playerStatus: value.playerStatus, validationStatus: value.validationStatus };
+}
+
+function validPilotStatus(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const pilotRevisionId = typeof value.pilotRevisionId === 'string' ? value.pilotRevisionId : undefined;
+  const statusValid = value.pilotStatus === 'draft' || value.pilotStatus === 'armed' || value.pilotStatus === 'stopped';
+  const switchValid = value.switchMode === 'disabled' || value.switchMode === 'dry_run' || value.switchMode === 'live';
+  if (!pilotRevisionId ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(pilotRevisionId) ||
+      value.contractVersion !== 1 || !statusValid || !switchValid ||
+      typeof value.configurationDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.configurationDigest) ||
+      typeof value.financiallyActive !== 'boolean' || typeof value.withinActiveWindow !== 'boolean' ||
+      value.playerCount !== 5 || value.providerCount !== 1 ||
+      !Number.isSafeInteger(value.submittingCustomerCount) || value.submittingCustomerCount < 1 || value.submittingCustomerCount > 5 ||
+      !Number.isSafeInteger(value.reservedDepositCount) || value.reservedDepositCount < 0 || value.reservedDepositCount > 5 ||
+      value.maximumReservationCount !== 5 || value.maximumAggregateMinor !== '12500' ||
+      typeof value.reservedAmountMinor !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(value.reservedAmountMinor) ||
+      BigInt(value.reservedAmountMinor) > 12500n ||
+      typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt)) ||
+      (value.financiallyActive && (value.pilotStatus !== 'armed' || value.switchMode !== 'live')) ||
+      (value.pilotStatus === 'draft' && value.switchMode !== 'disabled') ||
+      (value.pilotStatus === 'armed' && value.switchMode !== 'dry_run' && value.switchMode !== 'live') ||
+      (value.pilotStatus === 'stopped' && value.switchMode !== 'disabled')) return undefined;
+  return {
+    configurationDigest: value.configurationDigest,
+    expiresAt: value.expiresAt,
+    financiallyActive: value.financiallyActive,
+    pilotRevisionId,
+    pilotStatus: value.pilotStatus,
+    reservedAmountMinor: value.reservedAmountMinor,
+    reservedDepositCount: value.reservedDepositCount,
+    switchMode: value.switchMode,
+    withinActiveWindow: value.withinActiveWindow,
+  };
+}
+
+function updatePilotPreparationAvailability() {
+  pilotPrepareButton.disabled = Boolean(currentPilot) || selectedPilotPlayerIds.size !== 5 ||
+    !pilotConfirmation.checked;
+}
+
+function renderPilotCandidates(players) {
+  eligiblePilotPlayers = players.filter((player) => player.playerStatus === 'active' &&
+    player.validationStatus === 'valid' && player.decision === 'eligible');
+  for (const selected of [...selectedPilotPlayerIds]) {
+    if (!eligiblePilotPlayers.some((player) => player.playerId === selected)) {
+      selectedPilotPlayerIds.delete(selected);
+    }
+  }
+  pilotCandidateList.replaceChildren();
+  pilotReadiness.textContent = eligiblePilotPlayers.length + '/5 currently eligible Players are available. ' +
+    (eligiblePilotPlayers.length < 5
+      ? 'Preparation remains blocked until exactly five are ready.'
+      : 'Select exactly five for the fixed cohort.');
+  if (eligiblePilotPlayers.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No active, valid, currently eligible Player IDs.';
+    pilotCandidateList.append(empty);
+  }
+  for (const player of eligiblePilotPlayers) {
+    const label = document.createElement('label');
+    label.className = 'request-card pilot-choice';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selectedPilotPlayerIds.has(player.playerId);
+    checkbox.disabled = Boolean(currentPilot);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedPilotPlayerIds.add(player.playerId);
+      else selectedPilotPlayerIds.delete(player.playerId);
+      updatePilotPreparationAvailability();
+    });
+    const text = document.createElement('span');
+    text.textContent = player.playerId + ' · active · valid · eligible';
+    label.append(checkbox, text);
+    pilotCandidateList.append(label);
+  }
+  updatePilotPreparationAvailability();
+}
+
+function renderPilotStatus(pilot) {
+  currentPilot = pilot;
+  pilotStatusFacts.replaceChildren();
+  pilotStatusPanel.hidden = !pilot;
+  if (!pilot) {
+    renderPilotCandidates(eligiblePilotPlayers);
+    return;
+  }
+  const facts = [
+    ['State', pilot.pilotStatus],
+    ['Financial switch', pilot.switchMode],
+    ['Financially active', pilot.financiallyActive ? 'YES — stop immediately' : 'No'],
+    ['Within two-hour window', pilot.withinActiveWindow ? 'Yes' : 'No'],
+    ['Reservations', String(pilot.reservedDepositCount) + '/5'],
+    ['Reserved amount', String(Number(pilot.reservedAmountMinor) / 100) + ' / 125 ETB'],
+    ['Expires', new Date(pilot.expiresAt).toLocaleString()],
+  ];
+  for (const [label, value] of facts) {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const detail = document.createElement('dd');
+    detail.textContent = value;
+    pilotStatusFacts.append(term, detail);
+  }
+  pilotArmButton.disabled = pilot.pilotStatus !== 'draft' || pilot.financiallyActive;
+  pilotStopButton.disabled = pilot.pilotStatus === 'stopped';
+  renderPilotCandidates(eligiblePilotPlayers);
+}
+
+async function loadCurrentPilot() {
+  pilotRefreshButton.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/private-live-deposit-pilots/current', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('pilot_status');
+    const payload = await response.json();
+    if (!payload || (payload.pilot !== null && !validPilotStatus(payload.pilot))) throw new Error('pilot_status');
+    renderPilotStatus(payload.pilot === null ? undefined : validPilotStatus(payload.pilot));
+  } catch (error) {
+    if (!currentPilot) renderPilotStatus(undefined);
+    if (!isSignedOutError(error)) setNotice('Current private-pilot status is unavailable. Do not prepare or arm.');
+  } finally {
+    pilotRefreshButton.disabled = false;
+  }
 }
 
 function validDepositIntake(value) {
@@ -576,6 +785,7 @@ async function decidePlayerEligibility(player, decision) {
 
 function renderPlayerEligibility(players) {
   clearPlayerEligibility();
+  renderPilotCandidates(players);
   if (players.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-state';
@@ -726,6 +936,119 @@ async function loadDepositIntake() {
   renderDepositIntake(deposits, assessments);
 }
 
+function pilotMutationHeaders(requestId) {
+  return {
+    'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'private-live-pilot-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+async function prepareFixedPilot() {
+  if (currentPilot || selectedPilotPlayerIds.size !== 5 || !pilotConfirmation.checked) return;
+  if (!window.confirm(
+    'Prepare exactly five selected Players for the fixed TeleBirr pilot: 25 ETB each, 125 ETB total, one reservation each, and two hours? This remains financially disabled.',
+  )) return;
+  const requestId = crypto.randomUUID();
+  const activeFrom = new Date(Date.now() + 5_000);
+  const expiresAt = new Date(activeFrom.getTime() + 2 * 60 * 60 * 1_000);
+  setBusy(pilotPrepareForm, true);
+  setNotice('Preparing the fixed dormant TeleBirr pilot…');
+  try {
+    const response = await ownerRequest('/v1/owner/private-live-deposit-pilots/prepare', {
+      method: 'POST',
+      headers: pilotMutationHeaders(requestId),
+      body: JSON.stringify({
+        activeFrom: activeFrom.toISOString(),
+        confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
+        expiresAt: expiresAt.toISOString(),
+        playerIds: [...selectedPilotPlayerIds].sort(),
+        requestId,
+      }),
+    });
+    if (response.status !== 201) throw new Error('pilot_prepare');
+    const payload = await response.json();
+    const pilot = validPilotStatus(payload && payload.pilot);
+    if (!pilot || pilot.pilotStatus !== 'draft' || pilot.switchMode !== 'disabled' || pilot.financiallyActive) {
+      throw new Error('pilot_prepare');
+    }
+    renderPilotStatus(pilot);
+    setNotice('Fixed pilot prepared. Money remains disabled; review status before dry-run arming.');
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      setNotice('Pilot preparation was rejected or unavailable. Readiness remains blocked; checking for an idempotent result…');
+      await loadCurrentPilot();
+    }
+  } finally {
+    setBusy(pilotPrepareForm, false);
+    updatePilotPreparationAvailability();
+  }
+}
+
+async function armFixedPilot() {
+  if (!currentPilot || currentPilot.pilotStatus !== 'draft') return;
+  if (!window.confirm(
+    'Arm this pilot configuration in dry-run only? This must not enable payment verification, settlement, the executor, or KemerBet actions.',
+  )) return;
+  const requestId = currentPilot.pilotRevisionId;
+  pilotArmButton.disabled = true;
+  setNotice('Arming the dormant dry-run configuration…');
+  try {
+    const response = await ownerRequest('/v1/owner/private-live-deposit-pilots/' +
+      encodeURIComponent(requestId) + '/arm', {
+      method: 'POST',
+      headers: pilotMutationHeaders(requestId),
+      body: JSON.stringify({ confirmation: 'owner_confirmed_dry_run_only', requestId }),
+    });
+    if (!response.ok) throw new Error('pilot_arm');
+    const payload = await response.json();
+    const pilot = validPilotStatus(payload && payload.status);
+    if (!pilot || pilot.pilotStatus !== 'armed' || pilot.switchMode !== 'dry_run' || pilot.financiallyActive) {
+      throw new Error('pilot_arm');
+    }
+    renderPilotStatus(pilot);
+    setNotice('Pilot configuration armed in dry-run. Every real-money switch remains disabled.');
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      setNotice('Dry-run arm was rejected or unavailable. Checking the fail-closed status…');
+      await loadCurrentPilot();
+    }
+  } finally {
+    if (currentPilot) pilotArmButton.disabled = currentPilot.pilotStatus !== 'draft';
+  }
+}
+
+async function stopCurrentPilot() {
+  if (!currentPilot) return;
+  const requestId = currentPilot.pilotRevisionId;
+  const reasonCode = pilotStopReason.value;
+  if (!['owner_stop', 'provider_incident', 'parser_drift', 'execution_uncertainty', 'cap_review', 'pilot_complete'].includes(reasonCode) ||
+      !window.confirm('Emergency-stop this pilot now? New verification, settlement, lease, and final-action authority will be disabled.')) return;
+  pilotStopButton.disabled = true;
+  setNotice('Applying the private-pilot emergency stop…');
+  try {
+    const response = await ownerRequest('/v1/owner/private-live-deposit-pilots/' +
+      encodeURIComponent(requestId) + '/stop', {
+      method: 'POST',
+      headers: pilotMutationHeaders(requestId),
+      body: JSON.stringify({ confirmation: 'owner_confirmed_emergency_stop', reasonCode, requestId }),
+    });
+    if (!response.ok) throw new Error('pilot_stop');
+    const payload = await response.json();
+    const pilot = validPilotStatus(payload && payload.pilot);
+    if (!pilot || pilot.pilotStatus !== 'stopped' || pilot.switchMode !== 'disabled' || pilot.financiallyActive) {
+      throw new Error('pilot_stop');
+    }
+    renderPilotStatus(pilot);
+    setNotice('Emergency stop confirmed. The private pilot is disabled.');
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      setNotice('Emergency-stop acknowledgement is unavailable. Retry the same stop immediately.');
+      pilotStopButton.disabled = false;
+    }
+  }
+}
+
 async function loadOwnerPlayerQueues() {
   refreshRequestsButton.disabled = true;
   try {
@@ -734,6 +1057,7 @@ async function loadOwnerPlayerQueues() {
       loadAssociationCandidates(),
       loadPlayerEligibility(),
       loadDepositIntake(),
+      loadCurrentPilot(),
     ]);
   } finally {
     refreshRequestsButton.disabled = false;
@@ -835,6 +1159,14 @@ revokeButton.addEventListener('click', async () => {
 
 logoutButton.addEventListener('click', () => signOut());
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
+pilotConfirmation.addEventListener('change', updatePilotPreparationAvailability);
+pilotPrepareForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await prepareFixedPilot();
+});
+pilotRefreshButton.addEventListener('click', loadCurrentPilot);
+pilotArmButton.addEventListener('click', armFixedPilot);
+pilotStopButton.addEventListener('click', stopCurrentPilot);
 `;
 
 export function ownerDashboardPublicConfig(

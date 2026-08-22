@@ -1,5 +1,3 @@
-export type PrivateLivePilotProviderCode = 'cbe_birr' | 'telebirr';
-
 export type PrivateLivePilotStopReason =
   | 'cap_review'
   | 'execution_uncertainty'
@@ -8,18 +6,11 @@ export type PrivateLivePilotStopReason =
   | 'pilot_complete'
   | 'provider_incident';
 
-export interface PreparePrivateLivePilotRequest {
+export interface PrepareApprovedPrivateLivePilotRequest {
   readonly activeFrom: Date;
   readonly expiresAt: Date;
-  readonly maximumAggregateMinor: number;
-  readonly maximumPerDepositMinor: number;
-  readonly maximumPerPlayerMinor: number;
-  readonly maximumReservationCount: number;
-  readonly minimumAmountMinor: 2500;
   readonly playerIds: readonly [string, string, string, string, string];
-  readonly providerCodes: readonly PrivateLivePilotProviderCode[];
   readonly requestId: string;
-  readonly submittingCustomerIds: readonly string[];
 }
 
 export interface PrivateLivePilotStatus {
@@ -80,19 +71,12 @@ const STOP_REASONS = new Set<PrivateLivePilotStopReason>([
 ]);
 
 const PREPARE_SQL = `
-  select app.prepare_private_live_deposit_pilot(
+  select app.prepare_approved_private_live_telebirr_pilot(
     $1::uuid,
     $2::uuid,
     $3::text[],
-    $4::text[],
-    $5::uuid[],
-    $6::bigint,
-    $7::bigint,
-    $8::bigint,
-    $9::bigint,
-    $10::smallint,
-    $11::timestamptz,
-    $12::timestamptz
+    $4::timestamptz,
+    $5::timestamptz
   ) as pilot_revision_id
 `;
 const ARM_SQL = `select app.arm_private_live_deposit_pilot($1::uuid, $2::uuid)`;
@@ -117,6 +101,27 @@ const STATUS_SQL = `
          stopped_at,
          stop_reason_code
     from app.get_private_live_deposit_pilot_status($1::uuid, $2::uuid)
+`;
+const CURRENT_STATUS_SQL = `
+  select pilot_revision_id,
+         revision,
+         contract_version,
+         pilot_status,
+         switch_mode,
+         configuration_digest,
+         financially_active,
+         within_active_window,
+         player_count,
+         submitting_customer_count,
+         provider_count,
+         reserved_deposit_count,
+         reserved_amount_minor,
+         maximum_reservation_count,
+         maximum_aggregate_minor,
+         expires_at,
+         stopped_at,
+         stop_reason_code
+    from app.get_current_private_live_deposit_pilot_status($1::uuid)
 `;
 
 function databaseErrorCode(error: unknown): string | undefined {
@@ -153,42 +158,16 @@ function decimal(value: unknown): string {
   return value;
 }
 
-function validatePreparation(request: PreparePrivateLivePilotRequest): void {
-  const providers = [...request.providerCodes];
+function validatePreparation(request: PrepareApprovedPrivateLivePilotRequest): void {
   const players = [...request.playerIds];
-  const customers = [...request.submittingCustomerIds];
   if (
     !UUID_V4_PATTERN.test(request.requestId) ||
-    providers.length < 1 ||
-    providers.length > 2 ||
-    new Set(providers).size !== providers.length ||
-    providers.some((provider) => provider !== 'cbe_birr' && provider !== 'telebirr') ||
     players.length !== 5 ||
     new Set(players).size !== 5 ||
     players.some((playerId) => !PLAYER_ID_PATTERN.test(playerId)) ||
-    customers.length < 1 ||
-    customers.length > 5 ||
-    new Set(customers.map((id) => id.toLowerCase())).size !== customers.length ||
-    customers.some((id) => !UUID_PATTERN.test(id)) ||
-    request.minimumAmountMinor !== 2500 ||
-    !Number.isSafeInteger(request.maximumPerDepositMinor) ||
-    request.maximumPerDepositMinor < request.minimumAmountMinor ||
-    request.maximumPerDepositMinor > 2_500_000 ||
-    !Number.isSafeInteger(request.maximumPerPlayerMinor) ||
-    request.maximumPerPlayerMinor < request.maximumPerDepositMinor ||
-    request.maximumPerPlayerMinor > 2_500_000 ||
-    !Number.isSafeInteger(request.maximumAggregateMinor) ||
-    request.maximumAggregateMinor < request.maximumPerPlayerMinor ||
-    request.maximumAggregateMinor > request.maximumPerPlayerMinor * 5 ||
-    !Number.isSafeInteger(request.maximumReservationCount) ||
-    request.maximumReservationCount < 1 ||
-    request.maximumReservationCount > 5 ||
-    request.maximumAggregateMinor >
-      request.maximumPerDepositMinor * request.maximumReservationCount ||
     !Number.isFinite(request.activeFrom.getTime()) ||
     !Number.isFinite(request.expiresAt.getTime()) ||
-    request.expiresAt.getTime() <= request.activeFrom.getTime() ||
-    request.expiresAt.getTime() > request.activeFrom.getTime() + 24 * 60 * 60 * 1_000
+    request.expiresAt.getTime() !== request.activeFrom.getTime() + 2 * 60 * 60 * 1_000
   ) {
     throw new OwnerPrivateLivePilotRejectedError();
   }
@@ -278,7 +257,7 @@ export class PostgresOwnerPrivateLivePilotControl {
 
   async prepare(
     authUserId: string,
-    request: PreparePrivateLivePilotRequest,
+    request: PrepareApprovedPrivateLivePilotRequest,
   ): Promise<PrivateLivePilotStatus> {
     if (!UUID_PATTERN.test(authUserId)) throw new OwnerPrivateLivePilotRejectedError();
     validatePreparation(request);
@@ -287,14 +266,7 @@ export class PostgresOwnerPrivateLivePilotControl {
       const prepared = await this.database.query(PREPARE_SQL, [
         authUserId,
         request.requestId,
-        [...request.providerCodes],
         [...request.playerIds],
-        [...request.submittingCustomerIds],
-        request.minimumAmountMinor,
-        request.maximumPerDepositMinor,
-        request.maximumPerPlayerMinor,
-        request.maximumAggregateMinor,
-        request.maximumReservationCount,
         request.activeFrom,
         request.expiresAt,
       ]);
@@ -312,6 +284,30 @@ export class PostgresOwnerPrivateLivePilotControl {
         throw error;
       }
       if (databaseErrorCode(error) === 'P0001' || databaseErrorCode(error) === '23505') {
+        throw new OwnerPrivateLivePilotRejectedError();
+      }
+      throw new OwnerPrivateLivePilotUnavailableError();
+    }
+  }
+
+  async current(authUserId: string): Promise<PrivateLivePilotStatus | undefined> {
+    if (!UUID_PATTERN.test(authUserId)) throw new OwnerPrivateLivePilotRejectedError();
+    try {
+      const result = await this.database.query(CURRENT_STATUS_SQL, [authUserId]);
+      if (result.rows.length === 0) return undefined;
+      const row = result.rows.length === 1 ? rowObject(result.rows[0]) : undefined;
+      if (!row || typeof row.pilot_revision_id !== 'string') {
+        throw new OwnerPrivateLivePilotUnavailableError();
+      }
+      return statusFromRows(result.rows, row.pilot_revision_id);
+    } catch (error) {
+      if (
+        error instanceof OwnerPrivateLivePilotRejectedError ||
+        error instanceof OwnerPrivateLivePilotUnavailableError
+      ) {
+        throw error;
+      }
+      if (databaseErrorCode(error) === 'P0001') {
         throw new OwnerPrivateLivePilotRejectedError();
       }
       throw new OwnerPrivateLivePilotUnavailableError();

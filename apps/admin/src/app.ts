@@ -35,8 +35,7 @@ import {
 import {
   OwnerPrivateLivePilotRejectedError,
   OwnerPrivateLivePilotUnavailableError,
-  type PreparePrivateLivePilotRequest,
-  type PrivateLivePilotProviderCode,
+  type PrepareApprovedPrivateLivePilotRequest,
   type PrivateLivePilotStopReason,
 } from './owner-private-live-pilot.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
@@ -601,38 +600,21 @@ export function buildOwnerControlApp(
         'activeFrom',
         'confirmation',
         'expiresAt',
-        'maximumAggregateMinor',
-        'maximumPerDepositMinor',
-        'maximumPerPlayerMinor',
-        'maximumReservationCount',
-        'minimumAmountMinor',
         'playerIds',
-        'providerCodes',
         'requestId',
-        'submittingCustomerIds',
       ]);
       const activeFrom = exactIsoDate(body?.activeFrom);
       const expiresAt = exactIsoDate(body?.expiresAt);
       const playerIds = body?.playerIds;
-      const providerCodes = body?.providerCodes;
-      const submittingCustomerIds = body?.submittingCustomerIds;
       if (
         !body ||
-        body.confirmation !== 'owner_confirmed_dormant_private_live_pilot' ||
+        body.confirmation !== 'owner_confirmed_fixed_telebirr_five_player_pilot' ||
         !activeFrom ||
         !expiresAt ||
+        expiresAt.getTime() !== activeFrom.getTime() + 2 * 60 * 60 * 1_000 ||
         !Array.isArray(playerIds) ||
         playerIds.length !== 5 ||
         playerIds.some((value) => typeof value !== 'string') ||
-        !Array.isArray(providerCodes) ||
-        providerCodes.some((value) => value !== 'cbe_birr' && value !== 'telebirr') ||
-        !Array.isArray(submittingCustomerIds) ||
-        submittingCustomerIds.some((value) => typeof value !== 'string') ||
-        typeof body.minimumAmountMinor !== 'number' ||
-        typeof body.maximumPerDepositMinor !== 'number' ||
-        typeof body.maximumPerPlayerMinor !== 'number' ||
-        typeof body.maximumAggregateMinor !== 'number' ||
-        typeof body.maximumReservationCount !== 'number' ||
         !validPrivatePilotMutationHeaders(request.raw.rawHeaders, body.requestId)
       ) {
         return reply.code(400).send({ error: 'invalid_request' });
@@ -642,15 +624,8 @@ export function buildOwnerControlApp(
       const status = await dependencies.runtime.privateLivePilot.prepare(authUserId, {
         activeFrom,
         expiresAt,
-        maximumAggregateMinor: body.maximumAggregateMinor,
-        maximumPerDepositMinor: body.maximumPerDepositMinor,
-        maximumPerPlayerMinor: body.maximumPerPlayerMinor,
-        maximumReservationCount: body.maximumReservationCount,
-        minimumAmountMinor: body.minimumAmountMinor as 2500,
-        playerIds: playerIds as unknown as PreparePrivateLivePilotRequest['playerIds'],
-        providerCodes: providerCodes as PrivateLivePilotProviderCode[],
+        playerIds: playerIds as unknown as PrepareApprovedPrivateLivePilotRequest['playerIds'],
         requestId: body.requestId as string,
-        submittingCustomerIds: submittingCustomerIds as string[],
       });
       return reply.code(201).send({ pilot: status });
     } catch (error) {
@@ -732,6 +707,29 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner private live-deposit pilot emergency stop is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/private-live-deposit-pilots/current',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).length !== 0) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const status = await dependencies.runtime.privateLivePilot.current(authUserId);
+        return reply.code(200).send({ pilot: status ?? null });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPrivateLivePilotRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner current private live-deposit pilot status is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

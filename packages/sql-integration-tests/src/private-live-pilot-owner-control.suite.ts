@@ -12,12 +12,18 @@ async function queryAsOwnerControl<T extends QueryResultRow>(
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
-  await client.query('set local role fetanagent_owner_control');
+  const savepoint = `owner_control_query_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+  await client.query(`savepoint ${savepoint}`);
   try {
+    await client.query('set local role fetanagent_owner_control');
     const result = await client.query<T>(query, [...values]);
-    return result.rows;
-  } finally {
     await client.query('reset role');
+    await client.query(`release savepoint ${savepoint}`);
+    return result.rows;
+  } catch (error) {
+    await client.query(`rollback to savepoint ${savepoint}`);
+    await client.query(`release savepoint ${savepoint}`);
+    throw error;
   }
 }
 
@@ -44,13 +50,14 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('private live-pilot Owner-control boundary', () => {
-    it('grants exactly four hardened pilot controls without tables or any other authority', async () => {
+    it('grants the fixed preparation and five exact pilot controls without tables or other authority', async () => {
       const client = getClient();
       const publicSignatures = [
-        'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)',
+        'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)',
         'app.arm_private_live_deposit_pilot(uuid,uuid)',
         'app.stop_private_live_deposit_pilot(uuid,uuid,text)',
         'app.get_private_live_deposit_pilot_status(uuid,uuid)',
+        'app.get_current_private_live_deposit_pilot_status(uuid)',
       ];
       const boundary = await client.query<{
         readonly group_execute: boolean;
@@ -83,7 +90,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           order by signature`,
         [publicSignatures],
       );
-      expect(boundary.rows).toHaveLength(4);
+      expect(boundary.rows).toHaveLength(5);
       expect(boundary.rows.every((row) => row.hardened)).toBe(true);
       expect(boundary.rows.every((row) => row.group_execute && row.runtime_execute)).toBe(true);
       expect(boundary.rows.every((row) => !row.public_execute)).toBe(true);
@@ -158,6 +165,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
         },
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
+        { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
         { signature: 'app.issue_telegram_beta_invite(uuid,text,timestamp with time zone)' },
         { signature: 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)' },
@@ -170,7 +178,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.list_owner_player_registration_requests(uuid,integer)' },
         {
           signature:
-            'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
+            'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',
         },
         {
           signature: 'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)',
@@ -212,6 +220,23 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
            )
       `);
       expect(directRelations.rows).toEqual([{ relation_count: 0 }]);
+
+      const genericPrepareDenied = await client.query<{
+        readonly group_execute: boolean;
+        readonly runtime_execute: boolean;
+      }>(`
+        select has_function_privilege(
+                 'fetanagent_owner_control',
+                 'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)',
+                 'EXECUTE'
+               ) as group_execute,
+               has_function_privilege(
+                 'fetanagent_owner_control_runtime',
+                 'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)',
+                 'EXECUTE'
+               ) as runtime_execute
+      `);
+      expect(genericPrepareDenied.rows).toEqual([{ group_execute: false, runtime_execute: false }]);
     });
 
     it('binds the Auth UUID, replays prepare once, arms only dry-run, and reaches stop', async () => {
@@ -229,28 +254,50 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         expect(owner.rows).toHaveLength(1);
         const ownerAuthUserId = owner.rows[0]!.auth_user_id;
         const prerequisites = await createPilotPrerequisites(client);
+        await client.query(`
+          insert into app.receiver_accounts (
+            provider_id,
+            version,
+            account_holder_name,
+            account_reference_ciphertext,
+            verification_reference_ciphertext,
+            account_reference_masked,
+            instructions
+          )
+          select provider.id,
+                 coalesce((
+                   select max(receiver.version) + 1
+                     from app.receiver_accounts receiver
+                    where receiver.provider_id = provider.id
+                 ), 1),
+                 'Synthetic TeleBirr Pilot Receiver',
+                 'synthetic-telebirr-pilot-account-ciphertext',
+                 'synthetic-telebirr-pilot-verification-ciphertext',
+                 '****7001',
+                 jsonb_build_object('customer_message', 'Synthetic SQL fixture only')
+            from app.payment_providers provider
+           where provider.code = 'telebirr'
+             and provider.status = 'active'
+             and not exists (
+               select 1
+                 from app.receiver_accounts receiver
+                where receiver.provider_id = provider.id
+                  and receiver.status = 'active'
+             )
+        `);
         const requestId = randomUUID();
         const activeFrom = new Date(Date.now() - 15_000);
-        const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1_000);
+        const expiresAt = new Date(activeFrom.getTime() + 2 * 60 * 60 * 1_000);
         const prepareValues: readonly SqlValue[] = [
           ownerAuthUserId,
           requestId,
-          ['cbe_birr'],
           prerequisites.playerIds,
-          [prerequisites.submittingCustomerId],
-          2_500,
-          2_500,
-          2_500,
-          12_500,
-          5,
           activeFrom,
           expiresAt,
         ];
         const prepareSql = `
-          select app.prepare_private_live_deposit_pilot(
-            $1::uuid, $2::uuid, $3::text[], $4::text[], $5::uuid[],
-            $6::bigint, $7::bigint, $8::bigint, $9::bigint, $10::smallint,
-            $11::timestamptz, $12::timestamptz
+          select app.prepare_approved_private_live_telebirr_pilot(
+            $1::uuid, $2::uuid, $3::text[], $4::timestamptz, $5::timestamptz
           ) as pilot_revision_id
         `;
 
@@ -267,6 +314,46 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         expect(replay).toEqual(prepared);
         expect(prepared).toHaveLength(1);
         const pilotRevisionId = prepared[0]!.pilot_revision_id;
+
+        const fixedSnapshot = await client.query<{
+          readonly customers_derived_from_players: boolean;
+          readonly exact_caps: boolean;
+          readonly exact_duration: boolean;
+          readonly provider_codes: readonly string[];
+        }>(
+          `select pilot.minimum_amount_minor = 2500
+                    and pilot.maximum_per_deposit_minor = 2500
+                    and pilot.maximum_per_player_minor = 2500
+                    and pilot.maximum_aggregate_minor = 12500
+                    and pilot.maximum_reservation_count = 5 as exact_caps,
+                  pilot.expires_at = pilot.active_from + interval '2 hours' as exact_duration,
+                  (
+                    select array_agg(member.provider_code_snapshot order by member.provider_code_snapshot)
+                      from app.private_live_deposit_pilot_providers member
+                     where member.pilot_revision_id = pilot.id
+                  ) as provider_codes,
+                  (
+                    select array_agg(member.customer_id order by member.customer_id)
+                      from app.private_live_deposit_pilot_customers member
+                     where member.pilot_revision_id = pilot.id
+                  ) = (
+                    select array_agg(distinct member.player_owner_customer_id_snapshot
+                                     order by member.player_owner_customer_id_snapshot)
+                      from app.private_live_deposit_pilot_players member
+                     where member.pilot_revision_id = pilot.id
+                  ) as customers_derived_from_players
+             from app.private_live_deposit_pilot_revisions pilot
+            where pilot.id = $1::uuid`,
+          [pilotRevisionId],
+        );
+        expect(fixedSnapshot.rows).toEqual([
+          {
+            customers_derived_from_players: true,
+            exact_caps: true,
+            exact_duration: true,
+            provider_codes: ['telebirr'],
+          },
+        ]);
 
         const preparedAudits = await client.query<{
           readonly actor_admin_id: string;
@@ -285,13 +372,15 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           prerequisites.playerIds[0],
         );
         expect(JSON.stringify(preparedAudits.rows[0]!.metadata)).not.toContain(
-          prerequisites.submittingCustomerId,
+          prerequisites.ownerCustomerId,
         );
 
         await expectFailureAtSavepoint(client, prepareSql, [
-          ...prepareValues.slice(0, 6),
-          5_000,
-          ...prepareValues.slice(7),
+          ownerAuthUserId,
+          randomUUID(),
+          prerequisites.playerIds,
+          activeFrom,
+          new Date(expiresAt.getTime() + 1),
         ]);
 
         await expectFailureAtSavepoint(client, prepareSql, [
@@ -299,6 +388,21 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           randomUUID(),
           ...prepareValues.slice(2),
         ]);
+
+        const currentPrepared = await queryAsOwnerControl<Record<string, unknown>>(
+          client,
+          `select * from app.get_current_private_live_deposit_pilot_status($1::uuid)`,
+          [ownerAuthUserId],
+        );
+        expect(currentPrepared).toHaveLength(1);
+        expect(currentPrepared[0]).toMatchObject({
+          maximum_aggregate_minor: '12500',
+          maximum_reservation_count: 5,
+          pilot_revision_id: pilotRevisionId,
+          pilot_status: 'draft',
+          provider_count: 1,
+          submitting_customer_count: 1,
+        });
 
         await queryAsOwnerControl(
           client,
@@ -339,7 +443,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           switch_mode: 'dry_run',
         });
         expect(JSON.stringify(armed[0])).not.toContain(prerequisites.playerIds[0]);
-        expect(JSON.stringify(armed[0])).not.toContain(prerequisites.submittingCustomerId);
+        expect(JSON.stringify(armed[0])).not.toContain(prerequisites.ownerCustomerId);
 
         const armedAudits = await client.query<{
           readonly actor_admin_id: string;
@@ -358,7 +462,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           prerequisites.playerIds[0],
         );
         expect(JSON.stringify(armedAudits.rows[0]!.metadata)).not.toContain(
-          prerequisites.submittingCustomerId,
+          prerequisites.ownerCustomerId,
         );
 
         const armedSwitches = await client.query<{
@@ -427,6 +531,12 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
             switch_mode: 'disabled',
           },
         ]);
+        const noCurrentAfterStop = await queryAsOwnerControl<Record<string, unknown>>(
+          client,
+          `select * from app.get_current_private_live_deposit_pilot_status($1::uuid)`,
+          [ownerAuthUserId],
+        );
+        expect(noCurrentAfterStop).toEqual([]);
         const switches = await client.query<{
           readonly feature_key: string;
           readonly mode: string;

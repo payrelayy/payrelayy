@@ -2,6 +2,7 @@ import type { OwnerControlRuntimeConfig } from '@fetanagent/config/owner-control
 import { Pool, type PoolConfig } from 'pg';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
+import { PostgresOwnerKemerbetAgentProfiles } from './owner-kemerbet-agent-profile.js';
 import { PostgresOwnerPlayerDepositEligibility } from './owner-player-deposit-eligibility.js';
 import { PostgresOwnerDryRunDepositIntake } from './owner-deposit-intake.js';
 import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-assessments.js';
@@ -14,6 +15,7 @@ export interface OwnerControlPostgresRuntime {
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
+  readonly kemerbetAgentProfiles: Pick<PostgresOwnerKemerbetAgentProfiles, 'list' | 'prepare'>;
   readonly playerRegistrations: Pick<
     PostgresOwnerPlayerRegistrationReviews,
     'associate' | 'list' | 'listAssociationCandidates' | 'review'
@@ -132,6 +134,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
+    has_function_privilege(current_user, 'app.list_owner_kemerbet_agent_profiles(uuid)', 'execute') as kemerbet_agent_profile_list_allowed,
+    has_function_privilege(current_user, 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)', 'execute') as kemerbet_agent_profile_prepare_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -159,7 +163,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 21
+      select count(*) = 23
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -193,6 +197,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
+          ,'app.list_owner_kemerbet_agent_profiles(uuid)'::regprocedure
+          ,'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -247,6 +253,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     invites: new PostgresOwnerInviteControl({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    kemerbetAgentProfiles: new PostgresOwnerKemerbetAgentProfiles({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     playerRegistrations: new PostgresOwnerPlayerRegistrationReviews({

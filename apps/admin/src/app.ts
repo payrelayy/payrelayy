@@ -23,6 +23,11 @@ import {
   type BetaInviteRevocationReason,
 } from './owner-invites.js';
 import {
+  OwnerKemerbetAgentProfileRejectedError,
+  OwnerKemerbetAgentProfileUnavailableError,
+  type OwnerKemerbetAgentProfileReason,
+} from './owner-kemerbet-agent-profile.js';
+import {
   OwnerPlayerDepositEligibilityRejectedError,
   OwnerPlayerDepositEligibilityUnavailableError,
   type OwnerPlayerDepositEligibilityDecision,
@@ -100,6 +105,13 @@ const PRIVATE_LIVE_PILOT_STOP_REASONS = new Set<PrivateLivePilotStopReason>([
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
+const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
+const OWNER_KEMERBET_AGENT_PROFILE_REASONS = new Set<OwnerKemerbetAgentProfileReason>([
+  'agent_rotation',
+  'initial_configuration',
+  'owner_correction',
+  'security_recovery',
+]);
 const OWNER_RECEIVER_PROVIDERS = new Set<OwnerReceiverProvider>(['cbe_birr', 'telebirr']);
 const OWNER_RECEIVER_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
   'account_rotation',
@@ -233,6 +245,21 @@ export function buildOwnerControlApp(
       exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_RECEIVER_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validKemerbetAgentProfileMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -696,6 +723,67 @@ export function buildOwnerControlApp(
         return reply.code(403).send({ error: 'forbidden' });
       }
       request.log.warn('Owner receiver-account rotation is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.get('/v1/owner/kemerbet-agent-profiles', async (request, reply) => {
+    try {
+      if (
+        typeof request.query !== 'object' ||
+        request.query === null ||
+        Object.keys(request.query).length !== 0
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const profiles = await dependencies.runtime.kemerbetAgentProfiles.list(authUserId);
+      return reply.code(200).send({ profiles });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerKemerbetAgentProfileUnavailableError
+      ) {
+        request.log.warn('Owner KemerBet agent-profile history is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/owner/kemerbet-agent-profiles/prepare', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['configurationReason', 'confirmation', 'requestId']);
+      const configurationReason = body?.configurationReason;
+      if (
+        body?.confirmation !== 'owner_confirmed_kemerbet_agent_profile' ||
+        typeof configurationReason !== 'string' ||
+        !OWNER_KEMERBET_AGENT_PROFILE_REASONS.has(
+          configurationReason as OwnerKemerbetAgentProfileReason,
+        ) ||
+        !validKemerbetAgentProfileMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const profile = await dependencies.runtime.kemerbetAgentProfiles.prepare(authUserId, {
+        configurationReason: configurationReason as OwnerKemerbetAgentProfileReason,
+        requestId: body.requestId as string,
+      });
+      return reply.code(201).send({ profile });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner KemerBet agent-profile preparation is unavailable.');
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });

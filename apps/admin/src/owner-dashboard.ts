@@ -165,6 +165,41 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </form>
         </section>
 
+        <section class="review-section" aria-labelledby="kemerbet-agent-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Credential-free profile control</p>
+              <h2 id="kemerbet-agent-title">KemerBet agent browser profile</h2>
+            </div>
+            <button class="secondary" id="kemerbet-agent-refresh-button" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">
+            Prepare the private browser-profile record used for a later supervised KemerBet login.
+            FetanAgent never asks for or stores a KemerBet password, OTP, cookie, session export,
+            agent ID, or username here. Rotation retires the previous profile revision.
+          </p>
+          <p class="pilot-warning">
+            This step does not sign in, poll KemerBet, click Transfer, enable the executor, or move
+            money. It is accepted only while every financial/provider/pilot switch is disabled.
+          </p>
+          <div class="request-list" id="kemerbet-agent-profile-list"></div>
+          <form id="kemerbet-agent-profile-form" autocomplete="off">
+            <label for="kemerbet-agent-profile-reason">Reason</label>
+            <select id="kemerbet-agent-profile-reason" name="configurationReason" required>
+              <option value="initial_configuration">Initial configuration</option>
+              <option value="agent_rotation">Agent profile rotation</option>
+              <option value="security_recovery">Security recovery</option>
+              <option value="owner_correction">Owner correction</option>
+            </select>
+            <label class="confirmation-row" for="kemerbet-agent-profile-confirmation">
+              <input id="kemerbet-agent-profile-confirmation" name="confirmation" type="checkbox" required />
+              I approve creating a new opaque KemerBet browser-profile revision and retiring the
+              current revision. I will not enter credentials in FetanAgent.
+            </label>
+            <button type="submit">Prepare new KemerBet agent profile</button>
+          </form>
+        </section>
+
         <section class="review-section pilot-section" aria-labelledby="pilot-title">
           <div class="panel-heading">
             <div>
@@ -310,6 +345,10 @@ const receiverForm = document.querySelector('#receiver-form');
 const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
 const receiverAccountReference = document.querySelector('#receiver-account-reference');
 const receiverConfirmation = document.querySelector('#receiver-confirmation');
+const kemerbetAgentProfileList = document.querySelector('#kemerbet-agent-profile-list');
+const kemerbetAgentProfileForm = document.querySelector('#kemerbet-agent-profile-form');
+const kemerbetAgentProfileConfirmation = document.querySelector('#kemerbet-agent-profile-confirmation');
+const kemerbetAgentRefreshButton = document.querySelector('#kemerbet-agent-refresh-button');
 const pilotCandidateList = document.querySelector('#pilot-candidate-list');
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
@@ -363,6 +402,11 @@ function clearReceivers() {
   receiverConfirmation.checked = false;
 }
 
+function clearKemerbetAgentProfiles() {
+  kemerbetAgentProfileList.replaceChildren();
+  kemerbetAgentProfileConfirmation.checked = false;
+}
+
 function clearPilot() {
   currentPilot = undefined;
   eligiblePilotPlayers = [];
@@ -387,6 +431,7 @@ function signOut(message = 'Signed out.') {
   clearAssociationCandidates();
   clearPlayerEligibility();
   clearReceivers();
+  clearKemerbetAgentProfiles();
   clearPilot();
   clearDepositIntake();
   invitePanel.hidden = true;
@@ -610,6 +655,106 @@ async function rotateReceiver() {
     }
   } finally {
     setBusy(receiverForm, false);
+  }
+}
+
+function validKemerbetAgentProfile(value) {
+  if (!value || typeof value !== 'object' || value.platformCode !== 'kemerbet' ||
+      typeof value.platformAgentAccountId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.platformAgentAccountId) ||
+      typeof value.profileLabel !== 'string' || !/^Primary KemerBet agent revision [1-9][0-9]*$/.test(value.profileLabel) ||
+      !Number.isSafeInteger(value.profileRevision) || value.profileRevision < 1 ||
+      value.profileContractVersion !== 1 ||
+      (value.profileStatus !== 'active' && value.profileStatus !== 'inactive') ||
+      !['initial_configuration', 'agent_rotation', 'security_recovery', 'owner_correction'].includes(value.configurationReason) ||
+      typeof value.configuredAt !== 'string' || !Number.isFinite(Date.parse(value.configuredAt)) ||
+      (value.profileStatus === 'active' && value.retiredAt !== undefined) ||
+      (value.profileStatus === 'inactive' &&
+        (typeof value.retiredAt !== 'string' || !Number.isFinite(Date.parse(value.retiredAt))))) return undefined;
+  return { configuredAt: value.configuredAt, configurationReason: value.configurationReason,
+    platformAgentAccountId: value.platformAgentAccountId, platformCode: 'kemerbet',
+    profileContractVersion: 1, profileLabel: value.profileLabel,
+    profileRevision: value.profileRevision, profileStatus: value.profileStatus,
+    retiredAt: value.retiredAt };
+}
+
+function renderKemerbetAgentProfiles(profiles) {
+  kemerbetAgentProfileList.replaceChildren();
+  if (profiles.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No Owner-prepared KemerBet agent profile exists yet.';
+    kemerbetAgentProfileList.append(empty);
+    return;
+  }
+  for (const profile of profiles) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = profile.profileLabel;
+    const facts = document.createElement('p');
+    facts.className = 'request-meta';
+    facts.textContent = profile.profileStatus + ' · ' + profile.configurationReason +
+      ' · prepared ' + new Date(profile.configuredAt).toLocaleString() +
+      (profile.retiredAt ? ' · retired ' + new Date(profile.retiredAt).toLocaleString() : '');
+    card.append(title, facts);
+    kemerbetAgentProfileList.append(card);
+  }
+}
+
+async function loadKemerbetAgentProfiles() {
+  kemerbetAgentRefreshButton.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-agent-profiles', { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('kemerbet_agent_profiles');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.profiles) || payload.profiles.length > 100) throw new Error('kemerbet_agent_profiles');
+    const profiles = payload.profiles.map(validKemerbetAgentProfile);
+    if (profiles.some((profile) => !profile) ||
+        profiles.filter((profile) => profile.profileStatus === 'active').length > 1) {
+      throw new Error('kemerbet_agent_profiles');
+    }
+    renderKemerbetAgentProfiles(profiles);
+  } catch (error) {
+    kemerbetAgentProfileList.replaceChildren();
+    if (!isSignedOutError(error)) setNotice('KemerBet agent-profile history is unavailable. Do not prepare a profile.');
+  } finally {
+    kemerbetAgentRefreshButton.disabled = false;
+  }
+}
+
+async function prepareKemerbetAgentProfile() {
+  const configurationReason = kemerbetAgentProfileForm.elements.configurationReason.value;
+  if (!kemerbetAgentProfileConfirmation.checked ||
+      !['initial_configuration', 'agent_rotation', 'security_recovery', 'owner_correction'].includes(configurationReason)) return;
+  if (!window.confirm(
+    'Prepare a new opaque KemerBet agent browser profile? The active profile will be retired. This does not sign in or move money.',
+  )) return;
+  const requestId = crypto.randomUUID();
+  setBusy(kemerbetAgentProfileForm, true);
+  setNotice('Preparing the credential-free KemerBet agent profile…');
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-agent-profiles/prepare', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1',
+        'x-idempotency-key': requestId },
+      body: JSON.stringify({ configurationReason,
+        confirmation: 'owner_confirmed_kemerbet_agent_profile', requestId }),
+    });
+    if (response.status !== 201) throw new Error('kemerbet_agent_profile');
+    const payload = await response.json();
+    const profile = validKemerbetAgentProfile(payload && payload.profile);
+    if (!profile || profile.configurationReason !== configurationReason) throw new Error('kemerbet_agent_profile');
+    kemerbetAgentProfileConfirmation.checked = false;
+    setNotice(profile.profileLabel + ' is prepared. KemerBet login, Transfer, and money movement remain disabled.');
+    await loadKemerbetAgentProfiles();
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      setNotice('KemerBet agent-profile preparation was rejected or unavailable. No credential was requested or retained.');
+    }
+  } finally {
+    setBusy(kemerbetAgentProfileForm, false);
   }
 }
 
@@ -1240,6 +1385,7 @@ async function loadOwnerPlayerQueues() {
       loadAssociationCandidates(),
       loadPlayerEligibility(),
       loadReceivers(),
+      loadKemerbetAgentProfiles(),
       loadDepositIntake(),
       loadCurrentPilot(),
     ]);
@@ -1347,6 +1493,11 @@ receiverRefreshButton.addEventListener('click', loadReceivers);
 receiverForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await rotateReceiver();
+});
+kemerbetAgentRefreshButton.addEventListener('click', loadKemerbetAgentProfiles);
+kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await prepareKemerbetAgentProfile();
 });
 pilotConfirmation.addEventListener('change', updatePilotPreparationAvailability);
 pilotPrepareForm.addEventListener('submit', async (event) => {

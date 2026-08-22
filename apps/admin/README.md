@@ -31,6 +31,18 @@ terminal history, screenshots, logs, or an ad-hoc SQL command. This control plan
 receiver identity only; it does not create a provider profile, verify a payment, arm a pilot, enable
 a switch, or authorize KemerBet execution.
 
+The Owner page also exposes one credential-free KemerBet browser-profile control. `GET
+/v1/owner/kemerbet-agent-profiles` returns only redacted immutable revision facts, and `POST
+/v1/owner/kemerbet-agent-profiles/prepare` creates a server-generated opaque
+`platform_agent_accounts` reference while retiring the prior active profile. The mutation requires
+exact JSON, a matching UUID-v4 idempotency key, the same-origin
+`x-fetanagent-owner-csrf: owner-kemerbet-agent-profile-v1` header, and explicit Owner confirmation.
+It is rejected unless all payment/provider/pilot/execution switches are disabled and no draft or
+armed pilot exists. The form has no field for a KemerBet agent ID, username, password, OTP, cookie,
+session export, or balance. Preparing this record does not sign in to KemerBet, start polling, click
+Transfer, enable the executor, or move money; those remain separate supervised provisioning and
+readiness phases.
+
 The private live-pilot API exposes exactly five additional Owner operations: prepare one exact
 five-Player manifest, recover the current open manifest without copying its UUID, arm that manifest
 in `dry_run`, read an aggregate redacted status, and stop it. Mutations accept only exact JSON from

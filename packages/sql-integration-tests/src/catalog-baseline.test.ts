@@ -13,6 +13,7 @@ import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proo
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
+import { registerOwnerKemerbetAgentProfileControlSqlTests } from './owner-kemerbet-agent-profile-control.suite.js';
 import { registerOwnerReceiverAccountControlSqlTests } from './owner-receiver-account-control.suite.js';
 import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pilot-owner-control.suite.js';
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
@@ -9497,6 +9498,10 @@ registerDryRunDepositProofIntakeSqlTests(() => client);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
 registerOwnerReceiverAccountControlSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerOwnerKemerbetAgentProfileControlSqlTests(
   () => client,
   () => ownerAdminId,
 );

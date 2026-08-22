@@ -185,7 +185,7 @@ describe('KemerBet executor runtime isolation', () => {
   });
 
   it('loads selector JSON through an injected exhaustive validator and rejects unsafe files', async () => {
-    const path = '/etc/fetanagent/kemerbet-selector-contract.v1.json';
+    const path = '/etc/fetanagent/kemerbet-selector-contract.v2.json';
     const contract = { version: 1, marker: 'reviewed' };
     await expect(
       loadKemerBetSelectorContract({

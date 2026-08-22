@@ -12,9 +12,11 @@ import type { KemerBetHistoryReferenceFingerprinter } from './kemerbet-history-r
 import type { KemerBetDepositExecutionLease } from './kemerbet-deposit-types.js';
 import {
   KEMERBET_AGENT_DEPOSIT_URL,
-  type KemerBetAgentPageSelectorContractV1,
+  type KemerBetAgentPageSelectorContractV2,
   type PlaywrightLocatorPort,
   type PlaywrightPagePort,
+  type PlaywrightResponsePort,
+  type PlaywrightRoutePort,
 } from './playwright-kemerbet-agent-page.js';
 
 const ACCOUNT_ONE = '44444444-4444-4444-8444-444444444441';
@@ -27,19 +29,19 @@ const AGENT_IDENTITY_FINGERPRINT = `hmac-sha256-agent-identity-v1:${'c'.repeat(6
 const OTHER_AGENT_IDENTITY_FINGERPRINT = `hmac-sha256-agent-identity-v1:${'d'.repeat(64)}`;
 const INVALID_AGENT_IDENTITY_FINGERPRINT = `hmac-sha256-agent-identity-v1:${'e'.repeat(64)}`;
 
-const selectorContract: KemerBetAgentPageSelectorContractV1 = {
-  version: 1,
+const selectorContract: KemerBetAgentPageSelectorContractV2 = {
+  version: 2,
   depositWorkflow: {
-    financialActionsTrigger: '#financial-actions',
-    depositMenuItem: '#deposit-menu-item',
-    toPlayerTile: '#to-player-tile',
-    findByControl: '#find-by',
-    findByPlayerIdOptionValue: 'player-id',
-    playerIdInput: '#player-input',
-    findButton: '#find',
-    amountInput: '#amount-input',
-    notesInput: '#notes-input',
-    transferButton: '#transfer',
+    financialActionsTrigger: { by: 'css', selector: '#financial-actions' },
+    depositMenuItem: { by: 'role', role: 'menuitem', name: 'Deposit' },
+    toPlayerTile: { by: 'text', text: 'To Player' },
+    findBySelectedValue: { by: 'css', selector: '#find-by' },
+    findByPlayerIdLabel: 'Player ID',
+    playerIdInput: { by: 'label', label: 'Player ID *' },
+    findButton: { by: 'role', role: 'button', name: 'Find' },
+    amountInput: { by: 'label', label: 'Amount *' },
+    notesInput: { by: 'label', label: 'Notes' },
+    transferButton: { by: 'role', role: 'button', name: 'Transfer' },
   },
   signedInAgentIdentity: {
     root: '#signed-in-agent',
@@ -47,12 +49,12 @@ const selectorContract: KemerBetAgentPageSelectorContractV1 = {
   },
   lookup: {
     root: '#lookup',
-    playerId: { selector: '#player', source: 'text' },
+    resolvedIdentity: { selector: '#player', source: 'text' },
     currencyCode: { selector: '#currency', source: 'text' },
   },
   preparedDeposit: {
     root: '#prepared',
-    playerId: { selector: '#player', source: 'text' },
+    resolvedIdentity: { selector: '#player', source: 'text' },
     amount: { selector: '#amount', source: 'input' },
     currencyCode: { selector: '#currency', source: 'text' },
   },
@@ -279,6 +281,24 @@ class FakePage implements PlaywrightPagePort {
     this.financialLocatorRequests += 1;
     return new EmptyLocator();
   }
+  getByText() {
+    this.financialLocatorRequests += 1;
+    return new EmptyLocator();
+  }
+  async waitForResponse(
+    _predicate: (response: PlaywrightResponsePort) => boolean,
+    _options: { readonly timeout: number },
+  ): Promise<PlaywrightResponsePort> {
+    throw new Error('not used by session registry tests');
+  }
+  async route(
+    _url: string,
+    _handler: (route: PlaywrightRoutePort) => Promise<void>,
+  ): Promise<void> {}
+  async unroute(
+    _url: string,
+    _handler: (route: PlaywrightRoutePort) => Promise<void>,
+  ): Promise<void> {}
   locator(selector: string) {
     if (selector === this.visibleSessionFailureSelector) return new VisibleTextLocator('present');
     if (

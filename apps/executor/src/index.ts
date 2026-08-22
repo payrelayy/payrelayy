@@ -24,14 +24,14 @@ import {
 } from './kemerbet-executor-application.js';
 import { createKemerBetHistoryReferenceFingerprinter } from './kemerbet-history-reference-fingerprint.js';
 import {
-  assertKemerBetAgentPageSelectorContractV1,
-  type KemerBetAgentPageSelectorContractV1,
+  assertKemerBetAgentPageSelectorContractV2,
+  type KemerBetAgentPageSelectorContractV2,
 } from './playwright-kemerbet-agent-page.js';
 
 const EXECUTION_LEASE_SECONDS = 300;
 
-function validateSelectorContract(value: unknown): KemerBetAgentPageSelectorContractV1 {
-  assertKemerBetAgentPageSelectorContractV1(value);
+function validateSelectorContract(value: unknown): KemerBetAgentPageSelectorContractV2 {
+  assertKemerBetAgentPageSelectorContractV2(value);
   return value;
 }
 
@@ -59,7 +59,7 @@ function logRedactedExecutorResult(result: {
  * read-only; the application does not expose an enqueue or financial-action HTTP endpoint.
  */
 export function createProductionKemerBetExecutorApplication(): Promise<KemerBetExecutorApplication> {
-  return createKemerBetExecutorApplication<KemerBetAgentPageSelectorContractV1>({
+  return createKemerBetExecutorApplication<KemerBetAgentPageSelectorContractV2>({
     loadConfiguration: loadExecutorConfig,
 
     loadAgentIdentityBindings(config) {

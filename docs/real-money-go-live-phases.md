@@ -30,12 +30,12 @@ Public product live
   -> separate production/public launch review
 ```
 
-## Current truthful status — 2026-08-22
+## Current truthful status — 2026-08-23
 
-The current GitHub `main` release is
-`5212543bf77bd7b00c5b1c922f79dbde62539865`. GitHub quality, disposable PostgreSQL,
-customer-web image, executor-image, Supabase staging apply, staging deploy, Telegram smoke, public
-inspection, and public publication runs completed successfully for that exact release.
+The current GitHub `main` source is
+`de86ede3511b62332a6542fa60f571fcec8dc78e`. The currently visible public staging deployment may
+still be an earlier exact reviewed release until the next bounded staging deployment; public
+reachability must not be used as evidence that newer executor code is deployed.
 
 | Capability                                          | Status                            | Current evidence                                                                                                   |
 | --------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -47,7 +47,7 @@ inspection, and public publication runs completed successfully for that exact re
 | Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                |
 | Owner-adjustable TeleBirr/CBE receiver revisions    | **IMPLEMENTATION/DEPLOY NEXT**    | Authenticated Owner UI/API creates encrypted immutable revisions; source code contains no real account             |
 | KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                      |
-| Real KemerBet portal workflow contract              | **NEXT**                          | Live inspection found the real flow starts at `/agents`; current executor expects the wrong Payment Requests route |
+| Real KemerBet portal workflow contract              | **NEXT**                          | Five lookup-only attempts: four resolved in ETB, one did not; no amount was entered and Transfer was never clicked |
 | TeleBirr receiver/profile/signer/device             | **BLOCKED — not provisioned**     | No active TeleBirr receiver revision, profile, signer, or enrolled verifier device                                 |
 | Payment verification, settlement, and execution     | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                      |
 | Public real-money processing                        | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                     |
@@ -132,28 +132,49 @@ The controlled portal inspection established this sequence:
 11. success result;
 12. exact KemerBet history reconciliation.
 
-No money was moved during inspection.
+No Amount or Notes value was entered and `Transfer` was never clicked during inspection. Four of
+the five saved Player IDs advanced to an ETB account card; one stayed on the lookup form. The card
+does not visibly render the submitted external Player ID, so a visible-card-only match is not an
+acceptable authority boundary.
+
+The current portal client uses one exact lookup contract:
+
+- `GET https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=<Player ID>`;
+- the structured response contains the submitted external Player ID and KemerBet's internal player
+  ID;
+- a later deposit request uses that returned internal player ID at
+  `POST https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit`.
+
+Player IDs and resolved identities remain private and must not be written to logs, documentation,
+screenshots, or readiness output.
 
 ### Required engineering work
 
-Progress recorded 2026-08-22:
+Progress recorded 2026-08-23:
 
-1. **Implemented, awaiting publication:** the executor's exact deposit route is `/agents`; the old
-   Payment Requests route is rejected.
-2. **Implemented, awaiting publication:** the browser boundary now requires the real
+1. **Merged to GitHub main:** the executor's exact deposit route is `/agents`; the old Payment
+   Requests route is rejected.
+2. **Merged to GitHub main:** the browser boundary now requires the real
    financial-actions trigger -> `Deposit` menu item -> `To Player` tile sequence. The controls are
    selected only through the exact reviewed contract; accessible-role or broad-text guesses are not
    allowed.
-3. **Implemented, awaiting live capture:** the selector contract now covers every navigation,
-   lookup, amount, notes, and final Transfer control. Concrete portal selectors must be captured
-   from the Owner's signed-in session before the fixed host file can be installed.
-4. Prove the resolved account is exactly the requested Player ID. The visible dialog alone is not
-   sufficient if it exposes only an email/username; use a stable structured portal fact or fail
-   closed.
-5. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
+3. **Captured from the signed-in portal:** the financial trigger, `Deposit`, `To Player`, Find By
+   selection, Player ID input, `Find`, Amount, Notes, and `Transfer` controls have exact CSS or
+   accessible-name contracts. The real Find By control is an Ant Design combobox, not a native
+   `<select>`.
+4. **Implemented in the current publication branch:** start the exact lookup response wait before
+   clicking `Find`; require the exact API origin, path, GET method, one exact `externalId` query,
+   status 200, response external ID, positive internal player ID, ETB, and a response-bound visible
+   identity. A hidden or swapped Player ID, identity, response, origin, method, path, or currency
+   fails closed.
+5. **Implemented in the current publication branch:** intercept the final deposit POST before it
+   reaches the network and continue it only when its exact three-field body contains the
+   response-bound internal player ID, the prepared amount, and empty Notes. Wrong/missing requests
+   are aborted. This guard does not enable the executor or create authority to click Transfer.
+6. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
    client-side minimum or maximum.
-6. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
-7. Add regression tests for route drift, selector drift, swapped identity, logged-out session,
+7. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
+8. Add regression tests for route drift, selector drift, swapped identity, logged-out session,
    CAPTCHA, wrong Player, wrong currency, wrong amount, missing success, ambiguous history, and
    response loss.
 
@@ -192,11 +213,13 @@ It must expose no agent identity, Player ID, cookie, password, or account balanc
 The exact real browser profile passes a no-transfer readiness probe on the target host. The
 executor remains unable to lease work and no `Transfer` click has occurred.
 
-The executor code exposes a dedicated no-transfer lookup operation that can return only exact
-Player/ETB match and `transferDisabled=true`; it does not fill Amount or click Transfer. Its focused
-route/workflow/session suite currently passes 83 tests. The exit gate is not yet satisfied because
-the real signed-in selector capture, host browser profile, and five saved-Player lookup run remain
-outstanding.
+The executor code exposes a dedicated no-transfer lookup operation that can return only an exact
+response-bound Player/ETB match and `transferDisabled=true`; it does not fill Amount or click
+Transfer. Its focused route/workflow/session/adapter suite currently passes 102 tests. The exit gate
+is not yet satisfied because one of the five saved Player IDs did not resolve, the corrected code is
+not yet published/deployed, and the fixed selector/profile files are not yet installed on the
+executor host. The five-account pilot must not be prepared or activated until all five lookup-only
+checks pass.
 
 ## Phase 2 — Provision official TeleBirr receipt authority
 

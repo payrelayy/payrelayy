@@ -106,7 +106,7 @@ fixed by `@fetanagent/config`:
 | `/run/secrets/kemerbet_history_reference_hmac_key`   | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                              |
 | `/run/secrets/kemerbet_agent_identity_hmac_key`      | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                     |
 | `/run/configs/private_live_deposit_pilot.v1.json`    | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers |
-| `/etc/fetanagent/kemerbet-selector-contract.v1.json` | Separately reviewed selector contract v1                                                                                                                 |
+| `/etc/fetanagent/kemerbet-selector-contract.v2.json` | Separately reviewed selector contract v2                                                                                                                 |
 | `/run/configs/supabase_ca_certificate`               | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                |
 | `/var/lib/fetanagent/kemerbet-sessions`              | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                          |
 

@@ -442,6 +442,24 @@ assert.match(workflow, /docker build --pull=false --target customer-web/);
 assert.match(workflow, /docker build --pull=false --target api/);
 assert.match(workflow, /docker build --pull=false --target beta-admission/);
 assert.match(workflow, /docker build --pull=false --target bot/);
+assert.match(workflow, /docker build --pull=false --target gateway/);
+assert.match(workflow, /apt-cache policy chromium/);
+assert.match(
+  workflow,
+  /docker build --pull=false --target executor[\s\S]*?--build-arg "VCS_REF=\$GITHUB_SHA"[\s\S]*?--build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=\$CHROMIUM_PACKAGE_VERSION"[\s\S]*?-t "fetanagent-deposit-executor:\$tag"/,
+);
+assert.match(
+  workflow,
+  /docker image inspect "fetanagent-deposit-executor:\$tag"[\s\S]*?org\.opencontainers\.image\.revision[\s\S]*?= "\$GITHUB_SHA"/,
+);
+assert.match(
+  workflow,
+  /docker image inspect "fetanagent-deposit-executor:\$tag"[\s\S]*?org\.opencontainers\.image\.chromium-package-version[\s\S]*?"\$CHROMIUM_PACKAGE_VERSION"/,
+);
+assert.match(
+  workflow,
+  /docker save --output "\$RUNNER_TEMP\/fetanagent-staging-images\.tar"[\s\S]*?"fetanagent-gateway:\$tag"[\s\S]*?"fetanagent-deposit-executor:\$tag"/,
+);
 assert.match(workflow, /org\.opencontainers\.image\.revision/);
 assert.match(workflow, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.match(workflow, /stop-and-disable/);

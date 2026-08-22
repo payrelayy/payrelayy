@@ -14,6 +14,10 @@ const provisionSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-session-provision.ts`,
   'utf8',
 );
+const noTransferReadinessSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-no-transfer-readiness.ts`,
+  'utf8',
+);
 const registrySource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-agent-session-registry.ts`,
   'utf8',
@@ -145,36 +149,40 @@ assert.match(compose, /^name: fetanagent-deposit-executor$/m);
 const services = topLevelSection(compose, 'services');
 const executorService = childBlock(services, 'executor');
 const provisionService = childBlock(services, 'session-provision');
+const noTransferReadinessService = childBlock(services, 'no-transfer-readiness');
 const networks = topLevelSection(compose, 'networks');
 const secrets = topLevelSection(compose, 'secrets');
 const configs = topLevelSection(compose, 'configs');
 
 assert.deepEqual(
   [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gm)].map((match) => match[1]),
-  ['executor', 'session-provision'],
-  'the dedicated deployment may define only the executor and transient provisioner',
+  ['executor', 'session-provision', 'no-transfer-readiness'],
+  'the dedicated deployment may define only the executor and two transient no-money tools',
 );
 assert.equal(
   countMatches(services, /^    profiles:\s*\[/gm),
-  2,
-  'both services must remain inert without an explicit profile',
+  3,
+  'all services must remain inert without an explicit profile',
 );
 assert.match(executorService, /profiles: \[executor\]/);
 assert.match(provisionService, /profiles: \[executor-session-provision\]/);
+assert.match(noTransferReadinessService, /profiles: \[executor-no-transfer-readiness\]/);
 assert.doesNotMatch(executorService, /executor-session-provision/);
 assert.doesNotMatch(provisionService, /profiles: \[executor\]/);
 
 assertCommonContainerHardening('executor', executorService);
 assertCommonContainerHardening('session-provision', provisionService);
+assertCommonContainerHardening('no-transfer-readiness', noTransferReadinessService);
 assert.equal(
   countMatches(compose, /^    image: \$\{FETANAGENT_EXECUTOR_IMAGE_REFERENCE:/gm),
-  2,
-  'both services must consume the same single immutable image-reference input',
+  3,
+  'all services must consume the same single immutable image-reference input',
 );
 assert.doesNotMatch(compose, /FETANAGENT_EXECUTOR_IMAGE_TAG|^\s+build:\s*$|pull_policy: never/m);
 
 assert.match(executorService, /restart: unless-stopped/);
 assert.match(provisionService, /restart: 'no'/);
+assert.match(noTransferReadinessService, /restart: 'no'/);
 assert.match(executorService, /logging:\s*\r?\n\s+driver: json-file/);
 assert.match(executorService, /max-size: 10m/);
 assert.match(executorService, /max-file: '5'/);
@@ -182,6 +190,7 @@ assert.match(executorService, /max-file: '5'/);
 const executorDeploy = servicePropertyBlock(executorService, 'deploy');
 assert.equal(executorDeploy.trim(), 'replicas: 1', 'the executor must remain a single replica');
 assert.doesNotMatch(provisionService, /^    deploy:/m);
+assert.doesNotMatch(noTransferReadinessService, /^    deploy:/m);
 
 const executorEnvironment = servicePropertyBlock(executorService, 'environment');
 assert.deepEqual(environmentNames(executorEnvironment), [
@@ -310,6 +319,69 @@ assert.doesNotMatch(
   /DATABASE|HMAC|IDENTITY_BINDINGS|SELECTOR_CONTRACT|PRIVATE_LIVE_DEPOSIT_PILOT|NODE_EXTRA_CA_CERTS|FINANCIAL_ACTIONS_MODE|KEMERBET_EXECUTOR_ENABLED|KEMERBET_FINAL_ACTION_ENABLED|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED|KEMERBET_EXECUTOR_DEPLOYMENT_TARGET/,
 );
 
+assert.match(
+  noTransferReadinessService,
+  /command: \['node', 'apps\/executor\/dist\/kemerbet-no-transfer-readiness\.js'\]/,
+);
+assert.match(noTransferReadinessService, /healthcheck:\s*\r?\n\s+disable: true/);
+assert.doesNotMatch(noTransferReadinessService, /stdin_open|tty:|\.X11-unix|DISPLAY|XAUTHORITY/);
+const noTransferReadinessEnvironment = servicePropertyBlock(
+  noTransferReadinessService,
+  'environment',
+);
+assert.deepEqual(environmentNames(noTransferReadinessEnvironment), [
+  'NODE_ENV',
+  'LOG_LEVEL',
+  'FINANCIAL_ACTIONS_MODE',
+  'KEMERBET_NO_TRANSFER_READINESS_ENABLED',
+  'KEMERBET_EXECUTOR_ENABLED',
+  'KEMERBET_FINAL_ACTION_ENABLED',
+  'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+  'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
+]);
+for (const requiredSetting of [
+  /NODE_ENV: production/,
+  /FINANCIAL_ACTIONS_MODE: dry_run/,
+  /KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'/,
+  /KEMERBET_EXECUTOR_ENABLED: 'false'/,
+  /KEMERBET_FINAL_ACTION_ENABLED: 'false'/,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'/,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'/,
+]) {
+  assert.match(noTransferReadinessEnvironment, requiredSetting);
+}
+assert.doesNotMatch(
+  noTransferReadinessService,
+  /kemerbet_executor_database_url|kemerbet_history_reference_hmac_key|private_live_deposit_pilot_manifest|supabase_ca_certificate|NODE_EXTRA_CA_CERTS|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true'|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'true'/,
+  'no-transfer readiness must have no database, pilot, history, or live-action capability',
+);
+const noTransferReadinessSecrets = servicePropertyBlock(noTransferReadinessService, 'secrets');
+assert.deepEqual(sourceNames(noTransferReadinessSecrets), [
+  'kemerbet_agent_identity_bindings',
+  'kemerbet_agent_identity_hmac_key',
+  'kemerbet_no_transfer_readiness_player_ids',
+]);
+for (const secretName of sourceNames(noTransferReadinessSecrets)) {
+  assert.match(
+    noTransferReadinessSecrets,
+    new RegExp(
+      `source: ${escapeRegExp(secretName)}\\s*\\r?\\n\\s+target: ${escapeRegExp(secretName)}\\s*\\r?\\n\\s+uid: '10001'\\s*\\r?\\n\\s+gid: '10001'\\s*\\r?\\n\\s+mode: 0400`,
+    ),
+  );
+}
+const noTransferReadinessConfigs = servicePropertyBlock(noTransferReadinessService, 'configs');
+assert.deepEqual(sourceNames(noTransferReadinessConfigs), ['kemerbet_selector_contract']);
+assert.match(
+  noTransferReadinessConfigs,
+  /source: kemerbet_selector_contract\s*\r?\n\s+target: \/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json\s*\r?\n\s+uid: '10001'\s*\r?\n\s+gid: '10001'\s*\r?\n\s+mode: 0444/,
+);
+const noTransferReadinessVolumes = servicePropertyBlock(noTransferReadinessService, 'volumes');
+assert.equal(countMatches(noTransferReadinessVolumes, /^\s+- type: bind$/gm), 1);
+assert.match(
+  noTransferReadinessVolumes,
+  /source: \/var\/lib\/fetanagent\/kemerbet-sessions\s*\r?\n\s+target: \/var\/lib\/fetanagent\/kemerbet-sessions\s*\r?\n\s+read_only: false/,
+);
+
 const provisionSecrets = servicePropertyBlock(provisionService, 'secrets');
 assert.deepEqual(sourceNames(provisionSecrets), ['kemerbet_session_xauthority']);
 assert.match(
@@ -349,6 +421,7 @@ const expectedSecretDeclarations = [
   'kemerbet_history_reference_hmac_key',
   'kemerbet_agent_identity_hmac_key',
   'kemerbet_session_xauthority',
+  'kemerbet_no_transfer_readiness_player_ids',
 ];
 assert.deepEqual(
   [...secrets.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1]),
@@ -362,6 +435,7 @@ assert.match(secrets, /FETANAGENT_KEMERBET_AGENT_IDENTITY_BINDINGS_FILE/);
 assert.match(secrets, /FETANAGENT_KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE/);
 assert.match(secrets, /FETANAGENT_KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE/);
 assert.match(secrets, /FETANAGENT_KEMERBET_SESSION_XAUTHORITY_FILE/);
+assert.match(secrets, /FETANAGENT_KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE/);
 assert.match(
   secrets,
   /FETANAGENT_EXECUTOR_DATABASE_URL_FILE:-\/etc\/fetanagent\/executor-secrets\/kemerbet_executor_database_url/,
@@ -391,10 +465,10 @@ assert.match(
   /FETANAGENT_SUPABASE_CA_CERTIFICATE_FILE:-\/etc\/fetanagent\/executor-config\/supabase-ca-certificate\.crt/,
 );
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 5);
-assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 3);
-assert.equal(countMatches(compose, /^\s+uid: '10001'$/gm), 8);
-assert.equal(countMatches(compose, /^\s+gid: '10001'$/gm), 8);
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 8);
+assert.equal(countMatches(compose, /^\s+mode: 0444$/gm), 4);
+assert.equal(countMatches(compose, /^\s+uid: '10001'$/gm), 12);
+assert.equal(countMatches(compose, /^\s+gid: '10001'$/gm), 12);
 assert.doesNotMatch(compose, /^volumes:\s*$/m, 'named volumes are forbidden');
 assert.doesNotMatch(compose, /^\s+(?:ports|expose|devices|privileged|network_mode|ipc):/m);
 assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker|service_role|telegram/i);
@@ -606,6 +680,10 @@ assert.equal(
   executorPackage.scripts?.['session:provision'],
   'node dist/kemerbet-session-provision.js',
 );
+assert.equal(
+  executorPackage.scripts?.['readiness:no-transfer'],
+  'node dist/kemerbet-no-transfer-readiness.js',
+);
 assert.match(
   provisionSource,
   /const FIXED_XAUTHORITY_PATH = '\/run\/secrets\/kemerbet_session_xauthority'/,
@@ -639,6 +717,20 @@ assert.doesNotMatch(
   provisionSource,
   /KEMERBET_EXECUTOR_DATABASE_(?:RUNTIME_ROLE|DIRECT_HOST|SECRET_FILE)|KEMERBET_AGENT_IDENTITY_BINDINGS_FILE|KEMERBET_SELECTOR_CONTRACT_FILE|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE|KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE|KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE|loadExecutorConfig|createKemerBetDeposit|runOnce\(|enqueueVerifiedDeposit|fenceDeposit|\.goto\(|\.click\(|\.fill\(|\.selectOption\(/,
   'the manual provisioner must not acquire a database or automated financial-action surface',
+);
+assert.match(noTransferReadinessSource, /KEMERBET_NO_TRANSFER_READINESS_ENABLED !== 'true'/);
+assert.match(noTransferReadinessSource, /FINANCIAL_ACTIONS_MODE !== 'dry_run'/);
+assert.match(noTransferReadinessSource, /players\.playerIds\.length !== 5/);
+assert.match(noTransferReadinessSource, /bindings\.platformAgentAccountIds\.length !== 1/);
+assert.match(noTransferReadinessSource, /probePlayerLookup/);
+assert.match(noTransferReadinessSource, /transferDisabled !== true/);
+assert.match(noTransferReadinessSource, /identifiersRedacted: true/);
+assert.match(noTransferReadinessSource, /moneyMoved: false/);
+assert.match(noTransferReadinessSource, /'KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE'/);
+assert.doesNotMatch(
+  noTransferReadinessSource,
+  /loadExecutorConfig|createKemerBetDepositService|resolveBrowser|\.prepare\(|submitOnceAfterFence|\.transferOnce\(|\.fillDeposit\(|leaseNext|fenceFinalAction|KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE/,
+  'no-transfer readiness source must not acquire execution, amount, transfer, database, or history authority',
 );
 assert.match(registrySource, /readonly chromiumSandbox: true/);
 assert.match(registrySource, /chromiumSandbox: true/);

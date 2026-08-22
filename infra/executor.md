@@ -6,7 +6,7 @@
 composition for FetanAgent's behind-the-scenes KemerBet deposit executor. It supports only an
 explicit `staging` or `production` database target and is not part of the ordinary staging Compose
 inventory. The first supervised activation must target `staging`; production is a later, separate
-go/no-go. Both services require an explicit profile, publish no port, and have no inbound action
+go/no-go. All three services require an explicit profile, publish no port, and have no inbound action
 endpoint.
 
 This artifact does not deploy anything, provision a database login, change either database feature
@@ -14,12 +14,13 @@ switch, install credentials, or authorize a transfer. The database `payment_veri
 `deposit_execution` switches remain unchanged. Starting the long-lived executor is blocked until
 every item in [Activation blockers](#activation-blockers) is independently satisfied.
 
-The two services have deliberately different capabilities:
+The three services have deliberately different capabilities:
 
-| Service             | Profile                      | Capability                                                                                                                                                                                  |
-| ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `executor`          | `executor`                   | One non-root, single-replica execution/reconciliation loop with the exact database, binding, selector, HMAC, and browser-profile inputs                                                     |
-| `session-provision` | `executor-session-provision` | One transient, headed manual browser with only a single account UUID, X11 authorization, and the profile volume; no database URL, selector, binding map, HMAC key, or financial-action gate |
+| Service                 | Profile                          | Capability                                                                                                                                                                                                                                           |
+| ----------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executor`              | `executor`                       | One non-root, single-replica execution/reconciliation loop with the exact database, binding, selector, HMAC, and browser-profile inputs                                                                                                              |
+| `session-provision`     | `executor-session-provision`     | One transient, headed manual browser with only a single account UUID, X11 authorization, and the profile volume; no database URL, selector, binding map, HMAC key, or financial-action gate                                                          |
+| `no-transfer-readiness` | `executor-no-transfer-readiness` | One transient, headless, exact-five lookup probe with one bound profile, the identity key/binding, selector v2, and a one-use Player-ID file; no database credential, pilot manifest, history key, Amount operation, transfer method, or action loop |
 
 The long-lived service is consume-only at the database boundary. Its executor group/runtime can
 execute exactly six transitions: the private-pilot lease and final-action fence plus four recovery
@@ -53,6 +54,7 @@ docker build --target executor --build-arg VCS_REF=<reviewed-full-commit> `
   --tag <reviewed-registry>/fetanagent-deposit-executor:<reviewed-commit-tag> .
 docker compose -f infra/compose.executor.yaml --profile executor config
 docker compose -f infra/compose.executor.yaml --profile executor-session-provision config
+docker compose -f infra/compose.executor.yaml --profile executor-no-transfer-readiness config
 ```
 
 Building is separate from activation. Push the reviewed image through the approved registry path,
@@ -99,21 +101,50 @@ secret or configuration object.
 Nothing below belongs in Git or a shared `.env` file. Production paths inside the container are
 fixed by `@fetanagent/config`:
 
-| Container path                                       | Required content                                                                                                                                         |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/run/secrets/kemerbet_executor_database_url`        | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`   |
-| `/run/secrets/kemerbet_agent_identity_bindings`      | Unique lines of `<canonical UUID><single space><hmac-sha256-agent-identity-v1:64-lowercase-hex>`                                                         |
-| `/run/secrets/kemerbet_history_reference_hmac_key`   | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                              |
-| `/run/secrets/kemerbet_agent_identity_hmac_key`      | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                     |
-| `/run/configs/private_live_deposit_pilot.v1.json`    | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers |
-| `/etc/fetanagent/kemerbet-selector-contract.v2.json` | Separately reviewed selector contract v2                                                                                                                 |
-| `/run/configs/supabase_ca_certificate`               | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                |
-| `/var/lib/fetanagent/kemerbet-sessions`              | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                          |
+| Container path                                           | Required content                                                                                                                                                                |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/run/secrets/kemerbet_executor_database_url`            | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`                          |
+| `/run/secrets/kemerbet_agent_identity_bindings`          | Unique lines of `<canonical UUID><single space><hmac-sha256-agent-identity-v1:64-lowercase-hex>`                                                                                |
+| `/run/secrets/kemerbet_history_reference_hmac_key`       | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                                                     |
+| `/run/secrets/kemerbet_agent_identity_hmac_key`          | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                                            |
+| `/run/secrets/kemerbet_no_transfer_readiness_player_ids` | Exactly five distinct canonical Player IDs, one per line; one-use Phase 1 input, never logged, committed, retained as a pilot manifest, or mounted into the long-lived executor |
+| `/run/configs/private_live_deposit_pilot.v1.json`        | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers                        |
+| `/etc/fetanagent/kemerbet-selector-contract.v2.json`     | Separately reviewed selector contract v2                                                                                                                                        |
+| `/run/configs/supabase_ca_certificate`                   | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                                       |
+| `/var/lib/fetanagent/kemerbet-sessions`                  | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                                                 |
 
 The executor rejects symlinks, path substitution, unsafe owner/mode metadata, file replacement while
 reading, equal HMAC keys, malformed or duplicate bindings, missing profiles, unauthenticated or
 CAPTCHA sessions, and a visible agent identity that does not match its externally supplied binding.
 Errors and health responses contain no account, player, reference, key, or credential material.
+
+## Five-Player no-transfer readiness
+
+Run this only after the Owner has completed manual session provisioning and the visible signed-in
+identity has been independently HMAC-bound to the one active agent-account UUID. The source Player
+file is a short-lived operator secret built from the exact five saved, active, valid, currently
+eligible KemerBet accounts. Do not pass its contents through command arguments, environment
+variables, GitHub inputs, chat, screenshots, or logs.
+
+The readiness service deliberately receives no database URL, private-pilot manifest,
+history-reference key, executor switch, or final-action switch. It checks the authenticated agent
+identity first, performs the five response-bound ETB lookups sequentially, never fills Amount or
+Notes, and exposes no transfer method. Its only successful log projection is:
+
+```text
+KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.
+```
+
+Run it while the long-lived executor is stopped:
+
+```bash
+docker compose -f infra/compose.executor.yaml \
+  --profile executor-no-transfer-readiness run --rm no-transfer-readiness
+```
+
+After the command exits, securely remove the host source for
+`kemerbet_no_transfer_readiness_player_ids`. A successful local portal check or a successful image
+test is not a substitute for this exact target-host profile proof.
 
 The database target is mandatory whenever the execution runtime is enabled:
 

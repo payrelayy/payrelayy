@@ -76,6 +76,14 @@ export type KemerBetAgentSessionReadiness =
 
 export interface KemerBetAgentSessionRegistry {
   probeReadiness(platformAgentAccountId: string): Promise<KemerBetAgentSessionReadiness>;
+  probePlayerLookup(
+    platformAgentAccountId: string,
+    target: { readonly playerId: string; readonly currencyCode: 'ETB' },
+  ): Promise<{
+    readonly exactPlayerMatch: true;
+    readonly exactCurrencyMatch: true;
+    readonly transferDisabled: true;
+  } | null>;
   resolveBrowser(platformAgentAccountId: string): Promise<KemerBetDepositBrowser | null>;
   close(): Promise<void>;
 }
@@ -144,11 +152,13 @@ class SerialLane {
 function serializedBrowser(
   browser: KemerBetDepositBrowser,
   lane: SerialLane,
+  assertCurrentProfile: () => Promise<void>,
   closeOnFailure: () => Promise<void>,
 ): KemerBetDepositBrowser {
   async function run<T>(operation: () => Promise<T>): Promise<T> {
     return lane.run(async () => {
       try {
+        await assertCurrentProfile();
         return await operation();
       } catch (error) {
         await closeOnFailure();
@@ -445,13 +455,27 @@ export function createKemerBetAgentSessionRegistry(
         fingerprintExternalReference: options.fingerprintExternalReference,
       });
       let session: ActiveSession | null = null;
-      const browser = serializedBrowser(unSerializedBrowser, lane, async () => {
-        if (session === null) {
-          await context?.close().catch(() => undefined);
-          return;
-        }
-        await closeSession(platformAgentAccountId, session);
-      });
+      const browser = serializedBrowser(
+        unSerializedBrowser,
+        lane,
+        async () => {
+          const currentProfile = await readReadyProfile(platformAgentAccountId);
+          if (
+            !('userDataDirectory' in currentProfile) ||
+            currentProfile.bindingFingerprint !== profile.bindingFingerprint ||
+            !sameReadyProfile(currentProfile.profileMetadata, profile.profileMetadata)
+          ) {
+            throw new Error('The authenticated agent session is unavailable.');
+          }
+        },
+        async () => {
+          if (session === null) {
+            await context?.close().catch(() => undefined);
+            return;
+          }
+          await closeSession(platformAgentAccountId, session);
+        },
+      );
       session = {
         context,
         bindingFingerprint: profile.bindingFingerprint,
@@ -498,7 +522,11 @@ export function createKemerBetAgentSessionRegistry(
   ): Promise<ActiveSession | null> {
     if (closed || !validPlatformAgentAccountId(platformAgentAccountId)) return null;
     const profileResult = checkedProfile ?? (await readReadyProfile(platformAgentAccountId));
-    if (!('userDataDirectory' in profileResult)) return null;
+    if (!('userDataDirectory' in profileResult)) {
+      const existing = active.get(platformAgentAccountId);
+      if (existing !== undefined) await closeSession(platformAgentAccountId, existing);
+      return null;
+    }
     const existing = active.get(platformAgentAccountId);
     if (existing !== undefined) {
       if (
@@ -555,6 +583,16 @@ export function createKemerBetAgentSessionRegistry(
 
   return {
     probeReadiness,
+
+    async probePlayerLookup(platformAgentAccountId, target) {
+      const session = await ensureSession(platformAgentAccountId);
+      if (session === null) return null;
+      try {
+        return await session.browser.probePlayerLookup(target);
+      } catch {
+        return null;
+      }
+    },
 
     async resolveBrowser(platformAgentAccountId) {
       return (await ensureSession(platformAgentAccountId))?.browser ?? null;

@@ -33,7 +33,7 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: publishableKey,
     OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverReferenceEncryptionMaster,
     OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverReferenceFingerprintMaster,
-    DEPOSIT_PROOF_REFERENCE_PROFILE: receiverReferenceProfile,
+    OWNER_RECEIVER_REFERENCE_PROFILE: receiverReferenceProfile,
   };
 }
 
@@ -102,12 +102,18 @@ describe('Owner-control configuration', () => {
     expect(() =>
       loadOwnerControlConfig({
         ...enabledEnvironment(),
-        DEPOSIT_PROOF_REFERENCE_PROFILE: JSON.stringify({
+        OWNER_RECEIVER_REFERENCE_PROFILE: JSON.stringify({
           ...JSON.parse(receiverReferenceProfile),
           encryptionMasterFingerprint: `sha256:${'0'.repeat(64)}`,
         }),
       }),
     ).toThrow('do not match the approved version 2 profile');
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        DEPOSIT_PROOF_REFERENCE_PROFILE: receiverReferenceProfile,
+      }),
+    ).toThrow('must use the Owner-specific profile setting');
   });
 
   it('reads one newline-terminated value from each approved production file', () => {
@@ -130,7 +136,7 @@ describe('Owner-control configuration', () => {
           '/run/secrets/owner_receiver_reference_encryption_master',
         OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE:
           '/run/secrets/owner_receiver_reference_fingerprint_master',
-        DEPOSIT_PROOF_REFERENCE_PROFILE_FILE:
+        OWNER_RECEIVER_REFERENCE_PROFILE_FILE:
           '/etc/fetanagent/deposit-proof-reference-profile.v2.json',
       },
       { readSecretFile: (path) => values[path] ?? '' },

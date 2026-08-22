@@ -220,8 +220,20 @@ export function loadOwnerControlConfig(
   ) {
     throw new Error('Owner receiver-reference protection masters are missing or malformed.');
   }
+  if (
+    environment.DEPOSIT_PROOF_REFERENCE_PROFILE !== undefined ||
+    environment.DEPOSIT_PROOF_REFERENCE_PROFILE_FILE !== undefined
+  ) {
+    throw new Error(
+      'Owner receiver-reference protection must use the Owner-specific profile setting.',
+    );
+  }
   const receiverReferenceMasterProfile = loadAndVerifyDepositProofReferenceProfile(
-    environment,
+    {
+      ...environment,
+      DEPOSIT_PROOF_REFERENCE_PROFILE: environment.OWNER_RECEIVER_REFERENCE_PROFILE,
+      DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: environment.OWNER_RECEIVER_REFERENCE_PROFILE_FILE,
+    },
     environment.NODE_ENV,
     {
       encryptionMasterSecret: receiverReferenceEncryptionMaster,

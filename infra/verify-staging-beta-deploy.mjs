@@ -56,6 +56,21 @@ for (const artifact of [workflow, botWorkflow, qualityWorkflow, compose, helper,
   );
 }
 
+const ownerCompose = /\n  owner-control:\n([\s\S]*?)\n  customer-web:/u.exec(compose)?.[1];
+assert.ok(ownerCompose, 'The staging Compose contract must contain Owner control.');
+for (const exactOwnerReceiverSetting of [
+  'OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master',
+  'OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master',
+  'OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json',
+]) {
+  assert.match(ownerCompose, new RegExp(exactOwnerReceiverSetting.replaceAll('.', '\\.')));
+}
+assert.doesNotMatch(
+  ownerCompose,
+  /^\s+DEPOSIT_PROOF_REFERENCE_(?:ENCRYPTION|FINGERPRINT|PROFILE)/mu,
+  'Owner control must use its receiver-specific contract rather than the provider-proof environment.',
+);
+
 assert.match(workflow, /workflow_dispatch:/);
 assert.doesNotMatch(workflow, /pull_request:|pull_request_target:|push:|schedule:/);
 assert.match(workflow, /permissions:\s*\r?\n\s+contents: read/);

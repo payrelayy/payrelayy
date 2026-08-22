@@ -81,7 +81,7 @@ function config() {
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_for_staging_only',
     OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverEncryptionMaster,
     OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverFingerprintMaster,
-    DEPOSIT_PROOF_REFERENCE_PROFILE: receiverMasterProfile,
+    OWNER_RECEIVER_REFERENCE_PROFILE: receiverMasterProfile,
   });
 }
 

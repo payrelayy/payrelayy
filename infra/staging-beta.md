@@ -126,8 +126,14 @@ The application must support these exact file-valued variables before activation
   `DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE`, and
   `DEPOSIT_PROOF_REFERENCE_PROFILE_FILE` at their fixed production paths;
 - bot additionally: `BOT_TO_API_ACTION_HMAC_SECRET_FILE`;
-- owner-control: `OWNER_CONTROL_DATABASE_URL_FILE` and
-  `OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`; a Supabase service-role key is forbidden.
+- owner-control: `OWNER_CONTROL_DATABASE_URL_FILE`,
+  `OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`,
+  `OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE`,
+  `OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE`, and
+  `OWNER_RECEIVER_REFERENCE_PROFILE_FILE` at their fixed production paths. The Owner-specific
+  names separate receiver rotation from the provider-proof runtime contract even though both
+  domains are pinned to the same independently approved root profile. A Supabase service-role key
+  is forbidden.
 - customer-web: `CUSTOMER_WEB_DATABASE_URL_FILE`,
   `CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE`, and
   `CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE`, plus the same three provider-proof v2 file variables.

@@ -19,7 +19,7 @@ export interface OwnerControlPostgresRuntime {
   >;
   readonly privateLivePilot: Pick<
     PostgresOwnerPrivateLivePilotControl,
-    'arm' | 'prepare' | 'status' | 'stop'
+    'arm' | 'current' | 'prepare' | 'status' | 'stop'
   >;
   close(): Promise<void>;
   ready(): Promise<boolean>;
@@ -123,7 +123,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)', 'execute') as shadow_list_allowed,
     has_function_privilege(current_user, 'app.list_owner_player_deposit_eligibility(uuid,integer)', 'execute') as player_eligibility_list_allowed,
     has_function_privilege(current_user, 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)', 'execute') as player_eligibility_decide_allowed,
-    has_function_privilege(current_user, 'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)', 'execute') as private_live_pilot_prepare_allowed,
+    has_function_privilege(current_user, 'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)', 'execute') as private_live_pilot_prepare_allowed,
+    has_function_privilege(current_user, 'app.get_current_private_live_deposit_pilot_status(uuid)', 'execute') as private_live_pilot_current_status_allowed,
     has_function_privilege(current_user, 'app.arm_private_live_deposit_pilot(uuid,uuid)', 'execute') as private_live_pilot_arm_allowed,
     has_function_privilege(current_user, 'app.stop_private_live_deposit_pilot(uuid,uuid,text)', 'execute') as private_live_pilot_stop_allowed,
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
@@ -154,7 +155,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 18
+      select count(*) = 19
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -181,7 +182,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure,
           'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
           'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
-          'app.prepare_private_live_deposit_pilot(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)'::regprocedure,
+          'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)'::regprocedure,
+          'app.get_current_private_live_deposit_pilot_status(uuid)'::regprocedure,
           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure,
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure

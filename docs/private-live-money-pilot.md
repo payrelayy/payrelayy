@@ -36,32 +36,35 @@ An armed pilot revision contains all of the following, with no implicit defaults
 Creating or arming a pilot revision does not by itself enable payment verification, execution, or a
 KemerBet final action. Those remain separate reviewed gates.
 
-The Owner-control runtime receives exactly four pilot routines through a forward-only boundary:
-prepare, dry-run arm, aggregate status, and emergency stop. The service verifies the Supabase bearer
-subject, the database independently resolves that Auth UUID to the active Owner, mutations require
-exact same-origin JSON plus an explicit anti-CSRF header, and the catalog preflight rejects any
-table access or additional routine. Prepare reuses one UUID-v4 request key only for an identical
-request; arm recovery is postcondition-based; and same-reason stop replay creates no second audit
-event. None of these controls can make a financial or provider switch live. Operators must not
-substitute ad-hoc SQL for this boundary.
+The Owner-control runtime receives exactly five pilot routines through a forward-only boundary:
+fixed-policy prepare, current-open-pilot recovery, dry-run arm, aggregate status, and emergency
+stop. The service verifies the Supabase bearer subject, the database independently resolves that
+Auth UUID to the active Owner, mutations require exact same-origin JSON plus an explicit anti-CSRF
+header, and the catalog preflight rejects any table access or additional routine. Prepare reuses one
+UUID-v4 request key only for an identical request; arm recovery is postcondition-based; and
+same-reason stop replay creates no second audit event. None of these controls can make a financial
+or provider switch live. Operators must not substitute ad-hoc SQL for this boundary.
 
 ### Owner-control client contract
 
-The four server routes are an authenticated API boundary, not yet a supported human operator
-client. The current Owner dashboard does not render pilot preparation, status, arm, or stop
-controls. Consequently, this slice must remain unprovisioned and unarmed until a reviewed
-same-origin dashboard flow can perform all four operations while keeping the Supabase access token
-only in memory. Ad-hoc `curl`, copied bearer tokens, and browser-console snippets are not supported
-operator procedures. In particular, an always-visible emergency-stop control that does not require
-token extraction is an activation prerequisite.
+The same-origin Owner dashboard implements the supported human operator client while keeping the
+Supabase access token only in memory. It lists active, valid, currently eligible KemerBet Players;
+requires an explicit fixed-policy confirmation; recovers the current open pilot after a page reload;
+and keeps the emergency stop directly reachable without extracting a token or copying a UUID.
+Ad-hoc `curl`, copied bearer tokens, and browser-console snippets are not supported operator
+procedures.
 
-The future same-origin client must implement this exact transport contract:
+The client and server implement this exact transport contract:
 
 - `POST /v1/owner/private-live-deposit-pilots/prepare` accepts one exact JSON object containing a
   canonical lowercase UUID-v4 `requestId`, confirmation
-  `owner_confirmed_dormant_private_live_pilot`, one or two explicit provider codes, exactly five
-  Player IDs, one to five submitting-customer UUIDs, the bounded amount and reservation caps, and
-  canonical ISO activation/expiry timestamps no more than 24 hours apart.
+  `owner_confirmed_fixed_telebirr_five_player_pilot`, exactly five Player IDs, and canonical ISO
+  activation/expiry timestamps exactly two hours apart. The callable PostgreSQL routine supplies
+  only `telebirr`, fixes 2,500 minor units per deposit and Player, 12,500 minor units aggregate and
+  five reservations, derives the submitting-customer UUIDs from the Player owners, and rechecks the
+  immutable result. The generic provider/amount/customer routine is not callable by the runtime.
+- `GET /v1/owner/private-live-deposit-pilots/current` accepts no query parameters and returns either
+  the reviewed aggregate projection for the current draft/armed pilot or `null`.
 - `POST /v1/owner/private-live-deposit-pilots/{pilotRevisionId}/arm` accepts only confirmation
   `owner_confirmed_dry_run_only` and a `requestId` exactly equal to the path UUID. Success is valid
   only when the returned aggregate status is `armed`, `dry_run`, and `financiallyActive: false`.
@@ -74,7 +77,7 @@ The future same-origin client must implement this exact transport contract:
 
 Every mutation must be exact `application/json` from the Owner origin (or reviewed SSH loopback
 origin), with `x-fetanagent-owner-csrf: private-live-pilot-v1` and exactly one
-`x-idempotency-key` equal to the JSON `requestId`. All four routes require the in-memory Owner bearer
+`x-idempotency-key` equal to the JSON `requestId`. All five routes require the in-memory Owner bearer
 token; PostgreSQL independently maps its verified Auth UUID to the active Owner. The client must not
 put a bearer token, KemerBet Player ID, customer UUID, protected payment reference, receiver detail,
 or raw provider artifact into source control, terminal history, analytics, logs, screenshots, or
@@ -181,22 +184,24 @@ app or bot is publicly accessible.
 
 ## Required Owner inputs before activation
 
-Values that authorize financial exposure are not embedded in source code or guessed by the
-implementation. Before arming, the Owner must supply through the private control plane:
+The approved first-run exposure limits are fixed in the reviewed database routine, server payload,
+and dashboard copy rather than typed or guessed by an operator. Before preparation, the Owner must
+select through the private control plane:
 
 - the exact five KemerBet Player IDs;
-- the exact test customer identities/channels;
-- the provider to enable first;
-- the per-deposit, per-player, aggregate, and immutable-reservation-count limits;
-- the pilot duration; and
+- the exact test customer identities/channels, derived from those Player owners; and
 - the exact receiver revision and provider-specific protected matching material.
+
+The provider is TeleBirr, the caps are 25 ETB per deposit and Player / 125 ETB aggregate / five
+reservations, and the duration is exactly two hours. Changing any of those values requires another
+reviewed forward migration and client/server contract; it is not an Owner form field.
 
 No KemerBet password, provider password, OTP, browser cookie, raw transaction ID, or raw receipt is
 accepted through source control, ordinary chat, logs, or general audit metadata.
 
-## Recommended first supervised run
+## Approved first supervised run
 
-Unless the Owner explicitly chooses stricter values, the proposed first-run configuration is:
+The Owner approved this exact first-run configuration:
 
 - TeleBirr only, after the live Android/provider-response contract and receiver revision pass their
   independent readiness gates;
@@ -208,7 +213,7 @@ Unless the Owner explicitly chooses stricter values, the proposed first-run conf
 - one supervised transaction at a time, with provider, database, KemerBet balance/history, and
   customer-facing status reconciled before the next Player ID is attempted.
 
-These values are a proposal, not an activation. A test that returns an uncertain external result
+These approved values are still not an activation. A test that returns an uncertain external result
 still consumes its reservation and pauses the pilot for reconciliation. Passing five supervised
 transactions materially increases confidence, but it cannot prove that a real-money system is
 “100% perfect”; public real-money access still requires a separate reviewed launch decision.

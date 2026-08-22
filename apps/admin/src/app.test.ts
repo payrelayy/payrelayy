@@ -128,6 +128,7 @@ function runtime(
         alreadyApplied: false,
         status: pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' }),
       }),
+      current: async () => undefined,
       prepare: async () => pilotStatus(),
       status: async () => pilotStatus(),
       stop: async () =>
@@ -170,6 +171,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Player ID ownership associations');
     expect(response.body).toContain('Deposit eligibility decisions');
     expect(response.body).toMatch(/does not open a deposit[\s\S]*or move money/u);
+    expect(response.body).toContain('TeleBirr five-Player pilot');
+    expect(response.body).toContain('25 ETB maximum per deposit and Player');
+    expect(response.body).toContain('Emergency stop');
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
@@ -204,6 +208,10 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('/v1/owner/dry-run-deposit-intake?limit=25');
     expect(response.body).toContain('/v1/owner/dry-run-fixture-assessments?limit=50');
     expect(response.body).toContain('/v1/owner/player-deposit-eligibility?limit=50');
+    expect(response.body).toContain('/v1/owner/private-live-deposit-pilots/current');
+    expect(response.body).toContain('owner_confirmed_fixed_telebirr_five_player_pilot');
+    expect(response.body).toContain('owner_confirmed_emergency_stop');
+    expect(response.body).toContain("'x-fetanagent-owner-csrf': 'private-live-pilot-v1'");
     expect(response.body).toContain('Run advisory fixture');
     expect(response.body).toContain('does not verify, approve, credit, or execute a payment');
     expect(response.body).toContain("reviewButton('Found on KemerBet'");
@@ -644,6 +652,9 @@ describe('Owner-control HTTP boundary', () => {
           arm: async () => {
             throw new Error('not called');
           },
+          current: async () => {
+            throw new Error('not called');
+          },
           prepare: async (actor, request) => {
             observedActor = actor;
             observedRequest = request;
@@ -665,30 +676,51 @@ describe('Owner-control HTTP boundary', () => {
       headers: pilotMutationHeaders(),
       payload: {
         activeFrom: '2026-08-21T20:00:00.000Z',
-        confirmation: 'owner_confirmed_dormant_private_live_pilot',
+        confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
         expiresAt: '2026-08-21T22:00:00.000Z',
-        maximumAggregateMinor: 12_500,
-        maximumPerDepositMinor: 2_500,
-        maximumPerPlayerMinor: 2_500,
-        maximumReservationCount: 5,
-        minimumAmountMinor: 2_500,
         playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
-        providerCodes: ['telebirr'],
         requestId: pilotRequestId,
-        submittingCustomerIds: ['44444444-4444-4444-8444-444444444444'],
       },
     });
 
     expect(response.statusCode).toBe(201);
     expect(observedActor).toBe(authUserId);
     expect(observedRequest).toMatchObject({
-      maximumAggregateMinor: 12_500,
-      providerCodes: ['telebirr'],
+      playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
       requestId: pilotRequestId,
     });
     expect(response.json()).toEqual({ pilot: pilotStatus() });
     expect(response.body).not.toContain('PLAYER-1');
-    expect(response.body).not.toContain('44444444-4444-4444-8444-444444444444');
+    await app.close();
+  });
+
+  it('rejects browser-supplied provider, amount, reservation, or customer authority', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/private-live-deposit-pilots/prepare',
+      headers: pilotMutationHeaders(),
+      payload: {
+        activeFrom: '2026-08-21T20:00:00.000Z',
+        confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
+        expiresAt: '2026-08-21T22:00:00.000Z',
+        maximumAggregateMinor: 12_500,
+        playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
+        providerCodes: ['telebirr'],
+        requestId: pilotRequestId,
+        submittingCustomerIds: ['44444444-4444-4444-8444-444444444444'],
+      },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'invalid_request' });
+    expect(authenticationCalls).toBe(0);
     await app.close();
   });
 
@@ -760,6 +792,9 @@ describe('Owner-control HTTP boundary', () => {
               status: pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' }),
             };
           },
+          current: async () => {
+            throw new Error('not called');
+          },
           prepare: async () => {
             throw new Error('not called');
           },
@@ -807,6 +842,9 @@ describe('Owner-control HTTP boundary', () => {
       runtime: runtime({
         privateLivePilot: {
           arm: async () => {
+            throw new Error('not called');
+          },
+          current: async () => {
             throw new Error('not called');
           },
           prepare: async () => {
@@ -862,6 +900,42 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(accepted.statusCode).toBe(200);
     expect(accepted.json()).toEqual({ pilot: pilotStatus() });
+    await app.close();
+  });
+
+  it('loads the current pilot after authentication without requiring a copied pilot identifier', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        privateLivePilot: {
+          arm: async () => {
+            throw new Error('not called');
+          },
+          current: async (actor) => {
+            expect(actor).toBe(authUserId);
+            return pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' });
+          },
+          prepare: async () => {
+            throw new Error('not called');
+          },
+          status: async () => {
+            throw new Error('not called');
+          },
+          stop: async () => {
+            throw new Error('not called');
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/private-live-deposit-pilots/current',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      pilot: pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' }),
+    });
     await app.close();
   });
 });

@@ -171,10 +171,10 @@ Progress recorded 2026-08-23:
    reaches the network and continue it only when its exact three-field body contains the
    response-bound internal player ID, the prepared amount, and empty Notes. Wrong/missing requests
    are aborted. This guard does not enable the executor or create authority to click Transfer.
-6. **Current implementation:** add one transient target-host `no-transfer-readiness` command and
-   hardened Compose profile. It accepts exactly one HMAC-bound profile plus exactly five one-use
-   private Player IDs, performs only sequential response-bound ETB lookups, and has no database
-   credential, pilot manifest, history key, amount operation, transfer method, or action loop.
+6. **Merged to GitHub main:** one transient target-host `no-transfer-readiness` command and hardened
+   Compose profile accept exactly one HMAC-bound profile plus exactly five one-use private Player
+   IDs, perform only sequential response-bound ETB lookups, and have no database credential, pilot
+   manifest, history key, amount operation, transfer method, or action loop.
 7. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
    client-side minimum or maximum.
 8. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
@@ -188,7 +188,9 @@ Progress recorded 2026-08-23:
    with an opaque credential reference only. This control accepts no KemerBet password, OTP,
    cookie, session export, agent ID, username, or balance. Each adjustment creates a new immutable
    revision and retires the prior revision while all money/provider/pilot switches are disabled.
-2. Build and pin one reviewed executor image digest.
+2. **In deployment:** build and commit-pin one reviewed executor image in the same sealed staging
+   image bundle as the public application, without adding the executor to the staging Compose
+   service set or starting a container.
 3. Create one service-owned `0700` persistent browser-profile directory for the exact account UUID.
 4. Run the transient headed session provisioner while the long-lived executor is stopped.
 5. The Owner signs in manually. No password, OTP, cookie, or session export enters Git, chat,

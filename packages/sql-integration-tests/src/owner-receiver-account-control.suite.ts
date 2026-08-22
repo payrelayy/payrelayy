@@ -94,7 +94,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
                  'app.replace_receiver_account_by_admin_id_legacy(uuid,uuid,text,text,text,text,jsonb)',
                  'EXECUTE'
                ) as legacy_denied,
-               not has_function_privilege(
+               not has_table_privilege(
                  'fetanagent_owner_control_runtime', 'app.receiver_accounts',
                  'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
                ) as no_table_access,
@@ -114,8 +114,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
 
     it('atomically retires the old CBE revision, creates one protected revision, and replays exactly', async () => {
       const client = getClient();
-      const outerSavepoint = `owner_receiver_rotation_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
-      await client.query(`savepoint ${outerSavepoint}`);
+      await client.query('begin');
       try {
         const owner = await client.query<{ readonly auth_user_id: string }>(
           `select auth_user_id
@@ -250,15 +249,13 @@ export function registerOwnerReceiverAccountControlSqlTests(
           /conflicts with its original use/u,
         );
       } finally {
-        await client.query(`rollback to savepoint ${outerSavepoint}`);
-        await client.query(`release savepoint ${outerSavepoint}`);
+        await client.query('rollback');
       }
     });
 
     it('fails closed when a financial switch is not disabled and keeps history immutable', async () => {
       const client = getClient();
-      const outerSavepoint = `owner_receiver_gate_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
-      await client.query(`savepoint ${outerSavepoint}`);
+      await client.query('begin');
       try {
         const owner = await client.query<{ readonly auth_user_id: string }>(
           `select auth_user_id from app.admin_users where id = $1::uuid`,
@@ -301,8 +298,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
           ).rejects.toThrow(/immutable/u);
         }
       } finally {
-        await client.query(`rollback to savepoint ${outerSavepoint}`);
-        await client.query(`release savepoint ${outerSavepoint}`);
+        await client.query('rollback');
       }
     });
   });

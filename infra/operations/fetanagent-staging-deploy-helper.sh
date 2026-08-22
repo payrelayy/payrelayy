@@ -579,10 +579,21 @@ require_exact_fresh_bot_runtime() {
   local startup_contract_mode="$2"
   local container_id environment forbidden_environment health ids restart_count revision service services state
   local expected_environment
+  local gateway_container gateway_health gateway_restart gateway_revision services_contract
   local -a expected_services=(api beta-admission bot customer-web owner-control)
 
-  [[ "$startup_contract_mode" == 'immediate-startup' || "$startup_contract_mode" == 'steady-state' ]] ||
+  [[ "$startup_contract_mode" == 'immediate-startup' || "$startup_contract_mode" == 'steady-state' ||
+    "$startup_contract_mode" == 'published-steady-state' ||
+    "$startup_contract_mode" == 'published-with-kemerbet-session' ]] ||
     die 'the fresh-host Telegram startup-contract mode is invalid'
+
+  if [[ "$startup_contract_mode" == 'published-with-kemerbet-session' ]]; then
+    services_contract=$'api\nbeta-admission\nbot\ncustomer-web\ngateway\nkemerbet-session-provision\nowner-control'
+  elif [[ "$startup_contract_mode" == 'published-steady-state' ]]; then
+    services_contract=$'api\nbeta-admission\nbot\ncustomer-web\ngateway\nowner-control'
+  else
+    services_contract=$'api\nbeta-admission\nbot\ncustomer-web\nowner-control'
+  fi
 
   services="$({
     docker_local container ls --all --quiet \
@@ -593,7 +604,7 @@ require_exact_fresh_bot_runtime() {
           --format '{{ index .Config.Labels "com.docker.compose.service" }}'
       done
   } | sort)" || die 'the fresh-host Telegram service inventory could not be inspected'
-  [[ "$services" == $'api\nbeta-admission\nbot\ncustomer-web\nowner-control' ]] ||
+  [[ "$services" == "$services_contract" ]] ||
     die 'the fresh-host Telegram service set is not exact'
 
   for service in "${expected_services[@]}"; do
@@ -689,7 +700,117 @@ require_exact_fresh_bot_runtime() {
     fi
   done
 
+  if [[ "$startup_contract_mode" == 'published-steady-state' ||
+    "$startup_contract_mode" == 'published-with-kemerbet-session' ]]; then
+    gateway_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=gateway')" ||
+      die 'the published gateway inventory could not be inspected'
+    [[ "$gateway_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die 'the published gateway inventory is not singular'
+    [[ "$(docker_local container inspect "$gateway_container" --format '{{.State.Status}}')" == 'running' ]] ||
+      die 'the published gateway is not running'
+    gateway_health="$(docker_local container inspect "$gateway_container" --format '{{.State.Health.Status}}')"
+    [[ "$gateway_health" == 'healthy' ]] || die 'the published gateway is not healthy'
+    gateway_revision="$(docker_local container inspect "$gateway_container" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+    [[ "$gateway_revision" == "$commit_sha" ]] ||
+      die 'the published gateway does not run the reviewed commit'
+    gateway_restart="$(docker_local container inspect "$gateway_container" --format '{{.RestartCount}}')"
+    [[ "$gateway_restart" == '0' ]] || die 'the published gateway restarted unexpectedly'
+  fi
+
   require_reviewed_owner_port_3002 "$commit_sha"
+}
+
+require_kemerbet_session_provision_runtime() {
+  local commit_sha="$1"
+  local container_id environment health mount_contract owner_container owner_socket_source
+  local revision session_socket_source
+
+  container_id="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=kemerbet-session-provision')" ||
+    die 'the private KemerBet session container inventory could not be inspected'
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the private KemerBet session container inventory is not singular'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.State.Status}}')" == 'running' ]] ||
+    die 'the private KemerBet session container is not running'
+  health="$(docker_local container inspect "$container_id" --format '{{.State.Health.Status}}')"
+  [[ "$health" == 'healthy' ]] || die 'the private KemerBet session container is not healthy'
+  revision="$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+  [[ "$revision" == "$commit_sha" ]] ||
+    die 'the private KemerBet session container does not run the reviewed commit'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.Config.User}}')" == '10001:10001' ]] ||
+    die 'the private KemerBet session container user is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .Config.Cmd}}')" == \
+    '["node","apps/executor/dist/kemerbet-session-provision-server.js"]' ]] ||
+    die 'the private KemerBet session container command is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.ReadonlyRootfs}}')" == 'true' ]] ||
+    die 'the private KemerBet session root filesystem is writable'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.RestartCount}}')" == '0' ]] ||
+    die 'the private KemerBet session container restarted unexpectedly'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.CapAdd}}')" == 'null' ]] ||
+    die 'the private KemerBet session container adds a Linux capability'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.CapDrop}}')" == '["ALL"]' ]] ||
+    die 'the private KemerBet session container does not drop every Linux capability'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.SecurityOpt}}')" == '["no-new-privileges:true"]' ]] ||
+    die 'the private KemerBet session container permits privilege escalation'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.PidsLimit}}')" == '512' ]] ||
+    die 'the private KemerBet session PID limit is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.Memory}}')" == '1610612736' ]] ||
+    die 'the private KemerBet session memory limit is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.NanoCpus}}')" == '2000000000' ]] ||
+    die 'the private KemerBet session CPU limit is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.ShmSize}}')" == '536870912' ]] ||
+    die 'the private KemerBet session shared-memory limit is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.PortBindings}}')" == '{}' ]] ||
+    die 'the private KemerBet session container publishes a port'
+
+  environment="$(docker_local container inspect "$container_id" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}')" ||
+    die 'the private KemerBet session environment could not be inspected'
+  for expected_environment in \
+    'NODE_ENV=production' \
+    'FINANCIAL_ACTIONS_MODE=dry_run' \
+    'KEMERBET_EXECUTOR_ENABLED=false' \
+    'KEMERBET_FINAL_ACTION_ENABLED=false' \
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false' \
+    'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false'; do
+    grep -Fxq "$expected_environment" <<<"$environment" ||
+      die 'the private KemerBet session safety environment is not exact'
+  done
+  ! grep -Eq '(DATABASE|PASSWORD|SECRET|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY)' \
+    <<<"$environment" || die 'the private KemerBet session environment contains forbidden authority'
+
+  mount_contract="$(docker_local container inspect "$container_id" \
+    --format '{{range .Mounts}}{{println .Type "|" .Destination "|" .RW}}{{end}}' | sort)" ||
+    die 'the private KemerBet session mount contract could not be inspected'
+  [[ "$mount_contract" == $'volume | /run/fetanagent-kemerbet-session-control | true\nvolume | /var/lib/fetanagent/kemerbet-sessions | true' ]] ||
+    die 'the private KemerBet session mount contract is not exact'
+
+  owner_container="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=owner-control')" ||
+    die 'the Owner container inventory could not be inspected for private socket binding'
+  [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the Owner container inventory is not singular for private socket binding'
+  owner_socket_source="$(docker_local container inspect "$owner_container" \
+    --format '{{range .Mounts}}{{if eq .Destination "/run/fetanagent-kemerbet-session-control"}}{{.Name}}{{end}}{{end}}')"
+  session_socket_source="$(docker_local container inspect "$container_id" \
+    --format '{{range .Mounts}}{{if eq .Destination "/run/fetanagent-kemerbet-session-control"}}{{.Name}}{{end}}{{end}}')"
+  [[ -n "$owner_socket_source" && "$owner_socket_source" == "$session_socket_source" ]] ||
+    die 'the Owner and private KemerBet session containers do not share one exact socket volume'
+  docker_local container exec "$owner_container" node --input-type=module --eval '
+    import http from "node:http";
+    const request = http.get({
+      socketPath: "/run/fetanagent-kemerbet-session-control/session.sock",
+      path: "/healthz",
+    }, (response) => process.exit(response.statusCode === 200 ? 0 : 21));
+    request.on("error", () => process.exit(22));
+    request.setTimeout(3000, () => request.destroy());
+  ' || die 'Owner cannot reach the exact private KemerBet session socket'
 }
 
 require_fresh_bot_disabled_ready() {
@@ -1374,6 +1495,91 @@ case "$command" in
     require_fresh_bot_disabled_ready "$commit_sha"
     ;;
 
+  start-kemerbet-session-provision)
+    [[ $# -eq 3 ]] ||
+      die 'start-kemerbet-session-provision requires one reviewed main commit and image tag'
+    commit_sha="$2"
+    image_tag="$3"
+    validate_commit_and_tag "$commit_sha" "$image_tag"
+    require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+    [[ "$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
+      die 'the private KemerBet session image does not match the reviewed commit'
+    [[ "$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" \
+      --format '{{.Config.User}}')" == '10001:10001' ]] ||
+      die 'the private KemerBet session image user is not exact'
+
+    compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
+    [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
+      die 'the sealed Compose contract is absent or unsafe'
+    compose_environment=(
+      PATH="$SAFE_PATH"
+      HOME='/root'
+      DOCKER_HOST="$LOCAL_DOCKER_SOCKET"
+      FETANAGENT_VCS_REF="$commit_sha"
+      FETANAGENT_IMAGE_TAG="$image_tag"
+      FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
+      FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE="$SECRET_ROOT/customer-web-database-url"
+      FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/customer-web-publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE="$SECRET_ROOT/customer-web-rate-limit-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
+      FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
+      FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-encryption-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE="$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
+      FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
+      FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
+      FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
+      FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+    )
+    compose_command=(
+      docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
+      --project-name "$PROJECT_NAME" --profile kemerbet-session-provision -f "$compose_file"
+    )
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision
+    require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
+    require_kemerbet_session_provision_runtime "$commit_sha"
+    ;;
+
+  kemerbet-session-provision-ready)
+    [[ $# -eq 2 ]] ||
+      die 'kemerbet-session-provision-ready requires one reviewed main commit'
+    commit_sha="$2"
+    [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
+    require_kemerbet_session_provision_runtime "$commit_sha"
+    ;;
+
+  stop-kemerbet-session-provision)
+    [[ $# -eq 2 ]] ||
+      die 'stop-kemerbet-session-provision requires one reviewed main commit'
+    commit_sha="$2"
+    [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    session_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=kemerbet-session-provision')"
+    if [[ -n "$session_container" ]]; then
+      [[ "$session_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+        die 'the private KemerBet session container inventory is ambiguous'
+      docker_local container stop --time 70 "$session_container" >/dev/null
+      docker_local container rm "$session_container" >/dev/null
+    fi
+    require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+    ;;
+
   public-edge-ready|fresh-public-edge-ready)
     [[ $# -eq 2 ]] || die 'public-edge readiness requires one reviewed main commit'
     if [[ "$command" == 'fresh-public-edge-ready' ]]; then
@@ -1487,6 +1693,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

@@ -7,6 +7,10 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { buildOwnerControlApp } from './app.js';
+import type {
+  OwnerKemerbetSessionControl,
+  OwnerKemerbetSessionStatus,
+} from './owner-kemerbet-session-control.js';
 import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
 import type { PrivateLivePilotStatus } from './owner-private-live-pilot.js';
@@ -80,6 +84,33 @@ function kemerbetAgentProfileMutationHeaders(requestId = pilotRequestId) {
     'x-idempotency-key': requestId,
   };
 }
+
+function kemerbetSessionMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-kemerbet-session-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+const inactiveKemerbetSession: OwnerKemerbetSessionStatus = {
+  active: false,
+  loginRequired: false,
+  signedIn: false,
+  transferDisabled: true,
+};
+
+const activeKemerbetSession: OwnerKemerbetSessionStatus = {
+  active: true,
+  expiresAt: '2026-08-23T12:10:00.000Z',
+  imageBase64: 'YWJjZA==',
+  imageContentType: 'image/jpeg',
+  loginRequired: true,
+  signedIn: false,
+  transferDisabled: true,
+};
 
 function config() {
   return loadOwnerControlConfig({
@@ -241,6 +272,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('25 ETB maximum per deposit and Player');
     expect(response.body).toContain('Emergency stop');
     expect(response.body).toContain('Dry-run deposit intake');
+    expect(response.body).toContain('Private KemerBet sign-in');
+    expect(response.body).toContain('Transfer is blocked');
     expect(response.body).not.toContain('sb_publishable_');
     await app.close();
   });
@@ -281,6 +314,13 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1'");
     expect(response.body).toContain('owner_confirmed_kemerbet_agent_profile');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1'");
+    expect(response.body).toContain('/v1/owner/kemerbet-session/start');
+    expect(response.body).toContain('/v1/owner/kemerbet-session/input');
+    expect(response.body).toContain('/v1/owner/kemerbet-session/stop');
+    expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-session-v1'");
+    expect(response.body).toContain('owner_confirmed_private_kemerbet_sign_in');
+    expect(response.body).toContain('owner_confirmed_stop_private_kemerbet_session');
+    expect(response.body).toContain('createImageBitmap');
     expect(response.body).toContain('owner_confirmed_fixed_telebirr_five_player_pilot');
     expect(response.body).toContain('owner_confirmed_emergency_stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'private-live-pilot-v1'");
@@ -921,6 +961,155 @@ describe('Owner-control HTTP boundary', () => {
       expect(response.statusCode).toBe(400);
     }
     expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('controls only the active profile through the exact private no-transfer session boundary', async () => {
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const observed: unknown[] = [];
+    const control: OwnerKemerbetSessionControl = {
+      status: async () => activeKemerbetSession,
+      start: async (accountId, requestId) => {
+        observed.push(['start', accountId, requestId]);
+        return activeKemerbetSession;
+      },
+      input: async (value) => {
+        observed.push(['input', value]);
+        return activeKemerbetSession;
+      },
+      stop: async (requestId) => {
+        observed.push(['stop', requestId]);
+        return inactiveKemerbetSession;
+      },
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetSessionControl: control,
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async (actor) => {
+            expect(actor).toBe(authUserId);
+            return [profile];
+          },
+          prepare: async () => profile,
+        },
+      }),
+    });
+
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toEqual({ session: activeKemerbetSession });
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-session/start',
+      headers: kemerbetSessionMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(started.statusCode).toBe(201);
+
+    for (const payload of [
+      { kind: 'pointer', requestId: pilotRequestId, x: 123, y: 456 },
+      { key: 'A', kind: 'key', requestId: pilotRequestId },
+    ]) {
+      const input = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/input',
+        headers: kemerbetSessionMutationHeaders(),
+        payload,
+      });
+      expect(input.statusCode).toBe(200);
+      expect(input.json()).toEqual({ session: activeKemerbetSession });
+    }
+
+    const stopped = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-session/stop',
+      headers: kemerbetSessionMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_stop_private_kemerbet_session',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(stopped.statusCode).toBe(200);
+    expect(stopped.json()).toEqual({ session: inactiveKemerbetSession });
+    expect(observed).toEqual([
+      ['start', profile.platformAgentAccountId, pilotRequestId],
+      ['input', { kind: 'pointer', requestId: pilotRequestId, x: 123, y: 456 }],
+      ['input', { key: 'A', kind: 'key', requestId: pilotRequestId }],
+      ['stop', pilotRequestId],
+    ]);
+    expect(JSON.stringify(observed)).not.toMatch(/password|otp|cookie|amount|transfer/iu);
+    await app.close();
+  });
+
+  it('rejects private session credential, amount, Transfer, and cross-origin fields before auth', async () => {
+    let authenticationCalls = 0;
+    const controlCalls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      kemerbetSessionControl: {
+        status: async () => {
+          controlCalls.push('status');
+          return inactiveKemerbetSession;
+        },
+        start: async () => {
+          controlCalls.push('start');
+          return activeKemerbetSession;
+        },
+        input: async () => {
+          controlCalls.push('input');
+          return activeKemerbetSession;
+        },
+        stop: async () => {
+          controlCalls.push('stop');
+          return inactiveKemerbetSession;
+        },
+      },
+      runtime: runtime(),
+    });
+    const base = {
+      confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+      requestId: pilotRequestId,
+    };
+    for (const candidate of [
+      { payload: { ...base, password: 'forbidden' }, headers: kemerbetSessionMutationHeaders() },
+      { payload: { ...base, amount: 25 }, headers: kemerbetSessionMutationHeaders() },
+      { payload: { ...base, transfer: true }, headers: kemerbetSessionMutationHeaders() },
+      {
+        payload: base,
+        headers: { ...kemerbetSessionMutationHeaders(), origin: 'https://evil.example' },
+      },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/start',
+        headers: candidate.headers,
+        payload: candidate.payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    expect(controlCalls).toEqual([]);
     await app.close();
   });
 

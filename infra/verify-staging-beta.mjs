@@ -60,20 +60,30 @@ function sorted(values) {
 
 const services = topLevelSection(compose, 'services');
 const ownerService = childBlock(services, 'owner-control');
+const kemerbetSessionService = childBlock(services, 'kemerbet-session-provision');
 const customerWebService = childBlock(services, 'customer-web');
 const gatewayService = childBlock(services, 'gateway');
 const apiService = childBlock(services, 'api');
 const betaService = childBlock(services, 'beta-admission');
 const botService = childBlock(services, 'bot');
 const networks = topLevelSection(compose, 'networks');
+const volumes = topLevelSection(compose, 'volumes');
 const configs = topLevelSection(compose, 'configs');
 const secrets = topLevelSection(compose, 'secrets');
 
 const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gm)].map((match) => match[1]);
 assert.deepEqual(
   serviceNames,
-  ['owner-control', 'customer-web', 'gateway', 'api', 'beta-admission', 'bot'],
-  'only Owner control, customer web, the gated public gateway, Player-ID API, beta-admission, and bot are allowed',
+  [
+    'owner-control',
+    'kemerbet-session-provision',
+    'customer-web',
+    'gateway',
+    'api',
+    'beta-admission',
+    'bot',
+  ],
+  'only the five private services, no-transfer sign-in tool, and gated public gateway are allowed',
 );
 
 for (const [name, service] of [
@@ -171,6 +181,39 @@ assert.match(ownerService, /networks:\s*\r?\n\s+- owner_control_service/);
 assert.doesNotMatch(ownerService, /staging_service/);
 assert.match(ownerService, /http:\/\/127\.0\.0\.1:3002\/readyz/);
 assert.doesNotMatch(ownerService, /TELEGRAM_BOT_ENABLED: 'true'/);
+const ownerVolumes = servicePropertyBlock(ownerService, 'volumes');
+assert.match(ownerVolumes, /source: kemerbet_session_control/);
+assert.match(ownerVolumes, /target: \/run\/fetanagent-kemerbet-session-control/);
+assert.doesNotMatch(ownerVolumes, /kemerbet_sessions|docker\.sock|\/run\/secrets/);
+
+assert.match(kemerbetSessionService, /profiles: \[kemerbet-session-provision\]/);
+assert.match(kemerbetSessionService, /platform: linux\/amd64/);
+assert.match(kemerbetSessionService, /fetanagent-deposit-executor:/);
+assert.match(
+  kemerbetSessionService,
+  /command: \['node', 'apps\/executor\/dist\/kemerbet-session-provision-server\.js'\]/,
+);
+assert.match(kemerbetSessionService, /user: '10001:10001'/);
+assert.match(kemerbetSessionService, /restart: 'no'/);
+assert.match(kemerbetSessionService, /read_only: true/);
+assert.match(kemerbetSessionService, /cap_drop:\s*\r?\n\s+- ALL/);
+assert.match(kemerbetSessionService, /no-new-privileges:true/);
+assert.match(kemerbetSessionService, /pids_limit: 512/);
+assert.match(kemerbetSessionService, /mem_limit: 1536m/);
+assert.match(kemerbetSessionService, /cpus: 2\.00/);
+assert.match(kemerbetSessionService, /FINANCIAL_ACTIONS_MODE: dry_run/);
+assert.match(kemerbetSessionService, /KEMERBET_EXECUTOR_ENABLED: 'false'/);
+assert.match(kemerbetSessionService, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/);
+assert.match(kemerbetSessionService, /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'/);
+assert.match(kemerbetSessionService, /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'/);
+assert.match(kemerbetSessionService, /source: kemerbet_session_control/);
+assert.match(kemerbetSessionService, /source: kemerbet_sessions/);
+assert.match(kemerbetSessionService, /session\.sock/);
+assert.match(kemerbetSessionService, /networks:\s*\r?\n\s+- owner_control_service/);
+assert.doesNotMatch(
+  kemerbetSessionService,
+  /secrets:|configs:|ports:|expose:|DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY|docker\.sock/,
+);
 
 assert.match(customerWebService, /target: customer-web/);
 assert.match(customerWebService, /CUSTOMER_WEB_HOST: 0\.0\.0\.0/);
@@ -581,7 +624,7 @@ assert.equal(
   'Owner control and the separately gated HTTPS gateway are the only services that may bind ports',
 );
 assert.doesNotMatch(compose, /^\s+(expose|devices|privileged|network_mode):/m);
-for (const service of [ownerService, customerWebService, apiService, betaService, botService]) {
+for (const service of [customerWebService, apiService, betaService, botService]) {
   assert.doesNotMatch(service, /^\s+volumes:/m);
 }
 assert.doesNotMatch(betaService, /^\s+ports:/m);
@@ -592,7 +635,11 @@ assert.doesNotMatch(compose, /docker\.sock|\/var\/run\/docker/i);
 assert.doesNotMatch(compose, /\b(?:nginx|traefik|haproxy)\b/i);
 assert.doesNotMatch(compose, /xzztugbgtulptnbpoelr/i, 'the production project ref is forbidden');
 assert.doesNotMatch(services, /^  (?:worker|executor|maintenance|proxy):\s*$/m);
-assert.doesNotMatch(compose, /^volumes:\s*$/m, 'named volumes are forbidden');
+assert.deepEqual(
+  [...volumes.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1]),
+  ['kemerbet_session_control', 'kemerbet_sessions'],
+  'only the private socket and isolated KemerBet browser profile volumes are allowed',
+);
 
 const reviewedBase =
   'node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066';
@@ -665,5 +712,5 @@ assert.match(landingPage, /https:\/\/owner\.fetanagent\.com\/owner/);
 assert.doesNotMatch(landingPage, /\bPayRe(?:layy?|playy)\b/i);
 
 console.log(
-  'staging beta artifacts verified: five private services, a separately gated HTTPS gateway, isolated inputs, and locked financial/provider gates',
+  'staging beta artifacts verified: five private services, a gated HTTPS gateway, a no-transfer private sign-in tool, isolated inputs, and locked financial/provider gates',
 );

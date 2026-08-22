@@ -37,20 +37,20 @@ The current GitHub `main` source is
 still be an earlier exact reviewed release until the next bounded staging deployment; public
 reachability must not be used as evidence that newer executor code is deployed.
 
-| Capability                                          | Status                            | Current evidence                                                                                                   |
-| --------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `fetanagent.com` public home and account entry      | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                 |
-| `@FetanAgentBot` reachability and public onboarding | **COMPLETE**                      | Bot is online; `/start`, menu, and Player-ID submission respond                                                    |
-| Five private KemerBet test Player IDs               | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                        |
-| Owner fixed-pilot dashboard and server boundary     | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                |
-| Private pilot database boundary                     | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists               |
-| Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                |
-| Owner-adjustable TeleBirr/CBE receiver revisions    | **IMPLEMENTATION/DEPLOY NEXT**    | Authenticated Owner UI/API creates encrypted immutable revisions; source code contains no real account             |
-| KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                      |
-| Real KemerBet portal workflow contract              | **NEXT**                          | Five lookup-only attempts: four resolved in ETB, one did not; no amount was entered and Transfer was never clicked |
-| TeleBirr receiver/profile/signer/device             | **BLOCKED — not provisioned**     | No active TeleBirr receiver revision, profile, signer, or enrolled verifier device                                 |
-| Payment verification, settlement, and execution     | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                      |
-| Public real-money processing                        | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                     |
+| Capability                                          | Status                            | Current evidence                                                                                                                |
+| --------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `fetanagent.com` public home and account entry      | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                              |
+| `@FetanAgentBot` reachability and public onboarding | **COMPLETE**                      | Bot is online; `/start`, menu, and Player-ID submission respond                                                                 |
+| Five private KemerBet test Player IDs               | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                     |
+| Owner fixed-pilot dashboard and server boundary     | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                             |
+| Private pilot database boundary                     | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                            |
+| Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                             |
+| Owner-adjustable TeleBirr/CBE receiver revisions    | **IMPLEMENTATION/DEPLOY NEXT**    | Authenticated Owner UI/API creates encrypted immutable revisions; source code contains no real account                          |
+| KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                   |
+| Real KemerBet portal workflow contract              | **IN PROGRESS**                   | All five corrected Players resolve in the local lookup-only proof; target-host private sign-in and no-transfer readiness remain |
+| TeleBirr receiver/profile/signer/device             | **BLOCKED — not provisioned**     | No active TeleBirr receiver revision, profile, signer, or enrolled verifier device                                              |
+| Payment verification, settlement, and execution     | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                                   |
+| Public real-money processing                        | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                                  |
 
 The current public deployment is a time-boxed staging release. Its narrow database credentials and
 host stop timer expire automatically. Until the separate production-launch phase, keeping the demo
@@ -188,13 +188,17 @@ Progress recorded 2026-08-23:
    with an opaque credential reference only. This control accepts no KemerBet password, OTP,
    cookie, session export, agent ID, username, or balance. Each adjustment creates a new immutable
    revision and retires the prior revision while all money/provider/pilot switches are disabled.
-2. **In deployment:** build and commit-pin one reviewed executor image in the same sealed staging
-   image bundle as the public application, without adding the executor to the staging Compose
-   service set or starting a container.
-3. Create one service-owned `0700` persistent browser-profile directory for the exact account UUID.
-4. Run the transient headed session provisioner while the long-lived executor is stopped.
-5. The Owner signs in manually. No password, OTP, cookie, or session export enters Git, chat,
-   Supabase tables, or shared configuration.
+2. **Complete:** build and commit-pin one reviewed executor image in the same sealed staging image
+   bundle as the public application without starting the long-lived executor.
+3. **Implementation in review:** deploy a normally absent browser container with a service-owned
+   `0700` profile volume and mode-`0600` Unix socket shared only with Owner control. It has no
+   database or financial authority and hard-blocks the exact deposit endpoint.
+4. **Next Owner step:** start the private sign-in workflow, open the authenticated Owner dashboard,
+   click **Start private sign-in**, and type the KemerBet password/OTP only inside the screenshot
+   preview. Stop the transient browser immediately after the page reports `KemerBet signed in`.
+5. No password, OTP, cookie, or session export enters Git, chat, Supabase tables, shared
+   configuration, or application logs. The isolated profile volume retains only KemerBet's own
+   signed-in browser state for the later readiness command.
 6. Bind the visible signed-in agent identity to the account UUID with an independent HMAC key.
 7. Install the reviewed selector contract, separate history-reference HMAC key, Supabase CA, and
    identity-binding map as root-managed fixed-path files.

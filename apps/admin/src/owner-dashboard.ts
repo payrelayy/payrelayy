@@ -198,6 +198,29 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
             </label>
             <button type="submit">Prepare new KemerBet agent profile</button>
           </form>
+          <div class="kemerbet-session" aria-labelledby="kemerbet-session-title">
+            <h3 id="kemerbet-session-title">Private KemerBet sign-in</h3>
+            <p class="receipt-label">
+              Start a ten-minute isolated browser, then click the preview and type directly into
+              KemerBet. Passwords and OTPs are never sent to chat, Git, Supabase, or FetanAgent
+              logs. The private browser profile retains only KemerBet's own signed-in session on
+              the staging host. Transfer is blocked, and all input locks as soon as sign-in is
+              detected.
+            </p>
+            <p class="request-meta" id="kemerbet-session-status">
+              Load an active KemerBet profile to check sign-in readiness.
+            </p>
+            <div class="review-actions">
+              <button id="kemerbet-session-start-button" type="button" disabled>
+                Start private sign-in
+              </button>
+              <button class="danger" id="kemerbet-session-stop-button" type="button" disabled>
+                Stop private sign-in
+              </button>
+            </div>
+            <canvas id="kemerbet-session-canvas" width="1280" height="720" tabindex="0"
+              aria-label="Private KemerBet sign-in browser" hidden></canvas>
+          </div>
         </section>
 
         <section class="review-section pilot-section" aria-labelledby="pilot-title">
@@ -316,6 +339,10 @@ button:disabled { cursor: wait; opacity: 0.55; }
 .pilot-status dl { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 8px 14px; }
 .pilot-status dt { color: #a1a1aa; }
 .pilot-status dd { margin: 0; overflow-wrap: anywhere; }
+.kemerbet-session { margin-top: 24px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
+.kemerbet-session h3 { margin-top: 0; }
+#kemerbet-session-canvas { width: 100%; height: auto; margin-top: 16px; border: 1px solid #3f3f46; border-radius: 10px; background: #000; cursor: crosshair; }
+#kemerbet-session-canvas:focus { outline: 3px solid rgba(103, 232, 249, 0.55); outline-offset: 2px; }
 output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #cffafe; background: #0c1d20; padding: 14px; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .notice { min-height: 24px; color: #fcd34d; font-weight: 700; }
@@ -349,6 +376,10 @@ const kemerbetAgentProfileList = document.querySelector('#kemerbet-agent-profile
 const kemerbetAgentProfileForm = document.querySelector('#kemerbet-agent-profile-form');
 const kemerbetAgentProfileConfirmation = document.querySelector('#kemerbet-agent-profile-confirmation');
 const kemerbetAgentRefreshButton = document.querySelector('#kemerbet-agent-refresh-button');
+const kemerbetSessionStatus = document.querySelector('#kemerbet-session-status');
+const kemerbetSessionStartButton = document.querySelector('#kemerbet-session-start-button');
+const kemerbetSessionStopButton = document.querySelector('#kemerbet-session-stop-button');
+const kemerbetSessionCanvas = document.querySelector('#kemerbet-session-canvas');
 const pilotCandidateList = document.querySelector('#pilot-candidate-list');
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
@@ -366,6 +397,11 @@ let accessToken;
 let currentInvite;
 let currentPilot;
 let eligiblePilotPlayers = [];
+let activeKemerbetAgentProfileId;
+let currentKemerbetSession;
+let kemerbetSessionPollTimer;
+let kemerbetInputPending = false;
+let kemerbetInputLane = Promise.resolve();
 const selectedPilotPlayerIds = new Set();
 const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
 
@@ -403,8 +439,26 @@ function clearReceivers() {
 }
 
 function clearKemerbetAgentProfiles() {
+  activeKemerbetAgentProfileId = undefined;
   kemerbetAgentProfileList.replaceChildren();
   kemerbetAgentProfileConfirmation.checked = false;
+  clearKemerbetSession();
+}
+
+function clearKemerbetSession() {
+  currentKemerbetSession = undefined;
+  if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
+  kemerbetSessionPollTimer = undefined;
+  kemerbetInputPending = false;
+  kemerbetInputLane = Promise.resolve();
+  kemerbetSessionCanvas.hidden = true;
+  const context = kemerbetSessionCanvas.getContext('2d');
+  if (context) context.clearRect(0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId;
+  kemerbetSessionStopButton.disabled = true;
+  kemerbetSessionStatus.textContent = activeKemerbetAgentProfileId
+    ? 'Private sign-in service is stopped.'
+    : 'Load an active KemerBet profile to check sign-in readiness.';
 }
 
 function clearPilot() {
@@ -679,12 +733,16 @@ function validKemerbetAgentProfile(value) {
 }
 
 function renderKemerbetAgentProfiles(profiles) {
+  activeKemerbetAgentProfileId = profiles.find((profile) => profile.profileStatus === 'active')
+    ?.platformAgentAccountId;
   kemerbetAgentProfileList.replaceChildren();
   if (profiles.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'empty-state';
     empty.textContent = 'No Owner-prepared KemerBet agent profile exists yet.';
     kemerbetAgentProfileList.append(empty);
+    kemerbetSessionStartButton.disabled = true;
+    clearKemerbetSession();
     return;
   }
   for (const profile of profiles) {
@@ -700,6 +758,7 @@ function renderKemerbetAgentProfiles(profiles) {
     card.append(title, facts);
     kemerbetAgentProfileList.append(card);
   }
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || Boolean(currentKemerbetSession?.active);
 }
 
 async function loadKemerbetAgentProfiles() {
@@ -715,12 +774,174 @@ async function loadKemerbetAgentProfiles() {
       throw new Error('kemerbet_agent_profiles');
     }
     renderKemerbetAgentProfiles(profiles);
+    await loadKemerbetSession();
   } catch (error) {
-    kemerbetAgentProfileList.replaceChildren();
+    clearKemerbetAgentProfiles();
     if (!isSignedOutError(error)) setNotice('KemerBet agent-profile history is unavailable. Do not prepare a profile.');
   } finally {
     kemerbetAgentRefreshButton.disabled = false;
   }
+}
+
+function validKemerbetSession(value) {
+  if (!value || typeof value !== 'object' || typeof value.active !== 'boolean' ||
+      typeof value.loginRequired !== 'boolean' || typeof value.signedIn !== 'boolean' ||
+      value.transferDisabled !== true || (value.signedIn && value.loginRequired)) return undefined;
+  const expectedKeys = value.active
+    ? ['active', 'expiresAt', 'imageBase64', 'imageContentType', 'loginRequired', 'signedIn', 'transferDisabled']
+    : ['active', 'loginRequired', 'signedIn', 'transferDisabled'];
+  if (Object.keys(value).sort().join('\\0') !== expectedKeys.sort().join('\\0')) return undefined;
+  if (!value.active) {
+    return value.loginRequired || value.signedIn ? undefined :
+      { active: false, loginRequired: false, signedIn: false, transferDisabled: true };
+  }
+  if (typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt)) ||
+      value.imageContentType !== 'image/jpeg' || typeof value.imageBase64 !== 'string' ||
+      value.imageBase64.length < 4 || value.imageBase64.length > 1900000 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(value.imageBase64)) return undefined;
+  return value;
+}
+
+async function drawKemerbetSession(imageBase64) {
+  const binary = atob(imageBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+  try {
+    const context = kemerbetSessionCanvas.getContext('2d');
+    if (!context) throw new Error('canvas');
+    context.clearRect(0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
+    context.drawImage(bitmap, 0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
+    kemerbetSessionCanvas.hidden = false;
+  } finally {
+    bitmap.close();
+  }
+}
+
+function scheduleKemerbetSessionPoll() {
+  if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
+  kemerbetSessionPollTimer = currentKemerbetSession?.active
+    ? window.setTimeout(() => void loadKemerbetSession(), 1500)
+    : undefined;
+}
+
+async function renderKemerbetSession(session) {
+  currentKemerbetSession = session;
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || session.active;
+  kemerbetSessionStopButton.disabled = !session.active;
+  if (!session.active) {
+    kemerbetSessionCanvas.hidden = true;
+    kemerbetSessionStatus.textContent = 'Private sign-in service is stopped.';
+    scheduleKemerbetSessionPoll();
+    return;
+  }
+  await drawKemerbetSession(session.imageBase64);
+  if (session.signedIn) {
+    kemerbetSessionStatus.textContent = 'KemerBet signed in. Input is locked and Transfer remains disabled.';
+  } else {
+    kemerbetSessionStatus.textContent = 'Private KemerBet login is open until ' +
+      new Date(session.expiresAt).toLocaleTimeString() + '. Click the preview, then type your password or OTP.';
+  }
+  scheduleKemerbetSessionPoll();
+}
+
+async function loadKemerbetSession() {
+  if (!activeKemerbetAgentProfileId || !accessToken || kemerbetInputPending) return;
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-session', { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('kemerbet_session');
+    const payload = await response.json();
+    const session = validKemerbetSession(payload && payload.session);
+    if (!session) throw new Error('kemerbet_session');
+    await renderKemerbetSession(session);
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      clearKemerbetSession();
+      kemerbetSessionStatus.textContent = 'Private sign-in service is not running yet.';
+    }
+  }
+}
+
+function kemerbetSessionMutationHeaders(requestId) {
+  return { 'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-kemerbet-session-v1',
+    'x-idempotency-key': requestId };
+}
+
+async function startKemerbetSession() {
+  if (!activeKemerbetAgentProfileId || !window.confirm(
+    'Start a ten-minute private KemerBet sign-in browser? Transfer is blocked. Enter credentials only inside the browser preview.',
+  )) return;
+  const requestId = crypto.randomUUID();
+  kemerbetSessionStartButton.disabled = true;
+  setNotice('Starting the private KemerBet sign-in browser…');
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-session/start', {
+      method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
+      body: JSON.stringify({ confirmation: 'owner_confirmed_private_kemerbet_sign_in', requestId }),
+    });
+    if (response.status !== 201) throw new Error('kemerbet_session');
+    const payload = await response.json();
+    const session = validKemerbetSession(payload && payload.session);
+    if (!session || !session.active || !session.loginRequired) throw new Error('kemerbet_session');
+    await renderKemerbetSession(session);
+    kemerbetSessionCanvas.focus();
+    setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Private KemerBet sign-in could not start. No credential was accepted.');
+    await loadKemerbetSession();
+  }
+}
+
+async function stopKemerbetSession({ confirm = true } = {}) {
+  if (!currentKemerbetSession?.active) return;
+  if (confirm && !window.confirm('Stop the private KemerBet sign-in browser now?')) return;
+  const requestId = crypto.randomUUID();
+  kemerbetSessionStopButton.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-session/stop', {
+      method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
+      body: JSON.stringify({ confirmation: 'owner_confirmed_stop_private_kemerbet_session', requestId }),
+    });
+    if (!response.ok) throw new Error('kemerbet_session');
+    const payload = await response.json();
+    const session = validKemerbetSession(payload && payload.session);
+    if (!session || session.active) throw new Error('kemerbet_session');
+    await renderKemerbetSession(session);
+    setNotice('Private KemerBet sign-in browser stopped.');
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Stop acknowledgement is unavailable. Retry Stop immediately.');
+  }
+}
+
+async function sendKemerbetSessionInput(input) {
+  if (!currentKemerbetSession?.active || currentKemerbetSession.signedIn) return;
+  kemerbetInputPending = true;
+  if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
+  const requestId = crypto.randomUUID();
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-session/input', {
+      method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
+      body: JSON.stringify({ ...input, requestId }),
+    });
+    if (!response.ok) throw new Error('kemerbet_session');
+    const payload = await response.json();
+    const session = validKemerbetSession(payload && payload.session);
+    if (!session) throw new Error('kemerbet_session');
+    await renderKemerbetSession(session);
+  } catch (error) {
+    if (!isSignedOutError(error)) setNotice('Private browser input was rejected. Refresh the session before retrying.');
+  } finally {
+    kemerbetInputPending = false;
+    scheduleKemerbetSessionPoll();
+  }
+}
+
+function queueKemerbetSessionInput(input) {
+  kemerbetInputLane = kemerbetInputLane.then(
+    () => sendKemerbetSessionInput(input),
+    () => sendKemerbetSessionInput(input),
+  );
 }
 
 async function prepareKemerbetAgentProfile() {
@@ -1487,7 +1708,10 @@ revokeButton.addEventListener('click', async () => {
   }
 });
 
-logoutButton.addEventListener('click', () => signOut());
+logoutButton.addEventListener('click', async () => {
+  if (currentKemerbetSession?.active) await stopKemerbetSession({ confirm: false });
+  signOut();
+});
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
 receiverRefreshButton.addEventListener('click', loadReceivers);
 receiverForm.addEventListener('submit', async (event) => {
@@ -1498,6 +1722,28 @@ kemerbetAgentRefreshButton.addEventListener('click', loadKemerbetAgentProfiles);
 kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await prepareKemerbetAgentProfile();
+});
+kemerbetSessionStartButton.addEventListener('click', startKemerbetSession);
+kemerbetSessionStopButton.addEventListener('click', () => stopKemerbetSession());
+kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
+  if (!currentKemerbetSession?.active || currentKemerbetSession.signedIn) return;
+  event.preventDefault();
+  kemerbetSessionCanvas.focus();
+  const bounds = kemerbetSessionCanvas.getBoundingClientRect();
+  const x = Math.max(0, Math.min(1279,
+    Math.floor((event.clientX - bounds.left) * kemerbetSessionCanvas.width / bounds.width)));
+  const y = Math.max(0, Math.min(719,
+    Math.floor((event.clientY - bounds.top) * kemerbetSessionCanvas.height / bounds.height)));
+  queueKemerbetSessionInput({ kind: 'pointer', x, y });
+});
+kemerbetSessionCanvas.addEventListener('keydown', (event) => {
+  if (!currentKemerbetSession?.active || currentKemerbetSession.signedIn ||
+      event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+  const accepted = ['Backspace', 'Delete', 'Enter', 'Escape', 'Tab'].includes(event.key) ||
+    (/^[\\u0020-\\u007e]$/.test(event.key) && event.key !== '\u0060');
+  if (!accepted) return;
+  event.preventDefault();
+  queueKemerbetSessionInput({ key: event.key, kind: 'key' });
 });
 pilotConfirmation.addEventListener('change', updatePilotPreparationAvailability);
 pilotPrepareForm.addEventListener('submit', async (event) => {

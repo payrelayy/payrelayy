@@ -171,6 +171,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)' },
         { signature: 'app.list_owner_dry_run_deposit_intake(uuid,integer)' },
         { signature: 'app.list_owner_dry_run_fixture_assessments(uuid,integer)' },
+        { signature: 'app.list_owner_kemerbet_agent_profiles(uuid)' },
         { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
         {
           signature: 'app.list_owner_player_registration_association_candidates(uuid,integer)',
@@ -181,6 +182,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature:
             'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',
         },
+        { signature: 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)' },
         {
           signature: 'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)',
         },

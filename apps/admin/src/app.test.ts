@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
   loadOwnerControlConfig,
@@ -15,6 +17,17 @@ const inviteId = '22222222-2222-4222-8222-222222222222';
 const pilotRevisionId = '33333333-3333-4333-8333-333333333333';
 const pilotRequestId = '55555555-5555-4555-8555-555555555555';
 const bearer = 'header.payload.signature-with-safe-characters';
+const receiverEncryptionMaster = 'c'.repeat(64);
+const receiverFingerprintMaster = 'd'.repeat(64);
+const receiverMasterProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(receiverEncryptionMaster, 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(receiverFingerprintMaster, 'hex'))
+    .digest('hex')}`,
+  version: 2,
+});
 
 function pilotStatus(overrides: Partial<PrivateLivePilotStatus> = {}): PrivateLivePilotStatus {
   return {
@@ -48,6 +61,16 @@ function pilotMutationHeaders(requestId = pilotRequestId) {
   };
 }
 
+function receiverMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
 function config() {
   return loadOwnerControlConfig({
     NODE_ENV: 'test',
@@ -56,6 +79,9 @@ function config() {
     OWNER_CONTROL_DATABASE_URL: `postgresql://fetanagent_owner_control_runtime:password@db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
     OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_for_staging_only',
+    OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverEncryptionMaster,
+    OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverFingerprintMaster,
+    DEPOSIT_PROOF_REFERENCE_PROFILE: receiverMasterProfile,
   });
 }
 
@@ -138,6 +164,21 @@ function runtime(
           stoppedAt: '2026-08-21T20:30:00.000Z',
         }),
     },
+    receivers: {
+      list: async () => [],
+      rotate: async (_actor, request) => ({
+        accountHolderName: request.accountHolderName,
+        accountReferenceMasked: `***${request.accountReference.slice(-4)}`,
+        activeFrom: '2026-08-22T13:30:00.000Z',
+        protectedReference: true,
+        providerCode: request.providerCode,
+        providerDisplayName: request.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr',
+        receiverRevisionId: '66666666-6666-4666-8666-666666666666',
+        receiverStatus: 'active',
+        revision: 1,
+        rotationReason: request.rotationReason,
+      }),
+    },
     ready: async () => true,
     close: async () => undefined,
     ...overrides,
@@ -170,6 +211,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Explicit ownership confirmation');
     expect(response.body).toContain('Player ID ownership associations');
     expect(response.body).toContain('Deposit eligibility decisions');
+    expect(response.body).toContain('Receiving accounts');
+    expect(response.body).toContain('never rewrites receipt history');
     expect(response.body).toMatch(/does not open a deposit[\s\S]*or move money/u);
     expect(response.body).toContain('TeleBirr five-Player pilot');
     expect(response.body).toContain('25 ETB maximum per deposit and Player');
@@ -209,6 +252,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('/v1/owner/dry-run-fixture-assessments?limit=50');
     expect(response.body).toContain('/v1/owner/player-deposit-eligibility?limit=50');
     expect(response.body).toContain('/v1/owner/private-live-deposit-pilots/current');
+    expect(response.body).toContain('/v1/owner/receiver-accounts');
+    expect(response.body).toContain('owner_confirmed_receiver_rotation');
+    expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1'");
     expect(response.body).toContain('owner_confirmed_fixed_telebirr_five_player_pilot');
     expect(response.body).toContain('owner_confirmed_emergency_stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'private-live-pilot-v1'");
@@ -639,6 +685,116 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'invalid_request' });
+    await app.close();
+  });
+
+  it('lists only masked receiver history and rotates an exact Owner-confirmed account', async () => {
+    let observed: unknown;
+    const receiver = {
+      accountHolderName: 'FetanAgent Receiver',
+      accountReferenceMasked: '***3456',
+      activeFrom: '2026-08-22T13:30:00.000Z',
+      protectedReference: true,
+      providerCode: 'telebirr' as const,
+      providerDisplayName: 'TeleBirr',
+      receiverRevisionId: '66666666-6666-4666-8666-666666666666',
+      receiverStatus: 'active' as const,
+      revision: 2,
+      rotationReason: 'account_rotation' as const,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receivers: {
+          list: async (actor) => {
+            expect(actor).toBe(authUserId);
+            return [receiver];
+          },
+          rotate: async (actor, request) => {
+            expect(actor).toBe(authUserId);
+            observed = request;
+            return receiver;
+          },
+        },
+      }),
+    });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/receiver-accounts',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({ receivers: [receiver] });
+    expect(listed.body).not.toContain('0000003456');
+
+    const rotated = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/receiver-accounts/rotate',
+      headers: receiverMutationHeaders(),
+      payload: {
+        accountHolderName: 'FetanAgent Receiver',
+        accountReference: '0000003456',
+        confirmation: 'owner_confirmed_receiver_rotation',
+        providerCode: 'telebirr',
+        requestId: pilotRequestId,
+        rotationReason: 'account_rotation',
+      },
+    });
+    expect(rotated.statusCode).toBe(201);
+    expect(observed).toEqual({
+      accountHolderName: 'FetanAgent Receiver',
+      accountReference: '0000003456',
+      providerCode: 'telebirr',
+      requestId: pilotRequestId,
+      rotationReason: 'account_rotation',
+    });
+    expect(rotated.json()).toEqual({ receiver });
+    expect(rotated.body).not.toContain('0000003456');
+    await app.close();
+  });
+
+  it('rejects malformed receiver, cross-origin, and extra-field requests before authentication', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const base = {
+      accountHolderName: 'FetanAgent Receiver',
+      accountReference: '0000003456',
+      confirmation: 'owner_confirmed_receiver_rotation',
+      providerCode: 'telebirr',
+      requestId: pilotRequestId,
+      rotationReason: 'account_rotation',
+    };
+    for (const candidate of [
+      {
+        payload: { ...base, accountReference: '+0000003456' },
+        headers: receiverMutationHeaders(),
+      },
+      { payload: { ...base, amount: 25 }, headers: receiverMutationHeaders() },
+      { payload: base, headers: { ...receiverMutationHeaders(), origin: 'https://evil.example' } },
+      {
+        payload: base,
+        headers: {
+          ...receiverMutationHeaders(),
+          'x-fetanagent-owner-csrf': 'private-live-pilot-v1',
+        },
+      },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/receiver-accounts/rotate',
+        headers: candidate.headers,
+        payload: candidate.payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
     await app.close();
   });
 

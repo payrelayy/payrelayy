@@ -18,13 +18,16 @@ where admin_user.auth_user_id = :'owner_auth_user_id'::uuid
   and admin_user.status = 'active'
 \gset
 
-select count(*) = 4 as financial_features_disabled
+select count(*) = 7 as financial_features_disabled
 from app.feature_switches as feature_switch
 where feature_switch.feature_key in (
   'payment_verification',
   'deposit_execution',
   'withdrawal_validation',
-  'withdrawal_collection'
+  'withdrawal_collection',
+  'cbe_birr_authoritative_verification',
+  'telebirr_authoritative_verification',
+  'private_live_deposit_pilot'
 )
   and feature_switch.mode = 'disabled'
 \gset
@@ -58,7 +61,7 @@ where receiver_account.provider_id = :'cbe_birr_provider_id'::uuid
 \gset
 
 \if :no_active_receiver
-  select app.replace_receiver_account(
+  select app.replace_receiver_account_by_admin_id_legacy(
     :'owner_admin_id'::uuid,
     :'cbe_birr_provider_id'::uuid,
     'FETANAGENT STAGING SIMULATION - DO NOT PAY',

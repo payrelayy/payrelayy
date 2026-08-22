@@ -27,13 +27,16 @@ where admin_user.auth_user_id = :'owner_auth_user_id'::uuid
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 4 as financial_features_disabled
+select count(*) = 7 as financial_features_disabled
 from app.feature_switches as feature_switch
 where feature_switch.feature_key in (
   'payment_verification',
   'deposit_execution',
   'withdrawal_validation',
-  'withdrawal_collection'
+  'withdrawal_collection',
+  'cbe_birr_authoritative_verification',
+  'telebirr_authoritative_verification',
+  'private_live_deposit_pilot'
 )
   and feature_switch.mode = 'disabled'
 \gset
@@ -81,7 +84,7 @@ select count(*) = 1 as replacement_contract_private
 from pg_catalog.pg_proc as procedure
 join pg_catalog.pg_namespace as namespace on namespace.oid = procedure.pronamespace
 where namespace.nspname = 'app'
-  and procedure.proname = 'replace_receiver_account'
+  and procedure.proname = 'replace_receiver_account_by_admin_id_legacy'
   and pg_catalog.pg_get_function_identity_arguments(procedure.oid) =
     'p_actor_admin_id uuid, p_provider_id uuid, p_account_holder_name text, p_account_reference_ciphertext text, p_verification_reference_ciphertext text, p_account_reference_masked text, p_instructions jsonb'
   and procedure.prosecdef

@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 
+import {
+  loadAndVerifyDepositProofReferenceProfile,
+  type DepositProofReferenceProfile,
+} from './deposit-proof-reference-profile.js';
 import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.js';
 
 export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
@@ -11,6 +15,10 @@ export const OWNER_CONTROL_DATABASE_DIRECT_HOST = `db.${OWNER_CONTROL_STAGING_PR
 const STAGING_SUPABASE_URL = `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
 const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
   OWNER_CONTROL_DATABASE_URL: '/run/secrets/owner_control_database_url',
+  OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER:
+    '/run/secrets/owner_receiver_reference_encryption_master',
+  OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER:
+    '/run/secrets/owner_receiver_reference_fingerprint_master',
   OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: '/run/secrets/owner_control_supabase_publishable_key',
 };
 
@@ -28,6 +36,7 @@ export type OwnerControlRuntimeConfig =
       readonly connection: undefined;
       readonly projectReference: undefined;
       readonly publishableKey: undefined;
+      readonly receiverReferenceProtection: undefined;
       readonly stage: undefined;
       readonly supabaseUrl: undefined;
       readonly tlsMode: undefined;
@@ -37,6 +46,11 @@ export type OwnerControlRuntimeConfig =
       readonly connection: OwnerControlDatabaseConnection;
       readonly projectReference: typeof OWNER_CONTROL_STAGING_PROJECT_REFERENCE;
       readonly publishableKey: string;
+      readonly receiverReferenceProtection: {
+        readonly encryptionSecret: string;
+        readonly fingerprintSecret: string;
+        readonly masterProfile: DepositProofReferenceProfile;
+      };
       readonly stage: 'staging';
       readonly supabaseUrl: typeof STAGING_SUPABASE_URL;
       readonly tlsMode: 'verify-full';
@@ -166,6 +180,7 @@ export function loadOwnerControlConfig(
         connection: undefined,
         projectReference: undefined,
         publishableKey: undefined,
+        receiverReferenceProtection: undefined,
         stage: undefined,
         supabaseUrl: undefined,
         tlsMode: undefined,
@@ -182,10 +197,38 @@ export function loadOwnerControlConfig(
     'OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY',
     dependencies,
   );
+  const receiverReferenceEncryptionMaster = readSecret(
+    environment,
+    'OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER',
+    dependencies,
+  );
+  const receiverReferenceFingerprintMaster = readSecret(
+    environment,
+    'OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER',
+    dependencies,
+  );
   if (!databaseUrl) throw new Error('OWNER_CONTROL_DATABASE_URL is required.');
   if (!publishableKey || !/^sb_publishable_[A-Za-z0-9_-]{20,}$/u.test(publishableKey)) {
     throw new Error('OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY is missing or malformed.');
   }
+  if (
+    !receiverReferenceEncryptionMaster ||
+    !receiverReferenceFingerprintMaster ||
+    !/^[0-9a-f]{64}$/u.test(receiverReferenceEncryptionMaster) ||
+    !/^[0-9a-f]{64}$/u.test(receiverReferenceFingerprintMaster) ||
+    receiverReferenceEncryptionMaster === receiverReferenceFingerprintMaster
+  ) {
+    throw new Error('Owner receiver-reference protection masters are missing or malformed.');
+  }
+  const receiverReferenceMasterProfile = loadAndVerifyDepositProofReferenceProfile(
+    environment,
+    environment.NODE_ENV,
+    {
+      encryptionMasterSecret: receiverReferenceEncryptionMaster,
+      fingerprintMasterSecret: receiverReferenceFingerprintMaster,
+    },
+    dependencies.readSecretFile === undefined ? {} : { readFile: dependencies.readSecretFile },
+  );
 
   return {
     ...common,
@@ -194,6 +237,11 @@ export function loadOwnerControlConfig(
       connection: parseDatabaseUrl(databaseUrl),
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
       publishableKey,
+      receiverReferenceProtection: {
+        encryptionSecret: receiverReferenceEncryptionMaster,
+        fingerprintSecret: receiverReferenceFingerprintMaster,
+        masterProfile: receiverReferenceMasterProfile,
+      },
       stage: 'staging',
       supabaseUrl: STAGING_SUPABASE_URL,
       tlsMode: 'verify-full',
@@ -214,6 +262,10 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
       tlsMode: config.runtime.tlsMode,
       databaseConfigured: config.runtime.enabled,
       publishableKeyConfigured: config.runtime.enabled,
+      receiverReferenceProtectionConfigured: config.runtime.enabled,
+      receiverReferenceMasterProfileVersion: config.runtime.enabled
+        ? config.runtime.receiverReferenceProtection.masterProfile.version
+        : undefined,
     },
   } as const;
 }

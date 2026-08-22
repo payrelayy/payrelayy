@@ -15,6 +15,11 @@ export const DEPOSIT_PROOF_REFERENCE_MIN_CODE_POINTS = 8;
 export const DEPOSIT_PROOF_REFERENCE_MAX_CODE_POINTS = 32;
 export const DEPOSIT_PROOF_REFERENCE_PROVIDERS = Object.freeze(['cbe_birr', 'telebirr'] as const);
 
+export const RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION = 1 as const;
+export const RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION = 1 as const;
+export const RECEIVER_ACCOUNT_REFERENCE_MIN_DIGITS = 9;
+export const RECEIVER_ACCOUNT_REFERENCE_MAX_DIGITS = 24;
+
 export type DepositProofReferenceProvider = (typeof DEPOSIT_PROOF_REFERENCE_PROVIDERS)[number];
 
 export interface ProtectedDepositReference {
@@ -47,6 +52,21 @@ export interface ProtectedDepositProofReference {
   readonly provider: DepositProofReferenceProvider;
 }
 
+export interface ReceiverAccountReferenceProtectionInput {
+  readonly provider: DepositProofReferenceProvider;
+  readonly reference: string;
+  readonly secrets: DepositReferenceProtectionSecrets;
+}
+
+export interface ProtectedReceiverAccountReference {
+  readonly ciphertext: string;
+  readonly fingerprint: string;
+  readonly keyVersion: typeof RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION;
+  readonly masked: string;
+  readonly profileVersion: typeof RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION;
+  readonly provider: DepositProofReferenceProvider;
+}
+
 export class DepositReferenceProtectionError extends Error {
   constructor() {
     super('The deposit reference could not be protected.');
@@ -74,6 +94,15 @@ function validDepositProofReference(value: unknown): value is string {
     value.length >= DEPOSIT_PROOF_REFERENCE_MIN_CODE_POINTS &&
     value.length <= DEPOSIT_PROOF_REFERENCE_MAX_CODE_POINTS &&
     DIRECT_PROOF_REFERENCE_PATTERN.test(value)
+  );
+}
+
+function validReceiverAccountReference(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= RECEIVER_ACCOUNT_REFERENCE_MIN_DIGITS &&
+    value.length <= RECEIVER_ACCOUNT_REFERENCE_MAX_DIGITS &&
+    /^[0-9]+$/u.test(value)
   );
 }
 
@@ -268,6 +297,94 @@ export function protectDepositProofReference(
       fingerprint,
       keyVersion: DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
       masked: `***${suffix}`,
+      provider,
+    });
+  } catch {
+    throw new DepositReferenceProtectionError();
+  } finally {
+    encryptionMaster?.fill(0);
+    fingerprintMaster?.fill(0);
+    encryptionKey?.fill(0);
+    fingerprintKey?.fill(0);
+    nonce?.fill(0);
+  }
+}
+
+/**
+ * Protects an Owner-configured receiver wallet/account number before it crosses the PostgreSQL
+ * boundary. This contract is deliberately separate from customer proof references: provider
+ * identity is bound into the derived keys, authenticated data, envelope, and blind index, while
+ * only a four-digit suffix remains displayable. Callers must supply the exact digits; this routine
+ * never guesses, strips punctuation, or normalizes a country prefix.
+ */
+export function protectReceiverAccountReference(
+  input: ReceiverAccountReferenceProtectionInput,
+  dependencies: DepositReferenceProtectionDependencies = {},
+): ProtectedReceiverAccountReference {
+  let encryptionMaster: Buffer | undefined;
+  let fingerprintMaster: Buffer | undefined;
+  let encryptionKey: Buffer | undefined;
+  let fingerprintKey: Buffer | undefined;
+  let nonce: Buffer | undefined;
+  try {
+    const inputProperties = exactDataProperties(input, ['provider', 'reference', 'secrets']);
+    if (inputProperties === undefined) throw new Error();
+    const secretsProperties = exactDataProperties(inputProperties.secrets, [
+      'encryptionSecret',
+      'fingerprintSecret',
+    ]);
+    if (
+      !exactProvider(inputProperties.provider) ||
+      !validReceiverAccountReference(inputProperties.reference) ||
+      secretsProperties === undefined ||
+      !validSecret(secretsProperties.encryptionSecret) ||
+      !validSecret(secretsProperties.fingerprintSecret) ||
+      secretsProperties.encryptionSecret === secretsProperties.fingerprintSecret
+    ) {
+      throw new Error();
+    }
+
+    const provider = inputProperties.provider;
+    const reference = inputProperties.reference;
+    encryptionMaster = Buffer.from(secretsProperties.encryptionSecret, 'hex');
+    fingerprintMaster = Buffer.from(secretsProperties.fingerprintSecret, 'hex');
+    encryptionKey = createHmac('sha256', encryptionMaster)
+      .update(
+        `fetanagent:receiver-account-reference:encryption-key:v1\nprovider:${provider}`,
+        'utf8',
+      )
+      .digest();
+    fingerprintKey = createHmac('sha256', fingerprintMaster)
+      .update(
+        `fetanagent:receiver-account-reference:fingerprint-key:v1\nprovider:${provider}`,
+        'utf8',
+      )
+      .digest();
+    nonce = exactNonce(exactProviderAwareNonce(dependencies));
+
+    const cipher = createCipheriv('aes-256-gcm', encryptionKey, nonce);
+    cipher.setAAD(
+      Buffer.from(
+        `fetanagent:receiver-account-reference:encryption-aad:v1\nprovider:${provider}`,
+        'utf8',
+      ),
+    );
+    const encrypted = Buffer.concat([cipher.update(reference, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    const fingerprint = createHmac('sha256', fingerprintKey)
+      .update(
+        `fetanagent:receiver-account-reference:fingerprint-input:v1\nprovider:${provider}\n`,
+        'utf8',
+      )
+      .update(reference, 'utf8')
+      .digest('hex');
+
+    return Object.freeze({
+      ciphertext: `receiver-v1.${provider}.${nonce.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`,
+      fingerprint,
+      keyVersion: RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION,
+      masked: `***${reference.slice(-4)}`,
+      profileVersion: RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION,
       provider,
     });
   } catch {

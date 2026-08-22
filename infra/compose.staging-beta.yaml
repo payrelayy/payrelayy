@@ -44,6 +44,9 @@ services:
       INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'
       OWNER_CONTROL_DATABASE_URL_FILE: /run/secrets/owner_control_database_url
       OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/owner_control_supabase_publishable_key
+      OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master
+      OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
+      DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
@@ -69,9 +72,24 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
+      - source: deposit_proof_reference_encryption_master
+        target: owner_receiver_reference_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: owner_receiver_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
     configs:
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: deposit_proof_reference_profile
+        target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
         uid: '10001'
         gid: '10001'
         mode: 0444

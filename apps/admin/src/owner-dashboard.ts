@@ -118,6 +118,53 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           <div class="request-list" id="player-eligibility-list"></div>
         </section>
 
+        <section class="review-section" aria-labelledby="receiver-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Immutable Owner configuration</p>
+              <h2 id="receiver-title">Receiving accounts</h2>
+            </div>
+            <button class="secondary" id="receiver-refresh-button" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">
+            Add or change the active TeleBirr and CBE Birr receiving accounts here. A change creates
+            a new revision and retires the previous one; it never rewrites receipt history. The
+            complete account number is encrypted in server memory and is never displayed again.
+          </p>
+          <p class="pilot-warning">
+            Rotation is accepted only while every payment, provider, pilot, settlement, and KemerBet
+            execution switch is disabled. Stop any pilot before changing its receiver.
+          </p>
+          <div class="request-list" id="receiver-list"></div>
+          <form id="receiver-form" autocomplete="off">
+            <label for="receiver-provider">Provider</label>
+            <select id="receiver-provider" name="providerCode" required>
+              <option value="telebirr">TeleBirr</option>
+              <option value="cbe_birr">CBE Birr</option>
+            </select>
+            <label for="receiver-holder-name">Official receiver full name</label>
+            <input id="receiver-holder-name" name="accountHolderName" type="text"
+              minlength="2" maxlength="160" autocomplete="off" required />
+            <label for="receiver-account-reference">Wallet or account number (digits only)</label>
+            <input id="receiver-account-reference" name="accountReference" type="password"
+              inputmode="numeric" pattern="[0-9]{9,24}" minlength="9" maxlength="24"
+              autocomplete="new-password" required />
+            <label for="receiver-rotation-reason">Reason</label>
+            <select id="receiver-rotation-reason" name="rotationReason" required>
+              <option value="initial_configuration">Initial configuration</option>
+              <option value="account_rotation">Account rotation</option>
+              <option value="provider_incident_recovery">Provider incident recovery</option>
+              <option value="owner_correction">Owner correction</option>
+            </select>
+            <label class="confirmation-row" for="receiver-confirmation">
+              <input id="receiver-confirmation" name="confirmation" type="checkbox" required />
+              I checked the official receiver name and complete account number and approve creating
+              a new immutable active revision.
+            </label>
+            <button id="receiver-submit-button" type="submit">Save new active receiver</button>
+          </form>
+        </section>
+
         <section class="review-section pilot-section" aria-labelledby="pilot-title">
           <div class="panel-heading">
             <div>
@@ -258,6 +305,11 @@ const refreshRequestsButton = document.querySelector('#refresh-requests-button')
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
 const playerEligibilityList = document.querySelector('#player-eligibility-list');
+const receiverList = document.querySelector('#receiver-list');
+const receiverForm = document.querySelector('#receiver-form');
+const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
+const receiverAccountReference = document.querySelector('#receiver-account-reference');
+const receiverConfirmation = document.querySelector('#receiver-confirmation');
 const pilotCandidateList = document.querySelector('#pilot-candidate-list');
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
@@ -305,6 +357,12 @@ function clearPlayerEligibility() {
   playerEligibilityList.replaceChildren();
 }
 
+function clearReceivers() {
+  receiverList.replaceChildren();
+  receiverAccountReference.value = '';
+  receiverConfirmation.checked = false;
+}
+
 function clearPilot() {
   currentPilot = undefined;
   eligiblePilotPlayers = [];
@@ -328,6 +386,7 @@ function signOut(message = 'Signed out.') {
   clearPlayerRequests();
   clearAssociationCandidates();
   clearPlayerEligibility();
+  clearReceivers();
   clearPilot();
   clearDepositIntake();
   invitePanel.hidden = true;
@@ -428,6 +487,130 @@ function validPlayerEligibility(value) {
       !(decisionAbsent || decisionPresent)) return undefined;
   return { decidedAt: value.decidedAt, decision: value.decision, decisionVersion: value.decisionVersion,
     playerAccountId, playerId, playerStatus: value.playerStatus, validationStatus: value.validationStatus };
+}
+
+function validReceiver(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const providerCode = value.providerCode;
+  const expectedDisplay = providerCode === 'cbe_birr' ? 'CBE Birr' :
+    providerCode === 'telebirr' ? 'TeleBirr' : undefined;
+  if (!expectedDisplay || value.providerDisplayName !== expectedDisplay ||
+      typeof value.receiverRevisionId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.receiverRevisionId) ||
+      !Number.isSafeInteger(value.revision) || value.revision < 1 ||
+      typeof value.accountHolderName !== 'string' ||
+      !/^[^\\s\\u0000-\\u001f\\u007f](?:[^\\u0000-\\u001f\\u007f]{0,158}[^\\s\\u0000-\\u001f\\u007f])?$/.test(value.accountHolderName) ||
+      typeof value.accountReferenceMasked !== 'string' || !/^\\*{3}[0-9]{4}$/.test(value.accountReferenceMasked) ||
+      (value.receiverStatus !== 'active' && value.receiverStatus !== 'inactive') ||
+      typeof value.activeFrom !== 'string' || !Number.isFinite(Date.parse(value.activeFrom)) ||
+      typeof value.protectedReference !== 'boolean' ||
+      (value.protectedReference &&
+        !['initial_configuration', 'account_rotation', 'provider_incident_recovery', 'owner_correction'].includes(value.rotationReason)) ||
+      (!value.protectedReference && value.rotationReason !== undefined) ||
+      (value.receiverStatus === 'active' && value.retiredAt !== undefined) ||
+      (value.receiverStatus === 'inactive' &&
+        (typeof value.retiredAt !== 'string' || !Number.isFinite(Date.parse(value.retiredAt))))) return undefined;
+  return { accountHolderName: value.accountHolderName, accountReferenceMasked: value.accountReferenceMasked,
+    activeFrom: value.activeFrom, providerCode, providerDisplayName: expectedDisplay,
+    receiverRevisionId: value.receiverRevisionId, receiverStatus: value.receiverStatus,
+    protectedReference: value.protectedReference, retiredAt: value.retiredAt,
+    revision: value.revision, rotationReason: value.rotationReason };
+}
+
+function renderReceivers(receivers) {
+  receiverList.replaceChildren();
+  if (receivers.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No protected receiver revisions are configured yet.';
+    receiverList.append(empty);
+    return;
+  }
+  for (const receiver of receivers) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = receiver.providerDisplayName + ' · ' + receiver.accountHolderName;
+    const facts = document.createElement('p');
+    facts.className = 'request-meta';
+    facts.textContent = 'Revision ' + receiver.revision + ' · ' + receiver.receiverStatus +
+      ' · ' + receiver.accountReferenceMasked + ' · ' +
+      (receiver.protectedReference ? receiver.rotationReason : 'legacy protection') +
+      ' · active from ' + new Date(receiver.activeFrom).toLocaleString() +
+      (receiver.retiredAt ? ' · retired ' + new Date(receiver.retiredAt).toLocaleString() : '');
+    card.append(title, facts);
+    receiverList.append(card);
+  }
+}
+
+async function loadReceivers() {
+  receiverRefreshButton.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/receiver-accounts', { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('receivers');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.receivers) || payload.receivers.length > 100) throw new Error('receivers');
+    const receivers = payload.receivers.map(validReceiver);
+    if (receivers.some((receiver) => !receiver)) throw new Error('receivers');
+    renderReceivers(receivers);
+  } catch (error) {
+    receiverList.replaceChildren();
+    if (!isSignedOutError(error)) setNotice('Receiver-account history is unavailable. Do not rotate an account.');
+  } finally {
+    receiverRefreshButton.disabled = false;
+  }
+}
+
+function receiverMutationHeaders(requestId) {
+  return {
+    'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+async function rotateReceiver() {
+  const providerCode = receiverForm.elements.providerCode.value;
+  const accountHolderName = receiverForm.elements.accountHolderName.value;
+  const accountReference = receiverForm.elements.accountReference.value;
+  const rotationReason = receiverForm.elements.rotationReason.value;
+  if (!receiverConfirmation.checked || !['cbe_birr', 'telebirr'].includes(providerCode) ||
+      !/^[0-9]{9,24}$/.test(accountReference)) return;
+  if (!window.confirm(
+    'Create a new active ' + (providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
+    ' receiver revision for ' + accountHolderName + ' ending ' + accountReference.slice(-4) +
+    '? The previous active revision will be retired and cannot be reactivated.',
+  )) return;
+  const requestId = crypto.randomUUID();
+  setBusy(receiverForm, true);
+  setNotice('Protecting and rotating the receiver account…');
+  try {
+    const response = await ownerRequest('/v1/owner/receiver-accounts/rotate', {
+      method: 'POST',
+      headers: receiverMutationHeaders(requestId),
+      body: JSON.stringify({ accountHolderName, accountReference,
+        confirmation: 'owner_confirmed_receiver_rotation', providerCode, requestId, rotationReason }),
+    });
+    receiverAccountReference.value = '';
+    if (response.status !== 201) throw new Error('receiver_rotation');
+    const payload = await response.json();
+    const receiver = validReceiver(payload && payload.receiver);
+    if (!receiver || !receiver.protectedReference || receiver.providerCode !== providerCode) {
+      throw new Error('receiver_rotation');
+    }
+    receiverConfirmation.checked = false;
+    setNotice(receiver.providerDisplayName + ' receiver revision ' + receiver.revision +
+      (receiver.receiverStatus === 'active' ? ' is active.' : ' was already applied and has since been superseded.') +
+      ' Money remains disabled until later readiness gates pass.');
+    await loadReceivers();
+  } catch (error) {
+    receiverAccountReference.value = '';
+    if (!isSignedOutError(error)) {
+      setNotice('Receiver rotation was rejected or unavailable. No account number was retained in this page. Refresh before retrying.');
+    }
+  } finally {
+    setBusy(receiverForm, false);
+  }
 }
 
 function validPilotStatus(value) {
@@ -1056,6 +1239,7 @@ async function loadOwnerPlayerQueues() {
       loadPlayerRequests(),
       loadAssociationCandidates(),
       loadPlayerEligibility(),
+      loadReceivers(),
       loadDepositIntake(),
       loadCurrentPilot(),
     ]);
@@ -1159,6 +1343,11 @@ revokeButton.addEventListener('click', async () => {
 
 logoutButton.addEventListener('click', () => signOut());
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
+receiverRefreshButton.addEventListener('click', loadReceivers);
+receiverForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await rotateReceiver();
+});
 pilotConfirmation.addEventListener('change', updatePilotPreparationAvailability);
 pilotPrepareForm.addEventListener('submit', async (event) => {
   event.preventDefault();

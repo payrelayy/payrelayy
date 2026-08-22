@@ -7,6 +7,7 @@ import { PostgresOwnerDryRunDepositIntake } from './owner-deposit-intake.js';
 import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-assessments.js';
 import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
 import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot.js';
+import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
 
 export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
@@ -21,6 +22,7 @@ export interface OwnerControlPostgresRuntime {
     PostgresOwnerPrivateLivePilotControl,
     'arm' | 'current' | 'prepare' | 'status' | 'stop'
   >;
+  readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'>;
   close(): Promise<void>;
   ready(): Promise<boolean>;
 }
@@ -128,6 +130,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.arm_private_live_deposit_pilot(uuid,uuid)', 'execute') as private_live_pilot_arm_allowed,
     has_function_privilege(current_user, 'app.stop_private_live_deposit_pilot(uuid,uuid,text)', 'execute') as private_live_pilot_stop_allowed,
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
+    has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
+    has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -155,7 +159,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 19
+      select count(*) = 21
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -187,6 +191,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure,
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure
+          ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
+          ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -249,6 +255,13 @@ export async function createOwnerControlPostgresRuntime(
     privateLivePilot: new PostgresOwnerPrivateLivePilotControl({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
+    receivers: new PostgresOwnerReceiverAccounts(
+      { query: async (sql, values) => pool.query(sql, [...values]) },
+      {
+        encryptionSecret: config.receiverReferenceProtection.encryptionSecret,
+        fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
+      },
+    ),
     ready: async () => {
       if (closed) return false;
       try {

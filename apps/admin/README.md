@@ -12,6 +12,25 @@ The service verifies the bearer token with the exact staging Supabase Auth proje
 Auth user ID from that verified response, and passes it to private database procedures. The
 database independently requires that subject to map to the one active Owner.
 
+The same authenticated Owner page also manages the receiving account for exactly `telebirr` and
+`cbe_birr`. The Owner enters the provider's official receiver name and the complete digits-only
+wallet/account number in the browser; the server immediately creates a provider-separated
+AES-256-GCM envelope, keyed fingerprint, and `***last4` mask before calling PostgreSQL. The API and
+database never return the complete number, ciphertext, or fingerprint. Each change creates a new
+immutable revision and retires the old revision at the exact new activation timestamp, so receipt
+history is never rewritten. Rotation is rejected unless all payment, provider, pilot, and execution
+switches are disabled and no draft/armed pilot uses that provider. The existing provider-neutral
+master files are reused only after their immutable key-profile identity is verified; receiver
+encryption and fingerprint keys are derived under a separate receiver-account/provider domain.
+
+Use `GET /v1/owner/receiver-accounts` to render the redacted revision history and
+`POST /v1/owner/receiver-accounts/rotate` only through the same-origin dashboard. The mutation
+requires exact JSON, `x-fetanagent-owner-csrf: owner-receiver-rotation-v1`, a matching UUID-v4
+`x-idempotency-key`, and the explicit confirmation. Never paste a receiver number into chat, Git,
+terminal history, screenshots, logs, or an ad-hoc SQL command. This control plane configures
+receiver identity only; it does not create a provider profile, verify a payment, arm a pilot, enable
+a switch, or authorize KemerBet execution.
+
 The private live-pilot API exposes exactly five additional Owner operations: prepare one exact
 five-Player manifest, recover the current open manifest without copying its UUID, arm that manifest
 in `dry_run`, read an aggregate redacted status, and stop it. Mutations accept only exact JSON from

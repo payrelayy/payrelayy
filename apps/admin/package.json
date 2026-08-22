@@ -7,6 +7,7 @@
     "@fetanagent/cbe-birr-fixtures": "workspace:*",
     "@fetanagent/config": "workspace:*",
     "@fetanagent/contracts": "workspace:*",
+    "@fetanagent/deposit-reference-protection": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "8.22.0"
   },

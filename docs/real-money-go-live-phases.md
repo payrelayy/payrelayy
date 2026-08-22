@@ -45,6 +45,7 @@ inspection, and public publication runs completed successfully for that exact re
 | Owner fixed-pilot dashboard and server boundary     | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                |
 | Private pilot database boundary                     | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists               |
 | Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                |
+| Owner-adjustable TeleBirr/CBE receiver revisions    | **IMPLEMENTATION/DEPLOY NEXT**    | Authenticated Owner UI/API creates encrypted immutable revisions; source code contains no real account             |
 | KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                      |
 | Real KemerBet portal workflow contract              | **NEXT**                          | Live inspection found the real flow starts at `/agents`; current executor expects the wrong Payment Requests route |
 | TeleBirr receiver/profile/signer/device             | **BLOCKED — not provisioned**     | No active TeleBirr receiver revision, profile, signer, or enrolled verifier device                                 |
@@ -192,7 +193,7 @@ status, and intended receiver before any database settlement is possible.
 
 ### Required Owner inputs
 
-- the exact receiving TeleBirr account, entered only through a private Owner procedure;
+- the exact receiving TeleBirr account, entered only through the authenticated Owner dashboard;
 - the exact official credited-party name shown by TeleBirr;
 - one dedicated Android phone under the Owner's control;
 - the official TeleBirr app signed in on that phone.
@@ -202,7 +203,8 @@ logs, screenshots, or ordinary database columns.
 
 ### Required engineering and provisioning work
 
-1. Create an immutable active TeleBirr receiver revision.
+1. Deploy the Owner receiver-control migration/UI, then create an immutable active TeleBirr
+   receiver revision in that page. Never use chat, ad-hoc SQL, a copied bearer token, or Git.
 2. Create the receiver profile binding the exact normalized credited-party name, parser version,
    policy, receiver revision, and configuration digest.
 3. Generate a P-256 assignment-signing key; keep the private key in a root-owned secret file and
@@ -543,6 +545,8 @@ run URLs, and redacted outcome states as evidence.
 
 ## Related technical contracts
 
+- [`reference-protection.md`](reference-protection.md) — proof-reference and Owner receiver-account
+  encryption, masking, immutable rotation, and remaining decrypt/source blockers.
 - [`private-live-money-pilot.md`](private-live-money-pilot.md) — exact five-account financial and
   database authority contract.
 - [`../infra/executor.md`](../infra/executor.md) — KemerBet executor deployment, session

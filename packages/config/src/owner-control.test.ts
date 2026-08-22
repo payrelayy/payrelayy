@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,6 +12,17 @@ import {
 
 const databaseUrl = `postgresql://fetanagent_owner_control_runtime:password@${OWNER_CONTROL_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
 const publishableKey = 'sb_publishable_test_key_for_staging_only';
+const receiverReferenceEncryptionMaster = 'c'.repeat(64);
+const receiverReferenceFingerprintMaster = 'd'.repeat(64);
+const receiverReferenceProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(receiverReferenceEncryptionMaster, 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(receiverReferenceFingerprintMaster, 'hex'))
+    .digest('hex')}`,
+  version: 2,
+});
 
 function enabledEnvironment(): NodeJS.ProcessEnv {
   return {
@@ -18,6 +31,9 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
     OWNER_CONTROL_DATABASE_URL: databaseUrl,
     OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+    OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverReferenceEncryptionMaster,
+    OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverReferenceFingerprintMaster,
+    DEPOSIT_PROOF_REFERENCE_PROFILE: receiverReferenceProfile,
   };
 }
 
@@ -76,17 +92,31 @@ describe('Owner-control configuration', () => {
     const serialized = JSON.stringify(redactedOwnerControlConfigForLog(config));
     expect(serialized).not.toContain('password');
     expect(serialized).not.toContain(publishableKey);
+    expect(serialized).not.toContain(receiverReferenceEncryptionMaster);
+    expect(serialized).not.toContain(receiverReferenceFingerprintMaster);
     expect(serialized).not.toContain('fetanagent_owner_control_runtime');
 
     expect(() =>
       loadOwnerControlConfig({ ...enabledEnvironment(), NODE_ENV: 'production' }),
     ).toThrow('OWNER_CONTROL_DATABASE_URL_FILE is required');
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        DEPOSIT_PROOF_REFERENCE_PROFILE: JSON.stringify({
+          ...JSON.parse(receiverReferenceProfile),
+          encryptionMasterFingerprint: `sha256:${'0'.repeat(64)}`,
+        }),
+      }),
+    ).toThrow('do not match the approved version 2 profile');
   });
 
   it('reads one newline-terminated value from each approved production file', () => {
     const values: Record<string, string> = {
       '/run/secrets/owner_control_database_url': `${databaseUrl}\n`,
       '/run/secrets/owner_control_supabase_publishable_key': `${publishableKey}\n`,
+      '/run/secrets/owner_receiver_reference_encryption_master': `${receiverReferenceEncryptionMaster}\n`,
+      '/run/secrets/owner_receiver_reference_fingerprint_master': `${receiverReferenceFingerprintMaster}\n`,
+      '/etc/fetanagent/deposit-proof-reference-profile.v2.json': receiverReferenceProfile,
     };
     const config = loadOwnerControlConfig(
       {
@@ -96,9 +126,18 @@ describe('Owner-control configuration', () => {
         OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
         OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:
           '/run/secrets/owner_control_supabase_publishable_key',
+        OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE:
+          '/run/secrets/owner_receiver_reference_encryption_master',
+        OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE:
+          '/run/secrets/owner_receiver_reference_fingerprint_master',
+        DEPOSIT_PROOF_REFERENCE_PROFILE_FILE:
+          '/etc/fetanagent/deposit-proof-reference-profile.v2.json',
       },
       { readSecretFile: (path) => values[path] ?? '' },
     );
     expect(config.runtime.enabled && config.runtime.publishableKey).toBe(publishableKey);
+    expect(
+      config.runtime.enabled && config.runtime.receiverReferenceProtection.masterProfile.version,
+    ).toBe(2);
   });
 });

@@ -43,7 +43,7 @@ assert.doesNotMatch(
 );
 
 assert.match(inspectSql, /begin transaction isolation level serializable read only;/);
-assert.match(inspectSql, /count\(\*\) = 4 as financial_features_disabled/);
+assert.match(inspectSql, /count\(\*\) = 7 as financial_features_disabled/);
 assert.match(inspectSql, /FETANAGENT STAGING SIMULATION - DO NOT PAY/g);
 assert.match(inspectSql, /SIMULATION ONLY — DO NOT SEND MONEY\./g);
 assert.match(inspectSql, /procedure\.prosecdef/);
@@ -59,8 +59,8 @@ assert.doesNotMatch(inspectSql, /\binsert\b|\bupdate\b|\bdelete\b|\btruncate\b/i
 
 assert.match(configureSql, /begin transaction isolation level serializable;/);
 assert.match(configureSql, /pg_catalog\.pg_advisory_xact_lock/);
-assert.match(configureSql, /count\(\*\) = 4 as financial_features_disabled/);
-assert.match(configureSql, /select app\.replace_receiver_account\(/);
+assert.match(configureSql, /count\(\*\) = 7 as financial_features_disabled/);
+assert.match(configureSql, /select app\.replace_receiver_account_by_admin_id_legacy\(/);
 assert.match(configureSql, /FETANAGENT STAGING SIMULATION - DO NOT PAY/g);
 assert.match(configureSql, /SIMULATION ONLY — DO NOT SEND MONEY\./g);
 assert.match(configureSql, /synthetic-staging-v1:do-not-pay/g);

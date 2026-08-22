@@ -2,7 +2,6 @@ import type { Page } from 'playwright-core';
 
 import {
   KemerBetDepositBrowserUnavailableError,
-  type BrowserRole,
   type KemerBetAgentHistoryView,
   type KemerBetAgentLookupView,
   type KemerBetAgentPreparedDepositView,
@@ -11,8 +10,7 @@ import {
 } from './kemerbet-deposit-browser-adapter.js';
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
 
-export const KEMERBET_AGENT_DEPOSIT_URL =
-  'https://agentsystem.admindigi.com/payments/requests#tab=1' as const;
+export const KEMERBET_AGENT_DEPOSIT_URL = 'https://agentsystem.admindigi.com/agents' as const;
 export const KEMERBET_AGENT_HISTORY_URL =
   'https://agentsystem.admindigi.com/payments/history' as const;
 export const KEMERBET_AGENT_TIME_ZONE = 'Africa/Addis_Ababa' as const;
@@ -37,6 +35,18 @@ export interface KemerBetAgentStructuredFieldSelector {
  */
 export interface KemerBetAgentPageSelectorContractV1 {
   readonly version: 1;
+  readonly depositWorkflow: {
+    readonly financialActionsTrigger: string;
+    readonly depositMenuItem: string;
+    readonly toPlayerTile: string;
+    readonly findByControl: string;
+    readonly findByPlayerIdOptionValue: string;
+    readonly playerIdInput: string;
+    readonly findButton: string;
+    readonly amountInput: string;
+    readonly notesInput: string;
+    readonly transferButton: string;
+  };
   readonly signedInAgentIdentity: {
     readonly root: string;
     readonly value: KemerBetAgentStructuredFieldSelector;
@@ -100,11 +110,6 @@ export interface PlaywrightPagePort {
     options: { readonly waitUntil: 'domcontentloaded'; readonly timeout: number },
   ): Promise<unknown>;
   url(): string;
-  getByRole(
-    role: BrowserRole,
-    options: { readonly name: string; readonly exact: true },
-  ): PlaywrightLocatorPort;
-  getByLabel(text: string, options: { readonly exact: true }): PlaywrightLocatorPort;
   locator(selector: string): PlaywrightLocatorPort;
 }
 
@@ -174,6 +179,7 @@ export function assertKemerBetAgentPageSelectorContractV1(
     !isRecord(value) ||
     !hasExactKeys(value, [
       'version',
+      'depositWorkflow',
       'signedInAgentIdentity',
       'lookup',
       'preparedDeposit',
@@ -186,12 +192,27 @@ export function assertKemerBetAgentPageSelectorContractV1(
     unavailable();
   }
   const lookup = value.lookup;
+  const depositWorkflow = value.depositWorkflow;
   const signedInAgentIdentity = value.signedInAgentIdentity;
   const preparedDeposit = value.preparedDeposit;
   const transferResult = value.transferResult;
   const history = value.history;
   const sessionFailure = value.sessionFailure;
   if (
+    !isRecord(depositWorkflow) ||
+    !hasExactKeys(depositWorkflow, [
+      'financialActionsTrigger',
+      'depositMenuItem',
+      'toPlayerTile',
+      'findByControl',
+      'findByPlayerIdOptionValue',
+      'playerIdInput',
+      'findButton',
+      'amountInput',
+      'notesInput',
+      'transferButton',
+    ]) ||
+    Object.values(depositWorkflow).some((entry) => typeof entry !== 'string') ||
     !isRecord(signedInAgentIdentity) ||
     !hasExactKeys(signedInAgentIdentity, ['root', 'value']) ||
     typeof signedInAgentIdentity.root !== 'string' ||
@@ -259,6 +280,15 @@ export function assertKemerBetAgentPageSelectorContractV1(
     contract.transferResult.playerCreditFact,
   ];
   for (const selector of [
+    contract.depositWorkflow.financialActionsTrigger,
+    contract.depositWorkflow.depositMenuItem,
+    contract.depositWorkflow.toPlayerTile,
+    contract.depositWorkflow.findByControl,
+    contract.depositWorkflow.playerIdInput,
+    contract.depositWorkflow.findButton,
+    contract.depositWorkflow.amountInput,
+    contract.depositWorkflow.notesInput,
+    contract.depositWorkflow.transferButton,
     contract.signedInAgentIdentity.root,
     contract.lookup.root,
     contract.preparedDeposit.root,
@@ -273,6 +303,19 @@ export function assertKemerBetAgentPageSelectorContractV1(
   ]) {
     requireSelector(selector);
   }
+  requireNonemptyBounded(contract.depositWorkflow.findByPlayerIdOptionValue, 80);
+  const workflowSelectors = [
+    contract.depositWorkflow.financialActionsTrigger,
+    contract.depositWorkflow.depositMenuItem,
+    contract.depositWorkflow.toPlayerTile,
+    contract.depositWorkflow.findByControl,
+    contract.depositWorkflow.playerIdInput,
+    contract.depositWorkflow.findButton,
+    contract.depositWorkflow.amountInput,
+    contract.depositWorkflow.notesInput,
+    contract.depositWorkflow.transferButton,
+  ];
+  if (new Set(workflowSelectors).size !== workflowSelectors.length) unavailable();
   for (const field of fields) {
     requireSelector(field.selector);
     if (field.source !== 'input' && field.source !== 'text') unavailable();
@@ -648,22 +691,9 @@ export function createPlaywrightKemerBetAgentPage(
     return result;
   }
 
-  async function exactRole(role: BrowserRole, name: string): Promise<PlaywrightLocatorPort> {
+  async function exactWorkflowControl(selector: string): Promise<PlaywrightLocatorPort> {
     const locator = await pollAuthenticated(async () => {
-      const candidate = page.getByRole(role, { name, exact: true });
-      const count = await candidate.count();
-      if (count === 0) return null;
-      if (count !== 1) unavailable();
-      if (!(await candidate.isVisible()) || !(await candidate.isEnabled())) return null;
-      return candidate;
-    });
-    if (locator === null) unavailable();
-    return locator;
-  }
-
-  async function exactLabel(label: string): Promise<PlaywrightLocatorPort> {
-    const locator = await pollAuthenticated(async () => {
-      const candidate = page.getByLabel(label, { exact: true });
+      const candidate = page.locator(selector);
       const count = await candidate.count();
       if (count === 0) return null;
       if (count !== 1) unavailable();
@@ -766,42 +796,75 @@ export function createPlaywrightKemerBetAgentPage(
       return requireReadyAgentPage();
     },
 
-    async clickByRole(role, name) {
+    async openPlayerDeposit() {
       await requireReadyAgentPage();
-      const allowed =
-        expectedUrl === KEMERBET_AGENT_DEPOSIT_URL &&
-        ((role === 'tab' && name === 'Deposit') ||
-          (role === 'button' && ['To Player', 'Find', 'Transfer'].includes(name)));
-      if (!allowed) unavailable();
-      await (await exactRole(role, name)).click({ timeout: timeoutMs });
-      await requireReadyAgentPage();
+      if (expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+      for (const selector of [
+        contract.depositWorkflow.financialActionsTrigger,
+        contract.depositWorkflow.depositMenuItem,
+        contract.depositWorkflow.toPlayerTile,
+      ]) {
+        await (await exactWorkflowControl(selector)).click({ timeout: timeoutMs });
+        await requireReadyAgentPage();
+      }
     },
 
-    async fillByLabel(label, value) {
+    async lookupPlayer(playerId) {
       await requireReadyAgentPage();
       if (
         expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL ||
-        !['Player ID', 'Amount', 'Notes'].includes(label) ||
-        value.length > 128 ||
-        /\r|\n|\0/u.test(value)
-      ) {
+        playerId.length < 1 ||
+        playerId.length > 128 ||
+        playerId !== playerId.trim() ||
+        /\r|\n|\0/u.test(playerId)
+      )
         unavailable();
-      }
-      await (await exactLabel(label)).fill(value, { timeout: timeoutMs });
+      const findBy = await exactWorkflowControl(contract.depositWorkflow.findByControl);
+      const optionValue = contract.depositWorkflow.findByPlayerIdOptionValue;
+      const selected = await findBy.selectOption(optionValue, { timeout: timeoutMs });
+      if (selected.length !== 1 || selected[0] !== optionValue) unavailable();
+      await (
+        await exactWorkflowControl(contract.depositWorkflow.playerIdInput)
+      ).fill(playerId, {
+        timeout: timeoutMs,
+      });
+      await (
+        await exactWorkflowControl(contract.depositWorkflow.findButton)
+      ).click({
+        timeout: timeoutMs,
+      });
       await requireReadyAgentPage();
     },
 
-    async selectByLabel(label, value) {
+    async fillDeposit(amount, notes) {
       await requireReadyAgentPage();
       if (
         expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL ||
-        label !== 'Find By' ||
-        value !== 'Player ID'
-      ) {
+        !/^[0-9]+\.[0-9]{2}$/u.test(amount) ||
+        notes !== ''
+      )
         unavailable();
-      }
-      const selected = await (await exactLabel(label)).selectOption(value, { timeout: timeoutMs });
-      if (selected.length !== 1 || selected[0] !== value) unavailable();
+      await (
+        await exactWorkflowControl(contract.depositWorkflow.amountInput)
+      ).fill(amount, {
+        timeout: timeoutMs,
+      });
+      await (
+        await exactWorkflowControl(contract.depositWorkflow.notesInput)
+      ).fill(notes, {
+        timeout: timeoutMs,
+      });
+      await requireReadyAgentPage();
+    },
+
+    async transferOnce() {
+      await requireReadyAgentPage();
+      if (expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+      await (
+        await exactWorkflowControl(contract.depositWorkflow.transferButton)
+      ).click({
+        timeout: timeoutMs,
+      });
       await requireReadyAgentPage();
     },
 

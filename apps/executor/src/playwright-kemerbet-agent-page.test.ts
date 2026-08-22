@@ -15,6 +15,18 @@ import {
 
 const contract: KemerBetAgentPageSelectorContractV1 = {
   version: 1,
+  depositWorkflow: {
+    financialActionsTrigger: '#financial-actions',
+    depositMenuItem: '#deposit-menu-item',
+    toPlayerTile: '#to-player-tile',
+    findByControl: '#find-by',
+    findByPlayerIdOptionValue: 'player-id',
+    playerIdInput: '#player-id-input',
+    findButton: '#find-player',
+    amountInput: '#amount-input',
+    notesInput: '#notes-input',
+    transferButton: '#transfer',
+  },
   signedInAgentIdentity: {
     root: '#signed-in-agent',
     value: { selector: '#signed-in-agent-value', source: 'text' },
@@ -215,6 +227,7 @@ class FakePage implements PlaywrightPagePort {
   lookupDelayPolls = 0;
   historyDelayPolls = 0;
   dialogDelayPolls = 0;
+  workflowClicks: string[] = [];
 
   readonly lookup = new FakeLocator({
     children: {
@@ -230,12 +243,9 @@ class FakePage implements PlaywrightPagePort {
       '#prepared-currency': new FakeLocator({ text: 'ETB' }),
     },
   });
-  readonly labels = new Map<string, FakeLocator>([
-    ['Player ID', new FakeLocator({ input: 'PLAYER-ALPHA' })],
-    ['Amount', this.preparedAmount],
-    ['Notes', new FakeLocator()],
-    ['Find By', new FakeLocator({ input: 'Player ID' })],
-  ]);
+  readonly findBy = new FakeLocator({ input: 'player-id' });
+  readonly playerIdInput = new FakeLocator({ input: 'PLAYER-ALPHA' });
+  readonly notesInput = new FakeLocator();
 
   async goto(url: string) {
     this.urlValue = this.redirectTo ?? url;
@@ -243,17 +253,6 @@ class FakePage implements PlaywrightPagePort {
 
   url() {
     return this.urlValue;
-  }
-
-  getByRole(role: 'button' | 'link' | 'tab', options: { name: string; exact: true }) {
-    if (role === 'button' && options.name === 'Transfer') {
-      return new FakeLocator({ onClick: () => (this.transferClicks += 1) });
-    }
-    return new FakeLocator();
-  }
-
-  getByLabel(text: string) {
-    return this.labels.get(text) ?? emptyLocator();
   }
 
   locator(selector: string): FakeLocator {
@@ -269,6 +268,20 @@ class FakePage implements PlaywrightPagePort {
           '#signed-in-agent-value': new FakeLocator({ text: this.rawAgentIdentity }),
         },
       });
+    }
+    if (
+      ['#financial-actions', '#deposit-menu-item', '#to-player-tile', '#find-player'].includes(
+        selector,
+      )
+    ) {
+      return new FakeLocator({ onClick: () => this.workflowClicks.push(selector) });
+    }
+    if (selector === '#find-by') return this.findBy;
+    if (selector === '#player-id-input') return this.playerIdInput;
+    if (selector === '#amount-input') return this.preparedAmount;
+    if (selector === '#notes-input') return this.notesInput;
+    if (selector === '#transfer') {
+      return new FakeLocator({ onClick: () => (this.transferClicks += 1) });
     }
     if (selector === '#lookup') {
       if (this.lookupDelayPolls > 0) {
@@ -348,7 +361,7 @@ describe('Playwright KemerBet agent page', () => {
 
   it.each([
     'https://agentsystem.admindigi.com/payments/requests',
-    'https://agentsystem.admindigi.com/payments/requests#tab=2',
+    'https://agentsystem.admindigi.com/agents/',
     'https://agentsystem.admindigi.com/login',
     'https://kemerbet.co/en/pages/9999/1',
   ])('rejects every route outside the two exact agent routes: %s', async (url) => {
@@ -372,6 +385,25 @@ describe('Playwright KemerBet agent page', () => {
     );
   });
 
+  it('uses only the reviewed /agents controls and can stop after an exact no-transfer lookup', async () => {
+    const fixture = driver();
+    await fixture.driver.goto(KEMERBET_AGENT_DEPOSIT_URL);
+    await fixture.driver.openPlayerDeposit();
+    await fixture.driver.lookupPlayer('PLAYER-ALPHA');
+
+    await expect(fixture.driver.readAgentLookup()).resolves.toEqual({
+      playerId: 'PLAYER-ALPHA',
+      currencyCode: 'ETB',
+    });
+    expect(fixture.page.workflowClicks).toEqual([
+      '#financial-actions',
+      '#deposit-menu-item',
+      '#to-player-tile',
+      '#find-player',
+    ]);
+    expect(fixture.page.transferClicks).toBe(0);
+  });
+
   it('waits for a delayed signed-in identity marker and rejects a swapped identity', async () => {
     const delayed = driver();
     delayed.page.identityDelayPolls = 2;
@@ -388,7 +420,7 @@ describe('Playwright KemerBet agent page', () => {
     const fixture = driver();
     await fixture.driver.goto(KEMERBET_AGENT_DEPOSIT_URL);
     fixture.page.rawAgentIdentity = 'different-agent@example.invalid';
-    await expect(fixture.driver.fillByLabel('Amount', '25.00')).rejects.toBeInstanceOf(
+    await expect(fixture.driver.fillDeposit('25.00', '')).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
   });
@@ -405,7 +437,7 @@ describe('Playwright KemerBet agent page', () => {
       amountText: '25.00',
       currencyCode: 'ETB',
     });
-    await fixture.driver.clickByRole('button', 'Transfer');
+    await fixture.driver.transferOnce();
     await expect(fixture.driver.readAgentTransferResult()).resolves.toEqual({
       playerId: 'PLAYER-ALPHA',
       creditEvidenceText: 'Player Balance +25.00 ETB Success',
@@ -569,7 +601,7 @@ describe('Playwright KemerBet agent page', () => {
     const route = driver();
     await route.driver.goto(KEMERBET_AGENT_DEPOSIT_URL);
     route.page.urlValue = KEMERBET_AGENT_HISTORY_URL;
-    await expect(route.driver.fillByLabel('Amount', '25.00')).rejects.toBeInstanceOf(
+    await expect(route.driver.fillDeposit('25.00', '')).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
   });

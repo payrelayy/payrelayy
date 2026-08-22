@@ -158,6 +158,7 @@ function serializedBrowser(
   }
   return {
     platformAgentAccountId: browser.platformAgentAccountId,
+    probePlayerLookup: (target) => run(async () => browser.probePlayerLookup(target)),
     prepare: (lease) => run(async () => browser.prepare(lease)),
     submitOnceAfterFence: (lease, fence) =>
       run(async () => browser.submitOnceAfterFence(lease, fence)),

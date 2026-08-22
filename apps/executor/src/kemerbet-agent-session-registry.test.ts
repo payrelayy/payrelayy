@@ -29,6 +29,18 @@ const INVALID_AGENT_IDENTITY_FINGERPRINT = `hmac-sha256-agent-identity-v1:${'e'.
 
 const selectorContract: KemerBetAgentPageSelectorContractV1 = {
   version: 1,
+  depositWorkflow: {
+    financialActionsTrigger: '#financial-actions',
+    depositMenuItem: '#deposit-menu-item',
+    toPlayerTile: '#to-player-tile',
+    findByControl: '#find-by',
+    findByPlayerIdOptionValue: 'player-id',
+    playerIdInput: '#player-input',
+    findButton: '#find',
+    amountInput: '#amount-input',
+    notesInput: '#notes-input',
+    transferButton: '#transfer',
+  },
   signedInAgentIdentity: {
     root: '#signed-in-agent',
     value: { selector: '#signed-in-agent-value', source: 'text' },

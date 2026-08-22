@@ -12,12 +12,18 @@ async function queryAsOwnerControl<T extends QueryResultRow>(
   query: string,
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
-  await client.query('set local role fetanagent_owner_control');
+  const savepoint = `owner_control_query_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+  await client.query(`savepoint ${savepoint}`);
   try {
+    await client.query('set local role fetanagent_owner_control');
     const result = await client.query<T>(query, [...values]);
-    return result.rows;
-  } finally {
     await client.query('reset role');
+    await client.query(`release savepoint ${savepoint}`);
+    return result.rows;
+  } catch (error) {
+    await client.query(`rollback to savepoint ${savepoint}`);
+    await client.query(`release savepoint ${savepoint}`);
+    throw error;
   }
 }
 

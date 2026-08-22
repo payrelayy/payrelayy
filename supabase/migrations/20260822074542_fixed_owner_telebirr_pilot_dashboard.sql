@@ -60,11 +60,11 @@ begin
     array['telebirr']::text[],
     p_player_ids,
     submitting_customer_ids,
-    2500,
-    2500,
-    2500,
-    12500,
-    5,
+    2500::bigint,
+    2500::bigint,
+    2500::bigint,
+    12500::bigint,
+    5::smallint,
     p_active_from,
     p_expires_at
   );

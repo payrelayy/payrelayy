@@ -1739,6 +1739,14 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             owner_runtime_allowed: false,
             settlement_allowed: false,
           });
+        } else if (row.signature.includes('prepare_private_live_deposit_pilot')) {
+          expect(row).toMatchObject({
+            direct_grantees: [],
+            executor_allowed: false,
+            owner_allowed: false,
+            owner_runtime_allowed: false,
+            settlement_allowed: false,
+          });
         } else {
           expect(row).toMatchObject({
             direct_grantees: ['fetanagent_owner_control'],

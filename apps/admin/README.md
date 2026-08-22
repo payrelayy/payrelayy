@@ -43,6 +43,19 @@ session export, or balance. Preparing this record does not sign in to KemerBet, 
 Transfer, enable the executor, or move money; those remain separate supervised provisioning and
 readiness phases.
 
+After the separately reviewed staging sign-in service is started, the same Owner page exposes a
+ten-minute private browser preview through `GET /v1/owner/kemerbet-session` and exact start, input,
+and stop mutations. Every request is re-authenticated as the active Owner and rebinds to the one
+active opaque KemerBet profile. The browser runs in a separate UID-10001 container with no database
+URL, Supabase key, Player-ID list, selector contract, HMAC key, pilot manifest, executor lease, or
+final-action authority. Owner and browser share only a mode-`0600` Unix socket volume. The browser
+always aborts the exact KemerBet deposit endpoint; after `/agents` is reached it refuses all further
+input and all non-read network requests. Its persistent private volume retains KemerBet's own
+signed-in browser session, but the Owner API and logs never receive a password, OTP, cookie, session
+export, agent identity, or balance as structured data. Stop the transient browser immediately after
+the dashboard reports `KemerBet signed in`; the persistent profile remains for the later no-transfer
+readiness probe.
+
 The private live-pilot API exposes exactly five additional Owner operations: prepare one exact
 five-Player manifest, recover the current open manifest without copying its UUID, arm that manifest
 in `dry_run`, read an aggregate redacted status, and stop it. Mutations accept only exact JSON from
@@ -81,10 +94,10 @@ active Owner may explicitly approve or revoke an already associated KemerBet Pla
 has no direct table grant, is serialized with new intents, writes fixed reason codes and safe audit
 metadata, and does not open a deposit, change a feature switch, call KemerBet, or move money.
 
-The runtime remains disabled by default. Its staging container binds only to host loopback for an
-SSH-forwarded operator session; there is no public proxy or Internet-facing Owner endpoint. The
-current page remains private to the Owner, is not a customer-facing PWA, and keeps English-only
-interface and validation copy.
+The runtime remains disabled by default. Its staging container binds only to host loopback; the
+reviewed public Caddy boundary may proxy the authenticated `/owner` page but exposes neither the
+Unix socket nor the transient browser container. The current page remains private to the Owner, is
+not a customer-facing PWA, and keeps English-only interface and validation copy.
 
 After the reviewed page is deployed, open it only through an SSH local-forward from the approved
 operator workstation:

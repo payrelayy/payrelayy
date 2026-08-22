@@ -2,9 +2,9 @@
 
 `compose.staging-beta.yaml` is a deployment artifact for private beta admission plus pending
 Player-ID registration. It does not run under the default Compose profile and it does not include a
-worker, executor, maintenance process, public API host port, Docker socket, production project
+worker, long-lived executor, maintenance process, public API host port, Docker socket, production project
 reference, Player-ID validation, or a live financial/provider action path. Owner control retains
-its VM-loopback binding. A fifth, secret-free HTTPS gateway exists only in the separate
+its VM-loopback binding. A secret-free HTTPS gateway exists only in the separate
 `public-domain` profile and is governed by [`public-domain.md`](public-domain.md).
 
 The only services are:
@@ -19,6 +19,11 @@ The only services are:
 - `bot`, exactly one Telegram long-polling process which waits for `beta-admission` readiness.
 - `gateway`, a separately selected Caddy edge which serves the static FetanAgent landing page and
   proxies only authenticated Owner control. It cannot reach the API or beta-admission bridge.
+- `kemerbet-session-provision`, a normally absent, separately profile-gated, ten-minute private
+  sign-in browser built from the reviewed executor image. It receives no application secret,
+  database access, Player list, or financial flag. It shares only a private Unix-socket volume with
+  Owner and an isolated persistent KemerBet browser-profile volume. Its route guard always blocks
+  the exact deposit endpoint and locks input after the signed-in `/agents` page appears.
 
 The five application images use the immutable Linux/amd64 Node base in the repository `Dockerfile`;
 the gateway uses a separately pinned official Caddy image. Every service runs as numeric UID/GID
@@ -154,9 +159,10 @@ Supabase, GitHub, Telegram, or the VM:
 node infra/verify-staging-beta.mjs
 ```
 
-It enforces the five private-service topology, separately gated secret-free gateway, pinned
-architecture and build targets, hardening settings, isolated file-secret set, network separation,
-disabled generic action/provider gates, and absence of the production ref.
+It enforces the five private-service topology, separately gated secret-free gateway, normally
+absent no-transfer sign-in tool, pinned architecture and build targets, hardening settings,
+isolated file-secret set and browser volumes, network separation, disabled generic action/provider
+gates, and absence of the production ref.
 
 Before any separately approved build, set `FETANAGENT_VCS_REF` to the reviewed full commit SHA and
 `FETANAGENT_IMAGE_TAG` to a commit-derived immutable local tag. Render only from a sealed checkout
@@ -229,8 +235,8 @@ logins are disabled. Keep the runtime offline throughout replacement.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188
-reviewed_successor=4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e
+installed_predecessor=4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e
+reviewed_successor=215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -241,7 +247,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
+NEXT_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -257,10 +263,10 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-4966c316"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-4d3442cf"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
-PREVIOUS_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
-NEXT_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
+PREVIOUS_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
+NEXT_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
 METADATA='http://169.254.169.254/metadata/v1'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
@@ -302,14 +308,14 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `4d3442cf…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+against successor SHA `215c0958…` before `deploy-and-smoke` is allowed. If it fails, keep staging
 offline and use the root console to atomically restore only the checksum-proven `previous` file:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-4966c316'
-PREVIOUS_SHA='4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-4d3442cf'
+PREVIOUS_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
 test ! -L "$BACKUP" && test "$(stat --format='%U:%G:%a' "$BACKUP")" = 'root:root:600'
 test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
 RESTORE_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"

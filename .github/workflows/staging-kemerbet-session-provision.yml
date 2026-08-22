@@ -1,0 +1,147 @@
+name: Staging private KemerBet sign-in
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Start, inspect, or stop the private no-transfer KemerBet sign-in browser
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - start
+          - stop
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_no_transfer:
+        description: For start, type private-sign-in-no-transfer
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_DROPLET_ID: '593344964'
+
+jobs:
+  validate-target:
+    name: Validate exact no-transfer staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_NO_TRANSFER: ${{ inputs.confirm_no_transfer }}
+      CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      REQUESTED_MODE: ${{ inputs.mode }}
+    steps:
+      - name: Reject every non-staging or financial target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|start|stop)$ ]]
+          if [[ "$REQUESTED_MODE" == 'start' ]]; then
+            [[ "$CONFIRMED_NO_TRANSFER" == 'private-sign-in-no-transfer' ]]
+          else
+            [[ -z "$CONFIRMED_NO_TRANSFER" ]]
+          fi
+
+  session-action:
+    name: Start, attest, or stop private KemerBet sign-in
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact sign-in contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Prepare the protected SSH boundary
+        id: protected
+        shell: bash
+        env:
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+          protected="$RUNNER_TEMP/protected-kemerbet-session"
+          install -d -m 0700 "$protected"
+          umask 077
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected/deploy-key" "$protected/known-hosts"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
+          [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "helper_sha=$helper_sha" >>"$GITHUB_OUTPUT"
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >>"$GITHUB_OUTPUT"
+
+      - name: Run the exact private sign-in action
+        if: inputs.mode != 'stop'
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          ssh_options=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          prefix="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}'"
+          if [[ '${{ inputs.mode }}' == 'start' ]]; then
+            ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+              "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-kemerbet-session-provision '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          fi
+          ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+            "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-session-provision-ready '$GITHUB_SHA'"
+          echo 'private_kemerbet_sign_in_no_transfer=pass'
+
+      - name: Stop the private sign-in browser
+        if: inputs.mode == 'stop'
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          ssh -F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop-kemerbet-session-provision '$GITHUB_SHA'"
+
+      - name: Roll back a failed private sign-in start
+        if: failure() && inputs.mode == 'start'
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          ssh -F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+            "sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop-kemerbet-session-provision '$GITHUB_SHA'"

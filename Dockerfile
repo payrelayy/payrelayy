@@ -82,6 +82,12 @@ ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-owner-control" \
       org.opencontainers.image.revision="${VCS_REF}"
 
+USER root
+
+RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control
+
+USER 10001:10001
+
 COPY --from=admin-build --chown=10001:10001 /workspace/node_modules ./node_modules
 COPY --from=admin-build --chown=10001:10001 /workspace/packages ./packages
 COPY --from=admin-build --chown=10001:10001 /workspace/apps/admin ./apps/admin
@@ -133,6 +139,7 @@ ARG FETANAGENT_CHROMIUM_PACKAGE_VERSION
 RUN apt-get update \
   && test -n "${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
   && apt-get install --yes --no-install-recommends ca-certificates "chromium=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" fonts-liberation \
+  && install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control /var/lib/fetanagent/kemerbet-sessions \
   && rm -rf /var/lib/apt/lists/*
 
 ENV HOME=/tmp

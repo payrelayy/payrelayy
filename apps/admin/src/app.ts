@@ -28,6 +28,13 @@ import {
   type OwnerKemerbetAgentProfileReason,
 } from './owner-kemerbet-agent-profile.js';
 import {
+  OwnerKemerbetSessionRejectedError,
+  OwnerKemerbetSessionUnavailableError,
+  UnixOwnerKemerbetSessionControl,
+  type OwnerKemerbetSessionControl,
+  type OwnerKemerbetSessionInput,
+} from './owner-kemerbet-session-control.js';
+import {
   OwnerPlayerDepositEligibilityRejectedError,
   OwnerPlayerDepositEligibilityUnavailableError,
   type OwnerPlayerDepositEligibilityDecision,
@@ -60,6 +67,7 @@ import {
 
 export interface OwnerControlAppDependencies {
   readonly fetch?: typeof fetch;
+  readonly kemerbetSessionControl?: OwnerKemerbetSessionControl;
   readonly now?: () => Date;
   readonly runtime: OwnerControlPostgresRuntime;
 }
@@ -106,6 +114,7 @@ const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
+const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
 const OWNER_KEMERBET_AGENT_PROFILE_REASONS = new Set<OwnerKemerbetAgentProfileReason>([
   'agent_rotation',
   'initial_configuration',
@@ -151,6 +160,8 @@ export function buildOwnerControlApp(
 ) {
   if (!config.runtime.enabled) throw new Error('The Owner-control runtime is disabled.');
   const runtimeConfig = config.runtime;
+  const kemerbetSessionControl =
+    dependencies.kemerbetSessionControl ?? new UnixOwnerKemerbetSessionControl();
   const privatePilotMutationOrigins = new Set([
     'https://owner.fetanagent.com',
     `http://127.0.0.1:${config.server.port}`,
@@ -262,6 +273,28 @@ export function buildOwnerControlApp(
         OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
+  }
+
+  function validKemerbetSessionMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  async function activeKemerbetAgentProfileId(authUserId: string): Promise<string> {
+    const profiles = await dependencies.runtime.kemerbetAgentProfiles.list(authUserId);
+    const active = profiles.filter((profile) => profile.profileStatus === 'active');
+    if (active.length !== 1) throw new OwnerKemerbetSessionRejectedError();
+    return active[0]!.platformAgentAccountId;
   }
 
   app.post('/v1/owner/telegram-beta-invites', async (request, reply) => {
@@ -784,6 +817,133 @@ export function buildOwnerControlApp(
         return reply.code(403).send({ error: 'forbidden' });
       }
       request.log.warn('Owner KemerBet agent-profile preparation is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.get('/v1/owner/kemerbet-session', async (request, reply) => {
+    try {
+      if (
+        typeof request.query !== 'object' ||
+        request.query === null ||
+        Object.keys(request.query).length !== 0
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      await activeKemerbetAgentProfileId(authUserId);
+      return reply.code(200).send({ session: await kemerbetSessionControl.status() });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError ||
+        error instanceof OwnerKemerbetSessionRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner KemerBet session status is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/owner/kemerbet-session/start', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        body?.confirmation !== 'owner_confirmed_private_kemerbet_sign_in' ||
+        !validKemerbetSessionMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const accountId = await activeKemerbetAgentProfileId(authUserId);
+      const session = await kemerbetSessionControl.start(accountId, body.requestId as string);
+      return reply.code(201).send({ session });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError ||
+        error instanceof OwnerKemerbetSessionRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner KemerBet session start is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/owner/kemerbet-session/input', async (request, reply) => {
+    try {
+      const candidate = request.body as Record<string, unknown> | undefined;
+      const body =
+        candidate?.kind === 'pointer'
+          ? exactObject(candidate, ['kind', 'requestId', 'x', 'y'])
+          : candidate?.kind === 'key'
+            ? exactObject(candidate, ['key', 'kind', 'requestId'])
+            : undefined;
+      const pointerValid =
+        body?.kind === 'pointer' &&
+        Number.isInteger(body.x) &&
+        Number(body.x) >= 0 &&
+        Number(body.x) < 1280 &&
+        Number.isInteger(body.y) &&
+        Number(body.y) >= 0 &&
+        Number(body.y) < 720;
+      const keyValid =
+        body?.kind === 'key' &&
+        typeof body.key === 'string' &&
+        (['Backspace', 'Delete', 'Enter', 'Escape', 'Tab'].includes(body.key) ||
+          (/^[\u0020-\u007e]$/u.test(body.key) && body.key !== '`'));
+      if (
+        (!pointerValid && !keyValid) ||
+        !validKemerbetSessionMutationHeaders(request.raw.rawHeaders, body?.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      await activeKemerbetAgentProfileId(authUserId);
+      const session = await kemerbetSessionControl.input(
+        body as unknown as OwnerKemerbetSessionInput,
+      );
+      return reply.code(200).send({ session });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError ||
+        error instanceof OwnerKemerbetSessionRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner KemerBet session input is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/owner/kemerbet-session/stop', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        body?.confirmation !== 'owner_confirmed_stop_private_kemerbet_session' ||
+        !validKemerbetSessionMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      await activeKemerbetAgentProfileId(authUserId);
+      return reply
+        .code(200)
+        .send({ session: await kemerbetSessionControl.stop(body.requestId as string) });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError ||
+        error instanceof OwnerKemerbetSessionRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof OwnerKemerbetSessionUnavailableError) {
+        request.log.warn('Owner KemerBet session stop is unavailable.');
+      }
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });

@@ -12,6 +12,10 @@ const botWorkflow = readFileSync(
   resolve(root, '.github/workflows/staging-telegram-bot.yml'),
   'utf8',
 );
+const kemerbetSessionWorkflow = readFileSync(
+  resolve(root, '.github/workflows/staging-kemerbet-session-provision.yml'),
+  'utf8',
+);
 const botSource = readFileSync(resolve(root, 'apps/bot/src/index.ts'), 'utf8');
 const apiSource = readFileSync(resolve(root, 'apps/api/src/app.ts'), 'utf8');
 const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/quality.yml'), 'utf8');
@@ -35,8 +39,8 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  '4966c316de10e9d7a5ac5e94662e75dbcb241b0103828b91b049b93670e1c188';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-4966c316';
+  '4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-4d3442cf';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
 const reviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
@@ -48,7 +52,15 @@ const retiredDepositReferenceProtection = new RegExp(
   'iu',
 );
 
-for (const artifact of [workflow, botWorkflow, qualityWorkflow, compose, helper, stagingRunbook]) {
+for (const artifact of [
+  workflow,
+  botWorkflow,
+  kemerbetSessionWorkflow,
+  qualityWorkflow,
+  compose,
+  helper,
+  stagingRunbook,
+]) {
   assert.doesNotMatch(
     artifact,
     retiredDepositReferenceProtection,
@@ -56,7 +68,9 @@ for (const artifact of [workflow, botWorkflow, qualityWorkflow, compose, helper,
   );
 }
 
-const ownerCompose = /\n  owner-control:\n([\s\S]*?)\n  customer-web:/u.exec(compose)?.[1];
+const ownerCompose = /\n  owner-control:\n([\s\S]*?)\n  kemerbet-session-provision:/u.exec(
+  compose,
+)?.[1];
 assert.ok(ownerCompose, 'The staging Compose contract must contain Owner control.');
 for (const exactOwnerReceiverSetting of [
   'OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master',
@@ -69,6 +83,36 @@ assert.doesNotMatch(
   ownerCompose,
   /^\s+DEPOSIT_PROOF_REFERENCE_(?:ENCRYPTION|FINGERPRINT|PROFILE)/mu,
   'Owner control must use its receiver-specific contract rather than the provider-proof environment.',
+);
+assert.match(ownerCompose, /source: kemerbet_session_control/);
+assert.match(ownerCompose, /target: \/run\/fetanagent-kemerbet-session-control/);
+
+for (const requiredSessionWorkflowContract of [
+  /workflow_dispatch:/,
+  /group: fetanagent-staging-beta-deploy/,
+  /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/,
+  /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/,
+  /STAGING_DROPLET_ID: '593344964'/,
+  /GITHUB_REF" == 'refs\/heads\/main'/,
+  /CONFIRMED_COMMIT.*GITHUB_SHA/,
+  /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/,
+  /CONFIRMED_PROJECT.*PRODUCTION_PROJECT_REF/,
+  /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/,
+  /private-sign-in-no-transfer/,
+  /environment: staging/,
+  /persist-credentials: false/,
+  /StrictHostKeyChecking=yes/g,
+  /fetanagent-staging-deploy-helper verify/,
+  /fetanagent-staging-deploy-helper start-kemerbet-session-provision/,
+  /fetanagent-staging-deploy-helper kemerbet-session-provision-ready/,
+  /fetanagent-staging-deploy-helper stop-kemerbet-session-provision/,
+  /private_kemerbet_sign_in_no_transfer=pass/,
+]) {
+  assert.match(kemerbetSessionWorkflow, requiredSessionWorkflowContract);
+}
+assert.doesNotMatch(
+  kemerbetSessionWorkflow,
+  /root@|ssh-keyscan|StrictHostKeyChecking=no|sudo -n (?:docker|bash)|docker\.sock|\bpsql\b|\bsupabase\b|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'/,
 );
 
 assert.match(workflow, /workflow_dispatch:/);
@@ -1108,6 +1152,8 @@ assert.match(
   freshBotRuntime,
   /"\$startup_contract_mode" == 'immediate-startup' \|\| "\$startup_contract_mode" == 'steady-state'/,
 );
+assert.match(freshBotRuntime, /published-steady-state/);
+assert.match(freshBotRuntime, /published-with-kemerbet-session/);
 assert.match(freshBotRuntime, /api beta-admission bot customer-web owner-control/);
 assert.match(freshBotRuntime, /NODE_ENV=production/);
 assert.match(freshBotRuntime, /FINANCIAL_ACTIONS_MODE=dry_run/);
@@ -1196,6 +1242,61 @@ assert.match(stopBot, /clear_bot_startup_receipt/);
 assert.match(stopBot, /telegram-disabled-until-separate-smoke/);
 assert.match(stopBot, /require_fresh_bot_disabled_ready "\$commit_sha"/);
 assert.doesNotMatch(stopBot, /stop_project|network rm|owner-control|api|beta-admission/);
+
+const startKemerbetSession = /\n  start-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
+  helper,
+)?.[1];
+assert.ok(startKemerbetSession, 'The helper must define the private no-transfer sign-in start.');
+assert.match(
+  startKemerbetSession,
+  /require_exact_fresh_bot_runtime "\$commit_sha" published-steady-state/,
+);
+assert.match(startKemerbetSession, /fetanagent-deposit-executor:\$image_tag/);
+assert.match(startKemerbetSession, /--profile kemerbet-session-provision/);
+assert.match(
+  startKemerbetSession,
+  /up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision/,
+);
+assert.match(startKemerbetSession, /require_kemerbet_session_provision_runtime "\$commit_sha"/);
+assert.doesNotMatch(startKemerbetSession, /FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
+
+const kemerbetSessionRuntime =
+  /require_kemerbet_session_provision_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(kemerbetSessionRuntime, 'The helper must attest the private KemerBet sign-in runtime.');
+for (const contract of [
+  /kemerbet-session-provision/,
+  /org\.opencontainers\.image\.revision/,
+  /10001:10001/,
+  /ReadonlyRootfs/,
+  /CapDrop/,
+  /SecurityOpt/,
+  /PidsLimit/,
+  /\.HostConfig\.Memory/,
+  /NanoCpus/,
+  /ShmSize/,
+  /PortBindings/,
+  /FINANCIAL_ACTIONS_MODE=dry_run/,
+  /KEMERBET_EXECUTOR_ENABLED=false/,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/,
+  /\/run\/fetanagent-kemerbet-session-control\/session\.sock/,
+]) {
+  assert.match(kemerbetSessionRuntime, contract);
+}
+assert.doesNotMatch(kemerbetSessionRuntime, /container logs|\bcat\b|password=|token=/iu);
+
+const stopKemerbetSession = /\n  stop-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
+  helper,
+)?.[1];
+assert.ok(stopKemerbetSession, 'The helper must define the private KemerBet sign-in stop.');
+assert.match(stopKemerbetSession, /container stop --time 70/);
+assert.match(stopKemerbetSession, /container rm/);
+assert.match(stopKemerbetSession, /published-steady-state/);
+assert.doesNotMatch(
+  stopKemerbetSession,
+  /stop_project|network rm|com\.docker\.compose\.service=(?:gateway|owner-control|bot)|container (?:rm|stop)[^\n]*(?:gateway|owner-control|bot)/,
+);
 
 const botReady = /\n  bot-ready\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(

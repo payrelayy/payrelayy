@@ -136,10 +136,17 @@ No money was moved during inspection.
 
 ### Required engineering work
 
-1. Change the executor's exact deposit route from the Payment Requests page to `/agents`.
-2. Replace the incorrect `Deposit tab -> To Player button` assumption with the real dropdown/menu/tile
-   interaction.
-3. Add a reviewed selector contract for the financial-actions trigger and every structured fact.
+Progress recorded 2026-08-22:
+
+1. **Implemented, awaiting publication:** the executor's exact deposit route is `/agents`; the old
+   Payment Requests route is rejected.
+2. **Implemented, awaiting publication:** the browser boundary now requires the real
+   financial-actions trigger -> `Deposit` menu item -> `To Player` tile sequence. The controls are
+   selected only through the exact reviewed contract; accessible-role or broad-text guesses are not
+   allowed.
+3. **Implemented, awaiting live capture:** the selector contract now covers every navigation,
+   lookup, amount, notes, and final Transfer control. Concrete portal selectors must be captured
+   from the Owner's signed-in session before the fixed host file can be installed.
 4. Prove the resolved account is exactly the requested Player ID. The visible dialog alone is not
    sufficient if it exposes only an email/username; use a stable structured portal fact or fail
    closed.
@@ -152,7 +159,7 @@ No money was moved during inspection.
 
 ### Required provisioning work
 
-1. Use the authenticated Owner dashboard to prepare one private `platform_agent_accounts` revision
+1. **Complete:** use the authenticated Owner dashboard to prepare one private `platform_agent_accounts` revision
    with an opaque credential reference only. This control accepts no KemerBet password, OTP,
    cookie, session export, agent ID, username, or balance. Each adjustment creates a new immutable
    revision and retires the prior revision while all money/provider/pilot switches are disabled.
@@ -184,6 +191,12 @@ It must expose no agent identity, Player ID, cookie, password, or account balanc
 
 The exact real browser profile passes a no-transfer readiness probe on the target host. The
 executor remains unable to lease work and no `Transfer` click has occurred.
+
+The executor code exposes a dedicated no-transfer lookup operation that can return only exact
+Player/ETB match and `transferDisabled=true`; it does not fill Amount or click Transfer. Its focused
+route/workflow/session suite currently passes 83 tests. The exit gate is not yet satisfied because
+the real signed-in selector capture, host browser profile, and five saved-Player lookup run remain
+outstanding.
 
 ## Phase 2 — Provision official TeleBirr receipt authority
 

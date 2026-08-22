@@ -8,8 +8,6 @@ import {
 
 export const KEMERBET_AGENT_ALLOWED_ORIGIN = 'https://agentsystem.admindigi.com' as const;
 
-export type BrowserRole = 'button' | 'link' | 'tab';
-
 export interface KemerBetAgentLookupView {
   readonly playerId: string;
   readonly currencyCode: string;
@@ -46,9 +44,10 @@ export interface KemerBetBrowserPage {
   readonly sessionKey: string;
   goto(url: string): Promise<void>;
   currentUrl(): Promise<string>;
-  clickByRole(role: BrowserRole, name: string): Promise<void>;
-  fillByLabel(label: string, value: string): Promise<void>;
-  selectByLabel(label: string, value: string): Promise<void>;
+  openPlayerDeposit(): Promise<void>;
+  lookupPlayer(playerId: string): Promise<void>;
+  fillDeposit(amount: string, notes: string): Promise<void>;
+  transferOnce(): Promise<void>;
   readAgentLookup(): Promise<KemerBetAgentLookupView>;
   readAgentPreparedDeposit(): Promise<KemerBetAgentPreparedDepositView>;
   readAgentTransferResult(): Promise<KemerBetAgentTransferResultView | null>;
@@ -75,6 +74,11 @@ export interface KemerBetImmediateFinalActionResult {
 
 export interface KemerBetDepositBrowser {
   readonly platformAgentAccountId: string;
+  probePlayerLookup(target: { readonly playerId: string; readonly currencyCode: 'ETB' }): Promise<{
+    readonly exactPlayerMatch: true;
+    readonly exactCurrencyMatch: true;
+    readonly transferDisabled: true;
+  }>;
   prepare(lease: KemerBetDepositExecutionLease): Promise<KemerBetDepositPreparedPage>;
   submitOnceAfterFence(
     lease: KemerBetDepositExecutionLease,
@@ -171,30 +175,46 @@ export function createKemerBetDepositBrowser(
     }
   }
 
+  async function openAndVerifyPlayer(target: {
+    readonly playerId: string;
+    readonly currencyCode: 'ETB';
+  }): Promise<void> {
+    if (
+      target.playerId.length < 1 ||
+      target.playerId.length > 128 ||
+      target.playerId !== target.playerId.trim() ||
+      /\r|\n|\0/u.test(target.playerId) ||
+      target.currencyCode !== 'ETB'
+    ) {
+      throw new KemerBetDepositBrowserUnavailableError();
+    }
+    await navigateAllowed(agentPage, routes.agentDepositUrl);
+    await agentPage.openPlayerDeposit();
+    await agentPage.lookupPlayer(target.playerId);
+    await requirePageStillAllowed(agentPage);
+    const lookup = await agentPage.readAgentLookup();
+    if (lookup.playerId !== target.playerId || lookup.currencyCode !== target.currencyCode) {
+      throw new KemerBetDepositBrowserUnavailableError();
+    }
+  }
+
   return {
     platformAgentAccountId,
+    async probePlayerLookup(target) {
+      await openAndVerifyPlayer(target);
+      return {
+        exactPlayerMatch: true,
+        exactCurrencyMatch: true,
+        transferDisabled: true,
+      };
+    },
     async prepare(lease) {
       requireExactAgentBinding(lease);
       if (!isKemerBetDepositAmountMinor(lease.target.amountMinor)) {
         throw new KemerBetDepositBrowserUnavailableError();
       }
-      await navigateAllowed(agentPage, routes.agentDepositUrl);
-      await agentPage.clickByRole('tab', 'Deposit');
-      await agentPage.clickByRole('button', 'To Player');
-      await agentPage.selectByLabel('Find By', 'Player ID');
-      await agentPage.fillByLabel('Player ID', lease.target.playerId);
-      await agentPage.clickByRole('button', 'Find');
-      await requirePageStillAllowed(agentPage);
-      const lookup = await agentPage.readAgentLookup();
-      if (
-        lookup.playerId !== lease.target.playerId ||
-        lookup.currencyCode !== lease.target.currencyCode
-      ) {
-        throw new KemerBetDepositBrowserUnavailableError();
-      }
-
-      await agentPage.fillByLabel('Amount', (lease.target.amountMinor / 100).toFixed(2));
-      await agentPage.fillByLabel('Notes', '');
+      await openAndVerifyPlayer(lease.target);
+      await agentPage.fillDeposit((lease.target.amountMinor / 100).toFixed(2), '');
       await requirePageStillAllowed(agentPage);
       const rendered = await agentPage.readAgentPreparedDeposit();
       if (
@@ -230,7 +250,7 @@ export function createKemerBetDepositBrowser(
         return { response: 'response_uncertain', exactPlayerCreditMatch: false };
       }
       // This is the only browser call in the adapter that can move money.
-      await agentPage.clickByRole('button', 'Transfer');
+      await agentPage.transferOnce();
       await requirePageStillAllowed(agentPage);
       try {
         const result = await agentPage.readAgentTransferResult();

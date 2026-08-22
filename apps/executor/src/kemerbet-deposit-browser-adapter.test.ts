@@ -94,15 +94,17 @@ class FakeAgentPage implements KemerBetBrowserPage {
     return this.url;
   }
 
-  async clickByRole(_role: 'button' | 'link' | 'tab', name: string) {
-    if (name === 'Transfer') this.transfers += 1;
+  async openPlayerDeposit() {}
+
+  async lookupPlayer() {}
+
+  async fillDeposit(amount: string) {
+    this.amount = amount;
   }
 
-  async fillByLabel(label: string, value: string) {
-    if (label === 'Amount') this.amount = value;
+  async transferOnce() {
+    this.transfers += 1;
   }
-
-  async selectByLabel() {}
 
   async readAgentLookup() {
     return { playerId: lease.target.playerId, currencyCode: 'ETB' };
@@ -136,7 +138,7 @@ function dependencies(page = new FakeAgentPage()) {
       platformAgentAccountId: AGENT_ACCOUNT_ID,
       agentPage: page,
       routes: {
-        agentDepositUrl: 'https://agentsystem.admindigi.com/payments/requests',
+        agentDepositUrl: 'https://agentsystem.admindigi.com/agents',
         agentHistoryUrl: 'https://agentsystem.admindigi.com/payments/history',
       },
       now: () => new Date(NOW),
@@ -147,9 +149,9 @@ function dependencies(page = new FakeAgentPage()) {
 
 describe('KemerBet deposit browser boundary', () => {
   it.each([
-    'http://agentsystem.admindigi.com/payments/requests',
-    'https://agentsystem.admindigi.com.evil.example/payments/requests',
-    'https://user:pass@agentsystem.admindigi.com/payments/requests',
+    'http://agentsystem.admindigi.com/agents',
+    'https://agentsystem.admindigi.com.evil.example/agents',
+    'https://user:pass@agentsystem.admindigi.com/agents',
   ])('rejects a non-allowlisted agent route: %s', (agentDepositUrl) => {
     const fixture = dependencies();
     expect(() =>
@@ -170,6 +172,21 @@ describe('KemerBet deposit browser boundary', () => {
         platformAgentAccountId: '33333333-3333-4333-8333-333333333339',
       }),
     ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
+    expect(fixture.page.transfers).toBe(0);
+  });
+
+  it('proves an exact Player/ETB lookup without filling Amount or clicking Transfer', async () => {
+    const fixture = dependencies();
+    const browser = createKemerBetDepositBrowser(fixture.value);
+
+    await expect(
+      browser.probePlayerLookup({ playerId: lease.target.playerId, currencyCode: 'ETB' }),
+    ).resolves.toEqual({
+      exactPlayerMatch: true,
+      exactCurrencyMatch: true,
+      transferDisabled: true,
+    });
+    expect(fixture.page.amount).toBe('');
     expect(fixture.page.transfers).toBe(0);
   });
 

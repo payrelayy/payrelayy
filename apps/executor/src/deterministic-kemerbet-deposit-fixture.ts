@@ -309,7 +309,7 @@ class DeterministicPage implements KemerBetBrowserPage {
   }
 
   async goto(url: string) {
-    if (this.#options.failPreparation && url.includes('/requests')) {
+    if (this.#options.failPreparation && url.endsWith('/agents')) {
       throw new Error('simulated unavailable session');
     }
     this.#url = url;
@@ -319,8 +319,15 @@ class DeterministicPage implements KemerBetBrowserPage {
     return this.#url;
   }
 
-  async clickByRole(_role: 'button' | 'link' | 'tab', name: string) {
-    if (name !== 'Transfer') return;
+  async openPlayerDeposit() {}
+
+  async lookupPlayer() {}
+
+  async fillDeposit(amount: string) {
+    this.#filledAmount = amount;
+  }
+
+  async transferOnce() {
     if (this.#filledAmount !== (this.#amountMinor / 100).toFixed(2)) {
       throw new Error('amount was not filled from the immutable target');
     }
@@ -341,12 +348,6 @@ class DeterministicPage implements KemerBetBrowserPage {
     if (this.#options.duplicateApprovedHistory) this.#world.history.push({ ...row });
     if (this.#options.loseTransferResponse) throw new Error('simulated response loss');
   }
-
-  async fillByLabel(label: string, value: string) {
-    if (label === 'Amount') this.#filledAmount = value;
-  }
-
-  async selectByLabel() {}
 
   async readAgentLookup() {
     return { playerId: PLAYER_ID, currencyCode: 'ETB' };
@@ -410,7 +411,7 @@ export function createDeterministicKemerBetDepositFixture(
       platformAgentAccountId: AGENT_ACCOUNT_ID,
       agentPage: new DeterministicPage(world, options),
       routes: {
-        agentDepositUrl: 'https://agentsystem.admindigi.com/payments/requests',
+        agentDepositUrl: 'https://agentsystem.admindigi.com/agents',
         agentHistoryUrl: 'https://agentsystem.admindigi.com/payments/history',
       },
       now: () => new Date(world.now),

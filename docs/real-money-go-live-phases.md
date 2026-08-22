@@ -132,10 +132,10 @@ The controlled portal inspection established this sequence:
 11. success result;
 12. exact KemerBet history reconciliation.
 
-No Amount or Notes value was entered and `Transfer` was never clicked during inspection. Four of
-the five saved Player IDs advanced to an ETB account card; one stayed on the lookup form. The card
-does not visibly render the submitted external Player ID, so a visible-card-only match is not an
-acceptable authority boundary.
+No Amount or Notes value was entered and `Transfer` was never clicked during inspection. After the
+Owner corrected the fifth saved Player ID, all five advanced to a response-bound ETB account card.
+That was a local signed-in-browser proof only. The card does not visibly render the submitted
+external Player ID, so a visible-card-only match is not an acceptable authority boundary.
 
 The current portal client uses one exact lookup contract:
 
@@ -162,19 +162,23 @@ Progress recorded 2026-08-23:
    selection, Player ID input, `Find`, Amount, Notes, and `Transfer` controls have exact CSS or
    accessible-name contracts. The real Find By control is an Ant Design combobox, not a native
    `<select>`.
-4. **Implemented in the current publication branch:** start the exact lookup response wait before
+4. **Merged to GitHub main:** start the exact lookup response wait before
    clicking `Find`; require the exact API origin, path, GET method, one exact `externalId` query,
    status 200, response external ID, positive internal player ID, ETB, and a response-bound visible
    identity. A hidden or swapped Player ID, identity, response, origin, method, path, or currency
    fails closed.
-5. **Implemented in the current publication branch:** intercept the final deposit POST before it
+5. **Merged to GitHub main:** intercept the final deposit POST before it
    reaches the network and continue it only when its exact three-field body contains the
    response-bound internal player ID, the prepared amount, and empty Notes. Wrong/missing requests
    are aborted. This guard does not enable the executor or create authority to click Transfer.
-6. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
+6. **Current implementation:** add one transient target-host `no-transfer-readiness` command and
+   hardened Compose profile. It accepts exactly one HMAC-bound profile plus exactly five one-use
+   private Player IDs, performs only sequential response-bound ETB lookups, and has no database
+   credential, pilot manifest, history key, amount operation, transfer method, or action loop.
+7. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
    client-side minimum or maximum.
-7. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
-8. Add regression tests for route drift, selector drift, swapped identity, logged-out session,
+8. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
+9. Add regression tests for route drift, selector drift, swapped identity, logged-out session,
    CAPTCHA, wrong Player, wrong currency, wrong amount, missing success, ambiguous history, and
    response loss.
 
@@ -215,11 +219,11 @@ executor remains unable to lease work and no `Transfer` click has occurred.
 
 The executor code exposes a dedicated no-transfer lookup operation that can return only an exact
 response-bound Player/ETB match and `transferDisabled=true`; it does not fill Amount or click
-Transfer. Its focused route/workflow/session/adapter suite currently passes 102 tests. The exit gate
-is not yet satisfied because one of the five saved Player IDs did not resolve, the corrected code is
-not yet published/deployed, and the fixed selector/profile files are not yet installed on the
-executor host. The five-account pilot must not be prepared or activated until all five lookup-only
-checks pass.
+Transfer. The corrected fifth Player now passes the local lookup-only inspection. The exit gate is
+not yet satisfied until the new exact-five readiness command is published and the reviewed image,
+fixed selector, identity binding/key, and manually signed-in persistent profile are installed and
+probed on the executor host. The five-account pilot must not be prepared or activated until that
+target-host proof passes.
 
 ## Phase 2 — Provision official TeleBirr receipt authority
 

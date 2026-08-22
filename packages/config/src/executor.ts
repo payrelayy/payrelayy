@@ -44,6 +44,8 @@ export const KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE =
   '/run/secrets/kemerbet_history_reference_hmac_key' as const;
 export const KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE =
   '/run/secrets/kemerbet_agent_identity_hmac_key' as const;
+export const KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE =
+  '/run/secrets/kemerbet_no_transfer_readiness_player_ids' as const;
 export const KEMERBET_SUPABASE_CA_CERTIFICATE_FILE =
   '/run/configs/supabase_ca_certificate' as const;
 export const KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE =

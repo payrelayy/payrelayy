@@ -102,6 +102,9 @@ function dependencies(
         ? { ready: false, reason: 'profile_missing' }
         : { ready: true, reason: 'ready' };
     },
+    async probePlayerLookup() {
+      return null;
+    },
     async resolveBrowser() {
       browserResolutions += 1;
       return null;

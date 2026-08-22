@@ -562,6 +562,23 @@ describe('KemerBet agent session registry', () => {
     expect(fixture.launcherFixture.launches).toBe(2);
   });
 
+  it('rechecks immutable profile metadata inside the serialized no-transfer lookup lane', async () => {
+    const fileFixture = fakeFileSystem();
+    const fixture = registry(fileFixture);
+    await expect(fixture.registry.probeReadiness(ACCOUNT_ONE)).resolves.toMatchObject({
+      ready: true,
+    });
+
+    fileFixture.setProfileMode(0o750);
+    await expect(
+      fixture.registry.probePlayerLookup(ACCOUNT_ONE, {
+        playerId: 'PLAYER-ONE',
+        currencyCode: 'ETB',
+      }),
+    ).resolves.toBeNull();
+    expect(fixture.launcherFixture.contexts[0]?.closed).toBe(1);
+  });
+
   it('rejects duplicate or wrong-version immutable external identity bindings before filesystem or browser access', () => {
     const fileFixture = fakeFileSystem({ accounts: [ACCOUNT_ONE, ACCOUNT_TWO] });
     const launcherFixture = fakeLauncher();

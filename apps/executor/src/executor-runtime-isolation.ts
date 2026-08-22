@@ -8,6 +8,9 @@ const AGENT_IDENTITY_FINGERPRINT_PATTERN = /^hmac-sha256-agent-identity-v1:[0-9a
 const MAXIMUM_AGENT_ACCOUNTS = 64;
 const MAXIMUM_BINDING_FILE_BYTES = 16_384;
 const MAXIMUM_SELECTOR_FILE_BYTES = 128 * 1_024;
+const EXACT_READINESS_PLAYER_COUNT = 5;
+const MAXIMUM_READINESS_PLAYER_IDS_FILE_BYTES = 1_024;
+const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 interface IsolationFileStat {
   readonly size: number;
@@ -229,6 +232,47 @@ export async function loadKemerBetSelectorContract<T>(options: {
   } catch {
     return unavailable();
   }
+}
+
+export interface KemerBetNoTransferReadinessPlayers {
+  readonly playerIds: readonly string[];
+}
+
+/**
+ * Parse the one-use private readiness cohort. Player IDs are deliberately returned only to the
+ * in-process lookup probe and must never be logged or included in readiness output.
+ */
+export function parseKemerBetNoTransferReadinessPlayerIds(
+  value: string,
+): KemerBetNoTransferReadinessPlayers {
+  if (value.length < 1 || /\r|\0/u.test(value)) return unavailable();
+  const body = value.endsWith('\n') ? value.slice(0, -1) : value;
+  if (body.length < 1 || body.endsWith('\n')) return unavailable();
+  const playerIds = body.split('\n');
+  if (
+    playerIds.length !== EXACT_READINESS_PLAYER_COUNT ||
+    new Set(playerIds).size !== EXACT_READINESS_PLAYER_COUNT ||
+    playerIds.some((playerId) => !PLAYER_ID_PATTERN.test(playerId))
+  ) {
+    return unavailable();
+  }
+  return Object.freeze({ playerIds: Object.freeze([...playerIds]) });
+}
+
+export async function loadKemerBetNoTransferReadinessPlayerIds(options: {
+  readonly filePath: string;
+  readonly fileSystem?: ExecutorIsolationFileSystem;
+  readonly platform?: NodeJS.Platform;
+  readonly effectiveUserId?: number;
+}): Promise<KemerBetNoTransferReadinessPlayers> {
+  const text = await readVerifiedTextFile({
+    path: options.filePath,
+    maximumBytes: MAXIMUM_READINESS_PLAYER_IDS_FILE_BYTES,
+    fileSystem: options.fileSystem ?? nodeFileSystem,
+    platform: options.platform ?? process.platform,
+    ...(options.effectiveUserId === undefined ? {} : { effectiveUserId: options.effectiveUserId }),
+  });
+  return parseKemerBetNoTransferReadinessPlayerIds(text);
 }
 
 export async function assertKemerBetBrowserExecutable(options: {

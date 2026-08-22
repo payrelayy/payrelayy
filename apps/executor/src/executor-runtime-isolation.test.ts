@@ -4,8 +4,10 @@ import {
   assertKemerBetBrowserExecutable,
   KemerBetExecutorIsolationUnavailableError,
   loadKemerBetAgentIdentityBindings,
+  loadKemerBetNoTransferReadinessPlayerIds,
   loadKemerBetSelectorContract,
   parseKemerBetAgentIdentityBindings,
+  parseKemerBetNoTransferReadinessPlayerIds,
   type ExecutorIsolationFileSystem,
 } from './executor-runtime-isolation.js';
 
@@ -77,6 +79,40 @@ function fakeFileSystem(
 }
 
 describe('KemerBet executor runtime isolation', () => {
+  it('accepts only five distinct canonical private readiness Player IDs', async () => {
+    const content = 'PLAYER-1\nPLAYER-2\nPLAYER-3\nPLAYER-4\nPLAYER-5\n';
+    expect(parseKemerBetNoTransferReadinessPlayerIds(content).playerIds).toEqual([
+      'PLAYER-1',
+      'PLAYER-2',
+      'PLAYER-3',
+      'PLAYER-4',
+      'PLAYER-5',
+    ]);
+    for (const invalid of [
+      '',
+      'PLAYER-1\nPLAYER-2\nPLAYER-3\nPLAYER-4',
+      'PLAYER-1\nPLAYER-2\nPLAYER-3\nPLAYER-4\nPLAYER-5\nPLAYER-6',
+      'PLAYER-1\nPLAYER-2\nPLAYER-3\nPLAYER-4\nPLAYER-4',
+      'PLAYER-1\nPLAYER-2\nPLAYER 3\nPLAYER-4\nPLAYER-5',
+      'PLAYER-1\r\nPLAYER-2\nPLAYER-3\nPLAYER-4\nPLAYER-5',
+      'PLAYER-1\nPLAYER-2\nPLAYER-3\nPLAYER-4\nPLAYER-5\n\n',
+    ]) {
+      expect(() => parseKemerBetNoTransferReadinessPlayerIds(invalid)).toThrow(
+        KemerBetExecutorIsolationUnavailableError,
+      );
+    }
+
+    const path = '/run/secrets/kemerbet_no_transfer_readiness_player_ids';
+    await expect(
+      loadKemerBetNoTransferReadinessPlayerIds({
+        filePath: path,
+        fileSystem: fakeFileSystem(path, content, { mode: 0o400, uid: 1000 }),
+        platform: 'linux',
+        effectiveUserId: 1000,
+      }),
+    ).resolves.toEqual({ playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'] });
+  });
+
   it('parses exact unique UUID-to-agent-identity bindings and derives the account list', () => {
     const parsed = parseKemerBetAgentIdentityBindings(
       `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n${SECOND_ACCOUNT} ${SECOND_FINGERPRINT}\n`,

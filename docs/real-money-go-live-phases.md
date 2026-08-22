@@ -108,7 +108,7 @@ can be created by an ordinary user.
 
 ## Phase 1 — Correct and connect the KemerBet agent workflow
 
-**Status: NEXT**
+**Status: IN PROGRESS**
 
 ### Purpose
 
@@ -152,7 +152,10 @@ No money was moved during inspection.
 
 ### Required provisioning work
 
-1. Create one private `platform_agent_accounts` record with an opaque credential reference only.
+1. Use the authenticated Owner dashboard to prepare one private `platform_agent_accounts` revision
+   with an opaque credential reference only. This control accepts no KemerBet password, OTP,
+   cookie, session export, agent ID, username, or balance. Each adjustment creates a new immutable
+   revision and retires the prior revision while all money/provider/pilot switches are disabled.
 2. Build and pin one reviewed executor image digest.
 3. Create one service-owned `0700` persistent browser-profile directory for the exact account UUID.
 4. Run the transient headed session provisioner while the long-lived executor is stopped.

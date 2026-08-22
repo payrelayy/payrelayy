@@ -71,6 +71,16 @@ function receiverMutationHeaders(requestId = pilotRequestId) {
   };
 }
 
+function kemerbetAgentProfileMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
 function config() {
   return loadOwnerControlConfig({
     NODE_ENV: 'test',
@@ -132,6 +142,19 @@ function runtime(
         inviteUrl: 'https://t.me/fetanagentbot?start=raw-token-returned-once',
       }),
       revoke: async () => undefined,
+    },
+    kemerbetAgentProfiles: {
+      list: async () => [],
+      prepare: async (_actor, request) => ({
+        configuredAt: '2026-08-22T19:30:00.000Z',
+        configurationReason: request.configurationReason,
+        platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+        platformCode: 'kemerbet',
+        profileContractVersion: 1,
+        profileLabel: 'Primary KemerBet agent revision 1',
+        profileRevision: 1,
+        profileStatus: 'active',
+      }),
     },
     playerRegistrations: {
       associate: async (_actor, requestId) => ({
@@ -253,8 +276,11 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('/v1/owner/player-deposit-eligibility?limit=50');
     expect(response.body).toContain('/v1/owner/private-live-deposit-pilots/current');
     expect(response.body).toContain('/v1/owner/receiver-accounts');
+    expect(response.body).toContain('/v1/owner/kemerbet-agent-profiles');
     expect(response.body).toContain('owner_confirmed_receiver_rotation');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1'");
+    expect(response.body).toContain('owner_confirmed_kemerbet_agent_profile');
+    expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1'");
     expect(response.body).toContain('owner_confirmed_fixed_telebirr_five_player_pilot');
     expect(response.body).toContain('owner_confirmed_emergency_stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'private-live-pilot-v1'");
@@ -789,6 +815,106 @@ describe('Owner-control HTTP boundary', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/v1/owner/receiver-accounts/rotate',
+        headers: candidate.headers,
+        payload: candidate.payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('lists and prepares only a credential-free KemerBet agent profile', async () => {
+    let observed: unknown;
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async (actor) => {
+            expect(actor).toBe(authUserId);
+            return [profile];
+          },
+          prepare: async (actor, request) => {
+            expect(actor).toBe(authUserId);
+            observed = request;
+            return profile;
+          },
+        },
+      }),
+    });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-agent-profiles',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({ profiles: [profile] });
+
+    const prepared = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(),
+      payload: {
+        configurationReason: 'initial_configuration',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+    expect(prepared.json()).toEqual({ profile });
+    expect(observed).toEqual({
+      configurationReason: 'initial_configuration',
+      requestId: pilotRequestId,
+    });
+    expect(prepared.body).not.toMatch(/password|cookie|otp|credential/iu);
+    await app.close();
+  });
+
+  it('rejects credential fields and invalid KemerBet profile mutation headers before authentication', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const base = {
+      configurationReason: 'initial_configuration',
+      confirmation: 'owner_confirmed_kemerbet_agent_profile',
+      requestId: pilotRequestId,
+    };
+    for (const candidate of [
+      {
+        payload: { ...base, password: 'forbidden' },
+        headers: kemerbetAgentProfileMutationHeaders(),
+      },
+      {
+        payload: base,
+        headers: { ...kemerbetAgentProfileMutationHeaders(), origin: 'https://evil.example' },
+      },
+      {
+        payload: base,
+        headers: {
+          ...kemerbetAgentProfileMutationHeaders(),
+          'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+        },
+      },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-agent-profiles/prepare',
         headers: candidate.headers,
         payload: candidate.payload,
       });

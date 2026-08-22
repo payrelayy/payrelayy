@@ -219,7 +219,7 @@ for (const requiredSetting of [
   /KEMERBET_AGENT_IDENTITY_BINDINGS_FILE: \/run\/secrets\/kemerbet_agent_identity_bindings/,
   /KEMERBET_AGENT_PROFILES_ROOT: \/var\/lib\/fetanagent\/kemerbet-sessions/,
   /KEMERBET_BROWSER_EXECUTABLE_PATH: \/usr\/bin\/chromium/,
-  /KEMERBET_SELECTOR_CONTRACT_FILE: \/etc\/fetanagent\/kemerbet-selector-contract\.v1\.json/,
+  /KEMERBET_SELECTOR_CONTRACT_FILE: \/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json/,
   /KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE: \/run\/secrets\/kemerbet_history_reference_hmac_key/,
   /KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE: \/run\/secrets\/kemerbet_agent_identity_hmac_key/,
   /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/,
@@ -258,7 +258,7 @@ assert.match(
 );
 assert.match(
   executorConfigs,
-  /source: kemerbet_selector_contract\s*\r?\n\s+target: \/etc\/fetanagent\/kemerbet-selector-contract\.v1\.json\s*\r?\n\s+uid: '10001'\s*\r?\n\s+gid: '10001'\s*\r?\n\s+mode: 0444/,
+  /source: kemerbet_selector_contract\s*\r?\n\s+target: \/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json\s*\r?\n\s+uid: '10001'\s*\r?\n\s+gid: '10001'\s*\r?\n\s+mode: 0444/,
 );
 assert.match(
   executorConfigs,
@@ -383,7 +383,7 @@ assert.match(
 assert.match(configs, /FETANAGENT_KEMERBET_SELECTOR_CONTRACT_FILE/);
 assert.match(
   configs,
-  /FETANAGENT_KEMERBET_SELECTOR_CONTRACT_FILE:-\/etc\/fetanagent\/executor-config\/kemerbet-selector-contract\.v1\.json/,
+  /FETANAGENT_KEMERBET_SELECTOR_CONTRACT_FILE:-\/etc\/fetanagent\/executor-config\/kemerbet-selector-contract\.v2\.json/,
 );
 assert.match(configs, /FETANAGENT_SUPABASE_CA_CERTIFICATE_FILE/);
 assert.match(

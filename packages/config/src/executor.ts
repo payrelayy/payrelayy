@@ -39,7 +39,7 @@ export const KEMERBET_AGENT_IDENTITY_BINDINGS_FILE =
 export const KEMERBET_AGENT_PROFILES_ROOT = '/var/lib/fetanagent/kemerbet-sessions' as const;
 export const KEMERBET_BROWSER_EXECUTABLE_PATH = '/usr/bin/chromium' as const;
 export const KEMERBET_SELECTOR_CONTRACT_FILE =
-  '/etc/fetanagent/kemerbet-selector-contract.v1.json' as const;
+  '/etc/fetanagent/kemerbet-selector-contract.v2.json' as const;
 export const KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE =
   '/run/secrets/kemerbet_history_reference_hmac_key' as const;
 export const KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE =

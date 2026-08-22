@@ -12,7 +12,7 @@ import {
   createPlaywrightKemerBetAgentPage,
   KEMERBET_AGENT_DEPOSIT_URL,
   KEMERBET_AGENT_HISTORY_URL,
-  type KemerBetAgentPageSelectorContractV1,
+  type KemerBetAgentPageSelectorContractV2,
   type PlaywrightKemerBetAgentPage,
   type PlaywrightPagePort,
 } from './playwright-kemerbet-agent-page.js';
@@ -83,7 +83,7 @@ export interface KemerBetAgentSessionRegistry {
 export interface KemerBetAgentSessionRegistryOptions {
   readonly profilesRoot: string;
   readonly browserExecutablePath: string;
-  readonly selectorContract: KemerBetAgentPageSelectorContractV1;
+  readonly selectorContract: KemerBetAgentPageSelectorContractV2;
   readonly expectedAgentIdentityBindings: ReadonlyMap<string, string>;
   readonly fingerprintExternalReference: KemerBetHistoryReferenceFingerprinter;
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;

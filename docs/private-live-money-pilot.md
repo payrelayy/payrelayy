@@ -1,5 +1,10 @@
 # Private real-money pilot
 
+The canonical Owner-facing progress sequence is
+[`real-money-go-live-phases.md`](real-money-go-live-phases.md). This file remains the detailed pilot
+authority contract; the phase map records what is complete, what comes next, and the visible exit
+gate for each step.
+
 This contract separates **public product reachability** from **real-money authority**.
 
 The FetanAgent web app and Telegram bot may remain reachable from anywhere during the pilot. Public

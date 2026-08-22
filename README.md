@@ -1,5 +1,10 @@
 # FetanAgent
 
+The canonical plain-language path from the current public, financially disabled release through the
+five-account real-money pilot and a later separate public launch is
+[`docs/real-money-go-live-phases.md`](docs/real-money-go-live-phases.md). Use that phase map for
+progress reporting and do not skip its exit gates.
+
 FetanAgent's settled product direction is a standalone, responsive web/PWA-first
 payment-verification and betting-agent service. Customers may create and use FetanAgent accounts
 through the intended self-service email-and-password flow without Telegram, associate multiple

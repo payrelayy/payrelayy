@@ -713,7 +713,7 @@ describe('read-only repository prerequisite regressions', () => {
     expect(protectionSource).not.toMatch(/authoritative|provider_receipt_lookup/iu);
   });
 
-  it('keeps later migrations from silently satisfying receiver or lease blockers', () => {
+  it('permits only the reviewed Owner receiver-protection migration without wiring CBE lookup', () => {
     const migrationModules = import.meta.glob('../../../supabase/migrations/*.sql', {
       eager: true,
       import: 'default',
@@ -729,6 +729,7 @@ describe('read-only repository prerequisite regressions', () => {
 
     const coreMigrationName = '20260807235833_core_identity_and_configuration.sql';
     const foundationMigrationName = '20260814115713_cbe_birr_shadow_verification_foundation.sql';
+    const ownerReceiverMigrationName = '20260822162146_owner_adjustable_receiver_accounts.sql';
     const laterThanCore = migrations.filter(
       ({ path }) => path.split('/').at(-1)! > coreMigrationName,
     );
@@ -736,7 +737,8 @@ describe('read-only repository prerequisite regressions', () => {
       ({ path }) => path.split('/').at(-1)! > foundationMigrationName,
     );
 
-    for (const { source } of laterThanCore) {
+    for (const { path, source } of laterThanCore) {
+      const migrationName = path.split('/').at(-1)!;
       const ddlSource = source.replace(/--[^\r\n]*/gu, '').replace(/\/\*[\s\S]*?\*\//gu, '');
       expect(ddlSource).not.toMatch(
         /\b(?:create|drop)\s+table(?:\s+if\s+(?:not\s+)?exists)?\s+(?:only\s+)?app\.receiver_accounts\b/iu,
@@ -747,6 +749,7 @@ describe('read-only repository prerequisite regressions', () => {
         ),
         (match) => match[0],
       );
+      const changedReceiverColumnNames: string[] = [];
       for (const statement of receiverAlterStatements) {
         expect(statement).not.toMatch(/\bverification_reference_[a-z0-9_]+\b/iu);
         const changedColumnNames = [
@@ -761,8 +764,25 @@ describe('read-only repository prerequisite regressions', () => {
             (match) => [match[1], match[2]],
           ).flat(),
         ].filter((name): name is string => name !== undefined);
+        changedReceiverColumnNames.push(
+          ...changedColumnNames.filter(
+            (name) => !['check', 'constraint', 'foreign', 'primary', 'unique'].includes(name),
+          ),
+        );
+      }
+      const uniqueChangedReceiverColumnNames = [...new Set(changedReceiverColumnNames)].sort();
+      if (migrationName === ownerReceiverMigrationName) {
+        expect(uniqueChangedReceiverColumnNames).toEqual([
+          'account_reference_fingerprint',
+          'encryption_key_version',
+          'fingerprint_key_version',
+          'protection_profile_version',
+          'rotation_reason',
+          'rotation_request_id',
+        ]);
+      } else {
         expect(
-          changedColumnNames.filter((name) =>
+          uniqueChangedReceiverColumnNames.filter((name) =>
             /(?:verification|lookup|cipher|encrypt|decrypt|key|kms|envelope|protection|provenance|purpose|algorithm|lifecycle|rotation|metadata|handle)/iu.test(
               name,
             ),
@@ -772,9 +792,30 @@ describe('read-only repository prerequisite regressions', () => {
       expect(ddlSource).not.toMatch(
         /\b(?:create(?:\s+or\s+replace)?|alter|drop)\s+function\s+app\.enforce_receiver_account_revision_immutable\b/iu,
       );
-      expect(ddlSource).not.toMatch(
-        /\b(?:create|alter|drop)\s+trigger\s+receiver_accounts_immutable_revision\b/iu,
-      );
+      if (migrationName === ownerReceiverMigrationName) {
+        expect(ddlSource).toMatch(
+          /\bdrop\s+trigger\s+receiver_accounts_immutable_revision\s+on\s+app\.receiver_accounts\s*;/iu,
+        );
+        expect(ddlSource).toMatch(
+          /\bcreate\s+trigger\s+receiver_accounts_immutable_revision\s+before\s+update\s+on\s+app\.receiver_accounts[\s\S]*?execute\s+function\s+app\.enforce_receiver_account_revision_immutable_v2\(\)\s*;/iu,
+        );
+      } else {
+        expect(ddlSource).not.toMatch(
+          /\b(?:create|alter|drop)\s+trigger\s+receiver_accounts_immutable_revision\b/iu,
+        );
+      }
+      if (migrationName === ownerReceiverMigrationName) {
+        expect(ddlSource).toContain('create function app.rotate_owner_receiver_account(');
+        expect(ddlSource).toMatch(
+          /\brevoke\s+all\s+on\s+function[\s\S]*?app\.rotate_owner_receiver_account\(/iu,
+        );
+        expect(ddlSource).not.toMatch(
+          /\bgrant\s+execute[\s\S]*?\bto\s+fetanagent_cbe_birr_shadow_worker\b/iu,
+        );
+        expect(ddlSource).not.toMatch(
+          /\bupdate\s+app\.feature_switches\b[\s\S]*?\bmode\s*=\s*'live'/iu,
+        );
+      }
     }
 
     for (const { source } of laterThanFoundation) {

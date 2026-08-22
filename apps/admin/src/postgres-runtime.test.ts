@@ -19,6 +19,15 @@ const config = {
     user: 'fetanagent_owner_control_runtime',
   },
   publishableKey: 'sb_publishable_test_key_for_staging_only',
+  receiverReferenceProtection: {
+    encryptionSecret: 'c'.repeat(64),
+    fingerprintSecret: 'd'.repeat(64),
+    masterProfile: {
+      encryptionMasterFingerprint: `sha256:${'1'.repeat(64)}`,
+      fingerprintMasterFingerprint: `sha256:${'2'.repeat(64)}`,
+      version: 2,
+    },
+  },
   supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',
   tlsMode: 'verify-full',
 } satisfies Extract<OwnerControlRuntimeConfig, { readonly enabled: true }>;
@@ -47,7 +56,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows exactly eighteen reviewed Owner procedures including four dormant pilot controls', () => {
+  it('allows exactly twenty-one reviewed Owner procedures including receiver rotation', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -98,7 +107,11 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.get_private_live_deposit_pilot_status(uuid,uuid)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 19');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.list_owner_receiver_accounts(uuid)');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 21');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');

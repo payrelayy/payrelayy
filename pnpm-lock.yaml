@@ -34,6 +34,9 @@ importers:
       '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../../packages/deposit-reference-protection
       fastify:
         specifier: ^5.0.0
         version: 5.11.2

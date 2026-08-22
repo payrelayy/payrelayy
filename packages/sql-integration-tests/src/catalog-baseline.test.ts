@@ -13,6 +13,7 @@ import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proo
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
+import { registerOwnerReceiverAccountControlSqlTests } from './owner-receiver-account-control.suite.js';
 import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pilot-owner-control.suite.js';
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
@@ -9495,6 +9496,10 @@ registerDepositExecutionCommandSqlTests(() => client);
 registerDryRunDepositProofIntakeSqlTests(() => client);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
+registerOwnerReceiverAccountControlSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
 registerPrivateLiveMoneyPilotSqlTests(
   () => client,
   () => ownerAdminId,

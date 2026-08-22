@@ -176,6 +176,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.list_owner_player_registration_association_candidates(uuid,integer)',
         },
         { signature: 'app.list_owner_player_registration_requests(uuid,integer)' },
+        { signature: 'app.list_owner_receiver_accounts(uuid)' },
         {
           signature:
             'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',
@@ -188,6 +189,10 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.review_owner_player_registration_request(uuid,uuid,text,text)',
         },
         { signature: 'app.revoke_telegram_beta_invite(uuid,uuid,text)' },
+        {
+          signature:
+            'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
+        },
         { signature: 'app.stop_private_live_deposit_pilot(uuid,uuid,text)' },
       ]);
 

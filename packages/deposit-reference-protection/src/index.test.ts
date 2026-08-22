@@ -7,8 +7,11 @@ import {
   DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
   DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
   DepositReferenceProtectionError,
+  RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION,
+  RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION,
   protectCbeBirrDepositReference,
   protectDepositProofReference,
+  protectReceiverAccountReference,
   type DepositProofReferenceProvider,
 } from './index.js';
 
@@ -543,5 +546,79 @@ describe('provider-aware deposit proof-reference protection', () => {
     expect(
       Object.keys(depositReferenceProtection).filter((name) => /decrypt|log/iu.test(name)),
     ).toEqual([]);
+  });
+});
+
+describe('Owner receiver-account reference protection', () => {
+  it('binds the provider and returns only an encrypted envelope, fingerprint, and mask', () => {
+    const cbe = protectReceiverAccountReference(
+      { provider: 'cbe_birr', reference: '0000000006789', secrets },
+      { nonce: () => Buffer.alloc(12, 10) },
+    );
+    const telebirr = protectReceiverAccountReference(
+      { provider: 'telebirr', reference: '0000003456', secrets },
+      { nonce: () => Buffer.alloc(12, 10) },
+    );
+
+    expect(cbe).toEqual({
+      ciphertext: expect.stringMatching(
+        /^receiver-v1\.cbe_birr\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u,
+      ),
+      fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      keyVersion: 1,
+      masked: '***6789',
+      profileVersion: 1,
+      provider: 'cbe_birr',
+    });
+    expect(telebirr.masked).toBe('***3456');
+    expect(telebirr.fingerprint).not.toBe(cbe.fingerprint);
+    const envelopeSegments = telebirr.ciphertext.split('.');
+    expect(envelopeSegments.map((segment) => segment.length)).toEqual([11, 8, 16, 22, 14]);
+    expect(JSON.stringify(cbe)).not.toContain('0000000006789');
+    expect(Object.isFrozen(cbe)).toBe(true);
+
+    const sameDigitsUnderCbe = protectReceiverAccountReference(
+      { provider: 'cbe_birr', reference: '0000003456', secrets },
+      { nonce: () => Buffer.alloc(12, 10) },
+    );
+    expect(sameDigitsUnderCbe.fingerprint).not.toBe(telebirr.fingerprint);
+    expect(sameDigitsUnderCbe.ciphertext).not.toBe(telebirr.ciphertext);
+  });
+
+  it('is stable for one provider across randomized encryption', () => {
+    const first = protectReceiverAccountReference(
+      { provider: 'telebirr', reference: '0000003456', secrets },
+      { nonce: () => Buffer.alloc(12, 11) },
+    );
+    const second = protectReceiverAccountReference(
+      { provider: 'telebirr', reference: '0000003456', secrets },
+      { nonce: () => Buffer.alloc(12, 12) },
+    );
+    expect(second.fingerprint).toBe(first.fingerprint);
+    expect(second.ciphertext).not.toBe(first.ciphertext);
+  });
+
+  it.each([
+    '',
+    '00000034',
+    '1'.repeat(25),
+    '+0000003456',
+    '0000 003 456',
+    '0000-003-456',
+    '0000003456\n',
+  ])('rejects a non-canonical receiver account without echoing it: %j', (reference) => {
+    let thrown: unknown;
+    try {
+      protectReceiverAccountReference({ provider: 'telebirr', reference, secrets });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DepositReferenceProtectionError);
+    if (reference !== '') expect(String(thrown)).not.toContain(reference);
+  });
+
+  it('exports independent receiver profile and key versions', () => {
+    expect(RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION).toBe(1);
+    expect(RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION).toBe(1);
   });
 });

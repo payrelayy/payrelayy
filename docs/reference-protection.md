@@ -2,13 +2,15 @@
 
 ## Current scope
 
-Two reviewed protection contracts coexist and must not be confused:
+Three reviewed protection contracts coexist and must not be confused:
 
 - the legacy CBE Birr v1 boundary protects a reference for an already-opened amount-first deposit
   intent; and
 - the provider-bound v2 proof boundary accepts only an amount-free direct transaction ID for
   `cbe_birr` or `telebirr` and records an untrusted `proof_received` candidate while every financial
-  switch remains disabled.
+  switch remains disabled; and
+- the Owner receiver-account v1 boundary protects a digits-only TeleBirr wallet or CBE Birr account
+  before an immutable receiver revision is written.
 
 The default-off legacy live Telegram and customer-web paths require all three locked live switches
 and atomically create one private authoritative verification job. The v2 proof boundary has no live
@@ -61,6 +63,36 @@ uniqueness index. The leading ciphertext value and stored smallint are selectors
 profile verification supplies the machine-checked key identity, and authoritative worker readiness
 must enforce the same profile before the source switch may become live.
 
+### Owner receiver-account v1 contract
+
+The authenticated Owner dashboard accepts exactly one provider (`telebirr` or `cbe_birr`), the
+official receiver name, and 9–24 ASCII digits. It does not trim, guess, reformat, add a country
+prefix, or accept punctuation. The Owner server derives separate encryption and fingerprint keys
+from the approved provider-neutral master pair using receiver-account-specific v1 domains plus the
+exact provider. AES-256-GCM binds the same provider/domain as additional authenticated data. The
+stored envelope is
+`receiver-v1.<provider>.<16-char nonce>.<22-char tag>.<12-to-32-char ciphertext>`, the blind index is
+64 lowercase hex characters, and the only display value is `***` plus the last four digits.
+
+Owner startup verifies the shared master pair against the immutable v2 master-key profile before
+receiver operations become ready. Sharing the approved roots does not share derived keys or blind
+indexes: proof v2 and receiver v1 have different derivation/input/AAD domains, and receiver keys are
+additionally provider-separated. The browser, API response, audit event, PostgreSQL function
+result, and logs receive no complete receiver number after the request crosses the in-process
+protector.
+
+Rotation is append-only. PostgreSQL locks and requires the exact provider/payment/pilot/execution
+switch set to remain disabled, rejects a draft or armed pilot for that provider, retires the current
+revision once, and inserts the new revision at the same timestamp. A UUID-v4 request key replays
+only the same provider/name/fingerprint/mask/reason semantics. Historical legacy revisions remain
+visible only as masked `legacy protection`; they are never relabelled as protected.
+
+This boundary makes receiver entry and rotation safe; it does not supply authoritative provider
+transport or decryption authority. TeleBirr still needs its reviewed receiver-name profile,
+signer/device enrollment, and live official-observation runtime. CBE Birr still needs a separately
+reviewed receiver decrypt/lookup lifecycle and authoritative source that independently exposes the
+required receiver fact.
+
 ### Provider-bound proof v2 contract
 
 The amount-free dry-run proof boundary is a separate versioned contract:
@@ -110,12 +142,12 @@ protection profile and does not bless the current `v1` value. The package accept
 ciphertext, key, protected-material version, algorithm or KMS choice, URL, credential, lease value,
 runtime or schema wiring, financial claim, or KemerBet operation; every capability is false.
 
-Two protection lifecycles remain unresolved. First, the receiver verification ciphertext lacks
-protection metadata and key provenance. Those facts must not be inferred or backfilled onto the
-existing immutable receiver-account revision. A future lookup requires a fresh new immutable
-revision with fresh, explicit protection provenance. Second, the submitted-reference encryption and
-fingerprint keys now have distinct roots and one machine-checked cross-process profile, but no
-authoritative worker credential or live CBE transport has been provisioned yet.
+Two protection lifecycles remain unresolved. First, legacy receiver revisions still lack protection
+metadata and key provenance and must never be inferred or backfilled; only a fresh Owner-created
+revision has the new explicit receiver protection provenance. The new envelope has no granted CBE
+worker decrypt/lookup lifecycle yet. Second, submitted-reference encryption and fingerprint keys
+have distinct roots and one machine-checked cross-process profile, but no authoritative CBE worker
+credential or live CBE transport has been provisioned yet.
 
 Normalization is also unresolved across three separate profiles: lookup-reference,
 receiver-lookup, and canonical-reference normalization. The current capture normalization is not

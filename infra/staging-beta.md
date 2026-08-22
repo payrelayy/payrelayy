@@ -51,28 +51,28 @@ or a command line. The operator must provide twenty service-separated secret fil
 independently approved immutable nonsecret profile files, and one verified public CA file outside
 the checkout:
 
-| Host-path selector                                                   | Mounted only into | Container path                                              |
-| -------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------- |
-| `FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE`                 | owner-control     | `/run/secrets/owner_control_database_url`                   |
-| `FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`     | owner-control     | `/run/secrets/owner_control_supabase_publishable_key`       |
-| `FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE`                | beta-admission    | `/run/secrets/beta_admission_database_url`                  |
-| `FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE`              | beta-admission    | `/run/secrets/beta_admission_bot_transport_hmac`            |
-| `FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE`                | beta-admission    | `/run/secrets/beta_admission_payload_hmac`                  |
-| `FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE`                 | api               | `/run/secrets/player_action_database_url`                   |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE`           | api               | `/run/secrets/api_player_action_transport_hmac`             |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`             | api               | `/run/secrets/api_player_action_payload_hmac`               |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`          | api               | `/run/secrets/api_player_action_capability_hmac`            |
-| `FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`            | api               | `/run/secrets/api_player_action_semantic_hmac`              |
-| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE`       | api               | `/run/secrets/cbe_deposit_reference_encryption_key`         |
-| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE`      | api               | `/run/secrets/cbe_deposit_reference_fingerprint_key`        |
-| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE`          | api               | `/etc/fetanagent/cbe-deposit-reference-key-profile.v1.json` |
-| `FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE`  | api, customer-web | `/run/secrets/deposit_proof_reference_encryption_master`    |
-| `FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE` | api, customer-web | `/run/secrets/deposit_proof_reference_fingerprint_master`   |
-| `FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE`            | api, customer-web | `/etc/fetanagent/deposit-proof-reference-profile.v2.json`   |
-| `FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                    | all DB clients    | `/run/configs/supabase_ca_certificate`                      |
-| `FETANAGENT_STAGING_BOT_TOKEN_FILE`                                  | bot               | `/run/secrets/telegram_bot_token`                           |
-| `FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE`                         | bot               | `/run/secrets/bot_beta_admission_transport_hmac`            |
-| `FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`           | bot               | `/run/secrets/bot_player_action_transport_hmac`             |
+| Host-path selector                                                   | Mounted only into                | Container path                                                                            |
+| -------------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE`                 | owner-control                    | `/run/secrets/owner_control_database_url`                                                 |
+| `FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE`     | owner-control                    | `/run/secrets/owner_control_supabase_publishable_key`                                     |
+| `FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE`                | beta-admission                   | `/run/secrets/beta_admission_database_url`                                                |
+| `FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE`              | beta-admission                   | `/run/secrets/beta_admission_bot_transport_hmac`                                          |
+| `FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE`                | beta-admission                   | `/run/secrets/beta_admission_payload_hmac`                                                |
+| `FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE`                 | api                              | `/run/secrets/player_action_database_url`                                                 |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE`           | api                              | `/run/secrets/api_player_action_transport_hmac`                                           |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE`             | api                              | `/run/secrets/api_player_action_payload_hmac`                                             |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE`          | api                              | `/run/secrets/api_player_action_capability_hmac`                                          |
+| `FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE`            | api                              | `/run/secrets/api_player_action_semantic_hmac`                                            |
+| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE`       | api                              | `/run/secrets/cbe_deposit_reference_encryption_key`                                       |
+| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE`      | api                              | `/run/secrets/cbe_deposit_reference_fingerprint_key`                                      |
+| `FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE`          | api                              | `/etc/fetanagent/cbe-deposit-reference-key-profile.v1.json`                               |
+| `FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE`  | api, customer-web, owner-control | proof-v2 path; Owner target is `/run/secrets/owner_receiver_reference_encryption_master`  |
+| `FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE` | api, customer-web, owner-control | proof-v2 path; Owner target is `/run/secrets/owner_receiver_reference_fingerprint_master` |
+| `FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE`            | api, customer-web, owner-control | `/etc/fetanagent/deposit-proof-reference-profile.v2.json`                                 |
+| `FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE`                    | all DB clients                   | `/run/configs/supabase_ca_certificate`                                                    |
+| `FETANAGENT_STAGING_BOT_TOKEN_FILE`                                  | bot                              | `/run/secrets/telegram_bot_token`                                                         |
+| `FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE`                         | bot                              | `/run/secrets/bot_beta_admission_transport_hmac`                                          |
+| `FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`           | bot                              | `/run/secrets/bot_player_action_transport_hmac`                                           |
 
 The two transport-HMAC files must contain the same independently generated 32-byte lowercase-hex
 value, but they are intentionally separate host files and separate mounts. The bot cannot read the
@@ -86,7 +86,9 @@ The provider-neutral v2 encryption and fingerprint roots are another two distinc
 provisioned 32-byte lowercase-hex values. They must also differ from every password, HMAC, and v1
 key. Their separately approved profile contains exactly `encryptionMasterFingerprint`,
 `fingerprintMasterFingerprint`, and `version: 2`; ordinary deployment validates but never derives
-or self-approves it. Only API and customer-web receive the two v2 roots and profile.
+or self-approves it. API and customer-web use the roots for proof v2. Owner control verifies the
+same immutable root identities, then derives separate provider-bound receiver-account v1 keys; it
+does not receive or use the proof-v2 protection routine.
 Owner control is placed on a separate egress-capable bridge from the bot and admission service.
 
 All four database URLs must use the staging project's exact IPv6 direct endpoint:
@@ -503,8 +505,8 @@ simulation receiver `FETANAGENT STAGING SIMULATION - DO NOT PAY` with masked val
 the customer message `SIMULATION ONLY — DO NOT SEND MONEY.` Run `inspect` first, then use
 `configure` only from the exact reviewed `main` commit with the staging ref, active Owner Auth UUID,
 and confirmation phrase. The workflow rejects production, refuses to replace an unknown or real
-active receiver, checks that all four financial feature switches remain disabled, calls the
-existing private audited Owner procedure, and verifies the result afterward. It accepts no account
+active receiver, checks that all seven financial/provider/pilot feature switches remain disabled,
+calls the ungranted legacy synthetic-only Owner procedure, and verifies the result afterward. It accepts no account
 number, receiver name, transaction reference, provider credential, or payment secret.
 
 This setup enables only the deposit-intake simulation and protected reference-storage demo. It does

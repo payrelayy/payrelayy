@@ -153,6 +153,18 @@ assert.match(
   ownerService,
   /OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: \/run\/secrets\/owner_control_supabase_publishable_key/,
 );
+assert.match(
+  ownerService,
+  /OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: \/run\/secrets\/owner_receiver_reference_encryption_master/,
+);
+assert.match(
+  ownerService,
+  /OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: \/run\/secrets\/owner_receiver_reference_fingerprint_master/,
+);
+assert.match(
+  ownerService,
+  /DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: \/etc\/fetanagent\/deposit-proof-reference-profile\.v2\.json/,
+);
 assert.match(ownerService, /ports:\s*\r?\n\s+- 127\.0\.0\.1:3002:3002/);
 assert.match(ownerService, /networks:\s*\r?\n\s+- owner_control_service/);
 assert.doesNotMatch(ownerService, /staging_service/);
@@ -266,11 +278,11 @@ for (const service of [ownerService, customerWebService, gatewayService, betaSer
     'CBE deposit-reference key material and its profile must remain API-only',
   );
 }
-for (const service of [ownerService, gatewayService, betaService, botService]) {
+for (const service of [gatewayService, betaService, botService]) {
   assert.doesNotMatch(
     service,
     /DEPOSIT_PROOF_REFERENCE|deposit_proof_reference|deposit-proof-reference/,
-    'provider-proof v2 roots and profile must remain limited to API and customer web',
+    'provider-proof v2 roots and profile must remain limited to API, customer web, and the cryptographically domain-separated Owner receiver protector',
   );
 }
 
@@ -356,13 +368,18 @@ assert.deepEqual(
 );
 assert.deepEqual(
   [...ownerSecrets.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
-  ['owner_control_database_url', 'owner_control_supabase_publishable_key'],
-  'Owner control must receive only its database URL and public Auth client key',
+  [
+    'owner_control_database_url',
+    'owner_control_supabase_publishable_key',
+    'deposit_proof_reference_encryption_master',
+    'deposit_proof_reference_fingerprint_master',
+  ],
+  'Owner control must receive only its database URL, public Auth client key, and receiver-reference protection roots',
 );
 assert.deepEqual(
   [...ownerConfigs.matchAll(/^\s+- source: ([a-z][a-z0-9_]*)\r?$/gm)].map((match) => match[1]),
-  ['supabase_ca_certificate'],
-  'Owner control must receive the verified staging Supabase CA',
+  ['supabase_ca_certificate', 'deposit_proof_reference_profile'],
+  'Owner control must receive the verified staging Supabase CA and immutable master-key profile',
 );
 assert.deepEqual(
   betaSecretSources,
@@ -412,20 +429,20 @@ assert.deepEqual(
 );
 assert.doesNotMatch(botService, /supabase_ca_certificate|NODE_EXTRA_CA_CERTS/);
 
-assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 22, 'every secret mount must be 0400');
+assert.equal(countMatches(compose, /^\s+mode: 0400$/gm), 24, 'every secret mount must be 0400');
 assert.equal(
   countMatches(compose, /^\s+mode: 0444$/gm),
-  7,
+  8,
   'each immutable config mount must be 0444',
 );
 assert.equal(
   countMatches(compose, /^\s+uid: '10001'$/gm),
-  29,
+  32,
   'every mounted input must target UID 10001',
 );
 assert.equal(
   countMatches(compose, /^\s+gid: '10001'$/gm),
-  29,
+  32,
   'every mounted input must target GID 10001',
 );
 

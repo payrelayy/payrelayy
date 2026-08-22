@@ -38,6 +38,12 @@ import {
   type PrepareApprovedPrivateLivePilotRequest,
   type PrivateLivePilotStopReason,
 } from './owner-private-live-pilot.js';
+import {
+  OwnerReceiverAccountRejectedError,
+  OwnerReceiverAccountUnavailableError,
+  type OwnerReceiverProvider,
+  type OwnerReceiverRotationReason,
+} from './owner-receiver-accounts.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 import {
   OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
@@ -93,6 +99,17 @@ const PRIVATE_LIVE_PILOT_STOP_REASONS = new Set<PrivateLivePilotStopReason>([
 ]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
+const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
+const OWNER_RECEIVER_PROVIDERS = new Set<OwnerReceiverProvider>(['cbe_birr', 'telebirr']);
+const OWNER_RECEIVER_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
+  'account_rotation',
+  'initial_configuration',
+  'owner_correction',
+  'provider_incident_recovery',
+]);
+const OWNER_RECEIVER_HOLDER_PATTERN =
+  /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]{0,158}[^\s\u0000-\u001f\u007f])?$/u;
+const OWNER_RECEIVER_REFERENCE_PATTERN = /^[0-9]{9,24}$/u;
 
 function exactRawHeader(rawHeaders: readonly string[], name: string): string | undefined {
   const values: string[] = [];
@@ -202,6 +219,20 @@ export function buildOwnerControlApp(
       exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_PILOT_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validReceiverMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_RECEIVER_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -593,6 +624,81 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/receiver-accounts',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).length !== 0) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receivers = await dependencies.runtime.receivers.list(authUserId);
+        return reply.code(200).send({ receivers });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerReceiverAccountRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (
+          error instanceof OwnerAuthenticationUnavailableError ||
+          error instanceof OwnerReceiverAccountUnavailableError
+        ) {
+          request.log.warn('Owner receiver-account history is unavailable.');
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post('/v1/owner/receiver-accounts/rotate', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, [
+        'accountHolderName',
+        'accountReference',
+        'confirmation',
+        'providerCode',
+        'requestId',
+        'rotationReason',
+      ]);
+      const providerCode = body?.providerCode;
+      const rotationReason = body?.rotationReason;
+      if (
+        body?.confirmation !== 'owner_confirmed_receiver_rotation' ||
+        typeof providerCode !== 'string' ||
+        !OWNER_RECEIVER_PROVIDERS.has(providerCode as OwnerReceiverProvider) ||
+        typeof rotationReason !== 'string' ||
+        !OWNER_RECEIVER_ROTATION_REASONS.has(rotationReason as OwnerReceiverRotationReason) ||
+        typeof body.accountHolderName !== 'string' ||
+        !OWNER_RECEIVER_HOLDER_PATTERN.test(body.accountHolderName) ||
+        typeof body.accountReference !== 'string' ||
+        !OWNER_RECEIVER_REFERENCE_PATTERN.test(body.accountReference) ||
+        !validReceiverMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const receiver = await dependencies.runtime.receivers.rotate(authUserId, {
+        accountHolderName: body.accountHolderName,
+        accountReference: body.accountReference,
+        providerCode: providerCode as OwnerReceiverProvider,
+        requestId: body.requestId as string,
+        rotationReason: rotationReason as OwnerReceiverRotationReason,
+      });
+      return reply.code(201).send({ receiver });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerReceiverAccountRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner receiver-account rotation is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post('/v1/owner/private-live-deposit-pilots/prepare', async (request, reply) => {
     try {

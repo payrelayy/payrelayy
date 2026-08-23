@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,6 +12,15 @@ const LOGIN_PAGE = 'https://agentsystem.admindigi.com/login?et=1';
 const AGENTS_PAGE = 'https://agentsystem.admindigi.com/agents';
 
 describe('private KemerBet session provision server', () => {
+  it('uses the hardened container boundary instead of an incompatible nested Chromium sandbox', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-session-provision-server.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toMatch(/chromiumSandbox: false/u);
+    expect(source).not.toMatch(/chromiumSandbox: true/u);
+  });
+
   it('always blocks the exact deposit endpoint and every post-login mutation', () => {
     expect(
       isAllowedKemerBetSessionRequest({

@@ -29,6 +29,7 @@ import {
   createPlaywrightKemerBetAgentPage,
   KEMERBET_AGENT_DEPOSIT_URL,
   observeKemerBetAgentIdentityFingerprint,
+  type KemerBetAgentIdentityObservationStage,
   type KemerBetAgentPageSelectorContractV2,
 } from './playwright-kemerbet-agent-page.js';
 
@@ -51,6 +52,10 @@ export type KemerBetNoTransferReadinessSealStage =
   | 'signed_in_page'
   | 'route_guard'
   | 'agent_identity'
+  | 'agent_session_guard'
+  | 'agent_identity_marker'
+  | 'agent_identity_value'
+  | 'agent_identity_stability'
   | 'page_adoption'
   | 'lookup_surface'
   | 'lookup_request'
@@ -283,11 +288,24 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
     routeInstalled = true;
     if (options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
     reportStage('agent_identity');
+    const identityStage = (stage: KemerBetAgentIdentityObservationStage): void => {
+      const mapped: Record<
+        KemerBetAgentIdentityObservationStage,
+        KemerBetNoTransferReadinessSealStage
+      > = {
+        session_guard: 'agent_session_guard',
+        identity_marker: 'agent_identity_marker',
+        identity_value: 'agent_identity_value',
+        identity_stability: 'agent_identity_stability',
+      };
+      reportStage(mapped[stage]);
+    };
     const observedAgentIdentityFingerprint = await observeKemerBetAgentIdentityFingerprint({
       page: options.page,
       platformAgentAccountId: options.accountId,
       selectorContract: options.selectorContract,
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
+      reportStage: identityStage,
       timeoutMs: 30_000,
     });
     reportStage('page_adoption');

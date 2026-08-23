@@ -668,6 +668,34 @@ describe('Playwright KemerBet agent page', () => {
     ).resolves.toBe(AGENT_IDENTITY_FINGERPRINT);
   });
 
+  it('reports only fixed identity-observation stages', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    const stages: string[] = [];
+
+    await observeKemerBetAgentIdentityFingerprint({
+      page,
+      platformAgentAccountId: PLATFORM_AGENT_ACCOUNT_ID,
+      selectorContract: contract,
+      fingerprintAgentIdentity,
+      reportStage: (stage) => stages.push(stage),
+      timeoutMs: 100,
+      pollDelay: async () => undefined,
+    });
+
+    expect(stages).toEqual([
+      'session_guard',
+      'identity_marker',
+      'identity_value',
+      'session_guard',
+      'identity_marker',
+      'identity_value',
+      'identity_stability',
+      'session_guard',
+    ]);
+    expect(JSON.stringify(stages)).not.toMatch(/agent-one|hmac-sha256|44444444/iu);
+  });
+
   it('accepts one visible authenticated identity marker beside hidden retained markup', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;

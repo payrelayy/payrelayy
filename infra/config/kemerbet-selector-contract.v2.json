@@ -104,7 +104,7 @@
     }
   },
   "sessionFailure": {
-    "captcha": "iframe[src*=\"recaptcha\"]",
+    "captcha": "iframe[src*=\"recaptcha\"][src*=\"/bframe\"]",
     "signInForm": "form.ant-form:has(input#userName):has(input#password[type=\"password\"])"
   }
 }

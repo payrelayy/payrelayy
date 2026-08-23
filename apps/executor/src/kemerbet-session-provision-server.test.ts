@@ -21,6 +21,20 @@ describe('private KemerBet session provision server', () => {
     expect(source).not.toMatch(/chromiumSandbox: true/u);
   });
 
+  it('replaces the credential-entry deadline with bounded authenticated retention after sign-in', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-session-provision-server.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toMatch(/const LOGIN_LIFETIME_MS = 10 \* 60 \* 1_000/u);
+    expect(source).toMatch(/const AUTHENTICATED_SESSION_LIFETIME_MS = 12 \* 60 \* 60 \* 1_000/u);
+    expect(source).toMatch(/armExpiry\(LOGIN_LIFETIME_MS\)/u);
+    expect(source).toMatch(
+      /if \(signedIn && !signedInLogged\) \{[\s\S]*?armExpiry\(AUTHENTICATED_SESSION_LIFETIME_MS\)/u,
+    );
+    expect(source).not.toMatch(/const SESSION_LIFETIME_MS/u);
+  });
+
   it('always blocks the exact deposit endpoint and every post-login mutation', () => {
     expect(
       isAllowedKemerBetSessionRequest({

@@ -201,11 +201,11 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           <div class="kemerbet-session" aria-labelledby="kemerbet-session-title">
             <h3 id="kemerbet-session-title">Private KemerBet sign-in</h3>
             <p class="receipt-label">
-              Start a ten-minute isolated browser, then click the preview and type directly into
-              KemerBet. Passwords and OTPs are never sent to chat, Git, Supabase, or FetanAgent
-              logs. The private browser profile retains only KemerBet's own signed-in session on
-              the staging host. Transfer is blocked, and all input locks as soon as sign-in is
-              detected.
+              Open a ten-minute isolated sign-in window, then click the preview and type directly
+              into KemerBet. After successful sign-in, the locked authenticated browser is retained
+              for up to twelve hours, including across Owner-page re-authentication. Passwords and
+              OTPs are never sent to chat, Git, Supabase, or FetanAgent logs. Transfer is blocked,
+              and all input locks as soon as sign-in is detected.
             </p>
             <p class="request-meta" id="kemerbet-session-status">
               Load an active KemerBet profile to check sign-in readiness.
@@ -834,6 +834,7 @@ function scheduleKemerbetSessionPoll() {
 }
 
 async function renderKemerbetSession(session) {
+  const wasSignedIn = currentKemerbetSession?.signedIn === true;
   currentKemerbetSession = session;
   kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || session.active ||
     !kemerbetSessionConfirmation.checked;
@@ -846,7 +847,12 @@ async function renderKemerbetSession(session) {
   }
   await drawKemerbetSession(session.imageBase64);
   if (session.signedIn) {
-    kemerbetSessionStatus.textContent = 'KemerBet signed in. Input is locked and Transfer remains disabled.';
+    kemerbetSessionStatus.textContent = 'KemerBet signed in and retained until ' +
+      new Date(session.expiresAt).toLocaleString() +
+      '. Input is locked and Transfer remains disabled.';
+    if (!wasSignedIn) {
+      setNotice('KemerBet sign-in complete. The authenticated session is retained and preview input is locked.');
+    }
   } else {
     kemerbetSessionStatus.textContent = 'Private KemerBet login is open until ' +
       new Date(session.expiresAt).toLocaleTimeString() + '. Click the preview, then type your password or OTP.';

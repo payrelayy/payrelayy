@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -6,12 +7,55 @@ import {
   KemerBetProvisionServerUnavailableError,
   createKemerBetSessionProvisionServer,
   isAllowedKemerBetSessionRequest,
+  removeStaleChromiumSingletonArtifacts,
 } from './kemerbet-session-provision-server.js';
 
 const LOGIN_PAGE = 'https://agentsystem.admindigi.com/login?et=1';
 const AGENTS_PAGE = 'https://agentsystem.admindigi.com/agents';
 
 describe('private KemerBet session provision server', () => {
+  it('removes only the three exact stale Chromium profile-owner symlinks', async () => {
+    const profilePath = resolve('validated-kemerbet-profile');
+    const existing = new Set([
+      resolve(profilePath, 'SingletonCookie'),
+      resolve(profilePath, 'SingletonLock'),
+      resolve(profilePath, 'SingletonSocket'),
+    ]);
+    const removed: string[] = [];
+    const fileSystem = {
+      lstat: async (path: string) => {
+        if (!existing.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return { isSymbolicLink: () => true };
+      },
+      unlink: async (path: string) => {
+        removed.push(path);
+        existing.delete(path);
+      },
+    };
+
+    await removeStaleChromiumSingletonArtifacts(profilePath, fileSystem);
+    await removeStaleChromiumSingletonArtifacts(profilePath, fileSystem);
+
+    expect(removed.map((path) => basename(path))).toEqual([
+      'SingletonCookie',
+      'SingletonLock',
+      'SingletonSocket',
+    ]);
+  });
+
+  it('fails closed instead of deleting a non-symlink singleton entry', async () => {
+    const removed: string[] = [];
+    await expect(
+      removeStaleChromiumSingletonArtifacts(resolve('validated-kemerbet-profile'), {
+        lstat: async () => ({ isSymbolicLink: () => false }),
+        unlink: async (path: string) => {
+          removed.push(path);
+        },
+      }),
+    ).rejects.toBeInstanceOf(KemerBetProvisionServerUnavailableError);
+    expect(removed).toEqual([]);
+  });
+
   it('uses the hardened container boundary instead of an incompatible nested Chromium sandbox', () => {
     const source = readFileSync(
       new URL('./kemerbet-session-provision-server.ts', import.meta.url),

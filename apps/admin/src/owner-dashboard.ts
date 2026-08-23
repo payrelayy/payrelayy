@@ -1065,7 +1065,9 @@ async function startKemerbetSession() {
   if (!activeKemerbetAgentProfileId || !kemerbetSessionConfirmation.checked) return;
   const requestId = crypto.randomUUID();
   kemerbetSessionStartButton.disabled = true;
-  setNotice('Starting the private KemerBet sign-in browser…');
+  const startingMessage = 'Starting the private KemerBet sign-in browser…';
+  kemerbetSessionStatus.textContent = startingMessage;
+  setNotice(startingMessage);
   try {
     const response = await ownerRequest('/v1/owner/kemerbet-session/start', {
       method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
@@ -1080,8 +1082,13 @@ async function startKemerbetSession() {
     kemerbetSessionCanvas.focus();
     setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
   } catch (error) {
-    if (!isSignedOutError(error)) setNotice('Private KemerBet sign-in could not start. No credential was accepted.');
     await loadKemerbetSession();
+    if (!isSignedOutError(error)) {
+      const failureMessage =
+        'Private KemerBet sign-in could not start. No credential was accepted. Please try once more; if it still fails, contact support.';
+      kemerbetSessionStatus.textContent = failureMessage;
+      setNotice(failureMessage);
+    }
   }
 }
 

@@ -354,6 +354,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-session-v1'");
     expect(response.body).toContain('owner_confirmed_private_kemerbet_sign_in');
     expect(response.body).toContain('!kemerbetSessionConfirmation.checked');
+    expect(response.body).toContain('kemerbetSessionStatus.textContent = startingMessage');
+    expect(response.body).toContain('kemerbetSessionStatus.textContent = failureMessage');
+    expect(response.body).toContain('Please try once more; if it still fails, contact support.');
     expect(response.body).not.toContain(
       "window.confirm(\n    'Start a ten-minute private KemerBet sign-in browser?",
     );

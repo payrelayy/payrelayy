@@ -45,6 +45,18 @@ const DISALLOWED_ENVIRONMENT_KEYS = [
   'KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE',
 ] as const;
 
+export type KemerBetNoTransferReadinessSealStage =
+  | 'environment_guard'
+  | 'readiness_inputs'
+  | 'signed_in_page'
+  | 'route_guard'
+  | 'agent_identity'
+  | 'page_adoption'
+  | 'lookup_surface'
+  | 'lookup_request'
+  | 'lookup_result'
+  | 'binding_write';
+
 interface SafeStat {
   readonly mode: number;
   readonly uid: number;
@@ -77,6 +89,7 @@ export interface KemerBetNoTransferReadinessSealDependencies {
     readonly selectorContract: KemerBetAgentPageSelectorContractV2;
     readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
     readonly effectiveUserId: number;
+    readonly reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void;
   }) => Promise<KemerBetNoTransferReadinessSealProbe>;
   readonly writeBinding?: (
     accountId: string,
@@ -93,6 +106,7 @@ export interface KemerBetNoTransferReadinessSealDependencies {
     readonly identifiersRedacted: true;
     readonly moneyMoved: false;
   }) => void;
+  readonly reportStage?: (stage: KemerBetNoTransferReadinessSealStage) => void;
 }
 
 export class KemerBetNoTransferReadinessSealUnavailableError extends Error {
@@ -243,8 +257,10 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
   readonly close: () => Promise<void>;
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
   readonly page: Page;
+  readonly reportStage?: (stage: KemerBetNoTransferReadinessSealStage) => void;
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
 }): Promise<KemerBetNoTransferReadinessSealProbe> {
+  const reportStage = options.reportStage ?? (() => undefined);
   const readinessRoute = (route: Route) => guardedRoute(route, options.page);
   let routeInstalled = false;
   let probeReturned = false;
@@ -261,10 +277,12 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
     // the live document, and a navigation would discard the exact session that
     // the Owner just established. The caller and the checks below both require
     // the page to remain on the canonical Agent dashboard for the whole proof.
+    reportStage('route_guard');
     if (options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
     await options.page.route('**/*', readinessRoute);
     routeInstalled = true;
     if (options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+    reportStage('agent_identity');
     const observedAgentIdentityFingerprint = await observeKemerBetAgentIdentityFingerprint({
       page: options.page,
       platformAgentAccountId: options.accountId,
@@ -272,6 +290,7 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
       timeoutMs: 30_000,
     });
+    reportStage('page_adoption');
     const agentPage = createPlaywrightKemerBetAgentPage({
       page: options.page,
       platformAgentAccountId: options.accountId,
@@ -287,9 +306,12 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
       observedAgentIdentityFingerprint,
       probePlayerLookup: async (target) => {
         if (target.currencyCode !== 'ETB') unavailable();
+        reportStage('lookup_surface');
         await agentPage.openPlayerDeposit();
+        reportStage('lookup_request');
         await agentPage.lookupPlayer(target.playerId);
         if ((await agentPage.currentUrl()) !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+        reportStage('lookup_result');
         const lookup = await agentPage.readAgentLookup();
         if (lookup.playerId !== target.playerId || lookup.currencyCode !== target.currencyCode) {
           unavailable();
@@ -314,6 +336,7 @@ async function productionOpenProbe(options: {
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
   readonly effectiveUserId: number;
+  readonly reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void;
 }): Promise<KemerBetNoTransferReadinessSealProbe> {
   const profile = await resolveSafeProfile(options.accountId, options.effectiveUserId);
   await removeStaleChromiumSingletonArtifacts(profile);
@@ -349,6 +372,7 @@ async function productionOpenProbe(options: {
       accountId: options.accountId,
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
       page,
+      reportStage: options.reportStage,
       selectorContract: options.selectorContract,
       close: async () => {
         await retainedContext.close();
@@ -434,12 +458,15 @@ function defaultSuccessLog(
 export async function runKemerBetNoTransferReadinessSeal(
   dependencies: KemerBetNoTransferReadinessSealDependencies = {},
 ): Promise<void> {
+  const reportStage = dependencies.reportStage ?? (() => undefined);
+  reportStage('environment_guard');
   const environment = dependencies.environment ?? process.env;
   const accountId = assertInertEnvironment(environment);
   const effectiveUserId =
     dependencies.effectiveUserId ??
     (typeof process.geteuid === 'function' ? process.geteuid() : Number.NaN);
   if (effectiveUserId !== 10001) return unavailable();
+  reportStage('readiness_inputs');
   const [players, selectorContract, fingerprintAgentIdentity] = await Promise.all([
     dependencies.loadPlayerIds?.() ??
       loadKemerBetNoTransferReadinessPlayerIds({
@@ -464,11 +491,13 @@ export async function runKemerBetNoTransferReadinessSeal(
   ) {
     return unavailable();
   }
+  reportStage('signed_in_page');
   const probe = await (dependencies.openProbe ?? productionOpenProbe)({
     accountId,
     selectorContract,
     fingerprintAgentIdentity,
     effectiveUserId,
+    reportStage,
   });
   try {
     if (!FINGERPRINT_PATTERN.test(probe.observedAgentIdentityFingerprint)) unavailable();
@@ -482,6 +511,7 @@ export async function runKemerBetNoTransferReadinessSeal(
         unavailable();
       }
     }
+    reportStage('binding_write');
     await (dependencies.writeBinding ?? writeBindingAtomically)(
       accountId,
       probe.observedAgentIdentityFingerprint,

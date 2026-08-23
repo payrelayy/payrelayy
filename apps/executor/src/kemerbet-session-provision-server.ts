@@ -13,6 +13,7 @@ import {
 import {
   createKemerBetNoTransferReadinessSealProbeFromPage,
   runKemerBetNoTransferReadinessSeal,
+  type KemerBetNoTransferReadinessSealStage,
 } from './kemerbet-no-transfer-readiness-seal.js';
 
 const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';
@@ -341,6 +342,7 @@ export function createKemerBetSessionProvisionServer(
   let expiresAt: Date | undefined;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let signedInLogged = false;
+  let readinessStage: KemerBetNoTransferReadinessSealStage | undefined;
   let lane = Promise.resolve();
   const startupProfilesCleaned = new Set<string>();
 
@@ -484,6 +486,7 @@ export function createKemerBetSessionProvisionServer(
     readonly sealed: true;
     readonly transferDisabled: true;
   }> => {
+    readinessStage = 'signed_in_page';
     const currentStatus = await status();
     if (
       !currentStatus.signedIn ||
@@ -513,6 +516,9 @@ export function createKemerBetSessionProvisionServer(
       },
       effectiveUserId,
       assertBrowserExecutable: async () => undefined,
+      reportStage: (stage) => {
+        readinessStage = stage;
+      },
       openProbe: async (options) => {
         if (
           options.accountId !== retainedAccountId ||
@@ -529,6 +535,7 @@ export function createKemerBetSessionProvisionServer(
           close: async () => undefined,
           fingerprintAgentIdentity: options.fingerprintAgentIdentity,
           page: retainedPage,
+          reportStage: options.reportStage,
           selectorContract: options.selectorContract,
         });
       },
@@ -543,6 +550,7 @@ export function createKemerBetSessionProvisionServer(
     ) {
       return unavailable();
     }
+    readinessStage = undefined;
     return {
       sealed: true,
       playersChecked: 5,
@@ -593,8 +601,20 @@ export function createKemerBetSessionProvisionServer(
         }
         sendJson(response, 404, { error: 'not_found' });
       } catch {
-        if (!response.headersSent) sendJson(response, 503, { error: 'session_unavailable' });
-        else response.destroy();
+        const failureStage =
+          request.url === '/v1/readiness/seal' && request.method === 'POST'
+            ? readinessStage
+            : undefined;
+        readinessStage = undefined;
+        if (!response.headersSent) {
+          sendJson(
+            response,
+            503,
+            failureStage === undefined
+              ? { error: 'session_unavailable' }
+              : { error: 'session_unavailable', stage: failureStage },
+          );
+        } else response.destroy();
       }
     });
   });

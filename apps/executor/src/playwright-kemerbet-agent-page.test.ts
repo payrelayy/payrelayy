@@ -303,6 +303,8 @@ class FakePage implements PlaywrightPagePort {
   hideFindBy = false;
   hidePlayerIdInput = false;
   hideFindButton = false;
+  identityControlDuplicates: 'hidden' | 'visible' | null = null;
+  lookupControlDuplicates: 'hidden' | 'visible' | null = null;
   lookupResponseUrl: string | null = null;
   lookupResponseMethod = 'GET';
   lookupResponseStatus = 200;
@@ -335,6 +337,26 @@ class FakePage implements PlaywrightPagePort {
   readonly playerIdInput = new FakeLocator();
   readonly notesInput = new FakeLocator();
 
+  private withControlDuplicates(
+    locator: FakeLocator,
+    duplicates: 'hidden' | 'visible' | null,
+  ): FakeLocator {
+    if (duplicates === null) return locator;
+    return new FakeLocator({
+      items: [
+        new FakeLocator({
+          text: locator.text,
+          visible: duplicates === 'visible',
+        }),
+        locator,
+      ],
+    });
+  }
+
+  private withLookupControlDuplicates(locator: FakeLocator): FakeLocator {
+    return this.withControlDuplicates(locator, this.lookupControlDuplicates);
+  }
+
   async goto(url: string) {
     this.gotoCalls += 1;
     this.urlValue = this.redirectTo ?? url;
@@ -347,7 +369,7 @@ class FakePage implements PlaywrightPagePort {
   getByLabel(label: string) {
     if (label === 'Player ID *') {
       return this.playerDepositOpen && !this.hidePlayerIdInput
-        ? this.playerIdInput
+        ? this.withLookupControlDuplicates(this.playerIdInput)
         : emptyLocator();
     }
     if (label === 'Amount *') return this.preparedAmount;
@@ -365,11 +387,13 @@ class FakePage implements PlaywrightPagePort {
     }
     if (role === 'button' && options.name === 'Find') {
       if (!this.playerDepositOpen || this.hideFindButton) return emptyLocator();
-      return new FakeLocator({
-        onClick: () => {
-          this.workflowClicks.push('button:Find');
-        },
-      });
+      return this.withLookupControlDuplicates(
+        new FakeLocator({
+          onClick: () => {
+            this.workflowClicks.push('button:Find');
+          },
+        }),
+      );
     }
     if (role === 'button' && options.name === 'Transfer') {
       return new FakeLocator({
@@ -449,11 +473,14 @@ class FakePage implements PlaywrightPagePort {
         this.identityDelayPolls -= 1;
         return emptyLocator();
       }
-      return new FakeLocator({
-        children: {
-          '#signed-in-agent-value': new FakeLocator({ text: this.rawAgentIdentity }),
-        },
-      });
+      return this.withControlDuplicates(
+        new FakeLocator({
+          children: {
+            '#signed-in-agent-value': new FakeLocator({ text: this.rawAgentIdentity }),
+          },
+        }),
+        this.identityControlDuplicates,
+      );
     }
     if (selector === '#financial-actions') {
       return new FakeLocator({
@@ -463,7 +490,9 @@ class FakePage implements PlaywrightPagePort {
       });
     }
     if (selector === '#find-by-selected-value') {
-      return this.playerDepositOpen && !this.hideFindBy ? this.findBy : emptyLocator();
+      return this.playerDepositOpen && !this.hideFindBy
+        ? this.withLookupControlDuplicates(this.findBy)
+        : emptyLocator();
     }
     if (selector === '#lookup') {
       if (this.lookupDelayPolls > 0) {
@@ -570,6 +599,42 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
+  it('uses the one visible reviewed lookup control when Ant retains hidden duplicates', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    page.lookupControlDuplicates = 'hidden';
+    const fixture = driver(page);
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await fixture.driver.openPlayerDeposit();
+    await fixture.driver.lookupPlayer('PLAYER-ALPHA');
+    await expect(fixture.driver.readAgentLookup()).resolves.toMatchObject({
+      playerId: 'PLAYER-ALPHA',
+    });
+
+    expect(page.gotoCalls).toBe(0);
+    expect(page.workflowClicks).toEqual(['button:Find']);
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it('fails closed when more than one reviewed lookup control is visible', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    page.lookupControlDuplicates = 'visible';
+    const fixture = driver(page);
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await expect(fixture.driver.openPlayerDeposit()).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+
+    expect(page.gotoCalls).toBe(0);
+    expect(page.workflowClicks).toEqual([]);
+    expect(page.transferClicks).toBe(0);
+  });
+
   it('fails closed on a partial Player-ID lookup surface instead of clicking through it', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
@@ -601,6 +666,40 @@ describe('Playwright KemerBet agent page', () => {
         pollDelay: async () => undefined,
       }),
     ).resolves.toBe(AGENT_IDENTITY_FINGERPRINT);
+  });
+
+  it('accepts one visible authenticated identity marker beside hidden retained markup', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.identityControlDuplicates = 'hidden';
+
+    await expect(
+      observeKemerBetAgentIdentityFingerprint({
+        page,
+        platformAgentAccountId: PLATFORM_AGENT_ACCOUNT_ID,
+        selectorContract: contract,
+        fingerprintAgentIdentity,
+        timeoutMs: 100,
+        pollDelay: async () => undefined,
+      }),
+    ).resolves.toBe(AGENT_IDENTITY_FINGERPRINT);
+  });
+
+  it('rejects more than one visible authenticated identity marker', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.identityControlDuplicates = 'visible';
+
+    await expect(
+      observeKemerBetAgentIdentityFingerprint({
+        page,
+        platformAgentAccountId: PLATFORM_AGENT_ACCOUNT_ID,
+        selectorContract: contract,
+        fingerprintAgentIdentity,
+        timeoutMs: 100,
+        pollDelay: async () => undefined,
+      }),
+    ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
   });
 
   it('rejects a session-failure surface or identity drift while sealing a binding', async () => {

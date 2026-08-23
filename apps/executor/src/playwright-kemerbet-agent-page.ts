@@ -26,6 +26,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_HISTORY_PAGES = 8;
 const DEFAULT_MAX_HISTORY_ROWS = 400;
 const MAX_STRUCTURED_TEXT_LENGTH = 256;
+const MAX_REVIEWED_LOCATOR_CANDIDATES = 20;
 
 type AllowedAgentUrl = typeof KEMERBET_AGENT_DEPOSIT_URL | typeof KEMERBET_AGENT_HISTORY_URL;
 type FieldSource = 'input' | 'text';
@@ -665,16 +666,27 @@ async function defaultPollDelay(milliseconds: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function observeExactlyOneVisibleLocator(
+  locator: PlaywrightLocatorPort,
+): Promise<PlaywrightLocatorPort | null> {
+  const count = await locator.count();
+  if (count === 0) return null;
+  if (count > MAX_REVIEWED_LOCATOR_CANDIDATES) unavailable();
+  let visible: PlaywrightLocatorPort | null = null;
+  for (let index = 0; index < count; index += 1) {
+    const candidate = locator.nth(index);
+    if (!(await candidate.isVisible())) continue;
+    if (visible !== null) unavailable();
+    visible = candidate;
+  }
+  return visible;
+}
+
 async function observeStrictLocator(
   root: Pick<PlaywrightPagePort, 'locator'> | PlaywrightLocatorPort,
   selector: string,
 ): Promise<PlaywrightLocatorPort | null> {
-  const locator = root.locator(selector);
-  const count = await locator.count();
-  if (count === 0) return null;
-  if (count !== 1) unavailable();
-  if (!(await locator.isVisible())) return null;
-  return locator;
+  return observeExactlyOneVisibleLocator(root.locator(selector));
 }
 
 async function observeStructuredField(
@@ -957,11 +969,8 @@ export function createPlaywrightKemerBetAgentPage(
     control: KemerBetAgentWorkflowControl,
     requireEnabled: boolean,
   ): Promise<PlaywrightLocatorPort | null> {
-    const candidate = workflowControlLocator(control);
-    const count = await candidate.count();
-    if (count === 0) return null;
-    if (count !== 1) unavailable();
-    if (!(await candidate.isVisible())) return null;
+    const candidate = await observeExactlyOneVisibleLocator(workflowControlLocator(control));
+    if (candidate === null) return null;
     if (requireEnabled && !(await candidate.isEnabled())) return null;
     return candidate;
   }

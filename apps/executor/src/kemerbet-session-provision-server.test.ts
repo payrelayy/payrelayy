@@ -93,6 +93,8 @@ describe('private KemerBet session provision server', () => {
     expect(source).toMatch(/transferDisabled: true/u);
     expect(source).toMatch(/moneyMoved: false/u);
     expect(source).toMatch(/identifiersRedacted: true/u);
+    expect(source).toMatch(/error: 'session_unavailable', stage: failureStage/u);
+    expect(source).toMatch(/readinessStage = stage/u);
   });
 
   it('always blocks the exact deposit endpoint and every post-login mutation', () => {

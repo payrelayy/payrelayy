@@ -105,6 +105,21 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(JSON.stringify(test.logSuccess.mock.calls)).not.toMatch(/PLAYER-|hmac-sha256/u);
   });
 
+  it('reports only fixed, redacted workflow stages', async () => {
+    const stages: string[] = [];
+    const test = fixture({ reportStage: (stage) => stages.push(stage) });
+
+    await runKemerBetNoTransferReadinessSeal(test.dependencies);
+
+    expect(stages).toEqual([
+      'environment_guard',
+      'readiness_inputs',
+      'signed_in_page',
+      'binding_write',
+    ]);
+    expect(JSON.stringify(stages)).not.toMatch(/PLAYER-|hmac-sha256|11111111/iu);
+  });
+
   it.each([
     ['FINANCIAL_ACTIONS_MODE', 'live'],
     ['KEMERBET_EXECUTOR_ENABLED', 'true'],

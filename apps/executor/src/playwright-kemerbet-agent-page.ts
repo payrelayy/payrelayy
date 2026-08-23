@@ -108,7 +108,7 @@ export interface PlaywrightLocatorPort {
   locator(selector: string): PlaywrightLocatorPort;
   nth(index: number): PlaywrightLocatorPort;
   count(): Promise<number>;
-  click(options?: { readonly timeout?: number }): Promise<unknown>;
+  click(options?: { readonly force?: boolean; readonly timeout?: number }): Promise<unknown>;
   fill(value: string, options?: { readonly timeout?: number }): Promise<unknown>;
   inputValue(options?: { readonly timeout?: number }): Promise<string>;
   innerText(options?: { readonly timeout?: number }): Promise<string>;
@@ -174,7 +174,18 @@ export interface PlaywrightKemerBetAgentPageOptions {
   readonly agentTimeZone?: string;
   readonly pollDelay?: (milliseconds: number) => Promise<void>;
   readonly monotonicNow?: () => number;
+  /**
+   * The no-transfer readiness browser is guarded against every mutating request. Its exact Find
+   * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled,
+   * so that proof may bypass only Playwright's pointer-actionability wait. This flag must never be
+   * used for the final Transfer control.
+   */
+  readonly forceReadOnlyLookupClick?: true;
+  readonly reportLookupStage?: (stage: KemerBetAgentLookupObservationStage) => void;
 }
+
+export type KemerBetAgentLookupObservationStage =
+  'lookup_input' | 'lookup_action' | 'lookup_response' | 'lookup_contract';
 
 export interface PlaywrightKemerBetAgentPage extends KemerBetBrowserPage {
   /** Adopt the already-authenticated Agent deposit page without navigating or reloading it. */
@@ -864,6 +875,7 @@ export function createPlaywrightKemerBetAgentPage(
   }
   const fingerprintAgentIdentity = options.fingerprintAgentIdentity;
   const contract = options.selectorContract;
+  const reportLookupStage = options.reportLookupStage ?? (() => undefined);
 
   let expectedUrl: AllowedAgentUrl | null = null;
   let preparedPlayerId: string | null = null;
@@ -1159,11 +1171,12 @@ export function createPlaywrightKemerBetAgentPage(
       ) {
         unavailable();
       }
-      await (
-        await exactWorkflowControl(contract.depositWorkflow.playerIdInput)
-      ).fill(playerId, {
+      reportLookupStage('lookup_input');
+      const playerIdInput = await exactWorkflowControl(contract.depositWorkflow.playerIdInput);
+      await playerIdInput.fill(playerId, {
         timeout: timeoutMs,
       });
+      if ((await playerIdInput.inputValue({ timeout: timeoutMs })) !== playerId) unavailable();
       authoritativeLookup = null;
       preparedPlayerId = null;
       preparedAmountText = null;
@@ -1171,12 +1184,16 @@ export function createPlaywrightKemerBetAgentPage(
         timeout: timeoutMs,
       });
       try {
+        reportLookupStage('lookup_action');
         await (
           await exactWorkflowControl(contract.depositWorkflow.findButton)
         ).click({
+          ...(options.forceReadOnlyLookupClick === true ? { force: true } : {}),
           timeout: timeoutMs,
         });
+        reportLookupStage('lookup_response');
         const response = await responsePromise;
+        reportLookupStage('lookup_contract');
         let body: unknown;
         try {
           body = await response.json();

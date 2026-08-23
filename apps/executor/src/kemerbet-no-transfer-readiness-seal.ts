@@ -59,6 +59,10 @@ export type KemerBetNoTransferReadinessSealStage =
   | 'page_adoption'
   | 'lookup_surface'
   | 'lookup_request'
+  | 'lookup_input'
+  | 'lookup_action'
+  | 'lookup_response'
+  | 'lookup_contract'
   | 'lookup_result'
   | 'binding_write';
 
@@ -316,7 +320,9 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
       selectorContract: options.selectorContract,
       expectedAgentIdentityFingerprint: observedAgentIdentityFingerprint,
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
+      forceReadOnlyLookupClick: true,
       timeoutMs: 30_000,
+      reportLookupStage: (stage) => options.reportStage?.(stage),
     });
     await agentPage.adoptCurrentDepositPageWithoutNavigation();
     probeReturned = true;

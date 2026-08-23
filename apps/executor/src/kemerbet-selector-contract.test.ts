@@ -15,9 +15,11 @@ describe('reviewed KemerBet selector contract', () => {
     expect(() => assertKemerBetAgentPageSelectorContractV2(contract)).not.toThrow();
     expect(contract).toMatchObject({
       sessionFailure: {
+        captcha: 'iframe[src*="recaptcha"][src*="/bframe"]',
         signInForm: 'form.ant-form:has(input#userName):has(input#password[type="password"])',
       },
     });
+    expect(JSON.stringify(contract)).not.toContain('"captcha":"iframe[src*=\\"recaptcha\\"]"');
     expect(JSON.stringify(contract)).not.toContain('"signInForm":"form.ant-form"');
   });
 });

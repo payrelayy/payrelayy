@@ -943,26 +943,54 @@ export function createPlaywrightKemerBetAgentPage(
     return result;
   }
 
+  function workflowControlLocator(control: KemerBetAgentWorkflowControl): PlaywrightLocatorPort {
+    return control.by === 'css'
+      ? page.locator(control.selector)
+      : control.by === 'label'
+        ? page.getByLabel(control.label, { exact: true })
+        : control.by === 'role'
+          ? page.getByRole(control.role, { name: control.name, exact: true })
+          : page.getByText(control.text, { exact: true });
+  }
+
+  async function observeWorkflowControl(
+    control: KemerBetAgentWorkflowControl,
+    requireEnabled: boolean,
+  ): Promise<PlaywrightLocatorPort | null> {
+    const candidate = workflowControlLocator(control);
+    const count = await candidate.count();
+    if (count === 0) return null;
+    if (count !== 1) unavailable();
+    if (!(await candidate.isVisible())) return null;
+    if (requireEnabled && !(await candidate.isEnabled())) return null;
+    return candidate;
+  }
+
   async function exactWorkflowControl(
     control: KemerBetAgentWorkflowControl,
   ): Promise<PlaywrightLocatorPort> {
-    const locator = await pollAuthenticated(async () => {
-      const candidate =
-        control.by === 'css'
-          ? page.locator(control.selector)
-          : control.by === 'label'
-            ? page.getByLabel(control.label, { exact: true })
-            : control.by === 'role'
-              ? page.getByRole(control.role, { name: control.name, exact: true })
-              : page.getByText(control.text, { exact: true });
-      const count = await candidate.count();
-      if (count === 0) return null;
-      if (count !== 1) unavailable();
-      if (!(await candidate.isVisible()) || !(await candidate.isEnabled())) return null;
-      return candidate;
-    });
+    const locator = await pollAuthenticated(() => observeWorkflowControl(control, true));
     if (locator === null) unavailable();
     return locator;
+  }
+
+  async function observePlayerLookupSurface(): Promise<'absent' | 'ready'> {
+    const [findBy, playerIdInput, findButton] = await Promise.all([
+      observeWorkflowControl(contract.depositWorkflow.findBySelectedValue, false),
+      observeWorkflowControl(contract.depositWorkflow.playerIdInput, false),
+      observeWorkflowControl(contract.depositWorkflow.findButton, false),
+    ]);
+    const visibleControls = [findBy, playerIdInput, findButton].filter(
+      (control) => control !== null,
+    ).length;
+    if (visibleControls === 0) return 'absent';
+    if (findBy === null || playerIdInput === null || findButton === null) unavailable();
+    if (
+      normalizeWhitespace(await findBy.innerText()) !== contract.depositWorkflow.findByPlayerIdLabel
+    ) {
+      unavailable();
+    }
+    return 'ready';
   }
 
   async function readCurrentHistoryPage(): Promise<readonly KemerBetAgentHistoryView[]> {
@@ -1075,6 +1103,11 @@ export function createPlaywrightKemerBetAgentPage(
     async openPlayerDeposit() {
       await requireReadyAgentPage();
       if (expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+      if ((await observePlayerLookupSurface()) === 'ready') {
+        await requireReadyAgentPage();
+        if ((await observePlayerLookupSurface()) !== 'ready') unavailable();
+        return;
+      }
       for (const selector of [
         contract.depositWorkflow.financialActionsTrigger,
         contract.depositWorkflow.depositMenuItem,
@@ -1083,6 +1116,10 @@ export function createPlaywrightKemerBetAgentPage(
         await (await exactWorkflowControl(selector)).click({ timeout: timeoutMs });
         await requireReadyAgentPage();
       }
+      const ready = await pollAuthenticated(async () =>
+        (await observePlayerLookupSurface()) === 'ready' ? true : null,
+      );
+      if (ready !== true) unavailable();
     },
 
     async lookupPlayer(playerId) {

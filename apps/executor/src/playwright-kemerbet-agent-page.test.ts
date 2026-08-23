@@ -299,6 +299,10 @@ class FakePage implements PlaywrightPagePort {
   historyDelayPolls = 0;
   dialogDelayPolls = 0;
   workflowClicks: string[] = [];
+  playerDepositOpen = false;
+  hideFindBy = false;
+  hidePlayerIdInput = false;
+  hideFindButton = false;
   lookupResponseUrl: string | null = null;
   lookupResponseMethod = 'GET';
   lookupResponseStatus = 200;
@@ -341,7 +345,11 @@ class FakePage implements PlaywrightPagePort {
   }
 
   getByLabel(label: string) {
-    if (label === 'Player ID *') return this.playerIdInput;
+    if (label === 'Player ID *') {
+      return this.playerDepositOpen && !this.hidePlayerIdInput
+        ? this.playerIdInput
+        : emptyLocator();
+    }
     if (label === 'Amount *') return this.preparedAmount;
     if (label === 'Notes') return this.notesInput;
     return emptyLocator();
@@ -356,6 +364,7 @@ class FakePage implements PlaywrightPagePort {
       });
     }
     if (role === 'button' && options.name === 'Find') {
+      if (!this.playerDepositOpen || this.hideFindButton) return emptyLocator();
       return new FakeLocator({
         onClick: () => {
           this.workflowClicks.push('button:Find');
@@ -390,6 +399,7 @@ class FakePage implements PlaywrightPagePort {
       ? new FakeLocator({
           onClick: () => {
             this.workflowClicks.push('text:To Player');
+            this.playerDepositOpen = true;
           },
         })
       : emptyLocator();
@@ -452,7 +462,9 @@ class FakePage implements PlaywrightPagePort {
         },
       });
     }
-    if (selector === '#find-by-selected-value') return this.findBy;
+    if (selector === '#find-by-selected-value') {
+      return this.playerDepositOpen && !this.hideFindBy ? this.findBy : emptyLocator();
+    }
     if (selector === '#lookup') {
       if (this.lookupDelayPolls > 0) {
         this.lookupDelayPolls -= 1;
@@ -533,6 +545,46 @@ describe('Playwright KemerBet agent page', () => {
 
     expect(page.gotoCalls).toBe(0);
     await expect(fixture.driver.currentUrl()).resolves.toBe(KEMERBET_AGENT_DEPOSIT_URL);
+  });
+
+  it('reuses an already-open exact Player-ID lookup surface without reopening the workflow', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    const fixture = driver(page);
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await fixture.driver.openPlayerDeposit();
+    await fixture.driver.lookupPlayer('PLAYER-ALPHA');
+    await expect(fixture.driver.readAgentLookup()).resolves.toMatchObject({
+      playerId: 'PLAYER-ALPHA',
+    });
+    await fixture.driver.openPlayerDeposit();
+    await fixture.driver.lookupPlayer('PLAYER-BETA');
+    await expect(fixture.driver.readAgentLookup()).resolves.toMatchObject({
+      playerId: 'PLAYER-BETA',
+    });
+
+    expect(page.gotoCalls).toBe(0);
+    expect(page.workflowClicks).toEqual(['button:Find', 'button:Find']);
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it('fails closed on a partial Player-ID lookup surface instead of clicking through it', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    page.hideFindButton = true;
+    const fixture = driver(page);
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await expect(fixture.driver.openPlayerDeposit()).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+
+    expect(page.gotoCalls).toBe(0);
+    expect(page.workflowClicks).toEqual([]);
+    expect(page.transferClicks).toBe(0);
   });
 
   it('returns only a stable keyed identity fingerprint from the exact authenticated route', async () => {
@@ -736,8 +788,7 @@ describe('Playwright KemerBet agent page', () => {
     const findBy = driver();
     findBy.page.findBy.text = 'Email';
     await findBy.driver.goto(KEMERBET_AGENT_DEPOSIT_URL);
-    await findBy.driver.openPlayerDeposit();
-    await expect(findBy.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
+    await expect(findBy.driver.openPlayerDeposit()).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
   });

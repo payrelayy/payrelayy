@@ -210,6 +210,11 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
             <p class="request-meta" id="kemerbet-session-status">
               Load an active KemerBet profile to check sign-in readiness.
             </p>
+            <label class="confirmation-row" for="kemerbet-session-confirmation">
+              <input id="kemerbet-session-confirmation" type="checkbox" />
+              I approve opening a ten-minute private KemerBet sign-in browser. I will enter
+              credentials only inside the preview. Transfer remains blocked.
+            </label>
             <div class="review-actions">
               <button id="kemerbet-session-start-button" type="button" disabled>
                 Start private sign-in
@@ -377,6 +382,7 @@ const kemerbetAgentProfileForm = document.querySelector('#kemerbet-agent-profile
 const kemerbetAgentProfileConfirmation = document.querySelector('#kemerbet-agent-profile-confirmation');
 const kemerbetAgentRefreshButton = document.querySelector('#kemerbet-agent-refresh-button');
 const kemerbetSessionStatus = document.querySelector('#kemerbet-session-status');
+const kemerbetSessionConfirmation = document.querySelector('#kemerbet-session-confirmation');
 const kemerbetSessionStartButton = document.querySelector('#kemerbet-session-start-button');
 const kemerbetSessionStopButton = document.querySelector('#kemerbet-session-stop-button');
 const kemerbetSessionCanvas = document.querySelector('#kemerbet-session-canvas');
@@ -454,7 +460,8 @@ function clearKemerbetSession() {
   kemerbetSessionCanvas.hidden = true;
   const context = kemerbetSessionCanvas.getContext('2d');
   if (context) context.clearRect(0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
-  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId;
+  kemerbetSessionConfirmation.checked = false;
+  kemerbetSessionStartButton.disabled = true;
   kemerbetSessionStopButton.disabled = true;
   kemerbetSessionStatus.textContent = activeKemerbetAgentProfileId
     ? 'Private sign-in service is stopped.'
@@ -758,7 +765,8 @@ function renderKemerbetAgentProfiles(profiles) {
     card.append(title, facts);
     kemerbetAgentProfileList.append(card);
   }
-  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || Boolean(currentKemerbetSession?.active);
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
+    Boolean(currentKemerbetSession?.active) || !kemerbetSessionConfirmation.checked;
 }
 
 async function loadKemerbetAgentProfiles() {
@@ -827,7 +835,8 @@ function scheduleKemerbetSessionPoll() {
 
 async function renderKemerbetSession(session) {
   currentKemerbetSession = session;
-  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || session.active;
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || session.active ||
+    !kemerbetSessionConfirmation.checked;
   kemerbetSessionStopButton.disabled = !session.active;
   if (!session.active) {
     kemerbetSessionCanvas.hidden = true;
@@ -869,9 +878,7 @@ function kemerbetSessionMutationHeaders(requestId) {
 }
 
 async function startKemerbetSession() {
-  if (!activeKemerbetAgentProfileId || !window.confirm(
-    'Start a ten-minute private KemerBet sign-in browser? Transfer is blocked. Enter credentials only inside the browser preview.',
-  )) return;
+  if (!activeKemerbetAgentProfileId || !kemerbetSessionConfirmation.checked) return;
   const requestId = crypto.randomUUID();
   kemerbetSessionStartButton.disabled = true;
   setNotice('Starting the private KemerBet sign-in browser…');
@@ -884,6 +891,7 @@ async function startKemerbetSession() {
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
     if (!session || !session.active || !session.loginRequired) throw new Error('kemerbet_session');
+    kemerbetSessionConfirmation.checked = false;
     await renderKemerbetSession(session);
     kemerbetSessionCanvas.focus();
     setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
@@ -1722,6 +1730,10 @@ kemerbetAgentRefreshButton.addEventListener('click', loadKemerbetAgentProfiles);
 kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await prepareKemerbetAgentProfile();
+});
+kemerbetSessionConfirmation.addEventListener('change', () => {
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
+    Boolean(currentKemerbetSession?.active) || !kemerbetSessionConfirmation.checked;
 });
 kemerbetSessionStartButton.addEventListener('click', startKemerbetSession);
 kemerbetSessionStopButton.addEventListener('click', () => stopKemerbetSession());

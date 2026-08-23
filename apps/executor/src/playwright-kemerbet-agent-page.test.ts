@@ -283,6 +283,7 @@ function historyTable(
 
 class FakePage implements PlaywrightPagePort {
   urlValue = 'about:blank';
+  gotoCalls = 0;
   redirectTo: string | null = null;
   captcha = false;
   signIn = false;
@@ -331,6 +332,7 @@ class FakePage implements PlaywrightPagePort {
   readonly notesInput = new FakeLocator();
 
   async goto(url: string) {
+    this.gotoCalls += 1;
     this.urlValue = this.redirectTo ?? url;
   }
 
@@ -520,6 +522,19 @@ async function prepareExactPlayer(fixture: ReturnType<typeof driver>) {
 }
 
 describe('Playwright KemerBet agent page', () => {
+  it('adopts the current authenticated deposit page without navigation or reload', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    const fixture = driver(page);
+
+    await expect(
+      fixture.driver.adoptCurrentDepositPageWithoutNavigation(),
+    ).resolves.toBeUndefined();
+
+    expect(page.gotoCalls).toBe(0);
+    await expect(fixture.driver.currentUrl()).resolves.toBe(KEMERBET_AGENT_DEPOSIT_URL);
+  });
+
   it('returns only a stable keyed identity fingerprint from the exact authenticated route', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;

@@ -23,7 +23,6 @@ import {
   createKemerBetAgentIdentityFingerprinter,
   type KemerBetAgentIdentityFingerprinter,
 } from './kemerbet-agent-identity-fingerprint.js';
-import { createKemerBetDepositBrowser } from './kemerbet-deposit-browser-adapter.js';
 import { removeStaleChromiumSingletonArtifacts } from './kemerbet-chromium-profile.js';
 import {
   assertKemerBetAgentPageSelectorContractV2,
@@ -218,16 +217,6 @@ export function isAllowedKemerBetReadinessSealRequest(input: {
   return true;
 }
 
-function disabledHistoryFingerprinter(): ((value: string) => string) & {
-  readonly keyFingerprint: string;
-} {
-  const fingerprinter = () => unavailable();
-  return Object.defineProperty(fingerprinter, 'keyFingerprint', {
-    value: 'disabled-for-no-transfer-readiness-seal',
-    enumerable: false,
-  }) as unknown as ((value: string) => string) & { readonly keyFingerprint: string };
-}
-
 async function guardedRoute(route: Route, page: Page): Promise<void> {
   const request = route.request();
   if (
@@ -292,20 +281,25 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
       timeoutMs: 30_000,
     });
-    const browser = createKemerBetDepositBrowser({
-      platformAgentAccountId: options.accountId,
-      agentPage,
-      routes: {
-        agentDepositUrl: KEMERBET_AGENT_DEPOSIT_URL,
-        agentHistoryUrl: 'https://agentsystem.admindigi.com/payments/history',
-      },
-      now: () => new Date(),
-      fingerprintExternalReference: disabledHistoryFingerprinter(),
-    });
+    await agentPage.adoptCurrentDepositPageWithoutNavigation();
     probeReturned = true;
     return {
       observedAgentIdentityFingerprint,
-      probePlayerLookup: (target) => browser.probePlayerLookup(target),
+      probePlayerLookup: async (target) => {
+        if (target.currencyCode !== 'ETB') unavailable();
+        await agentPage.openPlayerDeposit();
+        await agentPage.lookupPlayer(target.playerId);
+        if ((await agentPage.currentUrl()) !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+        const lookup = await agentPage.readAgentLookup();
+        if (lookup.playerId !== target.playerId || lookup.currencyCode !== target.currencyCode) {
+          unavailable();
+        }
+        return {
+          exactPlayerMatch: true,
+          exactCurrencyMatch: true,
+          transferDisabled: true,
+        };
+      },
       close,
     };
   } catch {

@@ -176,6 +176,8 @@ export interface PlaywrightKemerBetAgentPageOptions {
 }
 
 export interface PlaywrightKemerBetAgentPage extends KemerBetBrowserPage {
+  /** Adopt the already-authenticated Agent deposit page without navigating or reloading it. */
+  adoptCurrentDepositPageWithoutNavigation(): Promise<void>;
   /** Side-effect-free authenticated UI probe; it only navigates to agent history and reads identity. */
   probeAuthenticatedSession(): Promise<void>;
 }
@@ -1044,6 +1046,19 @@ export function createPlaywrightKemerBetAgentPage(
 
   return {
     sessionKey,
+
+    async adoptCurrentDepositPageWithoutNavigation() {
+      if (expectedUrl !== null) unavailable();
+      const current = requireAllowedAgentUrl(page.url());
+      if (current !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+      expectedUrl = current;
+      try {
+        await requireReadyAgentPage();
+      } catch (error) {
+        expectedUrl = null;
+        throw error;
+      }
+    },
 
     async probeAuthenticatedSession() {
       await navigateTo(KEMERBET_AGENT_HISTORY_URL);

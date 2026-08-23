@@ -175,12 +175,16 @@ Progress recorded 2026-08-23:
    Compose profile accept exactly one HMAC-bound profile plus exactly five one-use private Player
    IDs, perform only sequential response-bound ETB lookups, and have no database credential, pilot
    manifest, history key, amount operation, transfer method, or action loop.
-7. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
+7. **Implemented in this release:** one one-time `readiness:seal` command derives only the
+   HMAC identity binding from the manually authenticated profile and writes it atomically only after
+   those same five read-only lookup proofs pass. Its network boundary rejects every non-read request
+   and every main-frame destination except exact `/agents`.
+8. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
    client-side minimum or maximum.
-8. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
-9. Add regression tests for route drift, selector drift, swapped identity, logged-out session,
-   CAPTCHA, wrong Player, wrong currency, wrong amount, missing success, ambiguous history, and
-   response loss.
+9. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
+10. Add regression tests for route drift, selector drift, swapped identity, logged-out session,
+    CAPTCHA, wrong Player, wrong currency, wrong amount, missing success, ambiguous history, and
+    response loss.
 
 ### Required provisioning work
 
@@ -190,18 +194,21 @@ Progress recorded 2026-08-23:
    revision and retires the prior revision while all money/provider/pilot switches are disabled.
 2. **Complete:** build and commit-pin one reviewed executor image in the same sealed staging image
    bundle as the public application without starting the long-lived executor.
-3. **Implementation in review:** deploy a normally absent browser container with a service-owned
+3. **Complete:** deploy a normally absent browser container with a service-owned
    `0700` profile volume and mode-`0600` Unix socket shared only with Owner control. It has no
    database or financial authority and hard-blocks the exact deposit endpoint.
-4. **Next Owner step:** start the private sign-in workflow, open the authenticated Owner dashboard,
-   click **Start private sign-in**, and type the KemerBet password/OTP only inside the screenshot
-   preview. Stop the transient browser immediately after the page reports `KemerBet signed in`.
+4. **Current target-host step:** finish installing the reviewed selector/key/one-use cohort, then
+   start the private sign-in workflow once and type the KemerBet password/OTP only inside the
+   screenshot preview. Stop the transient browser immediately after the page reports
+   `KemerBet signed in`, then run the one-time readiness seal.
 5. No password, OTP, cookie, or session export enters Git, chat, Supabase tables, shared
    configuration, or application logs. The isolated profile volume retains only KemerBet's own
    signed-in browser state for the later readiness command.
-6. Bind the visible signed-in agent identity to the account UUID with an independent HMAC key.
-7. Install the reviewed selector contract, separate history-reference HMAC key, Supabase CA, and
-   identity-binding map as root-managed fixed-path files.
+6. Bind the visible signed-in agent identity to the account UUID with the one-time readiness seal
+   and an independent HMAC key; never print or copy the raw identity.
+7. Install the reviewed selector contract and produced identity-binding map as root-managed
+   fixed-path files. Install the separate history-reference HMAC key and Supabase CA only for the
+   later executor activation boundary.
 8. Provision a short-lived dedicated executor database LOGIN outside Git, but do not start polling.
 
 ### Owner-visible proof
@@ -220,14 +227,15 @@ It must expose no agent identity, Player ID, cookie, password, or account balanc
 
 ### Exit gate
 
-The exact real browser profile passes a no-transfer readiness probe on the target host. The
-executor remains unable to lease work and no `Transfer` click has occurred.
+The exact real browser profile passes the one-time readiness seal and independent no-transfer
+readiness probe on the target host. The executor remains unable to lease work and no `Transfer`
+click has occurred.
 
 The executor code exposes a dedicated no-transfer lookup operation that can return only an exact
 response-bound Player/ETB match and `transferDisabled=true`; it does not fill Amount or click
 Transfer. The corrected fifth Player now passes the local lookup-only inspection. The exit gate is
-not yet satisfied until the new exact-five readiness command is published and the reviewed image,
-fixed selector, identity binding/key, and manually signed-in persistent profile are installed and
+not yet satisfied until the readiness-seal release is merged/deployed and the reviewed selector,
+identity key, manually signed-in persistent profile, and exact-five one-use cohort are installed and
 probed on the executor host. The five-account pilot must not be prepared or activated until that
 target-host proof passes.
 

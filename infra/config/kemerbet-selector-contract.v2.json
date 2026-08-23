@@ -1,0 +1,110 @@
+{
+  "version": 2,
+  "depositWorkflow": {
+    "financialActionsTrigger": {
+      "by": "css",
+      "selector": ".rt--header-right .rt--header-actions-content-icon:has(.icon-transfer)"
+    },
+    "depositMenuItem": {
+      "by": "role",
+      "role": "menuitem",
+      "name": "Deposit"
+    },
+    "toPlayerTile": {
+      "by": "css",
+      "selector": ".rt--transfer-item:has(.icon-player)"
+    },
+    "findBySelectedValue": {
+      "by": "css",
+      "selector": ".ant-modal-content .ant-select-selection-item"
+    },
+    "findByPlayerIdLabel": "Player ID",
+    "playerIdInput": {
+      "by": "css",
+      "selector": ".ant-modal-content [data-placeholder=\"Enter Player ID\"] input"
+    },
+    "findButton": {
+      "by": "role",
+      "role": "button",
+      "name": "Find"
+    },
+    "amountInput": {
+      "by": "css",
+      "selector": ".ant-modal-content [data-placeholder=\"Enter Amount\"] input"
+    },
+    "notesInput": {
+      "by": "css",
+      "selector": ".ant-modal-content [data-placeholder=\"Enter Notes\"] textarea"
+    },
+    "transferButton": {
+      "by": "role",
+      "role": "button",
+      "name": "Transfer"
+    }
+  },
+  "signedInAgentIdentity": {
+    "root": ".rt--header-actions-content:has(.rt--header-actions-name)",
+    "value": {
+      "selector": ".rt--header-actions-name",
+      "source": "text"
+    }
+  },
+  "lookup": {
+    "root": ".ant-modal-content .rt--transfer-player-info",
+    "resolvedIdentity": {
+      "selector": ".rt--transfer-player-info-details > .rt--flex:nth-child(1) > b",
+      "source": "text"
+    },
+    "currencyCode": {
+      "selector": ".rt--transfer-player-info-details > .rt--flex:nth-child(2) > b",
+      "source": "text"
+    }
+  },
+  "preparedDeposit": {
+    "root": ".ant-modal-content:has(.rt--transfer-player-info)",
+    "resolvedIdentity": {
+      "selector": ".rt--transfer-player-info-details > .rt--flex:nth-child(1) > b",
+      "source": "text"
+    },
+    "amount": {
+      "selector": "[data-placeholder=\"Enter Amount\"] input",
+      "source": "input"
+    },
+    "currencyCode": {
+      "selector": ".rt--transfer-player-info-details > .rt--flex:nth-child(2) > b",
+      "source": "text"
+    }
+  },
+  "transferResult": {
+    "dialog": ".ant-modal.rt--modal-success .ant-modal-content, .ant-modal.rt--modal-error .ant-modal-content",
+    "title": {
+      "selector": ".ant-modal-title",
+      "source": "text"
+    },
+    "playerCreditFact": {
+      "selector": ".rt--modal-table tbody tr:first-child",
+      "source": "text"
+    }
+  },
+  "history": {
+    "table": ".ant-table-wrapper",
+    "headerCells": "thead th",
+    "bodyRows": "tbody tr.ant-table-row",
+    "rowCells": "td",
+    "nextButton": ".ant-pagination-next button",
+    "columns": {
+      "stateLabel": "Status",
+      "operationLabel": "Operation",
+      "paymentMethod": "Payment Method",
+      "playerId": "Player ID",
+      "amount": "Amount",
+      "currencyCode": "Currency",
+      "occurredAt": "Date",
+      "externalReference": "Reference"
+    }
+  },
+  "sessionFailure": {
+    "captcha": "iframe[src*=\"recaptcha\"]",
+    "signInForm": "form.ant-form"
+  }
+}

@@ -356,6 +356,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('!kemerbetSessionConfirmation.checked');
     expect(response.body).toContain('kemerbetSessionStatus.textContent = startingMessage');
     expect(response.body).toContain('kemerbetSessionStatus.textContent = failureMessage');
+    expect(response.body).toContain('if (currentKemerbetSession?.active)');
+    expect(response.body).toContain('The private KemerBet sign-in browser is already open.');
+    expect(response.body).toContain('KemerBet is already signed in.');
     expect(response.body).toContain('Please try once more; if it still fails, contact support.');
     expect(response.body).not.toContain(
       "window.confirm(\n    'Start a ten-minute private KemerBet sign-in browser?",

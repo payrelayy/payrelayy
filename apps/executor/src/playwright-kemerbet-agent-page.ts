@@ -693,6 +693,92 @@ async function observeStructuredField(
   return requireNonemptyBounded(value, maximum);
 }
 
+export interface ObserveKemerBetAgentIdentityFingerprintOptions {
+  readonly page: Page | PlaywrightPagePort;
+  readonly platformAgentAccountId: string;
+  readonly selectorContract: KemerBetAgentPageSelectorContractV2;
+  readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
+  readonly timeoutMs?: number;
+  readonly pollDelay?: (milliseconds: number) => Promise<void>;
+  readonly monotonicNow?: () => number;
+}
+
+/**
+ * Observe the exact authenticated Agent header and return only its keyed fingerprint. The raw
+ * KemerBet identity is kept inside this function, is never logged, and is observed twice around a
+ * route/session-failure recheck before a binding can be emitted.
+ */
+export async function observeKemerBetAgentIdentityFingerprint(
+  options: ObserveKemerBetAgentIdentityFingerprintOptions,
+): Promise<string> {
+  assertKemerBetAgentPageSelectorContractV2(options.selectorContract);
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      options.platformAgentAccountId,
+    ) ||
+    options.platformAgentAccountId === '00000000-0000-0000-0000-000000000000'
+  ) {
+    unavailable();
+  }
+  const page = options.page as PlaywrightPagePort;
+  const contract = options.selectorContract;
+  const timeoutMs = requireBoundedInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 100, 120_000);
+  const pollDelay = options.pollDelay ?? defaultPollDelay;
+  const monotonicNow = options.monotonicNow ?? Date.now;
+
+  const assertExactAuthenticatedRoute = async (): Promise<void> => {
+    if (requireAllowedAgentUrl(page.url()) !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+    for (const selector of [contract.sessionFailure.captcha, contract.sessionFailure.signInForm]) {
+      const locator = page.locator(selector);
+      const count = await locator.count();
+      if (count > 20) unavailable();
+      for (let index = 0; index < count; index += 1) {
+        if (await locator.nth(index).isVisible()) unavailable();
+      }
+    }
+  };
+
+  const observeFingerprint = async (): Promise<string | null> => {
+    const root = await observeStrictLocator(page, contract.signedInAgentIdentity.root);
+    if (root === null) return null;
+    const rawIdentity = await observeStructuredField(
+      root,
+      contract.signedInAgentIdentity.value,
+      256,
+      false,
+    );
+    if (rawIdentity === null) return null;
+    let fingerprint: string;
+    try {
+      fingerprint = options.fingerprintAgentIdentity(options.platformAgentAccountId, rawIdentity);
+    } catch {
+      return unavailable();
+    }
+    if (!/^hmac-sha256-agent-identity-v1:[0-9a-f]{64}$/u.test(fingerprint)) unavailable();
+    return fingerprint;
+  };
+
+  const deadline = monotonicNow() + timeoutMs;
+  const maximumPolls = Math.ceil(timeoutMs / 10) + 2;
+  for (let poll = 0; poll < maximumPolls; poll += 1) {
+    await assertExactAuthenticatedRoute();
+    const first = await observeFingerprint();
+    if (first !== null) {
+      await assertExactAuthenticatedRoute();
+      const second = await observeFingerprint();
+      if (second !== null) {
+        if (second !== first) unavailable();
+        await assertExactAuthenticatedRoute();
+        return first;
+      }
+    }
+    const remaining = deadline - monotonicNow();
+    if (remaining <= 0) break;
+    await pollDelay(Math.min(50, Math.max(1, remaining)));
+  }
+  return unavailable();
+}
+
 function requireExactColumnIndexes(
   headers: readonly string[],
   columns: KemerBetAgentPageSelectorContractV2['history']['columns'],

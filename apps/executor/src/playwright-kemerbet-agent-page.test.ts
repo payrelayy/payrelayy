@@ -10,6 +10,7 @@ import {
   KEMERBET_AGENT_PLAYER_DEPOSIT_URL,
   KEMERBET_AGENT_PLAYER_LOOKUP_URL,
   normalizeKemerBetAgentTimestamp,
+  observeKemerBetAgentIdentityFingerprint,
   type KemerBetAgentPageSelectorContractV2,
   type PlaywrightLocatorPort,
   type PlaywrightPagePort,
@@ -519,6 +520,59 @@ async function prepareExactPlayer(fixture: ReturnType<typeof driver>) {
 }
 
 describe('Playwright KemerBet agent page', () => {
+  it('returns only a stable keyed identity fingerprint from the exact authenticated route', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+
+    await expect(
+      observeKemerBetAgentIdentityFingerprint({
+        page,
+        platformAgentAccountId: PLATFORM_AGENT_ACCOUNT_ID,
+        selectorContract: contract,
+        fingerprintAgentIdentity,
+        timeoutMs: 100,
+        pollDelay: async () => undefined,
+      }),
+    ).resolves.toBe(AGENT_IDENTITY_FINGERPRINT);
+  });
+
+  it('rejects a session-failure surface or identity drift while sealing a binding', async () => {
+    const challenged = new FakePage();
+    challenged.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    challenged.signIn = true;
+    await expect(
+      observeKemerBetAgentIdentityFingerprint({
+        page: challenged,
+        platformAgentAccountId: PLATFORM_AGENT_ACCOUNT_ID,
+        selectorContract: contract,
+        fingerprintAgentIdentity,
+        timeoutMs: 100,
+        pollDelay: async () => undefined,
+      }),
+    ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
+
+    const drifting = new FakePage();
+    drifting.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    let observations = 0;
+    const driftingFingerprinter = Object.assign(
+      () => {
+        observations += 1;
+        return observations === 1 ? AGENT_IDENTITY_FINGERPRINT : OTHER_AGENT_IDENTITY_FINGERPRINT;
+      },
+      { keyFingerprint: 'f'.repeat(64) },
+    ) as KemerBetAgentIdentityFingerprinter;
+    await expect(
+      observeKemerBetAgentIdentityFingerprint({
+        page: drifting,
+        platformAgentAccountId: PLATFORM_AGENT_ACCOUNT_ID,
+        selectorContract: contract,
+        fingerprintAgentIdentity: driftingFingerprinter,
+        timeoutMs: 100,
+        pollDelay: async () => undefined,
+      }),
+    ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
+  });
+
   it('validates an untrusted selector contract without opening a browser', () => {
     expect(() => assertKemerBetAgentPageSelectorContractV2(contract)).not.toThrow();
     expect(() =>

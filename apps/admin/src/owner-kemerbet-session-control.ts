@@ -87,6 +87,7 @@ async function callControl(
   method: 'GET' | 'POST',
   path: string,
   body?: Readonly<Record<string, unknown>>,
+  timeoutMs = 5_000,
 ): Promise<OwnerKemerbetSessionStatus> {
   const serialized = body === undefined ? undefined : JSON.stringify(body);
   return new Promise<OwnerKemerbetSessionStatus>((resolvePromise, rejectPromise) => {
@@ -102,7 +103,7 @@ async function callControl(
         method,
         path,
         socketPath: CONTROL_SOCKET,
-        timeout: 5_000,
+        timeout: timeoutMs,
       },
       (response) => {
         const chunks: Buffer[] = [];
@@ -149,7 +150,7 @@ export class UnixOwnerKemerbetSessionControl implements OwnerKemerbetSessionCont
     if (!UUID_PATTERN.test(platformAgentAccountId) || !REQUEST_ID_PATTERN.test(requestId)) {
       throw new OwnerKemerbetSessionRejectedError();
     }
-    return callControl('POST', '/v1/session/start', { platformAgentAccountId, requestId });
+    return callControl('POST', '/v1/session/start', { platformAgentAccountId, requestId }, 35_000);
   }
 
   async input(value: OwnerKemerbetSessionInput): Promise<OwnerKemerbetSessionStatus> {

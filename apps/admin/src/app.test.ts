@@ -313,6 +313,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000');
     expect(response.body).toContain('const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000');
     expect(response.body).toContain('body: JSON.stringify({ refresh_token: refreshToken })');
+    expect(response.body).toContain('value.refresh_token.length < 12');
+    expect(response.body).not.toContain('value.refresh_token.length < 20');
+    expect(response.body).toContain('Supabase accepted sign-in but returned an unusable session.');
     expect(response.body).toContain(
       'ownerSessionExpiresAt = currentTime + OWNER_SESSION_LIFETIME_MS',
     );

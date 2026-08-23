@@ -785,9 +785,13 @@ require_kemerbet_session_provision_runtime() {
     <<<"$environment" || die 'the private KemerBet session environment contains forbidden authority'
 
   mount_contract="$(docker_local container inspect "$container_id" \
-    --format '{{range .Mounts}}{{println .Type "|" .Destination "|" .RW}}{{end}}' | sort)" ||
+    --format '{{range .Mounts}}{{printf "%s|%s|%t\n" .Type .Destination .RW}}{{end}}')" ||
     die 'the private KemerBet session mount contract could not be inspected'
-  [[ "$mount_contract" == $'volume | /run/fetanagent-kemerbet-session-control | true\nvolume | /var/lib/fetanagent/kemerbet-sessions | true' ]] ||
+  [[ "$(grep -c '^' <<<"$mount_contract")" == '2' ]] ||
+    die 'the private KemerBet session mount contract is not exact'
+  grep -Fxq 'volume|/run/fetanagent-kemerbet-session-control|true' <<<"$mount_contract" ||
+    die 'the private KemerBet session mount contract is not exact'
+  grep -Fxq 'volume|/var/lib/fetanagent/kemerbet-sessions|true' <<<"$mount_contract" ||
     die 'the private KemerBet session mount contract is not exact'
 
   owner_container="$(docker_local container ls --all --quiet \

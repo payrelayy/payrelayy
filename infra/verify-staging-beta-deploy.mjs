@@ -39,8 +39,8 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  '4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-4d3442cf';
+  '215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-215c0958';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
 const reviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
@@ -1280,6 +1280,9 @@ for (const contract of [
   /KEMERBET_FINAL_ACTION_ENABLED=false/,
   /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/,
   /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/,
+  /grep -c '\^'/,
+  /volume\|\/run\/fetanagent-kemerbet-session-control\|true/,
+  /volume\|\/var\/lib\/fetanagent\/kemerbet-sessions\|true/,
   /\/run\/fetanagent-kemerbet-session-control\/session\.sock/,
 ]) {
   assert.match(kemerbetSessionRuntime, contract);

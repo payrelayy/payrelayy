@@ -278,6 +278,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).toContain('Private KemerBet sign-in');
     expect(response.body).toContain('Transfer is blocked');
+    expect(response.body).toContain('survives page');
     expect(response.body).toMatch(/retained\s+for up to twelve hours/u);
     expect(response.body).toContain('including across Owner-page re-authentication');
     expect(response.body).toContain('id="kemerbet-session-confirmation"');
@@ -300,7 +301,7 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
-  it('keeps a rotating twelve-hour Owner session in memory without browser credential storage', async () => {
+  it('restores a rotating twelve-hour Owner session after a same-tab reload', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
     const response = await app.inject({ method: 'GET', url: '/owner/app.js' });
     expect(response.statusCode).toBe(200);
@@ -309,7 +310,18 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('/auth/v1/logout?scope=local');
     expect(response.body).toContain("credentials: 'omit'");
     expect(response.body).toContain("authorization: 'Bearer ' + accessToken");
-    expect(response.body).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/u);
+    expect(response.body).not.toMatch(/localStorage|document\.cookie|indexedDB/u);
+    expect(response.body).toContain(
+      "const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1'",
+    );
+    expect(response.body).toContain('window.sessionStorage.setItem(');
+    expect(response.body).toContain('window.sessionStorage.getItem(OWNER_SESSION_STORAGE_KEY)');
+    expect(response.body).toContain('window.sessionStorage.removeItem(OWNER_SESSION_STORAGE_KEY)');
+    expect(response.body).toContain(
+      'JSON.stringify({ expiresAt: ownerSessionExpiresAt, refreshToken })',
+    );
+    expect(response.body).toContain('void restoreOwnerSession()');
+    expect(response.body).toContain('Owner session restored after reload.');
     expect(response.body).toContain('const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000');
     expect(response.body).toContain('const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000');
     expect(response.body).toContain('body: JSON.stringify({ refresh_token: refreshToken })');

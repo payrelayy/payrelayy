@@ -15,6 +15,7 @@ const LOGIN_URL = 'https://agentsystem.admindigi.com/login';
 const WEB_ORIGIN = 'https://agentsystem.admindigi.com';
 const API_ORIGIN = 'https://admin-api.agt-digi.com';
 const DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
+const RECAPTCHA_ORIGINS = new Set(['https://www.google.com', 'https://www.recaptcha.net']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_BODY_BYTES = 1_024;
@@ -161,6 +162,7 @@ function validPageUrl(value: string): 'agents' | 'login' | undefined {
 }
 
 export function isAllowedKemerBetSessionRequest(input: {
+  readonly isMainFrame: boolean;
   readonly isNavigationRequest: boolean;
   readonly method: string;
   readonly pageUrl: string;
@@ -179,8 +181,12 @@ export function isAllowedKemerBetSessionRequest(input: {
     input.method !== 'GET' &&
     input.method !== 'HEAD' &&
     input.method !== 'OPTIONS';
+  const exactRecaptchaFrame =
+    !input.isMainFrame &&
+    RECAPTCHA_ORIGINS.has(url.origin) &&
+    url.pathname.startsWith('/recaptcha/');
   const navigationAllowed =
-    !input.isNavigationRequest || validPageUrl(url.toString()) !== undefined;
+    !input.isNavigationRequest || validPageUrl(url.toString()) !== undefined || exactRecaptchaFrame;
   return !exactDeposit && !mutatingAfterLogin && navigationAllowed;
 }
 
@@ -188,6 +194,7 @@ async function guardedRoute(route: Route, page: Page): Promise<void> {
   const request = route.request();
   if (
     !isAllowedKemerBetSessionRequest({
+      isMainFrame: request.frame() === page.mainFrame(),
       isNavigationRequest: request.isNavigationRequest(),
       method: request.method(),
       pageUrl: page.url(),

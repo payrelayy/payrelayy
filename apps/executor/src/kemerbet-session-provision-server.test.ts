@@ -24,6 +24,7 @@ describe('private KemerBet session provision server', () => {
   it('always blocks the exact deposit endpoint and every post-login mutation', () => {
     expect(
       isAllowedKemerBetSessionRequest({
+        isMainFrame: true,
         isNavigationRequest: false,
         method: 'POST',
         pageUrl: LOGIN_PAGE,
@@ -37,6 +38,7 @@ describe('private KemerBet session provision server', () => {
     ]) {
       expect(
         isAllowedKemerBetSessionRequest({
+          isMainFrame: true,
           isNavigationRequest: false,
           method: 'POST',
           pageUrl: AGENTS_PAGE,
@@ -49,6 +51,7 @@ describe('private KemerBet session provision server', () => {
   it('allows login transport but only exact login or agents top-level navigation', () => {
     expect(
       isAllowedKemerBetSessionRequest({
+        isMainFrame: true,
         isNavigationRequest: false,
         method: 'POST',
         pageUrl: LOGIN_PAGE,
@@ -63,6 +66,7 @@ describe('private KemerBet session provision server', () => {
     ]) {
       expect(
         isAllowedKemerBetSessionRequest({
+          isMainFrame: true,
           isNavigationRequest: true,
           method: 'GET',
           pageUrl: LOGIN_PAGE,
@@ -72,12 +76,45 @@ describe('private KemerBet session provision server', () => {
     }
     expect(
       isAllowedKemerBetSessionRequest({
+        isMainFrame: true,
         isNavigationRequest: true,
         method: 'GET',
         pageUrl: LOGIN_PAGE,
         requestUrl: AGENTS_PAGE,
       }),
     ).toBe(true);
+  });
+
+  it('allows only exact reCAPTCHA subframe navigation while keeping top-level redirects blocked', () => {
+    for (const requestUrl of [
+      'https://www.google.com/recaptcha/api2/anchor?site-key=redacted',
+      'https://www.google.com/recaptcha/api2/bframe?site-key=redacted',
+      'https://www.recaptcha.net/recaptcha/api2/anchor?site-key=redacted',
+    ]) {
+      expect(
+        isAllowedKemerBetSessionRequest({
+          isMainFrame: false,
+          isNavigationRequest: true,
+          method: 'GET',
+          pageUrl: LOGIN_PAGE,
+          requestUrl,
+        }),
+      ).toBe(true);
+    }
+    for (const candidate of [
+      { isMainFrame: true, requestUrl: 'https://www.google.com/recaptcha/api2/anchor' },
+      { isMainFrame: false, requestUrl: 'https://www.google.com/search?q=login' },
+      { isMainFrame: false, requestUrl: 'https://evil.example/recaptcha/api2/anchor' },
+    ]) {
+      expect(
+        isAllowedKemerBetSessionRequest({
+          ...candidate,
+          isNavigationRequest: true,
+          method: 'GET',
+          pageUrl: LOGIN_PAGE,
+        }),
+      ).toBe(false);
+    }
   });
 
   it('rejects every live, executor, final-action, pilot, or wrong-user environment at construction', () => {

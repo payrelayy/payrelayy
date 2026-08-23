@@ -1,6 +1,6 @@
-import { chmod, lstat, mkdir, realpath, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, realpath, rm, unlink } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { chromium, type BrowserContext, type Page, type Route } from 'playwright-core';
@@ -23,12 +23,22 @@ const LOGIN_LIFETIME_MS = 10 * 60 * 1_000;
 const AUTHENTICATED_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const VIEWPORT = Object.freeze({ width: 1280, height: 720 });
 const NAMED_KEYS = new Set(['Backspace', 'Delete', 'Enter', 'Escape', 'Tab']);
+const CHROMIUM_SINGLETON_ARTIFACTS = Object.freeze([
+  'SingletonCookie',
+  'SingletonLock',
+  'SingletonSocket',
+] as const);
 
 interface SafeStat {
   readonly mode: number;
   readonly uid: number;
   isDirectory(): boolean;
   isSymbolicLink(): boolean;
+}
+
+export interface KemerBetSingletonArtifactFileSystem {
+  lstat(path: string): Promise<{ isSymbolicLink(): boolean }>;
+  unlink(path: string): Promise<void>;
 }
 
 interface StartInput {
@@ -81,6 +91,38 @@ export class KemerBetProvisionServerUnavailableError extends Error {
 
 function unavailable(): never {
   throw new KemerBetProvisionServerUnavailableError();
+}
+
+function hasErrorCode(error: unknown, expectedCode: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { readonly code?: unknown }).code === expectedCode
+  );
+}
+
+/**
+ * A force-stopped Chromium process can leave these three profile-owner symlinks behind. A newly
+ * started, isolated session container has no inherited Chromium process, so removing only these
+ * exact symlinks once per profile restores the persistent profile without touching its cookies or
+ * any KemerBet data.
+ */
+export async function removeStaleChromiumSingletonArtifacts(
+  profilePath: string,
+  fileSystem: KemerBetSingletonArtifactFileSystem = { lstat, unlink },
+): Promise<void> {
+  for (const artifact of CHROMIUM_SINGLETON_ARTIFACTS) {
+    const artifactPath = resolve(profilePath, artifact);
+    if (relative(profilePath, artifactPath) !== artifact) unavailable();
+    try {
+      const stat = await fileSystem.lstat(artifactPath);
+      if (!stat.isSymbolicLink()) unavailable();
+      await fileSystem.unlink(artifactPath);
+    } catch (error) {
+      if (!hasErrorCode(error, 'ENOENT')) unavailable();
+    }
+  }
 }
 
 function exactObject(value: unknown, keys: readonly string[]): Record<string, unknown> | undefined {
@@ -306,6 +348,7 @@ export function createKemerBetSessionProvisionServer(
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let signedInLogged = false;
   let lane = Promise.resolve();
+  const startupProfilesCleaned = new Set<string>();
 
   const serialized = async <T>(operation: () => Promise<T>): Promise<T> => {
     const result = lane.then(operation, operation);
@@ -375,35 +418,47 @@ export function createKemerBetSessionProvisionServer(
       (() => assertKemerBetBrowserExecutable({ executablePath: CHROMIUM_PATH }))
     )();
     const profile = await prepareProfile(input.platformAgentAccountId, effectiveUserId);
-    const nextContext = await launch(profile, {
-      acceptDownloads: false,
-      bypassCSP: false,
-      // This browser runs inside the dedicated non-root Compose sandbox (read-only root,
-      // every Linux capability dropped, no-new-privileges, and an isolated network). The
-      // Chromium setuid/user-namespace sandbox cannot initialize under that exact boundary;
-      // asking Playwright to enable it makes the private sign-in browser fail before the
-      // KemerBet login page opens. Keep the outer container sandbox and do not request the
-      // incompatible nested Chromium sandbox.
-      chromiumSandbox: false,
-      executablePath: CHROMIUM_PATH,
-      headless: true,
-      ignoreHTTPSErrors: false,
-      serviceWorkers: 'block',
-      viewport: VIEWPORT,
-    });
-    const pages = nextContext.pages();
-    const nextPage =
-      pages.length === 1 ? pages[0] : pages.length === 0 ? await nextContext.newPage() : undefined;
-    if (!nextPage) {
-      await nextContext.close();
+    if (!startupProfilesCleaned.has(profile)) {
+      await removeStaleChromiumSingletonArtifacts(profile);
+      await assertSafeDirectory(profile, effectiveUserId);
+      await assertSafeDirectory(PROFILE_ROOT, effectiveUserId);
+      startupProfilesCleaned.add(profile);
+    }
+    let nextContext: BrowserContext | undefined;
+    let nextPage: Page | undefined;
+    try {
+      nextContext = await launch(profile, {
+        acceptDownloads: false,
+        bypassCSP: false,
+        // This browser runs inside the dedicated non-root Compose sandbox (read-only root,
+        // every Linux capability dropped, no-new-privileges, and an isolated network). The
+        // Chromium setuid/user-namespace sandbox cannot initialize under that exact boundary;
+        // asking Playwright to enable it makes the private sign-in browser fail before the
+        // KemerBet login page opens. Keep the outer container sandbox and do not request the
+        // incompatible nested Chromium sandbox.
+        chromiumSandbox: false,
+        executablePath: CHROMIUM_PATH,
+        headless: true,
+        ignoreHTTPSErrors: false,
+        serviceWorkers: 'block',
+        viewport: VIEWPORT,
+      });
+      const pages = nextContext.pages();
+      nextPage =
+        pages.length === 1
+          ? pages[0]
+          : pages.length === 0
+            ? await nextContext.newPage()
+            : undefined;
+      if (!nextPage) return unavailable();
+      await nextPage.route('**/*', (route) => guardedRoute(route, nextPage as Page));
+      await nextPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      if (validPageUrl(nextPage.url()) === undefined) return unavailable();
+    } catch {
+      await nextContext?.close().catch(() => undefined);
       return unavailable();
     }
-    await nextPage.route('**/*', (route) => guardedRoute(route, nextPage));
-    await nextPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    if (validPageUrl(nextPage.url()) === undefined) {
-      await nextContext.close();
-      return unavailable();
-    }
+    if (!nextContext || !nextPage) return unavailable();
     context = nextContext;
     page = nextPage;
     accountId = input.platformAgentAccountId;

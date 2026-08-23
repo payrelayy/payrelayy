@@ -19,7 +19,8 @@ const RECAPTCHA_ORIGINS = new Set(['https://www.google.com', 'https://www.recapt
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_BODY_BYTES = 1_024;
-const SESSION_LIFETIME_MS = 10 * 60 * 1_000;
+const LOGIN_LIFETIME_MS = 10 * 60 * 1_000;
+const AUTHENTICATED_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const VIEWPORT = Object.freeze({ width: 1280, height: 720 });
 const NAMED_KEYS = new Set(['Backspace', 'Delete', 'Enter', 'Escape', 'Tab']);
 
@@ -330,6 +331,12 @@ export function createKemerBetSessionProvisionServer(
     }
   };
 
+  const armExpiry = (lifetimeMs: number): void => {
+    if (expiryTimer !== undefined) clearTimer(expiryTimer);
+    expiresAt = new Date(now().getTime() + lifetimeMs);
+    expiryTimer = setTimer(() => void serialized(stop), lifetimeMs);
+  };
+
   const status = async (): Promise<KemerBetProvisionSessionStatus> => {
     if (!context || !page || !accountId || !expiresAt) {
       return { active: false, loginRequired: false, signedIn: false, transferDisabled: true };
@@ -342,6 +349,10 @@ export function createKemerBetSessionProvisionServer(
     if (!state) return unavailable();
     const signedIn = state === 'agents';
     if (signedIn && !signedInLogged) {
+      // The ten-minute deadline protects credential entry only. Once KemerBet confirms
+      // authentication, keep this exact locked browser context alive so an Owner-page
+      // re-authentication does not discard KemerBet's in-memory authenticated state.
+      armExpiry(AUTHENTICATED_SESSION_LIFETIME_MS);
       signedInLogged = true;
       log('signed_in');
     }
@@ -396,8 +407,7 @@ export function createKemerBetSessionProvisionServer(
     context = nextContext;
     page = nextPage;
     accountId = input.platformAgentAccountId;
-    expiresAt = new Date(now().getTime() + SESSION_LIFETIME_MS);
-    expiryTimer = setTimer(() => void serialized(stop), SESSION_LIFETIME_MS);
+    armExpiry(LOGIN_LIFETIME_MS);
     log('started');
     return status();
   };

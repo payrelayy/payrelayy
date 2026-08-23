@@ -274,6 +274,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).toContain('Private KemerBet sign-in');
     expect(response.body).toContain('Transfer is blocked');
+    expect(response.body).toMatch(/retained\s+for up to twelve hours/u);
+    expect(response.body).toContain('including across Owner-page re-authentication');
     expect(response.body).toContain('id="kemerbet-session-confirmation"');
     expect(response.body).toContain(
       'I approve opening a ten-minute private KemerBet sign-in browser.',
@@ -329,6 +331,10 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(response.body).toContain('owner_confirmed_stop_private_kemerbet_session');
     expect(response.body).toContain('createImageBitmap');
+    expect(response.body).toContain('KemerBet signed in and retained until');
+    expect(response.body).toContain(
+      'The authenticated session is retained and preview input is locked.',
+    );
     expect(response.body).toContain('owner_confirmed_fixed_telebirr_five_player_pilot');
     expect(response.body).toContain('owner_confirmed_emergency_stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'private-live-pilot-v1'");

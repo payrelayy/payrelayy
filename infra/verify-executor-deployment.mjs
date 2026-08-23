@@ -744,6 +744,15 @@ assert.doesNotMatch(
 );
 assert.match(privateSessionProvisionServerSource, /chromiumSandbox: false/);
 assert.doesNotMatch(privateSessionProvisionServerSource, /chromiumSandbox: true/);
+assert.match(privateSessionProvisionServerSource, /const LOGIN_LIFETIME_MS = 10 \* 60 \* 1_000/);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const AUTHENTICATED_SESSION_LIFETIME_MS = 12 \* 60 \* 60 \* 1_000/,
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /if \(signedIn && !signedInLogged\) \{[\s\S]*?armExpiry\(AUTHENTICATED_SESSION_LIFETIME_MS\)/,
+);
 assert.match(
   executorConfigSource,
   /KEMERBET_SUPABASE_CA_CERTIFICATE_FILE\s*=\s*\r?\n\s*'\/run\/configs\/supabase_ca_certificate'/,

@@ -14,6 +14,10 @@ const provisionSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-session-provision.ts`,
   'utf8',
 );
+const privateSessionProvisionServerSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-session-provision-server.ts`,
+  'utf8',
+);
 const noTransferReadinessSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-no-transfer-readiness.ts`,
   'utf8',
@@ -738,6 +742,8 @@ assert.doesNotMatch(
   `${registrySource}\n${provisionSource}`,
   /--no-sandbox|--disable-setuid-sandbox/,
 );
+assert.match(privateSessionProvisionServerSource, /chromiumSandbox: false/);
+assert.doesNotMatch(privateSessionProvisionServerSource, /chromiumSandbox: true/);
 assert.match(
   executorConfigSource,
   /KEMERBET_SUPABASE_CA_CERTIFICATE_FILE\s*=\s*\r?\n\s*'\/run\/configs\/supabase_ca_certificate'/,

@@ -360,7 +360,13 @@ export function createKemerBetSessionProvisionServer(
     const nextContext = await launch(profile, {
       acceptDownloads: false,
       bypassCSP: false,
-      chromiumSandbox: true,
+      // This browser runs inside the dedicated non-root Compose sandbox (read-only root,
+      // every Linux capability dropped, no-new-privileges, and an isolated network). The
+      // Chromium setuid/user-namespace sandbox cannot initialize under that exact boundary;
+      // asking Playwright to enable it makes the private sign-in browser fail before the
+      // KemerBet login page opens. Keep the outer container sandbox and do not request the
+      // incompatible nested Chromium sandbox.
+      chromiumSandbox: false,
       executablePath: CHROMIUM_PATH,
       headless: true,
       ignoreHTTPSErrors: false,

@@ -106,7 +106,10 @@ interface LocatorOptions {
   readonly attributes?: Readonly<Record<string, string>>;
   readonly children?: Readonly<Record<string, FakeLocator>>;
   readonly items?: readonly FakeLocator[];
-  readonly onClick?: () => void | Promise<void>;
+  readonly onClick?: (options?: {
+    readonly force?: boolean;
+    readonly timeout?: number;
+  }) => void | Promise<void>;
 }
 
 class FakeLocator implements PlaywrightLocatorPort {
@@ -117,7 +120,9 @@ class FakeLocator implements PlaywrightLocatorPort {
   readonly attributes: Readonly<Record<string, string>>;
   readonly children: Readonly<Record<string, FakeLocator>>;
   readonly items: readonly FakeLocator[] | null;
-  readonly onClick: (() => void | Promise<void>) | undefined;
+  readonly onClick:
+    | ((options?: { readonly force?: boolean; readonly timeout?: number }) => void | Promise<void>)
+    | undefined;
 
   constructor(options: LocatorOptions = {}) {
     this.text = options.text ?? '';
@@ -142,8 +147,8 @@ class FakeLocator implements PlaywrightLocatorPort {
     return this.items?.length ?? (this.visible ? 1 : 0);
   }
 
-  async click() {
-    await this.onClick?.();
+  async click(options?: { readonly force?: boolean; readonly timeout?: number }) {
+    await this.onClick?.(options);
   }
 
   async fill(value: string) {
@@ -299,6 +304,7 @@ class FakePage implements PlaywrightPagePort {
   historyDelayPolls = 0;
   dialogDelayPolls = 0;
   workflowClicks: string[] = [];
+  findButtonClickOptions: { readonly force?: boolean; readonly timeout?: number } | undefined;
   playerDepositOpen = false;
   hideFindBy = false;
   hidePlayerIdInput = false;
@@ -389,7 +395,8 @@ class FakePage implements PlaywrightPagePort {
       if (!this.playerDepositOpen || this.hideFindButton) return emptyLocator();
       return this.withLookupControlDuplicates(
         new FakeLocator({
-          onClick: () => {
+          onClick: (options) => {
+            this.findButtonClickOptions = options;
             this.workflowClicks.push('button:Find');
           },
         }),
@@ -596,6 +603,28 @@ describe('Playwright KemerBet agent page', () => {
 
     expect(page.gotoCalls).toBe(0);
     expect(page.workflowClicks).toEqual(['button:Find', 'button:Find']);
+    expect(page.findButtonClickOptions).toEqual({ timeout: 100 });
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it('forces only the exact read-only Find action when the caller explicitly requests it', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    const stages: string[] = [];
+    const fixture = driver(page, {
+      forceReadOnlyLookupClick: true,
+      reportLookupStage: (stage: string) => stages.push(stage),
+    });
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await fixture.driver.lookupPlayer('PLAYER-ALPHA');
+    await expect(fixture.driver.readAgentLookup()).resolves.toMatchObject({
+      playerId: 'PLAYER-ALPHA',
+    });
+
+    expect(page.findButtonClickOptions).toEqual({ force: true, timeout: 100 });
+    expect(stages).toEqual(['lookup_input', 'lookup_action', 'lookup_response', 'lookup_contract']);
     expect(page.transferClicks).toBe(0);
   });
 

@@ -235,8 +235,8 @@ logins are disabled. Keep the runtime offline throughout replacement.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e
-reviewed_successor=215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505
+installed_predecessor=215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505
+reviewed_successor=f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -247,7 +247,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
+NEXT_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -263,10 +263,10 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-4d3442cf"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-215c0958"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
-PREVIOUS_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
-NEXT_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
+PREVIOUS_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
+NEXT_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
 METADATA='http://169.254.169.254/metadata/v1'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
@@ -308,14 +308,14 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `215c0958…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+against successor SHA `f7c708ac…` before `deploy-and-smoke` is allowed. If it fails, keep staging
 offline and use the root console to atomically restore only the checksum-proven `previous` file:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-4d3442cf'
-PREVIOUS_SHA='4d3442cf79fe7c1648b1a31a57b308cc3cbc9806f15505d93284ba314dc1449e'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-215c0958'
+PREVIOUS_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
 test ! -L "$BACKUP" && test "$(stat --format='%U:%G:%a' "$BACKUP")" = 'root:root:600'
 test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
 RESTORE_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"

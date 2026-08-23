@@ -1084,6 +1084,12 @@ async function startKemerbetSession() {
   } catch (error) {
     await loadKemerbetSession();
     if (!isSignedOutError(error)) {
+      if (currentKemerbetSession?.active) {
+        setNotice(currentKemerbetSession.signedIn
+          ? 'KemerBet is already signed in. The retained browser remains locked and Transfer is disabled.'
+          : 'The private KemerBet sign-in browser is already open. Click the preview and type there only.');
+        return;
+      }
       const failureMessage =
         'Private KemerBet sign-in could not start. No credential was accepted. Please try once more; if it still fails, contact support.';
       kemerbetSessionStatus.textContent = failureMessage;

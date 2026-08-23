@@ -22,6 +22,13 @@ const noTransferReadinessSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-no-transfer-readiness.ts`,
   'utf8',
 );
+const noTransferReadinessSealSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-no-transfer-readiness-seal.ts`,
+  'utf8',
+);
+const reviewedSelectorContract = JSON.parse(
+  await readFile(`${infraDirectory}config/kemerbet-selector-contract.v2.json`, 'utf8'),
+);
 const registrySource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-agent-session-registry.ts`,
   'utf8',
@@ -688,6 +695,10 @@ assert.equal(
   executorPackage.scripts?.['readiness:no-transfer'],
   'node dist/kemerbet-no-transfer-readiness.js',
 );
+assert.equal(
+  executorPackage.scripts?.['readiness:seal'],
+  'node dist/kemerbet-no-transfer-readiness-seal.js',
+);
 assert.match(
   provisionSource,
   /const FIXED_XAUTHORITY_PATH = '\/run\/secrets\/kemerbet_session_xauthority'/,
@@ -736,6 +747,34 @@ assert.doesNotMatch(
   /loadExecutorConfig|createKemerBetDepositService|resolveBrowser|\.prepare\(|submitOnceAfterFence|\.transferOnce\(|\.fillDeposit\(|leaseNext|fenceFinalAction|KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE/,
   'no-transfer readiness source must not acquire execution, amount, transfer, database, or history authority',
 );
+assert.match(
+  noTransferReadinessSealSource,
+  /KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED !== 'true'/,
+);
+assert.match(noTransferReadinessSealSource, /players\.playerIds\.length !== 5/);
+assert.match(noTransferReadinessSealSource, /READ_METHODS\.has\(input\.method\)/);
+assert.match(noTransferReadinessSealSource, /probePlayerLookup/);
+assert.match(noTransferReadinessSealSource, /transferDisabled !== true/);
+assert.match(noTransferReadinessSealSource, /identifiersRedacted: true/);
+assert.match(noTransferReadinessSealSource, /moneyMoved: false/);
+assert.match(
+  noTransferReadinessSealSource,
+  /const OUTPUT_ROOT = '\/run\/fetanagent-kemerbet-readiness-seal-output'/,
+);
+assert.match(noTransferReadinessSealSource, /chromiumSandbox: false/);
+assert.doesNotMatch(
+  noTransferReadinessSealSource,
+  /loadExecutorConfig|createKemerBetDepositService|\.prepare\(|submitOnceAfterFence|\.transferOnce\(|\.fillDeposit\(|leaseNext|fenceFinalAction|KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE/,
+  'the readiness seal must not acquire execution, amount, transfer, database, or history authority',
+);
+assert.equal(reviewedSelectorContract.version, 2);
+assert.deepEqual(reviewedSelectorContract.depositWorkflow.depositMenuItem, {
+  by: 'role',
+  role: 'menuitem',
+  name: 'Deposit',
+});
+assert.match(reviewedSelectorContract.signedInAgentIdentity.root, /rt--header-actions-content/);
+assert.equal(reviewedSelectorContract.signedInAgentIdentity.value.source, 'text');
 assert.match(registrySource, /readonly chromiumSandbox: true/);
 assert.match(registrySource, /chromiumSandbox: true/);
 assert.doesNotMatch(

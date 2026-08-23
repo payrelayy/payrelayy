@@ -6,8 +6,9 @@
 composition for FetanAgent's behind-the-scenes KemerBet deposit executor. It supports only an
 explicit `staging` or `production` database target and is not part of the ordinary staging Compose
 inventory. The first supervised activation must target `staging`; production is a later, separate
-go/no-go. All three services require an explicit profile, publish no port, and have no inbound action
-endpoint.
+go/no-go. All three Compose services require an explicit profile, publish no port, and have no
+inbound action endpoint. The image also contains a separate one-time readiness-seal command; it is
+not a long-running service and is never started by an ordinary deployment.
 
 This artifact does not deploy anything, provision a database login, change either database feature
 switch, install credentials, or authorize a transfer. The database `payment_verification` and
@@ -37,9 +38,12 @@ manifest values and the same immutable reservation and authorization token befor
 perform a Transfer action.
 
 The executor image uses the distribution Chromium at `/usr/bin/chromium`; Playwright downloads no
-browser. Both automated and manual persistent-context launchers require Chromium's sandbox and do
-not add a `--no-sandbox` argument. Activation Compose has no build section and accepts only the same
-reviewed `repository@sha256:<64 lowercase hex>` image reference for both services.
+browser. The long-lived executor and headed manual provisioner require Chromium's nested sandbox
+and do not add a `--no-sandbox` argument. The separately hardened private-preview and one-time
+readiness-seal containers use the host-verified outer container sandbox because Chromium's nested
+namespace sandbox cannot initialize inside their read-only, capability-free boundary. Activation
+Compose has no build section and accepts only the same reviewed
+`repository@sha256:<64 lowercase hex>` image reference for every service.
 
 ## Validation only
 
@@ -101,17 +105,18 @@ secret or configuration object.
 Nothing below belongs in Git or a shared `.env` file. Production paths inside the container are
 fixed by `@fetanagent/config`:
 
-| Container path                                           | Required content                                                                                                                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/run/secrets/kemerbet_executor_database_url`            | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`                          |
-| `/run/secrets/kemerbet_agent_identity_bindings`          | Unique lines of `<canonical UUID><single space><hmac-sha256-agent-identity-v1:64-lowercase-hex>`                                                                                |
-| `/run/secrets/kemerbet_history_reference_hmac_key`       | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                                                     |
-| `/run/secrets/kemerbet_agent_identity_hmac_key`          | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                                            |
-| `/run/secrets/kemerbet_no_transfer_readiness_player_ids` | Exactly five distinct canonical Player IDs, one per line; one-use Phase 1 input, never logged, committed, retained as a pilot manifest, or mounted into the long-lived executor |
-| `/run/configs/private_live_deposit_pilot.v1.json`        | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers                        |
-| `/etc/fetanagent/kemerbet-selector-contract.v2.json`     | Separately reviewed selector contract v2                                                                                                                                        |
-| `/run/configs/supabase_ca_certificate`                   | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                                       |
-| `/var/lib/fetanagent/kemerbet-sessions`                  | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                                                 |
+| Container path                                                                    | Required content                                                                                                                                                                |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/run/secrets/kemerbet_executor_database_url`                                     | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`                          |
+| `/run/secrets/kemerbet_agent_identity_bindings`                                   | Unique lines of `<canonical UUID><single space><hmac-sha256-agent-identity-v1:64-lowercase-hex>`                                                                                |
+| `/run/secrets/kemerbet_history_reference_hmac_key`                                | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                                                     |
+| `/run/secrets/kemerbet_agent_identity_hmac_key`                                   | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                                            |
+| `/run/secrets/kemerbet_no_transfer_readiness_player_ids`                          | Exactly five distinct canonical Player IDs, one per line; one-use Phase 1 input, never logged, committed, retained as a pilot manifest, or mounted into the long-lived executor |
+| `/run/fetanagent-kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings` | One-time, atomically created mode-`0600` identity-binding output; the command refuses to overwrite an existing file                                                             |
+| `/run/configs/private_live_deposit_pilot.v1.json`                                 | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers                        |
+| `/etc/fetanagent/kemerbet-selector-contract.v2.json`                              | Separately reviewed selector contract v2                                                                                                                                        |
+| `/run/configs/supabase_ca_certificate`                                            | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                                       |
+| `/var/lib/fetanagent/kemerbet-sessions`                                           | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                                                 |
 
 The executor rejects symlinks, path substitution, unsafe owner/mode metadata, file replacement while
 reading, equal HMAC keys, malformed or duplicate bindings, missing profiles, unauthenticated or
@@ -119,6 +124,50 @@ CAPTCHA sessions, and a visible agent identity that does not match its externall
 Errors and health responses contain no account, player, reference, key, or credential material.
 
 ## Five-Player no-transfer readiness
+
+### One-time identity binding and target-host seal
+
+The first target-host proof uses `readiness:seal`. Run it only while both the long-lived executor
+and private sign-in service are stopped, after the Owner preview has reported a successful KemerBet
+sign-in and that browser context has been closed cleanly. The command opens that exact persistent
+profile, permits only `GET`, `HEAD`, and `OPTIONS`, permits only the exact `/agents` main-frame
+navigation, and blocks every POST—including the deposit endpoint—before it reaches the network.
+
+The seal receives only one canonical platform-account UUID, the identity HMAC key, the reviewed
+selector v2 file, the exact-five one-use Player-ID file, the persistent profile volume, and an empty
+service-owned mode-`0700` output directory. It receives no database URL, existing binding, pilot
+manifest, history-reference key, Amount operation, settlement authority, or action loop. It writes
+the binding only after the authenticated identity is observed twice and all five response-bound ETB
+lookups pass. Its only successful log projection is:
+
+```text
+KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.
+```
+
+Use the reviewed executor image and the target's existing profile volume. Mount the key and Player
+file read-only at their fixed paths, the checked-in
+`infra/config/kemerbet-selector-contract.v2.json` read-only at the fixed selector path, and an empty
+UID/GID `10001`, mode-`0700` directory at the fixed output root. Set only these inert runtime values:
+
+```text
+NODE_ENV=production
+FINANCIAL_ACTIONS_MODE=dry_run
+KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true
+KEMERBET_AGENT_IDENTITY_BINDING_ACCOUNT_ID=<one canonical UUID>
+KEMERBET_EXECUTOR_ENABLED=false
+KEMERBET_FINAL_ACTION_ENABLED=false
+KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false
+INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false
+```
+
+Run `node apps/executor/dist/kemerbet-no-transfer-readiness-seal.js` as UID/GID `10001:10001` in a
+read-only, capability-free, no-new-privileges container with a `noexec,nosuid,nodev` temporary
+filesystem and the same bounded CPU, memory, PID, and shared-memory limits as the existing
+readiness service. After success, install the atomically produced binding as the fixed Owner-managed
+identity-binding secret without printing its contents. Securely delete the one-use Player file and
+the temporary output directory after installation.
+
+### Independent bound-profile recheck
 
 Run this only after the Owner has completed manual session provisioning and the visible signed-in
 identity has been independently HMAC-bound to the one active agent-account UUID. The source Player

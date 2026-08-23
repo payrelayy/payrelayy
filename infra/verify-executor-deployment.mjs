@@ -775,6 +775,11 @@ assert.deepEqual(reviewedSelectorContract.depositWorkflow.depositMenuItem, {
 });
 assert.match(reviewedSelectorContract.signedInAgentIdentity.root, /rt--header-actions-content/);
 assert.equal(reviewedSelectorContract.signedInAgentIdentity.value.source, 'text');
+assert.equal(
+  reviewedSelectorContract.sessionFailure.signInForm,
+  'form.ant-form:has(input#userName):has(input#password[type="password"])',
+);
+assert.notEqual(reviewedSelectorContract.sessionFailure.signInForm, 'form.ant-form');
 assert.match(registrySource, /readonly chromiumSandbox: true/);
 assert.match(registrySource, /chromiumSandbox: true/);
 assert.doesNotMatch(

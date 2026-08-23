@@ -13,5 +13,11 @@ describe('reviewed KemerBet selector contract', () => {
     const contract = JSON.parse(await readFile(path, 'utf8')) as unknown;
 
     expect(() => assertKemerBetAgentPageSelectorContractV2(contract)).not.toThrow();
+    expect(contract).toMatchObject({
+      sessionFailure: {
+        signInForm: 'form.ant-form:has(input#userName):has(input#password[type="password"])',
+      },
+    });
+    expect(JSON.stringify(contract)).not.toContain('"signInForm":"form.ant-form"');
   });
 });

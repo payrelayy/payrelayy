@@ -712,10 +712,14 @@ export interface ObserveKemerBetAgentIdentityFingerprintOptions {
   readonly platformAgentAccountId: string;
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
+  readonly reportStage?: (stage: KemerBetAgentIdentityObservationStage) => void;
   readonly timeoutMs?: number;
   readonly pollDelay?: (milliseconds: number) => Promise<void>;
   readonly monotonicNow?: () => number;
 }
+
+export type KemerBetAgentIdentityObservationStage =
+  'session_guard' | 'identity_marker' | 'identity_value' | 'identity_stability';
 
 /**
  * Observe the exact authenticated Agent header and return only its keyed fingerprint. The raw
@@ -739,6 +743,7 @@ export async function observeKemerBetAgentIdentityFingerprint(
   const timeoutMs = requireBoundedInteger(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 100, 120_000);
   const pollDelay = options.pollDelay ?? defaultPollDelay;
   const monotonicNow = options.monotonicNow ?? Date.now;
+  const reportStage = options.reportStage ?? (() => undefined);
 
   const assertExactAuthenticatedRoute = async (): Promise<void> => {
     if (requireAllowedAgentUrl(page.url()) !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
@@ -753,8 +758,10 @@ export async function observeKemerBetAgentIdentityFingerprint(
   };
 
   const observeFingerprint = async (): Promise<string | null> => {
+    reportStage('identity_marker');
     const root = await observeStrictLocator(page, contract.signedInAgentIdentity.root);
     if (root === null) return null;
+    reportStage('identity_value');
     const rawIdentity = await observeStructuredField(
       root,
       contract.signedInAgentIdentity.value,
@@ -775,13 +782,17 @@ export async function observeKemerBetAgentIdentityFingerprint(
   const deadline = monotonicNow() + timeoutMs;
   const maximumPolls = Math.ceil(timeoutMs / 10) + 2;
   for (let poll = 0; poll < maximumPolls; poll += 1) {
+    reportStage('session_guard');
     await assertExactAuthenticatedRoute();
     const first = await observeFingerprint();
     if (first !== null) {
+      reportStage('session_guard');
       await assertExactAuthenticatedRoute();
       const second = await observeFingerprint();
       if (second !== null) {
+        reportStage('identity_stability');
         if (second !== first) unavailable();
+        reportStage('session_guard');
         await assertExactAuthenticatedRoute();
         return first;
       }

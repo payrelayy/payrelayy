@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, realpath, rm, unlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, realpath, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,6 +6,14 @@ import { pathToFileURL } from 'node:url';
 import { chromium, type BrowserContext, type Page, type Route } from 'playwright-core';
 
 import { assertKemerBetBrowserExecutable } from './executor-runtime-isolation.js';
+import {
+  type KemerBetSingletonArtifactFileSystem,
+  removeStaleChromiumSingletonArtifacts as removeStaleChromiumSingletonArtifactsFromProfile,
+} from './kemerbet-chromium-profile.js';
+import {
+  createKemerBetNoTransferReadinessSealProbeFromPage,
+  runKemerBetNoTransferReadinessSeal,
+} from './kemerbet-no-transfer-readiness-seal.js';
 
 const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';
 const CONTROL_SOCKET = `${CONTROL_ROOT}/session.sock`;
@@ -23,11 +31,6 @@ const LOGIN_LIFETIME_MS = 10 * 60 * 1_000;
 const AUTHENTICATED_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const VIEWPORT = Object.freeze({ width: 1280, height: 720 });
 const NAMED_KEYS = new Set(['Backspace', 'Delete', 'Enter', 'Escape', 'Tab']);
-const CHROMIUM_SINGLETON_ARTIFACTS = Object.freeze([
-  'SingletonCookie',
-  'SingletonLock',
-  'SingletonSocket',
-] as const);
 
 interface SafeStat {
   readonly mode: number;
@@ -36,13 +39,12 @@ interface SafeStat {
   isSymbolicLink(): boolean;
 }
 
-export interface KemerBetSingletonArtifactFileSystem {
-  lstat(path: string): Promise<{ isSymbolicLink(): boolean }>;
-  unlink(path: string): Promise<void>;
-}
-
 interface StartInput {
   readonly platformAgentAccountId: string;
+  readonly requestId: string;
+}
+
+interface ReadinessSealInput {
   readonly requestId: string;
 }
 
@@ -73,10 +75,12 @@ export interface KemerBetProvisionSessionStatus {
 
 export interface KemerBetProvisionServerDependencies {
   readonly assertBrowserExecutable?: () => Promise<void>;
+  readonly createReadinessProbeFromPage?: typeof createKemerBetNoTransferReadinessSealProbeFromPage;
   readonly effectiveUserId?: number;
   readonly environment?: NodeJS.ProcessEnv;
   readonly launchPersistentContext?: typeof chromium.launchPersistentContext;
   readonly now?: () => Date;
+  readonly runReadinessSeal?: typeof runKemerBetNoTransferReadinessSeal;
   readonly setTimer?: typeof setTimeout;
   readonly clearTimer?: typeof clearTimeout;
   readonly log?: (event: 'started' | 'signed_in' | 'stopped') => void;
@@ -93,35 +97,14 @@ function unavailable(): never {
   throw new KemerBetProvisionServerUnavailableError();
 }
 
-function hasErrorCode(error: unknown, expectedCode: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { readonly code?: unknown }).code === expectedCode
-  );
-}
-
-/**
- * A force-stopped Chromium process can leave these three profile-owner symlinks behind. A newly
- * started, isolated session container has no inherited Chromium process, so removing only these
- * exact symlinks once per profile restores the persistent profile without touching its cookies or
- * any KemerBet data.
- */
 export async function removeStaleChromiumSingletonArtifacts(
   profilePath: string,
-  fileSystem: KemerBetSingletonArtifactFileSystem = { lstat, unlink },
+  fileSystem?: KemerBetSingletonArtifactFileSystem,
 ): Promise<void> {
-  for (const artifact of CHROMIUM_SINGLETON_ARTIFACTS) {
-    const artifactPath = resolve(profilePath, artifact);
-    if (relative(profilePath, artifactPath) !== artifact) unavailable();
-    try {
-      const stat = await fileSystem.lstat(artifactPath);
-      if (!stat.isSymbolicLink()) unavailable();
-      await fileSystem.unlink(artifactPath);
-    } catch (error) {
-      if (!hasErrorCode(error, 'ENOENT')) unavailable();
-    }
+  try {
+    await removeStaleChromiumSingletonArtifactsFromProfile(profilePath, fileSystem);
+  } catch {
+    unavailable();
   }
 }
 
@@ -140,6 +123,7 @@ function assertEnvironment(environment: NodeJS.ProcessEnv, effectiveUserId: numb
     effectiveUserId !== 10001 ||
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
+    environment.KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED !== 'true' ||
     environment.KEMERBET_EXECUTOR_ENABLED !== 'false' ||
     environment.KEMERBET_FINAL_ACTION_ENABLED !== 'false' ||
     environment.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED !== 'false' ||
@@ -290,6 +274,13 @@ function validStartInput(value: unknown): StartInput | undefined {
     : undefined;
 }
 
+function validReadinessSealInput(value: unknown): ReadinessSealInput | undefined {
+  const object = exactObject(value, ['requestId']);
+  return object && typeof object.requestId === 'string' && REQUEST_ID_PATTERN.test(object.requestId)
+    ? (object as unknown as ReadinessSealInput)
+    : undefined;
+}
+
 function validSessionInput(value: unknown): SessionInput | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -337,6 +328,9 @@ export function createKemerBetSessionProvisionServer(
   const now = dependencies.now ?? (() => new Date());
   const setTimer = dependencies.setTimer ?? setTimeout;
   const clearTimer = dependencies.clearTimer ?? clearTimeout;
+  const createReadinessProbeFromPage =
+    dependencies.createReadinessProbeFromPage ?? createKemerBetNoTransferReadinessSealProbeFromPage;
+  const runReadinessSeal = dependencies.runReadinessSeal ?? runKemerBetNoTransferReadinessSeal;
   const log =
     dependencies.log ??
     ((event: 'started' | 'signed_in' | 'stopped') =>
@@ -482,6 +476,83 @@ export function createKemerBetSessionProvisionServer(
     return status();
   };
 
+  const sealReadiness = async (): Promise<{
+    readonly currency: 'ETB';
+    readonly identifiersRedacted: true;
+    readonly moneyMoved: false;
+    readonly playersChecked: 5;
+    readonly sealed: true;
+    readonly transferDisabled: true;
+  }> => {
+    const currentStatus = await status();
+    if (
+      !currentStatus.signedIn ||
+      !signedInLogged ||
+      !context ||
+      !page ||
+      !accountId ||
+      !expiresAt ||
+      validPageUrl(page.url()) !== 'agents'
+    ) {
+      return unavailable();
+    }
+    const retainedContext = context;
+    const retainedPage = page;
+    const retainedAccountId = accountId;
+    const retainedExpiresAt = expiresAt;
+    await runReadinessSeal({
+      environment: {
+        NODE_ENV: 'production',
+        FINANCIAL_ACTIONS_MODE: 'dry_run',
+        KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED: 'true',
+        KEMERBET_AGENT_IDENTITY_BINDING_ACCOUNT_ID: retainedAccountId,
+        KEMERBET_EXECUTOR_ENABLED: 'false',
+        KEMERBET_FINAL_ACTION_ENABLED: 'false',
+        KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false',
+        INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false',
+      },
+      effectiveUserId,
+      assertBrowserExecutable: async () => undefined,
+      openProbe: async (options) => {
+        if (
+          options.accountId !== retainedAccountId ||
+          context !== retainedContext ||
+          page !== retainedPage ||
+          accountId !== retainedAccountId ||
+          expiresAt !== retainedExpiresAt ||
+          validPageUrl(retainedPage.url()) !== 'agents'
+        ) {
+          return unavailable();
+        }
+        return createReadinessProbeFromPage({
+          accountId: retainedAccountId,
+          close: async () => undefined,
+          fingerprintAgentIdentity: options.fingerprintAgentIdentity,
+          page: retainedPage,
+          selectorContract: options.selectorContract,
+        });
+      },
+    });
+    if (
+      context !== retainedContext ||
+      page !== retainedPage ||
+      accountId !== retainedAccountId ||
+      expiresAt !== retainedExpiresAt ||
+      now().getTime() >= retainedExpiresAt.getTime() ||
+      validPageUrl(retainedPage.url()) !== 'agents'
+    ) {
+      return unavailable();
+    }
+    return {
+      sealed: true,
+      playersChecked: 5,
+      currency: 'ETB',
+      transferDisabled: true,
+      moneyMoved: false,
+      identifiersRedacted: true,
+    };
+  };
+
   const server = createServer((request, response) => {
     void serialized(async () => {
       try {
@@ -503,6 +574,12 @@ export function createKemerBetSessionProvisionServer(
           const candidate = validSessionInput(await readJson(request));
           if (!candidate) return unavailable();
           sendJson(response, 200, await input(candidate));
+          return;
+        }
+        if (request.url === '/v1/readiness/seal' && request.method === 'POST') {
+          const candidate = validReadinessSealInput(await readJson(request));
+          if (!candidate) return unavailable();
+          sendJson(response, 201, await sealReadiness());
           return;
         }
         if (request.url === '/v1/session/stop' && request.method === 'POST') {

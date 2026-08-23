@@ -786,6 +786,16 @@ assert.doesNotMatch(privateSessionProvisionServerSource, /chromiumSandbox: true/
 assert.match(privateSessionProvisionServerSource, /const LOGIN_LIFETIME_MS = 10 \* 60 \* 1_000/);
 assert.match(
   privateSessionProvisionServerSource,
+  /environment\.KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED !== 'true'/,
+);
+assert.match(privateSessionProvisionServerSource, /\/v1\/readiness\/seal/);
+assert.match(privateSessionProvisionServerSource, /runReadinessSeal\(\{/);
+assert.match(privateSessionProvisionServerSource, /FINANCIAL_ACTIONS_MODE: 'dry_run'/);
+assert.match(privateSessionProvisionServerSource, /playersChecked: 5/);
+assert.match(privateSessionProvisionServerSource, /transferDisabled: true/);
+assert.match(privateSessionProvisionServerSource, /moneyMoved: false/);
+assert.match(
+  privateSessionProvisionServerSource,
   /const AUTHENTICATED_SESSION_LIFETIME_MS = 12 \* 60 \* 60 \* 1_000/,
 );
 assert.match(

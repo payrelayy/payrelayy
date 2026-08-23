@@ -19,11 +19,15 @@ The only services are:
 - `bot`, exactly one Telegram long-polling process which waits for `beta-admission` readiness.
 - `gateway`, a separately selected Caddy edge which serves the static FetanAgent landing page and
   proxies only authenticated Owner control. It cannot reach the API or beta-admission bridge.
-- `kemerbet-session-provision`, a normally absent, separately profile-gated, ten-minute private
-  sign-in browser built from the reviewed executor image. It receives no application secret,
-  database access, Player list, or financial flag. It shares only a private Unix-socket volume with
-  Owner and an isolated persistent KemerBet browser-profile volume. Its route guard always blocks
-  the exact deposit endpoint and locks input after the signed-in `/agents` page appears.
+- `kemerbet-session-provision`, a normally absent, separately profile-gated private sign-in browser
+  built from the reviewed executor image. Credential entry is limited to ten minutes; the exact
+  locked, authenticated browser can remain for at most twelve hours. It has no database, manifest,
+  amount, settlement, or execution authority. For its one-time readiness seal only, it receives one
+  identity HMAC key, the exact-five one-use Player list, reviewed selector v2, and an isolated output
+  directory. It shares a private Unix-socket volume with Owner and one isolated persistent browser
+  profile. Its route guard always blocks the exact deposit endpoint, locks manual input after the
+  signed-in `/agents` page appears, and permits the seal to issue read-only lookups in that same
+  in-memory authenticated Chromium process.
 
 The five application images use the immutable Linux/amd64 Node base in the repository `Dockerfile`;
 the gateway uses a separately pinned official Caddy image. Every service runs as numeric UID/GID
@@ -78,6 +82,14 @@ the checkout:
 | `FETANAGENT_STAGING_BOT_TOKEN_FILE`                                  | bot                              | `/run/secrets/telegram_bot_token`                                                         |
 | `FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE`                         | bot                              | `/run/secrets/bot_beta_admission_transport_hmac`                                          |
 | `FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE`           | bot                              | `/run/secrets/bot_player_action_transport_hmac`                                           |
+
+The separately started `kemerbet-session-provision` profile uses four fixed, non-substitutable host
+paths for its one-time no-transfer proof: mode-`0400` UID/GID-`10001` identity-key and exact-five
+Player files under `/etc/fetanagent/executor-secrets`, the root-owned mode-`0444` reviewed selector
+at `/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json`, and the UID/GID-`10001`
+mode-`0700` output directory `/var/lib/fetanagent/kemerbet-readiness-seal-output`. The first three are
+read-only mounts. The output directory is the only added writable bind, may contain only the
+atomically created mode-`0600` binding file, and is never mounted into Owner control.
 
 The two transport-HMAC files must contain the same independently generated 32-byte lowercase-hex
 value, but they are intentionally separate host files and separate mounts. The bot cannot read the
@@ -235,8 +247,8 @@ logins are disabled. Keep the runtime offline throughout replacement.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505
-reviewed_successor=f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87
+installed_predecessor=f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87
+reviewed_successor=33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -247,7 +259,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
+NEXT_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -263,10 +275,10 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-215c0958"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-f7c708ac"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
-PREVIOUS_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
-NEXT_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
+PREVIOUS_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
+NEXT_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
@@ -308,14 +320,14 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `f7c708ac…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+against successor SHA `33f4a5a4…` before `deploy-and-smoke` is allowed. If it fails, keep staging
 offline and use the root console to atomically restore only the checksum-proven `previous` file:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-215c0958'
-PREVIOUS_SHA='215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-f7c708ac'
+PREVIOUS_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
 test ! -L "$BACKUP" && test "$(stat --format='%U:%G:%a' "$BACKUP")" = 'root:root:600'
 test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
 RESTORE_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"

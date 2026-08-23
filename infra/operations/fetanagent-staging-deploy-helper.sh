@@ -28,6 +28,11 @@ readonly GATEWAY_STATE_ROOT='/var/lib/fetanagent-gateway'
 readonly BOT_STARTUP_RECEIPT_ROOT='/var/lib/fetanagent-bot-startup-receipt'
 readonly BOT_STARTUP_RECEIPT="$BOT_STARTUP_RECEIPT_ROOT/bot-v1"
 readonly BOT_STARTUP_RECEIPT_VERSION='1'
+readonly KEMERBET_AGENT_IDENTITY_HMAC_KEY='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
+readonly KEMERBET_READINESS_PLAYER_IDS='/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
+readonly KEMERBET_SELECTOR_CONTRACT='/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json'
+readonly KEMERBET_READINESS_OUTPUT_ROOT='/var/lib/fetanagent/kemerbet-readiness-seal-output'
+readonly KEMERBET_READINESS_BINDING="$KEMERBET_READINESS_OUTPUT_ROOT/kemerbet_agent_identity_bindings"
 readonly EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop.service'
 readonly EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop.timer'
 readonly EXPIRY_STOP_SERVICE_PATH="/etc/systemd/system/$EXPIRY_STOP_SERVICE"
@@ -96,6 +101,26 @@ require_immutable_config_file() {
   [[ ! -L "$path" && -f "$path" ]] || die 'a required immutable config file is absent or symbolic'
   [[ "$(stat --format='%U:%G:%a' "$path")" == 'root:root:444' ]] ||
     die 'an immutable config file does not have the required ownership and mode'
+}
+
+require_kemerbet_readiness_output_directory() {
+  local entry
+  [[ ! -L "$KEMERBET_READINESS_OUTPUT_ROOT" && -d "$KEMERBET_READINESS_OUTPUT_ROOT" ]] ||
+    die 'the KemerBet readiness output root is absent or symbolic'
+  [[ "$(stat --format='%u:%g:%a' "$KEMERBET_READINESS_OUTPUT_ROOT")" == '10001:10001:700' ]] ||
+    die 'the KemerBet readiness output root ownership or mode is unsafe'
+  [[ "$(realpath -- "$KEMERBET_READINESS_OUTPUT_ROOT")" == "$KEMERBET_READINESS_OUTPUT_ROOT" ]] ||
+    die 'the KemerBet readiness output root is not canonical'
+  while IFS= read -r entry; do
+    [[ "$entry" == 'kemerbet_agent_identity_bindings' ]] ||
+      die 'the KemerBet readiness output root contains unexpected residue'
+  done < <(find -P "$KEMERBET_READINESS_OUTPUT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')
+  if [[ -e "$KEMERBET_READINESS_BINDING" || -L "$KEMERBET_READINESS_BINDING" ]]; then
+    [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" ]] ||
+      die 'the KemerBet readiness binding is not a safe regular file'
+    [[ "$(stat --format='%u:%g:%a' "$KEMERBET_READINESS_BINDING")" == '10001:10001:600' ]] ||
+      die 'the KemerBet readiness binding ownership or mode is unsafe'
+  fi
 }
 
 stop_project() {
@@ -726,7 +751,13 @@ require_exact_fresh_bot_runtime() {
 require_kemerbet_session_provision_runtime() {
   local commit_sha="$1"
   local container_id environment health mount_contract owner_container owner_socket_source
-  local revision session_socket_source
+  local identity_key_source player_ids_source readiness_output_source revision selector_source
+  local session_socket_source
+
+  require_service_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+  require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
+  require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
+  require_kemerbet_readiness_output_directory
 
   container_id="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" \
@@ -774,6 +805,7 @@ require_kemerbet_session_provision_runtime() {
   for expected_environment in \
     'NODE_ENV=production' \
     'FINANCIAL_ACTIONS_MODE=dry_run' \
+    'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' \
     'KEMERBET_EXECUTOR_ENABLED=false' \
     'KEMERBET_FINAL_ACTION_ENABLED=false' \
     'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false' \
@@ -787,12 +819,34 @@ require_kemerbet_session_provision_runtime() {
   mount_contract="$(docker_local container inspect "$container_id" \
     --format '{{range .Mounts}}{{printf "%s|%s|%t\n" .Type .Destination .RW}}{{end}}')" ||
     die 'the private KemerBet session mount contract could not be inspected'
-  [[ "$(grep -c '^' <<<"$mount_contract")" == '2' ]] ||
+  [[ "$(grep -c '^' <<<"$mount_contract")" == '6' ]] ||
     die 'the private KemerBet session mount contract is not exact'
   grep -Fxq 'volume|/run/fetanagent-kemerbet-session-control|true' <<<"$mount_contract" ||
     die 'the private KemerBet session mount contract is not exact'
   grep -Fxq 'volume|/var/lib/fetanagent/kemerbet-sessions|true' <<<"$mount_contract" ||
     die 'the private KemerBet session mount contract is not exact'
+  grep -Fxq 'bind|/run/secrets/kemerbet_agent_identity_hmac_key|false' <<<"$mount_contract" ||
+    die 'the private KemerBet session mount contract is not exact'
+  grep -Fxq 'bind|/run/secrets/kemerbet_no_transfer_readiness_player_ids|false' <<<"$mount_contract" ||
+    die 'the private KemerBet session mount contract is not exact'
+  grep -Fxq 'bind|/etc/fetanagent/kemerbet-selector-contract.v2.json|false' <<<"$mount_contract" ||
+    die 'the private KemerBet session mount contract is not exact'
+  grep -Fxq 'bind|/run/fetanagent-kemerbet-readiness-seal-output|true' <<<"$mount_contract" ||
+    die 'the private KemerBet session mount contract is not exact'
+
+  identity_key_source="$(docker_local container inspect "$container_id" \
+    --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/kemerbet_agent_identity_hmac_key"}}{{.Source}}{{end}}{{end}}')"
+  player_ids_source="$(docker_local container inspect "$container_id" \
+    --format '{{range .Mounts}}{{if eq .Destination "/run/secrets/kemerbet_no_transfer_readiness_player_ids"}}{{.Source}}{{end}}{{end}}')"
+  selector_source="$(docker_local container inspect "$container_id" \
+    --format '{{range .Mounts}}{{if eq .Destination "/etc/fetanagent/kemerbet-selector-contract.v2.json"}}{{.Source}}{{end}}{{end}}')"
+  readiness_output_source="$(docker_local container inspect "$container_id" \
+    --format '{{range .Mounts}}{{if eq .Destination "/run/fetanagent-kemerbet-readiness-seal-output"}}{{.Source}}{{end}}{{end}}')"
+  [[ "$identity_key_source" == "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" &&
+    "$player_ids_source" == "$KEMERBET_READINESS_PLAYER_IDS" &&
+    "$selector_source" == "$KEMERBET_SELECTOR_CONTRACT" &&
+    "$readiness_output_source" == "$KEMERBET_READINESS_OUTPUT_ROOT" ]] ||
+    die 'the private KemerBet readiness input or output source is not exact'
 
   owner_container="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" \
@@ -1512,6 +1566,10 @@ case "$command" in
     [[ "$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" \
       --format '{{.Config.User}}')" == '10001:10001' ]] ||
       die 'the private KemerBet session image user is not exact'
+    require_service_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+    require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
+    require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
+    require_kemerbet_readiness_output_directory
 
     compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
     [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
@@ -1564,6 +1622,80 @@ case "$command" in
       die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
     require_kemerbet_session_provision_runtime "$commit_sha"
+    ;;
+
+  seal-kemerbet-readiness)
+    [[ $# -eq 2 ]] ||
+      die 'seal-kemerbet-readiness requires one reviewed main commit'
+    commit_sha="$2"
+    [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
+    require_kemerbet_session_provision_runtime "$commit_sha"
+    [[ ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+      die 'the one-time KemerBet readiness binding already exists'
+    owner_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=owner-control')"
+    [[ "$owner_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die 'the Owner container inventory is not singular for readiness sealing'
+    docker_local container exec "$owner_container" node --input-type=module --eval '
+      import { randomUUID } from "node:crypto";
+      import http from "node:http";
+      const body = JSON.stringify({ requestId: randomUUID() });
+      const request = http.request({
+        socketPath: "/run/fetanagent-kemerbet-session-control/session.sock",
+        path: "/v1/readiness/seal",
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+        },
+      }, (response) => {
+        let size = 0;
+        const chunks = [];
+        response.on("data", (chunk) => {
+          size += chunk.byteLength;
+          if (size > 4096) request.destroy();
+          else chunks.push(chunk);
+        });
+        response.on("end", () => {
+          try {
+            const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            const keys = Object.keys(result).sort();
+            const expectedKeys = [
+              "currency",
+              "identifiersRedacted",
+              "moneyMoved",
+              "playersChecked",
+              "sealed",
+              "transferDisabled",
+            ];
+            if (
+              response.statusCode !== 201 ||
+              keys.length !== expectedKeys.length ||
+              !keys.every((key, index) => key === expectedKeys[index]) ||
+              result.sealed !== true ||
+              result.playersChecked !== 5 ||
+              result.currency !== "ETB" ||
+              result.transferDisabled !== true ||
+              result.moneyMoved !== false ||
+              result.identifiersRedacted !== true
+            ) process.exit(31);
+            process.exit(0);
+          } catch {
+            process.exit(32);
+          }
+        });
+      });
+      request.on("error", () => process.exit(33));
+      request.setTimeout(180000, () => request.destroy());
+      request.end(body);
+    ' || die 'the one-time KemerBet readiness seal failed closed'
+    require_kemerbet_readiness_output_directory
+    [[ -f "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+      die 'the one-time KemerBet readiness binding was not created'
+    printf '%s\n' 'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
     ;;
 
   stop-kemerbet-session-provision)
@@ -1697,6 +1829,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, seal-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

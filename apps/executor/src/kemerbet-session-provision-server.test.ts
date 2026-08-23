@@ -79,6 +79,22 @@ describe('private KemerBet session provision server', () => {
     expect(source).not.toMatch(/const SESSION_LIFETIME_MS/u);
   });
 
+  it('exposes only an aggregate one-time readiness seal on the current signed-in page', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-session-provision-server.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toMatch(/request\.url === '\/v1\/readiness\/seal'/u);
+    expect(source).toMatch(/validPageUrl\(retainedPage\.url\(\)\) !== 'agents'/u);
+    expect(source).toMatch(/FINANCIAL_ACTIONS_MODE: 'dry_run'/u);
+    expect(source).toMatch(/KEMERBET_EXECUTOR_ENABLED: 'false'/u);
+    expect(source).toMatch(/KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
+    expect(source).toMatch(/playersChecked: 5/u);
+    expect(source).toMatch(/transferDisabled: true/u);
+    expect(source).toMatch(/moneyMoved: false/u);
+    expect(source).toMatch(/identifiersRedacted: true/u);
+  });
+
   it('always blocks the exact deposit endpoint and every post-login mutation', () => {
     expect(
       isAllowedKemerBetSessionRequest({
@@ -179,6 +195,7 @@ describe('private KemerBet session provision server', () => {
     const safe = {
       NODE_ENV: 'production',
       FINANCIAL_ACTIONS_MODE: 'dry_run',
+      KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED: 'true',
       KEMERBET_EXECUTOR_ENABLED: 'false',
       KEMERBET_FINAL_ACTION_ENABLED: 'false',
       KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false',
@@ -186,6 +203,10 @@ describe('private KemerBet session provision server', () => {
     };
     for (const candidate of [
       { environment: { ...safe, FINANCIAL_ACTIONS_MODE: 'live' }, effectiveUserId: 10_001 },
+      {
+        environment: { ...safe, KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED: 'false' },
+        effectiveUserId: 10_001,
+      },
       { environment: { ...safe, KEMERBET_EXECUTOR_ENABLED: 'true' }, effectiveUserId: 10_001 },
       { environment: { ...safe, KEMERBET_FINAL_ACTION_ENABLED: 'true' }, effectiveUserId: 10_001 },
       {

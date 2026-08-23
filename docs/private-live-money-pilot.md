@@ -53,10 +53,12 @@ or provider switch live. Operators must not substitute ad-hoc SQL for this bound
 ### Owner-control client contract
 
 The same-origin Owner dashboard implements the supported human operator client while keeping the
-Supabase access token only in memory. It lists active, valid, currently eligible KemerBet Players;
-requires an explicit fixed-policy confirmation; recovers the current open pilot after a page reload;
-and keeps the emergency stop directly reachable without extracting a token or copying a UUID.
-Ad-hoc `curl`, copied bearer tokens, and browser-console snippets are not supported operator
+Supabase access token only in memory. Its rotating refresh token and fixed twelve-hour deadline use
+tab-scoped session storage so a same-tab reload can restore the Owner session; explicit sign-out or
+closing the tab erases that restorable state. It lists active, valid, currently eligible KemerBet
+Players; requires an explicit fixed-policy confirmation; recovers the current open pilot after a
+page reload; and keeps the emergency stop directly reachable without extracting a token or copying
+a UUID. Ad-hoc `curl`, copied bearer tokens, and browser-console snippets are not supported operator
 procedures.
 
 The client and server implement this exact transport contract:
@@ -83,10 +85,11 @@ The client and server implement this exact transport contract:
 Every mutation must be exact `application/json` from the Owner origin (or reviewed SSH loopback
 origin), with `x-fetanagent-owner-csrf: private-live-pilot-v1` and exactly one
 `x-idempotency-key` equal to the JSON `requestId`. All five routes require the in-memory Owner bearer
-token; PostgreSQL independently maps its verified Auth UUID to the active Owner. The client must not
-put a bearer token, KemerBet Player ID, customer UUID, protected payment reference, receiver detail,
-or raw provider artifact into source control, terminal history, analytics, logs, screenshots, or
-chat. No response from these routes contains those cohort or payment inputs.
+token; PostgreSQL independently maps its verified Auth UUID to the active Owner. Only the rotating
+refresh token and hard deadline may enter the dashboard's tab-scoped session storage. The client
+must not put a bearer token, KemerBet Player ID, customer UUID, protected payment reference,
+receiver detail, or raw provider artifact into source control, terminal history, analytics, logs,
+screenshots, or chat. No response from these routes contains those cohort or payment inputs.
 
 The execution service also requires a fixed, root-managed canonical pilot manifest containing only
 contract version, pilot revision UUID, and database-computed configuration digest. The database

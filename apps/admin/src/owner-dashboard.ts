@@ -37,8 +37,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
         <h2 id="login-title">Owner sign in</h2>
         <p class="receipt-label">
           After sign-in, this open tab securely renews the Owner access token for up to twelve
-          hours. The rotating refresh token remains only in memory and is erased on sign-out,
-          reload, or tab close.
+          hours. The rotating refresh token is retained only in this browser tab, survives page
+          reloads, and is erased on sign-out or tab close.
         </p>
         <form id="login-form">
           <label for="email">Email</label>
@@ -426,6 +426,7 @@ const selectedPilotPlayerIds = new Set();
 const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
 const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
+const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
 
 function setNotice(message) {
   notice.textContent = message;
@@ -505,9 +506,51 @@ function clearOwnerRefreshTimer() {
   ownerRefreshTimer = undefined;
 }
 
+function clearPersistedOwnerSession() {
+  try {
+    window.sessionStorage.removeItem(OWNER_SESSION_STORAGE_KEY);
+  } catch {
+    // An unavailable storage boundary is equivalent to having no restorable session.
+  }
+}
+
+function validPersistedOwnerSession(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'expiresAt,refreshToken' ||
+      typeof value.refreshToken !== 'string' || value.refreshToken.length < 12 ||
+      value.refreshToken.length > 4_096 ||
+      !Number.isInteger(value.expiresAt) || value.expiresAt <= Date.now() ||
+      value.expiresAt > Date.now() + OWNER_SESSION_LIFETIME_MS) {
+    return undefined;
+  }
+  return { expiresAt: value.expiresAt, refreshToken: value.refreshToken };
+}
+
+function readPersistedOwnerSession() {
+  try {
+    const stored = window.sessionStorage.getItem(OWNER_SESSION_STORAGE_KEY);
+    if (!stored || stored.length > 4_256) return undefined;
+    const session = validPersistedOwnerSession(JSON.parse(stored));
+    if (!session) clearPersistedOwnerSession();
+    return session;
+  } catch {
+    clearPersistedOwnerSession();
+    return undefined;
+  }
+}
+
+function persistOwnerSession() {
+  if (!refreshToken || !ownerSessionExpiresAt) throw new Error('signed_out');
+  window.sessionStorage.setItem(
+    OWNER_SESSION_STORAGE_KEY,
+    JSON.stringify({ expiresAt: ownerSessionExpiresAt, refreshToken }),
+  );
+}
+
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
+  clearPersistedOwnerSession();
   accessToken = undefined;
   refreshToken = undefined;
   ownerAuthConfig = undefined;
@@ -565,6 +608,18 @@ function validOwnerAuthSession(value) {
   };
 }
 
+async function loadOwnerAuthConfig() {
+  const response = await fetch('/owner/config.json', { cache: 'no-store', credentials: 'omit' });
+  if (!response.ok) throw new Error('config');
+  const config = await response.json();
+  if (config.supabaseUrl !== expectedSupabaseUrl ||
+      typeof config.publishableKey !== 'string' ||
+      !/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(config.publishableKey)) {
+    throw new Error('config');
+  }
+  return config;
+}
+
 function scheduleOwnerRefresh() {
   clearOwnerRefreshTimer();
   if (!accessTokenRefreshAt || !ownerSessionExpiresAt) return;
@@ -590,6 +645,7 @@ function applyOwnerAuthSession(session, resetLifetime) {
   );
   ownerSessionStatus.textContent = 'Owner session active in this tab until ' +
     new Date(ownerSessionExpiresAt).toLocaleString() + '.';
+  persistOwnerSession();
   scheduleOwnerRefresh();
 }
 
@@ -1757,12 +1813,7 @@ loginForm.addEventListener('submit', async (event) => {
   setNotice('Signing in…');
   let failureNotice = 'Sign-in failed. Check the staging Owner account and try again.';
   try {
-    const configResponse = await fetch('/owner/config.json', { cache: 'no-store', credentials: 'omit' });
-    if (!configResponse.ok) throw new Error('config');
-    const config = await configResponse.json();
-    if (config.supabaseUrl !== expectedSupabaseUrl ||
-        typeof config.publishableKey !== 'string' ||
-        !/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(config.publishableKey)) throw new Error('config');
+    const config = await loadOwnerAuthConfig();
     const response = await fetch(config.supabaseUrl + '/auth/v1/token?grant_type=password', {
       method: 'POST',
       cache: 'no-store',
@@ -1784,7 +1835,7 @@ loginForm.addEventListener('submit', async (event) => {
     applyOwnerAuthSession(session, true);
     loginPanel.hidden = true;
     invitePanel.hidden = false;
-    setNotice('Signed in. This Owner session will remain active in this tab for up to twelve hours.');
+    setNotice('Signed in. This Owner session survives reloads in this tab for up to twelve hours.');
     await loadOwnerPlayerQueues();
   } catch {
     passwordInput.value = '';
@@ -1793,6 +1844,29 @@ loginForm.addEventListener('submit', async (event) => {
     setBusy(loginForm, false);
   }
 });
+
+async function restoreOwnerSession() {
+  const persisted = readPersistedOwnerSession();
+  if (!persisted) return;
+  setBusy(loginForm, true);
+  setNotice('Restoring your Owner session…');
+  try {
+    const config = await loadOwnerAuthConfig();
+    ownerAuthGeneration += 1;
+    ownerAuthConfig = config;
+    ownerSessionExpiresAt = persisted.expiresAt;
+    refreshToken = persisted.refreshToken;
+    await refreshOwnerSession();
+    loginPanel.hidden = true;
+    invitePanel.hidden = false;
+    setNotice('Owner session restored after reload.');
+    await loadOwnerPlayerQueues();
+  } catch {
+    signOut('Your saved Owner session could not be restored. Sign in again to continue.');
+  } finally {
+    setBusy(loginForm, false);
+  }
+}
 
 inviteForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1908,6 +1982,7 @@ pilotPrepareForm.addEventListener('submit', async (event) => {
 pilotRefreshButton.addEventListener('click', loadCurrentPilot);
 pilotArmButton.addEventListener('click', armFixedPilot);
 pilotStopButton.addEventListener('click', stopCurrentPilot);
+void restoreOwnerSession();
 `;
 
 export function ownerDashboardPublicConfig(

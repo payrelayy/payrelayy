@@ -501,8 +501,10 @@ use an approved SSH local-forward to `127.0.0.1:3002`. After the separately gate
 passes, the only supported public route is `https://owner.fetanagent.com/owner` through the reviewed
 gateway; port 3002 itself remains unpublished. The page has a fixed content-security policy, receives only the staging
 publishable key as public configuration, signs in against the exact staging Auth origin, and keeps
-the short-lived access token in memory only. Closing or refreshing the page discards the token and
-the one-time invite receipt.
+the short-lived access token in memory only. A rotating refresh token and the fixed twelve-hour
+deadline are kept only in tab-scoped session storage so a same-tab reload restores the session;
+explicit sign-out or closing the tab removes that restorable session. The one-time invite receipt
+is never persisted and is discarded by a reload.
 
 Before sign-in can authorize an invite, one confirmed staging Supabase Auth user must be converted
 to the first active Owner by the manual `Staging first Owner bootstrap` workflow. Create that Auth

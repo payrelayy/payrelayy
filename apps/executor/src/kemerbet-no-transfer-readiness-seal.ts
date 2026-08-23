@@ -267,12 +267,14 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
     await options.close();
   };
   try {
+    // The supervised sign-in service owns this already-authenticated page. Do not
+    // reload it: KemerBet may keep part of the authenticated dashboard state in
+    // the live document, and a navigation would discard the exact session that
+    // the Owner just established. The caller and the checks below both require
+    // the page to remain on the canonical Agent dashboard for the whole proof.
+    if (options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
     await options.page.route('**/*', readinessRoute);
     routeInstalled = true;
-    await options.page.goto(KEMERBET_AGENT_DEPOSIT_URL, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30_000,
-    });
     if (options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
     const observedAgentIdentityFingerprint = await observeKemerBetAgentIdentityFingerprint({
       page: options.page,

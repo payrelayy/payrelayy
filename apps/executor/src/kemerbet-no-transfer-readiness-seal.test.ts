@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
@@ -63,6 +65,23 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
 }
 
 describe('KemerBet no-transfer readiness seal', () => {
+  it('reuses the exact signed-in page without navigating or reloading it', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-no-transfer-readiness-seal.ts', import.meta.url),
+      'utf8',
+    );
+    const start = source.indexOf(
+      'export async function createKemerBetNoTransferReadinessSealProbeFromPage',
+    );
+    const end = source.indexOf('async function productionOpenProbe', start);
+    const body = start >= 0 && end > start ? source.slice(start, end) : undefined;
+
+    expect(body).toBeDefined();
+    expect(body).toContain('options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL');
+    expect(body).not.toContain('.goto(');
+    expect(body).not.toContain('.reload(');
+  });
+
   it('binds one redacted identity only after exactly five sequential lookup proofs', async () => {
     const test = fixture();
 

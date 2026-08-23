@@ -260,6 +260,10 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.headers['x-frame-options']).toBe('DENY');
     expect(response.headers['permissions-policy']).toContain('payment=()');
     expect(response.body).toContain('FetanAgent Owner');
+    expect(response.body).toMatch(
+      /securely renews the Owner access token for up to twelve\s+hours/u,
+    );
+    expect(response.body).toContain('id="owner-session-status"');
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
     expect(response.body).toContain('Explicit ownership confirmation');
@@ -296,15 +300,24 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
-  it('keeps the Owner access token in memory and never enables browser credential storage', async () => {
+  it('keeps a rotating twelve-hour Owner session in memory without browser credential storage', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
     const response = await app.inject({ method: 'GET', url: '/owner/app.js' });
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain('/auth/v1/token?grant_type=password');
+    expect(response.body).toContain('/auth/v1/token?grant_type=refresh_token');
+    expect(response.body).toContain('/auth/v1/logout?scope=local');
     expect(response.body).toContain("credentials: 'omit'");
     expect(response.body).toContain("authorization: 'Bearer ' + accessToken");
     expect(response.body).not.toMatch(/localStorage|sessionStorage|document\.cookie|indexedDB/u);
-    expect(response.body).not.toContain('refresh_token');
+    expect(response.body).toContain('const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000');
+    expect(response.body).toContain('const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000');
+    expect(response.body).toContain('body: JSON.stringify({ refresh_token: refreshToken })');
+    expect(response.body).toContain(
+      'ownerSessionExpiresAt = currentTime + OWNER_SESSION_LIFETIME_MS',
+    );
+    expect(response.body).toContain('Your twelve-hour Owner session ended.');
+    expect(response.body).toContain('refreshToken = undefined');
     expect(response.body).not.toContain('service_role');
     expect(response.body).toContain('/v1/owner/player-registration-requests?limit=25');
     expect(response.body).toContain(

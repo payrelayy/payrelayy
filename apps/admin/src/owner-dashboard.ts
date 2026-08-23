@@ -35,6 +35,11 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
 
       <section class="panel" id="login-panel" aria-labelledby="login-title">
         <h2 id="login-title">Owner sign in</h2>
+        <p class="receipt-label">
+          After sign-in, this open tab securely renews the Owner access token for up to twelve
+          hours. The rotating refresh token remains only in memory and is erased on sign-out,
+          reload, or tab close.
+        </p>
         <form id="login-form">
           <label for="email">Email</label>
           <input id="email" name="email" type="email" autocomplete="username" required />
@@ -52,6 +57,7 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </div>
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
+        <p class="request-meta" id="owner-session-status"></p>
         <form id="invite-form">
           <label for="expiry">Invite lifetime</label>
           <select id="expiry" name="expiry">
@@ -362,6 +368,7 @@ const loginForm = document.querySelector('#login-form');
 const inviteForm = document.querySelector('#invite-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
+const ownerSessionStatus = document.querySelector('#owner-session-status');
 const notice = document.querySelector('#notice');
 const receipt = document.querySelector('#invite-receipt');
 const inviteOutput = document.querySelector('#invite-url');
@@ -400,6 +407,13 @@ const pilotStopReason = document.querySelector('#pilot-stop-reason');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
+let refreshToken;
+let ownerAuthConfig;
+let ownerSessionExpiresAt;
+let accessTokenRefreshAt;
+let ownerRefreshTimer;
+let ownerRefreshPromise;
+let ownerAuthGeneration = 0;
 let currentInvite;
 let currentPilot;
 let eligiblePilotPlayers = [];
@@ -410,6 +424,8 @@ let kemerbetInputPending = false;
 let kemerbetInputLane = Promise.resolve();
 const selectedPilotPlayerIds = new Set();
 const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
+const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
 
 function setNotice(message) {
   notice.textContent = message;
@@ -484,8 +500,21 @@ function clearDepositIntake() {
   depositIntakeList.replaceChildren();
 }
 
+function clearOwnerRefreshTimer() {
+  if (ownerRefreshTimer !== undefined) window.clearTimeout(ownerRefreshTimer);
+  ownerRefreshTimer = undefined;
+}
+
 function signOut(message = 'Signed out.') {
+  ownerAuthGeneration += 1;
+  clearOwnerRefreshTimer();
   accessToken = undefined;
+  refreshToken = undefined;
+  ownerAuthConfig = undefined;
+  ownerSessionExpiresAt = undefined;
+  accessTokenRefreshAt = undefined;
+  ownerRefreshPromise = undefined;
+  ownerSessionStatus.textContent = '';
   passwordInput.value = '';
   clearInvite();
   clearPlayerRequests();
@@ -518,7 +547,96 @@ function isSignedOutError(error) {
   return error instanceof Error && error.message === 'signed_out';
 }
 
+function validOwnerAuthSession(value) {
+  if (!value || typeof value !== 'object' ||
+      typeof value.access_token !== 'string' || value.access_token.length < 20 ||
+      typeof value.refresh_token !== 'string' || value.refresh_token.length < 20 ||
+      !Number.isInteger(value.expires_in) || value.expires_in < 60 || value.expires_in > 86_400) {
+    return undefined;
+  }
+  return {
+    accessToken: value.access_token,
+    expiresInSeconds: value.expires_in,
+    refreshToken: value.refresh_token,
+  };
+}
+
+function scheduleOwnerRefresh() {
+  clearOwnerRefreshTimer();
+  if (!accessTokenRefreshAt || !ownerSessionExpiresAt) return;
+  const nextAt = Math.min(accessTokenRefreshAt, ownerSessionExpiresAt);
+  const delay = Math.max(1_000, nextAt - Date.now());
+  ownerRefreshTimer = window.setTimeout(
+    () => void refreshOwnerSession().catch(() => undefined),
+    delay,
+  );
+}
+
+function applyOwnerAuthSession(session, resetLifetime) {
+  const parsed = validOwnerAuthSession(session);
+  if (!parsed) throw new Error('signed_out');
+  const currentTime = Date.now();
+  if (resetLifetime) ownerSessionExpiresAt = currentTime + OWNER_SESSION_LIFETIME_MS;
+  if (!ownerSessionExpiresAt || currentTime >= ownerSessionExpiresAt) throw new Error('signed_out');
+  accessToken = parsed.accessToken;
+  refreshToken = parsed.refreshToken;
+  accessTokenRefreshAt = Math.min(
+    currentTime + parsed.expiresInSeconds * 1_000 - ACCESS_TOKEN_REFRESH_MARGIN_MS,
+    ownerSessionExpiresAt,
+  );
+  ownerSessionStatus.textContent = 'Owner session active in this tab until ' +
+    new Date(ownerSessionExpiresAt).toLocaleString() + '.';
+  scheduleOwnerRefresh();
+}
+
+async function refreshOwnerSession() {
+  if (ownerRefreshPromise) return ownerRefreshPromise;
+  const generation = ownerAuthGeneration;
+  ownerRefreshPromise = (async () => {
+    if (!refreshToken || !ownerAuthConfig || !ownerSessionExpiresAt ||
+        Date.now() >= ownerSessionExpiresAt) {
+      signOut('Your twelve-hour Owner session ended. Sign in again to continue.');
+      throw new Error('signed_out');
+    }
+    const response = await fetch(
+      ownerAuthConfig.supabaseUrl + '/auth/v1/token?grant_type=refresh_token',
+      {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { apikey: ownerAuthConfig.publishableKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+        referrerPolicy: 'no-referrer',
+      },
+    );
+    if (!response.ok || generation !== ownerAuthGeneration) throw new Error('signed_out');
+    applyOwnerAuthSession(await response.json(), false);
+  })();
+  try {
+    await ownerRefreshPromise;
+  } catch {
+    if (generation === ownerAuthGeneration) {
+      signOut('Your Owner session could not be renewed. Sign in again to continue.');
+    }
+    throw new Error('signed_out');
+  } finally {
+    if (generation === ownerAuthGeneration) ownerRefreshPromise = undefined;
+  }
+}
+
+async function ensureFreshOwnerAccessToken() {
+  if (!accessToken || !accessTokenRefreshAt || !ownerSessionExpiresAt) {
+    throw new Error('signed_out');
+  }
+  if (Date.now() >= ownerSessionExpiresAt) {
+    signOut('Your twelve-hour Owner session ended. Sign in again to continue.');
+    throw new Error('signed_out');
+  }
+  if (Date.now() >= accessTokenRefreshAt) await refreshOwnerSession();
+}
+
 async function ownerRequest(path, init) {
+  await ensureFreshOwnerAccessToken();
   if (!accessToken) throw new Error('signed_out');
   const response = await fetch(path, {
     ...init,
@@ -1651,16 +1769,18 @@ loginForm.addEventListener('submit', async (event) => {
     passwordInput.value = '';
     if (!response.ok) throw new Error('login');
     const session = await response.json();
-    if (typeof session.access_token !== 'string' || session.access_token.length < 20) throw new Error('login');
-    accessToken = session.access_token;
+    const parsedSession = validOwnerAuthSession(session);
+    if (!parsedSession) throw new Error('login');
+    ownerAuthGeneration += 1;
+    ownerAuthConfig = config;
+    applyOwnerAuthSession(session, true);
     loginPanel.hidden = true;
     invitePanel.hidden = false;
-    setNotice('Signed in. Create an invite when you are ready to send it.');
+    setNotice('Signed in. This Owner session will remain active in this tab for up to twelve hours.');
     await loadOwnerPlayerQueues();
   } catch {
     passwordInput.value = '';
-    accessToken = undefined;
-    setNotice('Sign-in failed. Check the staging Owner account and try again.');
+    signOut('Sign-in failed. Check the staging Owner account and try again.');
   } finally {
     setBusy(loginForm, false);
   }
@@ -1724,6 +1844,15 @@ revokeButton.addEventListener('click', async () => {
 
 logoutButton.addEventListener('click', async () => {
   if (currentKemerbetSession?.active) await stopKemerbetSession({ confirm: false });
+  const config = ownerAuthConfig;
+  const token = accessToken;
+  if (config && token) {
+    await fetch(config.supabaseUrl + '/auth/v1/logout?scope=local', {
+      method: 'POST', cache: 'no-store', credentials: 'omit',
+      headers: { apikey: config.publishableKey, authorization: 'Bearer ' + token },
+      referrerPolicy: 'no-referrer',
+    }).catch(() => undefined);
+  }
   signOut();
 });
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);

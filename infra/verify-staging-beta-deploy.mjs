@@ -39,8 +39,8 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  '215c09587469d20ae4b4f1f62ea321b29aa347de3580287d459cf6cb5759a505';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-215c0958';
+  'f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-f7c708ac';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
 const reviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
@@ -99,12 +99,14 @@ for (const requiredSessionWorkflowContract of [
   /CONFIRMED_PROJECT.*PRODUCTION_PROJECT_REF/,
   /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/,
   /private-sign-in-no-transfer/,
+  /seal-five-player-no-transfer/,
   /environment: staging/,
   /persist-credentials: false/,
   /StrictHostKeyChecking=yes/g,
   /fetanagent-staging-deploy-helper verify/,
   /fetanagent-staging-deploy-helper start-kemerbet-session-provision/,
   /fetanagent-staging-deploy-helper kemerbet-session-provision-ready/,
+  /fetanagent-staging-deploy-helper seal-kemerbet-readiness/,
   /fetanagent-staging-deploy-helper stop-kemerbet-session-provision/,
   /private_kemerbet_sign_in_no_transfer=pass/,
 ]) {
@@ -1252,6 +1254,10 @@ assert.match(
   /require_exact_fresh_bot_runtime "\$commit_sha" published-steady-state/,
 );
 assert.match(startKemerbetSession, /fetanagent-deposit-executor:\$image_tag/);
+assert.match(startKemerbetSession, /require_service_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/);
+assert.match(startKemerbetSession, /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/);
+assert.match(startKemerbetSession, /require_immutable_config_file "\$KEMERBET_SELECTOR_CONTRACT"/);
+assert.match(startKemerbetSession, /require_kemerbet_readiness_output_directory/);
 assert.match(startKemerbetSession, /--profile kemerbet-session-provision/);
 assert.match(
   startKemerbetSession,
@@ -1276,6 +1282,7 @@ for (const contract of [
   /ShmSize/,
   /PortBindings/,
   /FINANCIAL_ACTIONS_MODE=dry_run/,
+  /KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true/,
   /KEMERBET_EXECUTOR_ENABLED=false/,
   /KEMERBET_FINAL_ACTION_ENABLED=false/,
   /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/,
@@ -1283,11 +1290,45 @@ for (const contract of [
   /grep -c '\^'/,
   /volume\|\/run\/fetanagent-kemerbet-session-control\|true/,
   /volume\|\/var\/lib\/fetanagent\/kemerbet-sessions\|true/,
+  /bind\|\/run\/secrets\/kemerbet_agent_identity_hmac_key\|false/,
+  /bind\|\/run\/secrets\/kemerbet_no_transfer_readiness_player_ids\|false/,
+  /bind\|\/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json\|false/,
+  /bind\|\/run\/fetanagent-kemerbet-readiness-seal-output\|true/,
+  /KEMERBET_AGENT_IDENTITY_HMAC_KEY/,
+  /KEMERBET_READINESS_PLAYER_IDS/,
+  /KEMERBET_SELECTOR_CONTRACT/,
+  /KEMERBET_READINESS_OUTPUT_ROOT/,
   /\/run\/fetanagent-kemerbet-session-control\/session\.sock/,
 ]) {
   assert.match(kemerbetSessionRuntime, contract);
 }
 assert.doesNotMatch(kemerbetSessionRuntime, /container logs|\bcat\b|password=|token=/iu);
+
+const sealKemerbetReadiness = /\n  seal-kemerbet-readiness\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(
+  sealKemerbetReadiness,
+  'The helper must define the one-time live-session readiness seal.',
+);
+for (const contract of [
+  /published-with-kemerbet-session/,
+  /require_kemerbet_session_provision_runtime "\$commit_sha"/,
+  /! -e "\$KEMERBET_READINESS_BINDING"/,
+  /\/v1\/readiness\/seal/,
+  /randomUUID\(\)/,
+  /response\.statusCode !== 201/,
+  /result\.playersChecked !== 5/,
+  /result\.currency !== "ETB"/,
+  /result\.transferDisabled !== true/,
+  /result\.moneyMoved !== false/,
+  /result\.identifiersRedacted !== true/,
+  /KemerBet readiness sealed: 5 of 5 Players, Transfer disabled\./,
+]) {
+  assert.match(sealKemerbetReadiness, contract);
+}
+assert.doesNotMatch(
+  sealKemerbetReadiness,
+  /container logs|\bcat\b|PlayerEPOSDeposit|GeneralInfoByExternalId|password=|token=|FINANCIAL_ACTIONS_MODE=live/iu,
+);
 
 const stopKemerbetSession = /\n  stop-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
   helper,

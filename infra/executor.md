@@ -127,11 +127,13 @@ Errors and health responses contain no account, player, reference, key, or crede
 
 ### One-time identity binding and target-host seal
 
-The first target-host proof uses `readiness:seal`. Run it only while both the long-lived executor
-and private sign-in service are stopped, after the Owner preview has reported a successful KemerBet
-sign-in and that browser context has been closed cleanly. The command opens that exact persistent
-profile, permits only `GET`, `HEAD`, and `OPTIONS`, permits only the exact `/agents` main-frame
-navigation, and blocks every POST—including the deposit endpoint—before it reaches the network.
+The first target-host proof uses the same `readiness:seal` boundary inside the private sign-in
+service. KemerBet keeps this account's authenticated state in the running Chromium process, so the
+Owner preview must report a successful KemerBet sign-in and remain open while the one-time private
+Unix-socket endpoint runs. The seal adds a stricter route for its lifetime: only `GET`, `HEAD`, and
+`OPTIONS` are permitted, the only main-frame destination is exact `/agents`, and every POST—including
+the deposit endpoint—is blocked before it reaches the network. The serialized service lane prevents
+preview input, stop, or another seal request from interleaving with the proof.
 
 The seal receives only one canonical platform-account UUID, the identity HMAC key, the reviewed
 selector v2 file, the exact-five one-use Player-ID file, the persistent profile volume, and an empty
@@ -160,12 +162,14 @@ KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false
 INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false
 ```
 
-Run `node apps/executor/dist/kemerbet-no-transfer-readiness-seal.js` as UID/GID `10001:10001` in a
-read-only, capability-free, no-new-privileges container with a `noexec,nosuid,nodev` temporary
-filesystem and the same bounded CPU, memory, PID, and shared-memory limits as the existing
-readiness service. After success, install the atomically produced binding as the fixed Owner-managed
-identity-binding secret without printing its contents. Securely delete the one-use Player file and
-the temporary output directory after installation.
+On the staging host, invoke `POST /v1/readiness/seal` with only a fresh UUID request ID through the
+mode-`0600` Unix socket shared by Owner control and the sign-in service. The service itself runs as
+UID/GID `10001:10001` in a read-only, capability-free, no-new-privileges container with a
+`noexec,nosuid` temporary filesystem and bounded CPU, memory, PID, and shared-memory limits. A
+successful response is aggregate-only: five Players checked, ETB, Transfer disabled, no money moved,
+and identifiers redacted. After success, install the atomically produced binding as the fixed
+Owner-managed identity-binding secret without printing its contents. Securely delete the one-use
+Player file after the later independent recheck no longer needs it.
 
 ### Independent bound-profile recheck
 

@@ -202,17 +202,39 @@ assert.match(kemerbetSessionService, /pids_limit: 512/);
 assert.match(kemerbetSessionService, /mem_limit: 1536m/);
 assert.match(kemerbetSessionService, /cpus: 2\.00/);
 assert.match(kemerbetSessionService, /FINANCIAL_ACTIONS_MODE: dry_run/);
+assert.match(kemerbetSessionService, /KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED: 'true'/);
 assert.match(kemerbetSessionService, /KEMERBET_EXECUTOR_ENABLED: 'false'/);
 assert.match(kemerbetSessionService, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/);
 assert.match(kemerbetSessionService, /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'/);
 assert.match(kemerbetSessionService, /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'/);
 assert.match(kemerbetSessionService, /source: kemerbet_session_control/);
 assert.match(kemerbetSessionService, /source: kemerbet_sessions/);
+assert.match(
+  kemerbetSessionService,
+  /source: \/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_hmac_key[\s\S]*?target: \/run\/secrets\/kemerbet_agent_identity_hmac_key[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+);
+assert.match(
+  kemerbetSessionService,
+  /source: \/etc\/fetanagent\/executor-secrets\/kemerbet_no_transfer_readiness_player_ids[\s\S]*?target: \/run\/secrets\/kemerbet_no_transfer_readiness_player_ids[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+);
+assert.match(
+  kemerbetSessionService,
+  /source: \/etc\/fetanagent\/executor-config\/kemerbet-selector-contract\.v2\.json[\s\S]*?target: \/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+);
+assert.match(
+  kemerbetSessionService,
+  /source: \/var\/lib\/fetanagent\/kemerbet-readiness-seal-output[\s\S]*?target: \/run\/fetanagent-kemerbet-readiness-seal-output[\s\S]*?create_host_path: false/,
+);
 assert.match(kemerbetSessionService, /session\.sock/);
 assert.match(kemerbetSessionService, /networks:\s*\r?\n\s+- owner_control_service/);
 assert.doesNotMatch(
   kemerbetSessionService,
-  /secrets:|configs:|ports:|expose:|DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY|docker\.sock/,
+  /secrets:|configs:|ports:|expose:|DATABASE|PASSWORD|TOKEN|SUPABASE|RECEIVER|docker\.sock/,
+);
+const kemerbetSessionEnvironment = servicePropertyBlock(kemerbetSessionService, 'environment');
+assert.doesNotMatch(
+  kemerbetSessionEnvironment,
+  /DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY/,
 );
 
 assert.match(customerWebService, /target: customer-web/);

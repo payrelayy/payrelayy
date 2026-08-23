@@ -139,6 +139,7 @@ services:
     environment:
       NODE_ENV: production
       FINANCIAL_ACTIONS_MODE: dry_run
+      KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED: 'true'
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
       KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'
@@ -150,6 +151,29 @@ services:
       - type: volume
         source: kemerbet_sessions
         target: /var/lib/fetanagent/kemerbet-sessions
+      - type: bind
+        source: /etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key
+        target: /run/secrets/kemerbet_agent_identity_hmac_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids
+        target: /run/secrets/kemerbet_no_transfer_readiness_player_ids
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json
+        target: /etc/fetanagent/kemerbet-selector-contract.v2.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /var/lib/fetanagent/kemerbet-readiness-seal-output
+        target: /run/fetanagent-kemerbet-readiness-seal-output
+        bind:
+          create_host_path: false
     networks:
       - owner_control_service
     healthcheck:

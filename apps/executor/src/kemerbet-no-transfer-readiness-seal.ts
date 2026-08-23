@@ -24,7 +24,7 @@ import {
   type KemerBetAgentIdentityFingerprinter,
 } from './kemerbet-agent-identity-fingerprint.js';
 import { createKemerBetDepositBrowser } from './kemerbet-deposit-browser-adapter.js';
-import { removeStaleChromiumSingletonArtifacts } from './kemerbet-session-provision-server.js';
+import { removeStaleChromiumSingletonArtifacts } from './kemerbet-chromium-profile.js';
 import {
   assertKemerBetAgentPageSelectorContractV2,
   createPlaywrightKemerBetAgentPage,
@@ -244,6 +244,75 @@ async function guardedRoute(route: Route, page: Page): Promise<void> {
   await route.continue();
 }
 
+/**
+ * Build the five-lookup probe on an already-authenticated page. The extra route is installed for
+ * the proof lifetime so every request is read-only even when the page belongs to the manual
+ * sign-in service whose authenticated state exists only inside the current Chromium process.
+ */
+export async function createKemerBetNoTransferReadinessSealProbeFromPage(options: {
+  readonly accountId: string;
+  readonly close: () => Promise<void>;
+  readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
+  readonly page: Page;
+  readonly selectorContract: KemerBetAgentPageSelectorContractV2;
+}): Promise<KemerBetNoTransferReadinessSealProbe> {
+  const readinessRoute = (route: Route) => guardedRoute(route, options.page);
+  let routeInstalled = false;
+  let probeReturned = false;
+  const close = async (): Promise<void> => {
+    if (routeInstalled) {
+      routeInstalled = false;
+      await options.page.unroute('**/*', readinessRoute).catch(() => undefined);
+    }
+    await options.close();
+  };
+  try {
+    await options.page.route('**/*', readinessRoute);
+    routeInstalled = true;
+    await options.page.goto(KEMERBET_AGENT_DEPOSIT_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    });
+    if (options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+    const observedAgentIdentityFingerprint = await observeKemerBetAgentIdentityFingerprint({
+      page: options.page,
+      platformAgentAccountId: options.accountId,
+      selectorContract: options.selectorContract,
+      fingerprintAgentIdentity: options.fingerprintAgentIdentity,
+      timeoutMs: 30_000,
+    });
+    const agentPage = createPlaywrightKemerBetAgentPage({
+      page: options.page,
+      platformAgentAccountId: options.accountId,
+      sessionKey: `kemerbet-readiness-seal-v1:${options.accountId}`,
+      selectorContract: options.selectorContract,
+      expectedAgentIdentityFingerprint: observedAgentIdentityFingerprint,
+      fingerprintAgentIdentity: options.fingerprintAgentIdentity,
+      timeoutMs: 30_000,
+    });
+    const browser = createKemerBetDepositBrowser({
+      platformAgentAccountId: options.accountId,
+      agentPage,
+      routes: {
+        agentDepositUrl: KEMERBET_AGENT_DEPOSIT_URL,
+        agentHistoryUrl: 'https://agentsystem.admindigi.com/payments/history',
+      },
+      now: () => new Date(),
+      fingerprintExternalReference: disabledHistoryFingerprinter(),
+    });
+    probeReturned = true;
+    return {
+      observedAgentIdentityFingerprint,
+      probePlayerLookup: (target) => browser.probePlayerLookup(target),
+      close,
+    };
+  } catch {
+    return unavailable();
+  } finally {
+    if (!probeReturned) await close().catch(() => undefined);
+  }
+}
+
 async function productionOpenProbe(options: {
   readonly accountId: string;
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
@@ -279,45 +348,16 @@ async function productionOpenProbe(options: {
     context.on('page', (openedPage) => {
       if (openedPage !== page) void openedPage.close().catch(() => undefined);
     });
-    await page.route('**/*', (route) => guardedRoute(route, page));
-    await page.goto(KEMERBET_AGENT_DEPOSIT_URL, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30_000,
-    });
-    const observedAgentIdentityFingerprint = await observeKemerBetAgentIdentityFingerprint({
-      page,
-      platformAgentAccountId: options.accountId,
-      selectorContract: options.selectorContract,
-      fingerprintAgentIdentity: options.fingerprintAgentIdentity,
-      timeoutMs: 30_000,
-    });
-    const agentPage = createPlaywrightKemerBetAgentPage({
-      page,
-      platformAgentAccountId: options.accountId,
-      sessionKey: `kemerbet-readiness-seal-v1:${options.accountId}`,
-      selectorContract: options.selectorContract,
-      expectedAgentIdentityFingerprint: observedAgentIdentityFingerprint,
-      fingerprintAgentIdentity: options.fingerprintAgentIdentity,
-      timeoutMs: 30_000,
-    });
-    const browser = createKemerBetDepositBrowser({
-      platformAgentAccountId: options.accountId,
-      agentPage,
-      routes: {
-        agentDepositUrl: KEMERBET_AGENT_DEPOSIT_URL,
-        agentHistoryUrl: 'https://agentsystem.admindigi.com/payments/history',
-      },
-      now: () => new Date(),
-      fingerprintExternalReference: disabledHistoryFingerprinter(),
-    });
     const retainedContext = context;
-    return {
-      observedAgentIdentityFingerprint,
-      probePlayerLookup: (target) => browser.probePlayerLookup(target),
+    return await createKemerBetNoTransferReadinessSealProbeFromPage({
+      accountId: options.accountId,
+      fingerprintAgentIdentity: options.fingerprintAgentIdentity,
+      page,
+      selectorContract: options.selectorContract,
       close: async () => {
         await retainedContext.close();
       },
-    };
+    });
   } catch {
     await context?.close().catch(() => undefined);
     return unavailable();

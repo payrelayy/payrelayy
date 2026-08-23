@@ -175,10 +175,10 @@ Progress recorded 2026-08-23:
    Compose profile accept exactly one HMAC-bound profile plus exactly five one-use private Player
    IDs, perform only sequential response-bound ETB lookups, and have no database credential, pilot
    manifest, history key, amount operation, transfer method, or action loop.
-7. **Implemented in this release:** one one-time `readiness:seal` command derives only the
-   HMAC identity binding from the manually authenticated profile and writes it atomically only after
-   those same five read-only lookup proofs pass. Its network boundary rejects every non-read request
-   and every main-frame destination except exact `/agents`.
+7. **Implemented in this release:** one one-time `readiness:seal` boundary runs inside the exact
+   manually authenticated private Chromium process, derives only the HMAC identity binding, and
+   writes it atomically only after those same five read-only lookup proofs pass. Its network boundary
+   rejects every non-read request and every main-frame destination except exact `/agents`.
 8. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
    client-side minimum or maximum.
 9. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
@@ -199,11 +199,12 @@ Progress recorded 2026-08-23:
    database or financial authority and hard-blocks the exact deposit endpoint.
 4. **Current target-host step:** finish installing the reviewed selector/key/one-use cohort, then
    start the private sign-in workflow once and type the KemerBet password/OTP only inside the
-   screenshot preview. Stop the transient browser immediately after the page reports
-   `KemerBet signed in`, then run the one-time readiness seal.
+   screenshot preview. Keep that locked browser running after the page reports `KemerBet signed in`;
+   run the one-time readiness seal through its private Unix socket before stopping it, because this
+   KemerBet authentication exists only in the current Chromium process.
 5. No password, OTP, cookie, or session export enters Git, chat, Supabase tables, shared
-   configuration, or application logs. The isolated profile volume retains only KemerBet's own
-   signed-in browser state for the later readiness command.
+   configuration, or application logs. The isolated profile volume retains KemerBet browser data,
+   while the readiness seal reuses only the current locked in-memory authenticated page.
 6. Bind the visible signed-in agent identity to the account UUID with the one-time readiness seal
    and an independent HMAC key; never print or copy the raw identity.
 7. Install the reviewed selector contract and produced identity-binding map as root-managed

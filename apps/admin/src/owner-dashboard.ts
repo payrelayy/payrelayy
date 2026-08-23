@@ -548,9 +548,13 @@ function isSignedOutError(error) {
 }
 
 function validOwnerAuthSession(value) {
+  // Supabase still issues 12-character legacy refresh tokens for projects that
+  // have not migrated to its newer encoded-token format. Treat this value as
+  // opaque and enforce only the minimum accepted by Supabase Auth plus a cap.
   if (!value || typeof value !== 'object' ||
       typeof value.access_token !== 'string' || value.access_token.length < 20 ||
-      typeof value.refresh_token !== 'string' || value.refresh_token.length < 20 ||
+      typeof value.refresh_token !== 'string' || value.refresh_token.length < 12 ||
+      value.refresh_token.length > 4_096 ||
       !Number.isInteger(value.expires_in) || value.expires_in < 60 || value.expires_in > 86_400) {
     return undefined;
   }
@@ -1751,6 +1755,7 @@ loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBusy(loginForm, true);
   setNotice('Signing in…');
+  let failureNotice = 'Sign-in failed. Check the staging Owner account and try again.';
   try {
     const configResponse = await fetch('/owner/config.json', { cache: 'no-store', credentials: 'omit' });
     if (!configResponse.ok) throw new Error('config');
@@ -1770,7 +1775,10 @@ loginForm.addEventListener('submit', async (event) => {
     if (!response.ok) throw new Error('login');
     const session = await response.json();
     const parsedSession = validOwnerAuthSession(session);
-    if (!parsedSession) throw new Error('login');
+    if (!parsedSession) {
+      failureNotice = 'Supabase accepted sign-in but returned an unusable session. Refresh and try again.';
+      throw new Error('session');
+    }
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
     applyOwnerAuthSession(session, true);
@@ -1780,7 +1788,7 @@ loginForm.addEventListener('submit', async (event) => {
     await loadOwnerPlayerQueues();
   } catch {
     passwordInput.value = '';
-    signOut('Sign-in failed. Check the staging Owner account and try again.');
+    signOut(failureNotice);
   } finally {
     setBusy(loginForm, false);
   }

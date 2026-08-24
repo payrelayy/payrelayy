@@ -114,7 +114,14 @@ interface LocatorOptions {
   readonly onBlur?: (options?: { readonly timeout?: number }) => void | Promise<void>;
   readonly documentDispatchResult?: boolean;
   readonly defaultViewAvailable?: boolean;
-  readonly onClick?: (options?: { readonly timeout?: number }) => void | Promise<void>;
+  readonly onTrialClick?: (options?: {
+    readonly timeout?: number;
+    readonly trial?: boolean;
+  }) => void | Promise<void>;
+  readonly onClick?: (options?: {
+    readonly timeout?: number;
+    readonly trial?: boolean;
+  }) => void | Promise<void>;
 }
 
 class FakeLocator implements PlaywrightLocatorPort {
@@ -132,7 +139,12 @@ class FakeLocator implements PlaywrightLocatorPort {
   readonly onBlur: ((options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
   readonly documentDispatchResult: boolean;
   readonly defaultViewAvailable: boolean;
-  readonly onClick: ((options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
+  readonly onTrialClick:
+    | ((options?: { readonly timeout?: number; readonly trial?: boolean }) => void | Promise<void>)
+    | undefined;
+  readonly onClick:
+    | ((options?: { readonly timeout?: number; readonly trial?: boolean }) => void | Promise<void>)
+    | undefined;
   readonly fillCalls: Array<{
     readonly value: string;
     readonly options?: { readonly timeout?: number };
@@ -158,6 +170,7 @@ class FakeLocator implements PlaywrightLocatorPort {
     this.onBlur = options.onBlur;
     this.documentDispatchResult = options.documentDispatchResult ?? true;
     this.defaultViewAvailable = options.defaultViewAvailable ?? true;
+    this.onTrialClick = options.onTrialClick;
     this.onClick = options.onClick;
   }
 
@@ -173,7 +186,11 @@ class FakeLocator implements PlaywrightLocatorPort {
     return this.items?.length ?? (this.visible ? 1 : 0);
   }
 
-  async click(options?: { readonly timeout?: number }) {
+  async click(options?: { readonly timeout?: number; readonly trial?: boolean }) {
+    if (options?.trial === true) {
+      await this.onTrialClick?.(options);
+      return;
+    }
     await this.onClick?.(options);
   }
 
@@ -311,6 +328,13 @@ function emptyLocator() {
   return new FakeLocator({ visible: false, items: [] });
 }
 
+function hiddenExistingLocator() {
+  return new FakeLocator({
+    visible: false,
+    items: [new FakeLocator({ visible: false })],
+  });
+}
+
 const headers = [
   'State',
   'Operation',
@@ -376,17 +400,24 @@ class FakePage implements PlaywrightPagePort {
   historyDelayPolls = 0;
   dialogDelayPolls = 0;
   workflowClicks: string[] = [];
-  findButtonClickOptions: { readonly timeout?: number } | undefined;
-  findButtonDocumentEvents: string[] = [];
-  findButtonDocumentEventDetails: unknown[] = [];
+  findButtonTrialClickOptions: Array<{
+    readonly timeout?: number;
+    readonly trial?: boolean;
+  }> = [];
+  findButtonRealClickOptions: Array<{
+    readonly timeout?: number;
+    readonly trial?: boolean;
+  }> = [];
   resetDocumentEvents: Array<{ readonly type: string; readonly detail: unknown }> = [];
   lookupRequestPlayerIds: string[] = [];
+  lookupResponseWaits = 0;
   findButtonTagName = 'BUTTON';
   findButtonConnected = true;
   findButtonEnabled = true;
   findButtonAttributes: Readonly<Record<string, string>> = {};
-  findButtonDefaultViewAvailable = true;
-  findButtonDocumentDispatchResult = true;
+  findButtonTrialFails = false;
+  findButtonNativeValidationCount = 0;
+  showFinancialControlsAfterFindValidationCount: number | null = null;
   playerIdPressSequentiallyAvailable = true;
   playerIdBlurAvailable = true;
   playerIdBlurCommits = true;
@@ -394,6 +425,7 @@ class FakePage implements PlaywrightPagePort {
   playerDepositOpen = false;
   lookupResolved = false;
   showFinancialControlsDuringSearch = false;
+  hiddenFinancialControlDuringSearch: 'amount' | 'notes' | 'transfer' | null = null;
   hideFindBy = false;
   hidePlayerIdInput = false;
   hideFindButton = false;
@@ -542,14 +574,20 @@ class FakePage implements PlaywrightPagePort {
         ? this.withLookupControlDuplicates(this.playerIdInput)
         : emptyLocator();
     }
-    if (label === 'Amount *')
-      return this.lookupResolved || this.showFinancialControlsDuringSearch
-        ? this.preparedAmount
+    if (label === 'Amount *') {
+      if (this.lookupResolved || this.showFinancialControlsDuringSearch) {
+        return this.preparedAmount;
+      }
+      return this.hiddenFinancialControlDuringSearch === 'amount'
+        ? hiddenExistingLocator()
         : emptyLocator();
-    if (label === 'Notes')
-      return this.lookupResolved || this.showFinancialControlsDuringSearch
-        ? this.notesInput
+    }
+    if (label === 'Notes') {
+      if (this.lookupResolved || this.showFinancialControlsDuringSearch) return this.notesInput;
+      return this.hiddenFinancialControlDuringSearch === 'notes'
+        ? hiddenExistingLocator()
         : emptyLocator();
+    }
     return emptyLocator();
   }
 
@@ -570,25 +608,29 @@ class FakePage implements PlaywrightPagePort {
           connected: this.findButtonConnected,
           enabled: this.findButtonEnabled,
           attributes: this.findButtonAttributes,
-          defaultViewAvailable: this.findButtonDefaultViewAvailable,
-          documentDispatchResult: this.findButtonDocumentDispatchResult,
-          onDocumentEvent: (type, detail) => {
-            this.findButtonDocumentEvents.push(type);
-            this.findButtonDocumentEventDetails.push(detail);
-            if (type === 'onTransferOkActionEvent' && detail === undefined) {
-              if (this.playerIdCommittedValue !== this.playerIdInput.input) {
-                this.rejectPendingLookupResponse('Player ID form value was not committed');
-                return;
-              }
-              this.workflowClicks.push('button:Find');
-              this.emitLookupResponse();
+          onEvaluateResult: () => {
+            this.findButtonNativeValidationCount += 1;
+            if (
+              this.showFinancialControlsAfterFindValidationCount ===
+              this.findButtonNativeValidationCount
+            ) {
+              this.showFinancialControlsDuringSearch = true;
             }
           },
-          onEvaluateResult: (result) => {
-            if (result !== true) this.rejectPendingLookupResponse('Find activation failed');
+          onTrialClick: (options) => {
+            this.findButtonTrialClickOptions.push(options ?? {});
+            if (this.findButtonTrialFails) {
+              throw new Error('persistent overlay prevented the trial Find click');
+            }
           },
           onClick: (options) => {
-            this.findButtonClickOptions = options;
+            const followsGuardedTrial =
+              this.findButtonTrialClickOptions.length > this.findButtonRealClickOptions.length;
+            this.findButtonRealClickOptions.push(options ?? {});
+            if (followsGuardedTrial && this.playerIdCommittedValue !== this.playerIdInput.input) {
+              this.rejectPendingLookupResponse('Player ID form value was not committed');
+              return;
+            }
             this.workflowClicks.push('button:Find');
             this.emitLookupResponse();
           },
@@ -596,7 +638,11 @@ class FakePage implements PlaywrightPagePort {
       );
     }
     if (role === 'button' && options.name === 'Transfer') {
-      if (!this.lookupResolved && !this.showFinancialControlsDuringSearch) return emptyLocator();
+      if (!this.lookupResolved && !this.showFinancialControlsDuringSearch) {
+        return this.hiddenFinancialControlDuringSearch === 'transfer'
+          ? hiddenExistingLocator()
+          : emptyLocator();
+      }
       return new FakeLocator({
         onClick: async () => {
           this.transferClicks += 1;
@@ -632,6 +678,7 @@ class FakePage implements PlaywrightPagePort {
   }
 
   waitForResponse(predicate: (response: PlaywrightResponsePort) => boolean) {
+    this.lookupResponseWaits += 1;
     if (this.pendingLookupResponse !== null) {
       return Promise.reject(new Error('lookup response already pending'));
     }
@@ -788,7 +835,8 @@ describe('Playwright KemerBet agent page', () => {
       'text:To Player',
       'button:Find',
     ]);
-    expect(page.findButtonClickOptions).toEqual({ timeout: 100 });
+    expect(page.findButtonTrialClickOptions).toEqual([]);
+    expect(page.findButtonRealClickOptions).toEqual([{ timeout: 100 }, { timeout: 100 }]);
     expect(page.playerIdInput.fillCalls).toEqual([
       { value: 'PLAYER-ALPHA', options: { timeout: 100 } },
       { value: 'PLAYER-BETA', options: { timeout: 100 } },
@@ -797,13 +845,13 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('keystroke-feeds, blur-commits, and dispatches only the reviewed Find event when explicitly requested', async () => {
+  it('keystroke-feeds, blur-commits, actionability-checks, and performs one reviewed native Find click when explicitly requested', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     const stages: string[] = [];
     const fixture = driver(page, {
-      activateReadOnlyLookupWithoutPointer: true,
+      activateReadOnlyLookupWithGuardedNativeClick: true,
       reportLookupStage: (stage: string) => stages.push(stage),
     });
 
@@ -813,21 +861,23 @@ describe('Playwright KemerBet agent page', () => {
       playerId: 'PLAYER-ALPHA',
     });
 
-    expect(page.findButtonClickOptions).toBeUndefined();
+    expect(page.findButtonTrialClickOptions).toEqual([{ timeout: 100, trial: true }]);
+    expect(page.findButtonRealClickOptions).toEqual([{ timeout: 100 }]);
     expect(page.playerIdInput.fillCalls).toEqual([{ value: '', options: { timeout: 100 } }]);
     expect(page.playerIdInput.pressSequentiallyCalls).toEqual([
       { text: 'PLAYER-ALPHA', options: { delay: 10, timeout: 100 } },
     ]);
     expect(page.playerIdInput.blurCalls).toEqual([{ timeout: 100 }]);
     expect(page.playerIdCommittedValue).toBe('PLAYER-ALPHA');
-    expect(page.findButtonDocumentEvents).toEqual(['onTransferOkActionEvent']);
-    expect(page.findButtonDocumentEventDetails).toEqual([undefined]);
     expect(page.lookupRequestPlayerIds).toEqual(['PLAYER-ALPHA']);
+    expect(page.lookupResponseWaits).toBe(1);
+    expect(page.workflowClicks).toEqual(['button:Find']);
     expect(stages).toEqual([
       'lookup_input',
       'lookup_input_blurred',
       'lookup_action',
-      'lookup_event_dispatch',
+      'lookup_click_actionability',
+      'lookup_native_click',
       'lookup_response',
       'lookup_contract',
     ]);
@@ -839,7 +889,7 @@ describe('Playwright KemerBet agent page', () => {
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.playerIdInput.input = 'STALE-PLAYER';
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await fixture.driver.lookupPlayer('PLAYER-ALPHA');
@@ -863,11 +913,12 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.playerIdInput.blurCalls).toEqual([{ timeout: 100 }, { timeout: 100 }]);
     expect(page.lookupRequestPlayerIds).toEqual(['PLAYER-ALPHA', 'PLAYER-BETA']);
     expect(page.workflowClicks).toEqual(['button:Find', 'button:Find']);
-    expect(page.findButtonDocumentEvents).toEqual([
-      'onTransferOkActionEvent',
-      'onTransferOkActionEvent',
+    expect(page.findButtonTrialClickOptions).toEqual([
+      { timeout: 100, trial: true },
+      { timeout: 100, trial: true },
     ]);
-    expect(page.findButtonDocumentEventDetails).toEqual([undefined, undefined]);
+    expect(page.findButtonRealClickOptions).toEqual([{ timeout: 100 }, { timeout: 100 }]);
+    expect(page.lookupResponseWaits).toBe(2);
     expect(page.resetDocumentEvents).toEqual([
       { type: 'onTransferEposPlayerFoundEvent', detail: { info: null } },
     ]);
@@ -878,20 +929,21 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('fails closed instead of dispatching the Find event from a non-native role', async () => {
+  it('fails closed instead of clicking Find from a non-native role', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.findButtonTagName = 'DIV';
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
 
-    expect(page.findButtonClickOptions).toBeUndefined();
-    expect(page.findButtonDocumentEvents).toEqual([]);
+    expect(page.findButtonTrialClickOptions).toEqual([]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
     expect(page.transferClicks).toBe(0);
   });
 
@@ -900,7 +952,7 @@ describe('Playwright KemerBet agent page', () => {
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.playerIdPressSequentiallyAvailable = false;
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
@@ -909,7 +961,9 @@ describe('Playwright KemerBet agent page', () => {
 
     expect(page.playerIdInput.fillCalls).toEqual([]);
     expect(page.playerIdInput.pressSequentiallyCalls).toEqual([]);
-    expect(page.findButtonDocumentEvents).toEqual([]);
+    expect(page.findButtonTrialClickOptions).toEqual([]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
     expect(page.lookupRequestPlayerIds).toEqual([]);
     expect(page.transferClicks).toBe(0);
   });
@@ -919,7 +973,7 @@ describe('Playwright KemerBet agent page', () => {
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.playerIdBlurAvailable = false;
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
@@ -929,17 +983,19 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.playerIdInput.fillCalls).toEqual([]);
     expect(page.playerIdInput.pressSequentiallyCalls).toEqual([]);
     expect(page.playerIdInput.blurCalls).toEqual([]);
-    expect(page.findButtonDocumentEvents).toEqual([]);
+    expect(page.findButtonTrialClickOptions).toEqual([]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
     expect(page.lookupRequestPlayerIds).toEqual([]);
     expect(page.transferClicks).toBe(0);
   });
 
-  it('cannot synthesize a successful lookup unless blur commits the exact Player-ID form value', async () => {
+  it('keeps the trial click actionability-only and fails closed when blur does not commit the exact Player-ID form value', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.playerIdBlurCommits = false;
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
@@ -948,7 +1004,9 @@ describe('Playwright KemerBet agent page', () => {
 
     expect(page.playerIdInput.blurCalls).toEqual([{ timeout: 100 }]);
     expect(page.playerIdCommittedValue).toBeNull();
-    expect(page.findButtonDocumentEvents).toEqual(['onTransferOkActionEvent']);
+    expect(page.findButtonTrialClickOptions).toEqual([{ timeout: 100, trial: true }]);
+    expect(page.findButtonRealClickOptions).toEqual([{ timeout: 100 }]);
+    expect(page.lookupResponseWaits).toBe(1);
     expect(page.lookupRequestPlayerIds).toEqual([]);
     expect(page.workflowClicks).toEqual([]);
     expect(page.transferClicks).toBe(0);
@@ -959,80 +1017,144 @@ describe('Playwright KemerBet agent page', () => {
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.showFinancialControlsDuringSearch = true;
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
 
-    expect(page.findButtonDocumentEvents).toEqual([]);
+    expect(page.findButtonTrialClickOptions).toEqual([]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
     expect(page.lookupRequestPlayerIds).toEqual([]);
     expect(page.preparedAmount.fillCalls).toEqual([]);
     expect(page.notesInput.fillCalls).toEqual([]);
     expect(page.transferClicks).toBe(0);
   });
 
-  it.each<readonly [string, (page: FakePage) => void, boolean]>([
-    [
-      'a disconnected native Find control',
-      (page) => {
-        page.findButtonConnected = false;
-      },
-      false,
-    ],
-    [
-      'a disabled native Find control',
-      (page) => {
-        page.findButtonAttributes = { disabled: '' };
-      },
-      false,
-    ],
-    [
-      'a native Find control Playwright reports as disabled',
-      (page) => {
-        page.findButtonEnabled = false;
-      },
-      false,
-    ],
-    [
-      'an aria-disabled native Find control',
-      (page) => {
-        page.findButtonAttributes = { 'aria-disabled': 'true' };
-      },
-      false,
-    ],
-    [
-      'a native Find control without a DOM window',
-      (page) => {
-        page.findButtonDefaultViewAvailable = false;
-      },
-      false,
-    ],
-    [
-      'a native Find control whose event dispatch is rejected',
-      (page) => {
-        page.findButtonDocumentDispatchResult = false;
-      },
-      true,
-    ],
-  ])('fails closed for %s', async (_name, mutate, eventReachedDocument) => {
+  it.each<readonly ['amount' | 'notes' | 'transfer']>([['amount'], ['notes'], ['transfer']])(
+    'fails closed before actionability when the hidden %s financial control remains in the search DOM',
+    async (hiddenControl) => {
+      const page = new FakePage();
+      page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+      page.playerDepositOpen = true;
+      page.hiddenFinancialControlDuringSearch = hiddenControl;
+      const fixture = driver(page, {
+        activateReadOnlyLookupWithGuardedNativeClick: true,
+      });
+
+      await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+      await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+
+      expect(page.findButtonTrialClickOptions).toEqual([]);
+      expect(page.findButtonRealClickOptions).toEqual([]);
+      expect(page.lookupResponseWaits).toBe(0);
+      expect(page.lookupRequestPlayerIds).toEqual([]);
+      expect(page.preparedAmount.fillCalls).toEqual([]);
+      expect(page.notesInput.fillCalls).toEqual([]);
+      expect(page.transferClicks).toBe(0);
+    },
+  );
+
+  it('fails closed when a persistent overlay blocks the trial click and never starts the response waiter or real click', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
-    mutate(page);
-    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+    page.findButtonTrialFails = true;
+    const stages: string[] = [];
+    const fixture = driver(page, {
+      activateReadOnlyLookupWithGuardedNativeClick: true,
+      reportLookupStage: (stage: string) => stages.push(stage),
+    });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
 
-    expect(page.findButtonClickOptions).toBeUndefined();
-    expect(page.findButtonDocumentEvents).toEqual(
-      eventReachedDocument ? ['onTransferOkActionEvent'] : [],
+    expect(page.findButtonTrialClickOptions).toEqual([{ timeout: 100, trial: true }]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
+    expect(page.lookupRequestPlayerIds).toEqual([]);
+    expect(page.workflowClicks).toEqual([]);
+    expect(stages).toEqual([
+      'lookup_input',
+      'lookup_input_blurred',
+      'lookup_action',
+      'lookup_click_actionability',
+    ]);
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it('re-proves financial-control absence after the final native validation and before the real click', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    page.showFinancialControlsAfterFindValidationCount = 2;
+    const fixture = driver(page, {
+      activateReadOnlyLookupWithGuardedNativeClick: true,
+    });
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
     );
-    expect(page.lookupRequestPlayerIds).toEqual(eventReachedDocument ? ['PLAYER-ALPHA'] : []);
+
+    expect(page.findButtonNativeValidationCount).toBe(2);
+    expect(page.findButtonTrialClickOptions).toEqual([{ timeout: 100, trial: true }]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
+    expect(page.lookupRequestPlayerIds).toEqual([]);
+    expect(page.workflowClicks).toEqual([]);
+    expect(page.preparedAmount.fillCalls).toEqual([]);
+    expect(page.notesInput.fillCalls).toEqual([]);
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it.each<readonly [string, (page: FakePage) => void]>([
+    [
+      'a disconnected native Find control',
+      (page) => {
+        page.findButtonConnected = false;
+      },
+    ],
+    [
+      'a disabled native Find control',
+      (page) => {
+        page.findButtonAttributes = { disabled: '' };
+      },
+    ],
+    [
+      'a native Find control Playwright reports as disabled',
+      (page) => {
+        page.findButtonEnabled = false;
+      },
+    ],
+    [
+      'an aria-disabled native Find control',
+      (page) => {
+        page.findButtonAttributes = { 'aria-disabled': 'true' };
+      },
+    ],
+  ])('fails closed for %s', async (_name, mutate) => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    mutate(page);
+    const fixture = driver(page, { activateReadOnlyLookupWithGuardedNativeClick: true });
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+
+    expect(page.findButtonTrialClickOptions).toEqual([]);
+    expect(page.findButtonRealClickOptions).toEqual([]);
+    expect(page.lookupResponseWaits).toBe(0);
+    expect(page.lookupRequestPlayerIds).toEqual([]);
     expect(page.transferClicks).toBe(0);
   });
 

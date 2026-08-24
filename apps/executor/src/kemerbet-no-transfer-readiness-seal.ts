@@ -320,7 +320,7 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
       selectorContract: options.selectorContract,
       expectedAgentIdentityFingerprint: observedAgentIdentityFingerprint,
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
-      forceReadOnlyLookupClick: true,
+      activateReadOnlyLookupThroughDom: true,
       timeoutMs: 30_000,
       reportLookupStage: (stage) => options.reportStage?.(stage),
     });

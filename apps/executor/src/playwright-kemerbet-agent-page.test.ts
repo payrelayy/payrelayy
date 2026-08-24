@@ -111,6 +111,7 @@ interface LocatorOptions {
   readonly connected?: boolean;
   readonly onDocumentEvent?: (type: string, detail: unknown) => void;
   readonly onEvaluateResult?: (result: unknown) => void;
+  readonly onBlur?: (options?: { readonly timeout?: number }) => void | Promise<void>;
   readonly documentDispatchResult?: boolean;
   readonly defaultViewAvailable?: boolean;
   readonly onClick?: (options?: { readonly timeout?: number }) => void | Promise<void>;
@@ -128,6 +129,7 @@ class FakeLocator implements PlaywrightLocatorPort {
   readonly connected: boolean;
   readonly onDocumentEvent: ((type: string, detail: unknown) => void) | undefined;
   readonly onEvaluateResult: ((result: unknown) => void) | undefined;
+  readonly onBlur: ((options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
   readonly documentDispatchResult: boolean;
   readonly defaultViewAvailable: boolean;
   readonly onClick: ((options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
@@ -139,6 +141,7 @@ class FakeLocator implements PlaywrightLocatorPort {
     readonly text: string;
     readonly options?: { readonly delay?: number; readonly timeout?: number };
   }> = [];
+  readonly blurCalls: Array<{ readonly timeout?: number } | undefined> = [];
 
   constructor(options: LocatorOptions = {}) {
     this.text = options.text ?? '';
@@ -152,6 +155,7 @@ class FakeLocator implements PlaywrightLocatorPort {
     this.connected = options.connected ?? true;
     this.onDocumentEvent = options.onDocumentEvent;
     this.onEvaluateResult = options.onEvaluateResult;
+    this.onBlur = options.onBlur;
     this.documentDispatchResult = options.documentDispatchResult ?? true;
     this.defaultViewAvailable = options.defaultViewAvailable ?? true;
     this.onClick = options.onClick;
@@ -211,6 +215,11 @@ class FakeLocator implements PlaywrightLocatorPort {
   ) {
     this.pressSequentiallyCalls.push(options === undefined ? { text } : { text, options });
     this.input += text;
+  }
+
+  async blur(options?: { readonly timeout?: number }) {
+    this.blurCalls.push(options);
+    await this.onBlur?.(options);
   }
 
   async fill(value: string, options?: { readonly timeout?: number }) {
@@ -379,6 +388,9 @@ class FakePage implements PlaywrightPagePort {
   findButtonDefaultViewAvailable = true;
   findButtonDocumentDispatchResult = true;
   playerIdPressSequentiallyAvailable = true;
+  playerIdBlurAvailable = true;
+  playerIdBlurCommits = true;
+  playerIdCommittedValue: string | null = null;
   playerDepositOpen = false;
   lookupResolved = false;
   showFinancialControlsDuringSearch = false;
@@ -435,7 +447,11 @@ class FakePage implements PlaywrightPagePort {
     },
   });
   readonly findBy = new FakeLocator({ text: 'Player ID' });
-  readonly playerIdInput = new FakeLocator();
+  readonly playerIdInput = new FakeLocator({
+    onBlur: () => {
+      if (this.playerIdBlurCommits) this.playerIdCommittedValue = this.playerIdInput.input;
+    },
+  });
   readonly notesInput = new FakeLocator();
 
   private rejectPendingLookupResponse(message: string): void {
@@ -516,6 +532,12 @@ class FakePage implements PlaywrightPagePort {
           value: undefined,
         });
       }
+      if (!this.playerIdBlurAvailable) {
+        Object.defineProperty(this.playerIdInput, 'blur', {
+          configurable: true,
+          value: undefined,
+        });
+      }
       return this.playerDepositOpen && !this.lookupResolved && !this.hidePlayerIdInput
         ? this.withLookupControlDuplicates(this.playerIdInput)
         : emptyLocator();
@@ -554,6 +576,10 @@ class FakePage implements PlaywrightPagePort {
             this.findButtonDocumentEvents.push(type);
             this.findButtonDocumentEventDetails.push(detail);
             if (type === 'onTransferOkActionEvent' && detail === undefined) {
+              if (this.playerIdCommittedValue !== this.playerIdInput.input) {
+                this.rejectPendingLookupResponse('Player ID form value was not committed');
+                return;
+              }
               this.workflowClicks.push('button:Find');
               this.emitLookupResponse();
             }
@@ -771,7 +797,7 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('keystroke-feeds the Player ID and dispatches only the reviewed read-only Find CustomEvent when explicitly requested', async () => {
+  it('keystroke-feeds, blur-commits, and dispatches only the reviewed Find event when explicitly requested', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
@@ -792,10 +818,19 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.playerIdInput.pressSequentiallyCalls).toEqual([
       { text: 'PLAYER-ALPHA', options: { delay: 10, timeout: 100 } },
     ]);
+    expect(page.playerIdInput.blurCalls).toEqual([{ timeout: 100 }]);
+    expect(page.playerIdCommittedValue).toBe('PLAYER-ALPHA');
     expect(page.findButtonDocumentEvents).toEqual(['onTransferOkActionEvent']);
     expect(page.findButtonDocumentEventDetails).toEqual([undefined]);
     expect(page.lookupRequestPlayerIds).toEqual(['PLAYER-ALPHA']);
-    expect(stages).toEqual(['lookup_input', 'lookup_action', 'lookup_response', 'lookup_contract']);
+    expect(stages).toEqual([
+      'lookup_input',
+      'lookup_input_blurred',
+      'lookup_action',
+      'lookup_event_dispatch',
+      'lookup_response',
+      'lookup_contract',
+    ]);
     expect(page.transferClicks).toBe(0);
   });
 
@@ -825,7 +860,9 @@ describe('Playwright KemerBet agent page', () => {
       { text: 'PLAYER-ALPHA', options: { delay: 10, timeout: 100 } },
       { text: 'PLAYER-BETA', options: { delay: 10, timeout: 100 } },
     ]);
+    expect(page.playerIdInput.blurCalls).toEqual([{ timeout: 100 }, { timeout: 100 }]);
     expect(page.lookupRequestPlayerIds).toEqual(['PLAYER-ALPHA', 'PLAYER-BETA']);
+    expect(page.workflowClicks).toEqual(['button:Find', 'button:Find']);
     expect(page.findButtonDocumentEvents).toEqual([
       'onTransferOkActionEvent',
       'onTransferOkActionEvent',
@@ -841,7 +878,7 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('fails closed instead of dispatching the read-only Find event from a non-native role', async () => {
+  it('fails closed instead of dispatching the Find event from a non-native role', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
@@ -877,7 +914,47 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('fails closed without dispatching the global Find event when financial controls share the search phase', async () => {
+  it('fails closed before activation when the exact Player-ID input cannot be blurred', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    page.playerIdBlurAvailable = false;
+    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+
+    expect(page.playerIdInput.fillCalls).toEqual([]);
+    expect(page.playerIdInput.pressSequentiallyCalls).toEqual([]);
+    expect(page.playerIdInput.blurCalls).toEqual([]);
+    expect(page.findButtonDocumentEvents).toEqual([]);
+    expect(page.lookupRequestPlayerIds).toEqual([]);
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it('cannot synthesize a successful lookup unless blur commits the exact Player-ID form value', async () => {
+    const page = new FakePage();
+    page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
+    page.playerDepositOpen = true;
+    page.playerIdBlurCommits = false;
+    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
+
+    await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
+    await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+
+    expect(page.playerIdInput.blurCalls).toEqual([{ timeout: 100 }]);
+    expect(page.playerIdCommittedValue).toBeNull();
+    expect(page.findButtonDocumentEvents).toEqual(['onTransferOkActionEvent']);
+    expect(page.lookupRequestPlayerIds).toEqual([]);
+    expect(page.workflowClicks).toEqual([]);
+    expect(page.transferClicks).toBe(0);
+  });
+
+  it('fails closed without activating Find when financial controls share the search phase', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;

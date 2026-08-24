@@ -108,13 +108,23 @@ export interface PlaywrightLocatorPort {
   locator(selector: string): PlaywrightLocatorPort;
   nth(index: number): PlaywrightLocatorPort;
   count(): Promise<number>;
-  click(options?: { readonly force?: boolean; readonly timeout?: number }): Promise<unknown>;
+  click(options?: { readonly timeout?: number }): Promise<unknown>;
+  evaluate?<Result>(
+    pageFunction: (element: PlaywrightDomControlPort) => Result | Promise<Result>,
+  ): Promise<Result>;
   fill(value: string, options?: { readonly timeout?: number }): Promise<unknown>;
   inputValue(options?: { readonly timeout?: number }): Promise<string>;
   innerText(options?: { readonly timeout?: number }): Promise<string>;
   isVisible(): Promise<boolean>;
   isEnabled(): Promise<boolean>;
   getAttribute(name: string): Promise<string | null>;
+}
+
+export interface PlaywrightDomControlPort {
+  readonly isConnected: boolean;
+  readonly tagName: string;
+  click(): void;
+  getAttribute(name: string): string | null;
 }
 
 export interface PlaywrightRequestPort {
@@ -177,10 +187,11 @@ export interface PlaywrightKemerBetAgentPageOptions {
   /**
    * The no-transfer readiness browser is guarded against every mutating request. Its exact Find
    * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled,
-   * so that proof may bypass only Playwright's pointer-actionability wait. This flag must never be
-   * used for the final Transfer control.
+   * so that proof may activate only that already-validated native button through the DOM instead of
+   * sending a pointer event that the mask can intercept. This flag must never be used for the final
+   * Transfer control.
    */
-  readonly forceReadOnlyLookupClick?: true;
+  readonly activateReadOnlyLookupThroughDom?: true;
   readonly reportLookupStage?: (stage: KemerBetAgentLookupObservationStage) => void;
 }
 
@@ -892,6 +903,23 @@ export function createPlaywrightKemerBetAgentPage(
     return false;
   }
 
+  async function activateExactReadOnlyLookup(control: PlaywrightLocatorPort): Promise<void> {
+    if (control.evaluate === undefined) unavailable();
+    const activated = await control.evaluate((element) => {
+      if (
+        !element.isConnected ||
+        element.tagName !== 'BUTTON' ||
+        element.getAttribute('disabled') !== null ||
+        element.getAttribute('aria-disabled') === 'true'
+      ) {
+        return false;
+      }
+      element.click();
+      return true;
+    });
+    if (activated !== true) unavailable();
+  }
+
   async function requireExactRouteAndNoSessionFailure(): Promise<AllowedAgentUrl> {
     if (expectedUrl === null) unavailable();
     const current = requireAllowedAgentUrl(page.url());
@@ -1185,12 +1213,13 @@ export function createPlaywrightKemerBetAgentPage(
       });
       try {
         reportLookupStage('lookup_action');
-        await (
-          await exactWorkflowControl(contract.depositWorkflow.findButton)
-        ).click({
-          ...(options.forceReadOnlyLookupClick === true ? { force: true } : {}),
-          timeout: timeoutMs,
-        });
+        const findButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
+        if (options.activateReadOnlyLookupThroughDom === true) {
+          await pollDelay(150);
+          await activateExactReadOnlyLookup(findButton);
+        } else {
+          await findButton.click({ timeout: timeoutMs });
+        }
         reportLookupStage('lookup_response');
         const response = await responsePromise;
         reportLookupStage('lookup_contract');

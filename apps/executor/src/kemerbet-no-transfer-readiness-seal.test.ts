@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
 
+import type { Page, Route } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
 import {
+  createKemerBetNoTransferReadinessSealProbeFromPage,
   guardKemerBetReadinessSealRoute,
   isAllowedKemerBetReadinessSealRequest,
   isExactKemerBetReadinessSealPlayerLookupRequest,
@@ -12,11 +14,20 @@ import {
   runKemerBetNoTransferReadinessSealMain,
   type KemerBetNoTransferReadinessSealDependencies,
 } from './kemerbet-no-transfer-readiness-seal.js';
-import type { KemerBetAgentPageSelectorContractV2 } from './playwright-kemerbet-agent-page.js';
+import {
+  KEMERBET_AGENT_DEPOSIT_URL,
+  type KemerBetAgentPageSelectorContractV2,
+} from './playwright-kemerbet-agent-page.js';
 
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const PLAYER_IDS = ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'] as const;
 const FINGERPRINT = `hmac-sha256-agent-identity-v1:${'1'.repeat(64)}`;
+const SELECTOR_CONTRACT = JSON.parse(
+  readFileSync(
+    new URL('../../../infra/config/kemerbet-selector-contract.v2.json', import.meta.url),
+    'utf8',
+  ),
+) as KemerBetAgentPageSelectorContractV2;
 
 function environment(): NodeJS.ProcessEnv {
   return {
@@ -43,8 +54,8 @@ function guardedRouteFixture(input: {
 }) {
   const mainFrame = {};
   const subframe = {};
-  const abort = vi.fn(async (_errorCode: 'blockedbyclient') => undefined);
-  const continueRequest = vi.fn(async () => undefined);
+  const abort = vi.fn(async (_errorCode: 'blockedbyclient'): Promise<void> => undefined);
+  const continueRequest = vi.fn(async (): Promise<void> => undefined);
   const route = {
     request: () => ({
       frame: () => (input.isMainFrame === true ? mainFrame : subframe),
@@ -60,9 +71,96 @@ function guardedRouteFixture(input: {
   return { abort, continueRequest, page, route, stages };
 }
 
+interface TestLocator {
+  locator(selector: string): TestLocator;
+  nth(index: number): TestLocator;
+  count(): Promise<number>;
+  isVisible(): Promise<boolean>;
+  innerText(): Promise<string>;
+  inputValue(): Promise<string>;
+}
+
+function testLocator(
+  options: {
+    readonly present?: boolean;
+    readonly text?: string;
+    readonly children?: Readonly<Record<string, TestLocator>>;
+  } = {},
+): TestLocator {
+  const present = options.present ?? true;
+  const locator: TestLocator = {
+    locator: (selector) => options.children?.[selector] ?? testLocator({ present: false }),
+    nth: (index) => (present && index === 0 ? locator : testLocator({ present: false })),
+    count: async () => (present ? 1 : 0),
+    isVisible: async () => present,
+    innerText: async () => options.text ?? '',
+    inputValue: async () => options.text ?? '',
+  };
+  return locator;
+}
+
+async function realProbePageHarness() {
+  const mainFrame = {};
+  const identityValue = testLocator({ text: 'agent-one@example.invalid' });
+  const identityRoot = testLocator({
+    children: {
+      [SELECTOR_CONTRACT.signedInAgentIdentity.value.selector]: identityValue,
+    },
+  });
+  let readinessRoute: ((route: Route) => Promise<void>) | null = null;
+  let waitForTimeoutHook: (milliseconds: number) => Promise<void> = async () => undefined;
+  const installRoute = vi.fn(async (_pattern: string, handler: (route: Route) => Promise<void>) => {
+    readinessRoute = handler;
+  });
+  const removeRoute = vi.fn(async (_pattern: string, handler: (route: Route) => Promise<void>) => {
+    if (readinessRoute !== handler) throw new Error('unexpected readiness route');
+    readinessRoute = null;
+  });
+  const waitForTimeout = vi.fn(async (milliseconds: number) => waitForTimeoutHook(milliseconds));
+  const closeOwner = vi.fn(async () => undefined);
+  const stages: string[] = [];
+  const page = {
+    url: () => KEMERBET_AGENT_DEPOSIT_URL,
+    mainFrame: () => mainFrame,
+    locator: (selector: string) =>
+      selector === SELECTOR_CONTRACT.signedInAgentIdentity.root
+        ? identityRoot
+        : testLocator({ present: false }),
+    route: installRoute,
+    unroute: removeRoute,
+    waitForTimeout,
+  } as unknown as Page;
+  const probe = await createKemerBetNoTransferReadinessSealProbeFromPage({
+    accountId: ACCOUNT_ID,
+    close: closeOwner,
+    fingerprintAgentIdentity: fingerprinter(),
+    page,
+    reportStage: (stage) => stages.push(stage),
+    selectorContract: SELECTOR_CONTRACT,
+  });
+
+  return {
+    closeOwner,
+    dispatchRoute(route: Route): Promise<void> {
+      const handler = readinessRoute;
+      if (handler === null) throw new Error('readiness route is not installed');
+      return handler(route);
+    },
+    installRoute,
+    probe,
+    removeRoute,
+    setWaitForTimeoutHook(hook: (milliseconds: number) => Promise<void>) {
+      waitForTimeoutHook = hook;
+    },
+    stages,
+    waitForTimeout,
+  };
+}
+
 function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies> = {}) {
   const probes: string[] = [];
   const close = vi.fn(async () => undefined);
+  const finalizeReadOnlyProof = vi.fn(async () => undefined);
   const writeBinding = vi.fn(async () => undefined);
   const logSuccess = vi.fn();
   const dependencies: KemerBetNoTransferReadinessSealDependencies = {
@@ -82,13 +180,21 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
           transferDisabled: true,
         };
       },
+      finalizeReadOnlyProof,
       close,
     }),
     writeBinding,
     logSuccess,
     ...overrides,
   };
-  return { dependencies, probes, close, writeBinding, logSuccess };
+  return {
+    dependencies,
+    probes,
+    close,
+    finalizeReadOnlyProof,
+    writeBinding,
+    logSuccess,
+  };
 }
 
 describe('KemerBet no-transfer readiness seal', () => {
@@ -106,13 +212,50 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(body).toBeDefined();
     expect(body).toContain('options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL');
     expect(body).toContain('await agentPage.adoptCurrentDepositPageWithoutNavigation()');
-    expect(body).toContain('activateReadOnlyLookupWithoutPointer: true');
+    expect(body).toContain('activateReadOnlyLookupWithGuardedNativeClick: true');
     expect(body).toContain('reportLookupStage: (stage) => options.reportStage?.(stage)');
+    expect(body).toContain('let forbiddenRequestObserved = false');
+    expect(body).toContain("reportStage('forbidden_request')");
+    expect(body).toContain('const readinessRequestBoundaryInvalid = (): boolean =>');
+    expect(body).toContain('if (closed || readinessRequestBoundaryInvalid()) unavailable()');
+    expect(source).toContain('await probe.finalizeReadOnlyProof()');
     expect(body).toContain("reportStage('lookup_reset')");
     expect(body).toContain('await agentPage.resetReadOnlyPlayerLookup()');
+    expect(body).not.toContain('activateReadOnlyLookupWithoutPointer');
     expect(body).not.toContain('createKemerBetDepositBrowser');
     expect(body).not.toContain('.goto(');
     expect(body).not.toContain('.reload(');
+  });
+
+  it('permits only the guarded unforced native Find click in readiness mode', () => {
+    const pageSource = readFileSync(
+      new URL('./playwright-kemerbet-agent-page.ts', import.meta.url),
+      'utf8',
+    );
+    const sealSource = readFileSync(
+      new URL('./kemerbet-no-transfer-readiness-seal.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(sealSource).toContain('activateReadOnlyLookupWithGuardedNativeClick: true');
+    expect(sealSource).toContain("| 'lookup_click_actionability'");
+    expect(sealSource).toContain("| 'lookup_native_click'");
+    expect(pageSource).toContain("reportLookupStage('lookup_click_actionability')");
+    expect(pageSource).toContain(
+      'await actionabilityCandidate.click({ timeout: timeoutMs, trial: true })',
+    );
+    expect(pageSource).toContain("reportLookupStage('lookup_native_click')");
+    expect(pageSource).toContain('await exactFindButton.click({ timeout: timeoutMs })');
+    expect(pageSource).toContain(
+      'workflowControlLocator(contract.depositWorkflow.transferButton, true).count()',
+    );
+    expect(pageSource).toContain('includeHidden: true');
+
+    expect(`${sealSource}\n${pageSource}`).not.toContain('lookup_event_dispatch');
+    expect(`${sealSource}\n${pageSource}`).not.toContain('onTransferOkActionEvent');
+    expect(pageSource).not.toMatch(/force\s*:\s*true/u);
+    expect(pageSource).not.toMatch(/\.press\(\s*['"]Enter['"]/u);
+    expect(pageSource).not.toMatch(/\belement\.click\(/u);
   });
 
   it('binds one redacted identity only after exactly five sequential lookup proofs', async () => {
@@ -121,6 +264,10 @@ describe('KemerBet no-transfer readiness seal', () => {
     await expect(runKemerBetNoTransferReadinessSeal(test.dependencies)).resolves.toBeUndefined();
 
     expect(test.probes).toEqual(PLAYER_IDS);
+    expect(test.finalizeReadOnlyProof).toHaveBeenCalledOnce();
+    expect(test.finalizeReadOnlyProof.mock.invocationCallOrder[0]).toBeLessThan(
+      test.writeBinding.mock.invocationCallOrder[0]!,
+    );
     expect(test.writeBinding).toHaveBeenCalledWith(ACCOUNT_ID, FINGERPRINT, 10001);
     expect(test.close).toHaveBeenCalledOnce();
     expect(test.logSuccess).toHaveBeenCalledWith({
@@ -146,6 +293,7 @@ describe('KemerBet no-transfer readiness seal', () => {
       'environment_guard',
       'readiness_inputs',
       'signed_in_page',
+      'final_guard',
       'binding_write',
     ]);
     expect(JSON.stringify(stages)).not.toMatch(/PLAYER-|hmac-sha256|11111111/iu);
@@ -184,6 +332,7 @@ describe('KemerBet no-transfer readiness seal', () => {
                 exactCurrencyMatch: true,
                 transferDisabled: true,
               },
+        finalizeReadOnlyProof: async () => undefined,
         close,
       }),
     });
@@ -194,6 +343,117 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(close).toHaveBeenCalledOnce();
     expect(test.writeBinding).not.toHaveBeenCalled();
     expect(test.logSuccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects the binding boundary when the real route wrapper sees a forbidden settle request', async () => {
+    const harness = await realProbePageHarness();
+    const forbidden = guardedRouteFixture({
+      method: 'POST',
+      requestUrl: 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit',
+    });
+    harness.setWaitForTimeoutHook(async (milliseconds) => {
+      expect(milliseconds).toBe(250);
+      await harness.dispatchRoute(forbidden.route as unknown as Route);
+    });
+    const test = fixture({
+      openProbe: async () => ({
+        ...harness.probe,
+        probePlayerLookup: async () => ({
+          exactPlayerMatch: true,
+          exactCurrencyMatch: true,
+          transferDisabled: true,
+        }),
+      }),
+    });
+
+    await expect(runKemerBetNoTransferReadinessSeal(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+
+    expect(harness.waitForTimeout).toHaveBeenCalledWith(250);
+    expect(forbidden.abort).toHaveBeenCalledOnce();
+    expect(forbidden.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(forbidden.continueRequest).not.toHaveBeenCalled();
+    expect(harness.stages).toContain('forbidden_request');
+    expect(harness.removeRoute).toHaveBeenCalledOnce();
+    expect(harness.closeOwner).toHaveBeenCalledOnce();
+    expect(test.writeBinding).not.toHaveBeenCalled();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+  });
+
+  it('drains a delayed rejected real route operation and fails finalization', async () => {
+    const harness = await realProbePageHarness();
+    const delayed = guardedRouteFixture({
+      method: 'GET',
+      requestUrl: 'https://static.example.invalid/assets/application.js',
+    });
+    let rejectContinuation: ((error: Error) => void) | undefined;
+    const continuation = new Promise<void>((_resolve, reject) => {
+      rejectContinuation = reject;
+    });
+    delayed.continueRequest.mockImplementation(() => continuation);
+
+    const routeOperation = harness.dispatchRoute(delayed.route as unknown as Route);
+    const observedRouteOperation = routeOperation.then(
+      () => ({ status: 'fulfilled' as const }),
+      (reason: unknown) => ({ reason, status: 'rejected' as const }),
+    );
+    const finalization = harness.probe.finalizeReadOnlyProof();
+    const observedFinalization = finalization.then(
+      () => ({ status: 'fulfilled' as const }),
+      (reason: unknown) => ({ reason, status: 'rejected' as const }),
+    );
+
+    await vi.waitFor(() => expect(harness.removeRoute).toHaveBeenCalledOnce());
+    expect(delayed.continueRequest).toHaveBeenCalledOnce();
+    expect(harness.closeOwner).not.toHaveBeenCalled();
+
+    const routeFailure = new Error('delayed route continuation failed');
+    rejectContinuation?.(routeFailure);
+    const [routeResult, finalizationResult] = await Promise.all([
+      observedRouteOperation,
+      observedFinalization,
+    ]);
+
+    expect(routeResult).toEqual({ reason: routeFailure, status: 'rejected' });
+    expect(finalizationResult.status).toBe('rejected');
+    if (finalizationResult.status === 'rejected') {
+      expect(finalizationResult.reason).toBeInstanceOf(
+        KemerBetNoTransferReadinessSealUnavailableError,
+      );
+    }
+    expect(harness.closeOwner).not.toHaveBeenCalled();
+
+    await harness.probe.close();
+    expect(harness.closeOwner).toHaveBeenCalledOnce();
+  });
+
+  it('writes no binding when the final drained route reports a forbidden request attempt', async () => {
+    const close = vi.fn(async () => undefined);
+    const finalizeReadOnlyProof = vi.fn(async () => {
+      throw new KemerBetNoTransferReadinessSealUnavailableError();
+    });
+    const test = fixture({
+      openProbe: async () => ({
+        observedAgentIdentityFingerprint: FINGERPRINT,
+        probePlayerLookup: async () => ({
+          exactPlayerMatch: true,
+          exactCurrencyMatch: true,
+          transferDisabled: true,
+        }),
+        finalizeReadOnlyProof,
+        close,
+      }),
+    });
+
+    await expect(runKemerBetNoTransferReadinessSeal(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+
+    expect(finalizeReadOnlyProof).toHaveBeenCalledOnce();
+    expect(test.writeBinding).not.toHaveBeenCalled();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('rejects a non-exact or duplicate five-Player cohort before opening the profile', async () => {

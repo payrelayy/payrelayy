@@ -108,7 +108,7 @@ export interface PlaywrightLocatorPort {
   locator(selector: string): PlaywrightLocatorPort;
   nth(index: number): PlaywrightLocatorPort;
   count(): Promise<number>;
-  click(options?: { readonly timeout?: number }): Promise<unknown>;
+  click(options?: { readonly timeout?: number; readonly trial?: boolean }): Promise<unknown>;
   evaluate?<Result>(
     pageFunction: (element: PlaywrightDomControlPort) => Result | Promise<Result>,
   ): Promise<Result>;
@@ -178,7 +178,7 @@ export interface PlaywrightPagePort {
   getByLabel(label: string, options: { readonly exact: true }): PlaywrightLocatorPort;
   getByRole(
     role: 'button' | 'menuitem',
-    options: { readonly name: string; readonly exact: true },
+    options: { readonly name: string; readonly exact: true; readonly includeHidden?: boolean },
   ): PlaywrightLocatorPort;
   getByText(text: string, options: { readonly exact: true }): PlaywrightLocatorPort;
   waitForResponse(
@@ -207,14 +207,14 @@ export interface PlaywrightKemerBetAgentPageOptions {
   readonly pollDelay?: (milliseconds: number) => Promise<void>;
   readonly monotonicNow?: () => number;
   /**
-   * The no-transfer readiness browser is guarded against every mutating request. Its exact Find
-   * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled.
-   * This proof may mirror operator keystrokes only in the exact Player-ID input, explicitly
-   * blur/commit that field, and dispatch KemerBet's reviewed Find event only after re-validating the
-   * search phase and native Find button. The independent readiness route still blocks every
+   * The no-transfer readiness browser is guarded against every mutating request. This proof may
+   * mirror operator keystrokes only in the exact Player-ID input, explicitly blur/commit that field,
+   * and perform one normal, unforced click on KemerBet's exact native Find button. Playwright must
+   * first prove pointer actionability, after which the search-only phase and native button are
+   * re-validated immediately before the click. The independent readiness route still blocks every
    * mutating request and the deposit endpoint. This flag must never be used for Amount or Transfer.
    */
-  readonly activateReadOnlyLookupWithoutPointer?: true;
+  readonly activateReadOnlyLookupWithGuardedNativeClick?: true;
   readonly reportLookupStage?: (stage: KemerBetAgentLookupObservationStage) => void;
 }
 
@@ -222,7 +222,8 @@ export type KemerBetAgentLookupObservationStage =
   | 'lookup_input'
   | 'lookup_input_blurred'
   | 'lookup_action'
-  | 'lookup_event_dispatch'
+  | 'lookup_click_actionability'
+  | 'lookup_native_click'
   | 'lookup_response'
   | 'lookup_contract';
 
@@ -497,9 +498,18 @@ function parseLookupRequestUrl(rawUrl: string): URL | null {
   return url;
 }
 
-function isExactPlayerLookupResponse(response: PlaywrightResponsePort): boolean {
+function isExactPlayerLookupResponse(
+  response: PlaywrightResponsePort,
+  expectedPlayerId: string,
+): boolean {
   const url = parseLookupRequestUrl(response.url());
-  return url !== null && response.request().method() === 'GET';
+  const queryEntries = url === null ? [] : [...url.searchParams.entries()];
+  return (
+    response.request().method() === 'GET' &&
+    queryEntries.length === 1 &&
+    queryEntries[0]?.[0] === 'externalId' &&
+    queryEntries[0]?.[1] === expectedPlayerId
+  );
 }
 
 function parseAuthoritativePlayerLookup(
@@ -936,25 +946,18 @@ export function createPlaywrightKemerBetAgentPage(
     return false;
   }
 
-  async function activateExactReadOnlyLookupWithoutPointer(
+  async function requireExactNativeReadOnlyLookupControl(
     control: PlaywrightLocatorPort,
   ): Promise<void> {
     if (control.evaluate === undefined) unavailable();
-    const exactReadOnlyEventDispatched = await control.evaluate((element) => {
-      if (
-        !element.isConnected ||
-        element.tagName !== 'BUTTON' ||
-        element.getAttribute('disabled') !== null ||
-        element.getAttribute('aria-disabled') === 'true'
-      ) {
-        return false;
-      }
-      const view = element.ownerDocument.defaultView;
-      if (view === null) return false;
-      const event = new view.CustomEvent('onTransferOkActionEvent', { detail: undefined });
-      return element.ownerDocument.dispatchEvent(event);
-    });
-    if (exactReadOnlyEventDispatched !== true) unavailable();
+    const exactNativeControl = await control.evaluate(
+      (element) =>
+        element.isConnected &&
+        element.tagName === 'BUTTON' &&
+        element.getAttribute('disabled') === null &&
+        element.getAttribute('aria-disabled') !== 'true',
+    );
+    if (exactNativeControl !== true) unavailable();
   }
 
   async function resetExactReadOnlyLookupWithoutPointer(
@@ -1059,13 +1062,20 @@ export function createPlaywrightKemerBetAgentPage(
     return result;
   }
 
-  function workflowControlLocator(control: KemerBetAgentWorkflowControl): PlaywrightLocatorPort {
+  function workflowControlLocator(
+    control: KemerBetAgentWorkflowControl,
+    includeHiddenRole = false,
+  ): PlaywrightLocatorPort {
     return control.by === 'css'
       ? page.locator(control.selector)
       : control.by === 'label'
         ? page.getByLabel(control.label, { exact: true })
         : control.by === 'role'
-          ? page.getByRole(control.role, { name: control.name, exact: true })
+          ? page.getByRole(control.role, {
+              name: control.name,
+              exact: true,
+              ...(includeHiddenRole ? { includeHidden: true } : {}),
+            })
           : page.getByText(control.text, { exact: true });
   }
 
@@ -1108,7 +1118,7 @@ export function createPlaywrightKemerBetAgentPage(
 
   async function requireExactReadOnlyLookupSearchPhase(): Promise<void> {
     if (
-      options.activateReadOnlyLookupWithoutPointer !== true ||
+      options.activateReadOnlyLookupWithGuardedNativeClick !== true ||
       (await observePlayerLookupSurface()) !== 'ready'
     ) {
       unavailable();
@@ -1129,6 +1139,18 @@ export function createPlaywrightKemerBetAgentPage(
     ) {
       unavailable();
     }
+
+    // A hidden financial form is not an acceptable search-only phase. Require total DOM absence,
+    // not merely the absence of visible controls, before actionability testing and again before the
+    // sole real Find click.
+    const financialCandidateCounts = await Promise.all([
+      page.locator(contract.lookup.root).count(),
+      page.locator(contract.preparedDeposit.root).count(),
+      workflowControlLocator(contract.depositWorkflow.amountInput).count(),
+      workflowControlLocator(contract.depositWorkflow.notesInput).count(),
+      workflowControlLocator(contract.depositWorkflow.transferButton, true).count(),
+    ]);
+    if (financialCandidateCounts.some((count) => count !== 0)) unavailable();
   }
 
   async function waitForExactReadOnlyLookupSearchPhase(): Promise<void> {
@@ -1303,7 +1325,7 @@ export function createPlaywrightKemerBetAgentPage(
       }
       reportLookupStage('lookup_input');
       const playerIdInput = await exactWorkflowControl(contract.depositWorkflow.playerIdInput);
-      if (options.activateReadOnlyLookupWithoutPointer === true) {
+      if (options.activateReadOnlyLookupWithGuardedNativeClick === true) {
         if (playerIdInput.pressSequentially === undefined || playerIdInput.blur === undefined) {
           unavailable();
         }
@@ -1321,27 +1343,57 @@ export function createPlaywrightKemerBetAgentPage(
         });
       }
       if ((await playerIdInput.inputValue({ timeout: timeoutMs })) !== playerId) unavailable();
-      if (options.activateReadOnlyLookupWithoutPointer === true) {
+      if (options.activateReadOnlyLookupWithGuardedNativeClick === true) {
         reportLookupStage('lookup_input_blurred');
       }
       authoritativeLookup = null;
       preparedPlayerId = null;
       preparedAmountText = null;
-      const responsePromise = page.waitForResponse(isExactPlayerLookupResponse, {
-        timeout: timeoutMs,
-      });
+      let responsePromise: Promise<PlaywrightResponsePort> | null = null;
       try {
         reportLookupStage('lookup_action');
-        if (options.activateReadOnlyLookupWithoutPointer === true) {
+        if (options.activateReadOnlyLookupWithGuardedNativeClick === true) {
           await pollDelay(150);
+          await requireReadyAgentPage();
           await requireExactReadOnlyLookupSearchPhase();
+          const actionabilityCandidate = await exactWorkflowControl(
+            contract.depositWorkflow.findButton,
+          );
+          await requireExactNativeReadOnlyLookupControl(actionabilityCandidate);
+          reportLookupStage('lookup_click_actionability');
+          await actionabilityCandidate.click({ timeout: timeoutMs, trial: true });
+
+          // The actionability wait may span a KemerBet render. Prove the exact search-only phase and
+          // resolve the one native Find button again before the sole real click.
+          await requireReadyAgentPage();
+          await requireExactReadOnlyLookupSearchPhase();
+          const exactPlayerIdInput = await exactWorkflowControl(
+            contract.depositWorkflow.playerIdInput,
+          );
+          if ((await exactPlayerIdInput.inputValue({ timeout: timeoutMs })) !== playerId) {
+            unavailable();
+          }
           const exactFindButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
-          reportLookupStage('lookup_event_dispatch');
-          await activateExactReadOnlyLookupWithoutPointer(exactFindButton);
+          await requireExactNativeReadOnlyLookupControl(exactFindButton);
+          // Re-run the complete DOM-absence proof after every potentially polling locator/read.
+          // Nothing asynchronous may intervene between this final search-only proof and installing
+          // the exact response waiter plus the sole real Find click.
+          await requireExactReadOnlyLookupSearchPhase();
+          responsePromise = page.waitForResponse(
+            (response) => isExactPlayerLookupResponse(response, playerId),
+            { timeout: timeoutMs },
+          );
+          reportLookupStage('lookup_native_click');
+          await exactFindButton.click({ timeout: timeoutMs });
         } else {
           const findButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
+          responsePromise = page.waitForResponse(
+            (response) => isExactPlayerLookupResponse(response, playerId),
+            { timeout: timeoutMs },
+          );
           await findButton.click({ timeout: timeoutMs });
         }
+        if (responsePromise === null) unavailable();
         const response = await responsePromise;
         reportLookupStage('lookup_response');
         reportLookupStage('lookup_contract');
@@ -1355,7 +1407,7 @@ export function createPlaywrightKemerBetAgentPage(
       } catch {
         // Activation failures must fail closed immediately. Keep a rejection handler attached to
         // Playwright's bounded waiter without delaying the caller until that independent timeout.
-        void responsePromise.catch(() => undefined);
+        void responsePromise?.catch(() => undefined);
         unavailable();
       }
       await requireReadyAgentPage();
@@ -1365,7 +1417,7 @@ export function createPlaywrightKemerBetAgentPage(
       await requireReadyAgentPage();
       const exactLookup = authoritativeLookup;
       if (
-        options.activateReadOnlyLookupWithoutPointer !== true ||
+        options.activateReadOnlyLookupWithGuardedNativeClick !== true ||
         expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL ||
         exactLookup === null ||
         exactLookup.visibleIdentity === null ||

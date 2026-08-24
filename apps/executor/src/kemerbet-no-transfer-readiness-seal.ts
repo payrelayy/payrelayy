@@ -65,12 +65,15 @@ export type KemerBetNoTransferReadinessSealStage =
   | 'lookup_input'
   | 'lookup_input_blurred'
   | 'lookup_action'
-  | 'lookup_event_dispatch'
+  | 'lookup_click_actionability'
+  | 'lookup_native_click'
   | 'lookup_response'
   | 'lookup_network_request'
+  | 'forbidden_request'
   | 'lookup_contract'
   | 'lookup_result'
   | 'lookup_reset'
+  | 'final_guard'
   | 'binding_write';
 
 interface SafeStat {
@@ -90,6 +93,8 @@ export interface KemerBetNoTransferReadinessSealProbe {
     readonly exactCurrencyMatch: true;
     readonly transferDisabled: true;
   } | null>;
+  /** Drain the proof route, stop its browser ownership, and reject any forbidden request attempt. */
+  finalizeReadOnlyProof(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -352,16 +357,53 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
 }): Promise<KemerBetNoTransferReadinessSealProbe> {
   const reportStage = options.reportStage ?? (() => undefined);
-  const readinessRoute = (route: Route) =>
-    guardKemerBetReadinessSealRoute(route, options.page, reportStage);
+  let forbiddenRequestObserved = false;
+  let routeHandlerFailureObserved = false;
+  const readinessRequestBoundaryInvalid = (): boolean =>
+    forbiddenRequestObserved || routeHandlerFailureObserved;
+  const readinessRoutesInFlight = new Set<Promise<void>>();
+  const readinessRoute = (route: Route) => {
+    const operation = (async () => {
+      const request = route.request();
+      if (
+        !isAllowedKemerBetReadinessSealRequest({
+          isMainFrame: request.frame() === options.page.mainFrame(),
+          isNavigationRequest: request.isNavigationRequest(),
+          method: request.method(),
+          requestUrl: request.url(),
+        })
+      ) {
+        forbiddenRequestObserved = true;
+        reportStage('forbidden_request');
+      }
+      await guardKemerBetReadinessSealRoute(route, options.page, reportStage);
+    })();
+    readinessRoutesInFlight.add(operation);
+    void operation.then(
+      () => readinessRoutesInFlight.delete(operation),
+      () => {
+        readinessRoutesInFlight.delete(operation);
+        routeHandlerFailureObserved = true;
+      },
+    );
+    return operation;
+  };
   let routeInstalled = false;
   let probeReturned = false;
-  const close = async (): Promise<void> => {
-    if (routeInstalled) {
-      routeInstalled = false;
-      await options.page.unroute('**/*', readinessRoute).catch(() => undefined);
+  let closed = false;
+  const removeReadinessRoute = async (): Promise<void> => {
+    if (!routeInstalled) return;
+    await options.page.unroute('**/*', readinessRoute);
+    routeInstalled = false;
+    while (readinessRoutesInFlight.size > 0) {
+      await Promise.allSettled([...readinessRoutesInFlight]);
     }
+  };
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    await removeReadinessRoute().catch(() => undefined);
     await options.close();
+    closed = true;
   };
   try {
     // The supervised sign-in service owns this already-authenticated page. Do not
@@ -403,7 +445,7 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
       selectorContract: options.selectorContract,
       expectedAgentIdentityFingerprint: observedAgentIdentityFingerprint,
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
-      activateReadOnlyLookupWithoutPointer: true,
+      activateReadOnlyLookupWithGuardedNativeClick: true,
       timeoutMs: 30_000,
       reportLookupStage: (stage) => options.reportStage?.(stage),
     });
@@ -412,24 +454,48 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
     return {
       observedAgentIdentityFingerprint,
       probePlayerLookup: async (target) => {
-        if (target.currencyCode !== 'ETB') unavailable();
+        if (target.currencyCode !== 'ETB' || readinessRequestBoundaryInvalid()) unavailable();
         reportStage('lookup_surface');
         await agentPage.openPlayerDeposit();
+        if (readinessRequestBoundaryInvalid()) unavailable();
         reportStage('lookup_request');
         await agentPage.lookupPlayer(target.playerId);
-        if ((await agentPage.currentUrl()) !== KEMERBET_AGENT_DEPOSIT_URL) unavailable();
+        if (
+          readinessRequestBoundaryInvalid() ||
+          (await agentPage.currentUrl()) !== KEMERBET_AGENT_DEPOSIT_URL
+        ) {
+          unavailable();
+        }
         reportStage('lookup_result');
         const lookup = await agentPage.readAgentLookup();
-        if (lookup.playerId !== target.playerId || lookup.currencyCode !== target.currencyCode) {
+        if (
+          readinessRequestBoundaryInvalid() ||
+          lookup.playerId !== target.playerId ||
+          lookup.currencyCode !== target.currencyCode
+        ) {
           unavailable();
         }
         reportStage('lookup_reset');
         await agentPage.resetReadOnlyPlayerLookup();
+        if (readinessRequestBoundaryInvalid()) unavailable();
         return {
           exactPlayerMatch: true,
           exactCurrencyMatch: true,
           transferDisabled: true,
         };
+      },
+      finalizeReadOnlyProof: async () => {
+        if (closed || readinessRequestBoundaryInvalid()) unavailable();
+        // Let application work causally triggered by the final Find/reset settle while the strict
+        // route is still installed, then drain every in-flight route handler before releasing the
+        // page. Production closes the context here; the supervised sign-in service retains it under
+        // its independent mutation-blocking route.
+        await options.page.waitForTimeout(250);
+        await removeReadinessRoute();
+        if (readinessRequestBoundaryInvalid()) unavailable();
+        await options.close();
+        closed = true;
+        if (readinessRequestBoundaryInvalid()) unavailable();
       },
       close,
     };
@@ -620,6 +686,8 @@ export async function runKemerBetNoTransferReadinessSeal(
         unavailable();
       }
     }
+    reportStage('final_guard');
+    await probe.finalizeReadOnlyProof();
     reportStage('binding_write');
     await (dependencies.writeBinding ?? writeBindingAtomically)(
       accountId,

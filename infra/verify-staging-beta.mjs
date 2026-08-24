@@ -61,6 +61,7 @@ function sorted(values) {
 const services = topLevelSection(compose, 'services');
 const ownerService = childBlock(services, 'owner-control');
 const kemerbetSessionService = childBlock(services, 'kemerbet-session-provision');
+const kemerbetRecheckService = childBlock(services, 'kemerbet-no-transfer-readiness');
 const customerWebService = childBlock(services, 'customer-web');
 const gatewayService = childBlock(services, 'gateway');
 const apiService = childBlock(services, 'api');
@@ -77,13 +78,14 @@ assert.deepEqual(
   [
     'owner-control',
     'kemerbet-session-provision',
+    'kemerbet-no-transfer-readiness',
     'customer-web',
     'gateway',
     'api',
     'beta-admission',
     'bot',
   ],
-  'only the five private services, no-transfer sign-in tool, and gated public gateway are allowed',
+  'only the five private services, no-transfer sign-in/recheck tools, and gated public gateway are allowed',
 );
 
 for (const [name, service] of [
@@ -235,6 +237,101 @@ const kemerbetSessionEnvironment = servicePropertyBlock(kemerbetSessionService, 
 assert.doesNotMatch(
   kemerbetSessionEnvironment,
   /DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY/,
+);
+
+assert.match(kemerbetRecheckService, /profiles: \[kemerbet-no-transfer-readiness\]/);
+assert.match(kemerbetRecheckService, /platform: linux\/amd64/);
+assert.match(
+  kemerbetRecheckService,
+  /image: fetanagent-deposit-executor:\$\{FETANAGENT_IMAGE_TAG:\?set a commit-derived image tag\}/,
+);
+assert.match(kemerbetRecheckService, /pull_policy: never/);
+assert.match(
+  kemerbetRecheckService,
+  /container_name: fetanagent-staging-beta-kemerbet-no-transfer-readiness-once/,
+);
+assert.match(
+  kemerbetRecheckService,
+  /command: \['node', 'apps\/executor\/dist\/kemerbet-no-transfer-readiness\.js'\]/,
+);
+assert.match(kemerbetRecheckService, /init: true/);
+assert.match(kemerbetRecheckService, /user: '10001:10001'/);
+assert.match(kemerbetRecheckService, /restart: 'no'/);
+assert.match(kemerbetRecheckService, /read_only: true/);
+assert.match(
+  kemerbetRecheckService,
+  /tmpfs:\s*\r?\n\s+- \/tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777/,
+);
+assert.match(kemerbetRecheckService, /shm_size: 512m/);
+assert.match(kemerbetRecheckService, /cap_drop:\s*\r?\n\s+- ALL/);
+assert.match(kemerbetRecheckService, /no-new-privileges:true/);
+assert.match(kemerbetRecheckService, /pids_limit: 512/);
+assert.match(kemerbetRecheckService, /mem_limit: 1536m/);
+assert.match(kemerbetRecheckService, /cpus: 2\.00/);
+assert.match(kemerbetRecheckService, /stop_grace_period: 60s/);
+assert.match(kemerbetRecheckService, /logging:\s*\r?\n\s+driver: none/);
+assert.match(kemerbetRecheckService, /FINANCIAL_ACTIONS_MODE: dry_run/);
+assert.match(kemerbetRecheckService, /KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'/);
+for (const disabledRecheckGate of [
+  'KEMERBET_EXECUTOR_ENABLED',
+  'KEMERBET_FINAL_ACTION_ENABLED',
+  'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+  'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
+]) {
+  assert.match(kemerbetRecheckService, new RegExp(`${disabledRecheckGate}: 'false'`));
+}
+const kemerbetRecheckEnvironment = servicePropertyBlock(kemerbetRecheckService, 'environment');
+assert.doesNotMatch(
+  kemerbetRecheckEnvironment,
+  /DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY|(?:^|_)AMOUNT|(?:^|_)NOTES|TRANSFER_METHOD/,
+  'the independent recheck environment must contain no database, identity, or financial authority',
+);
+const kemerbetRecheckVolumes = servicePropertyBlock(kemerbetRecheckService, 'volumes');
+assert.equal(
+  countMatches(kemerbetRecheckVolumes, /^\s+- type: /gm),
+  5,
+  'the one-shot recheck must have exactly one browser-profile volume and four read-only inputs',
+);
+assert.match(
+  kemerbetRecheckVolumes,
+  /type: volume\s*\r?\n\s+source: kemerbet_sessions\s*\r?\n\s+target: \/var\/lib\/fetanagent\/kemerbet-sessions/,
+);
+for (const [source, target] of [
+  [
+    '/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate/kemerbet_agent_identity_bindings',
+    '/run/secrets/kemerbet_agent_identity_bindings',
+  ],
+  [
+    '/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key',
+    '/run/secrets/kemerbet_agent_identity_hmac_key',
+  ],
+  [
+    '/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids',
+    '/run/secrets/kemerbet_no_transfer_readiness_player_ids',
+  ],
+  [
+    '/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json',
+    '/etc/fetanagent/kemerbet-selector-contract.v2.json',
+  ],
+]) {
+  assert.match(
+    kemerbetRecheckVolumes,
+    new RegExp(
+      `type: bind\\s*\\r?\\n\\s+source: ${escapeRegExp(source)}\\s*\\r?\\n\\s+target: ${escapeRegExp(target)}\\s*\\r?\\n\\s+read_only: true\\s*\\r?\\n\\s+bind:\\s*\\r?\\n\\s+create_host_path: false`,
+    ),
+  );
+}
+assert.match(kemerbetRecheckService, /networks:\s*\r?\n\s+- kemerbet_readiness_egress/);
+assert.equal(
+  countMatches(services, /^\s+- kemerbet_readiness_egress$/gm),
+  1,
+  'only the one-shot recheck may join its transient egress bridge',
+);
+assert.match(kemerbetRecheckService, /healthcheck:\s*\r?\n\s+disable: true/);
+assert.doesNotMatch(
+  kemerbetRecheckService,
+  /ports:|expose:|depends_on:|secrets:|configs:|owner_control_service|staging_service|kemerbet_session_control|kemerbet-readiness-seal-output|DATABASE|SUPABASE|RECEIVER|PILOT_MANIFEST|history|docker\.sock/iu,
+  'the one-shot recheck must remain isolated from application, database, pilot, history, and Docker authority',
 );
 
 assert.match(customerWebService, /target: customer-web/);
@@ -625,9 +722,16 @@ for (const directSecretName of [
 
 const ownerControlNetwork = childBlock(networks, 'owner_control_service');
 const stagingNetwork = childBlock(networks, 'staging_service');
+const kemerbetReadinessNetwork = childBlock(networks, 'kemerbet_readiness_egress');
+assert.deepEqual(
+  sorted([...networks.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1])),
+  sorted(['owner_control_service', 'staging_service', 'kemerbet_readiness_egress']),
+  'only the two application bridges and the transient no-transfer recheck bridge are allowed',
+);
 for (const [networkName, network] of [
   ['owner_control_service', ownerControlNetwork],
   ['staging_service', stagingNetwork],
+  ['kemerbet_readiness_egress', kemerbetReadinessNetwork],
 ]) {
   assert.match(network, /driver: bridge/);
   assert.match(network, /internal: false/, `${networkName} must retain outbound Internet access`);
@@ -639,6 +743,11 @@ assert.match(
   'the Owner-control service bridge must provide IPv6',
 );
 assert.match(stagingNetwork, /enable_ipv6: true/, 'the staging service bridge must provide IPv6');
+assert.match(
+  kemerbetReadinessNetwork,
+  /enable_ipv6: true/,
+  'the one-shot KemerBet recheck bridge must provide IPv6 without joining an application network',
+);
 
 assert.equal(
   countMatches(compose, /^\s+ports:\s*$/gm),
@@ -734,5 +843,5 @@ assert.match(landingPage, /https:\/\/owner\.fetanagent\.com\/owner/);
 assert.doesNotMatch(landingPage, /\bPayRe(?:layy?|playy)\b/i);
 
 console.log(
-  'staging beta artifacts verified: five private services, a gated HTTPS gateway, a no-transfer private sign-in tool, isolated inputs, and locked financial/provider gates',
+  'staging beta artifacts verified: five private services, a gated HTTPS gateway, isolated no-transfer sign-in/recheck tools, and locked financial/provider gates',
 );

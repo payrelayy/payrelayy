@@ -29,10 +29,24 @@ readonly BOT_STARTUP_RECEIPT_ROOT='/var/lib/fetanagent-bot-startup-receipt'
 readonly BOT_STARTUP_RECEIPT="$BOT_STARTUP_RECEIPT_ROOT/bot-v1"
 readonly BOT_STARTUP_RECEIPT_VERSION='1'
 readonly KEMERBET_AGENT_IDENTITY_HMAC_KEY='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
+readonly KEMERBET_AGENT_IDENTITY_BINDINGS='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings'
 readonly KEMERBET_READINESS_PLAYER_IDS='/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
 readonly KEMERBET_SELECTOR_CONTRACT='/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json'
 readonly KEMERBET_READINESS_OUTPUT_ROOT='/var/lib/fetanagent/kemerbet-readiness-seal-output'
 readonly KEMERBET_READINESS_BINDING="$KEMERBET_READINESS_OUTPUT_ROOT/kemerbet_agent_identity_bindings"
+readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
+readonly KEMERBET_RECHECK_RECEIPT="$KEMERBET_RECHECK_RECEIPT_ROOT/ready-v1"
+readonly KEMERBET_RECHECK_PROMOTION_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck-promotion'
+readonly KEMERBET_RECHECK_PROMOTION_JOURNAL="$KEMERBET_RECHECK_PROMOTION_ROOT/pending-v1"
+readonly KEMERBET_RECHECK_CANDIDATE_ROOT='/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate'
+readonly KEMERBET_RECHECK_CANDIDATE_BINDING="$KEMERBET_RECHECK_CANDIDATE_ROOT/kemerbet_agent_identity_bindings"
+readonly KEMERBET_RECHECK_CONTAINER="$PROJECT_NAME-kemerbet-no-transfer-readiness-once"
+readonly KEMERBET_RECHECK_NETWORK="${PROJECT_NAME}_kemerbet_readiness_egress"
+readonly KEMERBET_PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
+readonly KEMERBET_RECHECK_TIMEOUT_SECONDS='300'
+readonly KEMERBET_RECHECK_KILL_AFTER_SECONDS='15'
+readonly STAGING_MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
+readonly STAGING_MUTATION_LOCK="$STAGING_MUTATION_LOCK_ROOT/mutation.lock"
 readonly EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop.service'
 readonly EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop.timer'
 readonly EXPIRY_STOP_SERVICE_PATH="/etc/systemd/system/$EXPIRY_STOP_SERVICE"
@@ -75,6 +89,56 @@ require_service_file() {
   [[ ! -L "$path" && -f "$path" ]] || die 'a required service file is absent or symbolic'
   [[ "$(stat --format='%u:%g:%a' "$path")" == '10001:10001:400' ]] ||
     die 'a service secret does not have the required ownership and mode'
+}
+
+require_root_readable_immutable_file() {
+  local path="$1"
+  [[ ! -L "$path" && -f "$path" ]] || die 'a required root-managed file is absent or symbolic'
+  [[ "$(realpath -- "$path")" == "$path" ]] || die 'a required root-managed file is not canonical'
+  [[ "$(stat --format='%U:%G:%a' "$path")" == 'root:root:444' ]] ||
+    die 'a required root-managed file does not have the required ownership and mode'
+}
+
+require_kemerbet_identity_key_file() {
+  local metadata path="$1"
+  [[ ! -L "$path" && -f "$path" ]] || die 'the KemerBet identity key is absent or symbolic'
+  [[ "$(realpath -- "$path")" == "$path" ]] || die 'the KemerBet identity key is not canonical'
+  metadata="$(stat --format='%U:%G:%a' "$path")"
+  [[ "$metadata" == '10001:10001:400' || "$metadata" == 'root:root:444' ]] ||
+    die 'the KemerBet identity key ownership or mode is unsafe'
+}
+
+acquire_staging_mutation_lock() {
+  local fd_identity path_identity
+  command -v flock >/dev/null 2>&1 || die 'the staging mutation lock utility is unavailable'
+  [[ ! -L /run && -d /run && "$(realpath -- /run)" == '/run' &&
+    "$(stat --format='%U:%G:%a' /run)" == 'root:root:755' ]] ||
+    die 'the runtime directory is unsafe for the staging mutation lock'
+  if [[ ! -e "$STAGING_MUTATION_LOCK_ROOT" && ! -L "$STAGING_MUTATION_LOCK_ROOT" ]]; then
+    (umask 077 && mkdir --mode=0700 -- "$STAGING_MUTATION_LOCK_ROOT") ||
+      die 'the staging mutation lock root could not be created'
+  fi
+  [[ ! -L "$STAGING_MUTATION_LOCK_ROOT" && -d "$STAGING_MUTATION_LOCK_ROOT" &&
+    "$(realpath -- "$STAGING_MUTATION_LOCK_ROOT")" == "$STAGING_MUTATION_LOCK_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$STAGING_MUTATION_LOCK_ROOT")" == 'root:root:700' ]] ||
+    die 'the staging mutation lock root is unsafe'
+  if [[ ! -e "$STAGING_MUTATION_LOCK" && ! -L "$STAGING_MUTATION_LOCK" ]]; then
+    (set -o noclobber; umask 077; : >"$STAGING_MUTATION_LOCK") 2>/dev/null || true
+  fi
+  [[ ! -L "$STAGING_MUTATION_LOCK" && -f "$STAGING_MUTATION_LOCK" &&
+    "$(realpath -- "$STAGING_MUTATION_LOCK")" == "$STAGING_MUTATION_LOCK" &&
+    "$(stat --format='%U:%G:%a:%h' "$STAGING_MUTATION_LOCK")" == 'root:root:600:1' ]] ||
+    die 'the staging mutation lock is unsafe'
+  exec 9<>"$STAGING_MUTATION_LOCK"
+  path_identity="$(stat --format='%u:%g:%a:%h:%d:%i' "$STAGING_MUTATION_LOCK")" ||
+    die 'the staging mutation lock path could not be inspected'
+  fd_identity="$(stat -L --format='%u:%g:%a:%h:%d:%i' /proc/self/fd/9)" ||
+    die 'the opened staging mutation lock could not be inspected'
+  [[ "$fd_identity" == '0:0:600:1:'* && "$fd_identity" == "$path_identity" ]] ||
+    die 'the opened staging mutation lock does not match its root-managed path'
+  flock --exclusive --nonblock 9 || die 'another staging mutation is already active'
+  [[ "$(stat --format='%u:%g:%a:%h:%d:%i' "$STAGING_MUTATION_LOCK")" == "$fd_identity" ]] ||
+    die 'the staging mutation lock path changed while acquiring the lock'
 }
 
 clear_bot_startup_receipt() {
@@ -121,6 +185,1110 @@ require_kemerbet_readiness_output_directory() {
     [[ "$(stat --format='%u:%g:%a' "$KEMERBET_READINESS_BINDING")" == '10001:10001:600' ]] ||
       die 'the KemerBet readiness binding ownership or mode is unsafe'
   fi
+}
+
+consume_one_use_kemerbet_file() {
+  local path="$1"
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    return 0
+  fi
+  [[ ! -L "$path" && -f "$path" ]] || return 1
+  case "$(stat --format='%U:%G:%a' "$path")" in
+    10001:10001:400|10001:10001:444|root:root:400|root:root:444) ;;
+    *) return 1 ;;
+  esac
+  [[ "$(stat --format='%h' "$path")" == '1' ]] || return 1
+  command -v shred >/dev/null 2>&1 || return 1
+  shred --force --iterations=1 --zero --remove=unlink -- "$path" >/dev/null 2>&1 || return 1
+  sync -f "$(dirname -- "$path")" >/dev/null 2>&1 || return 1
+  [[ ! -e "$path" && ! -L "$path" ]]
+}
+
+consume_exact_one_use_kemerbet_file() {
+  local path="$1" expected_dev_ino="$2" actual_dev_ino
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    return 0
+  fi
+  [[ "$expected_dev_ino" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  [[ ! -L "$path" && -f "$path" ]] || return 1
+  actual_dev_ino="$(stat --format='%d:%i' "$path")" || return 1
+  if [[ "$actual_dev_ino" != "$expected_dev_ino" ]]; then
+    # A root operator may already have staged a replacement after the interrupted transaction.
+    # It is not the one-use source named by the durable journal and must not be consumed here.
+    return 0
+  fi
+  consume_one_use_kemerbet_file "$path"
+}
+
+remove_kemerbet_recheck_container() {
+  local container_id
+  container_id="$(docker_local container ls --all --quiet \
+    --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" || return 1
+  if [[ -z "$container_id" ]]; then
+    return 0
+  fi
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+  [[ "$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}')" == \
+    "$PROJECT_NAME|kemerbet-no-transfer-readiness" ]] || return 1
+  docker_local container rm --force "$container_id" >/dev/null 2>&1 || return 1
+  container_id="$(docker_local container ls --all --quiet \
+    --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" || return 1
+  [[ -z "$container_id" ]]
+}
+
+remove_kemerbet_recheck_network() {
+  local network_id
+  network_id="$(docker_local network ls --quiet --filter "name=^${KEMERBET_RECHECK_NETWORK}$")" ||
+    return 1
+  if [[ -z "$network_id" ]]; then
+    return 0
+  fi
+  [[ "$network_id" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+  [[ "$(docker_local network inspect "$network_id" \
+    --format '{{.Name}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}')" == \
+    "$KEMERBET_RECHECK_NETWORK|$PROJECT_NAME|kemerbet_readiness_egress" ]] || return 1
+  docker_local network rm "$network_id" >/dev/null 2>&1 || return 1
+  network_id="$(docker_local network ls --quiet --filter "name=^${KEMERBET_RECHECK_NETWORK}$")" ||
+    return 1
+  [[ -z "$network_id" ]]
+}
+
+remove_kemerbet_recheck_candidate() {
+  local candidate_mode root_mode
+  if [[ ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" ]]; then
+    return 0
+  fi
+  [[ ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" && -d "$KEMERBET_RECHECK_CANDIDATE_ROOT" ]] ||
+    return 1
+  [[ "$(realpath -- "$KEMERBET_RECHECK_CANDIDATE_ROOT")" == "$KEMERBET_RECHECK_CANDIDATE_ROOT" ]] ||
+    return 1
+  [[ "$(stat --format='%U:%G' "$KEMERBET_RECHECK_CANDIDATE_ROOT")" == 'root:root' ]] || return 1
+  root_mode="$(stat --format='%a' "$KEMERBET_RECHECK_CANDIDATE_ROOT")" || return 1
+  [[ "$root_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$root_mode & 8#022) == 0 )) || return 1
+  if [[ -e "$KEMERBET_RECHECK_CANDIDATE_BINDING" || -L "$KEMERBET_RECHECK_CANDIDATE_BINDING" ]]; then
+    [[ ! -L "$KEMERBET_RECHECK_CANDIDATE_BINDING" && -f "$KEMERBET_RECHECK_CANDIDATE_BINDING" ]] ||
+      return 1
+    [[ "$(realpath -- "$KEMERBET_RECHECK_CANDIDATE_BINDING")" == \
+      "$KEMERBET_RECHECK_CANDIDATE_BINDING" ]] || return 1
+    [[ "$(stat --format='%U:%G' "$KEMERBET_RECHECK_CANDIDATE_BINDING")" == 'root:root' ]] || return 1
+    candidate_mode="$(stat --format='%a' "$KEMERBET_RECHECK_CANDIDATE_BINDING")" || return 1
+    [[ "$candidate_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$candidate_mode & 8#022) == 0 )) || return 1
+    rm -f -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" || return 1
+  fi
+  rmdir -- "$KEMERBET_RECHECK_CANDIDATE_ROOT" >/dev/null 2>&1 || return 1
+  sync -f "$(dirname -- "$KEMERBET_RECHECK_CANDIDATE_ROOT")" >/dev/null 2>&1 || return 1
+  [[ ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" ]]
+}
+
+KEMERBET_RECHECK_CLEANUP_ARMED='false'
+KEMERBET_RECHECK_CANDIDATE_CREATED='false'
+KEMERBET_RECHECK_CANDIDATE_DEV_INO=''
+KEMERBET_RECHECK_CANDIDATE_DIGEST=''
+KEMERBET_RECHECK_FINAL_INSTALLED='false'
+KEMERBET_RECHECK_RECEIPT_OWNED='false'
+KEMERBET_RECHECK_PROMOTION_OWNED='false'
+KEMERBET_RECHECK_PLAYER_IDS_DEV_INO=''
+KEMERBET_RECHECK_RELEASE=''
+KEMERBET_RECHECK_SESSION_CONTAINER=''
+KEMERBET_RECHECK_SOURCE_DEV_INO=''
+KEMERBET_RECHECK_SOURCE_DIGEST=''
+KEMERBET_RECHECK_COMMITTED='false'
+
+remove_changed_kemerbet_binding_source() {
+  local expected_dev_ino="$1" expected_digest="$2" actual_dev_ino actual_digest
+  if [[ ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]]; then
+    return 0
+  fi
+  [[ "$expected_dev_ino" =~ ^[0-9]+:[0-9]+$ && "$expected_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    return 1
+  [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" ]] || return 1
+  actual_dev_ino="$(stat --format='%d:%i' "$KEMERBET_READINESS_BINDING")" || return 1
+  if [[ "$actual_dev_ino" != "$expected_dev_ino" ]]; then
+    # Preserve a root-operator replacement; it is not the source named by this transaction.
+    return 0
+  fi
+  [[ "$(stat --format='%u:%g:%a:%h' "$KEMERBET_READINESS_BINDING")" == '10001:10001:600:1' ]] ||
+    return 1
+  actual_digest="$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')" || return 1
+  if [[ "$actual_digest" == "$expected_digest" ]]; then
+    return 0
+  fi
+  shred --force --iterations=1 --zero --remove=unlink -- "$KEMERBET_READINESS_BINDING" \
+    >/dev/null 2>&1 || return 1
+  sync -f "$KEMERBET_READINESS_OUTPUT_ROOT" >/dev/null 2>&1 || return 1
+  [[ ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]]
+}
+
+rollback_kemerbet_recheck_final_binding() {
+  local final_dev_ino final_digest
+  if [[ ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]]; then
+    return 0
+  fi
+  [[ ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" && -f "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]] ||
+    return 1
+  [[ "$(realpath -- "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]] ||
+    return 1
+  [[ "$(stat --format='%U:%G' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == 'root:root' ]] || return 1
+  final_dev_ino="$(stat --format='%d:%i' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" || return 1
+  final_digest="$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" || return 1
+  [[ -n "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" &&
+    "$final_dev_ino" == "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" &&
+    "$final_digest" == "$KEMERBET_RECHECK_CANDIDATE_DIGEST" ]] || return 1
+  rm -f -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" || return 1
+  sync -f "$(dirname -- "$KEMERBET_AGENT_IDENTITY_BINDINGS")" >/dev/null 2>&1 || return 1
+  [[ ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]]
+}
+
+remove_owned_kemerbet_recheck_receipt_root() {
+  local entry entry_mode root_mode
+  if [[ ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
+    return 0
+  fi
+  [[ ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" && -d "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+    return 1
+  [[ "$(realpath -- "$KEMERBET_RECHECK_RECEIPT_ROOT")" == "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+    return 1
+  [[ "$(stat --format='%U:%G' "$KEMERBET_RECHECK_RECEIPT_ROOT")" == 'root:root' ]] || return 1
+  root_mode="$(stat --format='%a' "$KEMERBET_RECHECK_RECEIPT_ROOT")" || return 1
+  [[ "$root_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$root_mode & 8#022) == 0 )) || return 1
+  while IFS= read -r -d '' entry; do
+    [[ "$entry" == "$KEMERBET_RECHECK_RECEIPT" ||
+      "$entry" == "$KEMERBET_RECHECK_RECEIPT_ROOT"/.ready-v1.* ]] || return 1
+    [[ ! -L "$entry" && -f "$entry" && "$(stat --format='%U:%G' "$entry")" == 'root:root' ]] ||
+      return 1
+    entry_mode="$(stat --format='%a' "$entry")" || return 1
+    [[ "$entry_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$entry_mode & 8#022) == 0 )) || return 1
+  done < <(find -P "$KEMERBET_RECHECK_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -print0)
+  find -P "$KEMERBET_RECHECK_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -type f -delete || return 1
+  rmdir -- "$KEMERBET_RECHECK_RECEIPT_ROOT" >/dev/null 2>&1 || return 1
+  sync -f "$(dirname -- "$KEMERBET_RECHECK_RECEIPT_ROOT")" >/dev/null 2>&1 || return 1
+  [[ ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]
+}
+
+remove_owned_kemerbet_recheck_promotion_root() {
+  local entry entry_mode root_mode
+  if [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]; then
+    return 0
+  fi
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" ]] ||
+    return 1
+  [[ "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" == "$KEMERBET_RECHECK_PROMOTION_ROOT" ]] ||
+    return 1
+  [[ "$(stat --format='%U:%G' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root' ]] || return 1
+  root_mode="$(stat --format='%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" || return 1
+  [[ "$root_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (( (8#$root_mode & 8#022) == 0 )) || return 1
+  while IFS= read -r -d '' entry; do
+    [[ "$entry" == "$KEMERBET_RECHECK_PROMOTION_JOURNAL" ||
+      "$entry" == "$KEMERBET_RECHECK_PROMOTION_ROOT"/.pending-v1.* ]] || return 1
+    [[ ! -L "$entry" && -f "$entry" && "$(stat --format='%U:%G' "$entry")" == 'root:root' ]] ||
+      return 1
+    entry_mode="$(stat --format='%a' "$entry")" || return 1
+    [[ "$entry_mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$entry_mode & 8#022) == 0 )) || return 1
+  done < <(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -print0)
+  find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -type f -delete || return 1
+  rmdir -- "$KEMERBET_RECHECK_PROMOTION_ROOT" >/dev/null 2>&1 || return 1
+  sync -f "$(dirname -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" >/dev/null 2>&1 || return 1
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]
+}
+
+repair_kemerbet_identity_key_readability() {
+  local metadata parent parent_mode
+  parent="$(dirname -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+  [[ ! -L "$parent" && -d "$parent" && "$(realpath -- "$parent")" == "$parent" &&
+    "$(stat --format='%U:%G' "$parent")" == 'root:root' ]] || return 1
+  parent_mode="$(stat --format='%a' "$parent")" || return 1
+  case "$parent_mode" in
+    700) ;;
+    755) chmod 0700 "$parent" >/dev/null 2>&1 || return 1 ;;
+    *) return 1 ;;
+  esac
+  [[ "$(stat --format='%U:%G:%a' "$parent")" == 'root:root:700' ]] || return 1
+  sync -f "$parent" >/dev/null 2>&1 || return 1
+  [[ ! -L "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" && -f "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" ]] ||
+    return 1
+  [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] || return 1
+  metadata="$(stat --format='%U:%G:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+  case "$metadata" in
+    root:root:444) return 0 ;;
+    10001:10001:400|10001:10001:444|root:root:400) ;;
+    *) return 1 ;;
+  esac
+  chown root:root "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" >/dev/null 2>&1 || return 1
+  chmod 0444 "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" >/dev/null 2>&1 || return 1
+  sync -f "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" >/dev/null 2>&1 || return 1
+  [[ "$(stat --format='%U:%G:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == 'root:root:444' ]]
+}
+
+kemerbet_recheck_cleanup_trap() {
+  local original_status=$?
+  local cleanup_status=0
+  trap - EXIT
+  trap '' INT TERM HUP
+  set +e
+  if [[ "$KEMERBET_RECHECK_CLEANUP_ARMED" == 'true' ]]; then
+    remove_kemerbet_recheck_container || cleanup_status=1
+    remove_kemerbet_recheck_network || cleanup_status=1
+    if [[ -n "$KEMERBET_RECHECK_RELEASE" && -n "$KEMERBET_RECHECK_SESSION_CONTAINER" ]]; then
+      remove_exact_kemerbet_session_provision \
+        "$KEMERBET_RECHECK_SESSION_CONTAINER" "$KEMERBET_RECHECK_RELEASE" || cleanup_status=1
+    fi
+    kemerbet_profile_volume_holders_match '' || cleanup_status=1
+    if [[ "$KEMERBET_RECHECK_COMMITTED" != 'true' ]]; then
+      if [[ "$KEMERBET_RECHECK_RECEIPT_OWNED" == 'true' ]]; then
+        remove_owned_kemerbet_recheck_receipt_root || cleanup_status=1
+      fi
+      rollback_kemerbet_recheck_final_binding || cleanup_status=1
+    fi
+    if [[ "$KEMERBET_RECHECK_CANDIDATE_CREATED" == 'true' ]]; then
+      remove_kemerbet_recheck_candidate || cleanup_status=1
+    fi
+    if [[ -n "$KEMERBET_RECHECK_SOURCE_DEV_INO" && -n "$KEMERBET_RECHECK_SOURCE_DIGEST" ]]; then
+      remove_changed_kemerbet_binding_source \
+        "$KEMERBET_RECHECK_SOURCE_DEV_INO" "$KEMERBET_RECHECK_SOURCE_DIGEST" || cleanup_status=1
+    fi
+    if [[ -n "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" ]]; then
+      consume_exact_one_use_kemerbet_file \
+        "$KEMERBET_READINESS_PLAYER_IDS" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" || cleanup_status=1
+    else
+      consume_one_use_kemerbet_file "$KEMERBET_READINESS_PLAYER_IDS" || cleanup_status=1
+    fi
+    repair_kemerbet_identity_key_readability || cleanup_status=1
+    if [[ "$KEMERBET_RECHECK_PROMOTION_OWNED" == 'true' ]]; then
+      # The journal is the crash-recovery authority. Retire it only after every rollback and
+      # secret-repair step succeeded; otherwise the next locked invocation must retry recovery.
+      if [[ "$cleanup_status" -eq 0 ]]; then
+        remove_owned_kemerbet_recheck_promotion_root || cleanup_status=1
+      fi
+    fi
+  fi
+  if [[ "$original_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
+    original_status=1
+  fi
+  exit "$original_status"
+}
+
+kemerbet_recheck_signal_trap() {
+  local status="$1"
+  [[ "$status" =~ ^(129|130|143)$ ]] || status=1
+  exit "$status"
+}
+
+record_kemerbet_recheck_receipt() {
+  local commit_sha="$1"
+  local binding_digest="$2"
+  local identity_key_digest="$3"
+  local selector_digest="$4"
+  local image_id="$5"
+  local profile_identity_digest="$6"
+  local temporary
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the KemerBet recheck receipt release identity is invalid'
+  [[ "$binding_digest" =~ ^[0-9a-f]{64}$ && "$identity_key_digest" =~ ^[0-9a-f]{64}$ &&
+    "$selector_digest" =~ ^[0-9a-f]{64}$ && "$profile_identity_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet recheck receipt digest contract is invalid'
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet recheck receipt image identity is invalid'
+  [[ ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+    die 'the KemerBet recheck receipt root already exists'
+  install -d -o root -g root -m 0700 "$KEMERBET_RECHECK_RECEIPT_ROOT"
+  sync -f "$(dirname -- "$KEMERBET_RECHECK_RECEIPT_ROOT")" ||
+    die 'the KemerBet recheck receipt parent could not be synchronized'
+  temporary="$(mktemp "$KEMERBET_RECHECK_RECEIPT_ROOT/.ready-v1.XXXXXX")" ||
+    die 'the KemerBet recheck receipt could not be prepared'
+  if ! printf '%s\n' \
+    'version=1' \
+    "release=$commit_sha" \
+    "binding_sha256=$binding_digest" \
+    "identity_hmac_key_sha256=$identity_key_digest" \
+    "selector_sha256=$selector_digest" \
+    "image_id=$image_id" \
+    "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+    "profile_identity_sha256=$profile_identity_digest" >"$temporary"; then
+    rm -f -- "$temporary"
+    rmdir -- "$KEMERBET_RECHECK_RECEIPT_ROOT" >/dev/null 2>&1 || true
+    die 'the KemerBet recheck receipt could not be written'
+  fi
+  chown root:root "$temporary"
+  chmod 0600 "$temporary"
+  sync -f "$temporary" || die 'the KemerBet recheck receipt could not be synchronized'
+  if ! ln -- "$temporary" "$KEMERBET_RECHECK_RECEIPT"; then
+    rm -f -- "$temporary"
+    rmdir -- "$KEMERBET_RECHECK_RECEIPT_ROOT" >/dev/null 2>&1 || true
+    die 'the KemerBet recheck receipt could not be sealed atomically'
+  fi
+  rm -f -- "$temporary"
+  sync -f "$KEMERBET_RECHECK_RECEIPT_ROOT" || die 'the KemerBet recheck receipt directory could not be synchronized'
+  [[ ! -L "$KEMERBET_RECHECK_RECEIPT" && -f "$KEMERBET_RECHECK_RECEIPT" ]] ||
+    die 'the KemerBet recheck receipt is not a safe regular file'
+  [[ "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_RECEIPT")" == 'root:root:600' ]] ||
+    die 'the KemerBet recheck receipt ownership or mode is unsafe'
+}
+
+require_kemerbet_recheck_receipt() {
+  local commit_sha="$1"
+  local binding_digest="$2"
+  local identity_key_digest="$3"
+  local selector_digest="$4"
+  local image_id="$5"
+  local profile_identity_digest="$6"
+  local actual_digest entries expected_digest
+  [[ ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" && -d "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+    die 'the KemerBet recheck receipt root is absent or symbolic'
+  [[ "$(realpath -- "$KEMERBET_RECHECK_RECEIPT_ROOT")" == "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+    die 'the KemerBet recheck receipt root is not canonical'
+  [[ "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_RECEIPT_ROOT")" == 'root:root:700' ]] ||
+    die 'the KemerBet recheck receipt root ownership or mode is unsafe'
+  entries="$(find -P "$KEMERBET_RECHECK_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    die 'the KemerBet recheck receipt root could not be inspected'
+  [[ "$entries" == 'ready-v1' ]] || die 'the KemerBet recheck receipt root is not exact'
+  [[ ! -L "$KEMERBET_RECHECK_RECEIPT" && -f "$KEMERBET_RECHECK_RECEIPT" ]] ||
+    die 'the KemerBet recheck receipt is absent or symbolic'
+  [[ "$(realpath -- "$KEMERBET_RECHECK_RECEIPT")" == "$KEMERBET_RECHECK_RECEIPT" ]] ||
+    die 'the KemerBet recheck receipt is not canonical'
+  [[ "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_RECEIPT")" == 'root:root:600:1' ]] ||
+    die 'the KemerBet recheck receipt ownership, mode, or link count is unsafe'
+  expected_digest="$({
+    printf '%s\n' \
+      'version=1' \
+      "release=$commit_sha" \
+      "binding_sha256=$binding_digest" \
+      "identity_hmac_key_sha256=$identity_key_digest" \
+      "selector_sha256=$selector_digest" \
+      "image_id=$image_id" \
+      "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+      "profile_identity_sha256=$profile_identity_digest"
+  } | sha256sum | awk '{print $1}')"
+  actual_digest="$(sha256sum -- "$KEMERBET_RECHECK_RECEIPT" | awk '{print $1}')"
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die 'the KemerBet recheck receipt content is not exact'
+}
+
+record_kemerbet_recheck_promotion_journal() {
+  local commit_sha="$1"
+  local source_dev_ino="$2"
+  local binding_digest="$3"
+  local identity_key_digest="$4"
+  local selector_digest="$5"
+  local image_id="$6"
+  local session_container="$7"
+  local player_ids_dev_ino="$8"
+  local temporary
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the KemerBet promotion-journal release identity is invalid'
+  [[ "$source_dev_ino" =~ ^[0-9]+:[0-9]+$ && "$player_ids_dev_ino" =~ ^[0-9]+:[0-9]+$ ]] ||
+    die 'the KemerBet promotion-journal file identity is invalid'
+  [[ "$binding_digest" =~ ^[0-9a-f]{64}$ && "$identity_key_digest" =~ ^[0-9a-f]{64}$ &&
+    "$selector_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet promotion-journal digest contract is invalid'
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet promotion-journal image identity is invalid'
+  [[ "$session_container" == 'none' || "$session_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the KemerBet promotion-journal session identity is invalid'
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]] ||
+    die 'the KemerBet promotion-journal root already exists'
+  install -d -o root -g root -m 0700 "$KEMERBET_RECHECK_PROMOTION_ROOT"
+  sync -f "$(dirname -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" ||
+    die 'the KemerBet promotion-journal parent could not be synchronized'
+  temporary="$(mktemp "$KEMERBET_RECHECK_PROMOTION_ROOT/.pending-v1.XXXXXX")" ||
+    die 'the KemerBet promotion journal could not be prepared'
+  if ! printf '%s\n' \
+    'version=1' \
+    'state=prepared' \
+    "release=$commit_sha" \
+    "source_dev_ino=$source_dev_ino" \
+    "binding_sha256=$binding_digest" \
+    "identity_hmac_key_sha256=$identity_key_digest" \
+    "selector_sha256=$selector_digest" \
+    "image_id=$image_id" \
+    "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+    "session_container=$session_container" \
+    "player_ids_dev_ino=$player_ids_dev_ino" >"$temporary"; then
+    die 'the KemerBet promotion journal could not be written'
+  fi
+  chown root:root "$temporary"
+  chmod 0600 "$temporary"
+  sync -f "$temporary" || die 'the KemerBet promotion journal could not be synchronized'
+  ln -- "$temporary" "$KEMERBET_RECHECK_PROMOTION_JOURNAL" ||
+    die 'the KemerBet promotion journal could not be sealed without overwrite'
+  rm -f -- "$temporary"
+  sync -f "$KEMERBET_RECHECK_PROMOTION_ROOT" ||
+    die 'the KemerBet promotion-journal root could not be synchronized'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root:700' ]] ||
+    die 'the KemerBet promotion-journal root is unsafe'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the KemerBet promotion journal is unsafe'
+}
+
+advance_kemerbet_recheck_promotion_journal() {
+  local commit_sha="$1"
+  local source_dev_ino="$2"
+  local binding_dev_ino="$3"
+  local binding_digest="$4"
+  local identity_key_digest="$5"
+  local selector_digest="$6"
+  local image_id="$7"
+  local profile_identity_digest="$8"
+  local session_container="$9"
+  local player_ids_dev_ino="${10}"
+  local temporary
+  require_kemerbet_recheck_prepared_promotion_journal \
+    "$commit_sha" "$source_dev_ino" \
+    "$binding_digest" "$identity_key_digest" "$selector_digest" "$image_id" \
+    "$session_container" "$player_ids_dev_ino"
+  [[ "$binding_dev_ino" =~ ^[0-9]+:[0-9]+$ && "$profile_identity_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet candidate-bound promotion identity is invalid'
+  temporary="$(mktemp "$KEMERBET_RECHECK_PROMOTION_ROOT/.pending-v1.XXXXXX")" ||
+    die 'the candidate-bound KemerBet promotion journal could not be prepared'
+  if ! printf '%s\n' \
+    'version=1' \
+    'state=candidate_bound' \
+    "release=$commit_sha" \
+    "source_dev_ino=$source_dev_ino" \
+    "binding_dev_ino=$binding_dev_ino" \
+    "binding_sha256=$binding_digest" \
+    "identity_hmac_key_sha256=$identity_key_digest" \
+    "selector_sha256=$selector_digest" \
+    "image_id=$image_id" \
+    "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+    "profile_identity_sha256=$profile_identity_digest" \
+    "session_container=$session_container" \
+    "player_ids_dev_ino=$player_ids_dev_ino" >"$temporary"; then
+    die 'the candidate-bound KemerBet promotion journal could not be written'
+  fi
+  chown root:root "$temporary"
+  chmod 0600 "$temporary"
+  sync -f "$temporary" ||
+    die 'the candidate-bound KemerBet promotion journal could not be synchronized'
+  mv -f -- "$temporary" "$KEMERBET_RECHECK_PROMOTION_JOURNAL"
+  sync -f "$KEMERBET_RECHECK_PROMOTION_ROOT" ||
+    die 'the candidate-bound KemerBet promotion-journal root could not be synchronized'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the candidate-bound KemerBet promotion journal is unsafe'
+}
+
+require_kemerbet_recheck_prepared_promotion_journal() {
+  local commit_sha="$1"
+  local source_dev_ino="$2"
+  local binding_digest="$3"
+  local identity_key_digest="$4"
+  local selector_digest="$5"
+  local image_id="$6"
+  local session_container="$7"
+  local player_ids_dev_ino="$8"
+  local actual_digest entries expected_digest
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root:700' ]] ||
+    die 'the prepared KemerBet promotion-journal root is unsafe'
+  entries="$(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    die 'the prepared KemerBet promotion-journal root could not be inspected'
+  [[ "$entries" == 'pending-v1' ]] || die 'the prepared KemerBet promotion-journal root is not exact'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" && -f "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the prepared KemerBet promotion journal is unsafe'
+  expected_digest="$({
+    printf '%s\n' \
+      'version=1' \
+      'state=prepared' \
+      "release=$commit_sha" \
+      "source_dev_ino=$source_dev_ino" \
+      "binding_sha256=$binding_digest" \
+      "identity_hmac_key_sha256=$identity_key_digest" \
+      "selector_sha256=$selector_digest" \
+      "image_id=$image_id" \
+      "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+      "session_container=$session_container" \
+      "player_ids_dev_ino=$player_ids_dev_ino"
+  } | sha256sum | awk '{print $1}')"
+  actual_digest="$(sha256sum -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL" | awk '{print $1}')"
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die 'the prepared KemerBet promotion journal content is not exact'
+}
+
+require_kemerbet_recheck_promotion_journal() {
+  local commit_sha="$1"
+  local source_dev_ino="$2"
+  local binding_dev_ino="$3"
+  local binding_digest="$4"
+  local identity_key_digest="$5"
+  local selector_digest="$6"
+  local image_id="$7"
+  local profile_identity_digest="$8"
+  local session_container="$9"
+  local player_ids_dev_ino="${10}"
+  local actual_digest entries expected_digest
+  [[ "$source_dev_ino" =~ ^[0-9]+:[0-9]+$ && "$binding_dev_ino" =~ ^[0-9]+:[0-9]+$ ]] ||
+    die 'the KemerBet promotion journal file identity is invalid'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root:700' ]] ||
+    die 'the KemerBet promotion-journal root is unsafe'
+  entries="$(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    die 'the KemerBet promotion-journal root could not be inspected'
+  [[ "$entries" == 'pending-v1' ]] || die 'the KemerBet promotion-journal root is not exact'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" && -f "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the KemerBet promotion journal is unsafe'
+  expected_digest="$({
+    printf '%s\n' \
+      'version=1' \
+      'state=candidate_bound' \
+      "release=$commit_sha" \
+      "source_dev_ino=$source_dev_ino" \
+      "binding_dev_ino=$binding_dev_ino" \
+      "binding_sha256=$binding_digest" \
+      "identity_hmac_key_sha256=$identity_key_digest" \
+      "selector_sha256=$selector_digest" \
+      "image_id=$image_id" \
+      "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+      "profile_identity_sha256=$profile_identity_digest" \
+      "session_container=$session_container" \
+      "player_ids_dev_ino=$player_ids_dev_ino"
+  } | sha256sum | awk '{print $1}')"
+  actual_digest="$(sha256sum -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL" | awk '{print $1}')"
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die 'the KemerBet promotion journal content is not exact'
+}
+
+require_committed_kemerbet_recheck_boundary_shape() {
+  local binding_digest entries
+  local -a receipt_lines=()
+  [[ ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" && -d "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_RECEIPT_ROOT")" == "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_RECEIPT_ROOT")" == 'root:root:700' ]] ||
+    die 'an interrupted committed KemerBet receipt root is unsafe'
+  entries="$(find -P "$KEMERBET_RECHECK_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    die 'an interrupted committed KemerBet receipt root could not be inspected'
+  [[ "$entries" == 'ready-v1' ]] || die 'an interrupted committed KemerBet receipt root is not exact'
+  [[ ! -L "$KEMERBET_RECHECK_RECEIPT" && -f "$KEMERBET_RECHECK_RECEIPT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_RECEIPT")" == "$KEMERBET_RECHECK_RECEIPT" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_RECEIPT")" == 'root:root:600:1' ]] ||
+    die 'an interrupted committed KemerBet receipt is unsafe'
+  mapfile -t receipt_lines <"$KEMERBET_RECHECK_RECEIPT"
+  [[ "${#receipt_lines[@]}" -eq 8 &&
+    "${receipt_lines[0]}" == 'version=1' &&
+    "${receipt_lines[1]}" =~ ^release=[0-9a-f]{40}$ &&
+    "${receipt_lines[2]}" =~ ^binding_sha256=[0-9a-f]{64}$ &&
+    "${receipt_lines[3]}" =~ ^identity_hmac_key_sha256=[0-9a-f]{64}$ &&
+    "${receipt_lines[4]}" =~ ^selector_sha256=[0-9a-f]{64}$ &&
+    "${receipt_lines[5]}" =~ ^image_id=sha256:[0-9a-f]{64}$ &&
+    "${receipt_lines[6]}" == "profile_volume=$KEMERBET_PROFILE_VOLUME" &&
+    "${receipt_lines[7]}" =~ ^profile_identity_sha256=[0-9a-f]{64}$ ]] ||
+    die 'an interrupted committed KemerBet receipt content is invalid'
+  binding_digest="${receipt_lines[2]#binding_sha256=}"
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+  [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '1' &&
+    "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" == "$binding_digest" ]] ||
+    die 'an interrupted committed KemerBet binding does not match its receipt'
+}
+
+require_completed_kemerbet_recheck_for_release() {
+  local commit_sha="$1" image_tag="$2"
+  local account_id binding_digest binding_fingerprint binding_line binding_residue
+  local identity_key_digest image_id profile_identity_digest profile_mountpoint
+  local recheck_container recheck_network selector_digest
+  local -a receipt_lines=()
+  validate_commit_and_tag "$commit_sha" "$image_tag"
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]] ||
+    die 'a completed KemerBet recheck still has a promotion journal'
+  require_committed_kemerbet_recheck_boundary_shape
+  mapfile -t receipt_lines <"$KEMERBET_RECHECK_RECEIPT"
+  [[ "${receipt_lines[1]}" == "release=$commit_sha" ]] ||
+    die 'the completed KemerBet recheck belongs to another reviewed release'
+  binding_digest="${receipt_lines[2]#binding_sha256=}"
+  identity_key_digest="${receipt_lines[3]#identity_hmac_key_sha256=}"
+  selector_digest="${receipt_lines[4]#selector_sha256=}"
+  image_id="${receipt_lines[5]#image_id=}"
+  profile_identity_digest="${receipt_lines[7]#profile_identity_sha256=}"
+  require_kemerbet_recheck_receipt \
+    "$commit_sha" "$binding_digest" "$identity_key_digest" "$selector_digest" \
+    "$image_id" "$profile_identity_digest"
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+  require_root_readable_immutable_file "$KEMERBET_SELECTOR_CONTRACT"
+  [[ "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" == "$binding_digest" &&
+    "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == "$identity_key_digest" &&
+    "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == "$selector_digest" ]] ||
+    die 'a completed KemerBet recheck digest no longer matches its receipt'
+  [[ "$(wc -l <"$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '1' ]] ||
+    die 'the completed KemerBet binding shape is invalid'
+  LC_ALL=C grep -Eq \
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64}$' \
+    "$KEMERBET_AGENT_IDENTITY_BINDINGS" || die 'the completed KemerBet binding contract is invalid'
+  binding_line="$(<"$KEMERBET_AGENT_IDENTITY_BINDINGS")"
+  IFS=' ' read -r account_id binding_fingerprint binding_residue <<<"$binding_line"
+  [[ -n "$account_id" && -n "$binding_fingerprint" && -z "$binding_residue" ]] ||
+    die 'the completed KemerBet binding fields are invalid'
+  profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)"
+  [[ "$(kemerbet_profile_identity_digest "$account_id" "$profile_mountpoint")" == \
+    "$profile_identity_digest" ]] || die 'the completed KemerBet profile identity changed'
+  [[ "$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" --format '{{.Id}}')" == \
+    "$image_id" ]] || die 'the completed KemerBet image identity is unavailable or changed'
+  [[ "$(docker_local image inspect "$image_id" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}|{{ index .Config.Labels "org.opencontainers.image.title" }}|{{.Config.User}}')" == \
+    "$commit_sha|fetanagent-deposit-executor|10001:10001" ]] ||
+    die 'the completed KemerBet image provenance is invalid'
+  require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+  require_kemerbet_profile_volume_holders ''
+  recheck_container="$(docker_local container ls --all --quiet \
+    --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" ||
+    die 'the completed KemerBet recheck container inventory could not be inspected'
+  [[ -z "$recheck_container" ]] || die 'the completed KemerBet recheck retained a container'
+  recheck_network="$(docker_local network ls --quiet --filter "name=^${KEMERBET_RECHECK_NETWORK}$")" ||
+    die 'the completed KemerBet recheck network inventory could not be inspected'
+  [[ -z "$recheck_network" ]] || die 'the completed KemerBet recheck retained a network'
+  [[ ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" &&
+    ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+    ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+    die 'a completed KemerBet recheck retained a consumed input'
+  require_kemerbet_readiness_output_directory
+}
+
+remove_exact_kemerbet_session_provision() {
+  local expected_container="$1" commit_sha="$2"
+  local actual_container environment mount_source state
+  [[ "$expected_container" == 'none' || "$expected_container" =~ ^[0-9a-f]{12,64}$ ]] || return 1
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  actual_container="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=kemerbet-session-provision')" || return 1
+  if [[ "$expected_container" == 'none' ]]; then
+    [[ -z "$actual_container" ]]
+    return $?
+  fi
+  if [[ -z "$actual_container" ]]; then
+    return 0
+  fi
+  [[ "$actual_container" == "$expected_container" ]] || return 1
+  [[ "$(docker_local container inspect "$actual_container" \
+    --format '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ index .Config.Labels "org.opencontainers.image.revision" }}|{{.Config.User}}|{{json .Config.Cmd}}')" == \
+    "$PROJECT_NAME|kemerbet-session-provision|$commit_sha|10001:10001|[\"node\",\"apps/executor/dist/kemerbet-session-provision-server.js\"]" ]] || return 1
+  environment="$(docker_local container inspect "$actual_container" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}')" || return 1
+  for expected_environment in \
+    'NODE_ENV=production' \
+    'FINANCIAL_ACTIONS_MODE=dry_run' \
+    'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' \
+    'KEMERBET_EXECUTOR_ENABLED=false' \
+    'KEMERBET_FINAL_ACTION_ENABLED=false' \
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false' \
+    'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false'; do
+    grep -Fxq "$expected_environment" <<<"$environment" || return 1
+  done
+  ! grep -Eq '(DATABASE|PASSWORD|SECRET|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY)' \
+    <<<"$environment" || return 1
+  mount_source="$(docker_local container inspect "$actual_container" \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/lib/fetanagent/kemerbet-sessions"}}{{.Name}}{{end}}{{end}}')" || return 1
+  [[ "$mount_source" == "$KEMERBET_PROFILE_VOLUME" ]] || return 1
+  state="$(docker_local container inspect "$actual_container" --format '{{.State.Status}}')" || return 1
+  case "$state" in
+    running) docker_local container stop --time 70 "$actual_container" >/dev/null || return 1 ;;
+    exited) ;;
+    *) return 1 ;;
+  esac
+  docker_local container rm "$actual_container" >/dev/null || return 1
+  actual_container="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=kemerbet-session-provision')" || return 1
+  [[ -z "$actual_container" ]]
+}
+
+remove_journaled_kemerbet_session_provision() {
+  remove_exact_kemerbet_session_provision "$1" "$2" ||
+    die 'the journaled KemerBet session could not be removed safely'
+}
+
+recover_incomplete_kemerbet_recheck_promotion() {
+  local actual_entries candidate_dev_ino candidate_digest entry player_ids_dev_ino
+  local commit_sha receipt_present canonical_present session_container source_dev_ino state
+  local -a journal_lines=()
+  if [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]; then
+    return 0
+  fi
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root:700' ]] ||
+    die 'an interrupted KemerBet promotion root is unsafe'
+  actual_entries="$(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" ||
+    die 'the interrupted KemerBet promotion root could not be inspected'
+  receipt_present='false'
+  canonical_present='false'
+  [[ ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+    receipt_present='true'
+  [[ ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]] ||
+    canonical_present='true'
+
+  if [[ ! -e "$KEMERBET_RECHECK_PROMOTION_JOURNAL" && ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" ]]; then
+    if [[ -z "$actual_entries" ]]; then
+      if [[ "$receipt_present" != "$canonical_present" ]]; then
+        die 'an interrupted KemerBet promotion has an ambiguous committed boundary'
+      fi
+      if [[ "$receipt_present" == 'true' ]]; then
+        require_committed_kemerbet_recheck_boundary_shape
+      fi
+      remove_owned_kemerbet_recheck_promotion_root ||
+        die 'the interrupted KemerBet promotion root could not be removed'
+      return 0
+    fi
+    [[ "$actual_entries" =~ ^\.pending-v1\.[A-Za-z0-9]+$ &&
+      "$receipt_present" == 'false' && "$canonical_present" == 'false' ]] ||
+      die 'an interrupted KemerBet promotion journal is incomplete or ambiguous'
+    entry="$KEMERBET_RECHECK_PROMOTION_ROOT/$actual_entries"
+    [[ ! -L "$entry" && -f "$entry" &&
+      "$(stat --format='%U:%G:%a' "$entry")" == 'root:root:600' ]] ||
+      die 'the interrupted KemerBet promotion-journal temporary is unsafe'
+    remove_owned_kemerbet_recheck_promotion_root ||
+      die 'the interrupted KemerBet promotion root could not be removed'
+    return 0
+  fi
+
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" && -f "$KEMERBET_RECHECK_PROMOTION_JOURNAL" ]] ||
+    die 'the interrupted KemerBet promotion journal is unsafe'
+  if [[ "$actual_entries" != 'pending-v1' ]]; then
+    [[ "$actual_entries" =~ ^\.pending-v1\.[A-Za-z0-9]+$'\n'pending-v1$ ]] ||
+      die 'the interrupted KemerBet promotion journal contains unexpected residue'
+    entry="$KEMERBET_RECHECK_PROMOTION_ROOT/${actual_entries%%$'\n'*}"
+    [[ ! -L "$entry" && -f "$entry" &&
+      "$(stat --format='%U:%G:%a' "$entry")" == 'root:root:600' ]] ||
+      die 'the interrupted KemerBet promotion-journal temporary is unsafe'
+    rm -f -- "$entry"
+    sync -f "$KEMERBET_RECHECK_PROMOTION_ROOT" ||
+      die 'the interrupted KemerBet promotion journal could not be synchronized'
+  fi
+  [[ "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the interrupted KemerBet promotion journal ownership, mode, or link count is unsafe'
+  mapfile -t journal_lines <"$KEMERBET_RECHECK_PROMOTION_JOURNAL"
+  [[ "${#journal_lines[@]}" -ge 2 && "${journal_lines[0]}" == 'version=1' ]] ||
+    die 'the interrupted KemerBet promotion journal header is invalid'
+  state="${journal_lines[1]}"
+
+  if [[ "$state" == 'state=prepared' ]]; then
+    [[ "${#journal_lines[@]}" -eq 11 &&
+      "${journal_lines[2]}" =~ ^release=[0-9a-f]{40}$ &&
+      "${journal_lines[3]}" =~ ^source_dev_ino=[0-9]+:[0-9]+$ &&
+      "${journal_lines[4]}" =~ ^binding_sha256=[0-9a-f]{64}$ &&
+      "${journal_lines[5]}" =~ ^identity_hmac_key_sha256=[0-9a-f]{64}$ &&
+      "${journal_lines[6]}" =~ ^selector_sha256=[0-9a-f]{64}$ &&
+      "${journal_lines[7]}" =~ ^image_id=sha256:[0-9a-f]{64}$ &&
+      "${journal_lines[8]}" == "profile_volume=$KEMERBET_PROFILE_VOLUME" &&
+      "${journal_lines[9]}" =~ ^session_container=(none|[0-9a-f]{12,64})$ &&
+      "${journal_lines[10]}" =~ ^player_ids_dev_ino=[0-9]+:[0-9]+$ &&
+      "$receipt_present" == 'false' && "$canonical_present" == 'false' ]] ||
+      die 'the interrupted prepared KemerBet promotion journal is invalid or ambiguous'
+    commit_sha="${journal_lines[2]#release=}"
+    source_dev_ino="${journal_lines[3]#source_dev_ino=}"
+    candidate_digest="${journal_lines[4]#binding_sha256=}"
+    session_container="${journal_lines[9]#session_container=}"
+    player_ids_dev_ino="${journal_lines[10]#player_ids_dev_ino=}"
+    remove_kemerbet_recheck_container || die 'an interrupted KemerBet recheck container could not be removed'
+    remove_kemerbet_recheck_network || die 'an interrupted KemerBet recheck network could not be removed'
+    remove_journaled_kemerbet_session_provision "$session_container" "$commit_sha"
+    require_kemerbet_profile_volume_holders ''
+    [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" &&
+      "$(stat --format='%d:%i' "$KEMERBET_READINESS_BINDING")" == "$source_dev_ino" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')" == "$candidate_digest" ]] ||
+      die 'the interrupted prepared KemerBet binding source changed'
+    [[ ! -L "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" && -f "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" &&
+      "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == \
+      "${journal_lines[5]#identity_hmac_key_sha256=}" ]] ||
+      die 'the interrupted prepared KemerBet identity key changed'
+    require_root_readable_immutable_file "$KEMERBET_SELECTOR_CONTRACT"
+    [[ "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == \
+      "${journal_lines[6]#selector_sha256=}" ]] ||
+      die 'the interrupted prepared KemerBet selector changed'
+    # In prepared state the fixed candidate path did not exist before this journal. A crash may
+    # interrupt `install` mid-copy, so ownership/path checks—not a completed digest—authorize its
+    # rollback. A digest becomes mandatory only after the candidate_bound state is durable.
+    remove_kemerbet_recheck_candidate || die 'the interrupted prepared KemerBet candidate could not be removed'
+    consume_exact_one_use_kemerbet_file "$KEMERBET_READINESS_PLAYER_IDS" "$player_ids_dev_ino" ||
+      die 'the interrupted one-use KemerBet Player-ID source could not be removed'
+    repair_kemerbet_identity_key_readability ||
+      die 'the KemerBet identity key could not be repaired after interruption'
+    [[ "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == \
+      "${journal_lines[5]#identity_hmac_key_sha256=}" ]] ||
+      die 'the repaired KemerBet identity key no longer matches its journal'
+    remove_owned_kemerbet_recheck_promotion_root ||
+      die 'the interrupted prepared KemerBet promotion journal could not be retired'
+    return 0
+  fi
+
+  [[ "$state" == 'state=candidate_bound' && "${#journal_lines[@]}" -eq 13 &&
+    "${journal_lines[2]}" =~ ^release=[0-9a-f]{40}$ &&
+    "${journal_lines[3]}" =~ ^source_dev_ino=[0-9]+:[0-9]+$ &&
+    "${journal_lines[4]}" =~ ^binding_dev_ino=[0-9]+:[0-9]+$ &&
+    "${journal_lines[5]}" =~ ^binding_sha256=[0-9a-f]{64}$ &&
+    "${journal_lines[6]}" =~ ^identity_hmac_key_sha256=[0-9a-f]{64}$ &&
+    "${journal_lines[7]}" =~ ^selector_sha256=[0-9a-f]{64}$ &&
+    "${journal_lines[8]}" =~ ^image_id=sha256:[0-9a-f]{64}$ &&
+    "${journal_lines[9]}" == "profile_volume=$KEMERBET_PROFILE_VOLUME" &&
+    "${journal_lines[10]}" =~ ^profile_identity_sha256=[0-9a-f]{64}$ &&
+    "${journal_lines[11]}" =~ ^session_container=(none|[0-9a-f]{12,64})$ &&
+    "${journal_lines[12]}" =~ ^player_ids_dev_ino=[0-9]+:[0-9]+$ ]] ||
+    die 'the interrupted candidate-bound KemerBet promotion journal is invalid'
+  commit_sha="${journal_lines[2]#release=}"
+  source_dev_ino="${journal_lines[3]#source_dev_ino=}"
+  candidate_dev_ino="${journal_lines[4]#binding_dev_ino=}"
+  candidate_digest="${journal_lines[5]#binding_sha256=}"
+  session_container="${journal_lines[11]#session_container=}"
+  player_ids_dev_ino="${journal_lines[12]#player_ids_dev_ino=}"
+
+  remove_kemerbet_recheck_container || die 'an interrupted KemerBet recheck container could not be removed'
+  remove_kemerbet_recheck_network || die 'an interrupted KemerBet recheck network could not be removed'
+  remove_journaled_kemerbet_session_provision "$session_container" "$commit_sha"
+  require_kemerbet_profile_volume_holders ''
+
+  [[ ! -L "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" && -f "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" &&
+    "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == \
+    "${journal_lines[6]#identity_hmac_key_sha256=}" ]] ||
+    die 'the interrupted candidate-bound KemerBet identity key changed'
+  require_root_readable_immutable_file "$KEMERBET_SELECTOR_CONTRACT"
+  [[ "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == \
+    "${journal_lines[7]#selector_sha256=}" ]] ||
+    die 'the interrupted candidate-bound KemerBet selector changed'
+
+  if [[ "$receipt_present" == 'true' ]]; then
+    remove_owned_kemerbet_recheck_receipt_root ||
+      die 'an uncommitted KemerBet recheck receipt could not be removed'
+  fi
+  KEMERBET_RECHECK_CANDIDATE_DEV_INO="$candidate_dev_ino"
+  KEMERBET_RECHECK_CANDIDATE_DIGEST="$candidate_digest"
+  rollback_kemerbet_recheck_final_binding ||
+    die 'an uncommitted KemerBet identity binding could not be rolled back'
+  if [[ -e "$KEMERBET_RECHECK_CANDIDATE_BINDING" || -L "$KEMERBET_RECHECK_CANDIDATE_BINDING" ]]; then
+    [[ ! -L "$KEMERBET_RECHECK_CANDIDATE_BINDING" &&
+      "$(stat --format='%d:%i' "$KEMERBET_RECHECK_CANDIDATE_BINDING")" == "$candidate_dev_ino" &&
+      "$(sha256sum -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" | awk '{print $1}')" == "$candidate_digest" ]] ||
+      die 'the interrupted KemerBet candidate does not match its durable journal'
+  fi
+  remove_kemerbet_recheck_candidate || die 'the interrupted KemerBet candidate could not be removed'
+  remove_changed_kemerbet_binding_source "$source_dev_ino" "$candidate_digest" ||
+    die 'the interrupted KemerBet binding source could not be sanitized'
+  consume_exact_one_use_kemerbet_file "$KEMERBET_READINESS_PLAYER_IDS" "$player_ids_dev_ino" ||
+    die 'the interrupted one-use KemerBet Player-ID source could not be removed'
+  repair_kemerbet_identity_key_readability ||
+    die 'the KemerBet identity key could not be repaired after interruption'
+  [[ "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == \
+    "${journal_lines[6]#identity_hmac_key_sha256=}" ]] ||
+    die 'the repaired KemerBet identity key no longer matches its journal'
+  remove_owned_kemerbet_recheck_promotion_root ||
+    die 'the interrupted KemerBet promotion journal could not be retired'
+  KEMERBET_RECHECK_CANDIDATE_DEV_INO=''
+  KEMERBET_RECHECK_CANDIDATE_DIGEST=''
+}
+
+harden_kemerbet_identity_key() {
+  local digest_before metadata parent
+  parent="$(dirname -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+  [[ ! -L "$parent" && -d "$parent" && "$(realpath -- "$parent")" == "$parent" ]] ||
+    die 'the KemerBet executor secret root is absent, symbolic, or noncanonical'
+  [[ "$(stat --format='%U:%G:%a' "$parent")" == 'root:root:700' ]] ||
+    die 'the KemerBet executor secret root is not root-managed mode 0700'
+  require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+  [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] ||
+    die 'the KemerBet identity key has an unsafe hard-link count'
+  digest_before="$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')"
+  [[ "$digest_before" =~ ^[0-9a-f]{64}$ ]] || die 'the KemerBet identity key digest is invalid'
+  metadata="$(stat --format='%U:%G:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+  if [[ "$metadata" == '10001:10001:400' ]]; then
+    chown root:root "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+    chmod 0444 "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+    sync -f "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" ||
+      die 'the KemerBet identity key could not be synchronized after hardening'
+  fi
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+  [[ "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == "$digest_before" ]] ||
+    die 'the KemerBet identity key changed while it was hardened'
+}
+
+harden_kemerbet_player_ids_file() {
+  local digest_before parent
+  parent="$(dirname -- "$KEMERBET_READINESS_PLAYER_IDS")"
+  [[ ! -L "$parent" && -d "$parent" && "$(realpath -- "$parent")" == "$parent" ]] ||
+    die 'the KemerBet Player-ID secret root is absent, symbolic, or noncanonical'
+  [[ "$(stat --format='%U:%G:%a' "$parent")" == 'root:root:700' ]] ||
+    die 'the KemerBet Player-ID secret root is not root-managed mode 0700'
+  require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
+  [[ "$(stat --format='%h' "$KEMERBET_READINESS_PLAYER_IDS")" == '1' ]] ||
+    die 'the one-use KemerBet Player-ID file has an unsafe hard-link count'
+  digest_before="$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')"
+  [[ "$digest_before" =~ ^[0-9a-f]{64}$ ]] || die 'the KemerBet Player-ID file digest is invalid'
+  chown root:root "$KEMERBET_READINESS_PLAYER_IDS"
+  chmod 0444 "$KEMERBET_READINESS_PLAYER_IDS"
+  sync -f "$KEMERBET_READINESS_PLAYER_IDS" ||
+    die 'the KemerBet Player-ID file could not be synchronized after hardening'
+  require_root_readable_immutable_file "$KEMERBET_READINESS_PLAYER_IDS"
+  [[ "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$digest_before" ]] ||
+    die 'the KemerBet Player-ID file changed while it was hardened'
+}
+
+resolve_kemerbet_profile_volume_mountpoint() {
+  local mountpoint volume_name
+  volume_name="$(docker_local volume ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.volume=kemerbet_sessions')" ||
+    die 'the KemerBet profile volume inventory could not be inspected'
+  [[ "$volume_name" == "$KEMERBET_PROFILE_VOLUME" ]] ||
+    die 'the KemerBet profile volume identity is not exact'
+  [[ "$(docker_local volume inspect "$volume_name" \
+    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}')" == \
+    "$KEMERBET_PROFILE_VOLUME|local|local|$PROJECT_NAME|kemerbet_sessions" ]] ||
+    die 'the KemerBet profile volume contract is not exact'
+  mountpoint="$(docker_local volume inspect "$volume_name" --format '{{.Mountpoint}}')" ||
+    die 'the KemerBet profile volume mountpoint could not be inspected'
+  [[ "$mountpoint" == /* && ! -L "$mountpoint" && -d "$mountpoint" ]] ||
+    die 'the KemerBet profile volume mountpoint is unsafe'
+  [[ "$(realpath -- "$mountpoint")" == "$mountpoint" ]] ||
+    die 'the KemerBet profile volume mountpoint is not canonical'
+  [[ "$(stat --format='%u:%g:%a' "$mountpoint")" == '10001:10001:700' ]] ||
+    die 'the KemerBet profile volume root ownership or mode is unsafe'
+  printf '%s' "$mountpoint"
+}
+
+kemerbet_profile_volume_holders_match() {
+  local expected_container_id="$1" holders
+  holders="$(docker_local container ls --all --quiet --filter "volume=$KEMERBET_PROFILE_VOLUME")" ||
+    return 1
+  [[ "$holders" == "$expected_container_id" ]]
+}
+
+require_kemerbet_profile_volume_holders() {
+  kemerbet_profile_volume_holders_match "$1" ||
+    die 'the KemerBet profile volume has an unexpected concurrent holder'
+}
+
+kemerbet_profile_identity_digest() {
+  local account_id="$1" mountpoint="$2" profile_path root_entries singleton
+  [[ "$account_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
+    "$account_id" != '00000000-0000-0000-0000-000000000000' ]] ||
+    die 'the KemerBet profile account identity is invalid'
+  profile_path="$mountpoint/$account_id"
+  [[ ! -L "$profile_path" && -d "$profile_path" ]] ||
+    die 'the exact KemerBet profile is absent or symbolic'
+  [[ "$(realpath -- "$profile_path")" == "$profile_path" ]] ||
+    die 'the exact KemerBet profile is not canonical'
+  [[ "$(stat --format='%u:%g:%a' "$profile_path")" == '10001:10001:700' ]] ||
+    die 'the exact KemerBet profile ownership or mode is unsafe'
+  root_entries="$(find -P "$mountpoint" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    die 'the KemerBet profile root could not be inspected'
+  [[ "$root_entries" == "$account_id" ]] || die 'the KemerBet profile root is not exact'
+  for singleton in SingletonCookie SingletonLock SingletonSocket; do
+    [[ ! -e "$profile_path/$singleton" && ! -L "$profile_path/$singleton" ]] ||
+      die 'the KemerBet profile retains an active or stale Chromium singleton artifact'
+  done
+  printf 'volume=%s\nroot=%s\nprofile=%s\naccount=%s\n' \
+    "$KEMERBET_PROFILE_VOLUME" \
+    "$(stat --format='%d:%i:%u:%g:%a' "$mountpoint")" \
+    "$(stat --format='%d:%i:%u:%g:%a' "$profile_path")" \
+    "$account_id" | sha256sum | awk '{print $1}'
+}
+
+require_kemerbet_recheck_container_contract() {
+  local container_id="$1" commit_sha="$2" image_tag="$3" image_id="$4"
+  local actual_environment expected_environment image_environment mount_contract network_contract
+  local tmpfs_contract
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ && "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet recheck container or image identity is invalid'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.Name}}')" == "/$KEMERBET_RECHECK_CONTAINER" ]] ||
+    die 'the KemerBet recheck container name is not exact'
+  [[ "$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == \
+    "$PROJECT_NAME|kemerbet-no-transfer-readiness|$commit_sha" ]] ||
+    die 'the KemerBet recheck container labels are not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.State.Status}}')" == 'created' ]] ||
+    die 'the KemerBet recheck container was started before inspection'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.Image}}')" == "$image_id" ]] ||
+    die 'the KemerBet recheck container image identity changed'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.Config.Image}}')" == \
+    "fetanagent-deposit-executor:$image_tag" ]] || die 'the KemerBet recheck image reference is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.Config.User}}')" == '10001:10001' ]] ||
+    die 'the KemerBet recheck user is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .Config.Cmd}}')" == \
+    '["node","apps/executor/dist/kemerbet-no-transfer-readiness.js"]' ]] ||
+    die 'the KemerBet recheck command is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.Config.OpenStdin}}|{{.Config.Tty}}')" == \
+    'false|false' ]] || die 'the KemerBet recheck terminal contract is unsafe'
+  [[ "$(docker_local container inspect "$container_id" \
+    --format '{{.HostConfig.ReadonlyRootfs}}|{{.HostConfig.Privileged}}|{{.HostConfig.AutoRemove}}|{{.HostConfig.RestartPolicy.Name}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}')" == \
+    'true|false|false|no|0' ]] || die 'the KemerBet recheck host isolation contract is unsafe'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.Init}}')" == 'true' ]] ||
+    die 'the KemerBet recheck init process is not enabled'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.CapAdd}}')" == 'null' ]] ||
+    die 'the KemerBet recheck container adds a Linux capability'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.CapDrop}}')" == '["ALL"]' ]] ||
+    die 'the KemerBet recheck container does not drop every Linux capability'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.SecurityOpt}}')" == \
+    '["no-new-privileges:true"]' ]] || die 'the KemerBet recheck permits privilege escalation'
+  [[ "$(docker_local container inspect "$container_id" \
+    --format '{{.HostConfig.PidsLimit}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{.HostConfig.ShmSize}}')" == \
+    '512|1610612736|2000000000|536870912' ]] ||
+    die 'the KemerBet recheck resource limits are not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .HostConfig.PortBindings}}')" == '{}' ]] ||
+    die 'the KemerBet recheck publishes a port'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .Config.ExposedPorts}}')" == 'null' ]] ||
+    die 'the KemerBet recheck image exposes a port'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.LogConfig.Type}}')" == 'none' ]] ||
+    die 'the KemerBet recheck log driver is not disabled'
+  [[ "$(docker_local container inspect "$container_id" --format '{{json .Config.Healthcheck.Test}}')" == \
+    '["NONE"]' ]] || die 'the KemerBet recheck healthcheck is not disabled'
+  tmpfs_contract="$(docker_local container inspect "$container_id" --format '{{index .HostConfig.Tmpfs "/tmp"}}')"
+  [[ "$(tr ',' '\n' <<<"$tmpfs_contract" | LC_ALL=C sort)" == \
+    $'mode=1777\nnodev\nnoexec\nnosuid\nrw\nsize=268435456' ]] ||
+    die 'the KemerBet recheck temporary filesystem contract is not exact'
+
+  image_environment="$(docker_local image inspect "$image_id" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}')" ||
+    die 'the KemerBet recheck image environment could not be inspected'
+  expected_environment="$({
+    grep -Ev '^(NODE_ENV|FINANCIAL_ACTIONS_MODE|KEMERBET_NO_TRANSFER_READINESS_ENABLED|KEMERBET_EXECUTOR_ENABLED|KEMERBET_FINAL_ACTION_ENABLED|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED)=' \
+      <<<"$image_environment" || true
+    printf '%s\n' \
+      'NODE_ENV=production' \
+      'FINANCIAL_ACTIONS_MODE=dry_run' \
+      'KEMERBET_NO_TRANSFER_READINESS_ENABLED=true' \
+      'KEMERBET_EXECUTOR_ENABLED=false' \
+      'KEMERBET_FINAL_ACTION_ENABLED=false' \
+      'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false' \
+      'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false'
+  } | LC_ALL=C sort)"
+  actual_environment="$(docker_local container inspect "$container_id" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}' | LC_ALL=C sort)" ||
+    die 'the KemerBet recheck environment could not be inspected'
+  [[ "$actual_environment" == "$expected_environment" ]] ||
+    die 'the KemerBet recheck environment is not exact'
+
+  mount_contract="$(docker_local container inspect "$container_id" --format \
+    '{{range .Mounts}}{{if eq .Type "volume"}}{{printf "%s|%s|%s|%t\n" .Type .Name .Destination .RW}}{{else}}{{printf "%s|%s|%s|%t\n" .Type .Source .Destination .RW}}{{end}}{{end}}' | LC_ALL=C sort)" ||
+    die 'the KemerBet recheck mount contract could not be inspected'
+  [[ "$mount_contract" == "$(printf '%s\n' \
+    "bind|$KEMERBET_RECHECK_CANDIDATE_BINDING|/run/secrets/kemerbet_agent_identity_bindings|false" \
+    "bind|$KEMERBET_AGENT_IDENTITY_HMAC_KEY|/run/secrets/kemerbet_agent_identity_hmac_key|false" \
+    "bind|$KEMERBET_READINESS_PLAYER_IDS|/run/secrets/kemerbet_no_transfer_readiness_player_ids|false" \
+    "bind|$KEMERBET_SELECTOR_CONTRACT|/etc/fetanagent/kemerbet-selector-contract.v2.json|false" \
+    "volume|$KEMERBET_PROFILE_VOLUME|/var/lib/fetanagent/kemerbet-sessions|true" | LC_ALL=C sort)" ]] ||
+    die 'the KemerBet recheck mount contract is not exact'
+  [[ "$(docker_local container inspect "$container_id" --format '{{.HostConfig.NetworkMode}}')" == \
+    "$KEMERBET_RECHECK_NETWORK" ]] || die 'the KemerBet recheck network mode is not exact'
+  network_contract="$(docker_local network inspect "$KEMERBET_RECHECK_NETWORK" \
+    --format '{{.Name}}|{{.Driver}}|{{.Internal}}|{{.Attachable}}|{{.EnableIPv6}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}')" ||
+    die 'the KemerBet recheck network contract could not be inspected'
+  [[ "$network_contract" == \
+    "$KEMERBET_RECHECK_NETWORK|bridge|false|false|true|$PROJECT_NAME|kemerbet_readiness_egress" ]] ||
+    die 'the KemerBet recheck network contract is not exact'
+  [[ "$(docker_local container inspect "$container_id" \
+    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}')" == \
+    "$KEMERBET_RECHECK_NETWORK" ]] || die 'the KemerBet recheck network attachment is not singular'
 }
 
 stop_project() {
@@ -754,7 +1922,7 @@ require_kemerbet_session_provision_runtime() {
   local identity_key_source player_ids_source readiness_output_source revision selector_source
   local session_socket_source
 
-  require_service_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+  require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
   require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
   require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
   require_kemerbet_readiness_output_directory
@@ -1208,6 +2376,16 @@ fi
 [[ -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] || die 'Docker overrides are forbidden'
 
 case "$command" in
+  arm-expiry-stop|bot-ready|discard|expiry-stop|fresh-start|install|install-bot-token|recheck-kemerbet-readiness|seal-kemerbet-readiness|start|start-bot|start-fresh-public-edge|start-kemerbet-session-provision|start-public-edge|stop|stop-bot|stop-kemerbet-session-provision|stop-public-edge)
+    acquire_staging_mutation_lock
+    if [[ ! "$command" =~ ^(recheck-kemerbet-readiness|expiry-stop|stop|stop-bot|stop-kemerbet-session-provision|stop-public-edge)$ &&
+      ( -e "$KEMERBET_RECHECK_PROMOTION_ROOT" || -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ) ]]; then
+      die 'an interrupted KemerBet readiness promotion blocks state-expanding staging mutations'
+    fi
+    ;;
+esac
+
+case "$command" in
   verify)
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{64}$ ]] || die 'verify requires one SHA-256 digest'
     [[ "$(sha256sum "$HELPER_PATH" | awk '{print $1}')" == "$2" ]] ||
@@ -1566,7 +2744,7 @@ case "$command" in
     [[ "$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" \
       --format '{{.Config.User}}')" == '10001:10001' ]] ||
       die 'the private KemerBet session image user is not exact'
-    require_service_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+    require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
     require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
     require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
     require_kemerbet_readiness_output_directory
@@ -1696,6 +2874,350 @@ case "$command" in
     [[ -f "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
       die 'the one-time KemerBet readiness binding was not created'
     printf '%s\n' 'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
+    ;;
+
+  recheck-kemerbet-readiness)
+    [[ $# -eq 3 ]] ||
+      die 'recheck-kemerbet-readiness requires the reviewed release and image tag'
+    commit_sha="$2"
+    image_tag="$3"
+    validate_commit_and_tag "$commit_sha" "$image_tag"
+    command -v shred >/dev/null 2>&1 || die 'the one-use secret removal utility is unavailable'
+    command -v timeout >/dev/null 2>&1 || die 'the bounded execution utility is unavailable'
+    command -v sync >/dev/null 2>&1 || die 'the durable synchronization utility is unavailable'
+    recover_incomplete_kemerbet_recheck_promotion
+    if [[ -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
+      require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
+      printf '%s\n' 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.'
+      exit 0
+    fi
+    [[ ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]] ||
+      die 'the independent KemerBet readiness recheck already has a receipt'
+    compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
+    [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
+      die 'the sealed Compose contract is absent or unsafe'
+    [[ "$(realpath -- "$compose_file")" == "$compose_file" ]] ||
+      die 'the sealed Compose contract is not canonical'
+    require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+    require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
+    [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] ||
+      die 'the KemerBet identity key has an unsafe hard-link count'
+    [[ "$(stat --format='%h' "$KEMERBET_READINESS_PLAYER_IDS")" == '1' ]] ||
+      die 'the one-use KemerBet Player-ID file has an unsafe hard-link count'
+
+    require_root_readable_immutable_file "$KEMERBET_SELECTOR_CONTRACT"
+    selector_parent="$(dirname -- "$KEMERBET_SELECTOR_CONTRACT")"
+    [[ ! -L "$selector_parent" && -d "$selector_parent" &&
+      "$(realpath -- "$selector_parent")" == "$selector_parent" &&
+      "$(stat --format='%U:%G' "$selector_parent")" == 'root:root' ]] ||
+      die 'the KemerBet selector root is unsafe'
+    selector_parent_mode="$(stat --format='%a' "$selector_parent")"
+    [[ "$selector_parent_mode" =~ ^[0-7]{3,4}$ ]] || die 'the KemerBet selector root mode is invalid'
+    (( (8#$selector_parent_mode & 8#022) == 0 )) ||
+      die 'the KemerBet selector root is writable outside root'
+    require_kemerbet_readiness_output_directory
+    [[ -f "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+      die 'the sealed KemerBet identity binding is unavailable'
+    [[ "$(stat --format='%h' "$KEMERBET_READINESS_BINDING")" == '1' ]] ||
+      die 'the sealed KemerBet identity binding has an unsafe hard-link count'
+    [[ ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]] ||
+      die 'the fixed KemerBet identity binding already exists'
+    [[ ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" ]] ||
+      die 'a KemerBet recheck candidate boundary already exists'
+    [[ -z "$(docker_local container ls --all --quiet \
+      --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" ]] ||
+      die 'a KemerBet recheck container already exists'
+
+    image_id="$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" --format '{{.Id}}')" ||
+      die 'the KemerBet recheck image is unavailable'
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'the KemerBet recheck image ID is invalid'
+    [[ "$(docker_local image inspect "$image_id" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}|{{ index .Config.Labels "org.opencontainers.image.title" }}|{{.Config.User}}')" == \
+      "$commit_sha|fetanagent-deposit-executor|10001:10001" ]] ||
+      die 'the KemerBet recheck image does not match the reviewed release'
+
+    [[ "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
+      die 'the sealed KemerBet identity binding shape is invalid'
+    LC_ALL=C grep -Eq \
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64}$' \
+      "$KEMERBET_READINESS_BINDING" || die 'the sealed KemerBet identity binding contract is invalid'
+    binding_line="$(<"$KEMERBET_READINESS_BINDING")"
+    IFS=' ' read -r account_id binding_fingerprint binding_residue <<<"$binding_line"
+    [[ -n "$account_id" && -n "$binding_fingerprint" && -z "$binding_residue" ]] ||
+      die 'the sealed KemerBet identity binding fields are invalid'
+    source_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_BINDING")"
+    source_dev_ino="$(stat --format='%d:%i' "$KEMERBET_READINESS_BINDING")"
+    source_digest="$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')"
+    identity_key_dev_ino_before="$(stat --format='%d:%i' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+    identity_key_digest="$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')"
+    selector_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_SELECTOR_CONTRACT")"
+    selector_digest="$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')"
+    KEMERBET_RECHECK_PLAYER_IDS_DEV_INO="$(stat --format='%d:%i' "$KEMERBET_READINESS_PLAYER_IDS")"
+    player_ids_digest="$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')"
+    for digest in "$source_digest" "$identity_key_digest" "$selector_digest" "$player_ids_digest"; do
+      [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die 'a KemerBet recheck input digest is invalid'
+    done
+
+    session_container="$(docker_local container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=kemerbet-session-provision')" ||
+      die 'the private KemerBet session inventory could not be inspected before recheck'
+    journal_session_container='none'
+    if [[ -n "$session_container" ]]; then
+      [[ "$session_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+        die 'the private KemerBet session inventory is ambiguous before recheck'
+      require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
+      require_kemerbet_session_provision_runtime "$commit_sha"
+      journal_session_container="$session_container"
+    else
+      require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+      require_kemerbet_profile_volume_holders ''
+    fi
+
+    record_kemerbet_recheck_promotion_journal \
+      "$commit_sha" "$source_dev_ino" \
+      "$source_digest" "$identity_key_digest" "$selector_digest" "$image_id" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO"
+    require_kemerbet_recheck_prepared_promotion_journal \
+      "$commit_sha" "$source_dev_ino" \
+      "$source_digest" "$identity_key_digest" "$selector_digest" "$image_id" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO"
+
+    KEMERBET_RECHECK_RELEASE="$commit_sha"
+    KEMERBET_RECHECK_SESSION_CONTAINER="$journal_session_container"
+    KEMERBET_RECHECK_SOURCE_DEV_INO="$source_dev_ino"
+    KEMERBET_RECHECK_SOURCE_DIGEST="$source_digest"
+    KEMERBET_RECHECK_PROMOTION_OWNED='true'
+    KEMERBET_RECHECK_CLEANUP_ARMED='true'
+    trap kemerbet_recheck_cleanup_trap EXIT
+    trap 'kemerbet_recheck_signal_trap 130' INT
+    trap 'kemerbet_recheck_signal_trap 143' TERM
+    trap 'kemerbet_recheck_signal_trap 129' HUP
+
+    if [[ "$journal_session_container" != 'none' ]]; then
+      docker_local container stop --time 70 "$session_container" >/dev/null
+      docker_local container rm "$session_container" >/dev/null
+    fi
+    require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+    require_kemerbet_profile_volume_holders ''
+
+    secret_parent="$(dirname -- "$KEMERBET_AGENT_IDENTITY_BINDINGS")"
+    [[ ! -L "$secret_parent" && -d "$secret_parent" &&
+      "$(realpath -- "$secret_parent")" == "$secret_parent" &&
+      "$(stat --format='%U:%G' "$secret_parent")" == 'root:root' ]] ||
+      die 'the KemerBet executor secret root is absent, symbolic, noncanonical, or unowned'
+    case "$(stat --format='%a' "$secret_parent")" in
+      700) ;;
+      755) chmod 0700 "$secret_parent" ;;
+      *) die 'the KemerBet executor secret root mode is unsafe' ;;
+    esac
+    [[ "$(stat --format='%U:%G:%a' "$secret_parent")" == 'root:root:700' ]] ||
+      die 'the KemerBet executor secret root could not be fixed at mode 0700'
+    sync -f "$secret_parent" || die 'the KemerBet executor secret root could not be synchronized'
+    harden_kemerbet_identity_key
+    harden_kemerbet_player_ids_file
+
+    identity_key_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+    player_ids_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_PLAYER_IDS")"
+    [[ "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_BINDING")" == "$source_stat" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')" == "$source_digest" &&
+      "$(stat --format='%d:%i' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == "$identity_key_dev_ino_before" &&
+      "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == "$identity_key_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_SELECTOR_CONTRACT")" == "$selector_stat" &&
+      "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == "$selector_digest" &&
+      "$(stat --format='%d:%i' "$KEMERBET_READINESS_PLAYER_IDS")" == "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$player_ids_digest" ]] ||
+      die 'a KemerBet recheck input changed while the prepared journal was active'
+
+    profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)"
+    profile_identity_digest="$(kemerbet_profile_identity_digest "$account_id" "$profile_mountpoint")"
+    [[ "$profile_identity_digest" =~ ^[0-9a-f]{64}$ ]] ||
+      die 'the KemerBet profile identity digest is invalid'
+
+    KEMERBET_RECHECK_CANDIDATE_CREATED='true'
+    install -d -o root -g root -m 0700 "$KEMERBET_RECHECK_CANDIDATE_ROOT"
+    install -o root -g root -m 0444 \
+      "$KEMERBET_READINESS_BINDING" "$KEMERBET_RECHECK_CANDIDATE_BINDING"
+    sync -f "$KEMERBET_RECHECK_CANDIDATE_BINDING" ||
+      die 'the KemerBet recheck binding candidate could not be synchronized'
+    sync -f "$KEMERBET_RECHECK_CANDIDATE_ROOT" ||
+      die 'the KemerBet recheck candidate directory could not be synchronized'
+    require_root_readable_immutable_file "$KEMERBET_RECHECK_CANDIDATE_BINDING"
+    candidate_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_RECHECK_CANDIDATE_BINDING")"
+    KEMERBET_RECHECK_CANDIDATE_DEV_INO="$(stat --format='%d:%i' "$KEMERBET_RECHECK_CANDIDATE_BINDING")"
+    KEMERBET_RECHECK_CANDIDATE_DIGEST="$source_digest"
+    [[ "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_BINDING")" == "$source_stat" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')" == "$source_digest" &&
+      "$(sha256sum -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" | awk '{print $1}')" == "$source_digest" ]] ||
+      die 'the sealed KemerBet identity binding changed during candidate creation'
+
+    advance_kemerbet_recheck_promotion_journal \
+      "$commit_sha" "$source_dev_ino" \
+      "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO"
+    require_kemerbet_recheck_promotion_journal \
+      "$commit_sha" "$source_dev_ino" "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO"
+
+    remove_kemerbet_recheck_network || die 'a stale KemerBet recheck network could not be removed'
+    compose_environment=(
+      PATH="$SAFE_PATH"
+      HOME='/root'
+      DOCKER_HOST="$LOCAL_DOCKER_SOCKET"
+      FETANAGENT_VCS_REF="$commit_sha"
+      FETANAGENT_IMAGE_TAG="$image_tag"
+      FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE="$SECRET_ROOT/owner-database-url"
+      FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_DATABASE_URL_FILE="$SECRET_ROOT/customer-web-database-url"
+      FETANAGENT_STAGING_CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE="$SECRET_ROOT/customer-web-publishable-key"
+      FETANAGENT_STAGING_CUSTOMER_WEB_RATE_LIMIT_HMAC_FILE="$SECRET_ROOT/customer-web-rate-limit-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_DATABASE_URL_FILE="$SECRET_ROOT/beta-database-url"
+      FETANAGENT_STAGING_BETA_ADMISSION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/beta-transport-hmac"
+      FETANAGENT_STAGING_BETA_ADMISSION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/beta-payload-hmac"
+      FETANAGENT_STAGING_PLAYER_ACTION_DATABASE_URL_FILE="$SECRET_ROOT/player-action-database-url"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/api-action-transport-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_PAYLOAD_HMAC_FILE="$SECRET_ROOT/api-action-payload-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_CAPABILITY_HMAC_FILE="$SECRET_ROOT/api-action-capability-hmac"
+      FETANAGENT_STAGING_API_PLAYER_ACTION_SEMANTIC_HMAC_FILE="$SECRET_ROOT/api-action-semantic-hmac"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_ENCRYPTION_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_FINGERPRINT_KEY_FILE="$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+      FETANAGENT_STAGING_CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE="$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-encryption-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE="$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+      FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE="$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
+      FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE="$SECRET_ROOT/supabase-ca.crt"
+      FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
+      FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
+      FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+    )
+    compose_command=(
+      docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
+      --project-name "$PROJECT_NAME" --profile kemerbet-no-transfer-readiness -f "$compose_file"
+    )
+    env -i "${compose_environment[@]}" "${compose_command[@]}" \
+      create --no-build --no-recreate kemerbet-no-transfer-readiness >/dev/null
+    recheck_container="$(docker_local container ls --all --quiet \
+      --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" ||
+      die 'the KemerBet recheck container inventory could not be inspected'
+    [[ "$recheck_container" =~ ^[0-9a-f]{12,64}$ ]] ||
+      die 'the KemerBet recheck container inventory is not singular'
+    require_kemerbet_profile_volume_holders "$recheck_container"
+    require_kemerbet_recheck_container_contract "$recheck_container" "$commit_sha" "$image_tag" "$image_id"
+    [[ "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == "$identity_key_stat" &&
+      "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == "$identity_key_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_SELECTOR_CONTRACT")" == "$selector_stat" &&
+      "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == "$selector_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_PLAYER_IDS")" == "$player_ids_stat" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$player_ids_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_RECHECK_CANDIDATE_BINDING")" == "$candidate_stat" &&
+      "$(sha256sum -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" | awk '{print $1}')" == "$source_digest" ]] ||
+      die 'a KemerBet recheck input changed before execution'
+
+    recheck_status=0
+    if timeout --foreground --signal=TERM \
+      --kill-after="${KEMERBET_RECHECK_KILL_AFTER_SECONDS}s" \
+      "${KEMERBET_RECHECK_TIMEOUT_SECONDS}s" \
+      env -i PATH="$SAFE_PATH" HOME='/root' DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
+      docker --host "$LOCAL_DOCKER_SOCKET" container start --attach "$recheck_container" \
+      >/dev/null 2>&1; then
+      recheck_status=0
+    else
+      recheck_status=$?
+    fi
+    [[ "$recheck_status" -eq 0 ]] ||
+      die 'the independent KemerBet no-transfer readiness recheck failed closed'
+    [[ "$(docker_local container inspect "$recheck_container" \
+      --format '{{.State.Status}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Error}}|{{.RestartCount}}')" == \
+      'exited|0|false||0' ]] || die 'the KemerBet recheck exit contract is not exact'
+    [[ "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_RECHECK_CANDIDATE_BINDING")" == \
+      "$candidate_stat" &&
+      "$(sha256sum -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" | awk '{print $1}')" == "$source_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_BINDING")" == "$source_stat" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')" == "$source_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == "$identity_key_stat" &&
+      "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == "$identity_key_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_SELECTOR_CONTRACT")" == "$selector_stat" &&
+      "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == "$selector_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_PLAYER_IDS")" == "$player_ids_stat" &&
+      "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$player_ids_digest" &&
+      "$(kemerbet_profile_identity_digest "$account_id" "$profile_mountpoint")" == "$profile_identity_digest" ]] ||
+      die 'a KemerBet recheck input or profile identity changed during execution'
+
+    remove_kemerbet_recheck_container || die 'the transient KemerBet recheck container could not be removed'
+    remove_kemerbet_recheck_network || die 'the transient KemerBet recheck network could not be removed'
+    require_kemerbet_profile_volume_holders ''
+    consume_exact_one_use_kemerbet_file \
+      "$KEMERBET_READINESS_PLAYER_IDS" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" ||
+      die 'the one-use KemerBet Player-ID file could not be removed'
+
+    [[ ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]] ||
+      die 'the fixed KemerBet identity binding appeared before finalization'
+    ln -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
+      die 'the fixed KemerBet identity binding could not be installed without overwrite'
+    KEMERBET_RECHECK_FINAL_INSTALLED='true'
+    sync -f "$secret_parent" || die 'the fixed KemerBet identity binding directory could not be synchronized'
+    require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+    [[ "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" == "$source_digest" ]] ||
+      die 'the fixed KemerBet identity binding digest is not exact'
+    remove_kemerbet_recheck_candidate ||
+      die 'the KemerBet recheck binding candidate could not be retired'
+    KEMERBET_RECHECK_CANDIDATE_CREATED='false'
+    [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '1' ]] ||
+      die 'the fixed KemerBet identity binding retains an unexpected hard link'
+
+    require_kemerbet_readiness_output_directory
+    shred --force --iterations=1 --zero --remove=unlink -- "$KEMERBET_READINESS_BINDING" \
+      >/dev/null 2>&1 || die 'the promoted KemerBet binding source could not be removed'
+    sync -f "$KEMERBET_READINESS_OUTPUT_ROOT" ||
+      die 'the promoted KemerBet binding-source directory could not be synchronized'
+    [[ ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+      die 'the promoted KemerBet binding source remains after removal'
+    require_kemerbet_readiness_output_directory
+    require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+    KEMERBET_RECHECK_RECEIPT_OWNED='true'
+    record_kemerbet_recheck_receipt \
+      "$commit_sha" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest"
+    require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+    require_kemerbet_profile_volume_holders ''
+    [[ -z "$(docker_local container ls --all --quiet \
+      --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" ]] ||
+      die 'the transient KemerBet recheck container was retained'
+    [[ -z "$(docker_local network ls --quiet --filter "name=^${KEMERBET_RECHECK_NETWORK}$")" ]] ||
+      die 'the transient KemerBet recheck network was retained'
+    [[ "$KEMERBET_RECHECK_FINAL_INSTALLED" == 'true' ]] ||
+      die 'the fixed KemerBet identity binding installation was not committed'
+    require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+    [[ "$(stat --format='%d:%i:%h' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == \
+      "${KEMERBET_RECHECK_CANDIDATE_DEV_INO}:1" &&
+      "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" == "$source_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == "$identity_key_stat" &&
+      "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == "$identity_key_digest" &&
+      "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_SELECTOR_CONTRACT")" == "$selector_stat" &&
+      "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == "$selector_digest" &&
+      "$(kemerbet_profile_identity_digest "$account_id" "$profile_mountpoint")" == "$profile_identity_digest" ]] ||
+      die 'the committed KemerBet recheck boundary changed before finalization'
+    [[ ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" &&
+      ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+      ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+      die 'a consumed KemerBet recheck input remains before finalization'
+    require_kemerbet_recheck_receipt \
+      "$commit_sha" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest"
+    require_kemerbet_recheck_promotion_journal \
+      "$commit_sha" "$source_dev_ino" "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO"
+    trap '' INT TERM HUP
+    remove_owned_kemerbet_recheck_promotion_root ||
+      die 'the committed KemerBet promotion journal could not be retired'
+    KEMERBET_RECHECK_PROMOTION_OWNED='false'
+    KEMERBET_RECHECK_COMMITTED='true'
+    KEMERBET_RECHECK_CLEANUP_ARMED='false'
+    trap - EXIT INT TERM HUP
+    printf '%s\n' 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.'
     ;;
 
   stop-kemerbet-session-provision)
@@ -1829,6 +3351,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, seal-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, seal-kemerbet-readiness, recheck-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

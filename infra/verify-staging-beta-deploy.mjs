@@ -735,6 +735,20 @@ assert.match(helperReplacementRunbook, /593344964/);
 assert.match(helperReplacementRunbook, /161\.35\.41\.232/);
 assert.match(helperReplacementRunbook, /root:root:755/);
 assert.match(helperReplacementRunbook, /root:root:440/);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /test "\$\(stat --format='%U:%G:%a' \/etc\/sudoers\.d\)" = 'root:root:750'/g,
+    ) ?? []
+  ).length,
+  2,
+  'both helper rotation directions must preserve the exact hardened sudoers directory mode observed on the current host',
+);
+assert.doesNotMatch(
+  helperReplacementRunbook,
+  /test "\$\(stat --format='%U:%G:%a' \/etc\/sudoers\.d\)" = 'root:root:755'/,
+  'helper rotation must not require relaxing the current host sudoers directory permissions',
+);
 assert.match(
   helperReplacementRunbook,
   /fetanagent-admin ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/fetanagent-staging-deploy-helper \*/,

@@ -109,7 +109,8 @@ interface LocatorOptions {
   readonly items?: readonly FakeLocator[];
   readonly tagName?: string;
   readonly connected?: boolean;
-  readonly onPress?: (key: string, options?: { readonly timeout?: number }) => void | Promise<void>;
+  readonly onDocumentEvent?: (type: string) => void;
+  readonly documentDispatchResult?: boolean;
   readonly onClick?: (options?: { readonly timeout?: number }) => void | Promise<void>;
 }
 
@@ -123,8 +124,8 @@ class FakeLocator implements PlaywrightLocatorPort {
   readonly items: readonly FakeLocator[] | null;
   readonly tagName: string;
   readonly connected: boolean;
-  readonly onPress:
-    ((key: string, options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
+  readonly onDocumentEvent: ((type: string) => void) | undefined;
+  readonly documentDispatchResult: boolean;
   readonly onClick: ((options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
 
   constructor(options: LocatorOptions = {}) {
@@ -137,7 +138,8 @@ class FakeLocator implements PlaywrightLocatorPort {
     this.items = options.items ?? null;
     this.tagName = options.tagName ?? 'DIV';
     this.connected = options.connected ?? true;
-    this.onPress = options.onPress;
+    this.onDocumentEvent = options.onDocumentEvent;
+    this.documentDispatchResult = options.documentDispatchResult ?? true;
     this.onClick = options.onClick;
   }
 
@@ -160,16 +162,26 @@ class FakeLocator implements PlaywrightLocatorPort {
   async evaluate<Result>(
     pageFunction: (element: PlaywrightDomControlPort) => Result | Promise<Result>,
   ) {
+    let eventType = '';
     return pageFunction({
       isConnected: this.connected,
       tagName: this.tagName,
-      click: () => undefined,
+      ownerDocument: {
+        createEvent: () => ({
+          get type() {
+            return eventType;
+          },
+          initEvent: (type) => {
+            eventType = type;
+          },
+        }),
+        dispatchEvent: (event) => {
+          this.onDocumentEvent?.(event.type);
+          return this.documentDispatchResult;
+        },
+      },
       getAttribute: (name) => this.attributes[name] ?? null,
     });
-  }
-
-  async press(key: string, options?: { readonly timeout?: number }) {
-    await this.onPress?.(key, options);
   }
 
   async fill(value: string) {
@@ -326,9 +338,7 @@ class FakePage implements PlaywrightPagePort {
   dialogDelayPolls = 0;
   workflowClicks: string[] = [];
   findButtonClickOptions: { readonly timeout?: number } | undefined;
-  findButtonKeyboardActivations = 0;
-  findButtonPress:
-    { readonly key: string; readonly options?: { readonly timeout?: number } } | undefined;
+  findButtonDocumentEvents: string[] = [];
   findButtonTagName = 'BUTTON';
   playerDepositOpen = false;
   hideFindBy = false;
@@ -421,10 +431,8 @@ class FakePage implements PlaywrightPagePort {
       return this.withLookupControlDuplicates(
         new FakeLocator({
           tagName: this.findButtonTagName,
-          onPress: (key, pressOptions) => {
-            this.findButtonKeyboardActivations += 1;
-            this.findButtonPress =
-              pressOptions === undefined ? { key } : { key, options: pressOptions };
+          onDocumentEvent: (type) => {
+            this.findButtonDocumentEvents.push(type);
             this.workflowClicks.push('button:Find');
           },
           onClick: (options) => {
@@ -639,7 +647,7 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('keyboard-activates only the exact native read-only Find button when explicitly requested', async () => {
+  it('dispatches only the reviewed read-only Find event from the exact native button when explicitly requested', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
@@ -656,13 +664,12 @@ describe('Playwright KemerBet agent page', () => {
     });
 
     expect(page.findButtonClickOptions).toBeUndefined();
-    expect(page.findButtonKeyboardActivations).toBe(1);
-    expect(page.findButtonPress).toEqual({ key: 'Enter', options: { timeout: 100 } });
+    expect(page.findButtonDocumentEvents).toEqual(['onTransferOkActionEvent']);
     expect(stages).toEqual(['lookup_input', 'lookup_action', 'lookup_response', 'lookup_contract']);
     expect(page.transferClicks).toBe(0);
   });
 
-  it('fails closed instead of keyboard-activating a non-native Find role', async () => {
+  it('fails closed instead of dispatching the read-only Find event from a non-native role', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
@@ -675,7 +682,7 @@ describe('Playwright KemerBet agent page', () => {
     );
 
     expect(page.findButtonClickOptions).toBeUndefined();
-    expect(page.findButtonKeyboardActivations).toBe(0);
+    expect(page.findButtonDocumentEvents).toEqual([]);
     expect(page.transferClicks).toBe(0);
   });
 

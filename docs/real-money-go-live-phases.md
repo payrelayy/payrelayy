@@ -30,27 +30,29 @@ Public product live
   -> separate production/public launch review
 ```
 
-## Current truthful status — 2026-08-23
+## Current truthful status — 2026-08-24
 
-The current GitHub `main` source is
-`de86ede3511b62332a6542fa60f571fcec8dc78e`. The currently visible public staging deployment may
-still be an earlier exact reviewed release until the next bounded staging deployment; public
-reachability must not be used as evidence that newer executor code is deployed.
+The last independently verified deployed baseline is
+`f1ad2c94284cc5f4a70890af56f489e002b3dc1c`. That exact reviewed release remains deployed to the
+bounded public staging runtime while the successor independent-readiness release is reviewed.
+Public reachability remains separate from financial readiness and must not be used as evidence that
+payment or execution authority is enabled.
 
-| Capability                                          | Status                            | Current evidence                                                                                                                |
-| --------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `fetanagent.com` public home and account entry      | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                              |
-| `@FetanAgentBot` reachability and public onboarding | **COMPLETE**                      | Bot is online; `/start`, menu, and Player-ID submission respond                                                                 |
-| Five private KemerBet test Player IDs               | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                     |
-| Owner fixed-pilot dashboard and server boundary     | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                             |
-| Private pilot database boundary                     | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                            |
-| Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                             |
-| Owner-adjustable TeleBirr/CBE receiver revisions    | **IMPLEMENTATION/DEPLOY NEXT**    | Authenticated Owner UI/API creates encrypted immutable revisions; source code contains no real account                          |
-| KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                   |
-| Real KemerBet portal workflow contract              | **IN PROGRESS**                   | All five corrected Players resolve in the local lookup-only proof; target-host private sign-in and no-transfer readiness remain |
-| TeleBirr receiver/profile/signer/device             | **BLOCKED — not provisioned**     | No active TeleBirr receiver revision, profile, signer, or enrolled verifier device                                              |
-| Payment verification, settlement, and execution     | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                                   |
-| Public real-money processing                        | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                                  |
+| Capability                                          | Status                              | Current evidence                                                                                                                                                      |
+| --------------------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetanagent.com` public home and account entry      | **COMPLETE**                        | Public HTTPS home page responds and exposes Sign in/Create account                                                                                                    |
+| `@FetanAgentBot` reachability and public onboarding | **COMPLETE**                        | Bot is online; `/start`, menu, and Player-ID submission respond                                                                                                       |
+| Five private KemerBet test Player IDs               | **COMPLETE**                        | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                                                           |
+| Owner fixed-pilot dashboard and server boundary     | **COMPLETE, financially dormant**   | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                                                                   |
+| Private pilot database boundary                     | **COMPLETE, unprepared**            | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                                                                  |
+| Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**         | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                                                                   |
+| Owner-adjustable TeleBirr/CBE receiver revisions    | **DEPLOYED; STATE CHECK NEXT**      | Owner reports both receivers saved through the authenticated UI; active revision/profile state still requires a redacted read-only check                              |
+| KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**         | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                                                         |
+| Real KemerBet portal workflow contract              | **IN PROGRESS — SEAL PASSED**       | Exact target-host seal passed 5/5 read-only ETB lookups with Transfer disabled and `moneyMoved=false`; independent bound-profile recheck remains                      |
+| Independent bound-profile no-transfer recheck       | **IMPLEMENTED; DEPLOYMENT PENDING** | Exact-five aggregate-only probe and one-shot host boundary are locally verified; the exact reviewed successor must still be deployed and pass once on the target host |
+| TeleBirr receiver/profile/signer/device             | **NEXT — VERIFY/PROVISION**         | Verify the Owner-saved receiver revision, then provision the exact profile, signer, and dedicated verifier device                                                     |
+| Payment verification, settlement, and execution     | **BLOCKED — disabled**              | All financial/provider/private-pilot switches remain disabled                                                                                                         |
+| Public real-money processing                        | **BLOCKED**                         | No public customer has authority to claim a payment or cause a KemerBet credit                                                                                        |
 
 The current public deployment is a time-boxed staging release. Its narrow database credentials and
 host stop timer expire automatically. Until the separate production-launch phase, keeping the demo
@@ -108,7 +110,7 @@ can be created by an ordinary user.
 
 ## Phase 1 — Correct and connect the KemerBet agent workflow
 
-**Status: IN PROGRESS**
+**Status: IN PROGRESS — TARGET-HOST SEAL PASSED; INDEPENDENT BOUND-PROFILE RECHECK PENDING**
 
 ### Purpose
 
@@ -150,7 +152,7 @@ screenshots, or readiness output.
 
 ### Required engineering work
 
-Progress recorded 2026-08-23:
+Progress recorded 2026-08-24:
 
 1. **Merged to GitHub main:** the executor's exact deposit route is `/agents`; the old Payment
    Requests route is rejected.
@@ -175,10 +177,14 @@ Progress recorded 2026-08-23:
    Compose profile accept exactly one HMAC-bound profile plus exactly five one-use private Player
    IDs, perform only sequential response-bound ETB lookups, and have no database credential, pilot
    manifest, history key, amount operation, transfer method, or action loop.
-7. **Implemented in this release:** one one-time `readiness:seal` boundary runs inside the exact
-   manually authenticated private Chromium process, derives only the HMAC identity binding, and
-   writes it atomically only after those same five read-only lookup proofs pass. Its network boundary
-   rejects every non-read request and every main-frame destination except exact `/agents`.
+7. **Deployed and verified 2026-08-24:** one one-time `readiness:seal` boundary ran inside the exact
+   manually authenticated private Chromium process, derived only the HMAC identity binding, and
+   wrote it atomically after all five read-only lookup proofs passed. Its network boundary rejects
+   every non-read request and every main-frame destination except exact `/agents`. GitHub Actions
+   run `32764664066` passed on exact
+   release `f1ad2c94284cc5f4a70890af56f489e002b3dc1c` and reported
+   `KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.` The guarded response also
+   required ETB, redacted identifiers, and `moneyMoved=false`.
 8. Keep amount enforcement inside FetanAgent. The portal's Amount input exposes no trustworthy
    client-side minimum or maximum.
 9. Verify the final success dialog and one unique matching `Approved`/`EPOS` history row.
@@ -197,19 +203,18 @@ Progress recorded 2026-08-23:
 3. **Complete:** deploy a normally absent browser container with a service-owned
    `0700` profile volume and mode-`0600` Unix socket shared only with Owner control. It has no
    database or financial authority and hard-blocks the exact deposit endpoint.
-4. **Current target-host step:** finish installing the reviewed selector/key/one-use cohort, then
-   start the private sign-in workflow once and type the KemerBet password/OTP only inside the
-   screenshot preview. Keep that locked browser running after the page reports `KemerBet signed in`;
-   run the one-time readiness seal through its private Unix socket before stopping it, because this
-   KemerBet authentication exists only in the current Chromium process.
+4. **Complete:** installed the reviewed selector/key/one-use cohort, started the private sign-in
+   workflow, accepted the KemerBet password only inside the isolated preview, locked the signed-in
+   browser, and ran the one-time readiness seal through its private Unix socket.
 5. No password, OTP, cookie, or session export enters Git, chat, Supabase tables, shared
    configuration, or application logs. The isolated profile volume retains KemerBet browser data,
    while the readiness seal reuses only the current locked in-memory authenticated page.
-6. Bind the visible signed-in agent identity to the account UUID with the one-time readiness seal
-   and an independent HMAC key; never print or copy the raw identity.
-7. Install the reviewed selector contract and produced identity-binding map as root-managed
-   fixed-path files. Install the separate history-reference HMAC key and Supabase CA only for the
-   later executor activation boundary.
+6. **Seal output produced:** the one-time readiness seal created the HMAC-bound identity-binding
+   output without printing or copying the raw identity. Installation through the reviewed
+   fixed-path secret boundary and the independent bound-profile recheck remain pending.
+7. **Pending:** install the reviewed selector contract and produced identity-binding map as
+   root-managed fixed-path files. Install the separate history-reference HMAC key and Supabase CA
+   only for the later executor activation boundary.
 8. Provision a short-lived dedicated executor database LOGIN outside Git, but do not start polling.
 
 ### Owner-visible proof
@@ -228,17 +233,27 @@ It must expose no agent identity, Player ID, cookie, password, or account balanc
 
 ### Exit gate
 
-The exact real browser profile passes the one-time readiness seal and independent no-transfer
-readiness probe on the target host. The executor remains unable to lease work and no `Transfer`
-click has occurred.
+The exact real browser profile must pass both the one-time readiness seal and the independent
+no-transfer readiness probe on the target host. The executor remains unable to lease work and no
+`Transfer` click may occur.
 
-The executor code exposes a dedicated no-transfer lookup operation that can return only an exact
-response-bound Player/ETB match and `transferDisabled=true`; it does not fill Amount or click
-Transfer. The corrected fifth Player now passes the local lookup-only inspection. The exit gate is
-not yet satisfied until the readiness-seal release is merged/deployed and the reviewed selector,
-identity key, manually signed-in persistent profile, and exact-five one-use cohort are installed and
-probed on the executor host. The five-account pilot must not be prepared or activated until that
-target-host proof passes.
+The target-host one-time readiness seal passed for the exact-five cohort on release
+`f1ad2c94284cc5f4a70890af56f489e002b3dc1c`. Phase 1 remains open until the produced identity
+binding is installed through a reviewed fixed-path boundary and the independent bound-profile
+no-transfer readiness command passes on the target host. The executor, final-action, provider,
+settlement, and private-pilot switches remain disabled.
+
+The recheck workflow verifies that historical successful seal run as a separate prerequisite. The
+host receipt does not claim that the current binding file was produced by that GitHub run; it records
+only the current reviewed recheck release and the redacted digests that the host independently
+revalidated. This keeps historical CI evidence separate from current host attestation.
+
+The Owner also uses the same KemerBet agent account manually from other devices. Those manual
+deposits, withdrawals, balance updates, and history changes are expected concurrent external
+activity and are not attributed to FetanAgent unless FetanAgent's own signed audit lineage proves
+that it initiated the action. A balance or transaction-history change alone never passes or fails a
+FetanAgent readiness check. If KemerBet invalidates the retained browser session because of
+concurrent device use, the required response is a fresh private sign-in, not a financial retry.
 
 ## Phase 2 — Provision official TeleBirr receipt authority
 

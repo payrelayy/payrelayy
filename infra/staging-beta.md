@@ -244,11 +244,17 @@ replacement. Before publishing a commit that changes the helper, run `stop-and-d
 currently deployed reviewed commit so the containers are stopped and all four disposable database
 logins are disabled. Keep the runtime offline throughout replacement.
 
+The current Droplet follows only the fresh-host commands (`fresh-host-ready`, `fresh-start`, and
+`start-fresh-public-edge`). Those commands do not consume the retired Droplet's
+`helper-rotation-v1` receipt. Do not create, copy, or update VM-transition receipts on Droplet
+`593344964`; helper replacement and rollback there operate only on the exact checksummed helper
+file and its root-only backup.
+
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87
-reviewed_successor=33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba
+installed_predecessor=33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba
+reviewed_successor=b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -259,36 +265,129 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
+NEXT_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
 bash -n fetanagent-staging-deploy-helper.next
 ```
 
-At the DigitalOcean root console, use only the fixed paths and hashes below. The backup is accepted
-only after proving it is the exact predecessor. Installation occurs through a checked temporary file
-followed by one atomic rename; a mismatch aborts before replacing the installed helper.
+At the DigitalOcean root console, use only the fixed paths and hashes below. The installed
+predecessor predates the mutation lock, so the block atomically moves its exact sudoers grant to an
+ignored same-filesystem name, validates sudoers with the grant absent, and proves no process has the
+helper path as an argument before replacement. The grant remains absent while the successor's safe
+root-owned mutation lock is acquired and while the checked temporary file is atomically renamed.
+The exact grant is restored only after the installed successor is verified; the held successor lock
+then excludes a new privileged invocation until this root-console block exits. A mismatch or an
+in-flight helper aborts without replacing the helper, and the EXIT trap restores the exact grant.
+The backup is accepted only after proving it is the exact predecessor. The same block is resumable
+after `SIGKILL` or host restart: it accepts exactly one validated enabled/disabled grant, only the
+predecessor or successor TARGET hash, and only an absent or exact predecessor backup; it then
+re-establishes quiescence and either completes or verifies the successor before restoring sudo.
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-f7c708ac"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-33f4a5a4"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
-PREVIOUS_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
-NEXT_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
+SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
+MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
+MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
+PREVIOUS_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
+NEXT_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
 METADATA='http://169.254.169.254/metadata/v1'
+INSTALL_TMP=''
+BACKUP_TMP=''
+INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-b4664efd'
+BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-33f4a5a4.installing"
+SUDOERS_STATE=''
+TARGET_SHA=''
+expected_sudoers() {
+  printf '%s\n' \
+    'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-staging-deploy-helper *'
+}
+require_exact_sudoers_file() {
+  local path="$1"
+  test ! -L "$path" && test -f "$path" || return 1
+  test "$(realpath -- "$path")" = "$path" || return 1
+  test "$(stat --format='%U:%G:%a:%h' "$path")" = 'root:root:440:1' || return 1
+  cmp -s -- "$path" <(expected_sudoers) || return 1
+}
+require_no_helper_processes() {
+  local arg cmdline found
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [[ -r "$cmdline" ]] || continue
+    found='false'
+    while IFS= read -r -d '' arg; do
+      if [[ "$arg" == "$TARGET" ]]; then
+        found='true'
+        break
+      fi
+    done <"$cmdline" || true
+    [[ "$found" == 'false' ]] || return 1
+  done
+}
+require_allowed_helper_for_sudoers_restore() {
+  local helper_sha
+  test ! -L "$TARGET" && test -f "$TARGET" || return 1
+  test "$(realpath -- "$TARGET")" = "$TARGET" || return 1
+  test "$(stat --format='%U:%G:%a:%h' "$TARGET")" = 'root:root:755:1' || return 1
+  helper_sha="$(sha256sum "$TARGET" | awk '{ print $1 }')" || return 1
+  [[ "$helper_sha" == "$PREVIOUS_SHA" || "$helper_sha" == "$NEXT_SHA" ]] || return 1
+  bash -n "$TARGET" || return 1
+}
+restore_sudoers_grant() {
+  if [[ ! -e "$SUDOERS_DISABLED" && ! -L "$SUDOERS_DISABLED" ]]; then
+    require_allowed_helper_for_sudoers_restore || return 1
+    sync -f /etc/sudoers.d || return 1
+    require_exact_sudoers_file "$SUDOERS" || return 1
+    visudo -cf /etc/sudoers >/dev/null || return 1
+    return 0
+  fi
+  require_allowed_helper_for_sudoers_restore || return 1
+  require_exact_sudoers_file "$SUDOERS_DISABLED" || return 1
+  test ! -e "$SUDOERS" && test ! -L "$SUDOERS" || return 1
+  mv -- "$SUDOERS_DISABLED" "$SUDOERS" || return 1
+  sync -f /etc/sudoers.d || return 1
+  require_exact_sudoers_file "$SUDOERS" || return 1
+  visudo -cf /etc/sudoers >/dev/null || return 1
+}
+restore_sudoers_on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ -n "$INSTALL_TMP" ]]; then
+    rm -f -- "$INSTALL_TMP" || status=1
+  fi
+  if [[ -n "$BACKUP_TMP" ]]; then
+    rm -f -- "$BACKUP_TMP" || status=1
+  fi
+  restore_sudoers_grant || status=1
+  exit "$status"
+}
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
 test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
   "$METADATA/interfaces/public/0/ipv4/address")" = '161.35.41.232'
-test ! -L "$SUDOERS" && test "$(stat --format='%U:%G:%a' "$SUDOERS")" = 'root:root:440'
-cmp -s -- "$SUDOERS" <(printf '%s\n' \
-  'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-staging-deploy-helper *')
+test ! -L /etc/sudoers.d && test -d /etc/sudoers.d
+test "$(realpath -- /etc/sudoers.d)" = '/etc/sudoers.d'
+test "$(stat --format='%U:%G:%a' /etc/sudoers.d)" = 'root:root:755'
+if [[ -e "$SUDOERS" || -L "$SUDOERS" ]]; then
+  require_exact_sudoers_file "$SUDOERS"
+  test ! -e "$SUDOERS_DISABLED" && test ! -L "$SUDOERS_DISABLED"
+  SUDOERS_STATE='enabled'
+elif [[ -e "$SUDOERS_DISABLED" || -L "$SUDOERS_DISABLED" ]]; then
+  test ! -e "$SUDOERS" && test ! -L "$SUDOERS"
+  require_exact_sudoers_file "$SUDOERS_DISABLED"
+  SUDOERS_STATE='disabled'
+else
+  false
+fi
 visudo -cf /etc/sudoers >/dev/null
 test "$(systemctl show --property=LoadState --value \
   fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.service)" = 'not-found'
 test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer && \
   test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer
 test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && \
@@ -297,46 +396,341 @@ test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet 
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
 test ! -L "$STAGING_ROOT" && test "$(stat --format='%U:%G:%a' "$STAGING_ROOT")" = 'root:root:700'
 test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
-test "$(sha256sum "$TARGET" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+TARGET_SHA="$(sha256sum "$TARGET" | awk '{ print $1 }')"
+[[ "$TARGET_SHA" == "$PREVIOUS_SHA" || "$TARGET_SHA" == "$NEXT_SHA" ]]
 test ! -L "$STAGED" && test "$(stat --format='%U:%G:%a' "$STAGED")" = 'root:root:600'
 test "$(sha256sum "$STAGED" | awk '{ print $1 }')" = "$NEXT_SHA"
 bash -n "$STAGED"
-test ! -e "$BACKUP" && test ! -L "$BACKUP"
-install -o root -g root -m 0600 "$TARGET" "$BACKUP"
-test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
-INSTALL_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"
-trap 'rm -f -- "$INSTALL_TMP"' EXIT
-install -o root -g root -m 0755 "$STAGED" "$INSTALL_TMP"
-test "$(stat --format='%U:%G:%a' "$INSTALL_TMP")" = 'root:root:755'
-test "$(sha256sum "$INSTALL_TMP" | awk '{ print $1 }')" = "$NEXT_SHA"
-mv -f -- "$INSTALL_TMP" "$TARGET"
+if [[ -e "$BACKUP" || -L "$BACKUP" ]]; then
+  test ! -L "$BACKUP" && test -f "$BACKUP"
+  test "$(realpath -- "$BACKUP")" = "$BACKUP"
+  test "$(stat --format='%U:%G:%a:%h' "$BACKUP")" = 'root:root:600:1'
+  test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+else
+  test "$TARGET_SHA" = "$PREVIOUS_SHA"
+fi
+trap restore_sudoers_on_exit EXIT
+if [[ "$SUDOERS_STATE" == 'enabled' ]]; then
+  mv -- "$SUDOERS" "$SUDOERS_DISABLED"
+fi
+sync -f /etc/sudoers.d
+require_exact_sudoers_file "$SUDOERS_DISABLED"
+test ! -e "$SUDOERS" && test ! -L "$SUDOERS"
+visudo -cf /etc/sudoers >/dev/null
+require_no_helper_processes
+test ! -L /run && test -d /run && test "$(realpath -- /run)" = '/run'
+test "$(stat --format='%U:%G:%a' /run)" = 'root:root:755'
+if [[ ! -e "$MUTATION_LOCK_ROOT" && ! -L "$MUTATION_LOCK_ROOT" ]]; then
+  (umask 077 && mkdir --mode=0700 -- "$MUTATION_LOCK_ROOT")
+fi
+test ! -L "$MUTATION_LOCK_ROOT" && test -d "$MUTATION_LOCK_ROOT"
+test "$(realpath -- "$MUTATION_LOCK_ROOT")" = "$MUTATION_LOCK_ROOT"
+test "$(stat --format='%U:%G:%a' "$MUTATION_LOCK_ROOT")" = 'root:root:700'
+if [[ ! -e "$MUTATION_LOCK" && ! -L "$MUTATION_LOCK" ]]; then
+  (set -o noclobber; umask 077; : >"$MUTATION_LOCK") 2>/dev/null || true
+fi
+test ! -L "$MUTATION_LOCK" && test -f "$MUTATION_LOCK"
+test "$(realpath -- "$MUTATION_LOCK")" = "$MUTATION_LOCK"
+test "$(stat --format='%U:%G:%a:%h' "$MUTATION_LOCK")" = 'root:root:600:1'
+exec 9<>"$MUTATION_LOCK"
+path_identity="$(stat --format='%u:%g:%a:%h:%d:%i' "$MUTATION_LOCK")"
+fd_identity="$(stat -L --format='%u:%g:%a:%h:%d:%i' /proc/self/fd/9)"
+test "$fd_identity" = "$path_identity"
+case "$fd_identity" in 0:0:600:1:*) ;; *) false ;; esac
+flock --exclusive --nonblock 9
+test "$(stat --format='%u:%g:%a:%h:%d:%i' "$MUTATION_LOCK")" = "$fd_identity"
+require_no_helper_processes
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.service)" = 'not-found'
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
+test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
+  --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
+TARGET_SHA="$(sha256sum "$TARGET" | awk '{ print $1 }')"
+[[ "$TARGET_SHA" == "$PREVIOUS_SHA" || "$TARGET_SHA" == "$NEXT_SHA" ]]
+test "$(sha256sum "$STAGED" | awk '{ print $1 }')" = "$NEXT_SHA"
+bash -n "$STAGED"
+if [[ "$TARGET_SHA" == "$PREVIOUS_SHA" ]]; then
+  if [[ ! -e "$BACKUP" && ! -L "$BACKUP" ]]; then
+    if [[ -e "$BACKUP_TMP_PATH" || -L "$BACKUP_TMP_PATH" ]]; then
+      test ! -L "$BACKUP_TMP_PATH" && test -f "$BACKUP_TMP_PATH"
+      test "$(realpath -- "$BACKUP_TMP_PATH")" = "$BACKUP_TMP_PATH"
+      test "$(stat --format='%U:%G:%h' "$BACKUP_TMP_PATH")" = 'root:root:1'
+      rm -- "$BACKUP_TMP_PATH"
+      sync -f "$STAGING_ROOT"
+    fi
+    test ! -e "$BACKUP_TMP_PATH" && test ! -L "$BACKUP_TMP_PATH"
+    BACKUP_TMP="$BACKUP_TMP_PATH"
+    install -o root -g root -m 0600 "$TARGET" "$BACKUP_TMP"
+    test "$(stat --format='%U:%G:%a:%h' "$BACKUP_TMP")" = 'root:root:600:1'
+    test "$(sha256sum "$BACKUP_TMP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+    sync -f "$BACKUP_TMP"
+    test ! -e "$BACKUP" && test ! -L "$BACKUP"
+    mv -- "$BACKUP_TMP" "$BACKUP"
+    BACKUP_TMP=''
+    sync -f "$BACKUP"
+    sync -f "$STAGING_ROOT"
+  fi
+  test ! -L "$BACKUP" && test -f "$BACKUP"
+  test "$(stat --format='%U:%G:%a:%h' "$BACKUP")" = 'root:root:600:1'
+  test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+  if [[ -e "$INSTALL_TMP_PATH" || -L "$INSTALL_TMP_PATH" ]]; then
+    test ! -L "$INSTALL_TMP_PATH" && test -f "$INSTALL_TMP_PATH"
+    test "$(realpath -- "$INSTALL_TMP_PATH")" = "$INSTALL_TMP_PATH"
+    test "$(stat --format='%U:%G:%h' "$INSTALL_TMP_PATH")" = 'root:root:1'
+    rm -- "$INSTALL_TMP_PATH"
+    sync -f "$(dirname -- "$TARGET")"
+  fi
+  test ! -e "$INSTALL_TMP_PATH" && test ! -L "$INSTALL_TMP_PATH"
+  INSTALL_TMP="$INSTALL_TMP_PATH"
+  install -o root -g root -m 0755 "$STAGED" "$INSTALL_TMP"
+  test "$(stat --format='%U:%G:%a:%h' "$INSTALL_TMP")" = 'root:root:755:1'
+  test "$(sha256sum "$INSTALL_TMP" | awk '{ print $1 }')" = "$NEXT_SHA"
+  sync -f "$INSTALL_TMP"
+  mv -- "$INSTALL_TMP" "$TARGET"
+  INSTALL_TMP=''
+  sync -f "$(dirname -- "$TARGET")"
+else
+  test ! -L "$BACKUP" && test -f "$BACKUP"
+  test "$(stat --format='%U:%G:%a:%h' "$BACKUP")" = 'root:root:600:1'
+  test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+fi
 test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
 test "$(sha256sum "$TARGET" | awk '{ print $1 }')" = "$NEXT_SHA"
-cmp -s -- "$SUDOERS" <(printf '%s\n' \
-  'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-staging-deploy-helper *')
-visudo -cf /etc/sudoers >/dev/null
+require_no_helper_processes
+restore_sudoers_grant
 trap - EXIT
 FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `33f4a5a4…` before `deploy-and-smoke` is allowed. If it fails, keep staging
-offline and use the root console to atomically restore only the checksum-proven `previous` file:
+against successor SHA `b4664efd…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+offline and use the root console to atomically restore only the checksum-proven `previous` file.
+Rollback follows the same sudoers-revocation and exact process-quiescence boundary, verifies the
+restored predecessor before re-enabling its grant, and makes no further mutation afterward. It is
+also resumable with the exact disabled grant and either allowed TARGET hash, but only while the
+strict pre-recheck secret/output shape remains compatible with predecessor `33f4a5a4`; any journal,
+receipt, candidate, canonical binding, hardened key, or consumed Player-ID input forbids downgrade:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-f7c708ac'
-PREVIOUS_SHA='f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87'
-test ! -L "$BACKUP" && test "$(stat --format='%U:%G:%a' "$BACKUP")" = 'root:root:600'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-33f4a5a4'
+SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
+SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
+MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
+MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
+RECHECK_PROMOTION_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck-promotion'
+RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
+RECHECK_CANDIDATE_ROOT='/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate'
+CANONICAL_BINDING='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings'
+IDENTITY_KEY='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
+PLAYER_IDS='/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
+READINESS_OUTPUT_ROOT='/var/lib/fetanagent/kemerbet-readiness-seal-output'
+READINESS_BINDING="$READINESS_OUTPUT_ROOT/kemerbet_agent_identity_bindings"
+PREVIOUS_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
+NEXT_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
+METADATA='http://169.254.169.254/metadata/v1'
+RESTORE_TMP=''
+RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-33f4a5a4'
+SUDOERS_STATE=''
+TARGET_SHA=''
+require_pre_recheck_rollback_state() {
+  local absent_path entries service_file
+  for absent_path in \
+    "$RECHECK_PROMOTION_ROOT" \
+    "$RECHECK_RECEIPT_ROOT" \
+    "$RECHECK_CANDIDATE_ROOT" \
+    "$CANONICAL_BINDING"; do
+    [[ ! -e "$absent_path" && ! -L "$absent_path" ]] || return 1
+  done
+  for service_file in "$IDENTITY_KEY" "$PLAYER_IDS"; do
+    [[ ! -L "$service_file" && -f "$service_file" ]] || return 1
+    [[ "$(realpath -- "$service_file")" == "$service_file" ]] || return 1
+    [[ "$(stat --format='%u:%g:%a:%h' "$service_file")" == '10001:10001:400:1' ]] || return 1
+  done
+  [[ ! -L "$READINESS_OUTPUT_ROOT" && -d "$READINESS_OUTPUT_ROOT" ]] || return 1
+  [[ "$(realpath -- "$READINESS_OUTPUT_ROOT")" == "$READINESS_OUTPUT_ROOT" ]] || return 1
+  [[ "$(stat --format='%u:%g:%a' "$READINESS_OUTPUT_ROOT")" == '10001:10001:700' ]] || return 1
+  entries="$(find -P "$READINESS_OUTPUT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" || return 1
+  [[ "$entries" == 'kemerbet_agent_identity_bindings' ]] || return 1
+  [[ ! -L "$READINESS_BINDING" && -f "$READINESS_BINDING" ]] || return 1
+  [[ "$(realpath -- "$READINESS_BINDING")" == "$READINESS_BINDING" ]] || return 1
+  [[ "$(stat --format='%u:%g:%a:%h' "$READINESS_BINDING")" == '10001:10001:600:1' ]] || return 1
+}
+expected_sudoers() {
+  printf '%s\n' \
+    'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-staging-deploy-helper *'
+}
+require_exact_sudoers_file() {
+  local path="$1"
+  test ! -L "$path" && test -f "$path" || return 1
+  test "$(realpath -- "$path")" = "$path" || return 1
+  test "$(stat --format='%U:%G:%a:%h' "$path")" = 'root:root:440:1' || return 1
+  cmp -s -- "$path" <(expected_sudoers) || return 1
+}
+require_no_helper_processes() {
+  local arg cmdline found
+  for cmdline in /proc/[0-9]*/cmdline; do
+    [[ -r "$cmdline" ]] || continue
+    found='false'
+    while IFS= read -r -d '' arg; do
+      if [[ "$arg" == "$TARGET" ]]; then
+        found='true'
+        break
+      fi
+    done <"$cmdline" || true
+    [[ "$found" == 'false' ]] || return 1
+  done
+}
+require_allowed_helper_for_sudoers_restore() {
+  local helper_sha
+  test ! -L "$TARGET" && test -f "$TARGET" || return 1
+  test "$(realpath -- "$TARGET")" = "$TARGET" || return 1
+  test "$(stat --format='%U:%G:%a:%h' "$TARGET")" = 'root:root:755:1' || return 1
+  helper_sha="$(sha256sum "$TARGET" | awk '{ print $1 }')" || return 1
+  [[ "$helper_sha" == "$PREVIOUS_SHA" || "$helper_sha" == "$NEXT_SHA" ]] || return 1
+  bash -n "$TARGET" || return 1
+}
+restore_sudoers_grant() {
+  if [[ ! -e "$SUDOERS_DISABLED" && ! -L "$SUDOERS_DISABLED" ]]; then
+    require_allowed_helper_for_sudoers_restore || return 1
+    require_pre_recheck_rollback_state || return 1
+    sync -f /etc/sudoers.d || return 1
+    require_exact_sudoers_file "$SUDOERS" || return 1
+    visudo -cf /etc/sudoers >/dev/null || return 1
+    return 0
+  fi
+  require_allowed_helper_for_sudoers_restore || return 1
+  require_pre_recheck_rollback_state || return 1
+  require_exact_sudoers_file "$SUDOERS_DISABLED" || return 1
+  test ! -e "$SUDOERS" && test ! -L "$SUDOERS" || return 1
+  mv -- "$SUDOERS_DISABLED" "$SUDOERS" || return 1
+  sync -f /etc/sudoers.d || return 1
+  require_exact_sudoers_file "$SUDOERS" || return 1
+  visudo -cf /etc/sudoers >/dev/null || return 1
+}
+restore_sudoers_on_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ -n "$RESTORE_TMP" ]]; then
+    rm -f -- "$RESTORE_TMP" || status=1
+  fi
+  restore_sudoers_grant || status=1
+  exit "$status"
+}
+test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 "$METADATA/id")" = '593344964'
+test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
+  "$METADATA/interfaces/public/0/ipv4/address")" = '161.35.41.232'
+test ! -L /etc/sudoers.d && test -d /etc/sudoers.d
+test "$(realpath -- /etc/sudoers.d)" = '/etc/sudoers.d'
+test "$(stat --format='%U:%G:%a' /etc/sudoers.d)" = 'root:root:755'
+if [[ -e "$SUDOERS" || -L "$SUDOERS" ]]; then
+  require_exact_sudoers_file "$SUDOERS"
+  test ! -e "$SUDOERS_DISABLED" && test ! -L "$SUDOERS_DISABLED"
+  SUDOERS_STATE='enabled'
+elif [[ -e "$SUDOERS_DISABLED" || -L "$SUDOERS_DISABLED" ]]; then
+  test ! -e "$SUDOERS" && test ! -L "$SUDOERS"
+  require_exact_sudoers_file "$SUDOERS_DISABLED"
+  SUDOERS_STATE='disabled'
+else
+  false
+fi
+visudo -cf /etc/sudoers >/dev/null
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.service)" = 'not-found'
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
+test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
+  --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
+TARGET_SHA="$(sha256sum "$TARGET" | awk '{ print $1 }')"
+[[ "$TARGET_SHA" == "$PREVIOUS_SHA" || "$TARGET_SHA" == "$NEXT_SHA" ]]
+test ! -L "$BACKUP" && test -f "$BACKUP"
+test "$(realpath -- "$BACKUP")" = "$BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$BACKUP")" = 'root:root:600:1'
 test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
-RESTORE_TMP="$(mktemp /usr/local/sbin/.fetanagent-staging-deploy-helper.XXXXXX)"
-trap 'rm -f -- "$RESTORE_TMP"' EXIT
-install -o root -g root -m 0755 "$BACKUP" "$RESTORE_TMP"
-test "$(sha256sum "$RESTORE_TMP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
-mv -f -- "$RESTORE_TMP" "$TARGET"
+require_pre_recheck_rollback_state
+trap restore_sudoers_on_exit EXIT
+if [[ "$SUDOERS_STATE" == 'enabled' ]]; then
+  mv -- "$SUDOERS" "$SUDOERS_DISABLED"
+fi
+sync -f /etc/sudoers.d
+require_exact_sudoers_file "$SUDOERS_DISABLED"
+test ! -e "$SUDOERS" && test ! -L "$SUDOERS"
+visudo -cf /etc/sudoers >/dev/null
+require_no_helper_processes
+test ! -L /run && test -d /run && test "$(realpath -- /run)" = '/run'
+test "$(stat --format='%U:%G:%a' /run)" = 'root:root:755'
+if [[ ! -e "$MUTATION_LOCK_ROOT" && ! -L "$MUTATION_LOCK_ROOT" ]]; then
+  (umask 077 && mkdir --mode=0700 -- "$MUTATION_LOCK_ROOT")
+fi
+test ! -L "$MUTATION_LOCK_ROOT" && test -d "$MUTATION_LOCK_ROOT"
+test "$(realpath -- "$MUTATION_LOCK_ROOT")" = "$MUTATION_LOCK_ROOT"
+test "$(stat --format='%U:%G:%a' "$MUTATION_LOCK_ROOT")" = 'root:root:700'
+if [[ ! -e "$MUTATION_LOCK" && ! -L "$MUTATION_LOCK" ]]; then
+  (set -o noclobber; umask 077; : >"$MUTATION_LOCK") 2>/dev/null || true
+fi
+test ! -L "$MUTATION_LOCK" && test -f "$MUTATION_LOCK"
+test "$(realpath -- "$MUTATION_LOCK")" = "$MUTATION_LOCK"
+test "$(stat --format='%U:%G:%a:%h' "$MUTATION_LOCK")" = 'root:root:600:1'
+exec 9<>"$MUTATION_LOCK"
+path_identity="$(stat --format='%u:%g:%a:%h:%d:%i' "$MUTATION_LOCK")"
+fd_identity="$(stat -L --format='%u:%g:%a:%h:%d:%i' /proc/self/fd/9)"
+test "$fd_identity" = "$path_identity"
+case "$fd_identity" in 0:0:600:1:*) ;; *) false ;; esac
+flock --exclusive --nonblock 9
+test "$(stat --format='%u:%g:%a:%h:%d:%i' "$MUTATION_LOCK")" = "$fd_identity"
+require_no_helper_processes
+require_pre_recheck_rollback_state
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
+test "$(systemctl show --property=LoadState --value \
+  fetanagent-staging-runtime-expiry-stop.service)" = 'not-found'
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.timer
+test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && \
+  test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
+test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
+  --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
+TARGET_SHA="$(sha256sum "$TARGET" | awk '{ print $1 }')"
+[[ "$TARGET_SHA" == "$PREVIOUS_SHA" || "$TARGET_SHA" == "$NEXT_SHA" ]]
+test ! -L "$BACKUP" && test -f "$BACKUP"
+test "$(realpath -- "$BACKUP")" = "$BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$BACKUP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+if [[ "$TARGET_SHA" == "$NEXT_SHA" ]]; then
+  if [[ -e "$RESTORE_TMP_PATH" || -L "$RESTORE_TMP_PATH" ]]; then
+    test ! -L "$RESTORE_TMP_PATH" && test -f "$RESTORE_TMP_PATH"
+    test "$(realpath -- "$RESTORE_TMP_PATH")" = "$RESTORE_TMP_PATH"
+    test "$(stat --format='%U:%G:%h' "$RESTORE_TMP_PATH")" = 'root:root:1'
+    rm -- "$RESTORE_TMP_PATH"
+    sync -f "$(dirname -- "$TARGET")"
+  fi
+  test ! -e "$RESTORE_TMP_PATH" && test ! -L "$RESTORE_TMP_PATH"
+  RESTORE_TMP="$RESTORE_TMP_PATH"
+  install -o root -g root -m 0755 "$BACKUP" "$RESTORE_TMP"
+  test "$(stat --format='%U:%G:%a:%h' "$RESTORE_TMP")" = 'root:root:755:1'
+  test "$(sha256sum "$RESTORE_TMP" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+  sync -f "$RESTORE_TMP"
+  mv -- "$RESTORE_TMP" "$TARGET"
+  RESTORE_TMP=''
+  sync -f "$(dirname -- "$TARGET")"
+fi
 test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
 test "$(sha256sum "$TARGET" | awk '{ print $1 }')" = "$PREVIOUS_SHA"
+require_no_helper_processes
+restore_sudoers_grant
 trap - EXIT
 FETANAGENT_HELPER_RESTORE
 ```

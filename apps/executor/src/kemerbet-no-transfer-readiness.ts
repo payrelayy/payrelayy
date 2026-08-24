@@ -3,7 +3,6 @@ import { pathToFileURL } from 'node:url';
 import {
   KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,
   KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
-  KEMERBET_AGENT_PROFILES_ROOT,
   KEMERBET_BROWSER_EXECUTABLE_PATH,
   KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE,
   KEMERBET_SELECTOR_CONTRACT_FILE,
@@ -22,9 +21,10 @@ import {
   type KemerBetAgentIdentityFingerprinter,
 } from './kemerbet-agent-identity-fingerprint.js';
 import {
-  createKemerBetAgentSessionRegistry,
-  type KemerBetAgentSessionReadiness,
-} from './kemerbet-agent-session-registry.js';
+  openKemerBetNoTransferReadinessPersistentProfileProbe,
+  type KemerBetNoTransferReadinessPersistentProfileProbeOptions,
+  type KemerBetNoTransferReadinessSealProbe,
+} from './kemerbet-no-transfer-readiness-seal.js';
 import {
   assertKemerBetAgentPageSelectorContractV2,
   type KemerBetAgentPageSelectorContractV2,
@@ -36,19 +36,10 @@ const DISALLOWED_ENVIRONMENT_KEYS = [
   'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_MANIFEST_FILE',
   'KEMERBET_HISTORY_REFERENCE_HMAC_KEY_FILE',
 ] as const;
-
-export interface KemerBetNoTransferReadinessRegistry {
-  probeReadiness(platformAgentAccountId: string): Promise<KemerBetAgentSessionReadiness>;
-  probePlayerLookup(
-    platformAgentAccountId: string,
-    target: { readonly playerId: string; readonly currencyCode: 'ETB' },
-  ): Promise<{
-    readonly exactPlayerMatch: true;
-    readonly exactCurrencyMatch: true;
-    readonly transferDisabled: true;
-  } | null>;
-  close(): Promise<void>;
-}
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const FINGERPRINT_PATTERN = /^hmac-sha256-agent-identity-v1:[0-9a-f]{64}$/u;
+const KEY_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
+const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 export interface KemerBetNoTransferReadinessDependencies {
   readonly environment?: NodeJS.ProcessEnv;
@@ -57,11 +48,10 @@ export interface KemerBetNoTransferReadinessDependencies {
   readonly loadPlayerIds?: () => Promise<KemerBetNoTransferReadinessPlayers>;
   readonly loadSelectorContract?: () => Promise<KemerBetAgentPageSelectorContractV2>;
   readonly createAgentIdentityFingerprinter?: () => Promise<KemerBetAgentIdentityFingerprinter>;
-  readonly createRegistry?: (options: {
-    readonly selectorContract: KemerBetAgentPageSelectorContractV2;
-    readonly bindings: KemerBetAgentIdentityBindings;
-    readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
-  }) => KemerBetNoTransferReadinessRegistry;
+  readonly effectiveUserId?: number;
+  readonly openProbe?: (
+    options: KemerBetNoTransferReadinessPersistentProfileProbeOptions,
+  ) => Promise<KemerBetNoTransferReadinessSealProbe>;
   readonly logSuccess?: (result: {
     readonly component: 'kemerbet_no_transfer_readiness';
     readonly event: 'passed';
@@ -105,38 +95,6 @@ function validateSelectorContract(value: unknown): KemerBetAgentPageSelectorCont
   return value;
 }
 
-function disabledHistoryFingerprinter(): ((value: string) => string) & {
-  readonly keyFingerprint: string;
-} {
-  const fingerprinter = () => unavailable();
-  return Object.defineProperty(fingerprinter, 'keyFingerprint', {
-    value: 'disabled-for-no-transfer-readiness',
-    enumerable: false,
-  }) as unknown as ((value: string) => string) & { readonly keyFingerprint: string };
-}
-
-function productionRegistry(options: {
-  readonly selectorContract: KemerBetAgentPageSelectorContractV2;
-  readonly bindings: KemerBetAgentIdentityBindings;
-  readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
-}): KemerBetNoTransferReadinessRegistry {
-  const registry = createKemerBetAgentSessionRegistry({
-    profilesRoot: KEMERBET_AGENT_PROFILES_ROOT,
-    browserExecutablePath: KEMERBET_BROWSER_EXECUTABLE_PATH,
-    selectorContract: options.selectorContract,
-    expectedAgentIdentityBindings: options.bindings.expectedAgentIdentityBindings,
-    fingerprintAgentIdentity: options.fingerprintAgentIdentity,
-    fingerprintExternalReference: disabledHistoryFingerprinter(),
-    now: () => new Date(),
-    headless: true,
-  });
-  return {
-    probeReadiness: (accountId) => registry.probeReadiness(accountId),
-    probePlayerLookup: (accountId, target) => registry.probePlayerLookup(accountId, target),
-    close: () => registry.close(),
-  };
-}
-
 function defaultSuccessLog(
   result: Parameters<NonNullable<KemerBetNoTransferReadinessDependencies['logSuccess']>>[0],
 ) {
@@ -152,42 +110,66 @@ export async function runKemerBetNoTransferReadiness(
   dependencies: KemerBetNoTransferReadinessDependencies = {},
 ): Promise<void> {
   assertInertEnvironment(dependencies.environment ?? process.env);
-  const [bindings, players, selectorContract, fingerprintAgentIdentity] = await Promise.all([
-    dependencies.loadAgentIdentityBindings?.() ??
-      loadKemerBetAgentIdentityBindings({ filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE }),
-    dependencies.loadPlayerIds?.() ??
-      loadKemerBetNoTransferReadinessPlayerIds({
-        filePath: KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE,
-      }),
-    dependencies.loadSelectorContract?.() ??
-      loadKemerBetSelectorContract({
-        filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
-        validate: validateSelectorContract,
-      }),
-    dependencies.createAgentIdentityFingerprinter?.() ??
-      createKemerBetAgentIdentityFingerprinter({
-        secretFilePath: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
-      }),
-    dependencies.assertBrowserExecutable?.() ??
-      assertKemerBetBrowserExecutable({ executablePath: KEMERBET_BROWSER_EXECUTABLE_PATH }),
-  ]);
-  if (bindings.platformAgentAccountIds.length !== 1 || players.playerIds.length !== 5) {
-    return unavailable();
-  }
-  const accountId = bindings.platformAgentAccountIds[0]!;
-  const registry = (dependencies.createRegistry ?? productionRegistry)({
-    selectorContract,
-    bindings,
-    fingerprintAgentIdentity,
-  });
+  const effectiveUserId =
+    dependencies.effectiveUserId ??
+    (typeof process.geteuid === 'function' ? process.geteuid() : Number.NaN);
+  if (effectiveUserId !== 10001) return unavailable();
+  let probe: KemerBetNoTransferReadinessSealProbe | null = null;
   try {
-    const readiness = await registry.probeReadiness(accountId);
-    if (!readiness.ready) return unavailable();
+    const [bindings, players, selectorContract, fingerprintAgentIdentity] = await Promise.all([
+      dependencies.loadAgentIdentityBindings?.() ??
+        loadKemerBetAgentIdentityBindings({ filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE }),
+      dependencies.loadPlayerIds?.() ??
+        loadKemerBetNoTransferReadinessPlayerIds({
+          filePath: KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE,
+        }),
+      dependencies.loadSelectorContract?.() ??
+        loadKemerBetSelectorContract({
+          filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
+          validate: validateSelectorContract,
+        }),
+      dependencies.createAgentIdentityFingerprinter?.() ??
+        createKemerBetAgentIdentityFingerprinter({
+          secretFilePath: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
+        }),
+      dependencies.assertBrowserExecutable?.() ??
+        assertKemerBetBrowserExecutable({ executablePath: KEMERBET_BROWSER_EXECUTABLE_PATH }),
+    ]);
+    if (
+      bindings.platformAgentAccountIds.length !== 1 ||
+      bindings.expectedAgentIdentityBindings.size !== 1 ||
+      players.playerIds.length !== 5 ||
+      new Set(players.playerIds).size !== 5 ||
+      players.playerIds.some((playerId) => !PLAYER_ID_PATTERN.test(playerId)) ||
+      !KEY_FINGERPRINT_PATTERN.test(fingerprintAgentIdentity.keyFingerprint)
+    ) {
+      return unavailable();
+    }
+    const accountId = bindings.platformAgentAccountIds[0]!;
+    const expectedAgentIdentityFingerprint = bindings.expectedAgentIdentityBindings.get(accountId);
+    if (
+      !UUID_PATTERN.test(accountId) ||
+      accountId === '00000000-0000-0000-0000-000000000000' ||
+      expectedAgentIdentityFingerprint === undefined ||
+      !FINGERPRINT_PATTERN.test(expectedAgentIdentityFingerprint) ||
+      [...bindings.expectedAgentIdentityBindings.keys()].some((key) => key !== accountId)
+    ) {
+      return unavailable();
+    }
+    probe = await (dependencies.openProbe ?? openKemerBetNoTransferReadinessPersistentProfileProbe)(
+      {
+        accountId,
+        effectiveUserId,
+        expectedAgentIdentityFingerprint,
+        fingerprintAgentIdentity,
+        reportForbiddenRequest: () => undefined,
+        reportStage: () => undefined,
+        selectorContract,
+      },
+    );
+    if (probe.observedAgentIdentityFingerprint !== expectedAgentIdentityFingerprint) unavailable();
     for (const playerId of players.playerIds) {
-      const result = await registry.probePlayerLookup(accountId, {
-        playerId,
-        currencyCode: 'ETB',
-      });
+      const result = await probe.probePlayerLookup({ playerId, currencyCode: 'ETB' });
       if (
         result?.exactPlayerMatch !== true ||
         result.exactCurrencyMatch !== true ||
@@ -196,6 +178,7 @@ export async function runKemerBetNoTransferReadiness(
         return unavailable();
       }
     }
+    await probe.finalizeReadOnlyProof();
     (dependencies.logSuccess ?? defaultSuccessLog)({
       component: 'kemerbet_no_transfer_readiness',
       event: 'passed',
@@ -209,7 +192,7 @@ export async function runKemerBetNoTransferReadiness(
   } catch {
     return unavailable();
   } finally {
-    await registry.close().catch(() => undefined);
+    await probe?.close().catch(() => undefined);
   }
 }
 

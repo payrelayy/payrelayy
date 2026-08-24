@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Start, inspect, seal readiness, or stop the private no-transfer KemerBet browser
+        description: Start, inspect, seal, independently recheck, or stop the private no-transfer KemerBet browser
         required: true
         default: inspect
         type: choice
@@ -12,6 +12,7 @@ on:
           - inspect
           - start
           - seal
+          - recheck
           - stop
       confirm_staging_project_ref:
         description: Type the exact staging project ref
@@ -21,17 +22,28 @@ on:
         description: Type the exact full reviewed main commit SHA
         required: true
         type: string
+      confirm_prior_seal_commit_sha:
+        description: For recheck, type the exact full commit SHA from the prior successful seal run
+        required: false
+        default: ''
+        type: string
+      confirm_prior_seal_run_id:
+        description: For recheck, type the exact prior successful GitHub Actions seal run ID
+        required: false
+        default: ''
+        type: string
       confirm_droplet_id:
         description: Type the exact staging DigitalOcean droplet ID
         required: true
         type: string
       confirm_no_transfer:
-        description: For start type private-sign-in-no-transfer; for seal type seal-five-player-no-transfer
+        description: For start type private-sign-in-no-transfer; for seal type seal-five-player-no-transfer; for recheck type independent-five-player-no-transfer-recheck
         required: false
         default: ''
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -53,6 +65,8 @@ jobs:
       CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
       CONFIRMED_NO_TRANSFER: ${{ inputs.confirm_no_transfer }}
       CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_PRIOR_SEAL_COMMIT: ${{ inputs.confirm_prior_seal_commit_sha }}
+      CONFIRMED_PRIOR_SEAL_RUN_ID: ${{ inputs.confirm_prior_seal_run_id }}
       REQUESTED_MODE: ${{ inputs.mode }}
     steps:
       - name: Reject every non-staging or financial target
@@ -64,11 +78,25 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(inspect|start|seal|stop)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|start|seal|recheck|stop)$ ]]
           case "$REQUESTED_MODE" in
-            start) [[ "$CONFIRMED_NO_TRANSFER" == 'private-sign-in-no-transfer' ]] ;;
-            seal) [[ "$CONFIRMED_NO_TRANSFER" == 'seal-five-player-no-transfer' ]] ;;
-            inspect|stop) [[ -z "$CONFIRMED_NO_TRANSFER" ]] ;;
+            start)
+              [[ "$CONFIRMED_NO_TRANSFER" == 'private-sign-in-no-transfer' ]]
+              [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              ;;
+            seal)
+              [[ "$CONFIRMED_NO_TRANSFER" == 'seal-five-player-no-transfer' ]]
+              [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              ;;
+            recheck)
+              [[ "$CONFIRMED_NO_TRANSFER" == 'independent-five-player-no-transfer-recheck' ]]
+              [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+              [[ "$CONFIRMED_PRIOR_SEAL_RUN_ID" =~ ^[1-9][0-9]{7,19}$ ]]
+              ;;
+            inspect|stop)
+              [[ -z "$CONFIRMED_NO_TRANSFER" ]]
+              [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              ;;
           esac
 
   session-action:
@@ -78,7 +106,11 @@ jobs:
     timeout-minutes: 10
     environment: staging
     permissions:
+      actions: read
       contents: read
+    env:
+      CONFIRMED_PRIOR_SEAL_COMMIT: ${{ inputs.confirm_prior_seal_commit_sha }}
+      CONFIRMED_PRIOR_SEAL_RUN_ID: ${{ inputs.confirm_prior_seal_run_id }}
     steps:
       - name: Check out the exact sign-in contract
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -109,6 +141,74 @@ jobs:
           echo "protected=$protected" >>"$GITHUB_OUTPUT"
           echo "vm_host=$STAGING_VM_HOST" >>"$GITHUB_OUTPUT"
 
+      - name: Verify the exact prior successful readiness seal
+        if: inputs.mode == 'recheck'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_PRIOR_SEAL_RUN_ID" =~ ^[1-9][0-9]{7,19}$ ]]
+          protected='${{ steps.protected.outputs.protected }}'
+          metadata="$protected/seal-run.json"
+          archive="$protected/seal-run-logs.zip"
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$CONFIRMED_PRIOR_SEAL_RUN_ID"
+          trap 'rm -f -- "$metadata" "$archive"' EXIT
+          umask 077
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$metadata" "$api"
+          jq -e \
+            --arg id "$CONFIRMED_PRIOR_SEAL_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$CONFIRMED_PRIOR_SEAL_COMMIT" \
+            '(.id | tostring) == $id and
+             .head_sha == $sha and
+             .head_branch == "main" and
+             .head_repository.full_name == $repository and
+             .event == "workflow_dispatch" and
+             .status == "completed" and
+             .conclusion == "success" and
+             .name == "Staging private KemerBet sign-in" and
+             .path == ".github/workflows/staging-kemerbet-session-provision.yml"' \
+            "$metadata" >/dev/null
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GITHUB_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$archive" "$api/logs"
+          python3 - "$archive" <<'PY'
+          import re
+          import sys
+          import zipfile
+
+          expected = b'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
+          line_pattern = re.compile(
+              rb'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ' + re.escape(expected) + rb'\r?\n?$'
+          )
+          matches = 0
+          try:
+              with zipfile.ZipFile(sys.argv[1]) as archive:
+                  files = [entry for entry in archive.infolist() if not entry.is_dir()]
+                  if not files or len(files) > 64:
+                      raise SystemExit('The seal log archive shape is invalid.')
+                  if sum(entry.file_size for entry in files) > 64 * 1024 * 1024:
+                      raise SystemExit('The seal log archive is unexpectedly large.')
+                  for entry in files:
+                      if entry.file_size > 16 * 1024 * 1024:
+                          raise SystemExit('A seal log entry is unexpectedly large.')
+                      with archive.open(entry) as stream:
+                          matches += sum(1 for line in stream if line_pattern.fullmatch(line))
+          except (OSError, RuntimeError, zipfile.BadZipFile):
+              raise SystemExit('The seal log archive could not be safely inspected.') from None
+          if matches != 1:
+              raise SystemExit('The exact aggregate no-transfer seal result is absent or ambiguous.')
+          PY
+          echo 'prior_kemerbet_readiness_seal=verified'
+
       - name: Run the exact private sign-in action
         if: inputs.mode != 'stop'
         shell: bash
@@ -117,18 +217,28 @@ jobs:
           protected='${{ steps.protected.outputs.protected }}'
           ssh_options=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           prefix="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}'"
-          if [[ '${{ inputs.mode }}' == 'start' ]]; then
-            ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
-              "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-kemerbet-session-provision '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          case '${{ inputs.mode }}' in
+            start)
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-kemerbet-session-provision '$GITHUB_SHA' '${GITHUB_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-session-provision-ready '$GITHUB_SHA'"
+              ;;
+            inspect)
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-session-provision-ready '$GITHUB_SHA'"
+              ;;
+            seal)
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper seal-kemerbet-readiness '$GITHUB_SHA'"
+              ;;
+            recheck)
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper recheck-kemerbet-readiness '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+              echo 'private_kemerbet_independent_no_transfer_recheck=pass'
+              ;;
+          esac
+          if [[ '${{ inputs.mode }}' != 'recheck' ]]; then
+            echo 'private_kemerbet_sign_in_no_transfer=pass'
           fi
-          if [[ '${{ inputs.mode }}' == 'seal' ]]; then
-            ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
-              "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper seal-kemerbet-readiness '$GITHUB_SHA'"
-          else
-            ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
-              "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-session-provision-ready '$GITHUB_SHA'"
-          fi
-          echo 'private_kemerbet_sign_in_no_transfer=pass'
 
       - name: Stop the private sign-in browser
         if: inputs.mode == 'stop'

@@ -39,8 +39,8 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  'f7c708ac8acfff4e9b4d8fecf8de4ded4ffa601fc17b1e05c8b0759aa04dcf87';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-f7c708ac';
+  '33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
 const reviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
@@ -51,6 +51,15 @@ const retiredDepositReferenceProtection = new RegExp(
   ['api', 'deposit', 'reference', 'protection'].join('[_-]'),
   'iu',
 );
+
+function assertInOrder(source, requiredFragments, message) {
+  let position = -1;
+  for (const fragment of requiredFragments) {
+    const nextPosition = source.indexOf(fragment, position + 1);
+    assert.ok(nextPosition > position, `${message}: missing or out of order: ${fragment}`);
+    position = nextPosition;
+  }
+}
 
 for (const artifact of [
   workflow,
@@ -89,6 +98,7 @@ assert.match(ownerCompose, /target: \/run\/fetanagent-kemerbet-session-control/)
 
 for (const requiredSessionWorkflowContract of [
   /workflow_dispatch:/,
+  /permissions:\s*\r?\n\s+actions: read\s*\r?\n\s+contents: read/,
   /group: fetanagent-staging-beta-deploy/,
   /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/,
   /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/,
@@ -100,6 +110,12 @@ for (const requiredSessionWorkflowContract of [
   /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/,
   /private-sign-in-no-transfer/,
   /seal-five-player-no-transfer/,
+  /independent-five-player-no-transfer-recheck/,
+  /CONFIRMED_PRIOR_SEAL_COMMIT/,
+  /CONFIRMED_PRIOR_SEAL_RUN_ID/,
+  /\^\(inspect\|start\|seal\|recheck\|stop\)\$/,
+  /\^\[0-9a-f\]\{40\}\$/,
+  /\^\[1-9\]\[0-9\]\{7,19\}\$/,
   /environment: staging/,
   /persist-credentials: false/,
   /StrictHostKeyChecking=yes/g,
@@ -107,14 +123,79 @@ for (const requiredSessionWorkflowContract of [
   /fetanagent-staging-deploy-helper start-kemerbet-session-provision/,
   /fetanagent-staging-deploy-helper kemerbet-session-provision-ready/,
   /fetanagent-staging-deploy-helper seal-kemerbet-readiness/,
+  /fetanagent-staging-deploy-helper recheck-kemerbet-readiness '\$GITHUB_SHA' '\$\{GITHUB_SHA:0:12\}'/,
   /fetanagent-staging-deploy-helper stop-kemerbet-session-provision/,
+  /GITHUB_API_URL\/repos\/\$GITHUB_REPOSITORY\/actions\/runs\/\$CONFIRMED_PRIOR_SEAL_RUN_ID/,
+  /\.head_sha == \$sha/,
+  /\.head_branch == "main"/,
+  /\.head_repository\.full_name == \$repository/,
+  /\.event == "workflow_dispatch"/,
+  /\.status == "completed"/,
+  /\.conclusion == "success"/,
+  /\.name == "Staging private KemerBet sign-in"/,
+  /\.path == "\.github\/workflows\/staging-kemerbet-session-provision\.yml"/,
+  /KemerBet readiness sealed: 5 of 5 Players, Transfer disabled\./,
+  /if matches != 1:/,
+  /prior_kemerbet_readiness_seal=verified/,
+  /private_kemerbet_independent_no_transfer_recheck=pass/,
   /private_kemerbet_sign_in_no_transfer=pass/,
 ]) {
   assert.match(kemerbetSessionWorkflow, requiredSessionWorkflowContract);
 }
+assert.equal(
+  (kemerbetSessionWorkflow.match(/^\s+actions: read$/gm) ?? []).length,
+  2,
+  'both the workflow and its job-level permission override must retain actions:read',
+);
+const priorSealVerification =
+  /- name: Verify the exact prior successful readiness seal([\s\S]*?)\n\s+- name: Run the exact private sign-in action/u.exec(
+    kemerbetSessionWorkflow,
+  )?.[1];
+assert.ok(
+  priorSealVerification,
+  'the recheck must independently inspect the exact prior successful seal run as a separate historical gate',
+);
+assert.equal(
+  (priorSealVerification.match(/curl --fail --silent --show-error --location/g) ?? []).length,
+  2,
+  'both GitHub API responses must be written silently to protected files',
+);
+assert.match(priorSealVerification, /"\$metadata" >\/dev\/null/);
+assert.match(priorSealVerification, /with archive\.open\(entry\) as stream:/);
+assert.match(
+  priorSealVerification,
+  /except \(OSError, RuntimeError, zipfile\.BadZipFile\):\s*\r?\n\s+raise SystemExit\('The seal log archive could not be safely inspected\.'\) from None/,
+);
+assert.deepEqual(
+  [...priorSealVerification.matchAll(/^\s+echo (.+)$/gm)].map((match) => match[1]),
+  ["'prior_kemerbet_readiness_seal=verified'"],
+  'the historical seal gate may emit only one fixed aggregate verification result',
+);
+assert.doesNotMatch(
+  priorSealVerification,
+  /set -x|curl[^\r\n]*(?:--verbose|-v(?:\s|$))|\btee\b|\bunzip\b|extractall?\(|\bprint\(|sys\.stdout|GITHUB_STEP_SUMMARY|actions\/upload-artifact|::debug|\b(?:head|tail|sed|awk|grep|cat)\b/iu,
+  'the provenance step must never print, extract, summarize, or upload protected metadata or raw logs',
+);
+const privateSignInAction =
+  /- name: Run the exact private sign-in action([\s\S]*?)\n\s+- name: Stop the private sign-in browser/u.exec(
+    kemerbetSessionWorkflow,
+  )?.[1];
+assert.ok(
+  privateSignInAction,
+  'the exact private sign-in SSH action must remain separately bounded',
+);
+assert.match(
+  privateSignInAction,
+  /fetanagent-staging-deploy-helper recheck-kemerbet-readiness '\$GITHUB_SHA' '\$\{GITHUB_SHA:0:12\}'/,
+);
+assert.doesNotMatch(
+  privateSignInAction,
+  /CONFIRMED_PRIOR_SEAL|prior_seal|sealed_(?:commit|release)|seal_run/iu,
+  'historical CI seal provenance must never be exported or passed to the target-host recheck',
+);
 assert.doesNotMatch(
   kemerbetSessionWorkflow,
-  /root@|ssh-keyscan|StrictHostKeyChecking=no|sudo -n (?:docker|bash)|docker\.sock|\bpsql\b|\bsupabase\b|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'/,
+  /root@|ssh-keyscan|StrictHostKeyChecking=no|sudo -n (?:docker|bash)|docker\.sock|\bpsql\b|\bsupabase\b|actions: write|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'|gh run view|unzip -p|\bcat\b[^\r\n]*seal-run/,
 );
 
 assert.match(workflow, /workflow_dispatch:/);
@@ -660,24 +741,373 @@ assert.match(
 );
 assert.match(helperReplacementRunbook, /visudo -cf \/etc\/sudoers/);
 assert.doesNotMatch(helperReplacementRunbook, /fetanagent-vm-transition (?:rotate|verify|inspect)/);
-const replacementInstall = helperReplacementRunbook.indexOf(
+assert.match(helperReplacementRunbook, /sync -f "\$BACKUP"/);
+assert.match(helperReplacementRunbook, /sync -f "\$STAGING_ROOT"/);
+assert.match(
+  helperReplacementRunbook,
+  /Do not create, copy, or update VM-transition receipts on Droplet\s+`593344964`/u,
+  'fresh-host helper rotation must not create or mutate retired-host transition receipts',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /MUTATION_LOCK_ROOT='\/run\/fetanagent-staging-deploy-helper'/g,
+    ) ?? []
+  ).length,
+  2,
+  'both helper replacement and rollback must use the successor helper mutation-lock root',
+);
+assert.equal(
+  (helperReplacementRunbook.match(/MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.lock"/g) ?? [])
+    .length,
+  2,
+  'both helper replacement and rollback must use the exact successor mutation-lock path',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /SUDOERS_DISABLED='\/etc\/sudoers\.d\/\.fetanagent-staging-deploy-helper\.rotation-disabled'/g,
+    ) ?? []
+  ).length,
+  2,
+  'both rotation directions must use the same ignored same-filesystem sudoers quiescence path',
+);
+assert.equal(
+  (helperReplacementRunbook.match(/flock --exclusive --nonblock 9/g) ?? []).length,
+  2,
+  'both helper replacement and rollback must hold the nonblocking exclusive mutation lock',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /if \[\[ ! -e "\$MUTATION_LOCK_ROOT" && ! -L "\$MUTATION_LOCK_ROOT" \]\]/g,
+    ) ?? []
+  ).length,
+  2,
+  'both helper replacement and rollback must recreate the volatile safe lock root after reboot',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /\(set -o noclobber; umask 077; : >"\$MUTATION_LOCK"\) 2>\/dev\/null \|\| true/g,
+    ) ?? []
+  ).length,
+  2,
+  'both helper replacement and rollback must race-safely create the volatile lock with a restrictive umask',
+);
+for (const rotationBoundary of [
+  /test ! -L \/run && test -d \/run && test "\$\(realpath -- \/run\)" = '\/run'/,
+  /root:root:755/,
+  /root:root:700/,
+  /root:root:600:1/,
+  /path_identity="\$\(stat --format='%u:%g:%a:%h:%d:%i' "\$MUTATION_LOCK"\)"/,
+  /fd_identity="\$\(stat -L --format='%u:%g:%a:%h:%d:%i' \/proc\/self\/fd\/9\)"/,
+  /test "\$fd_identity" = "\$path_identity"/,
+  /case "\$fd_identity" in 0:0:600:1:\*\) ;; \*\) false ;; esac/,
+  /test "\$\(stat --format='%u:%g:%a:%h:%d:%i' "\$MUTATION_LOCK"\)" = "\$fd_identity"/,
+  /mv -- "\$SUDOERS" "\$SUDOERS_DISABLED"/,
+  /sync -f \/etc\/sudoers\.d/,
+  /require_no_helper_processes/,
+  /require_allowed_helper_for_sudoers_restore/,
+  /trap restore_sudoers_on_exit EXIT/,
+  /restore_sudoers_grant/,
+]) {
+  assert.equal(
+    (helperReplacementRunbook.match(new RegExp(rotationBoundary.source, 'gu')) ?? []).length >= 2,
+    true,
+    `both helper rotation directions must retain ${rotationBoundary}`,
+  );
+}
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /test "\$\(systemctl show --property=LoadState --value \\\n  fetanagent-staging-runtime-expiry-stop\.timer\)" = 'not-found'/g,
+    ) ?? []
+  ).length,
+  4,
+  'replacement and rollback must prove the expiry timer is unloaded before and after quiescence',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /test "\$\(systemctl show --property=LoadState --value \\\n  fetanagent-staging-runtime-expiry-stop\.service\)" = 'not-found'/g,
+    ) ?? []
+  ).length,
+  4,
+  'replacement and rollback must prove the expiry service is unloaded before and after quiescence',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      /test ! -e \/etc\/systemd\/system\/fetanagent-staging-runtime-expiry-stop\.service && \\\n  test ! -L \/etc\/systemd\/system\/fetanagent-staging-runtime-expiry-stop\.service/g,
+    ) ?? []
+  ).length,
+  4,
+  'replacement and rollback must prove no expiry service unit path exists at either boundary',
+);
+const sudoersRestoreFunctions = [
+  ...helperReplacementRunbook.matchAll(/restore_sudoers_grant\(\) \{([\s\S]*?)\n\}/gu),
+].map((match) => match[1]);
+assert.equal(sudoersRestoreFunctions.length, 2);
+for (const restoreFunction of sudoersRestoreFunctions) {
+  for (const restoreContract of [
+    /require_allowed_helper_for_sudoers_restore \|\| return 1/,
+    /require_exact_sudoers_file "\$SUDOERS_DISABLED" \|\| return 1/,
+    /test ! -e "\$SUDOERS" && test ! -L "\$SUDOERS" \|\| return 1/,
+    /mv -- "\$SUDOERS_DISABLED" "\$SUDOERS" \|\| return 1/,
+    /sync -f \/etc\/sudoers\.d \|\| return 1/,
+    /visudo -cf \/etc\/sudoers >\/dev\/null \|\| return 1/,
+  ]) {
+    assert.match(restoreFunction, restoreContract);
+  }
+  assert.ok(
+    restoreFunction.indexOf('require_allowed_helper_for_sudoers_restore') <
+      restoreFunction.indexOf('mv -- "$SUDOERS_DISABLED" "$SUDOERS"'),
+    'the NOPASSWD grant must remain disabled unless TARGET is an exact reviewed helper',
+  );
+  assert.equal(
+    (restoreFunction.match(/sync -f \/etc\/sudoers\.d \|\| return 1/g) ?? []).length,
+    2,
+    'both already-restored and rename-restored sudoers paths must durably sync the include directory',
+  );
+}
+const allowedHelperRestoreFunctions = [
+  ...helperReplacementRunbook.matchAll(
+    /require_allowed_helper_for_sudoers_restore\(\) \{([\s\S]*?)\n\}/gu,
+  ),
+].map((match) => match[1]);
+assert.equal(allowedHelperRestoreFunctions.length, 2);
+for (const allowedHelperFunction of allowedHelperRestoreFunctions) {
+  for (const contract of [
+    /test ! -L "\$TARGET" && test -f "\$TARGET" \|\| return 1/,
+    /test "\$\(realpath -- "\$TARGET"\)" = "\$TARGET" \|\| return 1/,
+    /test "\$\(stat --format='%U:%G:%a:%h' "\$TARGET"\)" = 'root:root:755:1' \|\| return 1/,
+    /helper_sha="\$\(sha256sum "\$TARGET" \| awk '\{ print \$1 \}'\)" \|\| return 1/,
+    /\[\[ "\$helper_sha" == "\$PREVIOUS_SHA" \|\| "\$helper_sha" == "\$NEXT_SHA" \]\] \|\| return 1/,
+    /bash -n "\$TARGET" \|\| return 1/,
+  ]) {
+    assert.match(allowedHelperFunction, contract);
+  }
+}
+const exactSudoersFileFunctions = [
+  ...helperReplacementRunbook.matchAll(/require_exact_sudoers_file\(\) \{([\s\S]*?)\n\}/gu),
+].map((match) => match[1]);
+assert.equal(exactSudoersFileFunctions.length, 2);
+for (const exactSudoersFileFunction of exactSudoersFileFunctions) {
+  for (const contract of [
+    /test ! -L "\$path" && test -f "\$path" \|\| return 1/,
+    /test "\$\(realpath -- "\$path"\)" = "\$path" \|\| return 1/,
+    /test "\$\(stat --format='%U:%G:%a:%h' "\$path"\)" = 'root:root:440:1' \|\| return 1/,
+    /cmp -s -- "\$path" <\(expected_sudoers\) \|\| return 1/,
+  ]) {
+    assert.match(exactSudoersFileFunction, contract);
+  }
+}
+const helperReplacement =
+  /<<'FETANAGENT_HELPER_REPLACE'\n([\s\S]*?)\nFETANAGENT_HELPER_REPLACE/u.exec(
+    helperReplacementRunbook,
+  )?.[1];
+assert.ok(helperReplacement, 'The exact successor replacement procedure must be documented.');
+for (const replacementResumeContract of [
+  /SUDOERS_STATE=''/,
+  /if \[\[ -e "\$SUDOERS" \|\| -L "\$SUDOERS" \]\]; then/,
+  /elif \[\[ -e "\$SUDOERS_DISABLED" \|\| -L "\$SUDOERS_DISABLED" \]\]; then/,
+  /SUDOERS_STATE='enabled'/,
+  /SUDOERS_STATE='disabled'/,
+  /TARGET_SHA="\$\(sha256sum "\$TARGET"/,
+  /"\$TARGET_SHA" == "\$PREVIOUS_SHA" \|\| "\$TARGET_SHA" == "\$NEXT_SHA"/,
+  /if \[\[ -e "\$BACKUP" \|\| -L "\$BACKUP" \]\]; then/,
+  /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
+  /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
+  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-b4664efd'/,
+  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-33f4a5a4\.installing"/,
+]) {
+  assert.match(helperReplacement, replacementResumeContract);
+}
+const replacementBackupTempAssign = helperReplacement.indexOf('BACKUP_TMP="$BACKUP_TMP_PATH"');
+const replacementBackupTempInstall = helperReplacement.indexOf(
+  'install -o root -g root -m 0600 "$TARGET" "$BACKUP_TMP"',
+  replacementBackupTempAssign,
+);
+const replacementBackupTempHash = helperReplacement.indexOf(
+  'sha256sum "$BACKUP_TMP"',
+  replacementBackupTempInstall,
+);
+const replacementBackupTempSync = helperReplacement.indexOf(
+  'sync -f "$BACKUP_TMP"',
+  replacementBackupTempHash,
+);
+const replacementBackupRename = helperReplacement.indexOf(
+  'mv -- "$BACKUP_TMP" "$BACKUP"',
+  replacementBackupTempSync,
+);
+const replacementBackupFileSync = helperReplacement.indexOf(
+  'sync -f "$BACKUP"',
+  replacementBackupRename,
+);
+const replacementBackupDirectorySync = helperReplacement.indexOf(
+  'sync -f "$STAGING_ROOT"',
+  replacementBackupFileSync,
+);
+assert.ok(
+  replacementBackupTempAssign >= 0 &&
+    replacementBackupTempAssign < replacementBackupTempInstall &&
+    replacementBackupTempInstall < replacementBackupTempHash &&
+    replacementBackupTempHash < replacementBackupTempSync &&
+    replacementBackupTempSync < replacementBackupRename &&
+    replacementBackupRename < replacementBackupFileSync &&
+    replacementBackupFileSync < replacementBackupDirectorySync,
+  'the predecessor backup must use a fixed recoverable temp, exact hash, file fsync, atomic rename, and directory fsync',
+);
+const replacementInstall = helperReplacement.indexOf(
   'install -o root -g root -m 0755 "$STAGED" "$INSTALL_TMP"',
 );
-const replacementHash = helperReplacementRunbook.indexOf(
-  'sha256sum "$INSTALL_TMP"',
-  replacementInstall,
+const replacementSudoersRevoke = helperReplacement.indexOf('mv -- "$SUDOERS" "$SUDOERS_DISABLED"');
+const replacementQuiescence = helperReplacement.indexOf(
+  'require_no_helper_processes',
+  replacementSudoersRevoke,
 );
-const replacementRename = helperReplacementRunbook.indexOf(
-  'mv -f -- "$INSTALL_TMP" "$TARGET"',
-  replacementHash,
+const replacementLock = helperReplacement.indexOf(
+  'flock --exclusive --nonblock 9',
+  replacementQuiescence,
 );
+const replacementPostLockQuiescence = helperReplacement.indexOf(
+  'require_no_helper_processes',
+  replacementLock,
+);
+const replacementHash = helperReplacement.indexOf('sha256sum "$INSTALL_TMP"', replacementInstall);
+const replacementSync = helperReplacement.indexOf('sync -f "$INSTALL_TMP"', replacementHash);
+const replacementRename = helperReplacement.indexOf(
+  'mv -- "$INSTALL_TMP" "$TARGET"',
+  replacementSync,
+);
+const replacementDirectorySync = helperReplacement.indexOf(
+  'sync -f "$(dirname -- "$TARGET")"',
+  replacementRename,
+);
+const replacementTargetVerification = helperReplacement.indexOf(
+  'test "$(sha256sum "$TARGET"',
+  helperReplacement.indexOf('mv -- "$INSTALL_TMP" "$TARGET"'),
+);
+const replacementSudoersRestore = helperReplacement.lastIndexOf('restore_sudoers_grant');
 const replacementVerify = helperReplacementRunbook.indexOf('transition-ssh-verify');
 assert.ok(
   replacementInstall >= 0 &&
+    replacementSudoersRevoke >= 0 &&
+    replacementSudoersRevoke < replacementQuiescence &&
+    replacementQuiescence < replacementLock &&
+    replacementLock < replacementPostLockQuiescence &&
+    replacementLock >= 0 &&
+    replacementLock < replacementInstall &&
     replacementInstall < replacementHash &&
-    replacementHash < replacementRename &&
+    replacementHash < replacementSync &&
+    replacementSync < replacementRename &&
+    replacementRename < replacementDirectorySync &&
+    replacementTargetVerification > replacementRename &&
+    replacementSudoersRestore > replacementTargetVerification &&
     replacementRename < replacementVerify,
-  'The exact helper must be syntax/hash checked, atomically installed, and then verified through non-root SSH.',
+  'The predecessor grant must be revoked and quiesced before the exact helper is atomically installed, verified, and re-enabled.',
+);
+const helperRestore = /<<'FETANAGENT_HELPER_RESTORE'\n([\s\S]*?)\nFETANAGENT_HELPER_RESTORE/u.exec(
+  helperReplacementRunbook,
+)?.[1];
+assert.ok(helperRestore, 'The exact predecessor restore procedure must be documented.');
+for (const restoreContract of [
+  /MUTATION_LOCK_ROOT='\/run\/fetanagent-staging-deploy-helper'/,
+  /MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.lock"/,
+  /SUDOERS_DISABLED='\/etc\/sudoers\.d\/\.fetanagent-staging-deploy-helper\.rotation-disabled'/,
+  /mv -- "\$SUDOERS" "\$SUDOERS_DISABLED"/,
+  /require_no_helper_processes/,
+  /flock --exclusive --nonblock 9/,
+  /METADATA='http:\/\/169\.254\.169\.254\/metadata\/v1'/,
+  /593344964/,
+  /161\.35\.41\.232/,
+  /fetanagent-staging-runtime-expiry-stop\.timer/,
+  /label=com\.docker\.compose\.project=fetanagent-staging-beta/,
+  /test ! -L "\$TARGET"/,
+  /root:root:755/,
+  /TARGET_SHA="\$\(sha256sum "\$TARGET"/,
+  /"\$TARGET_SHA" == "\$PREVIOUS_SHA" \|\| "\$TARGET_SHA" == "\$NEXT_SHA"/,
+  /sha256sum "\$TARGET"[^\n]*"\$PREVIOUS_SHA"/,
+]) {
+  assert.match(helperRestore, restoreContract);
+}
+for (const restoreResumeContract of [
+  /SUDOERS_STATE=''/,
+  /SUDOERS_STATE='enabled'/,
+  /SUDOERS_STATE='disabled'/,
+  /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
+  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-33f4a5a4'/,
+  /if \[\[ "\$TARGET_SHA" == "\$NEXT_SHA" \]\]; then/,
+  /RESTORE_TMP="\$RESTORE_TMP_PATH"/,
+]) {
+  assert.match(helperRestore, restoreResumeContract);
+}
+for (const exactBackupContract of [
+  /test ! -L "\$BACKUP" && test -f "\$BACKUP"/g,
+  /test "\$\(realpath -- "\$BACKUP"\)" = "\$BACKUP"/g,
+  /test "\$\(stat --format='%U:%G:%a:%h' "\$BACKUP"\)" = 'root:root:600:1'/g,
+  /test "\$\(sha256sum "\$BACKUP" \| awk '\{ print \$1 \}'\)" = "\$PREVIOUS_SHA"/g,
+]) {
+  assert.equal(
+    (helperRestore.match(exactBackupContract) ?? []).length,
+    2,
+    'rollback must re-prove the exact regular canonical single-link predecessor backup after quiescence',
+  );
+}
+const preRecheckRollbackState = /require_pre_recheck_rollback_state\(\) \{[\s\S]*?\n\}/u.exec(
+  helperRestore,
+)?.[0];
+assert.ok(preRecheckRollbackState, 'rollback must define its pre-recheck compatibility boundary');
+for (const preRecheckContract of [
+  /RECHECK_PROMOTION_ROOT/,
+  /RECHECK_RECEIPT_ROOT/,
+  /RECHECK_CANDIDATE_ROOT/,
+  /CANONICAL_BINDING/,
+  /10001:10001:400:1/,
+  /10001:10001:700/,
+  /kemerbet_agent_identity_bindings/,
+  /10001:10001:600:1/,
+  /\|\| return 1/,
+]) {
+  assert.match(preRecheckRollbackState, preRecheckContract);
+}
+assert.equal(
+  (helperRestore.match(/\brequire_pre_recheck_rollback_state\b/g) ?? []).length,
+  5,
+  'rollback compatibility must be defined, checked before and after locking, and checked in both sudoers-restoration branches',
+);
+const restoreTargetProof = helperRestore.indexOf('sha256sum "$TARGET"');
+const restoreSudoersRevoke = helperRestore.indexOf('mv -- "$SUDOERS" "$SUDOERS_DISABLED"');
+const restoreQuiescence = helperRestore.indexOf(
+  'require_no_helper_processes',
+  restoreSudoersRevoke,
+);
+const restoreLock = helperRestore.indexOf('flock --exclusive --nonblock 9', restoreQuiescence);
+const restoreTemporary = helperRestore.indexOf('RESTORE_TMP="$RESTORE_TMP_PATH"', restoreLock);
+const restoreSync = helperRestore.indexOf('sync -f "$RESTORE_TMP"', restoreTemporary);
+const restoreRename = helperRestore.indexOf('mv -- "$RESTORE_TMP" "$TARGET"');
+const restoreDirectorySync = helperRestore.indexOf(
+  'sync -f "$(dirname -- "$TARGET")"',
+  restoreRename,
+);
+const restoredTargetVerification = helperRestore.indexOf(
+  'test "$(sha256sum "$TARGET"',
+  restoreRename,
+);
+const restoreSudoersGrant = helperRestore.lastIndexOf('restore_sudoers_grant');
+assert.ok(
+  restoreTargetProof >= 0 &&
+    restoreTargetProof < restoreSudoersRevoke &&
+    restoreSudoersRevoke < restoreQuiescence &&
+    restoreQuiescence < restoreLock &&
+    restoreLock < restoreTemporary &&
+    restoreTemporary < restoreSync &&
+    restoreSync < restoreRename &&
+    restoreRename < restoreDirectorySync &&
+    restoredTargetVerification > restoreRename &&
+    restoreSudoersGrant > restoredTargetVerification,
+  'rollback must revoke and quiesce the grant, prove the installed successor, restore the checksum-proven predecessor, verify it, and only then re-enable sudo',
 );
 assert.match(
   stagingRunbook,
@@ -1254,7 +1684,10 @@ assert.match(
   /require_exact_fresh_bot_runtime "\$commit_sha" published-steady-state/,
 );
 assert.match(startKemerbetSession, /fetanagent-deposit-executor:\$image_tag/);
-assert.match(startKemerbetSession, /require_service_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/);
+assert.match(
+  startKemerbetSession,
+  /require_kemerbet_identity_key_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+);
 assert.match(startKemerbetSession, /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/);
 assert.match(startKemerbetSession, /require_immutable_config_file "\$KEMERBET_SELECTOR_CONTRACT"/);
 assert.match(startKemerbetSession, /require_kemerbet_readiness_output_directory/);
@@ -1330,6 +1763,767 @@ assert.doesNotMatch(
   /container logs|\bcat\b|PlayerEPOSDeposit|GeneralInfoByExternalId|password=|token=|FINANCIAL_ACTIONS_MODE=live/iu,
 );
 
+const recheckKemerbetReadiness = /\n  recheck-kemerbet-readiness\)([\s\S]*?)\n    ;;/u.exec(
+  helper,
+)?.[1];
+assert.ok(
+  recheckKemerbetReadiness,
+  'The helper must define the independent one-shot bound-profile readiness recheck.',
+);
+assert.doesNotMatch(
+  recheckKemerbetReadiness,
+  /sealed_commit|sealed_release|seal_run|prior_seal/iu,
+  'the host recheck must not claim provenance from the separately verified historical seal run',
+);
+for (const contract of [
+  /\[\[ \$# -eq 3 \]\]/,
+  /validate_commit_and_tag "\$commit_sha" "\$image_tag"/,
+  /require_kemerbet_identity_key_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+  /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /KEMERBET_RECHECK_CLEANUP_ARMED='true'/,
+  /trap kemerbet_recheck_cleanup_trap EXIT/,
+  /trap 'kemerbet_recheck_signal_trap 130' INT/,
+  /trap 'kemerbet_recheck_signal_trap 143' TERM/,
+  /trap 'kemerbet_recheck_signal_trap 129' HUP/,
+  /published-with-kemerbet-session/,
+  /container stop --time 70/,
+  /container rm/,
+  /published-steady-state/,
+  /require_kemerbet_profile_volume_holders ''/,
+  /harden_kemerbet_identity_key/,
+  /harden_kemerbet_player_ids_file/,
+  /source_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
+  /identity_key_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
+  /selector_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
+  /player_ids_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
+  /fetanagent-deposit-executor:\$image_tag/,
+  /org\.opencontainers\.image\.revision/,
+  /KEMERBET_RECHECK_CANDIDATE_ROOT/,
+  /KEMERBET_RECHECK_CANDIDATE_BINDING/,
+  /KEMERBET_RECHECK_CANDIDATE_CREATED='true'/,
+  /install -d -o root -g root -m 0700 "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/,
+  /install -o root -g root -m 0444/,
+  /sync -f "\$KEMERBET_RECHECK_CANDIDATE_BINDING"/,
+  /require_root_readable_immutable_file "\$KEMERBET_RECHECK_CANDIDATE_BINDING"/,
+  /--profile kemerbet-no-transfer-readiness/,
+  /create --no-build --no-recreate kemerbet-no-transfer-readiness/,
+  /require_kemerbet_recheck_container_contract/,
+  /require_kemerbet_profile_volume_holders "\$recheck_container"/,
+  /a KemerBet recheck input changed before execution/,
+  /timeout --foreground --signal=TERM/,
+  /KEMERBET_RECHECK_TIMEOUT_SECONDS/,
+  /KEMERBET_RECHECK_KILL_AFTER_SECONDS/,
+  /container start --attach "\$recheck_container"/,
+  /'exited\|0\|false\|\|0'/,
+  /a KemerBet recheck input or profile identity changed during execution/,
+  /remove_kemerbet_recheck_container/,
+  /remove_kemerbet_recheck_network/,
+  /consume_exact_one_use_kemerbet_file/,
+  /ln -- "\$KEMERBET_RECHECK_CANDIDATE_BINDING" "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /KEMERBET_RECHECK_FINAL_INSTALLED='true'/,
+  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /remove_kemerbet_recheck_candidate/,
+  /shred --force --iterations=1 --zero --remove=unlink -- "\$KEMERBET_READINESS_BINDING"/,
+  /KEMERBET_RECHECK_RECEIPT_OWNED='true'/,
+  /require_kemerbet_recheck_receipt/,
+  /KEMERBET_RECHECK_COMMITTED='true'/,
+  /KEMERBET_RECHECK_CLEANUP_ARMED='false'/,
+  /trap - EXIT INT TERM HUP/,
+  /KemerBet server readiness passed: 5 of 5 Players, Transfer disabled\./,
+  /record_kemerbet_recheck_receipt/,
+]) {
+  assert.match(recheckKemerbetReadiness, contract);
+}
+const recheckCandidatePosition = recheckKemerbetReadiness.indexOf(
+  'install -d -o root -g root -m 0700 "$KEMERBET_RECHECK_CANDIDATE_ROOT"',
+);
+const recheckRecoveryPosition = recheckKemerbetReadiness.indexOf(
+  'recover_incomplete_kemerbet_recheck_promotion',
+);
+const recheckCompletedReceiptBranchPosition = recheckKemerbetReadiness.indexOf(
+  'if [[ -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]',
+  recheckRecoveryPosition,
+);
+const recheckCompletedVerificationPosition = recheckKemerbetReadiness.indexOf(
+  'require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"',
+  recheckCompletedReceiptBranchPosition,
+);
+const recheckCompletedResultPosition = recheckKemerbetReadiness.indexOf(
+  "printf '%s\\n' 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.'",
+  recheckCompletedVerificationPosition,
+);
+const recheckCompletedExitPosition = recheckKemerbetReadiness.indexOf(
+  'exit 0',
+  recheckCompletedResultPosition,
+);
+const recheckPreparedJournalPosition = recheckKemerbetReadiness.indexOf(
+  'record_kemerbet_recheck_promotion_journal',
+);
+const recheckPreparedJournalVerificationPosition = recheckKemerbetReadiness.indexOf(
+  'require_kemerbet_recheck_prepared_promotion_journal',
+  recheckPreparedJournalPosition,
+);
+const recheckCleanupArmedPosition = recheckKemerbetReadiness.indexOf(
+  "KEMERBET_RECHECK_CLEANUP_ARMED='true'",
+);
+const recheckSessionStopPosition = recheckKemerbetReadiness.indexOf('container stop --time 70');
+const recheckSteadyPosition = recheckKemerbetReadiness.indexOf(
+  'require_exact_fresh_bot_runtime "$commit_sha" published-steady-state',
+  recheckSessionStopPosition,
+);
+const recheckHardenPosition = recheckKemerbetReadiness.indexOf('harden_kemerbet_identity_key');
+const recheckSnapshotPosition = recheckKemerbetReadiness.indexOf(
+  `source_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'`,
+);
+const recheckHardenedSnapshotPosition = recheckKemerbetReadiness.indexOf(
+  `identity_key_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'`,
+  recheckHardenPosition,
+);
+const recheckCreatePosition = recheckKemerbetReadiness.indexOf(
+  'create --no-build --no-recreate kemerbet-no-transfer-readiness',
+);
+const recheckCandidateJournalPosition = recheckKemerbetReadiness.indexOf(
+  'advance_kemerbet_recheck_promotion_journal',
+  recheckCandidatePosition,
+);
+const recheckCandidateJournalVerificationPosition = recheckKemerbetReadiness.indexOf(
+  'require_kemerbet_recheck_promotion_journal',
+  recheckCandidateJournalPosition,
+);
+const recheckAttestationPosition = recheckKemerbetReadiness.indexOf(
+  'require_kemerbet_recheck_container_contract',
+);
+const recheckBeforeExecutionPosition = recheckKemerbetReadiness.indexOf(
+  'a KemerBet recheck input changed before execution',
+);
+const recheckRunPosition = recheckKemerbetReadiness.indexOf(
+  'container start --attach "$recheck_container"',
+);
+const recheckSuccessPosition = recheckKemerbetReadiness.indexOf('[[ "$recheck_status" -eq 0 ]]');
+const recheckPostcheckPosition = recheckKemerbetReadiness.indexOf(
+  'a KemerBet recheck input or profile identity changed during execution',
+);
+const recheckContainerCleanupPosition = recheckKemerbetReadiness.indexOf(
+  'remove_kemerbet_recheck_container',
+  recheckPostcheckPosition,
+);
+const recheckNetworkCleanupPosition = recheckKemerbetReadiness.indexOf(
+  'remove_kemerbet_recheck_network',
+  recheckContainerCleanupPosition,
+);
+const recheckOneUseCleanupPosition = recheckKemerbetReadiness.indexOf(
+  'consume_exact_one_use_kemerbet_file',
+  recheckNetworkCleanupPosition,
+);
+const recheckFinalBindingPosition = recheckKemerbetReadiness.indexOf(
+  'ln -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+);
+const recheckCandidateCleanupPosition = recheckKemerbetReadiness.indexOf(
+  'remove_kemerbet_recheck_candidate',
+  recheckFinalBindingPosition,
+);
+const recheckSealSourceCleanupPosition = recheckKemerbetReadiness.indexOf(
+  'shred --force --iterations=1 --zero --remove=unlink -- "$KEMERBET_READINESS_BINDING"',
+);
+const recheckReceiptPosition = recheckKemerbetReadiness.indexOf('record_kemerbet_recheck_receipt');
+const recheckReceiptVerificationPosition = recheckKemerbetReadiness.indexOf(
+  'require_kemerbet_recheck_receipt',
+  recheckReceiptPosition,
+);
+const recheckCommittedPosition = recheckKemerbetReadiness.indexOf(
+  "KEMERBET_RECHECK_COMMITTED='true'",
+);
+const recheckFinalJournalVerificationPosition = recheckKemerbetReadiness.indexOf(
+  'require_kemerbet_recheck_promotion_journal',
+  recheckReceiptVerificationPosition,
+);
+const recheckJournalRetirementPosition = recheckKemerbetReadiness.indexOf(
+  'remove_owned_kemerbet_recheck_promotion_root',
+  recheckFinalJournalVerificationPosition,
+);
+const recheckDisarmedPosition = recheckKemerbetReadiness.indexOf(
+  "KEMERBET_RECHECK_CLEANUP_ARMED='false'",
+  recheckCommittedPosition,
+);
+const recheckResultPosition = recheckKemerbetReadiness.lastIndexOf(
+  'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.',
+);
+assert.ok(
+  recheckRecoveryPosition >= 0 &&
+    recheckCompletedReceiptBranchPosition > recheckRecoveryPosition &&
+    recheckCompletedVerificationPosition > recheckCompletedReceiptBranchPosition &&
+    recheckCompletedResultPosition > recheckCompletedVerificationPosition &&
+    recheckCompletedExitPosition > recheckCompletedResultPosition &&
+    recheckSnapshotPosition > recheckCompletedExitPosition &&
+    recheckSnapshotPosition < recheckPreparedJournalPosition &&
+    recheckPreparedJournalPosition > recheckCompletedExitPosition &&
+    recheckPreparedJournalPosition > recheckRecoveryPosition &&
+    recheckPreparedJournalVerificationPosition > recheckPreparedJournalPosition &&
+    recheckCleanupArmedPosition > recheckPreparedJournalVerificationPosition &&
+    recheckSessionStopPosition > recheckCleanupArmedPosition &&
+    recheckSteadyPosition > recheckSessionStopPosition &&
+    recheckHardenPosition > recheckSteadyPosition &&
+    recheckHardenedSnapshotPosition > recheckHardenPosition &&
+    recheckCandidatePosition > recheckCleanupArmedPosition &&
+    recheckCandidatePosition > recheckHardenedSnapshotPosition &&
+    recheckCandidateJournalPosition > recheckCandidatePosition &&
+    recheckCandidateJournalVerificationPosition > recheckCandidateJournalPosition &&
+    recheckCreatePosition > recheckCandidateJournalVerificationPosition &&
+    recheckAttestationPosition > recheckCreatePosition &&
+    recheckBeforeExecutionPosition > recheckAttestationPosition &&
+    recheckRunPosition > recheckCandidatePosition &&
+    recheckRunPosition > recheckBeforeExecutionPosition &&
+    recheckSuccessPosition > recheckRunPosition &&
+    recheckPostcheckPosition > recheckSuccessPosition &&
+    recheckContainerCleanupPosition > recheckPostcheckPosition &&
+    recheckNetworkCleanupPosition > recheckContainerCleanupPosition &&
+    recheckOneUseCleanupPosition > recheckSuccessPosition &&
+    recheckOneUseCleanupPosition > recheckNetworkCleanupPosition &&
+    recheckFinalBindingPosition > recheckOneUseCleanupPosition &&
+    recheckCandidateCleanupPosition > recheckFinalBindingPosition &&
+    recheckSealSourceCleanupPosition > recheckCandidateCleanupPosition &&
+    recheckReceiptPosition > recheckSealSourceCleanupPosition &&
+    recheckReceiptVerificationPosition > recheckReceiptPosition &&
+    recheckFinalJournalVerificationPosition > recheckReceiptVerificationPosition &&
+    recheckJournalRetirementPosition > recheckFinalJournalVerificationPosition &&
+    recheckCommittedPosition > recheckJournalRetirementPosition &&
+    recheckDisarmedPosition > recheckCommittedPosition &&
+    recheckResultPosition > recheckDisarmedPosition,
+  'the recheck must recover, accept only an exact already-committed receipt, otherwise journal before mutation, run once, clean transients, consume IDs, no-clobber promote, receipt, retire the journal, and only then commit',
+);
+assert.doesNotMatch(
+  recheckKemerbetReadiness,
+  /install -o 10001|root:root:700\|root:root:755|container logs|\bcat\b|PlayerEPOSDeposit|GeneralInfoByExternalId|password=|token=|FINANCIAL_ACTIONS_MODE=live/iu,
+  'the recheck must never preinstall a service-owned final binding, expose logs, or enable financial behavior',
+);
+
+for (const lifecycleInitialization of [
+  "KEMERBET_RECHECK_CLEANUP_ARMED='false'",
+  "KEMERBET_RECHECK_CANDIDATE_CREATED='false'",
+  "KEMERBET_RECHECK_CANDIDATE_DEV_INO=''",
+  "KEMERBET_RECHECK_CANDIDATE_DIGEST=''",
+  "KEMERBET_RECHECK_FINAL_INSTALLED='false'",
+  "KEMERBET_RECHECK_RECEIPT_OWNED='false'",
+  "KEMERBET_RECHECK_PROMOTION_OWNED='false'",
+  "KEMERBET_RECHECK_PLAYER_IDS_DEV_INO=''",
+  "KEMERBET_RECHECK_RELEASE=''",
+  "KEMERBET_RECHECK_SESSION_CONTAINER=''",
+  "KEMERBET_RECHECK_SOURCE_DEV_INO=''",
+  "KEMERBET_RECHECK_SOURCE_DIGEST=''",
+  "KEMERBET_RECHECK_COMMITTED='false'",
+]) {
+  assert.match(helper, new RegExp(`^${lifecycleInitialization}$`, 'm'));
+}
+
+const consumeOneUseKemerbetFile = /consume_one_use_kemerbet_file\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  consumeOneUseKemerbetFile,
+  'the helper must securely consume the exact one-use Player-ID input on terminal paths',
+);
+for (const contract of [
+  /! -L "\$path" && -f "\$path"/,
+  /10001:10001:400\|10001:10001:444\|root:root:400\|root:root:444/,
+  /stat --format='%h'/,
+  /shred --force --iterations=1 --zero --remove=unlink -- "\$path"/,
+  /! -e "\$path" && ! -L "\$path"/,
+]) {
+  assert.match(consumeOneUseKemerbetFile, contract);
+}
+
+const hardenKemerbetPlayerIds = /harden_kemerbet_player_ids_file\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  hardenKemerbetPlayerIds,
+  'the original one-use Player-ID file must be frozen before the one-shot container is created',
+);
+for (const contract of [
+  /root:root:700/,
+  /stat --format='%h'/,
+  /digest_before/,
+  /chmod 0444 "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /chown root:root "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /sync -f "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /require_root_readable_immutable_file "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /== "\$digest_before"/,
+]) {
+  assert.match(hardenKemerbetPlayerIds, contract);
+}
+
+const hardenKemerbetIdentityKey = /harden_kemerbet_identity_key\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  hardenKemerbetIdentityKey,
+  'the identity HMAC key must be frozen root-only without changing its digest',
+);
+for (const contract of [
+  /root:root:700/,
+  /stat --format='%h'/,
+  /digest_before/,
+  /chmod 0444 "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+  /chown root:root "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+  /== "\$digest_before"/,
+]) {
+  assert.match(hardenKemerbetIdentityKey, contract);
+}
+
+const stagingMutationLock = /acquire_staging_mutation_lock\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(stagingMutationLock, 'The helper must define one non-blocking root-owned mutation lock.');
+for (const contract of [
+  /STAGING_MUTATION_LOCK/,
+  /root:root:600/,
+  /exec 9<>"\$STAGING_MUTATION_LOCK"/,
+  /flock --exclusive --nonblock 9/,
+]) {
+  assert.match(stagingMutationLock, contract);
+}
+assert.match(
+  helper,
+  /case "\$command" in\s*\r?\n\s+[^\r\n]*\brecheck-kemerbet-readiness\b[^\r\n]*\)\s*\r?\n\s+acquire_staging_mutation_lock/,
+  'the independent recheck must share the non-blocking staging mutation lock',
+);
+assert.match(
+  helper,
+  /if \[\[ ! "\$command" =~ \^\(recheck-kemerbet-readiness\|expiry-stop\|stop\|stop-bot\|stop-kemerbet-session-provision\|stop-public-edge\)\$ &&\s*\r?\n\s+\( -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" \|\| -L "\$KEMERBET_RECHECK_PROMOTION_ROOT" \) \]\]; then\s*\r?\n\s+die 'an interrupted KemerBet readiness promotion blocks state-expanding staging mutations'/u,
+  'a durable pending recheck must block every state-expanding mutation while retaining fail-safe stop commands',
+);
+assert.equal(
+  (helper.match(/\brecover_incomplete_kemerbet_recheck_promotion\b/g) ?? []).length,
+  2,
+  'interruption recovery must be defined once and invoked only by the explicit recheck command',
+);
+
+const recordRecheckPromotionJournal =
+  /record_kemerbet_recheck_promotion_journal\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  recordRecheckPromotionJournal,
+  'the helper must create a durable prepared journal before any recheck mutation',
+);
+for (const contract of [
+  /install -d -o root -g root -m 0700 "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /sync -f "\$\(dirname -- "\$KEMERBET_RECHECK_PROMOTION_ROOT"\)"/,
+  /'state=prepared'/,
+  /"release=\$commit_sha"/,
+  /"source_dev_ino=\$source_dev_ino"/,
+  /"binding_sha256=\$binding_digest"/,
+  /"identity_hmac_key_sha256=\$identity_key_digest"/,
+  /"selector_sha256=\$selector_digest"/,
+  /"image_id=\$image_id"/,
+  /"profile_volume=\$KEMERBET_PROFILE_VOLUME"/,
+  /"session_container=\$session_container"/,
+  /"player_ids_dev_ino=\$player_ids_dev_ino"/,
+  /chmod 0600 "\$temporary"/,
+  /sync -f "\$temporary"/,
+  /ln -- "\$temporary" "\$KEMERBET_RECHECK_PROMOTION_JOURNAL"/,
+  /sync -f "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /root:root:600:1/,
+]) {
+  assert.match(recordRecheckPromotionJournal, contract);
+}
+assert.doesNotMatch(
+  recordRecheckPromotionJournal,
+  /Player ID|player_id(?!s_dev_ino)|agent_id=|account_id=|password|token|raw_|sealed_commit|sealed_release|seal_run|prior_seal/iu,
+  'the durable promotion journal must contain only redacted exact identities',
+);
+
+const advanceRecheckPromotionJournal =
+  /advance_kemerbet_recheck_promotion_journal\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  advanceRecheckPromotionJournal,
+  'the helper must atomically advance the durable journal after candidate creation',
+);
+for (const contract of [
+  /require_kemerbet_recheck_prepared_promotion_journal/,
+  /'state=candidate_bound'/,
+  /"binding_dev_ino=\$binding_dev_ino"/,
+  /"profile_identity_sha256=\$profile_identity_digest"/,
+  /"session_container=\$session_container"/,
+  /"player_ids_dev_ino=\$player_ids_dev_ino"/,
+  /sync -f "\$temporary"/,
+  /mv -f -- "\$temporary" "\$KEMERBET_RECHECK_PROMOTION_JOURNAL"/,
+  /sync -f "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /root:root:600:1/,
+]) {
+  assert.match(advanceRecheckPromotionJournal, contract);
+}
+assert.doesNotMatch(
+  advanceRecheckPromotionJournal,
+  /Player ID|player_id(?!s_dev_ino)|agent_id=|account_id=|password|token|raw_|sealed_commit|sealed_release|seal_run|prior_seal/iu,
+  'the candidate-bound journal must not add raw identity or historical seal provenance',
+);
+
+const removeExactKemerbetSession =
+  /remove_exact_kemerbet_session_provision\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  removeExactKemerbetSession,
+  'journal recovery must remove only the exact session container captured before mutation',
+);
+for (const contract of [
+  /expected_container/,
+  /actual_container" == "\$expected_container/,
+  /com\.docker\.compose\.project/,
+  /com\.docker\.compose\.service/,
+  /org\.opencontainers\.image\.revision/,
+  /kemerbet-session-provision/,
+  /10001:10001/,
+  /kemerbet-session-provision-server\.js/,
+  /FINANCIAL_ACTIONS_MODE=dry_run/,
+  /KEMERBET_EXECUTOR_ENABLED=false/,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/,
+  /KEMERBET_PROFILE_VOLUME/,
+  /running\) docker_local container stop --time 70/,
+  /docker_local container rm "\$actual_container"/,
+]) {
+  assert.match(removeExactKemerbetSession, contract);
+}
+
+const recoverRecheckPromotion =
+  /recover_incomplete_kemerbet_recheck_promotion\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  recoverRecheckPromotion,
+  'the helper must recover every durable prepared or candidate-bound crash prefix',
+);
+for (const contract of [
+  /state=prepared/,
+  /state=candidate_bound/,
+  /session_container=\(none\|\[0-9a-f\]/,
+  /player_ids_dev_ino=/,
+  /remove_kemerbet_recheck_container/,
+  /remove_kemerbet_recheck_network/,
+  /remove_journaled_kemerbet_session_provision/,
+  /require_kemerbet_profile_volume_holders ''/,
+  /remove_kemerbet_recheck_candidate/,
+  /consume_exact_one_use_kemerbet_file/,
+  /repair_kemerbet_identity_key_readability/,
+  /remove_owned_kemerbet_recheck_promotion_root/,
+  /remove_owned_kemerbet_recheck_receipt_root/,
+  /rollback_kemerbet_recheck_final_binding/,
+  /remove_changed_kemerbet_binding_source/,
+  /remove_owned_kemerbet_recheck_promotion_root/,
+]) {
+  assert.match(recoverRecheckPromotion, contract);
+}
+assert.doesNotMatch(
+  recoverRecheckPromotion,
+  /container start|compose .*\bup\b|GeneralInfoByExternalId|PlayerEPOSDeposit|FINANCIAL_ACTIONS_MODE=live/iu,
+  'crash recovery must clean exact state without retrying the browser probe or enabling money authority',
+);
+const preparedRecoveryStart = recoverRecheckPromotion.indexOf('state=prepared');
+const candidateRecoveryStart = recoverRecheckPromotion.indexOf('state=candidate_bound');
+const preparedRecovery = recoverRecheckPromotion.slice(
+  preparedRecoveryStart,
+  candidateRecoveryStart,
+);
+const candidateRecovery = recoverRecheckPromotion.slice(candidateRecoveryStart);
+assertInOrder(
+  preparedRecovery,
+  [
+    'remove_kemerbet_recheck_container',
+    'remove_kemerbet_recheck_network',
+    'remove_journaled_kemerbet_session_provision',
+    "require_kemerbet_profile_volume_holders ''",
+    'remove_kemerbet_recheck_candidate',
+    'consume_exact_one_use_kemerbet_file',
+    'repair_kemerbet_identity_key_readability',
+    'remove_owned_kemerbet_recheck_promotion_root',
+  ],
+  'prepared-state crash recovery must remove the exact session/profile holders, consume the one-use cohort, repair the key, and retire the journal last',
+);
+assertInOrder(
+  candidateRecovery,
+  [
+    'remove_kemerbet_recheck_container',
+    'remove_kemerbet_recheck_network',
+    'remove_journaled_kemerbet_session_provision',
+    "require_kemerbet_profile_volume_holders ''",
+    'remove_owned_kemerbet_recheck_receipt_root',
+    'rollback_kemerbet_recheck_final_binding',
+    'remove_kemerbet_recheck_candidate',
+    'remove_changed_kemerbet_binding_source',
+    'consume_exact_one_use_kemerbet_file',
+    'repair_kemerbet_identity_key_readability',
+    'remove_owned_kemerbet_recheck_promotion_root',
+  ],
+  'candidate-bound crash recovery must unwind receipt/canonical/candidate/source state before consuming the cohort and retiring the journal',
+);
+
+const recheckRuntimeContract =
+  /require_kemerbet_recheck_container_contract\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  recheckRuntimeContract,
+  'The helper must inspect the one-shot container before starting it.',
+);
+for (const contract of [
+  /\.State\.Status.*'created'/s,
+  /fetanagent-deposit-executor:\$image_tag/,
+  /10001:10001/,
+  /\["node","apps\/executor\/dist\/kemerbet-no-transfer-readiness\.js"\]/,
+  /'false\|false'/,
+  /ReadonlyRootfs/,
+  /Privileged/,
+  /AutoRemove/,
+  /RestartPolicy/,
+  /CapAdd/,
+  /CapDrop/,
+  /SecurityOpt/,
+  /PidsLimit/,
+  /\.HostConfig\.Memory/,
+  /NanoCpus/,
+  /ShmSize/,
+  /PortBindings/,
+  /ExposedPorts/,
+  /LogConfig\.Type.*'none'/s,
+  /Healthcheck\.Test.*'\["NONE"\]'/s,
+  /mode=1777\\nnodev\\nnoexec\\nnosuid\\nrw\\nsize=268435456/,
+  /KEMERBET_NO_TRANSFER_READINESS_ENABLED=true/,
+  /KEMERBET_EXECUTOR_ENABLED=false/,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/,
+  /KEMERBET_RECHECK_CANDIDATE_BINDING.*\/run\/secrets\/kemerbet_agent_identity_bindings/s,
+  /KEMERBET_AGENT_IDENTITY_HMAC_KEY.*\/run\/secrets\/kemerbet_agent_identity_hmac_key/s,
+  /KEMERBET_READINESS_PLAYER_IDS.*\/run\/secrets\/kemerbet_no_transfer_readiness_player_ids/s,
+  /KEMERBET_SELECTOR_CONTRACT.*\/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json/s,
+  /KEMERBET_PROFILE_VOLUME.*\/var\/lib\/fetanagent\/kemerbet-sessions/s,
+  /kemerbet_readiness_egress/,
+  /network attachment is not singular/,
+]) {
+  assert.match(recheckRuntimeContract, contract);
+}
+assert.doesNotMatch(
+  recheckRuntimeContract,
+  /container start|container logs|\bcat\b|DATABASE|PASSWORD|TOKEN|SUPABASE|RECEIVER|FINANCIAL_ACTIONS_MODE=live/iu,
+  'runtime attestation must occur before start and must not expose or add financial authority',
+);
+
+const recheckCleanup = /kemerbet_recheck_cleanup_trap\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(recheckCleanup, 'The helper must define terminal cleanup for the one-shot recheck.');
+for (const contract of [
+  /trap - EXIT/,
+  /trap '' INT TERM HUP/,
+  /remove_kemerbet_recheck_container/,
+  /remove_kemerbet_recheck_network/,
+  /KEMERBET_RECHECK_COMMITTED" != 'true'/,
+  /KEMERBET_RECHECK_RECEIPT_OWNED" == 'true'/,
+  /remove_owned_kemerbet_recheck_receipt_root/,
+  /rollback_kemerbet_recheck_final_binding/,
+  /KEMERBET_RECHECK_CANDIDATE_CREATED" == 'true'/,
+  /remove_kemerbet_recheck_candidate/,
+  /consume_exact_one_use_kemerbet_file/,
+  /repair_kemerbet_identity_key_readability/,
+  /original_status" -eq 0 && "\$cleanup_status" -ne 0/,
+  /exit "\$original_status"/,
+]) {
+  assert.match(recheckCleanup, contract);
+}
+for (const nonExitingCleanupContract of [
+  /remove_kemerbet_recheck_container \|\| cleanup_status=1/,
+  /remove_kemerbet_recheck_network \|\| cleanup_status=1/,
+  /remove_exact_kemerbet_session_provision[\s\S]*?\|\| cleanup_status=1/,
+  /kemerbet_profile_volume_holders_match '' \|\| cleanup_status=1/,
+  /remove_owned_kemerbet_recheck_receipt_root \|\| cleanup_status=1/,
+  /rollback_kemerbet_recheck_final_binding \|\| cleanup_status=1/,
+  /remove_kemerbet_recheck_candidate \|\| cleanup_status=1/,
+  /remove_changed_kemerbet_binding_source[\s\S]*?\|\| cleanup_status=1/,
+  /consume_exact_one_use_kemerbet_file[\s\S]*?\|\| cleanup_status=1/,
+  /consume_one_use_kemerbet_file "\$KEMERBET_READINESS_PLAYER_IDS" \|\| cleanup_status=1/,
+  /repair_kemerbet_identity_key_readability \|\| cleanup_status=1/,
+  /remove_owned_kemerbet_recheck_promotion_root \|\| cleanup_status=1/,
+]) {
+  assert.match(recheckCleanup, nonExitingCleanupContract);
+}
+assert.doesNotMatch(
+  recheckCleanup,
+  /\bdie\b|require_kemerbet_profile_volume_holders/,
+  'the EXIT trap must accumulate rollback failures without invoking an exiting helper',
+);
+assertInOrder(
+  recheckCleanup,
+  [
+    'remove_kemerbet_recheck_container',
+    'remove_kemerbet_recheck_network',
+    'remove_exact_kemerbet_session_provision',
+    "kemerbet_profile_volume_holders_match ''",
+    'remove_owned_kemerbet_recheck_receipt_root',
+    'rollback_kemerbet_recheck_final_binding',
+    'remove_kemerbet_recheck_candidate',
+    'remove_changed_kemerbet_binding_source',
+    'consume_exact_one_use_kemerbet_file',
+    'repair_kemerbet_identity_key_readability',
+    '"$cleanup_status" -eq 0',
+    'remove_owned_kemerbet_recheck_promotion_root',
+  ],
+  'catchable cleanup must remove the exact session and every owned transient before retiring the durable journal last',
+);
+assert.ok(
+  recheckCleanup.indexOf('"$cleanup_status" -eq 0') <
+    recheckCleanup.indexOf('remove_owned_kemerbet_recheck_promotion_root'),
+  'catchable cleanup must retain the durable recovery journal unless every rollback and secret repair succeeds',
+);
+
+const recheckRollback = /rollback_kemerbet_recheck_final_binding\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(recheckRollback, 'A failed finalization must roll back only its own final binding.');
+for (const contract of [
+  /root:root/,
+  /KEMERBET_RECHECK_CANDIDATE_DEV_INO/,
+  /KEMERBET_RECHECK_CANDIDATE_DIGEST/,
+  /rm -f -- "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /sync -f "\$\(dirname -- "\$KEMERBET_AGENT_IDENTITY_BINDINGS"\)"/,
+]) {
+  assert.match(recheckRollback, contract);
+}
+
+const recheckReceiptCleanup = /remove_owned_kemerbet_recheck_receipt_root\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  recheckReceiptCleanup,
+  'failed finalization must remove only its exact root-owned transient receipt boundary',
+);
+for (const contract of [
+  /root:root/,
+  /root_mode/,
+  /entry_mode/,
+  /KEMERBET_RECHECK_RECEIPT_ROOT"\/\.ready-v1\.\*/,
+  /find -P "\$KEMERBET_RECHECK_RECEIPT_ROOT"/,
+  /rmdir -- "\$KEMERBET_RECHECK_RECEIPT_ROOT"/,
+]) {
+  assert.match(recheckReceiptCleanup, contract);
+}
+assert.equal(
+  (recheckReceiptCleanup.match(/& 8#022\) == 0/g) ?? []).length,
+  2,
+  'receipt rollback may delete only root-owned entries that are not group/world writable',
+);
+
+const recheckIdentityKeyRepair =
+  /repair_kemerbet_identity_key_readability\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  recheckIdentityKeyRepair,
+  'terminal cleanup must leave the identity key root-owned and readable for a future bounded attempt',
+);
+assert.match(recheckIdentityKeyRepair, /root:root:700/);
+assert.match(recheckIdentityKeyRepair, /stat --format='%h'/);
+assert.match(recheckIdentityKeyRepair, /chmod 0444 "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/);
+assert.match(recheckIdentityKeyRepair, /chown root:root "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/);
+assert.match(recheckIdentityKeyRepair, /root:root:444/);
+
+const recheckCandidateCleanup = /remove_kemerbet_recheck_candidate\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  recheckCandidateCleanup,
+  'The helper must remove the root-only candidate on every terminal path.',
+);
+assert.match(recheckCandidateCleanup, /root:root/);
+assert.match(recheckCandidateCleanup, /root_mode/);
+assert.match(recheckCandidateCleanup, /candidate_mode/);
+assert.equal(
+  (recheckCandidateCleanup.match(/& 8#022\) == 0/g) ?? []).length,
+  2,
+  'cleanup may unlink only a root-owned candidate boundary that is not group/world writable',
+);
+assert.match(recheckCandidateCleanup, /realpath -- "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/);
+assert.match(recheckCandidateCleanup, /rm -f -- "\$KEMERBET_RECHECK_CANDIDATE_BINDING"/);
+assert.match(recheckCandidateCleanup, /rmdir -- "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/);
+assert.match(
+  recheckCandidateCleanup,
+  /! -e "\$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/,
+);
+
+const rootImmutableFileContract = /require_root_readable_immutable_file\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  rootImmutableFileContract,
+  'candidate and final bindings must share one root-owned immutable-file contract.',
+);
+assert.match(rootImmutableFileContract, /realpath -- "\$path"/);
+assert.match(rootImmutableFileContract, /root:root:444/);
+
+const recheckReceipt = /record_kemerbet_recheck_receipt\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(recheckReceipt, 'The helper must atomically record only redacted recheck provenance.');
+for (const contract of [
+  /'version=1'/,
+  /"release=\$commit_sha"/,
+  /"binding_sha256=\$binding_digest"/,
+  /"identity_hmac_key_sha256=\$identity_key_digest"/,
+  /"selector_sha256=\$selector_digest"/,
+  /"image_id=\$image_id"/,
+  /"profile_volume=\$KEMERBET_PROFILE_VOLUME"/,
+  /"profile_identity_sha256=\$profile_identity_digest"/,
+  /install -d -o root -g root -m 0700 "\$KEMERBET_RECHECK_RECEIPT_ROOT"/,
+  /root:root:600/,
+  /ln -- "\$temporary" "\$KEMERBET_RECHECK_RECEIPT"/,
+]) {
+  assert.match(recheckReceipt, contract);
+}
+assert.doesNotMatch(
+  recheckReceipt,
+  /Player ID|player_id(?!s_dev_ino)|agent_id=|account_id=|password|token|raw_|sealed_commit|sealed_release|seal_run|prior_seal/iu,
+  'the recheck receipt must not contain Player or agent identity data or misattribute historical seal provenance',
+);
+
+const recheckReceiptVerification = /require_kemerbet_recheck_receipt\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  recheckReceiptVerification,
+  'finalization must re-read and verify the exact root-only receipt before committing',
+);
+for (const contract of [
+  /root:root:700/,
+  /"\$entries" == 'ready-v1'/,
+  /root:root:600:1/,
+  /expected_digest/,
+  /actual_digest/,
+  /"\$actual_digest" == "\$expected_digest"/,
+]) {
+  assert.match(recheckReceiptVerification, contract);
+}
+
+const completedRecheckVerification =
+  /require_completed_kemerbet_recheck_for_release\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  completedRecheckVerification,
+  'a post-commit rerun must verify and return only the exact already-completed recheck',
+);
+for (const contract of [
+  /validate_commit_and_tag "\$commit_sha" "\$image_tag"/,
+  /! -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /require_committed_kemerbet_recheck_boundary_shape/,
+  /"\$\{receipt_lines\[1\]\}" == "release=\$commit_sha"/,
+  /require_kemerbet_recheck_receipt/,
+  /sha256sum -- "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /sha256sum -- "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+  /sha256sum -- "\$KEMERBET_SELECTOR_CONTRACT"/,
+  /kemerbet_profile_identity_digest "\$account_id" "\$profile_mountpoint"/,
+  /image inspect "fetanagent-deposit-executor:\$image_tag"/,
+  /org\.opencontainers\.image\.revision/,
+  /\$commit_sha\|fetanagent-deposit-executor\|10001:10001/,
+  /require_exact_fresh_bot_runtime "\$commit_sha" published-steady-state/,
+  /require_kemerbet_profile_volume_holders ''/,
+  /name=\^\/\$\{KEMERBET_RECHECK_CONTAINER\}\$/,
+  /name=\^\$\{KEMERBET_RECHECK_NETWORK\}\$/,
+  /! -e "\$KEMERBET_READINESS_PLAYER_IDS" && ! -L "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /! -e "\$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/,
+  /! -e "\$KEMERBET_READINESS_BINDING" && ! -L "\$KEMERBET_READINESS_BINDING"/,
+  /require_kemerbet_readiness_output_directory/,
+]) {
+  assert.match(completedRecheckVerification, contract);
+}
+assert.doesNotMatch(
+  completedRecheckVerification,
+  /container start|compose .*\bup\b|GeneralInfoByExternalId|PlayerEPOSDeposit|FINANCIAL_ACTIONS_MODE=live|sealed_commit|sealed_release|seal_run|prior_seal/iu,
+  'the idempotent completed path must only attest existing exact state and cannot rerun or claim historical seal provenance',
+);
+
 const stopKemerbetSession = /\n  stop-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
   helper,
 )?.[1];
@@ -1371,5 +2565,5 @@ assert.match(ownerDiagnostic, /container logs --tail 80/);
 assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container logs .*bot/);
 
 console.log(
-  'staging deploy workflow verified: manual exact-target guards, read-only exact-IP ban gate, sealed images, bounded runtime credentials, host-local stop-before-expiry, checksummed root helper, and explicit stop path',
+  'staging deploy workflow verified: manual exact-target guards, read-only exact-IP ban gate, sealed images, bounded runtime credentials, checksummed root helper, provenance-bound one-shot KemerBet recheck, and explicit stop path',
 );

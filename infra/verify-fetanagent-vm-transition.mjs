@@ -1009,6 +1009,11 @@ assertInOrder(
   'Fresh-host start must prove the exact commit, host network, free Owner port, and empty Compose project before launch',
 );
 assert.doesNotMatch(freshStartGate, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+assert.doesNotMatch(
+  freshStartGate,
+  /require_helper_rotation_overlay|require_legacy_stopped|require_transition_retired/,
+  'fresh-host readiness must not consume retired-Droplet transition receipts',
+);
 const freshHostIdentity = functionBody(deployHelper, 'require_fresh_host_identity');
 assertInOrder(
   freshHostIdentity,
@@ -1251,6 +1256,11 @@ assert.deepEqual(botRuntimeCalls, [
   '$commit_sha steady-state',
 ]);
 const freshPublicEdgeReady = functionBody(deployHelper, 'require_fresh_public_edge_ready');
+assert.doesNotMatch(
+  freshPublicEdgeReady,
+  /require_helper_rotation_overlay|require_legacy_stopped|require_transition_retired/,
+  'fresh-host publication must not consume retired-Droplet transition receipts',
+);
 assertInOrder(
   freshPublicEdgeReady,
   [

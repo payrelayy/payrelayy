@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -35,9 +37,11 @@ function fingerprinter(): KemerBetAgentIdentityFingerprinter {
 function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {}) {
   const probes: string[] = [];
   const close = vi.fn(async () => undefined);
+  const finalizeReadOnlyProof = vi.fn(async () => undefined);
   const logSuccess = vi.fn();
   const dependencies: KemerBetNoTransferReadinessDependencies = {
     environment: environment(),
+    effectiveUserId: 10001,
     assertBrowserExecutable: async () => undefined,
     loadAgentIdentityBindings: async () => ({
       platformAgentAccountIds: [ACCOUNT_ID],
@@ -46,9 +50,9 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {
     loadPlayerIds: async () => ({ playerIds: PLAYER_IDS }),
     loadSelectorContract: async () => ({ version: 2 }) as KemerBetAgentPageSelectorContractV2,
     createAgentIdentityFingerprinter: async () => fingerprinter(),
-    createRegistry: () => ({
-      probeReadiness: async () => ({ ready: true, reason: 'ready' }),
-      async probePlayerLookup(_accountId, target) {
+    openProbe: async () => ({
+      observedAgentIdentityFingerprint: FINGERPRINT,
+      async probePlayerLookup(target) {
         probes.push(target.playerId);
         return {
           exactPlayerMatch: true,
@@ -56,12 +60,13 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {
           transferDisabled: true,
         };
       },
+      finalizeReadOnlyProof,
       close,
     }),
     logSuccess,
     ...overrides,
   };
-  return { dependencies, probes, close, logSuccess };
+  return { dependencies, probes, close, finalizeReadOnlyProof, logSuccess };
 }
 
 describe('KemerBet server no-transfer readiness', () => {
@@ -71,6 +76,10 @@ describe('KemerBet server no-transfer readiness', () => {
     await expect(runKemerBetNoTransferReadiness(test.dependencies)).resolves.toBeUndefined();
 
     expect(test.probes).toEqual(PLAYER_IDS);
+    expect(test.finalizeReadOnlyProof).toHaveBeenCalledOnce();
+    expect(test.finalizeReadOnlyProof.mock.invocationCallOrder[0]).toBeLessThan(
+      test.logSuccess.mock.invocationCallOrder[0]!,
+    );
     expect(test.close).toHaveBeenCalledOnce();
     expect(test.logSuccess).toHaveBeenCalledWith({
       component: 'kemerbet_no_transfer_readiness',
@@ -105,10 +114,11 @@ describe('KemerBet server no-transfer readiness', () => {
   });
 
   it('fails closed, emits no aggregate success, and closes the profile when one lookup is unavailable', async () => {
+    const failedClose = vi.fn(async () => undefined);
     const test = fixture({
-      createRegistry: () => ({
-        probeReadiness: async () => ({ ready: true, reason: 'ready' }),
-        probePlayerLookup: async (_accountId, target) =>
+      openProbe: async () => ({
+        observedAgentIdentityFingerprint: FINGERPRINT,
+        probePlayerLookup: async (target) =>
           target.playerId === PLAYER_IDS[2]
             ? null
             : {
@@ -116,15 +126,15 @@ describe('KemerBet server no-transfer readiness', () => {
                 exactCurrencyMatch: true,
                 transferDisabled: true,
               },
-        close: testClose,
+        finalizeReadOnlyProof: async () => undefined,
+        close: failedClose,
       }),
     });
-    const testClose = test.close;
 
     await expect(runKemerBetNoTransferReadiness(test.dependencies)).rejects.toBeInstanceOf(
       KemerBetNoTransferReadinessUnavailableError,
     );
-    expect(testClose).toHaveBeenCalledOnce();
+    expect(failedClose).toHaveBeenCalledOnce();
     expect(test.logSuccess).not.toHaveBeenCalled();
   });
 
@@ -151,6 +161,120 @@ describe('KemerBet server no-transfer readiness', () => {
     await expect(runKemerBetNoTransferReadiness(twoAccounts.dependencies)).rejects.toBeInstanceOf(
       KemerBetNoTransferReadinessUnavailableError,
     );
+  });
+
+  it('requires EUID 10001 before loading any private input', async () => {
+    const loadPlayerIds = vi.fn(async () => ({ playerIds: PLAYER_IDS }));
+    const test = fixture({ effectiveUserId: 0, loadPlayerIds });
+
+    await expect(runKemerBetNoTransferReadiness(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessUnavailableError,
+    );
+    expect(loadPlayerIds).not.toHaveBeenCalled();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [[...PLAYER_IDS.slice(0, 4), PLAYER_IDS[0]]],
+    [[...PLAYER_IDS.slice(0, 4), 'PLAYER WITH SPACE']],
+    [[...PLAYER_IDS.slice(0, 4), '']],
+  ])(
+    'rejects duplicate or noncanonical Player IDs before opening the profile',
+    async (playerIds) => {
+      const openProbe = vi.fn();
+      const test = fixture({ loadPlayerIds: async () => ({ playerIds }), openProbe });
+
+      await expect(runKemerBetNoTransferReadiness(test.dependencies)).rejects.toBeInstanceOf(
+        KemerBetNoTransferReadinessUnavailableError,
+      );
+      expect(openProbe).not.toHaveBeenCalled();
+      expect(test.logSuccess).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires the exact sole binding fingerprint and binds it into the persistent probe', async () => {
+    const openProbe = vi.fn(async () => ({
+      observedAgentIdentityFingerprint: FINGERPRINT,
+      probePlayerLookup: async () => ({
+        exactPlayerMatch: true as const,
+        exactCurrencyMatch: true as const,
+        transferDisabled: true as const,
+      }),
+      finalizeReadOnlyProof: async () => undefined,
+      close: async () => undefined,
+    }));
+    const test = fixture({ openProbe });
+
+    await runKemerBetNoTransferReadiness(test.dependencies);
+
+    expect(openProbe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: ACCOUNT_ID,
+        effectiveUserId: 10001,
+        expectedAgentIdentityFingerprint: FINGERPRINT,
+      }),
+    );
+    const serialized = JSON.stringify(test.logSuccess.mock.calls);
+    expect(serialized).not.toContain(ACCOUNT_ID);
+    expect(serialized).not.toContain(FINGERPRINT);
+  });
+
+  it('rejects an observed identity mismatch before any Player lookup and closes the profile', async () => {
+    const probePlayerLookup = vi.fn();
+    const close = vi.fn(async () => undefined);
+    const test = fixture({
+      openProbe: async () => ({
+        observedAgentIdentityFingerprint: `hmac-sha256-agent-identity-v1:${'2'.repeat(64)}`,
+        probePlayerLookup,
+        finalizeReadOnlyProof: async () => undefined,
+        close,
+      }),
+    });
+
+    await expect(runKemerBetNoTransferReadiness(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessUnavailableError,
+    );
+    expect(probePlayerLookup).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+  });
+
+  it('does not emit success when final route draining fails', async () => {
+    const close = vi.fn(async () => undefined);
+    const test = fixture({
+      openProbe: async () => ({
+        observedAgentIdentityFingerprint: FINGERPRINT,
+        probePlayerLookup: async () => ({
+          exactPlayerMatch: true,
+          exactCurrencyMatch: true,
+          transferDisabled: true,
+        }),
+        finalizeReadOnlyProof: async () => {
+          throw new Error('fixed test failure');
+        },
+        close,
+      }),
+    });
+
+    await expect(runKemerBetNoTransferReadiness(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessUnavailableError,
+    );
+    expect(close).toHaveBeenCalledOnce();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+  });
+
+  it('does not use the generic session registry or history adapter path', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-no-transfer-readiness.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('openKemerBetNoTransferReadinessPersistentProfileProbe');
+    expect(source).toContain('await probe.finalizeReadOnlyProof()');
+    expect(source).not.toContain('createKemerBetAgentSessionRegistry');
+    expect(source).not.toContain('probeReadiness');
+    expect(source).not.toContain('fingerprintExternalReference');
+    expect(source).not.toContain('kemerbet-deposit-browser-adapter');
   });
 
   it('reports only a fixed generic main-process failure', async () => {

@@ -187,6 +187,71 @@ services:
       start_period: 45s
       retries: 3
 
+  kemerbet-no-transfer-readiness:
+    profiles: [kemerbet-no-transfer-readiness]
+    platform: linux/amd64
+    image: fetanagent-deposit-executor:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    container_name: fetanagent-staging-beta-kemerbet-no-transfer-readiness-once
+    command: ['node', 'apps/executor/dist/kemerbet-no-transfer-readiness.js']
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    shm_size: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1536m
+    cpus: 2.00
+    stop_grace_period: 60s
+    logging:
+      driver: none
+    environment:
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: dry_run
+      KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'
+      INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'
+    volumes:
+      - type: volume
+        source: kemerbet_sessions
+        target: /var/lib/fetanagent/kemerbet-sessions
+      - type: bind
+        source: /etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate/kemerbet_agent_identity_bindings
+        target: /run/secrets/kemerbet_agent_identity_bindings
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key
+        target: /run/secrets/kemerbet_agent_identity_hmac_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids
+        target: /run/secrets/kemerbet_no_transfer_readiness_player_ids
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json
+        target: /etc/fetanagent/kemerbet-selector-contract.v2.json
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - kemerbet_readiness_egress
+    healthcheck:
+      disable: true
+
   customer-web:
     profiles: [staging-manual]
     platform: linux/amd64
@@ -664,6 +729,11 @@ services:
         restart: true
 
 networks:
+  kemerbet_readiness_egress:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
   owner_control_service:
     driver: bridge
     enable_ipv6: true

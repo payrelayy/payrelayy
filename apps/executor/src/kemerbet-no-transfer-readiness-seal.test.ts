@@ -51,8 +51,10 @@ function fingerprinter(): KemerBetAgentIdentityFingerprinter {
 function guardedRouteFixture(input: {
   readonly method: string;
   readonly requestUrl: string;
+  readonly headers?: Readonly<Record<string, string>>;
   readonly isMainFrame?: boolean;
   readonly isNavigationRequest?: boolean;
+  readonly resourceType?: string;
 }) {
   const mainFrame = {};
   const subframe = {};
@@ -61,8 +63,10 @@ function guardedRouteFixture(input: {
   const route = {
     request: () => ({
       frame: () => (input.isMainFrame === true ? mainFrame : subframe),
+      headers: () => ({ ...input.headers }),
       isNavigationRequest: () => input.isNavigationRequest === true,
       method: () => input.method,
+      resourceType: () => input.resourceType ?? 'xhr',
       url: () => input.requestUrl,
     }),
     abort,
@@ -216,28 +220,84 @@ describe('KemerBet no-transfer readiness seal', () => {
       new URL('./kemerbet-no-transfer-readiness-seal.ts', import.meta.url),
       'utf8',
     );
+    const guardedStart = source.indexOf(
+      'async function createKemerBetNoTransferReadinessGuardedProbeFromPage',
+    );
     const start = source.indexOf(
       'export async function createKemerBetNoTransferReadinessSealProbeFromPage',
     );
-    const end = source.indexOf('async function productionOpenProbe', start);
-    const body = start >= 0 && end > start ? source.slice(start, end) : undefined;
+    const end = source.indexOf(
+      'export interface KemerBetNoTransferReadinessPersistentProfileProbeOptions',
+      start,
+    );
+    const guardedBody =
+      guardedStart >= 0 && start > guardedStart ? source.slice(guardedStart, start) : undefined;
+    const publicBody = start >= 0 && end > start ? source.slice(start, end) : undefined;
 
-    expect(body).toBeDefined();
-    expect(body).toContain('options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL');
-    expect(body).toContain('await agentPage.adoptCurrentDepositPageWithoutNavigation()');
-    expect(body).toContain('activateReadOnlyLookupWithGuardedNativeClick: true');
-    expect(body).toContain('reportLookupStage: (stage) => options.reportStage?.(stage)');
-    expect(body).toContain('let forbiddenRequestObserved = false');
-    expect(body).toContain("reportStage('forbidden_request')");
-    expect(body).toContain('const readinessRequestBoundaryInvalid = (): boolean =>');
-    expect(body).toContain('if (closed || readinessRequestBoundaryInvalid()) unavailable()');
+    expect(guardedBody).toBeDefined();
+    expect(publicBody).toBeDefined();
+    expect(guardedBody).toContain('await agentPage.adoptCurrentDepositPageWithoutNavigation()');
+    expect(guardedBody).toContain('activateReadOnlyLookupWithGuardedNativeClick: true');
+    expect(guardedBody).toContain('reportLookupStage: (stage) => options.reportStage?.(stage)');
+    expect(guardedBody).toContain('requestBoundary.invalid()');
+    expect(guardedBody).toContain('requestBoundary.withExpectedPlayerLookup');
     expect(source).toContain('await probe.finalizeReadOnlyProof()');
-    expect(body).toContain("reportStage('lookup_reset')");
-    expect(body).toContain('await agentPage.resetReadOnlyPlayerLookup()');
-    expect(body).not.toContain('activateReadOnlyLookupWithoutPointer');
-    expect(body).not.toContain('createKemerBetDepositBrowser');
-    expect(body).not.toContain('.goto(');
-    expect(body).not.toContain('.reload(');
+    expect(guardedBody).toContain("reportStage('lookup_reset')");
+    expect(guardedBody).toContain('await agentPage.resetReadOnlyPlayerLookup()');
+    expect(guardedBody).not.toContain('activateReadOnlyLookupWithoutPointer');
+    expect(guardedBody).not.toContain('createKemerBetDepositBrowser');
+    expect(publicBody).toContain("startup: { mode: 'adopt_authenticated_page' }");
+    expect(publicBody).not.toContain('.goto(');
+    expect(publicBody).not.toContain('.reload(');
+  });
+
+  it('installs context-wide HTTP and WebSocket guards before the persistent page goes online', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-no-transfer-readiness-seal.ts', import.meta.url),
+      'utf8',
+    );
+    const start = source.indexOf(
+      'export async function openKemerBetNoTransferReadinessPersistentProfileProbe',
+    );
+    const end = source.indexOf('async function productionOpenProbe', start);
+    const body = start >= 0 && end > start ? source.slice(start, end) : '';
+
+    expect(body).toContain('offline: true');
+    expect(body).toContain("serviceWorkers: 'block'");
+    expect(body).toContain("retainedContext.route('**/*', handler)");
+    expect(body).toContain("retainedContext.routeWebSocket('**/*'");
+    expect(body).toContain("retainedContext.unroute('**/*', handler)");
+    expect(body).not.toContain("page.routeWebSocket('**/*'");
+    expect(body.indexOf('restoredPage.close()')).toBeLessThan(
+      body.indexOf('requestBoundary.install()'),
+    );
+    expect(body.indexOf('requestBoundary.install()')).toBeLessThan(
+      body.indexOf("retainedContext.routeWebSocket('**/*'"),
+    );
+    expect(body.indexOf("retainedContext.routeWebSocket('**/*'")).toBeLessThan(
+      body.indexOf('retainedContext.newPage()'),
+    );
+    expect(body.indexOf('retainedContext.newPage()')).toBeLessThan(
+      body.indexOf('retainedContext.setOffline(false)'),
+    );
+    expect(body).not.toContain('requestBoundary?.remove()');
+
+    const guardedStart = source.indexOf(
+      'async function createKemerBetNoTransferReadinessGuardedProbeFromPage',
+    );
+    const guardedEnd = source.indexOf(
+      'export async function createKemerBetNoTransferReadinessSealProbeFromPage',
+      guardedStart,
+    );
+    const guardedBody = source.slice(guardedStart, guardedEnd);
+    const persistentCloseStart = guardedBody.indexOf(
+      "if (options.startup.mode === 'offline_canonical_navigation')",
+    );
+    const persistentCloseEnd = guardedBody.indexOf('} else {', persistentCloseStart);
+    const persistentClose = guardedBody.slice(persistentCloseStart, persistentCloseEnd);
+    expect(persistentClose).toContain('await options.close()');
+    expect(persistentClose).not.toContain('.catch(');
+    expect(persistentClose).not.toContain('requestBoundary.remove');
   });
 
   it('permits only the guarded unforced native Find click in readiness mode', () => {
@@ -398,7 +458,9 @@ describe('KemerBet no-transfer readiness seal', () => {
     const harness = await realProbePageHarness();
     const delayed = guardedRouteFixture({
       method: 'GET',
-      requestUrl: 'https://static.example.invalid/assets/application.js',
+      requestUrl:
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js',
+      resourceType: 'script',
     });
     let rejectContinuation: ((error: Error) => void) | undefined;
     const continuation = new Promise<void>((_resolve, reject) => {
@@ -417,8 +479,8 @@ describe('KemerBet no-transfer readiness seal', () => {
       (reason: unknown) => ({ reason, status: 'rejected' as const }),
     );
 
-    await vi.waitFor(() => expect(harness.removeRoute).toHaveBeenCalledOnce());
-    expect(delayed.continueRequest).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(delayed.continueRequest).toHaveBeenCalledOnce());
+    expect(harness.removeRoute).not.toHaveBeenCalled();
     expect(harness.closeOwner).not.toHaveBeenCalled();
 
     const routeFailure = new Error('delayed route continuation failed');
@@ -438,6 +500,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(harness.closeOwner).not.toHaveBeenCalled();
 
     await harness.probe.close();
+    expect(harness.removeRoute).toHaveBeenCalledOnce();
     expect(harness.closeOwner).toHaveBeenCalledOnce();
   });
 
@@ -491,11 +554,23 @@ describe('KemerBet no-transfer readiness seal', () => {
     ).toBe(true);
     expect(
       isAllowedKemerBetReadinessSealRequest({
+        expectedPlayerId: 'redacted',
         isMainFrame: true,
         isNavigationRequest: false,
         method: 'GET',
         requestUrl:
           'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+        resourceType: 'xhr',
+      }),
+    ).toBe(true);
+    expect(
+      isAllowedKemerBetReadinessSealRequest({
+        isMainFrame: true,
+        isNavigationRequest: false,
+        method: 'GET',
+        requestUrl:
+          'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js',
+        resourceType: 'script',
       }),
     ).toBe(true);
     for (const candidate of [
@@ -523,12 +598,124 @@ describe('KemerBet no-transfer readiness seal', () => {
         method: 'GET',
         requestUrl: 'http://agentsystem.admindigi.com/agents',
       },
+      {
+        isMainFrame: false,
+        isNavigationRequest: false,
+        method: 'GET',
+        requestUrl: 'https://agentsystem.admindigi.com/logout',
+        resourceType: 'xhr',
+      },
     ]) {
       expect(isAllowedKemerBetReadinessSealRequest(candidate)).toBe(false);
     }
   });
 
-  it('classifies forbidden requests using fixed redacted values only', () => {
+  it('binds GET and narrowly constrained CORS preflight to the one active Player', () => {
+    const exactLookupUrl =
+      'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1';
+    const base = {
+      expectedPlayerId: 'PLAYER-1',
+      isMainFrame: true,
+      isNavigationRequest: false,
+      requestUrl: exactLookupUrl,
+      resourceType: 'xhr',
+    } as const;
+
+    expect(isAllowedKemerBetReadinessSealRequest({ ...base, method: 'GET' })).toBe(true);
+    expect(
+      isAllowedKemerBetReadinessSealRequest({
+        ...base,
+        headers: {
+          origin: 'https://agentsystem.admindigi.com',
+          'access-control-request-method': 'GET',
+          'access-control-request-headers': 'authorization, content-type',
+        },
+        method: 'OPTIONS',
+      }),
+    ).toBe(true);
+    for (const candidate of [
+      { ...base, expectedPlayerId: 'PLAYER-2', method: 'GET' },
+      { ...base, expectedPlayerId: null, method: 'GET' },
+      { ...base, method: 'HEAD' },
+      {
+        ...base,
+        headers: {
+          origin: 'https://unknown.invalid',
+          'access-control-request-method': 'GET',
+          'access-control-request-headers': 'authorization',
+        },
+        method: 'OPTIONS',
+      },
+      {
+        ...base,
+        headers: {
+          origin: 'https://agentsystem.admindigi.com',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'authorization',
+        },
+        method: 'OPTIONS',
+      },
+      {
+        ...base,
+        headers: {
+          origin: 'https://agentsystem.admindigi.com',
+          'access-control-request-method': 'GET',
+          'access-control-request-headers': 'authorization, x-unreviewed',
+        },
+        method: 'OPTIONS',
+      },
+    ]) {
+      expect(isAllowedKemerBetReadinessSealRequest(candidate)).toBe(false);
+    }
+  });
+
+  it('allows only the exact audited v84 bootstrap assets without query data', () => {
+    const origin = 'https://agt-client-akm.agent-digi.com';
+    for (const [pathname, resourceType] of [
+      ['/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'script'],
+      ['/prd/agt-admin-client/v84/index-BnOqIDsD.css', 'stylesheet'],
+      ['/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css', 'stylesheet'],
+      ['/prd/agt-admin-client/v84/ltr-v1RhStcA.js', 'script'],
+      ['/prd/agt-admin-client/v84/ltr-v3JyGz8d.js', 'script'],
+      ['/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js', 'script'],
+      ['/prd/agt-admin-client/v84/index-6dvVbeUF.js', 'script'],
+    ] as const) {
+      expect(
+        isAllowedKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'GET',
+          requestUrl: `${origin}${pathname}`,
+          resourceType,
+        }),
+      ).toBe(true);
+    }
+    for (const candidate of [
+      {
+        requestUrl: `${origin}/prd/agt-admin-client/v84/index-BUEO7OSf.js?cache=1`,
+        resourceType: 'script',
+      },
+      {
+        requestUrl: `${origin}/prd/agt-admin-client/v84/unreviewed.js`,
+        resourceType: 'script',
+      },
+      {
+        requestUrl: `${origin}/prd/agt-admin-client/v84/index-BUEO7OSf.js`,
+        resourceType: 'image',
+      },
+    ]) {
+      expect(
+        isAllowedKemerBetReadinessSealRequest({
+          ...candidate,
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'GET',
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it('classifies blocked requests using fixed redacted values only', () => {
     expect(
       classifyKemerBetReadinessSealRequest({
         isMainFrame: true,
@@ -536,15 +723,7 @@ describe('KemerBet no-transfer readiness seal', () => {
         method: 'POST',
         requestUrl: 'https://send.sentry.report/api/306/envelope/?dsn=redacted',
       }),
-    ).toEqual({
-      decision: 'forbid',
-      diagnostic: {
-        reason: 'non_read_method',
-        target: 'known_telemetry',
-        method: 'POST',
-        kind: 'subresource',
-      },
-    });
+    ).toEqual({ decision: 'abort_optional', target: 'known_telemetry' });
     expect(
       classifyKemerBetReadinessSealRequest({
         isMainFrame: false,
@@ -568,15 +747,7 @@ describe('KemerBet no-transfer readiness seal', () => {
         method: 'GET',
         requestUrl: 'https://www.google.com/recaptcha/api2/anchor?secret=redacted',
       }),
-    ).toEqual({
-      decision: 'forbid',
-      diagnostic: {
-        reason: 'noncanonical_navigation',
-        target: 'recaptcha',
-        method: 'GET',
-        kind: 'subframe_navigation',
-      },
-    });
+    ).toEqual({ decision: 'abort_optional', target: 'recaptcha' });
 
     const sensitive = 'credential=raw-secret playerId=raw-player';
     const diagnostic = classifyKemerBetReadinessSealRequest({
@@ -597,13 +768,39 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(JSON.stringify(diagnostic)).not.toContain(sensitive);
   });
 
+  it('keeps every Wallet or Transaction read sticky-forbidden', () => {
+    for (const requestUrl of [
+      'https://admin-api.agt-digi.com/Wallet/UnreviewedRead',
+      'https://admin-api.agt-digi.com/Transaction/UnreviewedRead',
+    ]) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'GET',
+          requestUrl,
+          resourceType: 'xhr',
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: {
+          reason: 'exact_financial_endpoint',
+          target: 'agent_api',
+          method: 'GET',
+        },
+      });
+    }
+  });
+
   it('does not mistake a read-only subresource initiated by the main frame for navigation', () => {
     const lookup = {
+      expectedPlayerId: 'redacted',
       isMainFrame: true,
       isNavigationRequest: false,
       method: 'GET',
       requestUrl:
         'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+      resourceType: 'xhr',
     } as const;
 
     expect(classifyKemerBetReadinessSealRequest(lookup)).toEqual({ decision: 'allow' });
@@ -622,10 +819,7 @@ describe('KemerBet no-transfer readiness seal', () => {
           method: 'POST',
           requestUrl,
         }),
-      ).toMatchObject({
-        decision: 'forbid',
-        diagnostic: { reason: 'non_read_method', target: 'known_telemetry', method: 'POST' },
-      });
+      ).toEqual({ decision: 'abort_optional', target: 'known_telemetry' });
     }
     for (const method of ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE', 'TRACE']) {
       expect(
@@ -729,7 +923,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     const first = guardedRouteFixture({
       isMainFrame: true,
       method: 'POST',
-      requestUrl: 'https://send.sentry.report/api/306/envelope/?playerId=raw-player',
+      requestUrl: 'https://unknown.invalid/collect?playerId=raw-player',
     });
     const later = guardedRouteFixture({
       method: 'POST',
@@ -746,12 +940,75 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(harness.forbiddenRequests).toEqual([
       {
         reason: 'non_read_method',
-        target: 'known_telemetry',
+        target: 'third_party',
         method: 'POST',
         kind: 'subresource',
       },
     ]);
-    expect(JSON.stringify(harness.forbiddenRequests)).not.toMatch(/raw-player|sentry|envelope/iu);
+    expect(JSON.stringify(harness.forbiddenRequests)).not.toMatch(/raw-player|unknown|collect/iu);
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
+  });
+
+  it('locally aborts only reviewed optional providers/assets without poisoning the proof', async () => {
+    const harness = await realProbePageHarness();
+    const optionalRequests = [
+      guardedRouteFixture({
+        method: 'POST',
+        requestUrl: 'https://send.sentry.report/api/306/envelope/?redacted=1',
+        resourceType: 'fetch',
+      }),
+      guardedRouteFixture({
+        method: 'GET',
+        requestUrl:
+          'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CTmSmUzv.woff?squmb1',
+        resourceType: 'font',
+      }),
+      guardedRouteFixture({
+        method: 'GET',
+        requestUrl:
+          'https://agt-cdn.cdn-digi.com/prd/companies/2093/projects/39803/logo_24e4a06149154c9a956062027baa2fed.png',
+        resourceType: 'image',
+      }),
+      guardedRouteFixture({
+        method: 'GET',
+        requestUrl: 'https://admin-api.agt-digi.com/Account/Info',
+        resourceType: 'xhr',
+      }),
+    ];
+
+    for (const request of optionalRequests) {
+      await harness.dispatchRoute(request.route as unknown as Route);
+      expect(request.abort).toHaveBeenCalledWith('blockedbyclient');
+      expect(request.continueRequest).not.toHaveBeenCalled();
+    }
+    expect(harness.forbiddenRequests).toEqual([]);
+    await expect(harness.probe.finalizeReadOnlyProof()).resolves.toBeUndefined();
+    expect(harness.closeOwner).toHaveBeenCalledOnce();
+  });
+
+  it('makes an unknown third-party image request a sticky proof failure', async () => {
+    const harness = await realProbePageHarness();
+    const unknownImage = guardedRouteFixture({
+      method: 'GET',
+      requestUrl: 'https://unknown.invalid/unreviewed.png?player=raw-player',
+      resourceType: 'image',
+    });
+
+    await harness.dispatchRoute(unknownImage.route as unknown as Route);
+
+    expect(unknownImage.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(harness.forbiddenRequests).toEqual([
+      {
+        reason: 'noncanonical_navigation',
+        target: 'third_party',
+        method: 'GET',
+        kind: 'subresource',
+      },
+    ]);
+    expect(JSON.stringify(harness.forbiddenRequests)).not.toMatch(/unknown|raw-player|\.png/iu);
     await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
       KemerBetNoTransferReadinessSealUnavailableError,
     );
@@ -766,7 +1023,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     });
     const forbidden = guardedRouteFixture({
       method: 'POST',
-      requestUrl: 'https://send.sentry.report/api/306/envelope/?token=raw-secret',
+      requestUrl: 'https://unknown.invalid/collect?token=raw-secret',
     });
 
     await harness.dispatchRoute(forbidden.route as unknown as Route);
@@ -791,7 +1048,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     const forbidden = guardedRouteFixture({
       isMainFrame: true,
       method: 'POST',
-      requestUrl: 'https://send.sentry.report/api/306/envelope/?token=raw-secret',
+      requestUrl: 'https://unknown.invalid/collect?token=raw-secret',
     });
 
     await harness.dispatchRoute(forbidden.route as unknown as Route);
@@ -812,8 +1069,11 @@ describe('KemerBet no-transfer readiness seal', () => {
         'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
     });
 
-    await guardKemerBetReadinessSealRoute(test.route, test.page, (stage) =>
-      test.stages.push(stage),
+    await guardKemerBetReadinessSealRoute(
+      test.route,
+      test.page,
+      (stage) => test.stages.push(stage),
+      'redacted',
     );
 
     expect(test.continueRequest).toHaveBeenCalledOnce();
@@ -830,9 +1090,14 @@ describe('KemerBet no-transfer readiness seal', () => {
     });
 
     await expect(
-      guardKemerBetReadinessSealRoute(test.route, test.page, () => {
-        throw new Error('stage logger failed with raw-secret');
-      }),
+      guardKemerBetReadinessSealRoute(
+        test.route,
+        test.page,
+        () => {
+          throw new Error('stage logger failed with raw-secret');
+        },
+        'redacted',
+      ),
     ).resolves.toBeUndefined();
 
     expect(test.continueRequest).toHaveBeenCalledOnce();
@@ -859,7 +1124,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     },
   );
 
-  it('continues an unrelated allowed HTTPS GET without reporting a lookup stage', async () => {
+  it('aborts an unreviewed third-party GET without reporting a lookup stage', async () => {
     const test = guardedRouteFixture({
       method: 'GET',
       requestUrl: 'https://static.example.invalid/assets/application.js',
@@ -869,14 +1134,15 @@ describe('KemerBet no-transfer readiness seal', () => {
       test.stages.push(stage),
     );
 
-    expect(test.continueRequest).toHaveBeenCalledOnce();
-    expect(test.abort).not.toHaveBeenCalled();
+    expect(test.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(test.continueRequest).not.toHaveBeenCalled();
     expect(test.stages).toEqual([]);
   });
 
   it('recognizes only the exact redacted Player lookup request for network-stage reporting', () => {
     expect(
       isExactKemerBetReadinessSealPlayerLookupRequest({
+        expectedPlayerId: 'redacted',
         method: 'GET',
         requestUrl:
           'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
@@ -937,7 +1203,12 @@ describe('KemerBet no-transfer readiness seal', () => {
         )}`,
       },
     ]) {
-      expect(isExactKemerBetReadinessSealPlayerLookupRequest(candidate)).toBe(false);
+      expect(
+        isExactKemerBetReadinessSealPlayerLookupRequest({
+          ...candidate,
+          expectedPlayerId: 'redacted',
+        }),
+      ).toBe(false);
     }
   });
 

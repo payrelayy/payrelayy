@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   KemerBetProvisionServerUnavailableError,
   createKemerBetReadinessSealFailureEvent,
+  createKemerBetReadinessSealFailureTracker,
   createKemerBetSessionProvisionServer,
   isAllowedKemerBetSessionRequest,
   removeStaleChromiumSingletonArtifacts,
@@ -136,7 +137,12 @@ describe('private KemerBet session provision server', () => {
     expect(source).toMatch(/moneyMoved: false/u);
     expect(source).toMatch(/identifiersRedacted: true/u);
     expect(source).toMatch(/error: 'session_unavailable', stage: failureStage/u);
-    expect(source).toMatch(/readinessStage = stage/u);
+    expect(source).toContain('reportStage: readinessFailure.reportStage');
+    expect(source).toContain('reportForbiddenRequest: readinessFailure.reportForbiddenRequest');
+    expect(source).toContain('reportForbiddenRequest: options.reportForbiddenRequest');
+    expect(source).toContain(
+      'createKemerBetReadinessSealFailureEvent(failureStage, failureForbiddenRequest)',
+    );
     expect(source).toMatch(/event: 'readiness_seal_failed'/u);
     expect(source).toMatch(/detailsRedacted: true/u);
   });
@@ -190,6 +196,130 @@ describe('private KemerBet session provision server', () => {
       expect(JSON.stringify(event)).not.toContain(sensitive);
       expect(event).not.toHaveProperty('stage');
     }
+  });
+
+  it('adds only a validated fixed forbidden-request diagnostic to a forbidden failure', () => {
+    const diagnostic = {
+      reason: 'non_read_method',
+      target: 'third_party',
+      method: 'POST',
+      kind: 'subresource',
+    } as const;
+    expect(createKemerBetReadinessSealFailureEvent('forbidden_request', diagnostic)).toEqual({
+      component: 'kemerbet_session_provision',
+      event: 'readiness_seal_failed',
+      detailsRedacted: true,
+      stage: 'forbidden_request',
+      forbiddenRequest: diagnostic,
+    });
+    expect(createKemerBetReadinessSealFailureEvent('lookup_result', diagnostic)).toEqual({
+      component: 'kemerbet_session_provision',
+      event: 'readiness_seal_failed',
+      detailsRedacted: true,
+      stage: 'lookup_result',
+    });
+
+    const sensitive = 'credential=raw-secret playerId=raw-player https://secret.invalid';
+    const reads = new Map<PropertyKey, number>();
+    const changingDiagnostic = new Proxy(diagnostic, {
+      get: (target, property, receiver) => {
+        if (
+          property === 'reason' ||
+          property === 'target' ||
+          property === 'method' ||
+          property === 'kind'
+        ) {
+          const count = (reads.get(property) ?? 0) + 1;
+          reads.set(property, count);
+          return count === 1 ? Reflect.get(target, property, receiver) : sensitive;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const snapshotEvent = createKemerBetReadinessSealFailureEvent(
+      'forbidden_request',
+      changingDiagnostic,
+    );
+    expect(snapshotEvent).toEqual({
+      component: 'kemerbet_session_provision',
+      event: 'readiness_seal_failed',
+      detailsRedacted: true,
+      stage: 'forbidden_request',
+      forbiddenRequest: diagnostic,
+    });
+    expect(reads).toEqual(
+      new Map<PropertyKey, number>([
+        ['reason', 1],
+        ['target', 1],
+        ['method', 1],
+        ['kind', 1],
+      ]),
+    );
+    expect(JSON.stringify(snapshotEvent)).not.toContain(sensitive);
+
+    for (const candidate of [
+      { ...diagnostic, target: sensitive },
+      { ...diagnostic, method: sensitive },
+      { ...diagnostic, extra: sensitive },
+      new Error(sensitive),
+      new Proxy(
+        {},
+        {
+          ownKeys: () => {
+            throw new Error(sensitive);
+          },
+        },
+      ),
+    ]) {
+      const event = createKemerBetReadinessSealFailureEvent('forbidden_request', candidate);
+      expect(event).toEqual({
+        component: 'kemerbet_session_provision',
+        event: 'readiness_seal_failed',
+        detailsRedacted: true,
+        stage: 'forbidden_request',
+      });
+      expect(JSON.stringify(event)).not.toContain(sensitive);
+      expect(event).not.toHaveProperty('forbiddenRequest');
+    }
+  });
+
+  it('keeps the first forbidden diagnostic and stage sticky until one atomic consume', () => {
+    const tracker = createKemerBetReadinessSealFailureTracker();
+    const first = {
+      reason: 'non_read_method',
+      target: 'known_telemetry',
+      method: 'POST',
+      kind: 'subresource',
+    } as const;
+    const later = {
+      reason: 'exact_financial_endpoint',
+      target: 'agent_api',
+      method: 'POST',
+      kind: 'subresource',
+    } as const;
+
+    tracker.begin();
+    tracker.reportStage('lookup_action');
+    tracker.reportForbiddenRequest(first);
+    tracker.reportStage('lookup_result');
+    tracker.reportForbiddenRequest(later);
+
+    const failure = tracker.consume();
+    expect(failure).toEqual({ stage: 'forbidden_request', forbiddenRequest: first });
+    expect(
+      createKemerBetReadinessSealFailureEvent(failure.stage, failure.forbiddenRequest),
+    ).toEqual({
+      component: 'kemerbet_session_provision',
+      event: 'readiness_seal_failed',
+      detailsRedacted: true,
+      stage: 'forbidden_request',
+      forbiddenRequest: first,
+    });
+    expect(tracker.consume()).toEqual({});
+
+    tracker.begin();
+    tracker.reportStage('final_guard');
+    expect(tracker.consume()).toEqual({ stage: 'final_guard' });
   });
 
   it('logs exactly one fixed stage and preserves the staged 503 when diagnostics throw', async () => {

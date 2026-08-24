@@ -85,6 +85,56 @@ export interface KemerBetProvisionServerDependencies {
   readonly setTimer?: typeof setTimeout;
   readonly clearTimer?: typeof clearTimeout;
   readonly log?: (event: 'started' | 'signed_in' | 'stopped') => void;
+  readonly logReadinessSealFailure?: (event: KemerBetReadinessSealFailureEvent) => void;
+}
+
+export interface KemerBetReadinessSealFailureEvent {
+  readonly component: 'kemerbet_session_provision';
+  readonly detailsRedacted: true;
+  readonly event: 'readiness_seal_failed';
+  readonly stage?: KemerBetNoTransferReadinessSealStage;
+}
+
+const KEMERBET_READINESS_SEAL_FAILURE_STAGES = Object.freeze({
+  environment_guard: true,
+  readiness_inputs: true,
+  signed_in_page: true,
+  route_guard: true,
+  agent_identity: true,
+  agent_session_guard: true,
+  agent_identity_marker: true,
+  agent_identity_value: true,
+  agent_identity_stability: true,
+  page_adoption: true,
+  lookup_surface: true,
+  lookup_request: true,
+  lookup_input: true,
+  lookup_input_blurred: true,
+  lookup_action: true,
+  lookup_click_actionability: true,
+  lookup_native_click: true,
+  lookup_response: true,
+  lookup_network_request: true,
+  forbidden_request: true,
+  lookup_contract: true,
+  lookup_result: true,
+  lookup_reset: true,
+  final_guard: true,
+  binding_write: true,
+} satisfies Readonly<Record<KemerBetNoTransferReadinessSealStage, true>>);
+
+export function createKemerBetReadinessSealFailureEvent(
+  stage: unknown,
+): KemerBetReadinessSealFailureEvent {
+  const fixed = {
+    component: 'kemerbet_session_provision',
+    event: 'readiness_seal_failed',
+    detailsRedacted: true,
+  } as const;
+  return typeof stage === 'string' &&
+    Object.prototype.hasOwnProperty.call(KEMERBET_READINESS_SEAL_FAILURE_STAGES, stage)
+    ? Object.freeze({ ...fixed, stage: stage as KemerBetNoTransferReadinessSealStage })
+    : Object.freeze(fixed);
 }
 
 export class KemerBetProvisionServerUnavailableError extends Error {
@@ -336,6 +386,9 @@ export function createKemerBetSessionProvisionServer(
     dependencies.log ??
     ((event: 'started' | 'signed_in' | 'stopped') =>
       console.info({ component: 'kemerbet_session_provision', event, detailsRedacted: true }));
+  const logReadinessSealFailure =
+    dependencies.logReadinessSealFailure ??
+    ((event: KemerBetReadinessSealFailureEvent) => console.error(JSON.stringify(event)));
   let context: BrowserContext | undefined;
   let page: Page | undefined;
   let accountId: string | undefined;
@@ -601,11 +654,17 @@ export function createKemerBetSessionProvisionServer(
         }
         sendJson(response, 404, { error: 'not_found' });
       } catch {
-        const failureStage =
-          request.url === '/v1/readiness/seal' && request.method === 'POST'
-            ? readinessStage
-            : undefined;
+        const readinessSealRequest =
+          request.url === '/v1/readiness/seal' && request.method === 'POST';
+        const failureStage = readinessSealRequest ? readinessStage : undefined;
         readinessStage = undefined;
+        if (readinessSealRequest) {
+          try {
+            logReadinessSealFailure(createKemerBetReadinessSealFailureEvent(failureStage));
+          } catch {
+            // Diagnostics must never replace the existing fail-closed response or expose the error.
+          }
+        }
         if (!response.headersSent) {
           sendJson(
             response,

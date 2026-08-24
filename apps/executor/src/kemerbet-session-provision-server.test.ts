@@ -1,17 +1,59 @@
 import { readFileSync } from 'node:fs';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { basename, resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   KemerBetProvisionServerUnavailableError,
+  createKemerBetReadinessSealFailureEvent,
   createKemerBetSessionProvisionServer,
   isAllowedKemerBetSessionRequest,
   removeStaleChromiumSingletonArtifacts,
+  type KemerBetReadinessSealFailureEvent,
 } from './kemerbet-session-provision-server.js';
 
 const LOGIN_PAGE = 'https://agentsystem.admindigi.com/login?et=1';
 const AGENTS_PAGE = 'https://agentsystem.admindigi.com/agents';
+const REQUEST_ID = '11111111-1111-4111-8111-111111111111';
+const SAFE_ENVIRONMENT = Object.freeze({
+  NODE_ENV: 'production',
+  FINANCIAL_ACTIONS_MODE: 'dry_run',
+  KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED: 'true',
+  KEMERBET_EXECUTOR_ENABLED: 'false',
+  KEMERBET_FINAL_ACTION_ENABLED: 'false',
+  KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false',
+  INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false',
+});
+
+async function listenOnLoopback(server: Server): Promise<string> {
+  await new Promise<void>((resolveListen, rejectListen) => {
+    const reject = (error: Error) => rejectListen(error);
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolveListen();
+    });
+  });
+  const address = server.address() as AddressInfo | null;
+  if (!address || typeof address === 'string') throw new Error('Loopback test server unavailable.');
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolveClose, rejectClose) => {
+    server.close((error) => (error ? rejectClose(error) : resolveClose()));
+  });
+}
+
+async function postReadinessSeal(origin: string, body: string): Promise<Response> {
+  return fetch(`${origin}/v1/readiness/seal`, {
+    method: 'POST',
+    headers: { connection: 'close', 'content-type': 'application/json' },
+    body,
+  });
+}
 
 describe('private KemerBet session provision server', () => {
   it('removes only the three exact stale Chromium profile-owner symlinks', async () => {
@@ -95,6 +137,162 @@ describe('private KemerBet session provision server', () => {
     expect(source).toMatch(/identifiersRedacted: true/u);
     expect(source).toMatch(/error: 'session_unavailable', stage: failureStage/u);
     expect(source).toMatch(/readinessStage = stage/u);
+    expect(source).toMatch(/event: 'readiness_seal_failed'/u);
+    expect(source).toMatch(/detailsRedacted: true/u);
+  });
+
+  it('creates only the fixed redacted failure schema for every readiness stage', () => {
+    const stages = [
+      'environment_guard',
+      'readiness_inputs',
+      'signed_in_page',
+      'route_guard',
+      'agent_identity',
+      'agent_session_guard',
+      'agent_identity_marker',
+      'agent_identity_value',
+      'agent_identity_stability',
+      'page_adoption',
+      'lookup_surface',
+      'lookup_request',
+      'lookup_input',
+      'lookup_input_blurred',
+      'lookup_action',
+      'lookup_click_actionability',
+      'lookup_native_click',
+      'lookup_response',
+      'lookup_network_request',
+      'forbidden_request',
+      'lookup_contract',
+      'lookup_result',
+      'lookup_reset',
+      'final_guard',
+      'binding_write',
+    ] as const;
+
+    for (const stage of stages) {
+      expect(createKemerBetReadinessSealFailureEvent(stage)).toEqual({
+        component: 'kemerbet_session_provision',
+        event: 'readiness_seal_failed',
+        detailsRedacted: true,
+        stage,
+      });
+    }
+
+    const sensitive = 'credential=raw-secret playerId=raw-player https://secret.invalid';
+    for (const candidate of [undefined, 'unknown_stage', sensitive, new Error(sensitive)]) {
+      const event = createKemerBetReadinessSealFailureEvent(candidate);
+      expect(event).toEqual({
+        component: 'kemerbet_session_provision',
+        event: 'readiness_seal_failed',
+        detailsRedacted: true,
+      });
+      expect(JSON.stringify(event)).not.toContain(sensitive);
+      expect(event).not.toHaveProperty('stage');
+    }
+  });
+
+  it('logs exactly one fixed stage and preserves the staged 503 when diagnostics throw', async () => {
+    const events: KemerBetReadinessSealFailureEvent[] = [];
+    const loggerError = 'logger-credential=raw-secret playerId=raw-player';
+    const provision = createKemerBetSessionProvisionServer({
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      logReadinessSealFailure: (event) => {
+        events.push(event);
+        throw new Error(loggerError);
+      },
+    });
+    const origin = await listenOnLoopback(provision.server);
+
+    try {
+      const response = await postReadinessSeal(origin, JSON.stringify({ requestId: REQUEST_ID }));
+
+      expect(response.status).toBe(503);
+      const responseBody = await response.json();
+      expect(responseBody).toEqual({
+        error: 'session_unavailable',
+        stage: 'signed_in_page',
+      });
+      expect(events).toEqual([
+        {
+          component: 'kemerbet_session_provision',
+          event: 'readiness_seal_failed',
+          detailsRedacted: true,
+          stage: 'signed_in_page',
+        },
+      ]);
+      expect(JSON.stringify(events)).not.toContain(REQUEST_ID);
+      expect(JSON.stringify(responseBody)).not.toContain(loggerError);
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('writes the default failure event as one exact redacted JSON log line', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const provision = createKemerBetSessionProvisionServer({
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+    });
+    const origin = await listenOnLoopback(provision.server);
+
+    try {
+      const response = await postReadinessSeal(origin, JSON.stringify({ requestId: REQUEST_ID }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: 'session_unavailable',
+        stage: 'signed_in_page',
+      });
+      const expectedLine = JSON.stringify({
+        component: 'kemerbet_session_provision',
+        event: 'readiness_seal_failed',
+        detailsRedacted: true,
+        stage: 'signed_in_page',
+      });
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalledWith(expectedLine);
+      expect(expectedLine).not.toMatch(/[\r\n]/u);
+    } finally {
+      await closeServer(provision.server);
+      consoleError.mockRestore();
+    }
+  });
+
+  it('omits an unknown stage and never logs malformed request or parser details', async () => {
+    const events: KemerBetReadinessSealFailureEvent[] = [];
+    const provision = createKemerBetSessionProvisionServer({
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      logReadinessSealFailure: (event) => events.push(event),
+    });
+    const origin = await listenOnLoopback(provision.server);
+    const sensitive = 'credential=raw-secret playerId=raw-player https://secret.invalid';
+
+    try {
+      const response = await postReadinessSeal(
+        origin,
+        `{"requestId":"${REQUEST_ID}","password":"${sensitive}"`,
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: 'session_unavailable' });
+      expect(events).toEqual([
+        {
+          component: 'kemerbet_session_provision',
+          event: 'readiness_seal_failed',
+          detailsRedacted: true,
+        },
+      ]);
+      const serialized = JSON.stringify(events);
+      expect(serialized).not.toContain(REQUEST_ID);
+      expect(serialized).not.toContain(sensitive);
+      expect(serialized).not.toContain('password');
+      expect(events[0]).not.toHaveProperty('stage');
+    } finally {
+      await closeServer(provision.server);
+    }
   });
 
   it('always blocks the exact deposit endpoint and every post-login mutation', () => {

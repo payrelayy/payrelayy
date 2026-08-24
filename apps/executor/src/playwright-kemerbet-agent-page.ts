@@ -112,6 +112,7 @@ export interface PlaywrightLocatorPort {
   evaluate?<Result>(
     pageFunction: (element: PlaywrightDomControlPort) => Result | Promise<Result>,
   ): Promise<Result>;
+  blur?(options?: { readonly timeout?: number }): Promise<unknown>;
   pressSequentially?(
     text: string,
     options?: { readonly delay?: number; readonly timeout?: number },
@@ -208,17 +209,22 @@ export interface PlaywrightKemerBetAgentPageOptions {
   /**
    * The no-transfer readiness browser is guarded against every mutating request. Its exact Find
    * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled.
-   * KemerBet v84 uses an Ant search form and routes that modal's confirmed action through one
-   * reviewed document CustomEvent. This proof may mirror operator keystrokes only in the exact
-   * Player-ID input and use that exact event after re-validating the search phase and native Find
-   * button. This flag must never be used for Amount or the final Transfer control.
+   * This proof may mirror operator keystrokes only in the exact Player-ID input, explicitly
+   * blur/commit that field, and dispatch KemerBet's reviewed Find event only after re-validating the
+   * search phase and native Find button. The independent readiness route still blocks every
+   * mutating request and the deposit endpoint. This flag must never be used for Amount or Transfer.
    */
   readonly activateReadOnlyLookupWithoutPointer?: true;
   readonly reportLookupStage?: (stage: KemerBetAgentLookupObservationStage) => void;
 }
 
 export type KemerBetAgentLookupObservationStage =
-  'lookup_input' | 'lookup_action' | 'lookup_response' | 'lookup_contract';
+  | 'lookup_input'
+  | 'lookup_input_blurred'
+  | 'lookup_action'
+  | 'lookup_event_dispatch'
+  | 'lookup_response'
+  | 'lookup_contract';
 
 export interface PlaywrightKemerBetAgentPage extends KemerBetBrowserPage {
   /** Adopt the already-authenticated Agent deposit page without navigating or reloading it. */
@@ -1298,15 +1304,26 @@ export function createPlaywrightKemerBetAgentPage(
       reportLookupStage('lookup_input');
       const playerIdInput = await exactWorkflowControl(contract.depositWorkflow.playerIdInput);
       if (options.activateReadOnlyLookupWithoutPointer === true) {
-        if (playerIdInput.pressSequentially === undefined) unavailable();
+        if (playerIdInput.pressSequentially === undefined || playerIdInput.blur === undefined) {
+          unavailable();
+        }
         await playerIdInput.fill('', { timeout: timeoutMs });
         await playerIdInput.pressSequentially(playerId, { delay: 10, timeout: timeoutMs });
+        if ((await playerIdInput.inputValue({ timeout: timeoutMs })) !== playerId) unavailable();
+        // KemerBet's controlled Ant field can display keystrokes before its form state commits.
+        // Blur the exact Player-ID input before activating Find, without sending a pointer through
+        // the loading mask that previously blocked readiness lookup clicks.
+        await playerIdInput.blur({ timeout: timeoutMs });
+        await pollDelay(150);
       } else {
         await playerIdInput.fill(playerId, {
           timeout: timeoutMs,
         });
       }
       if ((await playerIdInput.inputValue({ timeout: timeoutMs })) !== playerId) unavailable();
+      if (options.activateReadOnlyLookupWithoutPointer === true) {
+        reportLookupStage('lookup_input_blurred');
+      }
       authoritativeLookup = null;
       preparedPlayerId = null;
       preparedAmountText = null;
@@ -1319,6 +1336,7 @@ export function createPlaywrightKemerBetAgentPage(
           await pollDelay(150);
           await requireExactReadOnlyLookupSearchPhase();
           const exactFindButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
+          reportLookupStage('lookup_event_dispatch');
           await activateExactReadOnlyLookupWithoutPointer(exactFindButton);
         } else {
           const findButton = await exactWorkflowControl(contract.depositWorkflow.findButton);

@@ -27,7 +27,10 @@ import { removeStaleChromiumSingletonArtifacts } from './kemerbet-chromium-profi
 import {
   assertKemerBetAgentPageSelectorContractV2,
   createPlaywrightKemerBetAgentPage,
+  KEMERBET_AGENT_API_ORIGIN,
   KEMERBET_AGENT_DEPOSIT_URL,
+  KEMERBET_AGENT_PLAYER_DEPOSIT_PATH,
+  KEMERBET_AGENT_PLAYER_LOOKUP_PATH,
   observeKemerBetAgentIdentityFingerprint,
   type KemerBetAgentIdentityObservationStage,
   type KemerBetAgentPageSelectorContractV2,
@@ -62,8 +65,10 @@ export type KemerBetNoTransferReadinessSealStage =
   | 'lookup_input'
   | 'lookup_action'
   | 'lookup_response'
+  | 'lookup_network_request'
   | 'lookup_contract'
   | 'lookup_result'
+  | 'lookup_reset'
   | 'binding_write';
 
 interface SafeStat {
@@ -226,11 +231,18 @@ export function isAllowedKemerBetReadinessSealRequest(input: {
     return false;
   }
   if (
+    url.origin === KEMERBET_AGENT_API_ORIGIN &&
+    url.pathname === KEMERBET_AGENT_PLAYER_DEPOSIT_PATH
+  ) {
+    return false;
+  }
+  if (
     !READ_METHODS.has(input.method) ||
     url.protocol !== 'https:' ||
     url.username !== '' ||
     url.password !== '' ||
-    url.port !== ''
+    url.port !== '' ||
+    url.hash !== ''
   ) {
     return false;
   }
@@ -240,7 +252,65 @@ export function isAllowedKemerBetReadinessSealRequest(input: {
   return true;
 }
 
-async function guardedRoute(route: Route, page: Page): Promise<void> {
+export function isExactKemerBetReadinessSealPlayerLookupRequest(input: {
+  readonly method: string;
+  readonly requestUrl: string;
+}): boolean {
+  if (
+    input.method !== 'GET' ||
+    /[\u0000-\u001f\u007f-\u009f]/u.test(input.requestUrl) ||
+    /%(?![0-9A-Fa-f]{2})/u.test(input.requestUrl)
+  ) {
+    return false;
+  }
+  let url: URL;
+  try {
+    url = new URL(input.requestUrl);
+  } catch {
+    return false;
+  }
+  const query = [...url.searchParams.entries()];
+  const playerId = query[0]?.[1];
+  return (
+    url.origin === KEMERBET_AGENT_API_ORIGIN &&
+    url.pathname === KEMERBET_AGENT_PLAYER_LOOKUP_PATH &&
+    url.username === '' &&
+    url.password === '' &&
+    url.port === '' &&
+    url.hash === '' &&
+    query.length === 1 &&
+    query[0]?.[0] === 'externalId' &&
+    typeof playerId === 'string' &&
+    playerId.length >= 1 &&
+    playerId.length <= 128 &&
+    playerId === playerId.trim() &&
+    !/\s/u.test(playerId) &&
+    !/[\u0000-\u001f\u007f-\u009f]/u.test(playerId)
+  );
+}
+
+export interface KemerBetReadinessSealRequestPort {
+  frame(): unknown;
+  isNavigationRequest(): boolean;
+  method(): string;
+  url(): string;
+}
+
+export interface KemerBetReadinessSealRoutePort {
+  request(): KemerBetReadinessSealRequestPort;
+  abort(errorCode: 'blockedbyclient'): Promise<unknown>;
+  continue(): Promise<unknown>;
+}
+
+export interface KemerBetReadinessSealPagePort {
+  mainFrame(): unknown;
+}
+
+export async function guardKemerBetReadinessSealRoute(
+  route: KemerBetReadinessSealRoutePort,
+  page: KemerBetReadinessSealPagePort,
+  reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void,
+): Promise<void> {
   const request = route.request();
   if (
     !isAllowedKemerBetReadinessSealRequest({
@@ -252,6 +322,16 @@ async function guardedRoute(route: Route, page: Page): Promise<void> {
   ) {
     await route.abort('blockedbyclient');
     return;
+  }
+  if (
+    isExactKemerBetReadinessSealPlayerLookupRequest({
+      method: request.method(),
+      requestUrl: request.url(),
+    })
+  ) {
+    // Diagnostic only: this fixed stage proves only that a lookup-shaped GET reached the guard.
+    // The response contract and later visible result bind the request to the expected Player.
+    reportStage('lookup_network_request');
   }
   await route.continue();
 }
@@ -270,7 +350,8 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
 }): Promise<KemerBetNoTransferReadinessSealProbe> {
   const reportStage = options.reportStage ?? (() => undefined);
-  const readinessRoute = (route: Route) => guardedRoute(route, options.page);
+  const readinessRoute = (route: Route) =>
+    guardKemerBetReadinessSealRoute(route, options.page, reportStage);
   let routeInstalled = false;
   let probeReturned = false;
   const close = async (): Promise<void> => {
@@ -340,6 +421,8 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
         if (lookup.playerId !== target.playerId || lookup.currencyCode !== target.currencyCode) {
           unavailable();
         }
+        reportStage('lookup_reset');
+        await agentPage.resetReadOnlyPlayerLookup();
         return {
           exactPlayerMatch: true,
           exactCurrencyMatch: true,

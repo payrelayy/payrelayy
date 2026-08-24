@@ -112,6 +112,10 @@ export interface PlaywrightLocatorPort {
   evaluate?<Result>(
     pageFunction: (element: PlaywrightDomControlPort) => Result | Promise<Result>,
   ): Promise<Result>;
+  pressSequentially?(
+    text: string,
+    options?: { readonly delay?: number; readonly timeout?: number },
+  ): Promise<unknown>;
   fill(value: string, options?: { readonly timeout?: number }): Promise<unknown>;
   inputValue(options?: { readonly timeout?: number }): Promise<string>;
   innerText(options?: { readonly timeout?: number }): Promise<string>;
@@ -122,11 +126,18 @@ export interface PlaywrightLocatorPort {
 
 export interface PlaywrightDomEventPort {
   readonly type: string;
-  initEvent(type: string, bubbles: boolean, cancelable: boolean): void;
+  readonly detail?: unknown;
+}
+
+export interface PlaywrightDomWindowPort {
+  readonly CustomEvent: new (
+    type: string,
+    init?: { readonly detail?: unknown },
+  ) => PlaywrightDomEventPort;
 }
 
 export interface PlaywrightDomDocumentPort {
-  createEvent(type: 'Event'): PlaywrightDomEventPort;
+  readonly defaultView: PlaywrightDomWindowPort | null;
   dispatchEvent(event: PlaywrightDomEventPort): boolean;
 }
 
@@ -197,9 +208,10 @@ export interface PlaywrightKemerBetAgentPageOptions {
   /**
    * The no-transfer readiness browser is guarded against every mutating request. Its exact Find
    * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled.
-   * KemerBet v84 routes that modal's confirmed action through one reviewed document event, so this
-   * proof may dispatch that event only after re-validating the exact native Find button. This flag
-   * must never be used for the final Transfer control.
+   * KemerBet v84 uses an Ant search form and routes that modal's confirmed action through one
+   * reviewed document CustomEvent. This proof may mirror operator keystrokes only in the exact
+   * Player-ID input and use that exact event after re-validating the search phase and native Find
+   * button. This flag must never be used for Amount or the final Transfer control.
    */
   readonly activateReadOnlyLookupWithoutPointer?: true;
   readonly reportLookupStage?: (stage: KemerBetAgentLookupObservationStage) => void;
@@ -213,6 +225,11 @@ export interface PlaywrightKemerBetAgentPage extends KemerBetBrowserPage {
   adoptCurrentDepositPageWithoutNavigation(): Promise<void>;
   /** Side-effect-free authenticated UI probe; it only navigates to agent history and reads identity. */
   probeAuthenticatedSession(): Promise<void>;
+  /**
+   * Return a verified no-transfer lookup result to the exact Player-ID search phase. This is
+   * available only to the guarded readiness browser and never activates Amount or Transfer.
+   */
+  resetReadOnlyPlayerLookup(): Promise<void>;
 }
 
 function unavailable(): never {
@@ -926,11 +943,28 @@ export function createPlaywrightKemerBetAgentPage(
       ) {
         return false;
       }
-      const event = element.ownerDocument.createEvent('Event');
-      event.initEvent('onTransferOkActionEvent', false, false);
+      const view = element.ownerDocument.defaultView;
+      if (view === null) return false;
+      const event = new view.CustomEvent('onTransferOkActionEvent', { detail: undefined });
       return element.ownerDocument.dispatchEvent(event);
     });
     if (exactReadOnlyEventDispatched !== true) unavailable();
+  }
+
+  async function resetExactReadOnlyLookupWithoutPointer(
+    lookupResult: PlaywrightLocatorPort,
+  ): Promise<void> {
+    if (lookupResult.evaluate === undefined) unavailable();
+    const exactReadOnlyResetDispatched = await lookupResult.evaluate((element) => {
+      if (!element.isConnected) return false;
+      const view = element.ownerDocument.defaultView;
+      if (view === null) return false;
+      const event = new view.CustomEvent('onTransferEposPlayerFoundEvent', {
+        detail: { info: null },
+      });
+      return element.ownerDocument.dispatchEvent(event);
+    });
+    if (exactReadOnlyResetDispatched !== true) unavailable();
   }
 
   async function requireExactRouteAndNoSessionFailure(): Promise<AllowedAgentUrl> {
@@ -1064,6 +1098,55 @@ export function createPlaywrightKemerBetAgentPage(
       unavailable();
     }
     return 'ready';
+  }
+
+  async function requireExactReadOnlyLookupSearchPhase(): Promise<void> {
+    if (
+      options.activateReadOnlyLookupWithoutPointer !== true ||
+      (await observePlayerLookupSurface()) !== 'ready'
+    ) {
+      unavailable();
+    }
+    const [lookupResult, preparedDeposit, amount, notes, transfer] = await Promise.all([
+      observeStrictLocator(page, contract.lookup.root),
+      observeStrictLocator(page, contract.preparedDeposit.root),
+      observeWorkflowControl(contract.depositWorkflow.amountInput, false),
+      observeWorkflowControl(contract.depositWorkflow.notesInput, false),
+      observeWorkflowControl(contract.depositWorkflow.transferButton, false),
+    ]);
+    if (
+      lookupResult !== null ||
+      preparedDeposit !== null ||
+      amount !== null ||
+      notes !== null ||
+      transfer !== null
+    ) {
+      unavailable();
+    }
+  }
+
+  async function waitForExactReadOnlyLookupSearchPhase(): Promise<void> {
+    const ready = await pollAuthenticated(async () => {
+      if ((await observePlayerLookupSurface()) !== 'ready') return null;
+      const [lookupResult, preparedDeposit, amount, notes, transfer] = await Promise.all([
+        observeStrictLocator(page, contract.lookup.root),
+        observeStrictLocator(page, contract.preparedDeposit.root),
+        observeWorkflowControl(contract.depositWorkflow.amountInput, false),
+        observeWorkflowControl(contract.depositWorkflow.notesInput, false),
+        observeWorkflowControl(contract.depositWorkflow.transferButton, false),
+      ]);
+      if (
+        lookupResult !== null ||
+        preparedDeposit !== null ||
+        amount !== null ||
+        notes !== null ||
+        transfer !== null
+      ) {
+        unavailable();
+      }
+      return true;
+    });
+    if (ready !== true) unavailable();
   }
 
   async function readCurrentHistoryPage(): Promise<readonly KemerBetAgentHistoryView[]> {
@@ -1214,9 +1297,15 @@ export function createPlaywrightKemerBetAgentPage(
       }
       reportLookupStage('lookup_input');
       const playerIdInput = await exactWorkflowControl(contract.depositWorkflow.playerIdInput);
-      await playerIdInput.fill(playerId, {
-        timeout: timeoutMs,
-      });
+      if (options.activateReadOnlyLookupWithoutPointer === true) {
+        if (playerIdInput.pressSequentially === undefined) unavailable();
+        await playerIdInput.fill('', { timeout: timeoutMs });
+        await playerIdInput.pressSequentially(playerId, { delay: 10, timeout: timeoutMs });
+      } else {
+        await playerIdInput.fill(playerId, {
+          timeout: timeoutMs,
+        });
+      }
       if ((await playerIdInput.inputValue({ timeout: timeoutMs })) !== playerId) unavailable();
       authoritativeLookup = null;
       preparedPlayerId = null;
@@ -1226,15 +1315,17 @@ export function createPlaywrightKemerBetAgentPage(
       });
       try {
         reportLookupStage('lookup_action');
-        const findButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
         if (options.activateReadOnlyLookupWithoutPointer === true) {
           await pollDelay(150);
-          await activateExactReadOnlyLookupWithoutPointer(findButton);
+          await requireExactReadOnlyLookupSearchPhase();
+          const exactFindButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
+          await activateExactReadOnlyLookupWithoutPointer(exactFindButton);
         } else {
+          const findButton = await exactWorkflowControl(contract.depositWorkflow.findButton);
           await findButton.click({ timeout: timeoutMs });
         }
-        reportLookupStage('lookup_response');
         const response = await responsePromise;
+        reportLookupStage('lookup_response');
         reportLookupStage('lookup_contract');
         let body: unknown;
         try {
@@ -1244,10 +1335,59 @@ export function createPlaywrightKemerBetAgentPage(
         }
         authoritativeLookup = parseAuthoritativePlayerLookup(response, playerId, body);
       } catch {
-        await responsePromise.catch(() => undefined);
+        // Activation failures must fail closed immediately. Keep a rejection handler attached to
+        // Playwright's bounded waiter without delaying the caller until that independent timeout.
+        void responsePromise.catch(() => undefined);
         unavailable();
       }
       await requireReadyAgentPage();
+    },
+
+    async resetReadOnlyPlayerLookup() {
+      await requireReadyAgentPage();
+      const exactLookup = authoritativeLookup;
+      if (
+        options.activateReadOnlyLookupWithoutPointer !== true ||
+        expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL ||
+        exactLookup === null ||
+        exactLookup.visibleIdentity === null ||
+        preparedPlayerId !== exactLookup.externalPlayerId ||
+        preparedAmountText !== null ||
+        (await observePlayerLookupSurface()) !== 'absent'
+      ) {
+        unavailable();
+      }
+
+      const lookupResult = await waitStrictLocator(page, contract.lookup.root);
+      const [preparedDeposit, amount, notes, transfer] = await Promise.all([
+        observeStrictLocator(page, contract.preparedDeposit.root),
+        observeWorkflowControl(contract.depositWorkflow.amountInput, false),
+        observeWorkflowControl(contract.depositWorkflow.notesInput, false),
+        observeWorkflowControl(contract.depositWorkflow.transferButton, false),
+      ]);
+      if (preparedDeposit === null || amount === null || notes === null || transfer === null) {
+        unavailable();
+      }
+      const [resolvedIdentity, currencyCode, amountText, notesText] = await Promise.all([
+        observeStructuredField(lookupResult, contract.lookup.resolvedIdentity, 256, false),
+        observeStructuredField(lookupResult, contract.lookup.currencyCode, 12),
+        amount.inputValue({ timeout: timeoutMs }),
+        notes.inputValue({ timeout: timeoutMs }),
+      ]);
+      if (
+        resolvedIdentity !== exactLookup.visibleIdentity ||
+        currencyCode !== exactLookup.currencyCode ||
+        amountText !== '' ||
+        notesText !== ''
+      ) {
+        unavailable();
+      }
+
+      await resetExactReadOnlyLookupWithoutPointer(lookupResult);
+      await waitForExactReadOnlyLookupSearchPhase();
+      authoritativeLookup = null;
+      preparedPlayerId = null;
+      preparedAmountText = null;
     },
 
     async fillDeposit(amount, notes) {

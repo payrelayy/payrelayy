@@ -371,7 +371,7 @@ test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
   "$METADATA/interfaces/public/0/ipv4/address")" = '161.35.41.232'
 test ! -L /etc/sudoers.d && test -d /etc/sudoers.d
 test "$(realpath -- /etc/sudoers.d)" = '/etc/sudoers.d'
-test "$(stat --format='%U:%G:%a' /etc/sudoers.d)" = 'root:root:755'
+test "$(stat --format='%U:%G:%a' /etc/sudoers.d)" = 'root:root:750'
 if [[ -e "$SUDOERS" || -L "$SUDOERS" ]]; then
   require_exact_sudoers_file "$SUDOERS"
   test ! -e "$SUDOERS_DISABLED" && test ! -L "$SUDOERS_DISABLED"
@@ -629,7 +629,7 @@ test "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
   "$METADATA/interfaces/public/0/ipv4/address")" = '161.35.41.232'
 test ! -L /etc/sudoers.d && test -d /etc/sudoers.d
 test "$(realpath -- /etc/sudoers.d)" = '/etc/sudoers.d'
-test "$(stat --format='%U:%G:%a' /etc/sudoers.d)" = 'root:root:755'
+test "$(stat --format='%U:%G:%a' /etc/sudoers.d)" = 'root:root:750'
 if [[ -e "$SUDOERS" || -L "$SUDOERS" ]]; then
   require_exact_sudoers_file "$SUDOERS"
   test ! -e "$SUDOERS_DISABLED" && test ! -L "$SUDOERS_DISABLED"

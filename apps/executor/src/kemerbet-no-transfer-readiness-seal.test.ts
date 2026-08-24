@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
 import {
+  classifyKemerBetReadinessSealRequest,
   createKemerBetNoTransferReadinessSealProbeFromPage,
   guardKemerBetReadinessSealRoute,
   isAllowedKemerBetReadinessSealRequest,
@@ -13,6 +14,7 @@ import {
   runKemerBetNoTransferReadinessSeal,
   runKemerBetNoTransferReadinessSealMain,
   type KemerBetNoTransferReadinessSealDependencies,
+  type KemerBetReadinessSealForbiddenRequestDiagnostic,
 } from './kemerbet-no-transfer-readiness-seal.js';
 import {
   KEMERBET_AGENT_DEPOSIT_URL,
@@ -99,7 +101,14 @@ function testLocator(
   return locator;
 }
 
-async function realProbePageHarness() {
+async function realProbePageHarness(
+  options: {
+    readonly reportForbiddenRequest?: (
+      diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic,
+    ) => void;
+    readonly reportStage?: (stage: string) => void;
+  } = {},
+) {
   const mainFrame = {};
   const identityValue = testLocator({ text: 'agent-one@example.invalid' });
   const identityRoot = testLocator({
@@ -119,6 +128,7 @@ async function realProbePageHarness() {
   const waitForTimeout = vi.fn(async (milliseconds: number) => waitForTimeoutHook(milliseconds));
   const closeOwner = vi.fn(async () => undefined);
   const stages: string[] = [];
+  const forbiddenRequests: KemerBetReadinessSealForbiddenRequestDiagnostic[] = [];
   const page = {
     url: () => KEMERBET_AGENT_DEPOSIT_URL,
     mainFrame: () => mainFrame,
@@ -135,7 +145,9 @@ async function realProbePageHarness() {
     close: closeOwner,
     fingerprintAgentIdentity: fingerprinter(),
     page,
-    reportStage: (stage) => stages.push(stage),
+    reportForbiddenRequest:
+      options.reportForbiddenRequest ?? ((diagnostic) => forbiddenRequests.push(diagnostic)),
+    reportStage: options.reportStage ?? ((stage) => stages.push(stage)),
     selectorContract: SELECTOR_CONTRACT,
   });
 
@@ -147,6 +159,7 @@ async function realProbePageHarness() {
       return handler(route);
     },
     installRoute,
+    forbiddenRequests,
     probe,
     removeRoute,
     setWaitForTimeoutHook(hook: (milliseconds: number) => Promise<void>) {
@@ -478,7 +491,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     ).toBe(true);
     expect(
       isAllowedKemerBetReadinessSealRequest({
-        isMainFrame: false,
+        isMainFrame: true,
         isNavigationRequest: false,
         method: 'GET',
         requestUrl:
@@ -515,8 +528,285 @@ describe('KemerBet no-transfer readiness seal', () => {
     }
   });
 
+  it('classifies forbidden requests using fixed redacted values only', () => {
+    expect(
+      classifyKemerBetReadinessSealRequest({
+        isMainFrame: true,
+        isNavigationRequest: false,
+        method: 'POST',
+        requestUrl: 'https://send.sentry.report/api/306/envelope/?dsn=redacted',
+      }),
+    ).toEqual({
+      decision: 'forbid',
+      diagnostic: {
+        reason: 'non_read_method',
+        target: 'known_telemetry',
+        method: 'POST',
+        kind: 'subresource',
+      },
+    });
+    expect(
+      classifyKemerBetReadinessSealRequest({
+        isMainFrame: false,
+        isNavigationRequest: false,
+        method: 'GET',
+        requestUrl: 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit',
+      }),
+    ).toEqual({
+      decision: 'forbid',
+      diagnostic: {
+        reason: 'exact_financial_endpoint',
+        target: 'agent_api',
+        method: 'GET',
+        kind: 'subresource',
+      },
+    });
+    expect(
+      classifyKemerBetReadinessSealRequest({
+        isMainFrame: false,
+        isNavigationRequest: true,
+        method: 'GET',
+        requestUrl: 'https://www.google.com/recaptcha/api2/anchor?secret=redacted',
+      }),
+    ).toEqual({
+      decision: 'forbid',
+      diagnostic: {
+        reason: 'noncanonical_navigation',
+        target: 'recaptcha',
+        method: 'GET',
+        kind: 'subframe_navigation',
+      },
+    });
+
+    const sensitive = 'credential=raw-secret playerId=raw-player';
+    const diagnostic = classifyKemerBetReadinessSealRequest({
+      isMainFrame: false,
+      isNavigationRequest: false,
+      method: `CUSTOM ${sensitive}`,
+      requestUrl: `not-a-url ${sensitive}`,
+    });
+    expect(diagnostic).toEqual({
+      decision: 'forbid',
+      diagnostic: {
+        reason: 'malformed_url',
+        target: 'unparseable',
+        method: 'OTHER',
+        kind: 'subresource',
+      },
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain(sensitive);
+  });
+
+  it('does not mistake a read-only subresource initiated by the main frame for navigation', () => {
+    const lookup = {
+      isMainFrame: true,
+      isNavigationRequest: false,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+    } as const;
+
+    expect(classifyKemerBetReadinessSealRequest(lookup)).toEqual({ decision: 'allow' });
+    expect(isAllowedKemerBetReadinessSealRequest(lookup)).toBe(true);
+  });
+
+  it('distinguishes exact known telemetry and auth-session targets from lookalikes', () => {
+    for (const requestUrl of [
+      'https://send.sentry.report/api/306/envelope/?dsn=redacted',
+      'https://t.cs.hotjar.io/api/v2/clientsites/redacted/visit-data',
+    ]) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'POST',
+          requestUrl,
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: { reason: 'non_read_method', target: 'known_telemetry', method: 'POST' },
+      });
+    }
+    for (const method of ['GET', 'HEAD', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE', 'TRACE']) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method,
+          requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: {
+          reason: 'exact_auth_session_endpoint',
+          target: 'agent_auth_session',
+          method: method === 'TRACE' ? 'OTHER' : method,
+        },
+      });
+    }
+    for (const requestUrl of [
+      'https://send.sentry.report.evil.invalid/api/306/envelope/',
+      'https://sub.send.sentry.report/api/306/envelope/',
+      'https://send.sentry.report./api/306/envelope/',
+      'https://send.sentry.report/api/999/envelope/',
+      'https://t.cs.hotjar.io.evil.invalid/api/v2/clientsites/redacted/visit-data',
+    ]) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'POST',
+          requestUrl,
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: { reason: 'non_read_method', target: 'third_party', method: 'POST' },
+      });
+    }
+    for (const [requestUrl, reason] of [
+      ['http://send.sentry.report/api/306/envelope/', 'non_https'],
+      ['https://send.sentry.report:8443/api/306/envelope/', 'explicit_port'],
+      ['https://user:secret@send.sentry.report/api/306/envelope/', 'url_credentials'],
+    ] as const) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'GET',
+          requestUrl,
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: { reason, target: 'known_telemetry', method: 'GET' },
+      });
+    }
+    for (const [requestUrl, target] of [
+      ['https://admin-api.agt-digi.com.evil.invalid/Account/RefreshToken', 'third_party'],
+      ['https://sub.admin-api.agt-digi.com/Account/RefreshToken', 'third_party'],
+      ['https://admin-api.agt-digi.com./Account/RefreshToken', 'third_party'],
+      ['https://admin-api.agt-digi.com/Account/RefreshToken/extra', 'agent_api'],
+      ['https://admin-api.agt-digi.com/account/refreshtoken', 'agent_api'],
+    ] as const) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: false,
+          method: 'POST',
+          requestUrl,
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: { reason: 'non_read_method', target, method: 'POST' },
+      });
+    }
+  });
+
+  it.each([
+    ['non_https', 'GET', 'http://agentsystem.admindigi.com/agents'],
+    ['url_credentials', 'GET', 'https://user:secret@agentsystem.admindigi.com/agents'],
+    ['explicit_port', 'GET', 'https://agentsystem.admindigi.com:8443/agents'],
+    ['fragment', 'GET', 'https://agentsystem.admindigi.com/agents#secret'],
+  ] as const)(
+    'reports the fixed %s reason without carrying request data',
+    (reason, method, url) => {
+      const classification = classifyKemerBetReadinessSealRequest({
+        isMainFrame: false,
+        isNavigationRequest: false,
+        method,
+        requestUrl: url,
+      });
+      expect(classification.decision).toBe('forbid');
+      if (classification.decision === 'forbid') {
+        expect(classification.diagnostic.reason).toBe(reason);
+        expect(JSON.stringify(classification.diagnostic)).not.toContain(url);
+        expect(JSON.stringify(classification.diagnostic)).not.toContain('secret');
+      }
+    },
+  );
+
+  it('records only the first forbidden diagnostic while every forbidden request stays aborted', async () => {
+    const harness = await realProbePageHarness();
+    const first = guardedRouteFixture({
+      isMainFrame: true,
+      method: 'POST',
+      requestUrl: 'https://send.sentry.report/api/306/envelope/?playerId=raw-player',
+    });
+    const later = guardedRouteFixture({
+      method: 'POST',
+      requestUrl: 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit',
+    });
+
+    await harness.dispatchRoute(first.route as unknown as Route);
+    await harness.dispatchRoute(later.route as unknown as Route);
+
+    expect(first.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(later.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(first.continueRequest).not.toHaveBeenCalled();
+    expect(later.continueRequest).not.toHaveBeenCalled();
+    expect(harness.forbiddenRequests).toEqual([
+      {
+        reason: 'non_read_method',
+        target: 'known_telemetry',
+        method: 'POST',
+        kind: 'subresource',
+      },
+    ]);
+    expect(JSON.stringify(harness.forbiddenRequests)).not.toMatch(/raw-player|sentry|envelope/iu);
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
+  });
+
+  it('keeps the forbidden boundary fail-closed when the diagnostic callback throws', async () => {
+    const harness = await realProbePageHarness({
+      reportForbiddenRequest: () => {
+        throw new Error('diagnostic logger failed with raw-secret');
+      },
+    });
+    const forbidden = guardedRouteFixture({
+      method: 'POST',
+      requestUrl: 'https://send.sentry.report/api/306/envelope/?token=raw-secret',
+    });
+
+    await harness.dispatchRoute(forbidden.route as unknown as Route);
+
+    expect(forbidden.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(forbidden.continueRequest).not.toHaveBeenCalled();
+    expect(harness.stages).toContain('forbidden_request');
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
+  });
+
+  it('still explicitly aborts a forbidden request when stage reporting throws', async () => {
+    const harness = await realProbePageHarness({
+      reportStage: (stage) => {
+        if (stage === 'forbidden_request') {
+          throw new Error('stage logger failed with raw-secret');
+        }
+      },
+    });
+    const forbidden = guardedRouteFixture({
+      isMainFrame: true,
+      method: 'POST',
+      requestUrl: 'https://send.sentry.report/api/306/envelope/?token=raw-secret',
+    });
+
+    await harness.dispatchRoute(forbidden.route as unknown as Route);
+
+    expect(forbidden.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(forbidden.continueRequest).not.toHaveBeenCalled();
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
+  });
+
   it('continues the exact Player lookup GET and reports only its fixed network stage', async () => {
     const test = guardedRouteFixture({
+      isMainFrame: true,
       method: 'GET',
       requestUrl:
         'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
@@ -529,6 +819,24 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(test.continueRequest).toHaveBeenCalledOnce();
     expect(test.abort).not.toHaveBeenCalled();
     expect(test.stages).toEqual(['lookup_network_request']);
+  });
+
+  it('continues the exact Player lookup GET when its diagnostic stage reporter throws', async () => {
+    const test = guardedRouteFixture({
+      isMainFrame: true,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+    });
+
+    await expect(
+      guardKemerBetReadinessSealRoute(test.route, test.page, () => {
+        throw new Error('stage logger failed with raw-secret');
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(test.continueRequest).toHaveBeenCalledOnce();
+    expect(test.abort).not.toHaveBeenCalled();
   });
 
   it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(

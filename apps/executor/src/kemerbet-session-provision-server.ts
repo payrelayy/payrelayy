@@ -14,6 +14,11 @@ import {
   createKemerBetNoTransferReadinessSealProbeFromPage,
   runKemerBetNoTransferReadinessSeal,
   type KemerBetNoTransferReadinessSealStage,
+  type KemerBetReadinessSealForbiddenRequestDiagnostic,
+  type KemerBetReadinessSealForbiddenRequestKind,
+  type KemerBetReadinessSealForbiddenRequestMethod,
+  type KemerBetReadinessSealForbiddenRequestReason,
+  type KemerBetReadinessSealForbiddenRequestTarget,
 } from './kemerbet-no-transfer-readiness-seal.js';
 
 const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';
@@ -92,6 +97,7 @@ export interface KemerBetReadinessSealFailureEvent {
   readonly component: 'kemerbet_session_provision';
   readonly detailsRedacted: true;
   readonly event: 'readiness_seal_failed';
+  readonly forbiddenRequest?: KemerBetReadinessSealForbiddenRequestDiagnostic;
   readonly stage?: KemerBetNoTransferReadinessSealStage;
 }
 
@@ -123,18 +129,157 @@ const KEMERBET_READINESS_SEAL_FAILURE_STAGES = Object.freeze({
   binding_write: true,
 } satisfies Readonly<Record<KemerBetNoTransferReadinessSealStage, true>>);
 
+const KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_REASONS = Object.freeze({
+  exact_financial_endpoint: true,
+  exact_auth_session_endpoint: true,
+  non_read_method: true,
+  noncanonical_navigation: true,
+  non_https: true,
+  url_credentials: true,
+  explicit_port: true,
+  fragment: true,
+  malformed_url: true,
+} satisfies Readonly<Record<KemerBetReadinessSealForbiddenRequestReason, true>>);
+
+const KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_TARGETS = Object.freeze({
+  agent_api: true,
+  agent_auth_session: true,
+  agent_web: true,
+  known_telemetry: true,
+  recaptcha: true,
+  third_party: true,
+  unparseable: true,
+} satisfies Readonly<Record<KemerBetReadinessSealForbiddenRequestTarget, true>>);
+
+const KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_METHODS = Object.freeze({
+  GET: true,
+  HEAD: true,
+  OPTIONS: true,
+  POST: true,
+  PUT: true,
+  PATCH: true,
+  DELETE: true,
+  OTHER: true,
+} satisfies Readonly<Record<KemerBetReadinessSealForbiddenRequestMethod, true>>);
+
+const KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_KINDS = Object.freeze({
+  main_navigation: true,
+  subframe_navigation: true,
+  subresource: true,
+} satisfies Readonly<Record<KemerBetReadinessSealForbiddenRequestKind, true>>);
+
+function fixedForbiddenRequestDiagnostic(
+  value: unknown,
+): KemerBetReadinessSealForbiddenRequestDiagnostic | undefined {
+  try {
+    const object = exactObject(value, ['reason', 'target', 'method', 'kind']);
+    if (object === undefined) return undefined;
+    const reason = object.reason;
+    const target = object.target;
+    const method = object.method;
+    const kind = object.kind;
+    if (
+      typeof reason !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(
+        KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_REASONS,
+        reason,
+      ) ||
+      typeof target !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(
+        KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_TARGETS,
+        target,
+      ) ||
+      typeof method !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(
+        KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_METHODS,
+        method,
+      ) ||
+      typeof kind !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(KEMERBET_READINESS_SEAL_FORBIDDEN_REQUEST_KINDS, kind)
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      reason: reason as KemerBetReadinessSealForbiddenRequestReason,
+      target: target as KemerBetReadinessSealForbiddenRequestTarget,
+      method: method as KemerBetReadinessSealForbiddenRequestMethod,
+      kind: kind as KemerBetReadinessSealForbiddenRequestKind,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 export function createKemerBetReadinessSealFailureEvent(
   stage: unknown,
+  forbiddenRequest?: unknown,
 ): KemerBetReadinessSealFailureEvent {
   const fixed = {
     component: 'kemerbet_session_provision',
     event: 'readiness_seal_failed',
     detailsRedacted: true,
   } as const;
-  return typeof stage === 'string' &&
-    Object.prototype.hasOwnProperty.call(KEMERBET_READINESS_SEAL_FAILURE_STAGES, stage)
-    ? Object.freeze({ ...fixed, stage: stage as KemerBetNoTransferReadinessSealStage })
-    : Object.freeze(fixed);
+  if (
+    typeof stage !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(KEMERBET_READINESS_SEAL_FAILURE_STAGES, stage)
+  ) {
+    return Object.freeze(fixed);
+  }
+  const fixedStage = stage as KemerBetNoTransferReadinessSealStage;
+  const fixedForbiddenRequest = fixedForbiddenRequestDiagnostic(forbiddenRequest);
+  return fixedStage === 'forbidden_request' && fixedForbiddenRequest !== undefined
+    ? Object.freeze({ ...fixed, stage: fixedStage, forbiddenRequest: fixedForbiddenRequest })
+    : Object.freeze({ ...fixed, stage: fixedStage });
+}
+
+export interface KemerBetReadinessSealFailureSnapshot {
+  readonly forbiddenRequest?: KemerBetReadinessSealForbiddenRequestDiagnostic;
+  readonly stage?: KemerBetNoTransferReadinessSealStage;
+}
+
+export function createKemerBetReadinessSealFailureTracker(): {
+  readonly begin: () => void;
+  readonly clear: () => void;
+  readonly consume: () => KemerBetReadinessSealFailureSnapshot;
+  readonly reportForbiddenRequest: (
+    diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic,
+  ) => void;
+  readonly reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void;
+} {
+  let stage: KemerBetNoTransferReadinessSealStage | undefined;
+  let forbiddenRequest: KemerBetReadinessSealForbiddenRequestDiagnostic | undefined;
+  const clear = (): void => {
+    stage = undefined;
+    forbiddenRequest = undefined;
+  };
+  return Object.freeze({
+    begin: () => {
+      stage = 'signed_in_page';
+      forbiddenRequest = undefined;
+    },
+    clear,
+    consume: () => {
+      const snapshot =
+        forbiddenRequest !== undefined
+          ? Object.freeze({ stage, forbiddenRequest })
+          : stage !== undefined
+            ? Object.freeze({ stage })
+            : Object.freeze({});
+      clear();
+      return snapshot;
+    },
+    reportForbiddenRequest: (diagnostic) => {
+      if (forbiddenRequest === undefined) {
+        forbiddenRequest = diagnostic;
+        stage = 'forbidden_request';
+      }
+    },
+    reportStage: (nextStage) => {
+      if (forbiddenRequest === undefined || nextStage === 'forbidden_request') {
+        stage = nextStage;
+      }
+    },
+  });
 }
 
 export class KemerBetProvisionServerUnavailableError extends Error {
@@ -395,7 +540,7 @@ export function createKemerBetSessionProvisionServer(
   let expiresAt: Date | undefined;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let signedInLogged = false;
-  let readinessStage: KemerBetNoTransferReadinessSealStage | undefined;
+  const readinessFailure = createKemerBetReadinessSealFailureTracker();
   let lane = Promise.resolve();
   const startupProfilesCleaned = new Set<string>();
 
@@ -539,7 +684,7 @@ export function createKemerBetSessionProvisionServer(
     readonly sealed: true;
     readonly transferDisabled: true;
   }> => {
-    readinessStage = 'signed_in_page';
+    readinessFailure.begin();
     const currentStatus = await status();
     if (
       !currentStatus.signedIn ||
@@ -569,9 +714,8 @@ export function createKemerBetSessionProvisionServer(
       },
       effectiveUserId,
       assertBrowserExecutable: async () => undefined,
-      reportStage: (stage) => {
-        readinessStage = stage;
-      },
+      reportStage: readinessFailure.reportStage,
+      reportForbiddenRequest: readinessFailure.reportForbiddenRequest,
       openProbe: async (options) => {
         if (
           options.accountId !== retainedAccountId ||
@@ -588,6 +732,7 @@ export function createKemerBetSessionProvisionServer(
           close: async () => undefined,
           fingerprintAgentIdentity: options.fingerprintAgentIdentity,
           page: retainedPage,
+          reportForbiddenRequest: options.reportForbiddenRequest,
           reportStage: options.reportStage,
           selectorContract: options.selectorContract,
         });
@@ -603,7 +748,7 @@ export function createKemerBetSessionProvisionServer(
     ) {
       return unavailable();
     }
-    readinessStage = undefined;
+    readinessFailure.clear();
     return {
       sealed: true,
       playersChecked: 5,
@@ -656,11 +801,15 @@ export function createKemerBetSessionProvisionServer(
       } catch {
         const readinessSealRequest =
           request.url === '/v1/readiness/seal' && request.method === 'POST';
-        const failureStage = readinessSealRequest ? readinessStage : undefined;
-        readinessStage = undefined;
+        const failure = readinessSealRequest ? readinessFailure.consume() : undefined;
+        if (!readinessSealRequest) readinessFailure.clear();
+        const failureStage = failure?.stage;
+        const failureForbiddenRequest = failure?.forbiddenRequest;
         if (readinessSealRequest) {
           try {
-            logReadinessSealFailure(createKemerBetReadinessSealFailureEvent(failureStage));
+            logReadinessSealFailure(
+              createKemerBetReadinessSealFailureEvent(failureStage, failureForbiddenRequest),
+            );
           } catch {
             // Diagnostics must never replace the existing fail-closed response or expose the error.
           }

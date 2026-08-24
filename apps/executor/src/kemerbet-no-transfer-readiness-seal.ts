@@ -41,6 +41,19 @@ const OUTPUT_FILE = `${OUTPUT_ROOT}/kemerbet_agent_identity_bindings`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const FINGERPRINT_PATTERN = /^hmac-sha256-agent-identity-v1:[0-9a-f]{64}$/u;
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const KEMERBET_AGENT_API_HOSTNAME = new URL(KEMERBET_AGENT_API_ORIGIN).hostname;
+const KEMERBET_AGENT_WEB_HOSTNAME = new URL(KEMERBET_AGENT_DEPOSIT_URL).hostname;
+const RECAPTCHA_HOSTNAMES = new Set(['www.google.com', 'www.recaptcha.net']);
+const KEMERBET_AGENT_REFRESH_TOKEN_PATH = '/Account/RefreshToken';
+const SENTRY_ENVELOPE_HOSTNAME = 'send.sentry.report';
+const SENTRY_ENVELOPE_PATH = '/api/306/envelope/';
+const HOTJAR_TELEMETRY_HOSTNAMES = new Set([
+  't.cs.hotjar.io',
+  'insights.hotjar.com',
+  'metrics.hotjar.io',
+  'script.hotjar.com',
+  'static.hotjar.com',
+]);
 const DISALLOWED_ENVIRONMENT_KEYS = [
   'KEMERBET_EXECUTOR_DATABASE_URL',
   'KEMERBET_EXECUTOR_DATABASE_URL_FILE',
@@ -75,6 +88,46 @@ export type KemerBetNoTransferReadinessSealStage =
   | 'lookup_reset'
   | 'final_guard'
   | 'binding_write';
+
+export type KemerBetReadinessSealForbiddenRequestReason =
+  | 'exact_financial_endpoint'
+  | 'exact_auth_session_endpoint'
+  | 'non_read_method'
+  | 'noncanonical_navigation'
+  | 'non_https'
+  | 'url_credentials'
+  | 'explicit_port'
+  | 'fragment'
+  | 'malformed_url';
+
+export type KemerBetReadinessSealForbiddenRequestTarget =
+  | 'agent_api'
+  | 'agent_auth_session'
+  | 'agent_web'
+  | 'known_telemetry'
+  | 'recaptcha'
+  | 'third_party'
+  | 'unparseable';
+
+export type KemerBetReadinessSealForbiddenRequestMethod =
+  'GET' | 'HEAD' | 'OPTIONS' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OTHER';
+
+export type KemerBetReadinessSealForbiddenRequestKind =
+  'main_navigation' | 'subframe_navigation' | 'subresource';
+
+export interface KemerBetReadinessSealForbiddenRequestDiagnostic {
+  readonly reason: KemerBetReadinessSealForbiddenRequestReason;
+  readonly target: KemerBetReadinessSealForbiddenRequestTarget;
+  readonly method: KemerBetReadinessSealForbiddenRequestMethod;
+  readonly kind: KemerBetReadinessSealForbiddenRequestKind;
+}
+
+export type KemerBetReadinessSealRequestClassification =
+  | { readonly decision: 'allow' }
+  | {
+      readonly decision: 'forbid';
+      readonly diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic;
+    };
 
 interface SafeStat {
   readonly mode: number;
@@ -111,6 +164,9 @@ export interface KemerBetNoTransferReadinessSealDependencies {
     readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
     readonly effectiveUserId: number;
     readonly reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void;
+    readonly reportForbiddenRequest: (
+      diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic,
+    ) => void;
   }) => Promise<KemerBetNoTransferReadinessSealProbe>;
   readonly writeBinding?: (
     accountId: string,
@@ -128,6 +184,9 @@ export interface KemerBetNoTransferReadinessSealDependencies {
     readonly moneyMoved: false;
   }) => void;
   readonly reportStage?: (stage: KemerBetNoTransferReadinessSealStage) => void;
+  readonly reportForbiddenRequest?: (
+    diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic,
+  ) => void;
 }
 
 export class KemerBetNoTransferReadinessSealUnavailableError extends Error {
@@ -225,38 +284,115 @@ async function resolveSafeProfile(accountId: string, effectiveUserId: number): P
   return profile;
 }
 
+function fixedRequestMethod(method: string): KemerBetReadinessSealForbiddenRequestMethod {
+  switch (method) {
+    case 'GET':
+    case 'HEAD':
+    case 'OPTIONS':
+    case 'POST':
+    case 'PUT':
+    case 'PATCH':
+    case 'DELETE':
+      return method;
+    default:
+      return 'OTHER';
+  }
+}
+
+function requestKind(input: {
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+}): KemerBetReadinessSealForbiddenRequestKind {
+  if (input.isNavigationRequest) {
+    return input.isMainFrame ? 'main_navigation' : 'subframe_navigation';
+  }
+  return 'subresource';
+}
+
+function requestTarget(url: URL): KemerBetReadinessSealForbiddenRequestTarget {
+  if (url.hostname === KEMERBET_AGENT_API_HOSTNAME) {
+    return url.pathname === KEMERBET_AGENT_REFRESH_TOKEN_PATH ? 'agent_auth_session' : 'agent_api';
+  }
+  if (url.hostname === KEMERBET_AGENT_WEB_HOSTNAME) return 'agent_web';
+  if (
+    (url.hostname === SENTRY_ENVELOPE_HOSTNAME && url.pathname === SENTRY_ENVELOPE_PATH) ||
+    HOTJAR_TELEMETRY_HOSTNAMES.has(url.hostname)
+  ) {
+    return 'known_telemetry';
+  }
+  if (RECAPTCHA_HOSTNAMES.has(url.hostname)) return 'recaptcha';
+  return 'third_party';
+}
+
+function forbiddenRequestClassification(
+  reason: KemerBetReadinessSealForbiddenRequestReason,
+  target: KemerBetReadinessSealForbiddenRequestTarget,
+  method: KemerBetReadinessSealForbiddenRequestMethod,
+  kind: KemerBetReadinessSealForbiddenRequestKind,
+): KemerBetReadinessSealRequestClassification {
+  return Object.freeze({
+    decision: 'forbid',
+    diagnostic: Object.freeze({ reason, target, method, kind }),
+  });
+}
+
+export function classifyKemerBetReadinessSealRequest(input: {
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly requestUrl: string;
+}): KemerBetReadinessSealRequestClassification {
+  const method = fixedRequestMethod(input.method);
+  const kind = requestKind(input);
+  let url: URL;
+  try {
+    url = new URL(input.requestUrl);
+  } catch {
+    return forbiddenRequestClassification('malformed_url', 'unparseable', method, kind);
+  }
+  const target = requestTarget(url);
+  if (
+    url.origin === KEMERBET_AGENT_API_ORIGIN &&
+    url.pathname === KEMERBET_AGENT_REFRESH_TOKEN_PATH
+  ) {
+    return forbiddenRequestClassification('exact_auth_session_endpoint', target, method, kind);
+  }
+  if (
+    url.origin === KEMERBET_AGENT_API_ORIGIN &&
+    url.pathname === KEMERBET_AGENT_PLAYER_DEPOSIT_PATH
+  ) {
+    return forbiddenRequestClassification('exact_financial_endpoint', target, method, kind);
+  }
+  if (!READ_METHODS.has(input.method)) {
+    return forbiddenRequestClassification('non_read_method', target, method, kind);
+  }
+  if (url.protocol !== 'https:') {
+    return forbiddenRequestClassification('non_https', target, method, kind);
+  }
+  if (url.username !== '' || url.password !== '') {
+    return forbiddenRequestClassification('url_credentials', target, method, kind);
+  }
+  if (url.port !== '') {
+    return forbiddenRequestClassification('explicit_port', target, method, kind);
+  }
+  if (url.hash !== '') {
+    return forbiddenRequestClassification('fragment', target, method, kind);
+  }
+  if (input.isNavigationRequest) {
+    if (!input.isMainFrame || url.href !== KEMERBET_AGENT_DEPOSIT_URL) {
+      return forbiddenRequestClassification('noncanonical_navigation', target, method, kind);
+    }
+  }
+  return Object.freeze({ decision: 'allow' });
+}
+
 export function isAllowedKemerBetReadinessSealRequest(input: {
   readonly isMainFrame: boolean;
   readonly isNavigationRequest: boolean;
   readonly method: string;
   readonly requestUrl: string;
 }): boolean {
-  let url: URL;
-  try {
-    url = new URL(input.requestUrl);
-  } catch {
-    return false;
-  }
-  if (
-    url.origin === KEMERBET_AGENT_API_ORIGIN &&
-    url.pathname === KEMERBET_AGENT_PLAYER_DEPOSIT_PATH
-  ) {
-    return false;
-  }
-  if (
-    !READ_METHODS.has(input.method) ||
-    url.protocol !== 'https:' ||
-    url.username !== '' ||
-    url.password !== '' ||
-    url.port !== '' ||
-    url.hash !== ''
-  ) {
-    return false;
-  }
-  if (input.isMainFrame || input.isNavigationRequest) {
-    return input.isMainFrame && url.href === KEMERBET_AGENT_DEPOSIT_URL;
-  }
-  return true;
+  return classifyKemerBetReadinessSealRequest(input).decision === 'allow';
 }
 
 export function isExactKemerBetReadinessSealPlayerLookupRequest(input: {
@@ -338,7 +474,11 @@ export async function guardKemerBetReadinessSealRoute(
   ) {
     // Diagnostic only: this fixed stage proves only that a lookup-shaped GET reached the guard.
     // The response contract and later visible result bind the request to the expected Player.
-    reportStage('lookup_network_request');
+    try {
+      reportStage('lookup_network_request');
+    } catch {
+      // Diagnostic reporting cannot interrupt an otherwise allowed read-only request.
+    }
   }
   await route.continue();
 }
@@ -353,11 +493,15 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
   readonly close: () => Promise<void>;
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
   readonly page: Page;
+  readonly reportForbiddenRequest?: (
+    diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic,
+  ) => void;
   readonly reportStage?: (stage: KemerBetNoTransferReadinessSealStage) => void;
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
 }): Promise<KemerBetNoTransferReadinessSealProbe> {
   const reportStage = options.reportStage ?? (() => undefined);
   let forbiddenRequestObserved = false;
+  let firstForbiddenRequest: KemerBetReadinessSealForbiddenRequestDiagnostic | undefined;
   let routeHandlerFailureObserved = false;
   const readinessRequestBoundaryInvalid = (): boolean =>
     forbiddenRequestObserved || routeHandlerFailureObserved;
@@ -365,16 +509,27 @@ export async function createKemerBetNoTransferReadinessSealProbeFromPage(options
   const readinessRoute = (route: Route) => {
     const operation = (async () => {
       const request = route.request();
-      if (
-        !isAllowedKemerBetReadinessSealRequest({
-          isMainFrame: request.frame() === options.page.mainFrame(),
-          isNavigationRequest: request.isNavigationRequest(),
-          method: request.method(),
-          requestUrl: request.url(),
-        })
-      ) {
+      const classification = classifyKemerBetReadinessSealRequest({
+        isMainFrame: request.frame() === options.page.mainFrame(),
+        isNavigationRequest: request.isNavigationRequest(),
+        method: request.method(),
+        requestUrl: request.url(),
+      });
+      if (classification.decision === 'forbid') {
         forbiddenRequestObserved = true;
-        reportStage('forbidden_request');
+        if (firstForbiddenRequest === undefined) {
+          firstForbiddenRequest = classification.diagnostic;
+          try {
+            options.reportForbiddenRequest?.(classification.diagnostic);
+          } catch {
+            // Diagnostics cannot weaken or replace the existing fail-closed request boundary.
+          }
+        }
+        try {
+          reportStage('forbidden_request');
+        } catch {
+          // A diagnostic callback cannot prevent the explicit request abort below.
+        }
       }
       await guardKemerBetReadinessSealRoute(route, options.page, reportStage);
     })();
@@ -512,6 +667,9 @@ async function productionOpenProbe(options: {
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
   readonly effectiveUserId: number;
   readonly reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void;
+  readonly reportForbiddenRequest: (
+    diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic,
+  ) => void;
 }): Promise<KemerBetNoTransferReadinessSealProbe> {
   const profile = await resolveSafeProfile(options.accountId, options.effectiveUserId);
   await removeStaleChromiumSingletonArtifacts(profile);
@@ -547,6 +705,7 @@ async function productionOpenProbe(options: {
       accountId: options.accountId,
       fingerprintAgentIdentity: options.fingerprintAgentIdentity,
       page,
+      reportForbiddenRequest: options.reportForbiddenRequest,
       reportStage: options.reportStage,
       selectorContract: options.selectorContract,
       close: async () => {
@@ -634,6 +793,7 @@ export async function runKemerBetNoTransferReadinessSeal(
   dependencies: KemerBetNoTransferReadinessSealDependencies = {},
 ): Promise<void> {
   const reportStage = dependencies.reportStage ?? (() => undefined);
+  const reportForbiddenRequest = dependencies.reportForbiddenRequest ?? (() => undefined);
   reportStage('environment_guard');
   const environment = dependencies.environment ?? process.env;
   const accountId = assertInertEnvironment(environment);
@@ -673,6 +833,7 @@ export async function runKemerBetNoTransferReadinessSeal(
     fingerprintAgentIdentity,
     effectiveUserId,
     reportStage,
+    reportForbiddenRequest,
   });
   try {
     if (!FINGERPRINT_PATTERN.test(probe.observedAgentIdentityFingerprint)) unavailable();

@@ -59,7 +59,7 @@ The historical `NEW_HELPER_SHA` constant in
 [`fetanagent-vm-transition.sh`](fetanagent-vm-transition.sh) remains pinned to the helper installed by
 the immutable retirement receipts. `ROTATED_HELPER_SHA` is pinned to the SHA-256 of the next final LF
 Git blob of `infra/operations/fetanagent-staging-deploy-helper.sh`; for this reviewed rotation it is
-`b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663`. Do not hash a Windows checkout:
+`af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833`. Do not hash a Windows checkout:
 CRLF conversion produces a different digest. Verify each pin from its reviewed commit before
 installing:
 

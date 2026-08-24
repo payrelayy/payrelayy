@@ -103,8 +103,8 @@ require_kemerbet_identity_key_file() {
   local metadata path="$1"
   [[ ! -L "$path" && -f "$path" ]] || die 'the KemerBet identity key is absent or symbolic'
   [[ "$(realpath -- "$path")" == "$path" ]] || die 'the KemerBet identity key is not canonical'
-  metadata="$(stat --format='%U:%G:%a' "$path")"
-  [[ "$metadata" == '10001:10001:400' || "$metadata" == 'root:root:444' ]] ||
+  metadata="$(stat --format='%u:%g:%a' "$path")"
+  [[ "$metadata" == '10001:10001:400' || "$metadata" == '0:0:444' ]] ||
     die 'the KemerBet identity key ownership or mode is unsafe'
 }
 
@@ -193,8 +193,8 @@ consume_one_use_kemerbet_file() {
     return 0
   fi
   [[ ! -L "$path" && -f "$path" ]] || return 1
-  case "$(stat --format='%U:%G:%a' "$path")" in
-    10001:10001:400|10001:10001:444|root:root:400|root:root:444) ;;
+  case "$(stat --format='%u:%g:%a' "$path")" in
+    10001:10001:400|10001:10001:444|0:0:400|0:0:444) ;;
     *) return 1 ;;
   esac
   [[ "$(stat --format='%h' "$path")" == '1' ]] || return 1
@@ -414,10 +414,10 @@ repair_kemerbet_identity_key_readability() {
   [[ ! -L "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" && -f "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" ]] ||
     return 1
   [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] || return 1
-  metadata="$(stat --format='%U:%G:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+  metadata="$(stat --format='%u:%g:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
   case "$metadata" in
-    root:root:444) return 0 ;;
-    10001:10001:400|10001:10001:444|root:root:400) ;;
+    0:0:444) return 0 ;;
+    10001:10001:400|10001:10001:444|0:0:400) ;;
     *) return 1 ;;
   esac
   chown root:root "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" >/dev/null 2>&1 || return 1
@@ -1100,7 +1100,7 @@ harden_kemerbet_identity_key() {
     die 'the KemerBet identity key has an unsafe hard-link count'
   digest_before="$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')"
   [[ "$digest_before" =~ ^[0-9a-f]{64}$ ]] || die 'the KemerBet identity key digest is invalid'
-  metadata="$(stat --format='%U:%G:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
+  metadata="$(stat --format='%u:%g:%a' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")"
   if [[ "$metadata" == '10001:10001:400' ]]; then
     chown root:root "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
     chmod 0444 "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"

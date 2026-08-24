@@ -39,9 +39,13 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  '33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
+  'b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-b4664efd';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
+const retainedPriorHelperBackupSha =
+  '33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba';
+const retainedPriorHelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
+const retainedPriorHelperBackupPath = `/root/fetanagent-helper-rotation/${retainedPriorHelperBackupName}`;
 const reviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -725,6 +729,38 @@ assert.ok(
     helperReplacementRunbook.includes(`BACKUP='${installedHelperBackupPath}'`),
   'The replacement and restore blocks must use the same new fixed predecessor-versioned backup path.',
 );
+assert.ok(
+  helperReplacementRunbook.includes(
+    `RETAINED_BACKUP="$STAGING_ROOT/${retainedPriorHelperBackupName}"`,
+  ) && helperReplacementRunbook.includes(`RETAINED_BACKUP='${retainedPriorHelperBackupPath}'`),
+  'Both rotation directions must separately name the retained earlier predecessor evidence.',
+);
+assert.equal(
+  (
+    helperReplacementRunbook.match(
+      new RegExp(`RETAINED_BACKUP_SHA='${retainedPriorHelperBackupSha}'`, 'gu'),
+    ) ?? []
+  ).length,
+  2,
+  'Both rotation directions must pin the exact retained earlier predecessor digest.',
+);
+for (const retainedBackupContract of [
+  /test ! -L "\$RETAINED_BACKUP" && test -f "\$RETAINED_BACKUP"/g,
+  /test "\$\(realpath -- "\$RETAINED_BACKUP"\)" = "\$RETAINED_BACKUP"/g,
+  /test "\$\(stat --format='%U:%G:%a:%h' "\$RETAINED_BACKUP"\)" = 'root:root:600:1'/g,
+  /test "\$\(sha256sum "\$RETAINED_BACKUP" \| awk '\{ print \$1 \}'\)" = "\$RETAINED_BACKUP_SHA"/g,
+]) {
+  assert.equal(
+    (helperReplacementRunbook.match(retainedBackupContract) ?? []).length,
+    2,
+    'Both rotation directions must prove the retained earlier predecessor is exact root-only evidence.',
+  );
+}
+assert.doesNotMatch(
+  helperReplacementRunbook,
+  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_BACKUP"/u,
+  'The current rotation must never mutate or remove the retained earlier predecessor evidence.',
+);
 assert.doesNotMatch(
   helperReplacementRunbook,
   /BACKUP=(?:"\$STAGING_ROOT\/|')fetanagent-staging-deploy-helper\.previous(?:"|')/u,
@@ -933,8 +969,8 @@ for (const replacementResumeContract of [
   /if \[\[ -e "\$BACKUP" \|\| -L "\$BACKUP" \]\]; then/,
   /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-b4664efd'/,
-  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-33f4a5a4\.installing"/,
+  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-af823251'/,
+  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-b4664efd\.installing"/,
 ]) {
   assert.match(helperReplacement, replacementResumeContract);
 }
@@ -1051,7 +1087,7 @@ for (const restoreResumeContract of [
   /SUDOERS_STATE='enabled'/,
   /SUDOERS_STATE='disabled'/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-33f4a5a4'/,
+  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-b4664efd'/,
   /if \[\[ "\$TARGET_SHA" == "\$NEXT_SHA" \]\]; then/,
   /RESTORE_TMP="\$RESTORE_TMP_PATH"/,
 ]) {
@@ -2038,13 +2074,38 @@ assert.ok(
 );
 for (const contract of [
   /! -L "\$path" && -f "\$path"/,
-  /10001:10001:400\|10001:10001:444\|root:root:400\|root:root:444/,
+  /stat --format='%u:%g:%a' "\$path"/,
+  /10001:10001:400\|10001:10001:444\|0:0:400\|0:0:444/,
   /stat --format='%h'/,
   /shred --force --iterations=1 --zero --remove=unlink -- "\$path"/,
   /! -e "\$path" && ! -L "\$path"/,
 ]) {
   assert.match(consumeOneUseKemerbetFile, contract);
 }
+assert.doesNotMatch(
+  consumeOneUseKemerbetFile,
+  /stat --format='%U:%G:%a'/,
+  'one-use service-file cleanup must compare numeric UID/GID values even when the host has no name for UID 10001',
+);
+
+const requireKemerbetIdentityKey = /require_kemerbet_identity_key_file\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  requireKemerbetIdentityKey,
+  'the KemerBet identity-key boundary must accept only the exact service or hardened-root metadata',
+);
+for (const contract of [
+  /metadata="\$\(stat --format='%u:%g:%a' "\$path"\)"/,
+  /"\$metadata" == '10001:10001:400' \|\| "\$metadata" == '0:0:444'/,
+]) {
+  assert.match(requireKemerbetIdentityKey, contract);
+}
+assert.doesNotMatch(
+  requireKemerbetIdentityKey,
+  /stat --format='%U:%G:%a'/,
+  'identity-key service ownership must not depend on a host account name for UID 10001',
+);
 
 const hardenKemerbetPlayerIds = /harden_kemerbet_player_ids_file\(\) \{[\s\S]*?\n\}/u.exec(
   helper,
@@ -2076,6 +2137,8 @@ assert.ok(
 for (const contract of [
   /root:root:700/,
   /stat --format='%h'/,
+  /metadata="\$\(stat --format='%u:%g:%a' "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"\)"/,
+  /if \[\[ "\$metadata" == '10001:10001:400' \]\]/,
   /digest_before/,
   /chmod 0444 "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
   /chown root:root "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
@@ -2084,6 +2147,11 @@ for (const contract of [
 ]) {
   assert.match(hardenKemerbetIdentityKey, contract);
 }
+assert.doesNotMatch(
+  hardenKemerbetIdentityKey,
+  /metadata="\$\(stat --format='%U:%G:%a' "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"\)"/,
+  'identity-key hardening must compare numeric service ownership before converting it to root ownership',
+);
 
 const stagingMutationLock = /acquire_staging_mutation_lock\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(stagingMutationLock, 'The helper must define one non-blocking root-owned mutation lock.');
@@ -2424,9 +2492,20 @@ assert.ok(
 );
 assert.match(recheckIdentityKeyRepair, /root:root:700/);
 assert.match(recheckIdentityKeyRepair, /stat --format='%h'/);
+assert.match(
+  recheckIdentityKeyRepair,
+  /metadata="\$\(stat --format='%u:%g:%a' "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"\)"/,
+);
+assert.match(recheckIdentityKeyRepair, /0:0:444\) return 0 ;;/);
+assert.match(recheckIdentityKeyRepair, /10001:10001:400\|10001:10001:444\|0:0:400\) ;;/);
 assert.match(recheckIdentityKeyRepair, /chmod 0444 "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/);
 assert.match(recheckIdentityKeyRepair, /chown root:root "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/);
 assert.match(recheckIdentityKeyRepair, /root:root:444/);
+assert.doesNotMatch(
+  recheckIdentityKeyRepair,
+  /metadata="\$\(stat --format='%U:%G:%a' "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"\)"/,
+  'identity-key recovery must compare numeric service ownership before repairing root readability',
+);
 
 const recheckCandidateCleanup = /remove_kemerbet_recheck_candidate\(\) \{[\s\S]*?\n\}/u.exec(
   helper,

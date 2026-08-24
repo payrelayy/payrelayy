@@ -79,7 +79,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(body).toBeDefined();
     expect(body).toContain('options.page.url() !== KEMERBET_AGENT_DEPOSIT_URL');
     expect(body).toContain('await agentPage.adoptCurrentDepositPageWithoutNavigation()');
-    expect(body).toContain('activateReadOnlyLookupThroughDom: true');
+    expect(body).toContain('activateReadOnlyLookupWithoutPointer: true');
     expect(body).toContain('reportLookupStage: (stage) => options.reportStage?.(stage)');
     expect(body).not.toContain('createKemerBetDepositBrowser');
     expect(body).not.toContain('.goto(');

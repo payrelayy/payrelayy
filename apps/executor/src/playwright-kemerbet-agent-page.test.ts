@@ -109,7 +109,7 @@ interface LocatorOptions {
   readonly items?: readonly FakeLocator[];
   readonly tagName?: string;
   readonly connected?: boolean;
-  readonly onDomActivate?: () => void;
+  readonly onPress?: (key: string, options?: { readonly timeout?: number }) => void | Promise<void>;
   readonly onClick?: (options?: { readonly timeout?: number }) => void | Promise<void>;
 }
 
@@ -123,7 +123,8 @@ class FakeLocator implements PlaywrightLocatorPort {
   readonly items: readonly FakeLocator[] | null;
   readonly tagName: string;
   readonly connected: boolean;
-  readonly onDomActivate: (() => void) | undefined;
+  readonly onPress:
+    ((key: string, options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
   readonly onClick: ((options?: { readonly timeout?: number }) => void | Promise<void>) | undefined;
 
   constructor(options: LocatorOptions = {}) {
@@ -136,7 +137,7 @@ class FakeLocator implements PlaywrightLocatorPort {
     this.items = options.items ?? null;
     this.tagName = options.tagName ?? 'DIV';
     this.connected = options.connected ?? true;
-    this.onDomActivate = options.onDomActivate;
+    this.onPress = options.onPress;
     this.onClick = options.onClick;
   }
 
@@ -162,9 +163,13 @@ class FakeLocator implements PlaywrightLocatorPort {
     return pageFunction({
       isConnected: this.connected,
       tagName: this.tagName,
-      click: () => this.onDomActivate?.(),
+      click: () => undefined,
       getAttribute: (name) => this.attributes[name] ?? null,
     });
+  }
+
+  async press(key: string, options?: { readonly timeout?: number }) {
+    await this.onPress?.(key, options);
   }
 
   async fill(value: string) {
@@ -321,7 +326,9 @@ class FakePage implements PlaywrightPagePort {
   dialogDelayPolls = 0;
   workflowClicks: string[] = [];
   findButtonClickOptions: { readonly timeout?: number } | undefined;
-  findButtonDomActivations = 0;
+  findButtonKeyboardActivations = 0;
+  findButtonPress:
+    { readonly key: string; readonly options?: { readonly timeout?: number } } | undefined;
   findButtonTagName = 'BUTTON';
   playerDepositOpen = false;
   hideFindBy = false;
@@ -414,8 +421,10 @@ class FakePage implements PlaywrightPagePort {
       return this.withLookupControlDuplicates(
         new FakeLocator({
           tagName: this.findButtonTagName,
-          onDomActivate: () => {
-            this.findButtonDomActivations += 1;
+          onPress: (key, pressOptions) => {
+            this.findButtonKeyboardActivations += 1;
+            this.findButtonPress =
+              pressOptions === undefined ? { key } : { key, options: pressOptions };
             this.workflowClicks.push('button:Find');
           },
           onClick: (options) => {
@@ -630,13 +639,13 @@ describe('Playwright KemerBet agent page', () => {
     expect(page.transferClicks).toBe(0);
   });
 
-  it('activates only the exact native read-only Find button when the caller explicitly requests it', async () => {
+  it('keyboard-activates only the exact native read-only Find button when explicitly requested', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     const stages: string[] = [];
     const fixture = driver(page, {
-      activateReadOnlyLookupThroughDom: true,
+      activateReadOnlyLookupWithoutPointer: true,
       reportLookupStage: (stage: string) => stages.push(stage),
     });
 
@@ -647,17 +656,18 @@ describe('Playwright KemerBet agent page', () => {
     });
 
     expect(page.findButtonClickOptions).toBeUndefined();
-    expect(page.findButtonDomActivations).toBe(1);
+    expect(page.findButtonKeyboardActivations).toBe(1);
+    expect(page.findButtonPress).toEqual({ key: 'Enter', options: { timeout: 100 } });
     expect(stages).toEqual(['lookup_input', 'lookup_action', 'lookup_response', 'lookup_contract']);
     expect(page.transferClicks).toBe(0);
   });
 
-  it('fails closed instead of DOM-activating a non-native Find role', async () => {
+  it('fails closed instead of keyboard-activating a non-native Find role', async () => {
     const page = new FakePage();
     page.urlValue = KEMERBET_AGENT_DEPOSIT_URL;
     page.playerDepositOpen = true;
     page.findButtonTagName = 'DIV';
-    const fixture = driver(page, { activateReadOnlyLookupThroughDom: true });
+    const fixture = driver(page, { activateReadOnlyLookupWithoutPointer: true });
 
     await fixture.driver.adoptCurrentDepositPageWithoutNavigation();
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
@@ -665,7 +675,7 @@ describe('Playwright KemerBet agent page', () => {
     );
 
     expect(page.findButtonClickOptions).toBeUndefined();
-    expect(page.findButtonDomActivations).toBe(0);
+    expect(page.findButtonKeyboardActivations).toBe(0);
     expect(page.transferClicks).toBe(0);
   });
 

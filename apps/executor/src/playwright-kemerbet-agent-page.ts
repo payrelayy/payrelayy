@@ -112,7 +112,6 @@ export interface PlaywrightLocatorPort {
   evaluate?<Result>(
     pageFunction: (element: PlaywrightDomControlPort) => Result | Promise<Result>,
   ): Promise<Result>;
-  press?(key: string, options?: { readonly timeout?: number }): Promise<unknown>;
   fill(value: string, options?: { readonly timeout?: number }): Promise<unknown>;
   inputValue(options?: { readonly timeout?: number }): Promise<string>;
   innerText(options?: { readonly timeout?: number }): Promise<string>;
@@ -121,10 +120,20 @@ export interface PlaywrightLocatorPort {
   getAttribute(name: string): Promise<string | null>;
 }
 
+export interface PlaywrightDomEventPort {
+  readonly type: string;
+  initEvent(type: string, bubbles: boolean, cancelable: boolean): void;
+}
+
+export interface PlaywrightDomDocumentPort {
+  createEvent(type: 'Event'): PlaywrightDomEventPort;
+  dispatchEvent(event: PlaywrightDomEventPort): boolean;
+}
+
 export interface PlaywrightDomControlPort {
   readonly isConnected: boolean;
   readonly tagName: string;
-  click(): void;
+  readonly ownerDocument: PlaywrightDomDocumentPort;
   getAttribute(name: string): string | null;
 }
 
@@ -187,10 +196,10 @@ export interface PlaywrightKemerBetAgentPageOptions {
   readonly monotonicNow?: () => number;
   /**
    * The no-transfer readiness browser is guarded against every mutating request. Its exact Find
-   * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled,
-   * so that proof may activate only that already-validated native button with the keyboard instead
-   * of sending a pointer event that the mask can intercept. This flag must never be used for the
-   * final Transfer control.
+   * control may sit beneath a harmless Ant loading mask even after it becomes visible and enabled.
+   * KemerBet v84 routes that modal's confirmed action through one reviewed document event, so this
+   * proof may dispatch that event only after re-validating the exact native Find button. This flag
+   * must never be used for the final Transfer control.
    */
   readonly activateReadOnlyLookupWithoutPointer?: true;
   readonly reportLookupStage?: (stage: KemerBetAgentLookupObservationStage) => void;
@@ -908,15 +917,20 @@ export function createPlaywrightKemerBetAgentPage(
     control: PlaywrightLocatorPort,
   ): Promise<void> {
     if (control.evaluate === undefined) unavailable();
-    const exactNativeControl = await control.evaluate(
-      (element) =>
-        element.isConnected &&
-        element.tagName === 'BUTTON' &&
-        element.getAttribute('disabled') === null &&
-        element.getAttribute('aria-disabled') !== 'true',
-    );
-    if (exactNativeControl !== true || control.press === undefined) unavailable();
-    await control.press('Enter', { timeout: timeoutMs });
+    const exactReadOnlyEventDispatched = await control.evaluate((element) => {
+      if (
+        !element.isConnected ||
+        element.tagName !== 'BUTTON' ||
+        element.getAttribute('disabled') !== null ||
+        element.getAttribute('aria-disabled') === 'true'
+      ) {
+        return false;
+      }
+      const event = element.ownerDocument.createEvent('Event');
+      event.initEvent('onTransferOkActionEvent', false, false);
+      return element.ownerDocument.dispatchEvent(event);
+    });
+    if (exactReadOnlyEventDispatched !== true) unavailable();
   }
 
   async function requireExactRouteAndNoSessionFailure(): Promise<AllowedAgentUrl> {

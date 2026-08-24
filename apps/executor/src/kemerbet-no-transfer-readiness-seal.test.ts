@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
 import {
+  guardKemerBetReadinessSealRoute,
   isAllowedKemerBetReadinessSealRequest,
+  isExactKemerBetReadinessSealPlayerLookupRequest,
   KemerBetNoTransferReadinessSealUnavailableError,
   runKemerBetNoTransferReadinessSeal,
   runKemerBetNoTransferReadinessSealMain,
@@ -31,6 +33,31 @@ function environment(): NodeJS.ProcessEnv {
 
 function fingerprinter(): KemerBetAgentIdentityFingerprinter {
   return Object.assign(() => FINGERPRINT, { keyFingerprint: '2'.repeat(64) });
+}
+
+function guardedRouteFixture(input: {
+  readonly method: string;
+  readonly requestUrl: string;
+  readonly isMainFrame?: boolean;
+  readonly isNavigationRequest?: boolean;
+}) {
+  const mainFrame = {};
+  const subframe = {};
+  const abort = vi.fn(async (_errorCode: 'blockedbyclient') => undefined);
+  const continueRequest = vi.fn(async () => undefined);
+  const route = {
+    request: () => ({
+      frame: () => (input.isMainFrame === true ? mainFrame : subframe),
+      isNavigationRequest: () => input.isNavigationRequest === true,
+      method: () => input.method,
+      url: () => input.requestUrl,
+    }),
+    abort,
+    continue: continueRequest,
+  };
+  const page = { mainFrame: () => mainFrame };
+  const stages: string[] = [];
+  return { abort, continueRequest, page, route, stages };
 }
 
 function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies> = {}) {
@@ -81,6 +108,8 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(body).toContain('await agentPage.adoptCurrentDepositPageWithoutNavigation()');
     expect(body).toContain('activateReadOnlyLookupWithoutPointer: true');
     expect(body).toContain('reportLookupStage: (stage) => options.reportStage?.(stage)');
+    expect(body).toContain("reportStage('lookup_reset')");
+    expect(body).toContain('await agentPage.resetReadOnlyPlayerLookup()');
     expect(body).not.toContain('createKemerBetDepositBrowser');
     expect(body).not.toContain('.goto(');
     expect(body).not.toContain('.reload(');
@@ -204,6 +233,12 @@ describe('KemerBet no-transfer readiness seal', () => {
         requestUrl: 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit',
       },
       {
+        isMainFrame: false,
+        isNavigationRequest: false,
+        method: 'GET',
+        requestUrl: 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit',
+      },
+      {
         isMainFrame: true,
         isNavigationRequest: true,
         method: 'GET',
@@ -217,6 +252,124 @@ describe('KemerBet no-transfer readiness seal', () => {
       },
     ]) {
       expect(isAllowedKemerBetReadinessSealRequest(candidate)).toBe(false);
+    }
+  });
+
+  it('continues the exact Player lookup GET and reports only its fixed network stage', async () => {
+    const test = guardedRouteFixture({
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+    });
+
+    await guardKemerBetReadinessSealRoute(test.route, test.page, (stage) =>
+      test.stages.push(stage),
+    );
+
+    expect(test.continueRequest).toHaveBeenCalledOnce();
+    expect(test.abort).not.toHaveBeenCalled();
+    expect(test.stages).toEqual(['lookup_network_request']);
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+    'aborts a %s request without reporting a lookup stage',
+    async (method) => {
+      const test = guardedRouteFixture({
+        method,
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+      });
+
+      await guardKemerBetReadinessSealRoute(test.route, test.page, (stage) =>
+        test.stages.push(stage),
+      );
+
+      expect(test.abort).toHaveBeenCalledOnce();
+      expect(test.abort).toHaveBeenCalledWith('blockedbyclient');
+      expect(test.continueRequest).not.toHaveBeenCalled();
+      expect(test.stages).toEqual([]);
+    },
+  );
+
+  it('continues an unrelated allowed HTTPS GET without reporting a lookup stage', async () => {
+    const test = guardedRouteFixture({
+      method: 'GET',
+      requestUrl: 'https://static.example.invalid/assets/application.js',
+    });
+
+    await guardKemerBetReadinessSealRoute(test.route, test.page, (stage) =>
+      test.stages.push(stage),
+    );
+
+    expect(test.continueRequest).toHaveBeenCalledOnce();
+    expect(test.abort).not.toHaveBeenCalled();
+    expect(test.stages).toEqual([]);
+  });
+
+  it('recognizes only the exact redacted Player lookup request for network-stage reporting', () => {
+    expect(
+      isExactKemerBetReadinessSealPlayerLookupRequest({
+        method: 'GET',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+      }),
+    ).toBe(true);
+
+    for (const candidate of [
+      {
+        method: 'POST',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted',
+      },
+      {
+        method: 'GET',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted&externalId=other',
+      },
+      {
+        method: 'GET',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted&extra=1',
+      },
+      {
+        method: 'GET',
+        requestUrl: 'https://untrusted.invalid/Player/GeneralInfoByExternalId?externalId=redacted',
+      },
+      {
+        method: 'GET',
+        requestUrl: 'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=',
+      },
+      {
+        method: 'GET',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted#fragment',
+      },
+      {
+        method: 'GET',
+        requestUrl: 'not a valid URL',
+      },
+      {
+        method: 'GET',
+        requestUrl: 'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=%ZZ',
+      },
+      {
+        method: 'GET',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted%20value',
+      },
+      {
+        method: 'GET',
+        requestUrl:
+          'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=redacted%01value',
+      },
+      {
+        method: 'GET',
+        requestUrl: `https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=${'a'.repeat(
+          129,
+        )}`,
+      },
+    ]) {
+      expect(isExactKemerBetReadinessSealPlayerLookupRequest(candidate)).toBe(false);
     }
   });
 

@@ -401,6 +401,29 @@ replacement. Before publishing a commit that changes the helper, run `stop-and-d
 currently deployed reviewed commit so the containers are stopped and all four disposable database
 logins are disabled. Keep the runtime offline throughout replacement.
 
+If that predecessor cleanup boundary was missed before `main` advanced, do not rotate over the
+running project and do not make the successor helper accept the predecessor. The bounded recovery
+mode `predecessor-stop-and-disable` exists only for the current `022a9f10` predecessor deployment.
+It requires the additional typed confirmation `stop-current-staging-predecessor-runtime`, verifies
+the installed helper against the complete pinned predecessor SHA-256, stops the fixed staging
+Compose project, discards only the safe predecessor incoming directory for
+`8f58ff06425160835c94801e564fa6f9066d0930`, and then runs the exact checksum-pinned normal
+database-login disablement. It does not transfer a release, replace a helper, start a container,
+change a network ban, initiate a new claim or recheck, or authorize a transfer. The predecessor's
+guarded `stop` still inspects and, when necessary, recovers interrupted KemerBet promotion state; a
+nonzero result blocks replacement even if emergency teardown made the host appear offline. The
+database cleanup is unreachable unless the remote non-root identity and exact predecessor helper are
+first proven; therefore the mode cannot disable successor runtime roles after helper rotation.
+
+```bash
+gh workflow run staging-beta-deploy-smoke.yml --ref main \
+  -f mode=predecessor-stop-and-disable \
+  -f confirm_staging_project_ref=spzpiyxheappsfyswewl \
+  -f confirm_main_commit_sha='<exact-current-reviewed-main-commit>' \
+  -f confirm_droplet_id=593344964 \
+  -f confirm_legacy_stop=stop-current-staging-predecessor-runtime
+```
+
 The current Droplet follows only the fresh-host commands (`fresh-host-ready`, `fresh-start`, and
 `start-fresh-public-edge`). Those commands do not consume the retired Droplet's
 `helper-rotation-v1` receipt. Do not create, copy, or update VM-transition receipts on Droplet

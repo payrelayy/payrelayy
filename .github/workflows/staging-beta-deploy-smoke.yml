@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build, verify transition SSH, stop legacy for transition, unban and check staging once, deploy and smoke, or stop staging
+        description: Build, verify transition SSH, stop legacy for transition, clean the pinned predecessor once, unban and check staging once, deploy and smoke, or stop staging
         required: true
         default: plan
         type: choice
@@ -14,6 +14,7 @@ on:
           - transition-stop-legacy
           - unban-and-connectivity-check
           - deploy-and-smoke
+          - predecessor-stop-and-disable
           - stop-and-disable
       confirm_staging_project_ref:
         description: Type the exact staging project ref
@@ -28,7 +29,7 @@ on:
         required: true
         type: string
       confirm_legacy_stop:
-        description: For transition-stop-legacy only, type stop-legacy-staging-runtime
+        description: For transition-stop-legacy type stop-legacy-staging-runtime; for predecessor-stop-and-disable type stop-current-staging-predecessor-runtime
         required: false
         default: ''
         type: string
@@ -74,9 +75,13 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|predecessor-stop-and-disable|stop-and-disable)$ ]]
           if [[ "$REQUESTED_MODE" == 'transition-stop-legacy' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' ]]
+          elif [[ "$REQUESTED_MODE" == 'predecessor-stop-and-disable' ]]; then
+            [[ "$CONFIRMED_LEGACY_STOP" == 'stop-current-staging-predecessor-runtime' ]]
+          else
+            [[ -z "$CONFIRMED_LEGACY_STOP" ]]
           fi
 
   build:
@@ -850,7 +855,7 @@ jobs:
 
   stop:
     name: Stop staging and disable runtime logins
-    if: inputs.mode == 'stop-and-disable'
+    if: inputs.mode == 'predecessor-stop-and-disable' || inputs.mode == 'stop-and-disable'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -874,6 +879,7 @@ jobs:
           PGSSLROOTCERT: ${{ runner.temp }}/supabase-ca.crt
           PGSERVICEFILE: /dev/null
           PGPASSFILE: /dev/null
+          REQUESTED_MODE: ${{ inputs.mode }}
           STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
           STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
@@ -886,11 +892,35 @@ jobs:
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$PGSSLROOTCERT"
           openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
           helper_sha="$(sha256sum infra/operations/fetanagent-staging-deploy-helper.sh | awk '{print $1}')"
+          release_sha="$GITHUB_SHA"
+          predecessor_mode='false'
+          if [[ "$REQUESTED_MODE" == 'predecessor-stop-and-disable' ]]; then
+            test "$(sha256sum infra/sql/staging-runtimes-disable.sql | awk '{print $1}')" = \
+              '956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583'
+            helper_sha='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
+            release_sha='8f58ff06425160835c94801e564fa6f9066d0930'
+            predecessor_mode='true'
+          else
+            [[ "$REQUESTED_MODE" == 'stop-and-disable' ]]
+          fi
+          remote_command="test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper discard '$release_sha'"
+          if [[ "$predecessor_mode" == 'true' ]]; then
+            remote_command="test \"\$(id -u)\" -ne 0 || exit 190; sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha' || exit 191; sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop || exit 192; sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper discard '$release_sha' || exit 193"
+          fi
           remote_status=0
           ssh -F /dev/null -i "$RUNNER_TEMP/deploy-key" -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
             "fetanagent-admin@$STAGING_VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper discard '$GITHUB_SHA'" || remote_status=$?
+            "$remote_command" || remote_status=$?
+          if [[ "$predecessor_mode" == 'true' ]]; then
+            case "$remote_status" in
+              0|192|193) ;;
+              *)
+                echo '::error::The exact predecessor proof boundary was not completed; database cleanup was not attempted.'
+                exit "$remote_status"
+                ;;
+            esac
+          fi
           psql -X --file=infra/sql/staging-runtimes-disable.sql
           if [[ "$remote_status" -ne 0 ]]; then
             echo '::error::Database logins were disabled, but the VM cleanup requires operator review.'

@@ -308,10 +308,12 @@ assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
 assert.match(workflow, /^\s+- transition-ssh-verify$/m);
 assert.match(workflow, /^\s+- transition-stop-legacy$/m);
+assert.match(workflow, /^\s+- predecessor-stop-and-disable$/m);
 assert.match(workflow, /stop-legacy-staging-runtime/);
+assert.match(workflow, /stop-current-staging-predecessor-runtime/);
 assert.match(
   workflow,
-  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|stop-and-disable\)\$/,
+  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|predecessor-stop-and-disable\|stop-and-disable\)\$/,
 );
 assert.match(workflow, /environment: staging/g);
 assert.match(workflow, /fetanagent-admin@/g);
@@ -463,7 +465,7 @@ assert.ok(validateTarget, 'The exact-target validation job must exist.');
 assert.match(validateTarget, /CONFIRMED_LEGACY_STOP: \$\{\{ inputs\.confirm_legacy_stop \}\}/);
 assert.match(
   validateTarget,
-  /if \[\[ "\$REQUESTED_MODE" == 'transition-stop-legacy' \]\]; then\s+\[\[ "\$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' \]\]\s+fi/u,
+  /if \[\[ "\$REQUESTED_MODE" == 'transition-stop-legacy' \]\]; then\s+\[\[ "\$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' \]\]\s+elif \[\[ "\$REQUESTED_MODE" == 'predecessor-stop-and-disable' \]\]; then\s+\[\[ "\$CONFIRMED_LEGACY_STOP" == 'stop-current-staging-predecessor-runtime' \]\]\s+else\s+\[\[ -z "\$CONFIRMED_LEGACY_STOP" \]\]\s+fi/u,
 );
 
 const transitionSshVerify =
@@ -693,6 +695,45 @@ assert.doesNotMatch(
   /network-bans remove|--db-unban-ip/,
   'Deploy mode must never mutate the Supabase network-ban list.',
 );
+const stopJob = /\n  stop:\n([\s\S]*)$/u.exec(workflow)?.[1];
+assert.ok(stopJob, 'The staging stop job must exist.');
+assert.match(
+  stopJob,
+  /if: inputs\.mode == 'predecessor-stop-and-disable' \|\| inputs\.mode == 'stop-and-disable'/,
+);
+assert.match(stopJob, /REQUESTED_MODE: \$\{\{ inputs\.mode \}\}/);
+assert.match(stopJob, /if \[\[ "\$REQUESTED_MODE" == 'predecessor-stop-and-disable' \]\]; then/u);
+assert.match(
+  stopJob,
+  /helper_sha='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'/,
+);
+assert.match(stopJob, /release_sha='8f58ff06425160835c94801e564fa6f9066d0930'/);
+assert.match(stopJob, /predecessor_mode='true'/);
+assert.match(stopJob, /else\s+\[\[ "\$REQUESTED_MODE" == 'stop-and-disable' \]\]\s+fi/u);
+assert.match(stopJob, /956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583/);
+assert.match(
+  stopJob,
+  /fetanagent-staging-deploy-helper verify '\$helper_sha' && sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper stop && sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper discard '\$release_sha'/,
+);
+assert.match(
+  stopJob,
+  /test \\"\\\$\(id -u\)\\" -ne 0 \|\| exit 190; sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper verify '\$helper_sha' \|\| exit 191; sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper stop \|\| exit 192; sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper discard '\$release_sha' \|\| exit 193/,
+);
+assert.match(stopJob, /psql -X --file=infra\/sql\/staging-runtimes-disable\.sql/);
+assert.ok(
+  stopJob.indexOf('0|192|193) ;;') <
+    stopJob.indexOf('psql -X --file=infra/sql/staging-runtimes-disable.sql'),
+  'Only a completed predecessor proof or explicitly mapped post-proof failure may reach database cleanup.',
+);
+assert.doesNotMatch(
+  stopJob,
+  /network-bans|--db-unban-ip|fetanagent-staging-deploy-helper (?:install|fresh-start|start-bot|start-public-edge|start-kemerbet-session-provision)/,
+  'The predecessor cleanup path must only stop the fixed project, discard its exact release, and disable runtime logins.',
+);
+assert.match(stagingRunbook, /`predecessor-stop-and-disable`/u);
+assert.match(stagingRunbook, /`stop-current-staging-predecessor-runtime`/u);
+assert.match(stagingRunbook, /`022a9f10` predecessor deployment/u);
+assert.match(stagingRunbook, /8f58ff06425160835c94801e564fa6f9066d0930/u);
 assert.ok(
   workflow.indexOf('Stop any prior staging project and disable old logins') <
     workflow.indexOf('Verify the fresh-host deployment boundary is empty') &&

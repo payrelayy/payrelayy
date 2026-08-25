@@ -84,7 +84,8 @@ LABEL org.opencontainers.image.title="fetanagent-owner-control" \
 
 USER root
 
-RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control
+RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control \
+  && install -d -o root -g root -m 0755 /run/fetanagent-kemerbet-readiness-cohort-receipts
 
 USER 10001:10001
 

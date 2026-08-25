@@ -65,6 +65,12 @@ services:
       - type: volume
         source: kemerbet_session_control
         target: /run/fetanagent-kemerbet-session-control
+      - type: bind
+        source: /var/lib/fetanagent/kemerbet-readiness-cohort-receipts
+        target: /run/fetanagent-kemerbet-readiness-cohort-receipts
+        read_only: true
+        bind:
+          create_host_path: false
     secrets:
       - source: owner_control_database_url
         target: owner_control_database_url

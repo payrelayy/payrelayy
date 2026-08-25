@@ -186,7 +186,22 @@ assert.doesNotMatch(ownerService, /TELEGRAM_BOT_ENABLED: 'true'/);
 const ownerVolumes = servicePropertyBlock(ownerService, 'volumes');
 assert.match(ownerVolumes, /source: kemerbet_session_control/);
 assert.match(ownerVolumes, /target: \/run\/fetanagent-kemerbet-session-control/);
+assert.match(
+  ownerVolumes,
+  /type: bind\s*\r?\n\s+source: \/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts\s*\r?\n\s+target: \/run\/fetanagent-kemerbet-readiness-cohort-receipts\s*\r?\n\s+read_only: true\s*\r?\n\s+bind:\s*\r?\n\s+create_host_path: false/,
+);
 assert.doesNotMatch(ownerVolumes, /kemerbet_sessions|docker\.sock|\/run\/secrets/);
+for (const service of [
+  kemerbetSessionService,
+  kemerbetRecheckService,
+  customerWebService,
+  gatewayService,
+  apiService,
+  betaService,
+  botService,
+]) {
+  assert.doesNotMatch(service, /kemerbet-readiness-cohort-receipts/);
+}
 
 assert.match(kemerbetSessionService, /profiles: \[kemerbet-session-provision\]/);
 assert.match(kemerbetSessionService, /platform: linux\/amd64/);
@@ -811,6 +826,10 @@ assert.match(betaImage, /HEALTHCHECK .*127\.0\.0\.1:3001\/readyz/);
 assert.match(betaImage, /CMD \["node", "apps\/beta-admission\/dist\/index\.js"\]/);
 assert.doesNotMatch(botImage, /HEALTHCHECK/);
 assert.match(botImage, /CMD \["node", "apps\/bot\/dist\/index\.js"\]/);
+assert.match(
+  adminImage,
+  /install -d -o root -g root -m 0755 \/run\/fetanagent-kemerbet-readiness-cohort-receipts/,
+);
 assert.match(adminImage, /127\.0\.0\.1:3002\/readyz/);
 assert.match(adminImage, /CMD \["node", "apps\/admin\/dist\/index\.js"\]/);
 const apiImage = dockerfile.split('FROM runtime-base AS api')[1];

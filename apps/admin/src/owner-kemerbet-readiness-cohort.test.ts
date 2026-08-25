@@ -1,10 +1,14 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import {
   chmod,
+  chown,
   link,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   symlink,
   unlink,
@@ -80,11 +84,22 @@ describe('Owner KemerBet readiness-cohort derivation', () => {
     );
 
     expect(source).toContain("const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';");
+    expect(source).toContain(
+      "const RECEIPT_ROOT = '/run/fetanagent-kemerbet-readiness-cohort-receipts';",
+    );
+    expect(source).toContain(
+      'const COMPLETED_CLAIM = `${RECEIPT_ROOT}/kemerbet-readiness-cohort-completed-v1`;',
+    );
+    expect(source).not.toContain(
+      'const COMPLETED_CLAIM = `${CONTROL_ROOT}/kemerbet-readiness-cohort-completed-v1`;',
+    );
     expect(source).toContain('kemerbet-readiness-player-ids.stage-v1');
     expect(source).toContain('kemerbet-readiness-cohort-claim.stage-v1');
     expect(source).toContain('kemerbet-readiness-cohort-imported-v1');
     expect(source).toContain('kemerbet-readiness-cohort-completed-v1');
     expect(source).toContain('kemerbet-readiness-cohort-failed-v1');
+    expect(source).toContain('kemerbet-readiness-recovery-in-progress-or-failed-v1');
+    expect(source).toContain('.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing');
     expect(source).not.toContain('.stage-v1.${requestId}');
     expect(source).toContain("process.env.NODE_ENV !== 'test'");
     expect(source).toContain("process.platform !== 'linux'");
@@ -366,6 +381,8 @@ interface LinuxBoundary {
     readonly imported: string;
     readonly importedInstalling: string;
   };
+  readonly controlRoot: string;
+  readonly receiptRoot: string;
   readonly root: string;
 }
 
@@ -374,21 +391,28 @@ const linuxRoots: string[] = [];
 async function linuxBoundary(): Promise<LinuxBoundary> {
   const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-cohort-'));
   linuxRoots.push(root);
-  await chmod(root, 0o700);
+  const controlRoot = join(root, 'control');
+  const receiptRoot = join(root, 'receipts');
+  await mkdir(controlRoot, { mode: 0o700 });
+  await mkdir(receiptRoot, { mode: 0o555 });
+  await chmod(controlRoot, 0o700);
+  await chmod(receiptRoot, 0o555);
   return {
-    control: createFileOwnerKemerbetReadinessCohortControlForLinuxTests(root),
+    control: createFileOwnerKemerbetReadinessCohortControlForLinuxTests(controlRoot, receiptRoot),
+    controlRoot,
     paths: {
-      claim: join(root, 'kemerbet-readiness-cohort-claim.stage-v1'),
-      claimInstalling: join(root, '.kemerbet-readiness-cohort-claim.stage-v1.installing'),
-      cohort: join(root, 'kemerbet-readiness-player-ids.stage-v1'),
-      cohortInstalling: join(root, '.kemerbet-readiness-player-ids.stage-v1.installing'),
-      completed: join(root, 'kemerbet-readiness-cohort-completed-v1'),
-      completedInstalling: join(root, '.kemerbet-readiness-cohort-completed-v1.installing'),
-      failed: join(root, 'kemerbet-readiness-cohort-failed-v1'),
-      failedInstalling: join(root, '.kemerbet-readiness-cohort-failed-v1.installing'),
-      imported: join(root, 'kemerbet-readiness-cohort-imported-v1'),
-      importedInstalling: join(root, '.kemerbet-readiness-cohort-imported-v1.installing'),
+      claim: join(controlRoot, 'kemerbet-readiness-cohort-claim.stage-v1'),
+      claimInstalling: join(controlRoot, '.kemerbet-readiness-cohort-claim.stage-v1.installing'),
+      cohort: join(controlRoot, 'kemerbet-readiness-player-ids.stage-v1'),
+      cohortInstalling: join(controlRoot, '.kemerbet-readiness-player-ids.stage-v1.installing'),
+      completed: join(receiptRoot, 'kemerbet-readiness-cohort-completed-v1'),
+      completedInstalling: join(receiptRoot, '.kemerbet-readiness-cohort-completed-v1.installing'),
+      failed: join(receiptRoot, 'kemerbet-readiness-cohort-failed-v1'),
+      failedInstalling: join(receiptRoot, '.kemerbet-readiness-cohort-failed-v1.installing'),
+      imported: join(receiptRoot, 'kemerbet-readiness-cohort-imported-v1'),
+      importedInstalling: join(receiptRoot, '.kemerbet-readiness-cohort-imported-v1.installing'),
     },
+    receiptRoot,
     root,
   };
 }
@@ -396,6 +420,27 @@ async function linuxBoundary(): Promise<LinuxBoundary> {
 async function writeExact(path: string, content: Buffer, mode: number): Promise<void> {
   await writeFile(path, content, { flag: 'wx', mode });
   await chmod(path, mode);
+}
+
+async function mutateReceiptRoot<T>(
+  boundary: LinuxBoundary,
+  mutation: () => Promise<T>,
+): Promise<T> {
+  await chmod(boundary.receiptRoot, 0o755);
+  try {
+    return await mutation();
+  } finally {
+    await chmod(boundary.receiptRoot, 0o555);
+  }
+}
+
+async function writeReceiptExact(
+  boundary: LinuxBoundary,
+  path: string,
+  content: Buffer,
+  mode: number,
+): Promise<void> {
+  await mutateReceiptRoot(boundary, async () => writeExact(path, content, mode));
 }
 
 async function expectExactFile(path: string, content: Buffer, mode: number): Promise<void> {
@@ -430,6 +475,36 @@ describe.skipIf(process.platform !== 'linux')(
       await Promise.all(roots.map(async (root) => rm(root, { force: true, recursive: true })));
     });
 
+    it('rejects either boundary root nested beneath the other root', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-overlap-'));
+      linuxRoots.push(root);
+      const controlRoot = join(root, 'control');
+      const nestedReceiptRoot = join(controlRoot, 'receipts');
+      await mkdir(nestedReceiptRoot, { recursive: true });
+
+      expect(() =>
+        createFileOwnerKemerbetReadinessCohortControlForLinuxTests(controlRoot, nestedReceiptRoot),
+      ).toThrow(OwnerKemerbetReadinessCohortUnavailableError);
+      expect(() =>
+        createFileOwnerKemerbetReadinessCohortControlForLinuxTests(nestedReceiptRoot, controlRoot),
+      ).toThrow(OwnerKemerbetReadinessCohortUnavailableError);
+    });
+
+    it('rejects a descendant whose basename begins with two dots', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-dotdot-name-'));
+      linuxRoots.push(root);
+      const controlRoot = join(root, 'control');
+      const deceptiveReceiptRoot = join(controlRoot, '..receipts');
+      await mkdir(deceptiveReceiptRoot, { recursive: true });
+
+      expect(() =>
+        createFileOwnerKemerbetReadinessCohortControlForLinuxTests(
+          controlRoot,
+          deceptiveReceiptRoot,
+        ),
+      ).toThrow(OwnerKemerbetReadinessCohortUnavailableError);
+    });
+
     it('atomically stages one exact service-owned Player/claim pair and is inode-idempotent', async () => {
       const { control, paths } = await linuxBoundary();
 
@@ -456,6 +531,39 @@ describe.skipIf(process.platform !== 'linux')(
       });
       expect((await lstat(paths.claim)).ino).toBe(claimIdentity.ino);
       expect((await lstat(paths.cohort)).ino).toBe(cohortIdentity.ino);
+    });
+
+    it('fails closed if a valid root receipt appears after both stage files are sealed', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-prepare-receipt-race-'));
+      linuxRoots.push(root);
+      const controlRoot = join(root, 'control');
+      const receiptRoot = join(root, 'receipts');
+      const claim = join(controlRoot, 'kemerbet-readiness-cohort-claim.stage-v1');
+      const cohort = join(controlRoot, 'kemerbet-readiness-player-ids.stage-v1');
+      const imported = join(receiptRoot, 'kemerbet-readiness-cohort-imported-v1');
+      await mkdir(controlRoot, { mode: 0o700 });
+      await mkdir(receiptRoot, { mode: 0o555 });
+      await chmod(controlRoot, 0o700);
+      await chmod(receiptRoot, 0o555);
+      const control = createFileOwnerKemerbetReadinessCohortControlForLinuxTests(
+        controlRoot,
+        receiptRoot,
+        async () => {
+          await chmod(receiptRoot, 0o755);
+          try {
+            await writeExact(imported, CLAIM_CONTENT, 0o440);
+          } finally {
+            await chmod(receiptRoot, 0o555);
+          }
+        },
+      );
+
+      await expect(control.prepare(exactFive(), REQUEST_ID, CLAIM_ID)).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+      await expectExactFile(claim, CLAIM_CONTENT, 0o400);
+      await expectExactFile(cohort, PLAYER_CONTENT, 0o400);
+      await expectExactFile(imported, CLAIM_CONTENT, 0o440);
     });
 
     it('serializes concurrent preparations without taking over a live partial installer', async () => {
@@ -559,7 +667,7 @@ describe.skipIf(process.platform !== 'linux')(
       expect((await readFile(target)).toString()).toBe('unchanged');
 
       const wrongRoot = await linuxBoundary();
-      await chmod(wrongRoot.root, 0o750);
+      await chmod(wrongRoot.controlRoot, 0o750);
       await expect(
         wrongRoot.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID),
       ).rejects.toBeInstanceOf(OwnerKemerbetReadinessCohortUnavailableError);
@@ -574,13 +682,14 @@ describe.skipIf(process.platform !== 'linux')(
 
     it('returns an exact imported receipt for each allowed frozen/consumed stage state', async () => {
       for (const consumed of ['neither', 'claim', 'cohort', 'both'] as const) {
-        const { control, paths } = await linuxBoundary();
+        const boundary = await linuxBoundary();
+        const { control, paths } = boundary;
         await control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
         await chmod(paths.claim, 0o444);
         await chmod(paths.cohort, 0o444);
         if (consumed === 'claim' || consumed === 'both') await unlink(paths.claim);
         if (consumed === 'cohort' || consumed === 'both') await unlink(paths.cohort);
-        await writeExact(paths.imported, CLAIM_CONTENT, 0o440);
+        await writeReceiptExact(boundary, paths.imported, CLAIM_CONTENT, 0o440);
 
         await expect(control.rootReceipt()).resolves.toEqual({
           claimId: CLAIM_ID,
@@ -591,8 +700,9 @@ describe.skipIf(process.platform !== 'linux')(
     });
 
     it('returns completed only for an exact marker with every stage artifact absent', async () => {
-      const { control, paths } = await linuxBoundary();
-      await writeExact(paths.completed, CLAIM_CONTENT, 0o440);
+      const boundary = await linuxBoundary();
+      const { control, paths } = boundary;
+      await writeReceiptExact(boundary, paths.completed, CLAIM_CONTENT, 0o440);
 
       await expect(control.rootReceipt()).resolves.toEqual({
         claimId: CLAIM_ID,
@@ -604,7 +714,7 @@ describe.skipIf(process.platform !== 'linux')(
       );
 
       const residue = await linuxBoundary();
-      await writeExact(residue.paths.completed, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(residue, residue.paths.completed, CLAIM_CONTENT, 0o440);
       await writeExact(residue.paths.claim, CLAIM_CONTENT, 0o400);
       await expect(residue.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
@@ -612,9 +722,10 @@ describe.skipIf(process.platform !== 'linux')(
     });
 
     it('returns retryable_failed only with the exact restored service-owned pair', async () => {
-      const { control, paths } = await linuxBoundary();
+      const boundary = await linuxBoundary();
+      const { control, paths } = boundary;
       await control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
-      await writeExact(paths.failed, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(boundary, paths.failed, CLAIM_CONTENT, 0o440);
 
       await expect(control.rootReceipt()).resolves.toEqual({
         claimId: CLAIM_ID,
@@ -630,7 +741,7 @@ describe.skipIf(process.platform !== 'linux')(
     it('rejects imported service-owned files, invalid Player content, and claim mismatch', async () => {
       const serviceOwned = await linuxBoundary();
       await serviceOwned.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
-      await writeExact(serviceOwned.paths.imported, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(serviceOwned, serviceOwned.paths.imported, CLAIM_CONTENT, 0o440);
       await expect(serviceOwned.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
@@ -642,7 +753,7 @@ describe.skipIf(process.platform !== 'linux')(
         Buffer.from('PLAYER_1\nPLAYER_2\nPLAYER_3\nPLAYER_4\nPLAYER_4\n'),
         0o444,
       );
-      await writeExact(malformed.paths.imported, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(malformed, malformed.paths.imported, CLAIM_CONTENT, 0o440);
       await expect(malformed.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortRejectedError,
       );
@@ -650,7 +761,7 @@ describe.skipIf(process.platform !== 'linux')(
       const mismatch = await linuxBoundary();
       await writeExact(mismatch.paths.claim, Buffer.from(`${OTHER_CLAIM_ID}\n`, 'ascii'), 0o444);
       await writeExact(mismatch.paths.cohort, PLAYER_CONTENT, 0o444);
-      await writeExact(mismatch.paths.imported, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(mismatch, mismatch.paths.imported, CLAIM_CONTENT, 0o440);
       await expect(mismatch.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortRejectedError,
       );
@@ -658,26 +769,27 @@ describe.skipIf(process.platform !== 'linux')(
 
     it('fails closed on conflicting markers, marker installers, unsafe metadata, and links', async () => {
       const conflict = await linuxBoundary();
-      await writeExact(conflict.paths.imported, CLAIM_CONTENT, 0o440);
-      await writeExact(conflict.paths.failed, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(conflict, conflict.paths.imported, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(conflict, conflict.paths.failed, CLAIM_CONTENT, 0o440);
       await expect(conflict.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
 
       const installer = await linuxBoundary();
-      await writeExact(installer.paths.completedInstalling, CLAIM_CONTENT, 0o440);
+      await writeReceiptExact(installer, installer.paths.completedInstalling, CLAIM_CONTENT, 0o440);
       await expect(installer.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
 
       const wrongMode = await linuxBoundary();
-      await writeExact(wrongMode.paths.completed, CLAIM_CONTENT, 0o400);
+      await writeReceiptExact(wrongMode, wrongMode.paths.completed, CLAIM_CONTENT, 0o400);
       await expect(wrongMode.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
 
       const noncanonical = await linuxBoundary();
-      await writeExact(
+      await writeReceiptExact(
+        noncanonical,
         noncanonical.paths.completed,
         Buffer.from('ABCDEFAB-CDEF-4ABC-8ABC-ABCDEFABCDEF\n', 'ascii'),
         0o440,
@@ -687,8 +799,10 @@ describe.skipIf(process.platform !== 'linux')(
       );
 
       const linked = await linuxBoundary();
-      await writeExact(linked.paths.completed, CLAIM_CONTENT, 0o440);
-      await link(linked.paths.completed, join(linked.root, 'extra-hard-link'));
+      await writeReceiptExact(linked, linked.paths.completed, CLAIM_CONTENT, 0o440);
+      await mutateReceiptRoot(linked, async () =>
+        link(linked.paths.completed, join(linked.receiptRoot, 'extra-hard-link')),
+      );
       await expect(linked.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
@@ -696,7 +810,7 @@ describe.skipIf(process.platform !== 'linux')(
       const symbolic = await linuxBoundary();
       const target = join(symbolic.root, 'marker-target');
       await writeExact(target, CLAIM_CONTENT, 0o440);
-      await symlink(target, symbolic.paths.completed);
+      await mutateReceiptRoot(symbolic, async () => symlink(target, symbolic.paths.completed));
       await expect(symbolic.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
@@ -706,6 +820,113 @@ describe.skipIf(process.platform !== 'linux')(
       const { control } = await linuxBoundary();
       await expect(control.rootReceipt()).resolves.toBeUndefined();
     });
+
+    it('rejects an unsafe or non-exact receipt-root namespace', async () => {
+      const unsafeMode = await linuxBoundary();
+      await chmod(unsafeMode.receiptRoot, 0o755);
+      await expect(unsafeMode.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const residue = await linuxBoundary();
+      await mutateReceiptRoot(residue, async () =>
+        writeExact(join(residue.receiptRoot, 'unexpected'), Buffer.from('fixed'), 0o440),
+      );
+      await expect(residue.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const legacy = await linuxBoundary();
+      await writeExact(
+        join(legacy.controlRoot, 'kemerbet-readiness-cohort-completed-v1'),
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(legacy.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+    });
+
+    it('cannot reclassify an aggregate receipt through its service-visible directory', async () => {
+      const boundary = await linuxBoundary();
+      await boundary.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
+      await chmod(boundary.paths.claim, 0o444);
+      await chmod(boundary.paths.cohort, 0o444);
+      await writeReceiptExact(boundary, boundary.paths.imported, CLAIM_CONTENT, 0o440);
+
+      expect((await lstat(boundary.receiptRoot)).mode & 0o7777).toBe(0o555);
+      if (process.geteuid?.() !== 0) {
+        await expect(
+          rename(boundary.paths.imported, boundary.paths.completed),
+        ).rejects.toMatchObject({ code: 'EACCES' });
+        await expect(unlink(boundary.paths.imported)).rejects.toMatchObject({ code: 'EACCES' });
+        await expect(
+          writeFile(boundary.paths.failed, CLAIM_CONTENT, { flag: 'wx', mode: 0o440 }),
+        ).rejects.toMatchObject({ code: 'EACCES' });
+        await expect(
+          link(boundary.paths.imported, join(boundary.receiptRoot, 'reclassified-hardlink')),
+        ).rejects.toMatchObject({ code: 'EACCES' });
+        await expect(
+          symlink(boundary.paths.imported, join(boundary.receiptRoot, 'reclassified-symlink')),
+        ).rejects.toMatchObject({ code: 'EACCES' });
+      }
+      await expect(boundary.control.rootReceipt()).resolves.toEqual({
+        claimId: CLAIM_ID,
+        event: 'imported',
+      });
+      await expect(lstat(boundary.paths.completed)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(lstat(boundary.paths.failed)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it.skipIf(process.geteuid?.() !== 0)(
+      'denies UID 10001 every receipt-directory mutation while preserving marker readability',
+      async () => {
+        const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-receipt-dac-'));
+        linuxRoots.push(root);
+        const receiptRoot = join(root, 'receipts');
+        const imported = join(receiptRoot, 'kemerbet-readiness-cohort-imported-v1');
+        await chmod(root, 0o755);
+        await mkdir(receiptRoot, { mode: 0o755 });
+        await writeFile(imported, CLAIM_CONTENT, { flag: 'wx', mode: 0o440 });
+        await chown(imported, 0, 10_001);
+        await chmod(imported, 0o440);
+
+        const child = spawnSync(
+          process.execPath,
+          [
+            '-e',
+            String.raw`
+              const fs = require('node:fs');
+              const [root, imported, claim] = process.argv.slice(1);
+              if (fs.readFileSync(imported, 'ascii') !== claim + '\n') process.exit(2);
+              const attempts = [
+                () => fs.renameSync(imported, root + '/kemerbet-readiness-cohort-completed-v1'),
+                () => fs.unlinkSync(imported),
+                () => fs.writeFileSync(root + '/kemerbet-readiness-cohort-failed-v1', claim + '\n', { flag: 'wx' }),
+                () => fs.linkSync(imported, root + '/reclassified-hardlink'),
+                () => fs.symlinkSync(imported, root + '/reclassified-symlink'),
+              ];
+              for (const attempt of attempts) {
+                try { attempt(); process.exit(3); }
+                catch (error) {
+                  if (!error || !['EACCES', 'EPERM', 'EROFS'].includes(error.code)) process.exit(4);
+                }
+              }
+            `,
+            receiptRoot,
+            imported,
+            CLAIM_ID,
+          ],
+          { encoding: 'utf8', gid: 10_001, uid: 10_001 },
+        );
+
+        expect(child.status).toBe(0);
+        expect(child.stdout).toBe('');
+        expect(child.stderr).toBe('');
+        expect(await readFile(imported)).toEqual(CLAIM_CONTENT);
+        expect((await lstat(imported)).nlink).toBe(1);
+      },
+    );
 
     it('never places request, claim, or Player identifiers into error messages', async () => {
       const { control, paths } = await linuxBoundary();
@@ -726,13 +947,38 @@ describe.skipIf(process.platform !== 'linux')(
     });
 
     it('keeps every marker-install path observable to conflict scans', async () => {
-      const { control, paths } = await linuxBoundary();
+      const boundary = await linuxBoundary();
+      const { control, paths } = boundary;
       for (const path of [paths.importedInstalling, paths.failedInstalling]) {
-        await writeExact(path, CLAIM_CONTENT, 0o440);
+        await writeReceiptExact(boundary, path, CLAIM_CONTENT, 0o440);
         await expect(control.rootReceipt()).rejects.toBeInstanceOf(
           OwnerKemerbetReadinessCohortUnavailableError,
         );
-        await removeIfPresent(path);
+        await mutateReceiptRoot(boundary, async () => removeIfPresent(path));
+      }
+    });
+
+    it('blocks reconciliation and preparation on a recovery latch or its crash installer', async () => {
+      const boundary = await linuxBoundary();
+      for (const basename of [
+        'kemerbet-readiness-recovery-in-progress-or-failed-v1',
+        '.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing',
+      ]) {
+        const path = join(boundary.receiptRoot, basename);
+        await mutateReceiptRoot(boundary, async () =>
+          writeExact(
+            path,
+            Buffer.from('fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n'),
+            0o400,
+          ),
+        );
+        await expect(boundary.control.rootReceipt()).rejects.toBeInstanceOf(
+          OwnerKemerbetReadinessCohortUnavailableError,
+        );
+        await expect(
+          boundary.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID),
+        ).rejects.toBeInstanceOf(OwnerKemerbetReadinessCohortUnavailableError);
+        await mutateReceiptRoot(boundary, async () => removeIfPresent(path));
       }
     });
   },

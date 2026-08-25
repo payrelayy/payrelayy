@@ -1,22 +1,23 @@
 import { timingSafeEqual } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
-import { link, lstat, open, realpath, unlink } from 'node:fs/promises';
+import { link, lstat, open, readdir, realpath, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 import type { OwnerPlayerDepositEligibilityRecord } from './owner-player-deposit-eligibility.js';
 
 const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';
+const RECEIPT_ROOT = '/run/fetanagent-kemerbet-readiness-cohort-receipts';
 const STAGED_COHORT = `${CONTROL_ROOT}/kemerbet-readiness-player-ids.stage-v1`;
 const INSTALLING_COHORT = `${CONTROL_ROOT}/.kemerbet-readiness-player-ids.stage-v1.installing`;
 const STAGED_CLAIM = `${CONTROL_ROOT}/kemerbet-readiness-cohort-claim.stage-v1`;
 const INSTALLING_CLAIM = `${CONTROL_ROOT}/.kemerbet-readiness-cohort-claim.stage-v1.installing`;
-const IMPORTED_CLAIM = `${CONTROL_ROOT}/kemerbet-readiness-cohort-imported-v1`;
-const INSTALLING_IMPORTED_CLAIM = `${CONTROL_ROOT}/.kemerbet-readiness-cohort-imported-v1.installing`;
-const COMPLETED_CLAIM = `${CONTROL_ROOT}/kemerbet-readiness-cohort-completed-v1`;
-const INSTALLING_COMPLETED_CLAIM = `${CONTROL_ROOT}/.kemerbet-readiness-cohort-completed-v1.installing`;
-const FAILED_CLAIM = `${CONTROL_ROOT}/kemerbet-readiness-cohort-failed-v1`;
-const INSTALLING_FAILED_CLAIM = `${CONTROL_ROOT}/.kemerbet-readiness-cohort-failed-v1.installing`;
+const IMPORTED_CLAIM = `${RECEIPT_ROOT}/kemerbet-readiness-cohort-imported-v1`;
+const INSTALLING_IMPORTED_CLAIM = `${RECEIPT_ROOT}/.kemerbet-readiness-cohort-imported-v1.installing`;
+const COMPLETED_CLAIM = `${RECEIPT_ROOT}/kemerbet-readiness-cohort-completed-v1`;
+const INSTALLING_COMPLETED_CLAIM = `${RECEIPT_ROOT}/.kemerbet-readiness-cohort-completed-v1.installing`;
+const FAILED_CLAIM = `${RECEIPT_ROOT}/kemerbet-readiness-cohort-failed-v1`;
+const INSTALLING_FAILED_CLAIM = `${RECEIPT_ROOT}/.kemerbet-readiness-cohort-failed-v1.installing`;
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const RECORD_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -24,6 +25,18 @@ const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const EXPECTED_EFFECTIVE_USER_ID = 10_001;
 const EXPECTED_EFFECTIVE_GROUP_ID = 10_001;
 const MAX_COHORT_BYTES = 1_024;
+const RECEIPT_BASENAMES = new Set([
+  'kemerbet-readiness-cohort-imported-v1',
+  '.kemerbet-readiness-cohort-imported-v1.installing',
+  'kemerbet-readiness-cohort-completed-v1',
+  '.kemerbet-readiness-cohort-completed-v1.installing',
+  'kemerbet-readiness-cohort-failed-v1',
+  '.kemerbet-readiness-cohort-failed-v1.installing',
+]);
+const RECOVERY_BLOCKING_BASENAMES = new Set([
+  'kemerbet-readiness-recovery-in-progress-or-failed-v1',
+  '.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing',
+]);
 
 interface OwnerKemerbetReadinessFileBoundary {
   readonly completedClaim: string;
@@ -37,6 +50,10 @@ interface OwnerKemerbetReadinessFileBoundary {
   readonly installingImportedClaim: string;
   readonly processGroupId: number;
   readonly processUserId: number;
+  readonly receiptRoot: string;
+  readonly receiptRootGroupId: number;
+  readonly receiptRootMode: number;
+  readonly receiptRootUserId: number;
   readonly stagedClaim: string;
   readonly stagedCohort: string;
   readonly completedClaimGroupId: number;
@@ -47,29 +64,37 @@ interface OwnerKemerbetReadinessFileBoundary {
 
 function fileBoundary(
   controlRoot: string,
+  receiptRoot: string,
   processUserId: number,
   processGroupId: number,
   completedClaimUserId: number,
   completedClaimGroupId: number,
   frozenStageUserId: number,
   frozenStageGroupId: number,
+  receiptRootUserId: number,
+  receiptRootGroupId: number,
+  receiptRootMode: number,
 ): OwnerKemerbetReadinessFileBoundary {
   return {
-    completedClaim: `${controlRoot}/kemerbet-readiness-cohort-completed-v1`,
+    completedClaim: `${receiptRoot}/kemerbet-readiness-cohort-completed-v1`,
     completedClaimGroupId,
     completedClaimUserId,
     controlRoot,
-    failedClaim: `${controlRoot}/kemerbet-readiness-cohort-failed-v1`,
+    failedClaim: `${receiptRoot}/kemerbet-readiness-cohort-failed-v1`,
     frozenStageGroupId,
     frozenStageUserId,
-    importedClaim: `${controlRoot}/kemerbet-readiness-cohort-imported-v1`,
+    importedClaim: `${receiptRoot}/kemerbet-readiness-cohort-imported-v1`,
     installingClaim: `${controlRoot}/.kemerbet-readiness-cohort-claim.stage-v1.installing`,
     installingCohort: `${controlRoot}/.kemerbet-readiness-player-ids.stage-v1.installing`,
-    installingCompletedClaim: `${controlRoot}/.kemerbet-readiness-cohort-completed-v1.installing`,
-    installingFailedClaim: `${controlRoot}/.kemerbet-readiness-cohort-failed-v1.installing`,
-    installingImportedClaim: `${controlRoot}/.kemerbet-readiness-cohort-imported-v1.installing`,
+    installingCompletedClaim: `${receiptRoot}/.kemerbet-readiness-cohort-completed-v1.installing`,
+    installingFailedClaim: `${receiptRoot}/.kemerbet-readiness-cohort-failed-v1.installing`,
+    installingImportedClaim: `${receiptRoot}/.kemerbet-readiness-cohort-imported-v1.installing`,
     processGroupId,
     processUserId,
+    receiptRoot,
+    receiptRootGroupId,
+    receiptRootMode,
+    receiptRootUserId,
     stagedClaim: `${controlRoot}/kemerbet-readiness-cohort-claim.stage-v1`,
     stagedCohort: `${controlRoot}/kemerbet-readiness-player-ids.stage-v1`,
   };
@@ -91,6 +116,10 @@ const PRODUCTION_FILE_BOUNDARY: OwnerKemerbetReadinessFileBoundary = {
   installingImportedClaim: INSTALLING_IMPORTED_CLAIM,
   processGroupId: EXPECTED_EFFECTIVE_GROUP_ID,
   processUserId: EXPECTED_EFFECTIVE_USER_ID,
+  receiptRoot: RECEIPT_ROOT,
+  receiptRootGroupId: 0,
+  receiptRootMode: 0o755,
+  receiptRootUserId: 0,
   stagedClaim: STAGED_CLAIM,
   stagedCohort: STAGED_COHORT,
 };
@@ -548,6 +577,59 @@ async function assertControlRoot(boundary: OwnerKemerbetReadinessFileBoundary): 
     throw new OwnerKemerbetReadinessCohortUnavailableError();
   }
   return after;
+}
+
+async function assertReceiptRoot(boundary: OwnerKemerbetReadinessFileBoundary): Promise<Stats> {
+  const before = await lstat(boundary.receiptRoot);
+  if (
+    boundary.receiptRoot === boundary.controlRoot ||
+    !before.isDirectory() ||
+    before.isSymbolicLink() ||
+    before.uid !== boundary.receiptRootUserId ||
+    before.gid !== boundary.receiptRootGroupId ||
+    (before.mode & 0o7777) !== boundary.receiptRootMode ||
+    (await realpath(boundary.receiptRoot)) !== boundary.receiptRoot
+  ) {
+    throw new OwnerKemerbetReadinessCohortUnavailableError();
+  }
+  const after = await lstat(boundary.receiptRoot);
+  if (!sameControlRoot(before, after)) {
+    throw new OwnerKemerbetReadinessCohortUnavailableError();
+  }
+  return after;
+}
+
+async function assertReceiptNamespace(boundary: OwnerKemerbetReadinessFileBoundary): Promise<void> {
+  const entries = await readdir(boundary.receiptRoot);
+  if (
+    entries.length > RECEIPT_BASENAMES.size ||
+    entries.some((entry) => RECOVERY_BLOCKING_BASENAMES.has(entry) || !RECEIPT_BASENAMES.has(entry))
+  ) {
+    throw new OwnerKemerbetReadinessCohortUnavailableError();
+  }
+}
+
+async function assertPrepareReceiptPathsAbsent(
+  boundary: OwnerKemerbetReadinessFileBoundary,
+): Promise<void> {
+  await Promise.all([
+    assertPathAbsent(boundary.importedClaim),
+    assertPathAbsent(boundary.installingImportedClaim),
+    assertPathAbsent(boundary.completedClaim),
+    assertPathAbsent(boundary.installingCompletedClaim),
+    assertPathAbsent(boundary.failedClaim),
+    assertPathAbsent(boundary.installingFailedClaim),
+  ]);
+}
+
+async function assertLegacyReceiptPathsAbsent(
+  boundary: OwnerKemerbetReadinessFileBoundary,
+): Promise<void> {
+  await Promise.all(
+    [...RECEIPT_BASENAMES].map((basename) =>
+      assertPathAbsent(`${boundary.controlRoot}/${basename}`),
+    ),
+  );
 }
 
 async function assertPathAbsent(path: string): Promise<void> {
@@ -1122,6 +1204,7 @@ function receipt(alreadyPrepared: boolean): OwnerKemerbetReadinessCohortReceipt 
 }
 
 export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetReadinessCohortControl {
+  private readonly afterStagingForLinuxTest: (() => Promise<void>) | undefined;
   private readonly boundary: OwnerKemerbetReadinessFileBoundary;
   private preparationTail: Promise<void> = Promise.resolve();
 
@@ -1129,12 +1212,15 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
   constructor(
     token: typeof LINUX_TEST_BOUNDARY_TOKEN,
     boundary: OwnerKemerbetReadinessFileBoundary,
+    afterStagingForLinuxTest?: () => Promise<void>,
   );
   constructor(
     token?: typeof LINUX_TEST_BOUNDARY_TOKEN,
     boundary?: OwnerKemerbetReadinessFileBoundary,
+    afterStagingForLinuxTest?: () => Promise<void>,
   ) {
-    if (token === undefined && boundary === undefined) {
+    if (token === undefined && boundary === undefined && afterStagingForLinuxTest === undefined) {
+      this.afterStagingForLinuxTest = undefined;
       this.boundary = PRODUCTION_FILE_BOUNDARY;
       return;
     }
@@ -1142,6 +1228,7 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
       throw new OwnerKemerbetReadinessCohortUnavailableError();
     }
     this.boundary = boundary;
+    this.afterStagingForLinuxTest = afterStagingForLinuxTest;
   }
 
   private assertProcessIdentity(): void {
@@ -1158,7 +1245,12 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
   async rootReceipt(): Promise<OwnerKemerbetReadinessRootReceipt | undefined> {
     this.assertProcessIdentity();
     try {
-      const rootBefore = await assertControlRoot(this.boundary);
+      const controlRootBefore = await assertControlRoot(this.boundary);
+      const receiptRootBefore = await assertReceiptRoot(this.boundary);
+      await Promise.all([
+        assertReceiptNamespace(this.boundary),
+        assertLegacyReceiptPathsAbsent(this.boundary),
+      ]);
       const first = await readRootClaimMarkerSet(this.boundary);
       if (first) await assertReceiptStageState(this.boundary, first);
       const second = await readRootClaimMarkerSet(this.boundary);
@@ -1166,7 +1258,14 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
         throw new OwnerKemerbetReadinessCohortUnavailableError();
       }
       if (second) await assertReceiptStageState(this.boundary, second);
-      if (!sameControlRoot(rootBefore, await assertControlRoot(this.boundary))) {
+      await Promise.all([
+        assertReceiptNamespace(this.boundary),
+        assertLegacyReceiptPathsAbsent(this.boundary),
+      ]);
+      if (
+        !sameControlRoot(controlRootBefore, await assertControlRoot(this.boundary)) ||
+        !sameControlRoot(receiptRootBefore, await assertReceiptRoot(this.boundary))
+      ) {
         throw new OwnerKemerbetReadinessCohortUnavailableError();
       }
       return second ? { claimId: second.claimId, event: second.event } : undefined;
@@ -1212,14 +1311,12 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
     await predecessor;
     try {
       const rootBefore = await assertControlRoot(this.boundary);
+      const receiptRootBefore = await assertReceiptRoot(this.boundary);
       await Promise.all([
-        assertPathAbsent(this.boundary.importedClaim),
-        assertPathAbsent(this.boundary.installingImportedClaim),
-        assertPathAbsent(this.boundary.completedClaim),
-        assertPathAbsent(this.boundary.installingCompletedClaim),
-        assertPathAbsent(this.boundary.failedClaim),
-        assertPathAbsent(this.boundary.installingFailedClaim),
+        assertReceiptNamespace(this.boundary),
+        assertLegacyReceiptPathsAbsent(this.boundary),
       ]);
+      await assertPrepareReceiptPathsAbsent(this.boundary);
       await assertInitialPairTopology(this.boundary);
       const claimAlreadyStaged = await installStagedControlFile(
         this.boundary,
@@ -1240,8 +1337,17 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
       await assertExactServiceFile(this.boundary, this.boundary.stagedCohort, content);
       await assertPathAbsent(this.boundary.installingClaim);
       await assertPathAbsent(this.boundary.installingCohort);
+      await this.afterStagingForLinuxTest?.();
       const rootAfter = await assertControlRoot(this.boundary);
       if (!sameControlRoot(rootBefore, rootAfter)) {
+        throw new OwnerKemerbetReadinessCohortUnavailableError();
+      }
+      await Promise.all([
+        assertReceiptNamespace(this.boundary),
+        assertLegacyReceiptPathsAbsent(this.boundary),
+        assertPrepareReceiptPathsAbsent(this.boundary),
+      ]);
+      if (!sameControlRoot(receiptRootBefore, await assertReceiptRoot(this.boundary))) {
         throw new OwnerKemerbetReadinessCohortUnavailableError();
       }
       return receipt(claimAlreadyStaged && cohortAlreadyStaged);
@@ -1266,22 +1372,42 @@ export class FileOwnerKemerbetReadinessCohortControl implements OwnerKemerbetRea
  */
 export function createFileOwnerKemerbetReadinessCohortControlForLinuxTests(
   controlRoot: string,
+  receiptRoot: string,
+  afterStagingForLinuxTest?: () => Promise<void>,
 ): FileOwnerKemerbetReadinessCohortControl {
   const effectiveUserId = process.geteuid?.();
   const effectiveGroupId = process.getegid?.();
   const temporaryRoot = resolve(tmpdir());
   const candidate = resolve(controlRoot);
+  const receiptCandidate = resolve(receiptRoot);
   const relativeCandidate = relative(temporaryRoot, candidate);
+  const relativeReceiptCandidate = relative(temporaryRoot, receiptCandidate);
+  const controlToReceipt = relative(candidate, receiptCandidate);
+  const receiptToControl = relative(receiptCandidate, candidate);
+  const escapesParent = (value: string): boolean => value === '..' || value.startsWith('../');
+  const isDescendant = (value: string): boolean =>
+    value !== '' && !escapesParent(value) && !isAbsolute(value);
+  const rootsOverlap =
+    controlToReceipt === '' ||
+    isDescendant(controlToReceipt) ||
+    receiptToControl === '' ||
+    isDescendant(receiptToControl);
   if (
     process.env.NODE_ENV !== 'test' ||
     process.platform !== 'linux' ||
     effectiveUserId === undefined ||
     effectiveGroupId === undefined ||
     !isAbsolute(controlRoot) ||
+    !isAbsolute(receiptRoot) ||
     candidate !== controlRoot ||
+    receiptCandidate !== receiptRoot ||
+    rootsOverlap ||
     candidate === temporaryRoot ||
-    relativeCandidate.startsWith('..') ||
-    isAbsolute(relativeCandidate)
+    receiptCandidate === temporaryRoot ||
+    escapesParent(relativeCandidate) ||
+    escapesParent(relativeReceiptCandidate) ||
+    isAbsolute(relativeCandidate) ||
+    isAbsolute(relativeReceiptCandidate)
   ) {
     throw new OwnerKemerbetReadinessCohortUnavailableError();
   }
@@ -1289,12 +1415,17 @@ export function createFileOwnerKemerbetReadinessCohortControlForLinuxTests(
     LINUX_TEST_BOUNDARY_TOKEN,
     fileBoundary(
       candidate,
+      receiptCandidate,
       effectiveUserId,
       effectiveGroupId,
       effectiveUserId,
       effectiveGroupId,
       effectiveUserId,
       effectiveGroupId,
+      effectiveUserId,
+      effectiveGroupId,
+      0o555,
     ),
+    afterStagingForLinuxTest,
   );
 }

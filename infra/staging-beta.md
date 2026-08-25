@@ -65,6 +65,20 @@ provider action. The recheck remains the existing lookup-only, transfer-blocked 
 not compare KemerBet balances or transaction history, so unrelated manual agent activity is not an
 import failure signal.
 
+The two Owner stages and the private socket remain in the service-owned read/write
+`kemerbet_session_control` volume. Aggregate finals and their hidden installers live only in the
+fixed host directory `/var/lib/fetanagent/kemerbet-readiness-cohort-receipts`. Every directory from
+`/` through `/var`, `/var/lib`, `/var/lib/fetanagent`, and the receipt root is a canonical,
+non-symbolic `root:root` directory with exact mode `0755`, so no service-writable ancestor can rename
+the boundary. Owner sees that directory only at
+`/run/fetanagent-kemerbet-readiness-cohort-receipts` through an exact read-only bind with implicit
+host-path creation disabled. Host DAC and the read-only mount therefore prevent UID 10001 from
+creating, unlinking, renaming, hard-linking, symlinking, or replacing a receipt or its directory;
+the helper is the only receipt publisher. All six legacy aggregate final/installer names must be
+absent from the Owner-writable session-control volume. The root-only detailed `ready-v1` receipt
+and promotion journal are never mounted into Owner. The helper preserves the root directory inode
+across stop/restart and never renames, removes, or recreates it while it can be bind-mounted.
+
 The exact crash-recovery topology is:
 
 - Before import, `kemerbet-readiness-player-ids.stage-v1` and
@@ -100,9 +114,66 @@ The exact crash-recovery topology is:
   same completed topology rather than retrying the browser probe.
 
 Every aggregate marker contains only the same UUID plus LF and uses a fixed hidden installer that
-the root journal can resume safely. An installer conflict, foreign UUID, symlink, hard link,
-unexpected owner/mode, or conflicting final marker fails closed. Operators must not print a stage
-file, marker UUID, journal digest, or binding digest during recovery.
+the root journal can resume safely. On retry cleanup, the journal-authorized guard rejects any
+completed installer/final, but normalizes an exact imported/failed crash prefix: an exact partial
+single-link installer is removed durably, while an exact two-link installer/final pair is reduced to
+its validated final before stage restoration continues. An installer conflict, foreign UUID,
+non-prefix content, symlink, unexpected hard link, unexpected owner/mode, or conflicting final marker
+fails closed. Operators must not print a stage file, marker UUID, journal digest, or binding digest
+during recovery.
+
+Every stop-family helper command (`stop`, systemd-only `expiry-stop`, `stop-bot`,
+`stop-kemerbet-session-provision`, and `stop-public-edge`) first validates its own arguments under
+the global mutation lock. Before any journal, candidate, stage, or aggregate-marker recovery
+mutation—or even creation of the latch installer—the helper first proves the exact Owner container
+is running with the protected receipt root mounted at the reviewed destination read-only and that no
+foreign container bind overlaps any ancestor or descendant of that root. Only then does it
+atomically publish and fsync the fixed root-owned
+`kemerbet-readiness-recovery-in-progress-or-failed-v1` write-ahead latch in the protected receipt
+root. The exact latch is `root:root`, mode `0400`, link count one, fixed non-sensitive content, and
+has a fixed crash installer with the same contract. Only the creating process, bound to that exact
+latch device/inode under the mutation lock, may call recovery marker transitions. The latch is
+removed and the receipt root fsynced only after recovery returns success, the promotion root is
+absent, and one explicit retired outcome is independently rechecked: the full committed receipt and
+binding boundary, the exact journal-derived retryable stage/failed-marker/source/key boundary, or an
+exact pre-journal/no-mutation boundary for an empty promotion root or one fixed journal temporary.
+Immediately before the latch unlink transaction, the helper re-proves that same live Owner,
+read-only mount, and no-overlapping-holder boundary; any liveness or holder change leaves the latch
+in place for manual remediation. Retirement is invoked through a Bash `||` error boundary, so the
+retirement function and every nested committed/retryable/pre-journal, control-volume, marker,
+singleton, and service-access validator explicitly propagate nonzero status before the unlink
+subprocess can start; they never rely on inherited `errexit` behavior.
+A crash, recovery failure, unsafe latch, or latch-removal failure leaves the latch (or its fail-closed
+installer) as a permanent manual-remediation guard. Explicit recheck, Owner
+preparation/reconciliation, every marker entry point, and every state-expanding helper command refuse
+a pre-existing or malformed latch.
+
+Latch-path presence alone is not treated as durable. Before emergency teardown the helper either has
+a successful file-and-directory-fsynced publisher result or descriptor-revalidates and fsyncs the
+fixed root-owned residue and its protected directory. If the protected receipt latch cannot be
+published or durably re-proved, the helper may create only the fixed
+`recovery-in-progress-or-failed-v1` fallback through its fixed hidden installer inside the exact
+unchanged root-owned promotion journal directory. That fallback publisher holds and rechecks the
+fixed `pending-v1` inode/content while it fsyncs the fallback file and directory. A partial fallback
+is durably re-proved by no-follow descriptor identity before teardown. Neither fallback name matches
+the journal temporary namespace, and generic promotion cleanup rejects either fallback before any
+delete. Every recovery and aggregate-marker entry point rejects any exact, partial, or malformed
+fallback, and no ordinary helper path removes it. If neither protected namespace can retain a
+durable block, recovery and teardown both stop before any additional mutation.
+
+If guarded recovery fails, the helper never performs another aggregate-marker transition and does
+not further mutate or delete the remaining aggregate markers, detailed receipt, candidate/stages, or
+other recovery evidence; the promotion journal/root and write-ahead latch remain to block restart.
+Regardless of which stop-family command was requested, it independently attempts full-project
+emergency container/network removal and deletion of every disposable credential, token, and startup
+receipt, then best-effort disarms expiry. It verifies the full project runtime and those disposable
+secrets absent, emits a fixed redacted error, and returns nonzero after all cleanup attempts; cleanup
+failures are accumulated so an early Docker error cannot skip credential deletion. Repeating any
+stop-family command sees the durable latch before recovery, skips all readiness mutation, and repeats
+only full-project emergency cleanup—even if a prior Docker failure left Owner running. This state is
+not a resumable completion and must remain stopped for manual root-certified terminal remediation.
+No ordinary helper, install, discard, stop, recheck, or rollback path clears the failed latch. No
+stopped-runtime or zero-Owner exception may publish, remove, or reclassify a root receipt.
 
 An active database cohort claim intentionally freezes writes to every table from which its cohort
 was derived, including otherwise unrelated customer/platform writes. That freeze begins before
@@ -116,13 +187,23 @@ journal, or source-table lock merely because it is old, and never query or copy 
 for diagnosis.
 
 The two singleton proofs are intentionally separate. Exactly one `owner-control` container is the
-only accepted producer of the staged pair. While the private session container is live, the helper
+only accepted producer of the staged pair and the sole container allowed to hold the aggregate
+receipt bind; the helper proves its exact host source, container destination, and `RW=false` before
+every receipt transition. It resolves every inspected bind source to a canonical host path before
+checking overlap, explicitly treating host `/`, every receipt-root ancestor, the root itself, and
+every descendant as overlapping; an unresolved source or any overlapping non-Owner bind fails
+closed. Docker mount inventories are inspected one exact container at a time so the CLI's per-object
+separator newline—including for a container with no binds—can never become an ambiguous empty mount
+record; only nonempty outputs reach the strict four-field classifier. While the private session
+container is live, the helper
 also proves that `/var/lib/fetanagent/kemerbet-sessions` is mounted from the exact
 `fetanagent-staging-beta_kemerbet_sessions` volume and that this container is its sole holder; the
 holder set must be empty before and after the isolated recheck. Chromium singleton artifacts are
 checked only inside the exact account directory (`$profile_mountpoint/$account_id/Singleton*`),
-never at the profile-volume root. These checks do not read balance or transaction history and do not
-change any provider state.
+never at the profile-volume root. The holder-free proof and both final root/profile metadata reads
+explicitly propagate failure through command substitution before hashing; no blank metadata field or
+failed holder inventory can still produce an accepted 64-hex identity digest. These checks do not
+read balance or transaction history and do not change any provider state.
 
 ## External secret files
 
@@ -325,7 +406,7 @@ For this replacement only, the accepted predecessor and successor LF SHA-256 val
 
 ```text
 installed_predecessor=af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833
-reviewed_successor=7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077
+reviewed_successor=121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -336,7 +417,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077'
+NEXT_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -369,13 +450,13 @@ SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disa
 MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
 PREVIOUS_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
-NEXT_SHA='7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077'
+NEXT_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
 RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
 RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 INSTALL_TMP=''
 BACKUP_TMP=''
-INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-7861082f'
+INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-121e3b36'
 BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-af823251.installing"
 SUDOERS_STATE=''
 TARGET_SHA=''
@@ -592,7 +673,7 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `7861082f…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+against successor SHA `121e3b36…` before `deploy-and-smoke` is allowed. If it fails, keep staging
 offline and use the root console to atomically restore only the checksum-proven `previous` file.
 Rollback follows the same sudoers-revocation and exact process-quiescence boundary, verifies the
 restored predecessor before re-enabling its grant, and makes no further mutation afterward. It is
@@ -600,6 +681,9 @@ also resumable with the exact disabled grant and either allowed TARGET hash, but
 strict rollback shape remains compatible with predecessor `af823251`: the complete promotion and
 receipt roots, recheck candidate root, canonical binding, fixed Player-ID import candidate, every
 Owner cohort stage/installer/aggregate marker, and every profile singleton must all be absent. The
+new root-anchored Owner aggregate receipt directory must itself be absent: once that boundary has
+been created for a new Owner runtime, helper-only predecessor rollback is intentionally forbidden
+because the predecessor and successor use different receipt locations. The
 identity key may be either the exact service-readable file or the exact root-frozen file left by the
 bounded recheck. The predecessor requires the exact service-readable one-use Player-ID file and the
 exact still-sealed readiness output/binding; absence is not a rollback-compatible pre-recheck state:
@@ -623,10 +707,11 @@ IDENTITY_KEY='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
 PLAYER_IDS='/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
 READINESS_OUTPUT_ROOT='/var/lib/fetanagent/kemerbet-readiness-seal-output'
 READINESS_BINDING="$READINESS_OUTPUT_ROOT/kemerbet_agent_identity_bindings"
+OWNER_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-cohort-receipts'
 SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'
 PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'
 PREVIOUS_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
-NEXT_SHA='7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077'
+NEXT_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
 RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
 RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
@@ -642,7 +727,8 @@ require_pre_recheck_rollback_state() {
     "$RECHECK_RECEIPT_ROOT" \
     "$RECHECK_CANDIDATE_ROOT" \
     "$CANONICAL_BINDING" \
-    "$IMPORT_CANDIDATE"; do
+    "$IMPORT_CANDIDATE" \
+    "$OWNER_RECEIPT_ROOT"; do
     [[ ! -e "$absent_path" && ! -L "$absent_path" ]] || return 1
   done
   [[ ! -L "$IDENTITY_KEY" && -f "$IDENTITY_KEY" ]] || return 1

@@ -43,6 +43,9 @@ readonly KEMERBET_RECHECK_CANDIDATE_BINDING="$KEMERBET_RECHECK_CANDIDATE_ROOT/ke
 readonly KEMERBET_RECHECK_CONTAINER="$PROJECT_NAME-kemerbet-no-transfer-readiness-once"
 readonly KEMERBET_RECHECK_NETWORK="${PROJECT_NAME}_kemerbet_readiness_egress"
 readonly KEMERBET_SESSION_CONTROL_VOLUME="${PROJECT_NAME}_kemerbet_session_control"
+readonly KEMERBET_OWNER_RECEIPT_PARENT='/var/lib/fetanagent'
+readonly KEMERBET_OWNER_RECEIPT_ROOT="$KEMERBET_OWNER_RECEIPT_PARENT/kemerbet-readiness-cohort-receipts"
+readonly KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT='/run/fetanagent-kemerbet-readiness-cohort-receipts'
 readonly KEMERBET_OWNER_STAGED_PLAYER_IDS_NAME='kemerbet-readiness-player-ids.stage-v1'
 readonly KEMERBET_OWNER_STAGED_PLAYER_IDS_INSTALLING_NAME='.kemerbet-readiness-player-ids.stage-v1.installing'
 readonly KEMERBET_OWNER_STAGED_CLAIM_NAME='kemerbet-readiness-cohort-claim.stage-v1'
@@ -53,6 +56,10 @@ readonly KEMERBET_OWNER_COMPLETED_CLAIM_NAME='kemerbet-readiness-cohort-complete
 readonly KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME='.kemerbet-readiness-cohort-completed-v1.installing'
 readonly KEMERBET_OWNER_FAILED_CLAIM_NAME='kemerbet-readiness-cohort-failed-v1'
 readonly KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME='.kemerbet-readiness-cohort-failed-v1.installing'
+readonly KEMERBET_RECOVERY_LATCH_NAME='kemerbet-readiness-recovery-in-progress-or-failed-v1'
+readonly KEMERBET_RECOVERY_LATCH_INSTALLING_NAME='.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing'
+readonly KEMERBET_RECOVERY_FALLBACK_NAME='recovery-in-progress-or-failed-v1'
+readonly KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME='.recovery-in-progress-or-failed-v1.installing'
 readonly KEMERBET_PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
 readonly KEMERBET_RECHECK_TIMEOUT_SECONDS='300'
 readonly KEMERBET_RECHECK_KILL_AFTER_SECONDS='15'
@@ -450,8 +457,13 @@ KEMERBET_RECHECK_RELEASE=''
 KEMERBET_RECHECK_SESSION_CONTAINER=''
 KEMERBET_RECHECK_SOURCE_DEV_INO=''
 KEMERBET_RECHECK_SOURCE_DIGEST=''
+KEMERBET_RECHECK_IDENTITY_KEY_DIGEST=''
 KEMERBET_RECHECK_COMMITTED='false'
 KEMERBET_RECHECK_DURABLE_SUCCESS='false'
+KEMERBET_RECHECK_RECOVERY_OUTCOME=''
+KEMERBET_TEARDOWN_RECOVERY_FAILED='false'
+KEMERBET_EMERGENCY_TEARDOWN_FAILED='false'
+KEMERBET_RECOVERY_LATCH_DEV_INO=''
 
 require_retryable_kemerbet_binding_source() {
   local expected_dev_ino="$1" expected_digest="$2"
@@ -530,6 +542,11 @@ remove_owned_kemerbet_recheck_promotion_root() {
   root_mode="$(stat --format='%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" || return 1
   [[ "$root_mode" =~ ^[0-7]{3,4}$ ]] || return 1
   (( (8#$root_mode & 8#022) == 0 )) || return 1
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_NAME" &&
+    ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_NAME" &&
+    ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME" &&
+    ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME" ]] ||
+    return 1
   while IFS= read -r -d '' entry; do
     [[ "$entry" == "$KEMERBET_RECHECK_PROMOTION_JOURNAL" ||
       "$entry" == "$KEMERBET_RECHECK_PROMOTION_ROOT"/.pending-v1.* ]] || return 1
@@ -1081,7 +1098,7 @@ require_committed_kemerbet_recheck_boundary_shape() {
     "${receipt_lines[7]}" =~ ^profile_identity_sha256=[0-9a-f]{64}$ ]] ||
     die 'an interrupted committed KemerBet receipt content is invalid'
   binding_digest="${receipt_lines[2]#binding_sha256=}"
-  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS" || return 1
   [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '1' &&
     "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" == "$binding_digest" ]] ||
     die 'an interrupted committed KemerBet binding does not match its receipt'
@@ -1091,7 +1108,8 @@ require_current_kemerbet_success_runtime_boundary() {
   local commit_sha="$1" binding_digest="$2" identity_key_digest="$3"
   local selector_digest="$4" image_id="$5" profile_identity_digest="$6"
   local receipt_policy="$7"
-  local account_id binding_fingerprint binding_line binding_residue profile_mountpoint
+  local account_id binding_fingerprint binding_line binding_residue observed_profile_identity_digest
+  local profile_mountpoint
   local recheck_container recheck_network
   [[ "$commit_sha" =~ ^[0-9a-f]{40}$ && "$binding_digest" =~ ^[0-9a-f]{64}$ &&
     "$identity_key_digest" =~ ^[0-9a-f]{64}$ && "$selector_digest" =~ ^[0-9a-f]{64}$ &&
@@ -1126,16 +1144,17 @@ require_current_kemerbet_success_runtime_boundary() {
   IFS=' ' read -r account_id binding_fingerprint binding_residue <<<"$binding_line"
   [[ -n "$account_id" && -n "$binding_fingerprint" && -z "$binding_residue" ]] ||
     die 'the committed KemerBet binding fields are invalid'
-  profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)"
-  [[ "$(kemerbet_profile_identity_digest \
-    "$account_id" "$profile_mountpoint" require-absent-singletons)" == "$profile_identity_digest" ]] ||
+  profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)" || return 1
+  observed_profile_identity_digest="$(kemerbet_profile_identity_digest \
+    "$account_id" "$profile_mountpoint" require-absent-singletons)" || return 1
+  [[ "$observed_profile_identity_digest" == "$profile_identity_digest" ]] ||
     die 'the committed KemerBet profile identity changed'
   [[ "$(docker_local image inspect "$image_id" \
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}|{{ index .Config.Labels "org.opencontainers.image.title" }}|{{.Config.User}}')" == \
     "$commit_sha|fetanagent-deposit-executor|10001:10001" ]] ||
     die 'the committed KemerBet image provenance is invalid'
   require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
-  require_single_owner_control_runtime_instance
+  require_owner_kemerbet_receipt_service_access
   require_kemerbet_profile_volume_holders ''
   recheck_container="$(docker_local container ls --all --quiet \
     --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" ||
@@ -1216,7 +1235,8 @@ require_committed_kemerbet_cleanup_artifacts() {
 require_completed_kemerbet_recheck_for_release() {
   local commit_sha="$1" image_tag="$2"
   local account_id binding_digest binding_fingerprint binding_line binding_residue
-  local identity_key_digest image_id profile_identity_digest profile_mountpoint
+  local identity_key_digest image_id observed_profile_identity_digest profile_identity_digest
+  local profile_mountpoint
   local recheck_container recheck_network selector_digest
   local -a receipt_lines=()
   validate_commit_and_tag "$commit_sha" "$image_tag"
@@ -1251,10 +1271,11 @@ require_completed_kemerbet_recheck_for_release() {
   IFS=' ' read -r account_id binding_fingerprint binding_residue <<<"$binding_line"
   [[ -n "$account_id" && -n "$binding_fingerprint" && -z "$binding_residue" ]] ||
     die 'the completed KemerBet binding fields are invalid'
-  profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)"
-  [[ "$(kemerbet_profile_identity_digest \
-    "$account_id" "$profile_mountpoint" require-absent-singletons)" == \
-    "$profile_identity_digest" ]] || die 'the completed KemerBet profile identity changed'
+  profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)" || return 1
+  observed_profile_identity_digest="$(kemerbet_profile_identity_digest \
+    "$account_id" "$profile_mountpoint" require-absent-singletons)" || return 1
+  [[ "$observed_profile_identity_digest" == "$profile_identity_digest" ]] ||
+    die 'the completed KemerBet profile identity changed'
   [[ "$(docker_local image inspect "fetanagent-deposit-executor:$image_tag" --format '{{.Id}}')" == \
     "$image_id" ]] || die 'the completed KemerBet image identity is unavailable or changed'
   [[ "$(docker_local image inspect "$image_id" \
@@ -1262,7 +1283,7 @@ require_completed_kemerbet_recheck_for_release() {
     "$commit_sha|fetanagent-deposit-executor|10001:10001" ]] ||
     die 'the completed KemerBet image provenance is invalid'
   require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
-  require_single_owner_control_runtime_instance
+  require_owner_kemerbet_receipt_service_access
   require_kemerbet_profile_volume_holders ''
   recheck_container="$(docker_local container ls --all --quiet \
     --filter "name=^/${KEMERBET_RECHECK_CONTAINER}$")" ||
@@ -1332,6 +1353,851 @@ remove_journaled_kemerbet_session_provision() {
     die 'the journaled KemerBet session could not be removed safely'
 }
 
+inspect_kemerbet_recovery_latch() {
+  local ancestor latch_path='' path present_count=0
+  for ancestor in / /var /var/lib "$KEMERBET_OWNER_RECEIPT_PARENT" "$KEMERBET_OWNER_RECEIPT_ROOT"; do
+    [[ ! -L "$ancestor" && -d "$ancestor" && "$(realpath -- "$ancestor" 2>/dev/null)" == "$ancestor" &&
+      "$(stat --format='%u:%g:%a' "$ancestor" 2>/dev/null)" == '0:0:755' ]] || return 2
+  done
+  for path in \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME"; do
+    if [[ -e "$path" || -L "$path" ]]; then
+      present_count=$((present_count + 1))
+      latch_path="$path"
+    fi
+  done
+  [[ "$present_count" -ne 0 ]] || return 1
+  [[ "$present_count" -eq 1 && ! -L "$latch_path" && -f "$latch_path" &&
+    "$(realpath -- "$latch_path" 2>/dev/null)" == "$latch_path" &&
+    "$(stat --format='%u:%g:%a:%h' "$latch_path" 2>/dev/null)" == '0:0:400:1' ]] || return 2
+  cmp -s -- "$latch_path" \
+    <(printf '%s\n' 'fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1') || return 2
+  return 0
+}
+
+inspect_kemerbet_recovery_fallback() {
+  local fallback_path='' path present_count=0
+  if [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]; then
+    return 1
+  fi
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT" 2>/dev/null)" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT" 2>/dev/null)" == '0:0:700' ]] || return 2
+  for path in \
+    "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_NAME" \
+    "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME"; do
+    if [[ -e "$path" || -L "$path" ]]; then
+      present_count=$((present_count + 1))
+      fallback_path="$path"
+    fi
+  done
+  [[ "$present_count" -ne 0 ]] || return 1
+  [[ "$present_count" -eq 1 && ! -L "$fallback_path" && -f "$fallback_path" &&
+    "$(realpath -- "$fallback_path" 2>/dev/null)" == "$fallback_path" &&
+    "$(stat --format='%u:%g:%a:%h' "$fallback_path" 2>/dev/null)" == '0:0:400:1' ]] || return 2
+  cmp -s -- "$fallback_path" \
+    <(printf '%s\n' 'fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1') || return 2
+  return 0
+}
+
+durably_retain_fixed_kemerbet_recovery_residue() {
+  local policy="$1" root="$2" final_name="$3" installing_name="$4"
+  [[ "$policy" =~ ^(receipt|promotion)$ && "$root" == /* && "$final_name" != */* &&
+    "$installing_name" != */* ]] || return 1
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$policy" "$root" "$final_name" "$installing_name" \
+    "$(basename -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" <<'PY'
+import os
+import stat
+import sys
+
+CONTENT = b"fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n"
+RECEIPT_MARKERS = {
+    'kemerbet-readiness-cohort-imported-v1',
+    '.kemerbet-readiness-cohort-imported-v1.installing',
+    'kemerbet-readiness-cohort-completed-v1',
+    '.kemerbet-readiness-cohort-completed-v1.installing',
+    'kemerbet-readiness-cohort-failed-v1',
+    '.kemerbet-readiness-cohort-failed-v1.installing',
+}
+
+
+def reject():
+    raise RuntimeError
+
+
+def same(first, second):
+    return (
+        first.st_dev == second.st_dev
+        and first.st_ino == second.st_ino
+        and first.st_mode == second.st_mode
+        and first.st_uid == second.st_uid
+        and first.st_gid == second.st_gid
+        and first.st_nlink == second.st_nlink
+        and first.st_size == second.st_size
+    )
+
+
+def open_exact(root_fd, name, expected_mode, maximum_size, expected_content=None):
+    named = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+    if (
+        not stat.S_ISREG(named.st_mode)
+        or named.st_uid != 0
+        or named.st_gid != 0
+        or stat.S_IMODE(named.st_mode) != expected_mode
+        or named.st_nlink != 1
+        or not 0 <= named.st_size <= maximum_size
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=root_fd,
+    )
+    opened = os.fstat(descriptor)
+    content = os.pread(descriptor, maximum_size + 1, 0)
+    if not same(named, opened) or len(content) != named.st_size:
+        os.close(descriptor)
+        reject()
+    if expected_content is not None and content != expected_content:
+        os.close(descriptor)
+        reject()
+    return descriptor, opened, content
+
+
+def main():
+    policy, root, final_name, installing_name, journal_name = sys.argv[1:]
+    if policy not in {'receipt', 'promotion'}:
+        reject()
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    residue_fd = None
+    journal_fd = None
+    try:
+        root_stat = os.fstat(root_fd)
+        expected_root_mode = 0o755 if policy == 'receipt' else 0o700
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or root_stat.st_uid != 0
+            or root_stat.st_gid != 0
+            or stat.S_IMODE(root_stat.st_mode) != expected_root_mode
+        ):
+            reject()
+        names = set(os.listdir(root_fd))
+        residue_names = names & {final_name, installing_name}
+        if len(residue_names) != 1:
+            reject()
+        residue_name = next(iter(residue_names))
+        if policy == 'receipt':
+            if names - RECEIPT_MARKERS - {residue_name}:
+                reject()
+        else:
+            if names != {journal_name, residue_name}:
+                reject()
+            journal_fd, journal_stat, journal_content = open_exact(
+                root_fd,
+                journal_name,
+                0o600,
+                4096,
+            )
+            journal_lines = journal_content.splitlines()
+            if (
+                journal_stat.st_size < 1
+                or len(journal_lines) < 2
+                or journal_lines[0] != b'version=1'
+                or journal_lines[1]
+                not in {
+                    b'state=import_prepared',
+                    b'state=prepared',
+                    b'state=candidate_bound',
+                }
+            ):
+                reject()
+        residue_fd, residue_stat, residue_content = open_exact(
+            root_fd,
+            residue_name,
+            0o400,
+            len(CONTENT),
+        )
+        if not CONTENT.startswith(residue_content):
+            reject()
+        os.fsync(residue_fd)
+        if journal_fd is not None:
+            os.fsync(journal_fd)
+        os.fsync(root_fd)
+        named_root = os.lstat(root)
+        if not same(root_stat, named_root) or os.path.realpath(root) != root:
+            reject()
+        named_residue = os.stat(residue_name, dir_fd=root_fd, follow_symlinks=False)
+        if (
+            not same(residue_stat, named_residue)
+            or os.pread(residue_fd, len(CONTENT) + 1, 0) != residue_content
+        ):
+            reject()
+        if journal_fd is not None:
+            named_journal = os.stat(journal_name, dir_fd=root_fd, follow_symlinks=False)
+            if (
+                not same(journal_stat, named_journal)
+                or os.pread(journal_fd, 4097, 0) != journal_content
+            ):
+                reject()
+    finally:
+        if journal_fd is not None:
+            os.close(journal_fd)
+        if residue_fd is not None:
+            os.close(residue_fd)
+        os.close(root_fd)
+
+
+try:
+    if len(sys.argv) != 6:
+        reject()
+    main()
+except BaseException:
+    raise SystemExit(1)
+PY
+}
+
+durably_retain_kemerbet_recovery_latch_residue() {
+  local ancestor
+  for ancestor in / /var /var/lib "$KEMERBET_OWNER_RECEIPT_PARENT" "$KEMERBET_OWNER_RECEIPT_ROOT"; do
+    [[ ! -L "$ancestor" && -d "$ancestor" && "$(realpath -- "$ancestor" 2>/dev/null)" == "$ancestor" &&
+      "$(stat --format='%u:%g:%a' "$ancestor" 2>/dev/null)" == '0:0:755' ]] || return 1
+  done
+  durably_retain_fixed_kemerbet_recovery_residue \
+    receipt "$KEMERBET_OWNER_RECEIPT_ROOT" \
+    "$KEMERBET_RECOVERY_LATCH_NAME" "$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME"
+}
+
+durably_retain_kemerbet_recovery_fallback_residue() {
+  local ancestor
+  for ancestor in / /var /var/lib "$KEMERBET_OWNER_RECEIPT_PARENT"; do
+    [[ ! -L "$ancestor" && -d "$ancestor" && "$(realpath -- "$ancestor" 2>/dev/null)" == "$ancestor" &&
+      "$(stat --format='%u:%g:%a' "$ancestor" 2>/dev/null)" == '0:0:755' ]] || return 1
+  done
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT" 2>/dev/null)" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT" 2>/dev/null)" == '0:0:700' ]] ||
+    return 1
+  durably_retain_fixed_kemerbet_recovery_residue \
+    promotion "$KEMERBET_RECHECK_PROMOTION_ROOT" \
+    "$KEMERBET_RECOVERY_FALLBACK_NAME" "$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME"
+}
+
+require_kemerbet_recovery_fallback_publish_boundary() {
+  local entries journal_size
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT" 2>/dev/null)" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT" 2>/dev/null)" == '0:0:700' ]] ||
+    return 1
+  entries="$(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    return 1
+  [[ "$entries" == 'pending-v1' ]] || return 1
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" && -f "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL" 2>/dev/null)" == "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%u:%g:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL" 2>/dev/null)" == '0:0:600:1' ]] ||
+    return 1
+  journal_size="$(stat --format='%s' "$KEMERBET_RECHECK_PROMOTION_JOURNAL" 2>/dev/null)" || return 1
+  [[ "$journal_size" =~ ^[0-9]+$ && "$journal_size" -ge 1 && "$journal_size" -le 4096 ]] || return 1
+  [[ "$(sed -n '1p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'version=1' &&
+    "$(sed -n '2p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" =~ ^state=(import_prepared|prepared|candidate_bound)$ ]] ||
+    return 1
+}
+
+publish_kemerbet_recovery_fallback() {
+  local fallback_status=0 publisher_status=0
+  set +e
+  inspect_kemerbet_recovery_fallback
+  fallback_status=$?
+  set -e
+  [[ "$fallback_status" -eq 1 ]] || return 1
+  require_kemerbet_recovery_fallback_publish_boundary || return 1
+  set +e
+  (
+    set -e
+    env -i PATH="$SAFE_PATH" python3 -I - \
+      "$KEMERBET_RECHECK_PROMOTION_ROOT" "$(basename -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" \
+      "$KEMERBET_RECOVERY_FALLBACK_NAME" "$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME" <<'PY'
+import os
+import stat
+import sys
+
+CONTENT = b"fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n"
+
+
+def main():
+    root, journal_name, final_name, installing_name = sys.argv[1:]
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    installing_fd = None
+    journal_fd = None
+    try:
+        root_stat = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or root_stat.st_uid != 0
+            or root_stat.st_gid != 0
+            or stat.S_IMODE(root_stat.st_mode) != 0o700
+        ):
+            raise RuntimeError
+        names = os.listdir(root_fd)
+        if names != [journal_name] and sorted(names) != [journal_name]:
+            raise RuntimeError
+        journal_fd = os.open(
+            journal_name,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=root_fd,
+        )
+        journal_stat = os.fstat(journal_fd)
+        journal_content = os.pread(journal_fd, 4097, 0)
+        journal_lines = journal_content.splitlines()
+        if (
+            not stat.S_ISREG(journal_stat.st_mode)
+            or journal_stat.st_uid != 0
+            or journal_stat.st_gid != 0
+            or stat.S_IMODE(journal_stat.st_mode) != 0o600
+            or journal_stat.st_nlink != 1
+            or not 1 <= journal_stat.st_size <= 4096
+            or len(journal_content) != journal_stat.st_size
+            or len(journal_lines) < 2
+            or journal_lines[0] != b'version=1'
+            or journal_lines[1]
+            not in {b'state=import_prepared', b'state=prepared', b'state=candidate_bound'}
+        ):
+            raise RuntimeError
+        named_journal = os.stat(journal_name, dir_fd=root_fd, follow_symlinks=False)
+        if (
+            (named_journal.st_dev, named_journal.st_ino)
+            != (journal_stat.st_dev, journal_stat.st_ino)
+            or named_journal.st_mode != journal_stat.st_mode
+            or named_journal.st_uid != journal_stat.st_uid
+            or named_journal.st_gid != journal_stat.st_gid
+            or named_journal.st_nlink != journal_stat.st_nlink
+            or named_journal.st_size != journal_stat.st_size
+        ):
+            raise RuntimeError
+        for name in (final_name, installing_name):
+            try:
+                os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise RuntimeError
+        installing_fd = os.open(
+            installing_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o400,
+            dir_fd=root_fd,
+        )
+        os.fchown(installing_fd, 0, 0)
+        os.fchmod(installing_fd, 0o400)
+        offset = 0
+        while offset < len(CONTENT):
+            written = os.write(installing_fd, CONTENT[offset:])
+            if written <= 0:
+                raise RuntimeError
+            offset += written
+        os.fsync(installing_fd)
+        installing_stat = os.fstat(installing_fd)
+        if (
+            not stat.S_ISREG(installing_stat.st_mode)
+            or installing_stat.st_uid != 0
+            or installing_stat.st_gid != 0
+            or stat.S_IMODE(installing_stat.st_mode) != 0o400
+            or installing_stat.st_nlink != 1
+            or installing_stat.st_size != len(CONTENT)
+        ):
+            raise RuntimeError
+        os.close(installing_fd)
+        installing_fd = None
+        os.rename(
+            installing_name,
+            final_name,
+            src_dir_fd=root_fd,
+            dst_dir_fd=root_fd,
+        )
+        os.fsync(root_fd)
+        final_fd = os.open(final_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+        try:
+            final_stat = os.fstat(final_fd)
+            if (
+                not stat.S_ISREG(final_stat.st_mode)
+                or final_stat.st_uid != 0
+                or final_stat.st_gid != 0
+                or stat.S_IMODE(final_stat.st_mode) != 0o400
+                or final_stat.st_nlink != 1
+                or final_stat.st_size != len(CONTENT)
+                or os.read(final_fd, len(CONTENT) + 1) != CONTENT
+            ):
+                raise RuntimeError
+        finally:
+            os.close(final_fd)
+        named_journal = os.stat(journal_name, dir_fd=root_fd, follow_symlinks=False)
+        if (
+            (named_journal.st_dev, named_journal.st_ino)
+            != (journal_stat.st_dev, journal_stat.st_ino)
+            or named_journal.st_mode != journal_stat.st_mode
+            or named_journal.st_uid != journal_stat.st_uid
+            or named_journal.st_gid != journal_stat.st_gid
+            or named_journal.st_nlink != journal_stat.st_nlink
+            or named_journal.st_size != journal_stat.st_size
+            or os.pread(journal_fd, 4097, 0) != journal_content
+        ):
+            raise RuntimeError
+    finally:
+        if journal_fd is not None:
+            os.close(journal_fd)
+        if installing_fd is not None:
+            os.close(installing_fd)
+        os.close(root_fd)
+
+
+try:
+    main()
+except BaseException:
+    raise SystemExit(1)
+PY
+  )
+  publisher_status=$?
+  set -e
+  [[ "$publisher_status" -eq 0 ]] || return 1
+  set +e
+  inspect_kemerbet_recovery_fallback
+  fallback_status=$?
+  set -e
+  [[ "$fallback_status" -eq 0 &&
+    -f "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_NAME" &&
+    ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_NAME" &&
+    ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME" &&
+    ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT/$KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME" ]]
+}
+
+publish_kemerbet_recovery_latch() {
+  local latch_status=0 publisher_status=0
+  set +e
+  inspect_kemerbet_recovery_latch
+  latch_status=$?
+  set -e
+  [[ "$latch_status" -eq 1 ]] || return 1
+  set +e
+  (
+    set -e
+    env -i PATH="$SAFE_PATH" python3 -I - \
+      "$KEMERBET_OWNER_RECEIPT_ROOT" "$KEMERBET_RECOVERY_LATCH_NAME" \
+      "$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" <<'PY'
+import os
+import stat
+import sys
+
+CONTENT = b"fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n"
+
+
+def main():
+    root, final_name, installing_name = sys.argv[1:]
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    installing_fd = None
+    try:
+        root_stat = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or root_stat.st_uid != 0
+            or root_stat.st_gid != 0
+            or stat.S_IMODE(root_stat.st_mode) != 0o755
+        ):
+            raise RuntimeError
+        for name in (final_name, installing_name):
+            try:
+                os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise RuntimeError
+        installing_fd = os.open(
+            installing_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o400,
+            dir_fd=root_fd,
+        )
+        os.fchown(installing_fd, 0, 0)
+        os.fchmod(installing_fd, 0o400)
+        offset = 0
+        while offset < len(CONTENT):
+            written = os.write(installing_fd, CONTENT[offset:])
+            if written <= 0:
+                raise RuntimeError
+            offset += written
+        os.fsync(installing_fd)
+        installing_stat = os.fstat(installing_fd)
+        if (
+            not stat.S_ISREG(installing_stat.st_mode)
+            or installing_stat.st_uid != 0
+            or installing_stat.st_gid != 0
+            or stat.S_IMODE(installing_stat.st_mode) != 0o400
+            or installing_stat.st_nlink != 1
+            or installing_stat.st_size != len(CONTENT)
+        ):
+            raise RuntimeError
+        os.close(installing_fd)
+        installing_fd = None
+        os.rename(
+            installing_name,
+            final_name,
+            src_dir_fd=root_fd,
+            dst_dir_fd=root_fd,
+        )
+        os.fsync(root_fd)
+        final_fd = os.open(final_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+        try:
+            final_stat = os.fstat(final_fd)
+            if (
+                not stat.S_ISREG(final_stat.st_mode)
+                or final_stat.st_uid != 0
+                or final_stat.st_gid != 0
+                or stat.S_IMODE(final_stat.st_mode) != 0o400
+                or final_stat.st_nlink != 1
+                or final_stat.st_size != len(CONTENT)
+                or os.read(final_fd, len(CONTENT) + 1) != CONTENT
+            ):
+                raise RuntimeError
+        finally:
+            os.close(final_fd)
+    finally:
+        if installing_fd is not None:
+            os.close(installing_fd)
+        os.close(root_fd)
+
+
+try:
+    main()
+except BaseException:
+    raise SystemExit(1)
+PY
+  )
+  publisher_status=$?
+  set -e
+  [[ "$publisher_status" -eq 0 ]] || return 1
+  set +e
+  inspect_kemerbet_recovery_latch
+  latch_status=$?
+  set -e
+  [[ "$latch_status" -eq 0 &&
+    ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" ]] || return 1
+  KEMERBET_RECOVERY_LATCH_DEV_INO="$(stat --format='%d:%i' \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME")"
+  [[ "$KEMERBET_RECOVERY_LATCH_DEV_INO" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+}
+
+require_kemerbet_recovery_latch_authority() {
+  local fallback_status=0 latch_status=0
+  set +e
+  inspect_kemerbet_recovery_fallback
+  fallback_status=$?
+  set -e
+  [[ "$fallback_status" -eq 1 ]] ||
+    die 'a durable KemerBet recovery fallback blocks readiness mutation'
+  set +e
+  inspect_kemerbet_recovery_latch
+  latch_status=$?
+  set -e
+  if [[ "$latch_status" -eq 1 ]]; then
+    [[ -z "$KEMERBET_RECOVERY_LATCH_DEV_INO" ]] ||
+      die 'the KemerBet recovery latch authorization is inconsistent'
+    return 0
+  fi
+  [[ "$latch_status" -eq 0 && "$KEMERBET_RECOVERY_LATCH_DEV_INO" =~ ^[0-9]+:[0-9]+$ &&
+    ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" &&
+    "$(stat --format='%d:%i' "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" 2>/dev/null)" == \
+      "$KEMERBET_RECOVERY_LATCH_DEV_INO" ]] ||
+    die 'a pre-existing or unsafe KemerBet recovery latch blocks readiness mutation'
+}
+
+require_owned_kemerbet_recovery_latch() {
+  [[ "$KEMERBET_RECOVERY_LATCH_DEV_INO" =~ ^[0-9]+:[0-9]+$ ]] ||
+    die 'the current process does not own the KemerBet recovery latch'
+  require_kemerbet_recovery_latch_authority || return 1
+}
+
+require_retryable_kemerbet_recovery_boundary() {
+  local expected_claim_id="$KEMERBET_RECHECK_OWNER_CLAIM_ID"
+  local expected_claim_dev_ino="$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO"
+  local expected_identity_digest="$KEMERBET_RECHECK_IDENTITY_KEY_DIGEST"
+  local expected_player_dev_ino="$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO"
+  local expected_player_digest="$KEMERBET_RECHECK_PLAYER_IDS_DIGEST"
+  local expected_source_dev_ino="$KEMERBET_RECHECK_SOURCE_DEV_INO"
+  local expected_source_digest="$KEMERBET_RECHECK_SOURCE_DIGEST"
+  local receipt_path
+  [[ "$expected_claim_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
+    "$expected_claim_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$expected_player_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$expected_player_digest" =~ ^[0-9a-f]{64}$ &&
+    "$expected_source_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$expected_source_digest" =~ ^[0-9a-f]{64}$ &&
+    "$expected_identity_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the retryable KemerBet recovery identity is incomplete'
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+    ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+    ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" ]] ||
+    die 'the retryable KemerBet recovery retained an incompatible committed artifact'
+  for receipt_path in \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"; do
+    [[ ! -e "$receipt_path" && ! -L "$receipt_path" ]] ||
+      die 'the retryable KemerBet recovery retained a conflicting receipt or installer'
+  done
+  require_retryable_kemerbet_binding_source "$expected_source_dev_ino" "$expected_source_digest" ||
+    die 'the retryable KemerBet recovery binding source is not exact'
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" || return 1
+  [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' &&
+    "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == \
+      "$expected_identity_digest" ]] ||
+    die 'the retryable KemerBet recovery identity key is not exact'
+  inspect_owner_staged_kemerbet_cohort || return 1
+  [[ "$KEMERBET_RECHECK_OWNER_CLAIM_ID" == "$expected_claim_id" &&
+    "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" == "$expected_claim_dev_ino" &&
+    "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" == "$expected_player_dev_ino" &&
+    "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" == "$expected_player_digest" ]] ||
+    die 'the restored retryable Owner KemerBet cohort does not match its journal'
+  owner_kemerbet_cohort_marker require-failed "$expected_claim_id" ||
+    die 'the restored retryable Owner KemerBet failure marker is not exact'
+  for receipt_path in \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"; do
+    [[ ! -e "$receipt_path" && ! -L "$receipt_path" ]] ||
+      die 'the retryable KemerBet recovery receipt topology changed during inspection'
+  done
+  require_legacy_owner_kemerbet_receipt_paths_absent || return 1
+  require_retryable_kemerbet_binding_source "$expected_source_dev_ino" "$expected_source_digest" ||
+    die 'the retryable KemerBet recovery binding source changed during inspection'
+  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" || return 1
+  [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' &&
+    "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" | awk '{print $1}')" == \
+      "$expected_identity_digest" ]] ||
+    die 'the retryable KemerBet recovery identity key changed during inspection'
+}
+
+require_prejournal_kemerbet_recovery_boundary() {
+  local entries failed_path path source_size
+  require_owned_kemerbet_recovery_latch || return 1
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+    ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+    ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" ]] ||
+    die 'the pre-journal KemerBet recovery retained a derived artifact'
+  require_kemerbet_readiness_output_directory || return 1
+  [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" &&
+    "$(realpath -- "$KEMERBET_READINESS_BINDING")" == "$KEMERBET_READINESS_BINDING" &&
+    "$(stat --format='%u:%g:%a:%h' "$KEMERBET_READINESS_BINDING")" == '10001:10001:600:1' ]] ||
+    die 'the pre-journal KemerBet binding source is unsafe'
+  source_size="$(stat --format='%s' "$KEMERBET_READINESS_BINDING")"
+  [[ "$source_size" =~ ^[0-9]+$ && "$source_size" -ge 100 && "$source_size" -le 256 &&
+    "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
+    die 'the pre-journal KemerBet binding source shape is invalid'
+  LC_ALL=C grep -Eq \
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64}$' \
+    "$KEMERBET_READINESS_BINDING" || die 'the pre-journal KemerBet binding source contract is invalid'
+  require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" || return 1
+  [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] ||
+    die 'the pre-journal KemerBet identity key has an unsafe link count'
+  require_root_readable_immutable_file "$KEMERBET_SELECTOR_CONTRACT" || return 1
+  [[ "$(stat --format='%h' "$KEMERBET_SELECTOR_CONTRACT")" == '1' ]] ||
+    die 'the pre-journal KemerBet selector has an unsafe link count'
+  for path in \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"; do
+    [[ ! -e "$path" && ! -L "$path" ]] ||
+      die 'the pre-journal KemerBet recovery retained a conflicting receipt or installer'
+  done
+  inspect_owner_staged_kemerbet_cohort || return 1
+  failed_path="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME"
+  if [[ -e "$failed_path" || -L "$failed_path" ]]; then
+    owner_kemerbet_cohort_marker require-failed "$KEMERBET_RECHECK_OWNER_CLAIM_ID" ||
+      die 'the pre-journal retryable KemerBet failure marker is not exact'
+  fi
+  entries="$(find -P "$KEMERBET_OWNER_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" ||
+    die 'the pre-journal KemerBet receipt boundary could not be inspected'
+  [[ "$entries" == "$KEMERBET_RECOVERY_LATCH_NAME" ||
+    "$entries" == "$KEMERBET_OWNER_FAILED_CLAIM_NAME"$'\n'"$KEMERBET_RECOVERY_LATCH_NAME" ]] ||
+    die 'the pre-journal KemerBet receipt boundary is not exact'
+  require_legacy_owner_kemerbet_receipt_paths_absent || return 1
+  require_kemerbet_readiness_output_directory || return 1
+}
+
+require_retired_kemerbet_recovery_boundary() {
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]] ||
+    die 'the KemerBet recovery did not retire its promotion root'
+  case "$KEMERBET_RECHECK_RECOVERY_OUTCOME" in
+    committed)
+      require_committed_kemerbet_recheck_boundary_shape || return 1
+      require_completed_owner_kemerbet_cohort_marker || return 1
+      ;;
+    retryable) require_retryable_kemerbet_recovery_boundary || return 1 ;;
+    prejournal_no_mutation) require_prejournal_kemerbet_recovery_boundary || return 1 ;;
+    *) die 'the retired KemerBet recovery outcome is missing or invalid' ;;
+  esac
+  require_owned_kemerbet_recovery_latch || return 1
+}
+
+retire_owned_kemerbet_recovery_latch() {
+  local expected_dev_ino="$KEMERBET_RECOVERY_LATCH_DEV_INO" retire_status=0
+  [[ "$expected_dev_ino" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  require_retired_kemerbet_recovery_boundary || return 1
+  # The independently verified recovery boundary is necessary but not sufficient to remove the
+  # write-ahead latch. Re-prove the exact live Owner/read-only bind immediately before unlink so a
+  # stopped Owner or a newly overlapping holder leaves the durable latch for manual remediation.
+  require_owner_kemerbet_receipt_service_access || return 1
+  set +e
+  (
+    set -e
+    env -i PATH="$SAFE_PATH" python3 -I - \
+      "$KEMERBET_OWNER_RECEIPT_ROOT" "$KEMERBET_RECOVERY_LATCH_NAME" \
+      "$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" "$expected_dev_ino" <<'PY'
+import os
+import stat
+import sys
+
+CONTENT = b"fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n"
+
+
+def write_replacement(root_fd, final_name):
+    replacement_fd = os.open(
+        final_name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o400,
+        dir_fd=root_fd,
+    )
+    try:
+        os.fchown(replacement_fd, 0, 0)
+        os.fchmod(replacement_fd, 0o400)
+        offset = 0
+        while offset < len(CONTENT):
+            written = os.write(replacement_fd, CONTENT[offset:])
+            if written <= 0:
+                raise RuntimeError
+            offset += written
+        os.fsync(replacement_fd)
+    finally:
+        os.close(replacement_fd)
+    os.fsync(root_fd)
+
+
+def main():
+    root, final_name, installing_name, expected_dev_ino = sys.argv[1:]
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    final_fd = None
+    unlinked = False
+    try:
+        root_stat = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or root_stat.st_uid != 0
+            or root_stat.st_gid != 0
+            or stat.S_IMODE(root_stat.st_mode) != 0o755
+        ):
+            raise RuntimeError
+        try:
+            os.stat(installing_name, dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise RuntimeError
+        final_fd = os.open(final_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+        final_stat = os.fstat(final_fd)
+        if (
+            not stat.S_ISREG(final_stat.st_mode)
+            or final_stat.st_uid != 0
+            or final_stat.st_gid != 0
+            or stat.S_IMODE(final_stat.st_mode) != 0o400
+            or final_stat.st_nlink != 1
+            or final_stat.st_size != len(CONTENT)
+            or f"{final_stat.st_dev}:{final_stat.st_ino}" != expected_dev_ino
+            or os.read(final_fd, len(CONTENT) + 1) != CONTENT
+        ):
+            raise RuntimeError
+        os.unlink(final_name, dir_fd=root_fd)
+        unlinked = True
+        try:
+            os.fsync(root_fd)
+        except BaseException:
+            write_replacement(root_fd, final_name)
+            raise
+        try:
+            os.stat(final_name, dir_fd=root_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise RuntimeError
+    except BaseException:
+        if unlinked:
+            try:
+                os.stat(final_name, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                try:
+                    write_replacement(root_fd, final_name)
+                except BaseException:
+                    pass
+        raise
+    finally:
+        if final_fd is not None:
+            os.close(final_fd)
+        os.close(root_fd)
+
+
+try:
+    main()
+except BaseException:
+    raise SystemExit(1)
+PY
+  )
+  retire_status=$?
+  set -e
+  [[ "$retire_status" -eq 0 ]] || return 1
+  [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" &&
+    ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" ]] || return 1
+  KEMERBET_RECOVERY_LATCH_DEV_INO=''
+}
+
+recover_incomplete_kemerbet_recheck_promotion_guarded() {
+  local fallback_status=0 latch_status=0
+  set +e
+  inspect_kemerbet_recovery_fallback
+  fallback_status=$?
+  set -e
+  [[ "$fallback_status" -eq 1 ]] ||
+    die 'a durable KemerBet recovery fallback requires manual root remediation'
+  set +e
+  inspect_kemerbet_recovery_latch
+  latch_status=$?
+  set -e
+  [[ "$latch_status" -eq 1 ]] ||
+    die 'a pre-existing or unsafe KemerBet recovery latch requires manual root remediation'
+  if [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]; then
+    return 0
+  fi
+  # This read-only liveness/mount proof must precede latch publication itself. The raw recovery
+  # repeats it after publication and before its first journal, candidate, stage, or marker mutation.
+  require_owner_kemerbet_receipt_service_access
+  publish_kemerbet_recovery_latch ||
+    die 'the KemerBet recovery latch could not be published before recovery'
+  require_owned_kemerbet_recovery_latch
+  recover_incomplete_kemerbet_recheck_promotion
+  require_retired_kemerbet_recovery_boundary
+  retire_owned_kemerbet_recovery_latch ||
+    die 'the successful KemerBet recovery latch could not be retired durably'
+}
+
 recover_incomplete_kemerbet_recheck_promotion() {
   local actual_entries candidate_dev_ino candidate_digest claim_id entry player_ids_dev_ino
   local commit_sha receipt_entries receipt_present canonical_present session_container source_dev_ino state
@@ -1340,10 +2206,15 @@ recover_incomplete_kemerbet_recheck_promotion() {
   if [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]; then
     return 0
   fi
+  KEMERBET_RECHECK_RECOVERY_OUTCOME=''
+  require_owned_kemerbet_recovery_latch
   [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
     "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
     "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root:700' ]] ||
     die 'an interrupted KemerBet promotion root is unsafe'
+  # This liveness/read-only preflight precedes every journal, candidate, stage, or receipt mutation.
+  # A rerun after emergency teardown therefore preserves all root recovery evidence unchanged.
+  require_owner_kemerbet_receipt_service_access
   actual_entries="$(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" ||
     die 'the interrupted KemerBet promotion root could not be inspected'
   receipt_present='false'
@@ -1390,6 +2261,9 @@ recover_incomplete_kemerbet_recheck_promotion() {
       if [[ "$receipt_present" == 'true' ]]; then
         require_committed_kemerbet_recheck_boundary_shape
         require_completed_owner_kemerbet_cohort_marker
+        KEMERBET_RECHECK_RECOVERY_OUTCOME='committed'
+      else
+        KEMERBET_RECHECK_RECOVERY_OUTCOME='prejournal_no_mutation'
       fi
       remove_owned_kemerbet_recheck_promotion_root ||
         die 'the interrupted KemerBet promotion root could not be removed'
@@ -1404,6 +2278,7 @@ recover_incomplete_kemerbet_recheck_promotion() {
       die 'the interrupted KemerBet promotion-journal temporary is unsafe'
     remove_owned_kemerbet_recheck_promotion_root ||
       die 'the interrupted KemerBet promotion root could not be removed'
+    KEMERBET_RECHECK_RECOVERY_OUTCOME='prejournal_no_mutation'
     return 0
   fi
 
@@ -1455,6 +2330,9 @@ recover_incomplete_kemerbet_recheck_promotion() {
     KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO="$owner_claim_dev_ino"
     KEMERBET_RECHECK_OWNER_CLAIM_ID="$claim_id"
     KEMERBET_RECHECK_PLAYER_IDS_DIGEST="$player_ids_digest"
+    KEMERBET_RECHECK_SOURCE_DEV_INO="$source_dev_ino"
+    KEMERBET_RECHECK_SOURCE_DIGEST="$candidate_digest"
+    KEMERBET_RECHECK_IDENTITY_KEY_DIGEST="${journal_lines[5]#identity_hmac_key_sha256=}"
     remove_kemerbet_recheck_container || die 'an interrupted KemerBet recheck container could not be removed'
     remove_kemerbet_recheck_network || die 'an interrupted KemerBet recheck network could not be removed'
     remove_journaled_kemerbet_session_provision "$session_container" "$commit_sha"
@@ -1494,6 +2372,7 @@ recover_incomplete_kemerbet_recheck_promotion() {
       die 'the KemerBet identity key could not be repaired after interrupted import'
     remove_owned_kemerbet_recheck_promotion_root ||
       die 'the interrupted import-prepared KemerBet promotion journal could not be retired'
+    KEMERBET_RECHECK_RECOVERY_OUTCOME='retryable'
     return 0
   fi
 
@@ -1527,6 +2406,9 @@ recover_incomplete_kemerbet_recheck_promotion() {
     KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO="$owner_claim_dev_ino"
     KEMERBET_RECHECK_OWNER_CLAIM_ID="$claim_id"
     KEMERBET_RECHECK_PLAYER_IDS_DIGEST="$player_ids_digest"
+    KEMERBET_RECHECK_SOURCE_DEV_INO="$source_dev_ino"
+    KEMERBET_RECHECK_SOURCE_DIGEST="$candidate_digest"
+    KEMERBET_RECHECK_IDENTITY_KEY_DIGEST="${journal_lines[5]#identity_hmac_key_sha256=}"
     remove_kemerbet_recheck_container || die 'an interrupted KemerBet recheck container could not be removed'
     remove_kemerbet_recheck_network || die 'an interrupted KemerBet recheck network could not be removed'
     remove_journaled_kemerbet_session_provision "$session_container" "$commit_sha"
@@ -1559,6 +2441,7 @@ recover_incomplete_kemerbet_recheck_promotion() {
       die 'the repaired KemerBet identity key no longer matches its journal'
     remove_owned_kemerbet_recheck_promotion_root ||
       die 'the interrupted prepared KemerBet promotion journal could not be retired'
+    KEMERBET_RECHECK_RECOVERY_OUTCOME='retryable'
     return 0
   fi
 
@@ -1593,6 +2476,9 @@ recover_incomplete_kemerbet_recheck_promotion() {
   KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO="$owner_claim_dev_ino"
   KEMERBET_RECHECK_OWNER_CLAIM_ID="$claim_id"
   KEMERBET_RECHECK_PLAYER_IDS_DIGEST="$player_ids_digest"
+  KEMERBET_RECHECK_SOURCE_DEV_INO="$source_dev_ino"
+  KEMERBET_RECHECK_SOURCE_DIGEST="$candidate_digest"
+  KEMERBET_RECHECK_IDENTITY_KEY_DIGEST="${journal_lines[6]#identity_hmac_key_sha256=}"
 
   remove_kemerbet_recheck_container || die 'an interrupted KemerBet recheck container could not be removed'
   remove_kemerbet_recheck_network || die 'an interrupted KemerBet recheck network could not be removed'
@@ -1668,6 +2554,7 @@ recover_incomplete_kemerbet_recheck_promotion() {
       "${journal_lines[10]#profile_identity_sha256=}" require-receipt
     remove_owned_kemerbet_recheck_promotion_root ||
       die 'the interrupted committed KemerBet promotion journal could not be retired'
+    KEMERBET_RECHECK_RECOVERY_OUTCOME='committed'
     KEMERBET_RECHECK_CANDIDATE_DEV_INO=''
     KEMERBET_RECHECK_CANDIDATE_DIGEST=''
     return 0
@@ -1697,8 +2584,79 @@ recover_incomplete_kemerbet_recheck_promotion() {
     die 'the repaired KemerBet identity key no longer matches its journal'
   remove_owned_kemerbet_recheck_promotion_root ||
     die 'the interrupted KemerBet promotion journal could not be retired'
+  KEMERBET_RECHECK_RECOVERY_OUTCOME='retryable'
   KEMERBET_RECHECK_CANDIDATE_DEV_INO=''
   KEMERBET_RECHECK_CANDIDATE_DIGEST=''
+}
+
+recover_kemerbet_recheck_before_teardown() {
+  local fallback_durable_status=0 fallback_publish_status=0 fallback_status=0
+  local latch_durable_status=0 latch_status=0 recovery_status=0
+  KEMERBET_TEARDOWN_RECOVERY_FAILED='false'
+  KEMERBET_EMERGENCY_TEARDOWN_FAILED='false'
+  # The mutation lock is already held by every caller. The guarded recovery publishes a durable,
+  # root-owned latch before its first recovery mutation. A pre-existing latch skips recovery.
+  set +e
+  ( set -e; recover_incomplete_kemerbet_recheck_promotion_guarded )
+  recovery_status=$?
+  set -e
+  if [[ "$recovery_status" -eq 0 &&
+    ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]]; then
+    return 0
+  fi
+  set +e
+  inspect_kemerbet_recovery_latch
+  latch_status=$?
+  set -e
+  if [[ "$latch_status" -ne 1 ]]; then
+    set +e
+    ( set -e; durably_retain_kemerbet_recovery_latch_residue )
+    latch_durable_status=$?
+    set -e
+  else
+    latch_durable_status=1
+  fi
+  if [[ "$latch_durable_status" -ne 0 ]]; then
+    set +e
+    inspect_kemerbet_recovery_fallback
+    fallback_status=$?
+    set -e
+    if [[ "$fallback_status" -eq 1 ]]; then
+      # A primary-latch publisher that leaves no final or installer has not authorized recovery
+      # mutation. Bind that exact untouched journal before emergency teardown. If neither durable
+      # namespace can retain a residue, preserve the pre-recovery topology and refuse teardown.
+      set +e
+      ( set -e; publish_kemerbet_recovery_fallback )
+      fallback_publish_status=$?
+      set -e
+      set +e
+      inspect_kemerbet_recovery_fallback
+      fallback_status=$?
+      set -e
+    fi
+    if [[ "$fallback_publish_status" -eq 0 || "$fallback_status" -ne 1 ]]; then
+      set +e
+      ( set -e; durably_retain_kemerbet_recovery_fallback_residue )
+      fallback_durable_status=$?
+      set -e
+    else
+      fallback_durable_status=1
+    fi
+    [[ "$fallback_durable_status" -eq 0 ]] ||
+      die 'KemerBet recovery could not retain a durable failure block; teardown was not attempted'
+  fi
+  KEMERBET_TEARDOWN_RECOVERY_FAILED='true'
+  printf '%s\n' \
+    'KemerBet readiness recovery is durably blocked; full emergency teardown will continue.' >&2
+}
+
+require_kemerbet_teardown_recovery_success() {
+  if [[ "$KEMERBET_TEARDOWN_RECOVERY_FAILED" == 'true' ]]; then
+    if [[ "$KEMERBET_EMERGENCY_TEARDOWN_FAILED" == 'true' ]]; then
+      die 'emergency teardown is incomplete and the interrupted KemerBet readiness journal requires root remediation'
+    fi
+    die 'the full staging runtime was stopped, but the interrupted KemerBet readiness journal requires root remediation'
+  fi
 }
 
 harden_kemerbet_identity_key() {
@@ -1906,25 +2864,185 @@ resolve_kemerbet_session_control_volume_mountpoint() {
   printf '%s' "$mountpoint"
 }
 
+require_owner_kemerbet_receipt_ancestors() {
+  local ancestor
+  for ancestor in / /var /var/lib; do
+    [[ ! -L "$ancestor" && -d "$ancestor" && "$(realpath -- "$ancestor")" == "$ancestor" &&
+      "$(stat --format='%u:%g:%a' "$ancestor")" == '0:0:755' ]] ||
+      die 'a system ancestor is unsafe for the Owner KemerBet receipt boundary'
+  done
+}
+
+require_owner_kemerbet_receipt_directory() {
+  require_owner_kemerbet_receipt_ancestors || return 1
+  [[ ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" && -d "$KEMERBET_OWNER_RECEIPT_PARENT" &&
+    "$(realpath -- "$KEMERBET_OWNER_RECEIPT_PARENT")" == "$KEMERBET_OWNER_RECEIPT_PARENT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_OWNER_RECEIPT_PARENT")" == '0:0:755' ]] ||
+    die 'the Owner KemerBet receipt parent is unsafe'
+  [[ ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" && -d "$KEMERBET_OWNER_RECEIPT_ROOT" &&
+    "$(realpath -- "$KEMERBET_OWNER_RECEIPT_ROOT")" == "$KEMERBET_OWNER_RECEIPT_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_OWNER_RECEIPT_ROOT")" == '0:0:755' ]] ||
+    die 'the Owner KemerBet receipt root is unsafe'
+}
+
+require_owner_kemerbet_receipt_startup_state() {
+  local claim_id entries entry final_count=0 path
+  require_owner_kemerbet_receipt_directory || return 1
+  entries="$(find -P "$KEMERBET_OWNER_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" ||
+    die 'the Owner KemerBet receipt root could not be inspected'
+  if [[ -n "$entries" ]]; then
+    while IFS= read -r entry; do
+      path="$KEMERBET_OWNER_RECEIPT_ROOT/$entry"
+      case "$entry" in
+        "$KEMERBET_OWNER_IMPORTED_CLAIM_NAME"|"$KEMERBET_OWNER_COMPLETED_CLAIM_NAME"|"$KEMERBET_OWNER_FAILED_CLAIM_NAME")
+          [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+            "$(stat --format='%u:%g:%a:%h:%s' "$path")" == '0:10001:440:1:37' ]] ||
+            die 'an Owner KemerBet receipt has unsafe metadata'
+          IFS= read -r claim_id <"$path" || die 'an Owner KemerBet receipt could not be read'
+          [[ "$claim_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+            die 'an Owner KemerBet receipt claim is invalid'
+          cmp -s -- "$path" <(printf '%s\n' "$claim_id") ||
+            die 'an Owner KemerBet receipt content is not exact'
+          final_count=$((final_count + 1))
+          ;;
+        "$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME"|"$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME"|"$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME")
+          die 'an incomplete Owner KemerBet receipt installation blocks startup'
+          ;;
+        *) die 'the Owner KemerBet receipt root contains unexpected residue' ;;
+      esac
+    done <<<"$entries"
+  fi
+  [[ "$final_count" -le 1 ]] || die 'the Owner KemerBet receipt state is conflicting'
+  require_owner_kemerbet_receipt_directory || return 1
+}
+
+ensure_owner_kemerbet_receipt_root() {
+  require_owner_kemerbet_receipt_ancestors
+  if [[ ! -e "$KEMERBET_OWNER_RECEIPT_PARENT" && ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" ]]; then
+    install -d -o root -g root -m 0755 "$KEMERBET_OWNER_RECEIPT_PARENT"
+    sync -f /var/lib || die 'the Owner KemerBet receipt parent could not be synchronized'
+  fi
+  [[ ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" && -d "$KEMERBET_OWNER_RECEIPT_PARENT" &&
+    "$(realpath -- "$KEMERBET_OWNER_RECEIPT_PARENT")" == "$KEMERBET_OWNER_RECEIPT_PARENT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_OWNER_RECEIPT_PARENT")" == '0:0:755' ]] ||
+    die 'the Owner KemerBet receipt parent is unsafe'
+  if [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" ]]; then
+    install -d -o root -g root -m 0755 "$KEMERBET_OWNER_RECEIPT_ROOT"
+    sync -f "$KEMERBET_OWNER_RECEIPT_PARENT" ||
+      die 'the Owner KemerBet receipt root installation could not be synchronized'
+  fi
+  require_owner_kemerbet_receipt_startup_state
+}
+
+require_legacy_owner_kemerbet_receipt_paths_absent() {
+  local control_mountpoint legacy_path
+  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)" || return 1
+  for legacy_path in \
+    "$control_mountpoint/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
+    "$control_mountpoint/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
+    "$control_mountpoint/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
+    "$control_mountpoint/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
+    "$control_mountpoint/$KEMERBET_OWNER_FAILED_CLAIM_NAME" \
+    "$control_mountpoint/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME" \
+    "$control_mountpoint/$KEMERBET_RECOVERY_LATCH_NAME" \
+    "$control_mountpoint/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME"; do
+    [[ ! -e "$legacy_path" && ! -L "$legacy_path" ]] ||
+      die 'a legacy Owner-writable KemerBet receipt path blocks the root receipt boundary'
+  done
+}
+
 require_single_owner_control_runtime_instance() {
-  local owner_ids
-  owner_ids="$(docker_local container ls --all --quiet \
+  local all_bind_contracts all_container_ids_text bind_container bind_destination bind_rw bind_source
+  local bind_source_canonical container_bind_contracts
+  local holder_contracts owner_ids receipt_mount
+  local -a all_container_ids=()
+  owner_ids="$(docker_local container ls --all --quiet --no-trunc \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" \
     --filter 'label=com.docker.compose.service=owner-control')" ||
     die 'the Owner control container inventory could not be inspected'
+  require_owner_kemerbet_receipt_directory || return 1
   [[ "$owner_ids" =~ ^[0-9a-f]{12,64}$ ]] ||
     die 'the reviewed runtime must contain exactly one Owner control container'
   [[ "$(docker_local container inspect "$owner_ids" \
     --format '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}')" == \
     "$PROJECT_NAME|owner-control" ]] ||
     die 'the singular Owner control container labels are not exact'
+  receipt_mount="$(docker_local container inspect "$owner_ids" --format \
+    '{{range .Mounts}}{{if eq .Destination "/run/fetanagent-kemerbet-readiness-cohort-receipts"}}{{printf "%s|%s|%s|%t" .Type .Source .Destination .RW}}{{end}}{{end}}')" ||
+    die 'the Owner KemerBet receipt mount could not be inspected'
+  [[ "$receipt_mount" == \
+    "bind|$KEMERBET_OWNER_RECEIPT_ROOT|$KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT|false" ]] ||
+    die 'the Owner KemerBet receipt mount contract is not exact'
+  all_container_ids_text="$(docker_local container ls --all --quiet --no-trunc)" ||
+    die 'the container inventory could not be inspected for Owner KemerBet receipt holders'
+  if [[ -n "$all_container_ids_text" ]]; then
+    mapfile -t all_container_ids <<<"$all_container_ids_text"
+  fi
+  holder_contracts=''
+  all_bind_contracts=''
+  if [[ "${#all_container_ids[@]}" -gt 0 ]]; then
+    # Docker appends a separator newline for every inspected object. Inspecting several objects in
+    # one template call therefore creates ambiguous blank records (especially for a container with
+    # no binds). Inspect one exact container at a time and append only a nonempty complete output;
+    # the rigid field classifier below continues to reject every partial record.
+    for bind_container in "${all_container_ids[@]}"; do
+      [[ "$bind_container" =~ ^[0-9a-f]{64}$ ]] ||
+        die 'a container identity could not be safely classified'
+      container_bind_contracts="$(docker_local container inspect "$bind_container" --format \
+        '{{range .Mounts}}{{if eq .Type "bind"}}{{printf "%s|%s|%s|%t\n" $.Id .Source .Destination .RW}}{{end}}{{end}}')" ||
+        die 'the Owner KemerBet receipt bind inventory could not be inspected'
+      if [[ -n "$container_bind_contracts" ]]; then
+        if [[ -n "$all_bind_contracts" ]]; then
+          all_bind_contracts+=$'\n'
+        fi
+        all_bind_contracts+="$container_bind_contracts"
+      fi
+    done
+    if [[ -n "$all_bind_contracts" ]]; then
+      while IFS='|' read -r bind_container bind_source bind_destination bind_rw; do
+        [[ "$bind_container" =~ ^[0-9a-f]{64}$ && "$bind_source" == /* &&
+          "$bind_destination" == /* && "$bind_rw" =~ ^(true|false)$ ]] ||
+          die 'a container bind mount could not be safely classified'
+        bind_source_canonical="$(realpath -- "$bind_source")" ||
+          die 'a container bind source could not be canonically resolved'
+        [[ "$bind_source_canonical" == /* && ! -L "$bind_source_canonical" &&
+          "$(realpath -- "$bind_source_canonical")" == "$bind_source_canonical" ]] ||
+          die 'a container bind source is not canonical'
+        if [[ "$bind_source_canonical" == '/' ||
+          "$bind_source_canonical" == "$KEMERBET_OWNER_RECEIPT_ROOT" ||
+          "$bind_source_canonical" == "$KEMERBET_OWNER_RECEIPT_ROOT/"* ||
+          "$KEMERBET_OWNER_RECEIPT_ROOT" == "$bind_source_canonical/"* ]]; then
+          holder_contracts+="$bind_container|bind|$bind_source_canonical|$bind_destination|$bind_rw"$'\n'
+        fi
+      done <<<"$all_bind_contracts"
+      holder_contracts="${holder_contracts%$'\n'}"
+    fi
+  fi
+  [[ "$holder_contracts" == \
+    "$owner_ids|bind|$KEMERBET_OWNER_RECEIPT_ROOT|$KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT|false" ]] ||
+    die 'the Owner KemerBet receipt boundary overlaps an unexpected container bind'
+  require_legacy_owner_kemerbet_receipt_paths_absent || return 1
+}
+
+require_owner_kemerbet_receipt_service_access() {
+  local owner_id
+  require_single_owner_control_runtime_instance || return 1
+  owner_id="$(docker_local container ls --quiet --no-trunc \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=owner-control')" ||
+    die 'the running Owner control container could not be inspected'
+  [[ "$owner_id" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the exact Owner control container is not running'
+  docker_local container exec "$owner_id" node -e \
+    "const fs=require('node:fs');const p='$KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT';fs.readdirSync(p);fs.accessSync(p,fs.constants.R_OK|fs.constants.X_OK);try{fs.accessSync(p,fs.constants.W_OK);process.exit(1)}catch(e){if(!e||!['EACCES','EPERM','EROFS'].includes(e.code))process.exit(1)}" \
+    >/dev/null 2>&1 || die 'the Owner process receipt mount is not read-only and traversable'
 }
 
 inspect_owner_staged_kemerbet_cohort() {
   local claim_path claim_size control_mountpoint inspection installing_path player_path player_size
   local -a inspection_lines=()
-  require_single_owner_control_runtime_instance
-  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)"
+  require_single_owner_control_runtime_instance || return 1
+  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)" || return 1
   player_path="$control_mountpoint/$KEMERBET_OWNER_STAGED_PLAYER_IDS_NAME"
   claim_path="$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_NAME"
   for installing_path in \
@@ -1941,6 +3059,11 @@ inspect_owner_staged_kemerbet_cohort() {
     ! -e "$control_mountpoint/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" &&
     ! -L "$control_mountpoint/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" ]] ||
     die 'the Owner-staged KemerBet cohort has an incompatible claim marker'
+  [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" &&
+    ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" ]] ||
+    die 'the Owner-staged KemerBet cohort has an incompatible root receipt'
   for staged_path in "$player_path" "$claim_path"; do
     [[ ! -L "$staged_path" && -f "$staged_path" && "$(realpath -- "$staged_path")" == "$staged_path" &&
       "$(stat --format='%u:%g:%a:%h' "$staged_path")" == '10001:10001:400:1' ]] ||
@@ -1957,8 +3080,8 @@ inspect_owner_staged_kemerbet_cohort() {
     die 'the Owner-staged KemerBet claim identity is invalid'
   cmp -s -- "$claim_path" <(printf '%s\n' "$KEMERBET_RECHECK_OWNER_CLAIM_ID") ||
     die 'the Owner-staged KemerBet claim content is not exact'
-  if [[ -e "$control_mountpoint/$KEMERBET_OWNER_FAILED_CLAIM_NAME" ||
-    -L "$control_mountpoint/$KEMERBET_OWNER_FAILED_CLAIM_NAME" ]]; then
+  if [[ -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME" ||
+    -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME" ]]; then
     owner_kemerbet_cohort_marker require-failed "$KEMERBET_RECHECK_OWNER_CLAIM_ID" ||
       die 'the retryable Owner-staged KemerBet failure marker does not match its claim'
   fi
@@ -3455,7 +4578,7 @@ PY
 }
 
 owner_kemerbet_cohort_marker() {
-  local action="$1" claim_id="$2" control_mountpoint installing_name marker_name
+  local action="$1" claim_id="$2" installing_name marker_name
   case "$action" in
     publish-imported|require-imported|remove-imported)
       marker_name="$KEMERBET_OWNER_IMPORTED_CLAIM_NAME"
@@ -3469,13 +4592,22 @@ owner_kemerbet_cohort_marker() {
       marker_name="$KEMERBET_OWNER_FAILED_CLAIM_NAME"
       installing_name="$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"
       ;;
+    guard-retry)
+      marker_name="$KEMERBET_OWNER_FAILED_CLAIM_NAME"
+      installing_name="$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"
+      ;;
     *) return 1 ;;
   esac
   [[ "$claim_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
     return 1
-  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)" || return 1
+  [[ $# -eq 2 ]] || return 1
+  require_kemerbet_recovery_latch_authority || return 1
+  require_owner_kemerbet_receipt_service_access || return 1
   env -i PATH="$SAFE_PATH" python3 -I - \
-    "$action" "$control_mountpoint/$marker_name" "$control_mountpoint/$installing_name" "$claim_id" <<'PY'
+    "$action" "$KEMERBET_OWNER_RECEIPT_ROOT/$marker_name" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$installing_name" "$claim_id" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" \
+    "$KEMERBET_RECOVERY_LATCH_DEV_INO" <<'PY'
 import os
 import re
 import stat
@@ -3487,6 +4619,8 @@ ALLOWED = {
     'kemerbet-readiness-cohort-completed-v1': '.kemerbet-readiness-cohort-completed-v1.installing',
     'kemerbet-readiness-cohort-failed-v1': '.kemerbet-readiness-cohort-failed-v1.installing',
 }
+LATCH_CONTENT = b"fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n"
+LATCH_NAME = 'kemerbet-readiness-recovery-in-progress-or-failed-v1'
 
 
 def reject():
@@ -3504,7 +4638,7 @@ def require_directory(path, descriptor):
         not stat.S_ISDIR(opened.st_mode)
         or not stat.S_ISDIR(named.st_mode)
         or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
-        or (opened.st_uid, opened.st_gid, mode(opened)) != (10001, 10001, 0o700)
+        or (opened.st_uid, opened.st_gid, mode(opened)) != (0, 0, 0o755)
         or named.st_mode != opened.st_mode
         or named.st_uid != opened.st_uid
         or named.st_gid != opened.st_gid
@@ -3566,6 +4700,67 @@ def exact_marker(directory_descriptor, name, path, content, links=1):
         os.close(descriptor)
 
 
+def exact_installing_prefix(directory_descriptor, name, named, content):
+    if (
+        not stat.S_ISREG(named.st_mode)
+        or named.st_nlink != 1
+        or named.st_size > len(content)
+        or (named.st_uid, named.st_gid, mode(named))
+        not in {(0, 0, 0o600), (0, 10001, 0o600), (0, 10001, 0o440)}
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_descriptor,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or opened.st_mode != named.st_mode
+            or opened.st_uid != named.st_uid
+            or opened.st_gid != named.st_gid
+            or opened.st_nlink != named.st_nlink
+            or opened.st_size != named.st_size
+            or os.pread(descriptor, len(content) + 1, 0) != content[:named.st_size]
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+
+
+def exact_recovery_latch(directory_descriptor, name, path, expected_dev_ino):
+    named = optional(directory_descriptor, name, path)
+    if (
+        named is None
+        or not stat.S_ISREG(named.st_mode)
+        or (named.st_uid, named.st_gid, mode(named), named.st_nlink, named.st_size)
+        != (0, 0, 0o400, 1, len(LATCH_CONTENT))
+        or f"{named.st_dev}:{named.st_ino}" != expected_dev_ino
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_descriptor,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or opened.st_mode != named.st_mode
+            or opened.st_uid != named.st_uid
+            or opened.st_gid != named.st_gid
+            or opened.st_nlink != 1
+            or opened.st_size != len(LATCH_CONTENT)
+            or os.pread(descriptor, len(LATCH_CONTENT) + 1, 0) != LATCH_CONTENT
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+
+
 def write_all(descriptor, content):
     offset = 0
     while offset < len(content):
@@ -3575,7 +4770,7 @@ def write_all(descriptor, content):
         offset += written
 
 
-def transition(action, marker_path, installing_path, claim_id):
+def transition(action, marker_path, installing_path, claim_id, latch_path, latch_dev_ino):
     marker_name = os.path.basename(marker_path)
     installing_name = os.path.basename(installing_path)
     directory = os.path.dirname(marker_path)
@@ -3584,11 +4779,14 @@ def transition(action, marker_path, installing_path, claim_id):
             'publish-imported', 'require-imported', 'remove-imported',
             'publish-completed', 'require-completed', 'remove-completed',
             'publish-failed', 'require-failed', 'remove-failed',
+            'guard-retry',
         }
         or ALLOWED.get(marker_name) != installing_name
         or os.path.dirname(installing_path) != directory
+        or os.path.dirname(latch_path) != directory
+        or os.path.basename(latch_path) != LATCH_NAME
         or CLAIM_ID.fullmatch(claim_id) is None
-        or action.split('-', 1)[1] not in marker_name
+        or (action != 'guard-retry' and action.split('-', 1)[1] not in marker_name)
     ):
         reject()
     content = (claim_id + '\n').encode('ascii')
@@ -3599,6 +4797,65 @@ def transition(action, marker_path, installing_path, claim_id):
     installing_descriptor = None
     try:
         require_directory(directory, directory_descriptor)
+        latch = optional(directory_descriptor, LATCH_NAME, latch_path)
+        namespace = set(ALLOWED) | set(ALLOWED.values())
+        if latch is None:
+            if latch_dev_ino:
+                reject()
+        else:
+            if re.fullmatch(r'[0-9]+:[0-9]+', latch_dev_ino) is None:
+                reject()
+            exact_recovery_latch(directory_descriptor, LATCH_NAME, latch_path, latch_dev_ino)
+            namespace.add(LATCH_NAME)
+        if any(entry not in namespace for entry in os.listdir(directory_descriptor)):
+            reject()
+        if action == 'guard-retry':
+            observed = []
+            for final_name, pending_name in ALLOWED.items():
+                final_path = os.path.join(directory, final_name)
+                pending_path = os.path.join(directory, pending_name)
+                pending = optional(directory_descriptor, pending_name, pending_path)
+                final = optional(directory_descriptor, final_name, final_path)
+                if 'completed' in final_name and (pending is not None or final is not None):
+                    reject()
+                if pending is not None or final is not None:
+                    observed.append((final_name, pending_name, final_path, pending_path, final, pending))
+            if len(observed) > 1:
+                reject()
+            if observed:
+                final_name, pending_name, final_path, pending_path, final, pending = observed[0]
+                if pending is not None and final is not None:
+                    if (
+                        (pending.st_dev, pending.st_ino) != (final.st_dev, final.st_ino)
+                        or pending.st_nlink != 2
+                        or final.st_nlink != 2
+                    ):
+                        reject()
+                    exact_marker(directory_descriptor, pending_name, pending_path, content, 2)
+                    exact_marker(directory_descriptor, final_name, final_path, content, 2)
+                elif pending is not None:
+                    exact_installing_prefix(directory_descriptor, pending_name, pending, content)
+                else:
+                    exact_marker(directory_descriptor, final_name, final_path, content)
+                if pending is not None:
+                    os.unlink(pending_name, dir_fd=directory_descriptor)
+                    os.fsync(directory_descriptor)
+                    if optional(directory_descriptor, pending_name, pending_path) is not None:
+                        reject()
+                    final = optional(directory_descriptor, final_name, final_path)
+                    if final is not None:
+                        exact_marker(directory_descriptor, final_name, final_path, content)
+            if latch is not None:
+                exact_recovery_latch(
+                    directory_descriptor,
+                    LATCH_NAME,
+                    latch_path,
+                    latch_dev_ino,
+                )
+            if any(entry not in namespace for entry in os.listdir(directory_descriptor)):
+                reject()
+            require_directory(directory, directory_descriptor)
+            return
         installing = optional(
             directory_descriptor,
             installing_name,
@@ -3620,14 +4877,7 @@ def transition(action, marker_path, installing_path, claim_id):
                 os.fsync(directory_descriptor)
                 marker = optional(directory_descriptor, marker_name, marker_path)
             else:
-                if (
-                    not stat.S_ISREG(installing.st_mode)
-                    or installing.st_nlink != 1
-                    or installing.st_size > len(content)
-                    or (installing.st_uid, installing.st_gid, mode(installing))
-                    not in {(0, 0, 0o600), (0, 10001, 0o600), (0, 10001, 0o440)}
-                ):
-                    reject()
+                exact_installing_prefix(directory_descriptor, installing_name, installing, content)
                 os.unlink(installing_name, dir_fd=directory_descriptor)
                 os.fsync(directory_descriptor)
         if verb == 'publish':
@@ -3688,6 +4938,15 @@ def transition(action, marker_path, installing_path, claim_id):
             exact_marker(directory_descriptor, marker_name, marker_path, content)
         if optional(directory_descriptor, installing_name, installing_path) is not None:
             reject()
+        if latch is not None:
+            exact_recovery_latch(
+                directory_descriptor,
+                LATCH_NAME,
+                latch_path,
+                latch_dev_ino,
+            )
+        if any(entry not in namespace for entry in os.listdir(directory_descriptor)):
+            reject()
         require_directory(directory, directory_descriptor)
     finally:
         if installing_descriptor is not None:
@@ -3696,9 +4955,9 @@ def transition(action, marker_path, installing_path, claim_id):
 
 
 try:
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 7:
         reject()
-    transition(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+    transition(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
 except Exception:
     raise SystemExit(1)
 PY
@@ -3706,8 +4965,8 @@ PY
 
 require_completed_owner_kemerbet_cohort_marker() {
   local claim_id control_mountpoint path
-  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)"
-  path="$control_mountpoint/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME"
+  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)" || return 1
+  path="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME"
   [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
     "$(stat --format='%u:%g:%a:%h:%s' "$path")" == '0:10001:440:1:37' ]] ||
     die 'the completed Owner KemerBet cohort marker is absent or unsafe'
@@ -3722,14 +4981,19 @@ require_completed_owner_kemerbet_cohort_marker() {
     "$control_mountpoint/$KEMERBET_OWNER_STAGED_PLAYER_IDS_NAME" \
     "$control_mountpoint/$KEMERBET_OWNER_STAGED_PLAYER_IDS_INSTALLING_NAME" \
     "$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_NAME" \
-    "$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_INSTALLING_NAME" \
-    "$control_mountpoint/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
-    "$control_mountpoint/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
-    "$control_mountpoint/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
-    "$control_mountpoint/$KEMERBET_OWNER_FAILED_CLAIM_NAME" \
-    "$control_mountpoint/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"; do
+    "$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_INSTALLING_NAME"; do
     [[ ! -e "$path" && ! -L "$path" ]] ||
       die 'the completed Owner KemerBet cohort retained a staging residue'
+  done
+  require_legacy_owner_kemerbet_receipt_paths_absent || return 1
+  for path in \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"; do
+    [[ ! -e "$path" && ! -L "$path" ]] ||
+      die 'the completed Owner KemerBet cohort retained a receipt residue'
   done
 }
 
@@ -3742,7 +5006,9 @@ complete_owner_staged_kemerbet_cohort() {
 }
 
 restore_retryable_owner_staged_kemerbet_cohort() {
+  owner_kemerbet_cohort_marker guard-retry "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
   restore_owner_staged_kemerbet_cohort || return 1
+  owner_kemerbet_cohort_marker guard-retry "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
   owner_kemerbet_cohort_marker remove-imported "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
   owner_kemerbet_cohort_marker publish-failed "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
   owner_kemerbet_cohort_marker require-failed "$KEMERBET_RECHECK_OWNER_CLAIM_ID"
@@ -3786,12 +5052,13 @@ require_kemerbet_profile_volume_holders() {
 kemerbet_profile_identity_digest() {
   [[ $# -eq 3 ]] || die 'the KemerBet profile singleton policy is invalid'
   local account_id="$1" mountpoint="$2" singleton_policy="$3"
-  local profile_path root_entries singleton singleton_path singleton_stat
+  local digest mountpoint_stat profile_path profile_stat root_entries singleton singleton_path
+  local singleton_stat
   [[ "$account_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
     "$account_id" != '00000000-0000-0000-0000-000000000000' ]] ||
     die 'the KemerBet profile account identity is invalid'
   case "$singleton_policy" in
-    allow-exact-stale-singletons) require_kemerbet_profile_volume_holders '' ;;
+    allow-exact-stale-singletons) require_kemerbet_profile_volume_holders '' || return 1 ;;
     require-absent-singletons) ;;
     *) die 'the KemerBet profile singleton policy is invalid' ;;
   esac
@@ -3817,11 +5084,15 @@ kemerbet_profile_identity_digest() {
     [[ "$singleton_stat" == '10001:10001:777:1' ]] ||
       die 'the KemerBet profile singleton metadata is unsafe'
   done
-  printf 'volume=%s\nroot=%s\nprofile=%s\naccount=%s\n' \
+  mountpoint_stat="$(stat --format='%d:%i:%u:%g:%a' "$mountpoint")" || return 1
+  profile_stat="$(stat --format='%d:%i:%u:%g:%a' "$profile_path")" || return 1
+  digest="$(printf 'volume=%s\nroot=%s\nprofile=%s\naccount=%s\n' \
     "$KEMERBET_PROFILE_VOLUME" \
-    "$(stat --format='%d:%i:%u:%g:%a' "$mountpoint")" \
-    "$(stat --format='%d:%i:%u:%g:%a' "$profile_path")" \
-    "$account_id" | sha256sum | awk '{print $1}'
+    "$mountpoint_stat" \
+    "$profile_stat" \
+    "$account_id" | sha256sum | awk '{print $1}')" || return 1
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "$digest"
 }
 
 require_kemerbet_recheck_container_contract() {
@@ -3921,43 +5192,117 @@ require_kemerbet_recheck_container_contract() {
     "$KEMERBET_RECHECK_NETWORK" ]] || die 'the KemerBet recheck network attachment is not singular'
 }
 
-stop_project() {
-  local containers networks
-  containers="$(docker_local container ls --all --quiet --filter "label=com.docker.compose.project=$PROJECT_NAME")"
-  if [[ -n "$containers" ]]; then
+remove_project_runtime_best_effort() {
+  local cleanup_status=0 containers='' networks='' remaining=''
+  if ! containers="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
+    cleanup_status=1
+  elif [[ -n "$containers" ]]; then
     # Container identifiers returned by Docker contain only hexadecimal characters and newlines.
-    docker_local container rm --force $containers >/dev/null
+    docker_local container rm --force $containers >/dev/null || cleanup_status=1
   fi
-  networks="$(docker_local network ls --quiet --filter "label=com.docker.compose.project=$PROJECT_NAME")"
-  if [[ -n "$networks" ]]; then
+  if ! networks="$(docker_local network ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
+    cleanup_status=1
+  elif [[ -n "$networks" ]]; then
     # Network identifiers returned by Docker contain only hexadecimal characters and newlines.
-    docker_local network rm $networks >/dev/null
+    docker_local network rm $networks >/dev/null || cleanup_status=1
   fi
-  rm -f -- \
-    "$SECRET_ROOT/owner-database-url" \
-    "$SECRET_ROOT/publishable-key" \
-    "$SECRET_ROOT/customer-web-database-url" \
-    "$SECRET_ROOT/customer-web-publishable-key" \
-    "$SECRET_ROOT/customer-web-rate-limit-hmac" \
-    "$SECRET_ROOT/beta-database-url" \
-    "$SECRET_ROOT/beta-transport-hmac" \
-    "$SECRET_ROOT/bot-transport-hmac" \
-    "$SECRET_ROOT/beta-payload-hmac" \
-    "$SECRET_ROOT/player-action-database-url" \
-    "$SECRET_ROOT/api-action-transport-hmac" \
-    "$SECRET_ROOT/api-action-payload-hmac" \
-    "$SECRET_ROOT/api-action-capability-hmac" \
-    "$SECRET_ROOT/api-action-semantic-hmac" \
-    "$SECRET_ROOT/cbe-deposit-reference-encryption-key" \
-    "$SECRET_ROOT/cbe-deposit-reference-fingerprint-key" \
-    "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json" \
-    "$SECRET_ROOT/deposit-proof-reference-encryption-master" \
-    "$SECRET_ROOT/deposit-proof-reference-fingerprint-master" \
-    "$SECRET_ROOT/deposit-proof-reference-profile.v2.json" \
-    "$SECRET_ROOT/bot-action-transport-hmac" \
-    "$SECRET_ROOT/bot-token" \
+  if ! remaining="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
+    cleanup_status=1
+  elif [[ -n "$remaining" ]]; then
+    cleanup_status=1
+  fi
+  if ! remaining="$(docker_local network ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
+    cleanup_status=1
+  elif [[ -n "$remaining" ]]; then
+    cleanup_status=1
+  fi
+  return "$cleanup_status"
+}
+
+remove_staging_runtime_secrets_best_effort() {
+  local cleanup_status=0 secret_path
+  local -a secret_paths=(
+    "$SECRET_ROOT/owner-database-url"
+    "$SECRET_ROOT/publishable-key"
+    "$SECRET_ROOT/customer-web-database-url"
+    "$SECRET_ROOT/customer-web-publishable-key"
+    "$SECRET_ROOT/customer-web-rate-limit-hmac"
+    "$SECRET_ROOT/beta-database-url"
+    "$SECRET_ROOT/beta-transport-hmac"
+    "$SECRET_ROOT/bot-transport-hmac"
+    "$SECRET_ROOT/beta-payload-hmac"
+    "$SECRET_ROOT/player-action-database-url"
+    "$SECRET_ROOT/api-action-transport-hmac"
+    "$SECRET_ROOT/api-action-payload-hmac"
+    "$SECRET_ROOT/api-action-capability-hmac"
+    "$SECRET_ROOT/api-action-semantic-hmac"
+    "$SECRET_ROOT/cbe-deposit-reference-encryption-key"
+    "$SECRET_ROOT/cbe-deposit-reference-fingerprint-key"
+    "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
+    "$SECRET_ROOT/deposit-proof-reference-encryption-master"
+    "$SECRET_ROOT/deposit-proof-reference-fingerprint-master"
+    "$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
+    "$SECRET_ROOT/bot-action-transport-hmac"
+    "$SECRET_ROOT/bot-token"
     "$SECRET_ROOT/supabase-ca.crt"
-  clear_bot_startup_receipt
+  )
+  for secret_path in "${secret_paths[@]}"; do
+    rm -f -- "$secret_path" || cleanup_status=1
+  done
+  ( clear_bot_startup_receipt ) || cleanup_status=1
+  for secret_path in "${secret_paths[@]}"; do
+    [[ ! -e "$secret_path" && ! -L "$secret_path" ]] || cleanup_status=1
+  done
+  [[ ! -e "$BOT_STARTUP_RECEIPT" && ! -L "$BOT_STARTUP_RECEIPT" &&
+    ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]] || cleanup_status=1
+  return "$cleanup_status"
+}
+
+stop_project_runtime_only() {
+  remove_project_runtime_best_effort ||
+    die 'the exact staging project runtime could not be removed completely'
+}
+
+stop_project() {
+  stop_project_runtime_only
+  remove_staging_runtime_secrets_best_effort ||
+    die 'the disposable staging credentials or bot receipt could not be removed completely'
+}
+
+emergency_stop_project_after_kemerbet_recovery_failure() {
+  local cleanup_status=0
+  remove_project_runtime_best_effort || cleanup_status=1
+  remove_staging_runtime_secrets_best_effort || cleanup_status=1
+  return "$cleanup_status"
+}
+
+emergency_disarm_expiry_stop_after_kemerbet_recovery_failure() {
+  local cleanup_status=0 timer_load_state=''
+  if command -v systemctl >/dev/null 2>&1; then
+    if timer_load_state="$(systemctl show --property=LoadState --value "$EXPIRY_STOP_TIMER" 2>/dev/null)"; then
+      if [[ "$timer_load_state" != 'not-found' && -n "$timer_load_state" ]]; then
+        systemctl disable --now "$EXPIRY_STOP_TIMER" >/dev/null || cleanup_status=1
+      fi
+    else
+      cleanup_status=1
+    fi
+  else
+    cleanup_status=1
+  fi
+  rm -f -- "$EXPIRY_STOP_TIMER_PATH" "$EXPIRY_STOP_SERVICE_PATH" || cleanup_status=1
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || cleanup_status=1
+    if timer_load_state="$(systemctl show --property=LoadState --value "$EXPIRY_STOP_TIMER" 2>/dev/null)"; then
+      [[ "$timer_load_state" == 'not-found' ]] || cleanup_status=1
+    else
+      cleanup_status=1
+    fi
+  fi
+  return "$cleanup_status"
 }
 
 disarm_expiry_stop() {
@@ -5014,8 +6359,12 @@ case "$command" in
   arm-expiry-stop|bot-ready|discard|expiry-stop|fresh-start|install|install-bot-token|recheck-kemerbet-readiness|seal-kemerbet-readiness|start|start-bot|start-fresh-public-edge|start-kemerbet-session-provision|start-public-edge|stop|stop-bot|stop-kemerbet-session-provision|stop-public-edge)
     acquire_staging_mutation_lock
     if [[ ! "$command" =~ ^(recheck-kemerbet-readiness|expiry-stop|stop|stop-bot|stop-kemerbet-session-provision|stop-public-edge)$ &&
-      ( -e "$KEMERBET_RECHECK_PROMOTION_ROOT" || -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ) ]]; then
-      die 'an interrupted KemerBet readiness promotion blocks state-expanding staging mutations'
+      ( -e "$KEMERBET_RECHECK_PROMOTION_ROOT" || -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ||
+        -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" ||
+        -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" ||
+        -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" ||
+        -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" ) ]]; then
+      die 'an interrupted KemerBet readiness recovery blocks state-expanding staging mutations'
     fi
     ;;
 esac
@@ -5029,8 +6378,17 @@ case "$command" in
 
   stop)
     [[ $# -eq 1 ]] || die 'stop accepts no additional arguments'
-    stop_project
-    disarm_expiry_stop
+    recover_kemerbet_recheck_before_teardown
+    if [[ "$KEMERBET_TEARDOWN_RECOVERY_FAILED" == 'true' ]]; then
+      emergency_stop_project_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      emergency_disarm_expiry_stop_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+    else
+      stop_project
+      disarm_expiry_stop
+    fi
+    require_kemerbet_teardown_recovery_success
     ;;
 
   arm-expiry-stop)
@@ -5040,8 +6398,17 @@ case "$command" in
 
   expiry-stop)
     [[ $# -eq 1 ]] || die 'expiry-stop accepts no additional arguments'
-    stop_project
-    disarm_expiry_stop
+    recover_kemerbet_recheck_before_teardown
+    if [[ "$KEMERBET_TEARDOWN_RECOVERY_FAILED" == 'true' ]]; then
+      emergency_stop_project_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      emergency_disarm_expiry_stop_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+    else
+      stop_project
+      disarm_expiry_stop
+    fi
+    require_kemerbet_teardown_recovery_success
     ;;
 
   cutover-ready)
@@ -5210,6 +6577,9 @@ case "$command" in
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
       --project-name "$PROJECT_NAME" --profile staging-manual -f "$compose_file"
     )
+    # Docker may not create this bind source. Its root-owned inode is the
+    # aggregate receipt authority and must exist before every Compose preflight.
+    ensure_owner_kemerbet_receipt_root
 
     run_bounded_database_preflight() {
       local service="$1"
@@ -5252,6 +6622,7 @@ case "$command" in
       env -i "${compose_environment[@]}" "${compose_command[@]}" \
         up -d --no-build --wait --wait-timeout 90
     fi
+    require_owner_kemerbet_receipt_service_access
     ;;
 
   bot-disabled-ready)
@@ -5350,6 +6721,14 @@ case "$command" in
     commit_sha="$2"
     [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
       die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    recover_kemerbet_recheck_before_teardown
+    if [[ "$KEMERBET_TEARDOWN_RECOVERY_FAILED" == 'true' ]]; then
+      emergency_stop_project_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      emergency_disarm_expiry_stop_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      require_kemerbet_teardown_recovery_success
+    fi
     bot_container="$(docker_local container ls --all --quiet \
       --filter "label=com.docker.compose.project=$PROJECT_NAME" \
       --filter 'label=com.docker.compose.service=bot')"
@@ -5364,6 +6743,7 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$disabled_token" "$SECRET_ROOT/bot-token"
     rm -f -- "$disabled_token"
     require_fresh_bot_disabled_ready "$commit_sha"
+    require_kemerbet_teardown_recovery_success
     ;;
 
   start-kemerbet-session-provision)
@@ -5519,7 +6899,7 @@ case "$command" in
     validate_commit_and_tag "$commit_sha" "$image_tag"
     command -v timeout >/dev/null 2>&1 || die 'the bounded execution utility is unavailable'
     command -v sync >/dev/null 2>&1 || die 'the durable synchronization utility is unavailable'
-    recover_incomplete_kemerbet_recheck_promotion
+    recover_incomplete_kemerbet_recheck_promotion_guarded
     if [[ -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
       require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
       printf '%s\n' 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.'
@@ -5695,9 +7075,11 @@ case "$command" in
       "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$player_ids_digest" ]] ||
       die 'a KemerBet recheck input changed while the prepared journal was active'
 
-    profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)"
+    profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)" ||
+      die 'the KemerBet profile volume could not be resolved before identity attestation'
     profile_identity_digest="$(kemerbet_profile_identity_digest \
-      "$account_id" "$profile_mountpoint" allow-exact-stale-singletons)"
+      "$account_id" "$profile_mountpoint" allow-exact-stale-singletons)" ||
+      die 'the KemerBet profile identity could not be attested'
     [[ "$profile_identity_digest" =~ ^[0-9a-f]{64}$ ]] ||
       die 'the KemerBet profile identity digest is invalid'
 
@@ -5804,6 +7186,9 @@ case "$command" in
     [[ "$(docker_local container inspect "$recheck_container" \
       --format '{{.State.Status}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.State.Error}}|{{.RestartCount}}')" == \
       'exited|0|false||0' ]] || die 'the KemerBet recheck exit contract is not exact'
+    observed_profile_identity_digest="$(kemerbet_profile_identity_digest \
+      "$account_id" "$profile_mountpoint" require-absent-singletons)" ||
+      die 'the KemerBet profile identity could not be re-attested after execution'
     [[ "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_RECHECK_CANDIDATE_BINDING")" == \
       "$candidate_stat" &&
       "$(sha256sum -- "$KEMERBET_RECHECK_CANDIDATE_BINDING" | awk '{print $1}')" == "$source_digest" &&
@@ -5815,8 +7200,7 @@ case "$command" in
       "$(sha256sum -- "$KEMERBET_SELECTOR_CONTRACT" | awk '{print $1}')" == "$selector_digest" &&
       "$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_PLAYER_IDS")" == "$player_ids_stat" &&
       "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$player_ids_digest" &&
-      "$(kemerbet_profile_identity_digest \
-        "$account_id" "$profile_mountpoint" require-absent-singletons)" == "$profile_identity_digest" ]] ||
+      "$observed_profile_identity_digest" == "$profile_identity_digest" ]] ||
       die 'a KemerBet recheck input or profile identity changed during execution'
 
     remove_kemerbet_recheck_container || die 'the transient KemerBet recheck container could not be removed'
@@ -5916,6 +7300,14 @@ case "$command" in
     commit_sha="$2"
     [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
       die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    recover_kemerbet_recheck_before_teardown
+    if [[ "$KEMERBET_TEARDOWN_RECOVERY_FAILED" == 'true' ]]; then
+      emergency_stop_project_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      emergency_disarm_expiry_stop_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      require_kemerbet_teardown_recovery_success
+    fi
     session_container="$(docker_local container ls --all --quiet \
       --filter "label=com.docker.compose.project=$PROJECT_NAME" \
       --filter 'label=com.docker.compose.service=kemerbet-session-provision')"
@@ -5926,6 +7318,7 @@ case "$command" in
       docker_local container rm "$session_container" >/dev/null
     fi
     require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+    require_kemerbet_teardown_recovery_success
     ;;
 
   public-edge-ready|fresh-public-edge-ready)
@@ -6011,6 +7404,14 @@ case "$command" in
 
   stop-public-edge)
     [[ $# -eq 1 ]] || die 'stop-public-edge accepts no additional arguments'
+    recover_kemerbet_recheck_before_teardown
+    if [[ "$KEMERBET_TEARDOWN_RECOVERY_FAILED" == 'true' ]]; then
+      emergency_stop_project_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      emergency_disarm_expiry_stop_after_kemerbet_recovery_failure ||
+        KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
+      require_kemerbet_teardown_recovery_success
+    fi
     gateway_container="$(docker_local container ls --all --quiet \
       --filter "label=com.docker.compose.project=$PROJECT_NAME" \
       --filter 'label=com.docker.compose.service=gateway')"
@@ -6018,6 +7419,7 @@ case "$command" in
       [[ "$gateway_container" =~ ^[0-9a-f]{12,64}$ ]] || die 'the gateway container inventory is ambiguous'
       docker_local container rm --force "$gateway_container" >/dev/null
     fi
+    require_kemerbet_teardown_recovery_success
     ;;
 
   diagnose-owner-startup)

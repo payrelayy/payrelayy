@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -51,7 +52,7 @@ const retained33f4HelperBackupSha =
 const retained33f4HelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
 const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retained33f4HelperBackupName}`;
 const reviewedHelperSuccessorSha =
-  '7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077';
+  '121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -74,6 +75,13 @@ function assertInOrder(source, requiredFragments, message) {
     assert.ok(nextPosition > position, `${message}: missing or out of order: ${fragment}`);
     position = nextPosition;
   }
+}
+
+function extractShellFunction(source, name, nextName) {
+  const start = source.indexOf(`${name}() {`);
+  const end = source.indexOf(`\n}\n\n${nextName}() {`, start);
+  assert.ok(start >= 0 && end > start, `missing shell function boundary: ${name}`);
+  return source.slice(start, end + 2);
 }
 
 for (const artifact of [
@@ -108,6 +116,23 @@ for (const ownerClaimRunbookContract of [
   /re-proves it again after publication, and retires the\s+journal last/u,
   /Exactly one `owner-control` container/u,
   /this container is its sole holder/u,
+  /\/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts/u,
+  /\/run\/fetanagent-kemerbet-readiness-cohort-receipts/u,
+  /exact read-only bind/u,
+  /prevent UID 10001 from\s+creating, unlinking, renaming, hard-linking, symlinking, or replacing/u,
+  /Every directory from\s+`\/` through `\/var`, `\/var\/lib`, `\/var\/lib\/fetanagent`/u,
+  /resolves every inspected bind source to a canonical host path/u,
+  /explicitly treating host `\/`/u,
+  /normalizes an exact imported\/failed crash prefix/u,
+  /exact partial\s+single-link installer is removed durably/u,
+  /rejects any\s+completed installer\/final/u,
+  /legacy aggregate final\/installer names must be\s+absent from the Owner-writable session-control volume/u,
+  /Latch-path presence alone is not treated as durable/u,
+  /`recovery-in-progress-or-failed-v1` fallback/u,
+  /fixed `pending-v1` inode\/content/u,
+  /generic promotion cleanup rejects either fallback before any\s+delete/u,
+  /If neither protected namespace can retain a\s+durable block, recovery and teardown both stop/u,
+  /exact pre-journal\/no-mutation boundary/u,
   /\$profile_mountpoint\/\$account_id\/Singleton\*/u,
   /does\s+not compare KemerBet balances or transaction history/u,
   /freezes writes to every table from which its cohort\s+was derived/u,
@@ -136,6 +161,16 @@ assert.doesNotMatch(
 );
 assert.match(ownerCompose, /source: kemerbet_session_control/);
 assert.match(ownerCompose, /target: \/run\/fetanagent-kemerbet-session-control/);
+assert.match(
+  ownerCompose,
+  /type: bind\s*\r?\n\s+source: \/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts\s*\r?\n\s+target: \/run\/fetanagent-kemerbet-readiness-cohort-receipts\s*\r?\n\s+read_only: true\s*\r?\n\s+bind:\s*\r?\n\s+create_host_path: false/,
+);
+assert.equal(
+  (compose.match(/source: \/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts/g) ?? [])
+    .length,
+  1,
+  'only Owner control may receive the aggregate receipt bind',
+);
 
 for (const requiredSessionWorkflowContract of [
   /workflow_dispatch:/,
@@ -1035,7 +1070,7 @@ for (const replacementResumeContract of [
   /if \[\[ -e "\$BACKUP" \|\| -L "\$BACKUP" \]\]; then/,
   /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-7861082f'/,
+  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-121e3b36'/,
   /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-af823251\.installing"/,
 ]) {
   assert.match(helperReplacement, replacementResumeContract);
@@ -1182,6 +1217,7 @@ for (const exactRollbackResiduePath of [
   /CANONICAL_BINDING='\/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings'/,
   /IMPORT_CANDIDATE='\/etc\/fetanagent\/executor-secrets\/\.kemerbet-readiness-player-ids\.promote-v1'/,
   /READINESS_OUTPUT_ROOT='\/var\/lib\/fetanagent\/kemerbet-readiness-seal-output'/,
+  /OWNER_RECEIPT_ROOT='\/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts'/,
   /SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'/,
   /PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'/,
 ]) {
@@ -1198,6 +1234,8 @@ for (const preRecheckContract of [
   /identity_key_metadata/,
   /READINESS_OUTPUT_ROOT/,
   /READINESS_BINDING/,
+  /OWNER_RECEIPT_ROOT/,
+  /"\$IMPORT_CANDIDATE" \\\n    "\$OWNER_RECEIPT_ROOT"; do/,
   /10001:10001:600:1/,
   /kemerbet-readiness-cohort-imported-v1/,
   /kemerbet-readiness-cohort-completed-v1/,
@@ -1533,6 +1571,14 @@ assert.match(boundedPreflight, /run --rm --no-deps "\$service" node "\$preflight
 assert.match(boundedPreflight, /if \[\[ "\$attempt" -lt 3 \]\]/);
 assert.match(boundedPreflight, /sleep 15/);
 assert.doesNotMatch(boundedPreflight, /up -d|password|secret|psql|curl|wget/);
+const ensureReceiptRootPosition = helper.indexOf('    ensure_owner_kemerbet_receipt_root');
+const firstDatabasePreflightPosition = helper.indexOf(
+  'run_bounded_database_preflight \\\n      owner-control',
+);
+assert.ok(
+  ensureReceiptRootPosition >= 0 && ensureReceiptRootPosition < firstDatabasePreflightPosition,
+  'the root-owned receipt bind source must be installed before any Compose database preflight',
+);
 const longLivedStart = helper.indexOf('up -d --no-build --wait --wait-timeout 90');
 assert.ok(
   helper.indexOf('owner-control apps/admin/dist/database-preflight-cli.js') < longLivedStart &&
@@ -1542,6 +1588,10 @@ assert.ok(
     helper.indexOf('beta-admission apps/beta-admission/dist/catalog-preflight-cli.js') <
       longLivedStart,
   'All four one-shot runtime preflights must pass before long-lived services start.',
+);
+assert.ok(
+  helper.indexOf('require_owner_kemerbet_receipt_service_access', longLivedStart) > longLivedStart,
+  'the live Owner process must prove read-only receipt access after long-lived startup',
 );
 assert.match(helper, /docker_local network rm \$networks/);
 assert.match(helper, /EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop\.service'/);
@@ -1571,6 +1621,22 @@ const expiryStopCommand = /\n  expiry-stop\)([\s\S]*?)\n    ;;/u.exec(helper)?.[
 assert.ok(expiryStopCommand, 'The helper must define the systemd-only expiry stop command.');
 assert.match(expiryStopCommand, /stop_project/);
 assert.match(expiryStopCommand, /disarm_expiry_stop/);
+assertInOrder(
+  expiryStopCommand,
+  [
+    "[[ $# -eq 1 ]] || die 'expiry-stop accepts no additional arguments'",
+    'recover_kemerbet_recheck_before_teardown',
+    'emergency_stop_project_after_kemerbet_recovery_failure',
+    'emergency_disarm_expiry_stop_after_kemerbet_recovery_failure',
+    'require_kemerbet_teardown_recovery_success',
+  ],
+  'expiry-stop must validate its invocation and retire any exact promotion journal before deleting runtime credentials',
+);
+assert.equal(
+  (expiryStopCommand.match(/require_kemerbet_teardown_recovery_success/g) ?? []).length,
+  1,
+  'expiry-stop must expose a nonzero fixed result only after the emergency cleanup branch finishes',
+);
 assert.match(helper, /"\$command" == 'expiry-stop'/);
 assert.match(helper, /-z "\$\{SUDO_USER:-\}"/);
 assert.match(helper, /-n "\$\{INVOCATION_ID:-\}"/);
@@ -1580,9 +1646,49 @@ const normalStopCommand = /\n  stop\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(normalStopCommand, 'The ordinary stop command must remain present.');
 assert.match(normalStopCommand, /stop_project/);
 assert.match(normalStopCommand, /disarm_expiry_stop/);
+assertInOrder(
+  normalStopCommand,
+  [
+    "[[ $# -eq 1 ]] || die 'stop accepts no additional arguments'",
+    'recover_kemerbet_recheck_before_teardown',
+    'emergency_stop_project_after_kemerbet_recovery_failure',
+    'emergency_disarm_expiry_stop_after_kemerbet_recovery_failure',
+    'require_kemerbet_teardown_recovery_success',
+  ],
+  'ordinary stop must retire an exact promotion journal before its first teardown or secret deletion',
+);
+assert.equal(
+  (normalStopCommand.match(/require_kemerbet_teardown_recovery_success/g) ?? []).length,
+  1,
+  'ordinary stop must expose a nonzero fixed result only after the emergency cleanup branch finishes',
+);
 const stopProject = /stop_project\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(stopProject, 'The helper must define exact project cleanup.');
-assert.match(stopProject, /clear_bot_startup_receipt/);
+assert.match(stopProject, /remove_staging_runtime_secrets_best_effort/);
+const bestEffortRuntimeRemoval = /remove_project_runtime_best_effort\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const bestEffortSecretRemoval =
+  /remove_staging_runtime_secrets_best_effort\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(bestEffortRuntimeRemoval && bestEffortSecretRemoval);
+for (const contract of [
+  /container rm --force \$containers[^\n]*\|\| cleanup_status=1/,
+  /network rm \$networks[^\n]*\|\| cleanup_status=1/,
+  /remaining=/,
+  /return "\$cleanup_status"/,
+]) {
+  assert.match(bestEffortRuntimeRemoval, contract);
+}
+for (const contract of [
+  /for secret_path in "\$\{secret_paths\[@\]\}"/,
+  /rm -f -- "\$secret_path" \|\| cleanup_status=1/,
+  /clear_bot_startup_receipt/,
+  /! -e "\$secret_path" && ! -L "\$secret_path"/,
+  /BOT_STARTUP_RECEIPT_ROOT/,
+  /return "\$cleanup_status"/,
+]) {
+  assert.match(bestEffortSecretRemoval, contract);
+}
 assert.match(
   helper,
   /if \[\[ "\$command" == 'fresh-start' \]\]; then\s+require_fresh_host_start_ready "\$commit_sha"\s+clear_bot_startup_receipt/,
@@ -1818,7 +1924,30 @@ assert.match(stopBot, /container rm --force/);
 assert.match(stopBot, /clear_bot_startup_receipt/);
 assert.match(stopBot, /telegram-disabled-until-separate-smoke/);
 assert.match(stopBot, /require_fresh_bot_disabled_ready "\$commit_sha"/);
-assert.doesNotMatch(stopBot, /stop_project|network rm|owner-control|api|beta-admission/);
+assertInOrder(
+  stopBot,
+  [
+    "[[ $# -eq 2 ]] || die 'stop-bot requires one reviewed main commit'",
+    '[[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]]',
+    'recover_kemerbet_recheck_before_teardown',
+    'emergency_stop_project_after_kemerbet_recovery_failure',
+    'emergency_disarm_expiry_stop_after_kemerbet_recovery_failure',
+    'require_kemerbet_teardown_recovery_success',
+    'bot_container=',
+    'clear_bot_startup_receipt',
+  ],
+  'bot stop must validate the reviewed commit and recover the journal before removing runtime or receipts',
+);
+assert.equal(
+  (stopBot.match(/require_kemerbet_teardown_recovery_success/g) ?? []).length,
+  2,
+  'bot stop must report recovery failure after full-project emergency cleanup and retain a final normal-path check',
+);
+assert.doesNotMatch(
+  stopBot,
+  /emergency_(?:disable_bot|remove_project_service)_after_kemerbet_recovery_failure/,
+  'bot-stop recovery failure must never leave Owner or another project service running',
+);
 
 const startKemerbetSession = /\n  start-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
   helper,
@@ -1927,7 +2056,7 @@ for (const contract of [
   /singleton_policy="\$3"/,
   /allow-exact-stale-singletons\)/,
   /require-absent-singletons\)/,
-  /allow-exact-stale-singletons\) require_kemerbet_profile_volume_holders ''/,
+  /allow-exact-stale-singletons\) require_kemerbet_profile_volume_holders '' \|\| return 1/,
   /the KemerBet profile singleton policy is invalid/,
   /for singleton in SingletonCookie SingletonLock SingletonSocket/,
   /if \[\[ ! -e "\$singleton_path" && ! -L "\$singleton_path" \]\]; then/,
@@ -1935,6 +2064,11 @@ for (const contract of [
   /stat --format='%u:%g:%a:%h' -- "\$singleton_path"/,
   /"\$singleton_stat" == '10001:10001:777:1'/,
   /the KemerBet profile singleton metadata is unsafe/,
+  /mountpoint_stat="\$\(stat --format='%d:%i:%u:%g:%a' "\$mountpoint"\)" \|\| return 1/,
+  /profile_stat="\$\(stat --format='%d:%i:%u:%g:%a' "\$profile_path"\)" \|\| return 1/,
+  /digest="\$\(printf 'volume=%s\\nroot=%s\\nprofile=%s\\naccount=%s\\n'/,
+  /\[\[ "\$digest" =~ \^\[0-9a-f\]\{64\}\$ \]\] \|\| return 1/,
+  /printf '%s' "\$digest"/,
 ]) {
   assert.match(kemerbetProfileIdentityDigest, contract);
 }
@@ -1949,6 +2083,60 @@ assert.match(
   /readonly KEMERBET_SESSION_CONTROL_VOLUME="\$\{PROJECT_NAME\}_kemerbet_session_control"/,
   'the Owner-staged cohort must use only the exact Compose session-control volume',
 );
+for (const receiptBoundaryConstant of [
+  /readonly KEMERBET_OWNER_RECEIPT_PARENT='\/var\/lib\/fetanagent'/,
+  /readonly KEMERBET_OWNER_RECEIPT_ROOT="\$KEMERBET_OWNER_RECEIPT_PARENT\/kemerbet-readiness-cohort-receipts"/,
+  /readonly KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT='\/run\/fetanagent-kemerbet-readiness-cohort-receipts'/,
+]) {
+  assert.match(helper, receiptBoundaryConstant);
+}
+
+const receiptDirectory = /require_owner_kemerbet_receipt_directory\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(receiptDirectory, 'the helper must prove the fixed root-anchored receipt directory');
+for (const contract of [
+  /require_owner_kemerbet_receipt_ancestors/,
+  /realpath -- "\$KEMERBET_OWNER_RECEIPT_PARENT"/,
+  /realpath -- "\$KEMERBET_OWNER_RECEIPT_ROOT"/,
+  /stat --format='%u:%g:%a' "\$KEMERBET_OWNER_RECEIPT_PARENT"/,
+  /stat --format='%u:%g:%a' "\$KEMERBET_OWNER_RECEIPT_ROOT"/,
+  /'0:0:755'/,
+]) {
+  assert.match(receiptDirectory, contract);
+}
+
+const receiptAncestors = /require_owner_kemerbet_receipt_ancestors\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(receiptAncestors, 'every host ancestor of the receipt authority must be proven safe');
+for (const contract of [
+  /for ancestor in \/ \/var \/var\/lib/,
+  /! -L "\$ancestor" && -d "\$ancestor"/,
+  /realpath -- "\$ancestor"/,
+  /stat --format='%u:%g:%a' "\$ancestor"/,
+  /'0:0:755'/,
+]) {
+  assert.match(receiptAncestors, contract);
+}
+
+const ensureReceiptRoot = /ensure_owner_kemerbet_receipt_root\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(
+  ensureReceiptRoot,
+  'the helper must create the fixed bind source without following links',
+);
+for (const contract of [
+  /require_owner_kemerbet_receipt_ancestors/,
+  /install -d -o root -g root -m 0755 "\$KEMERBET_OWNER_RECEIPT_PARENT"/,
+  /install -d -o root -g root -m 0755 "\$KEMERBET_OWNER_RECEIPT_ROOT"/,
+  /sync -f \/var\/lib/,
+  /sync -f "\$KEMERBET_OWNER_RECEIPT_PARENT"/,
+  /require_owner_kemerbet_receipt_startup_state/,
+]) {
+  assert.match(ensureReceiptRoot, contract);
+}
 assert.match(
   helper,
   /readonly KEMERBET_OWNER_STAGED_PLAYER_IDS_NAME='kemerbet-readiness-player-ids\.stage-v1'/,
@@ -2086,8 +2274,348 @@ for (const fixedCohortPath of [
   /readonly KEMERBET_OWNER_IMPORTED_CLAIM_NAME='kemerbet-readiness-cohort-imported-v1'/,
   /readonly KEMERBET_OWNER_COMPLETED_CLAIM_NAME='kemerbet-readiness-cohort-completed-v1'/,
   /readonly KEMERBET_OWNER_FAILED_CLAIM_NAME='kemerbet-readiness-cohort-failed-v1'/,
+  /readonly KEMERBET_RECOVERY_LATCH_NAME='kemerbet-readiness-recovery-in-progress-or-failed-v1'/,
+  /readonly KEMERBET_RECOVERY_LATCH_INSTALLING_NAME='\.kemerbet-readiness-recovery-in-progress-or-failed-v1\.installing'/,
+  /readonly KEMERBET_RECOVERY_FALLBACK_NAME='recovery-in-progress-or-failed-v1'/,
+  /readonly KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME='\.recovery-in-progress-or-failed-v1\.installing'/,
 ]) {
   assert.match(helper, fixedCohortPath);
+}
+const inspectRecoveryLatch = /inspect_kemerbet_recovery_latch\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const publishRecoveryLatch = /publish_kemerbet_recovery_latch\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const recoveryLatchAuthority = /require_kemerbet_recovery_latch_authority\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const retireRecoveryLatch = /retire_owned_kemerbet_recovery_latch\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const guardedIncompleteRecovery =
+  /recover_incomplete_kemerbet_recheck_promotion_guarded\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+const inspectRecoveryFallback = extractShellFunction(
+  helper,
+  'inspect_kemerbet_recovery_fallback',
+  'durably_retain_fixed_kemerbet_recovery_residue',
+);
+const durableRecoveryResidue = extractShellFunction(
+  helper,
+  'durably_retain_fixed_kemerbet_recovery_residue',
+  'durably_retain_kemerbet_recovery_latch_residue',
+);
+const durableRecoveryLatchResidue = extractShellFunction(
+  helper,
+  'durably_retain_kemerbet_recovery_latch_residue',
+  'durably_retain_kemerbet_recovery_fallback_residue',
+);
+const durableRecoveryFallbackResidue = extractShellFunction(
+  helper,
+  'durably_retain_kemerbet_recovery_fallback_residue',
+  'require_kemerbet_recovery_fallback_publish_boundary',
+);
+const fallbackPublishBoundary = extractShellFunction(
+  helper,
+  'require_kemerbet_recovery_fallback_publish_boundary',
+  'publish_kemerbet_recovery_fallback',
+);
+const publishRecoveryFallback = extractShellFunction(
+  helper,
+  'publish_kemerbet_recovery_fallback',
+  'publish_kemerbet_recovery_latch',
+);
+const retryableRecoveryBoundary = extractShellFunction(
+  helper,
+  'require_retryable_kemerbet_recovery_boundary',
+  'require_prejournal_kemerbet_recovery_boundary',
+);
+const prejournalRecoveryBoundary = extractShellFunction(
+  helper,
+  'require_prejournal_kemerbet_recovery_boundary',
+  'require_retired_kemerbet_recovery_boundary',
+);
+const retiredRecoveryBoundary = extractShellFunction(
+  helper,
+  'require_retired_kemerbet_recovery_boundary',
+  'retire_owned_kemerbet_recovery_latch',
+);
+const committedRecoveryBoundary = extractShellFunction(
+  helper,
+  'require_committed_kemerbet_recheck_boundary_shape',
+  'require_current_kemerbet_success_runtime_boundary',
+);
+const completedOwnerRecoveryBoundary = extractShellFunction(
+  helper,
+  'require_completed_owner_kemerbet_cohort_marker',
+  'complete_owner_staged_kemerbet_cohort',
+);
+const removePromotionRoot = extractShellFunction(
+  helper,
+  'remove_owned_kemerbet_recheck_promotion_root',
+  'repair_kemerbet_identity_key_readability',
+);
+assert.ok(
+  inspectRecoveryLatch &&
+    publishRecoveryLatch &&
+    recoveryLatchAuthority &&
+    retireRecoveryLatch &&
+    guardedIncompleteRecovery &&
+    inspectRecoveryFallback &&
+    durableRecoveryResidue &&
+    publishRecoveryFallback &&
+    retryableRecoveryBoundary &&
+    prejournalRecoveryBoundary &&
+    retiredRecoveryBoundary &&
+    committedRecoveryBoundary &&
+    completedOwnerRecoveryBoundary,
+  'the helper must define a write-ahead root latch around every recovery attempt',
+);
+assertInOrder(
+  removePromotionRoot,
+  [
+    'KEMERBET_RECOVERY_FALLBACK_NAME',
+    'KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME',
+    'find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -type f -delete',
+  ],
+  'generic promotion cleanup must reject either fallback name before any journal deletion',
+);
+assert.doesNotMatch(
+  'recovery-in-progress-or-failed-v1',
+  /^\.pending-v1\.[A-Za-z0-9]+$/u,
+  'the durable fallback name must never enter the generic journal-temporary namespace',
+);
+for (const contract of [
+  /for ancestor in \/ \/var \/var\/lib/,
+  /0:0:755/,
+  /KEMERBET_RECOVERY_LATCH_NAME/,
+  /KEMERBET_RECOVERY_LATCH_INSTALLING_NAME/,
+  /0:0:400:1/,
+  /fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1/,
+]) {
+  assert.match(inspectRecoveryLatch, contract);
+}
+for (const contract of [
+  /KEMERBET_RECOVERY_FALLBACK_NAME/,
+  /KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME/,
+  /present_count/,
+  /0:0:700/,
+  /0:0:400:1/,
+  /fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1/,
+]) {
+  assert.match(inspectRecoveryFallback, contract);
+}
+for (const contract of [
+  /os\.O_RDONLY \| os\.O_DIRECTORY \| os\.O_NOFOLLOW/,
+  /os\.O_RDONLY \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/,
+  /len\(residue_names\) != 1/,
+  /not CONTENT\.startswith\(residue_content\)/,
+  /os\.fsync\(residue_fd\)/,
+  /os\.fsync\(journal_fd\)/,
+  /os\.fsync\(root_fd\)/,
+  /not same\(residue_stat, named_residue\)/,
+  /not same\(journal_stat, named_journal\)/,
+]) {
+  assert.match(durableRecoveryResidue, contract);
+}
+for (const contract of [
+  /for ancestor in \/ \/var \/var\/lib/,
+  /0:0:755/,
+  /durably_retain_fixed_kemerbet_recovery_residue/,
+  /receipt "\$KEMERBET_OWNER_RECEIPT_ROOT"/,
+]) {
+  assert.match(durableRecoveryLatchResidue, contract);
+}
+for (const contract of [
+  /for ancestor in \/ \/var \/var\/lib/,
+  /0:0:755/,
+  /0:0:700/,
+  /durably_retain_fixed_kemerbet_recovery_residue/,
+  /promotion "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+]) {
+  assert.match(durableRecoveryFallbackResidue, contract);
+}
+for (const contract of [
+  /entries=.*find -P "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /\[\[ "\$entries" == 'pending-v1' \]\]/,
+  /0:0:600:1/,
+  /version=1/,
+  /state=\(import_prepared\|prepared\|candidate_bound\)/,
+]) {
+  assert.match(fallbackPublishBoundary, contract);
+}
+for (const contract of [
+  /require_kemerbet_recovery_fallback_publish_boundary/,
+  /KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME/,
+  /journal_fd = os\.open/,
+  /journal_content = os\.pread/,
+  /os\.O_WRONLY \| os\.O_CREAT \| os\.O_EXCL \| os\.O_NOFOLLOW/,
+  /os\.fsync\(installing_fd\)/,
+  /os\.rename\(/,
+  /os\.fsync\(root_fd\)/,
+  /publisher_status=\$\?/,
+  /\[\[ "\$publisher_status" -eq 0 \]\] \|\| return 1/,
+  /inspect_kemerbet_recovery_fallback/,
+]) {
+  assert.match(publishRecoveryFallback, contract);
+}
+assertInOrder(
+  publishRecoveryFallback,
+  [
+    'journal_fd = os.open',
+    'installing_fd = os.open',
+    'os.fsync(installing_fd)',
+    'os.rename(',
+    'os.fsync(root_fd)',
+    'named_journal = os.stat',
+    'publisher_status=$?',
+    '[[ "$publisher_status" -eq 0 ]] || return 1',
+    'inspect_kemerbet_recovery_fallback',
+  ],
+  'the fallback must bind the exact journal and durably rename its fixed installer before success',
+);
+for (const contract of [
+  /os\.O_WRONLY \| os\.O_CREAT \| os\.O_EXCL \| os\.O_NOFOLLOW/,
+  /os\.fchown\(installing_fd, 0, 0\)/,
+  /os\.fchmod\(installing_fd, 0o400\)/,
+  /os\.fsync\(installing_fd\)/,
+  /os\.rename\(/,
+  /os\.fsync\(root_fd\)/,
+  /publisher_status=\$\?/,
+  /\[\[ "\$publisher_status" -eq 0 \]\] \|\| return 1/,
+  /KEMERBET_RECOVERY_LATCH_DEV_INO="\$\(stat --format='%d:%i'/,
+]) {
+  assert.match(publishRecoveryLatch, contract);
+}
+assertInOrder(
+  publishRecoveryLatch,
+  [
+    'set +e',
+    'os.rename(',
+    'os.fsync(root_fd)',
+    'publisher_status=$?',
+    '[[ "$publisher_status" -eq 0 ]] || return 1',
+    'inspect_kemerbet_recovery_latch',
+    'KEMERBET_RECOVERY_LATCH_DEV_INO=',
+  ],
+  'latch namespace shape must never hide a failed final-rename directory fsync',
+);
+for (const contract of [
+  /inspect_kemerbet_recovery_fallback/,
+  /durable KemerBet recovery fallback blocks readiness mutation/,
+  /KEMERBET_RECOVERY_LATCH_DEV_INO/,
+  /stat --format='%d:%i'/,
+  /pre-existing or unsafe KemerBet recovery latch blocks readiness mutation/,
+]) {
+  assert.match(recoveryLatchAuthority, contract);
+}
+assertInOrder(
+  recoveryLatchAuthority,
+  ['inspect_kemerbet_recovery_fallback', 'inspect_kemerbet_recovery_latch'],
+  'fallback state must block every marker or recovery authority before latch authorization',
+);
+for (const contract of [
+  /require_retired_kemerbet_recovery_boundary \|\| return 1/,
+  /require_owner_kemerbet_receipt_service_access \|\| return 1/,
+  /os\.O_RDONLY \| os\.O_NOFOLLOW/,
+  /expected_dev_ino/,
+  /os\.unlink\(final_name, dir_fd=root_fd\)/,
+  /os\.fsync\(root_fd\)/,
+  /write_replacement/,
+  /retire_status=\$\?/,
+  /\[\[ "\$retire_status" -eq 0 \]\] \|\| return 1/,
+  /KEMERBET_RECOVERY_LATCH_DEV_INO=''/,
+]) {
+  assert.match(retireRecoveryLatch, contract);
+}
+assertInOrder(
+  retireRecoveryLatch,
+  [
+    'require_retired_kemerbet_recovery_boundary || return 1',
+    'require_owner_kemerbet_receipt_service_access || return 1',
+    'set +e',
+    'env -i PATH="$SAFE_PATH" python3',
+    'os.unlink(final_name, dir_fd=root_fd)',
+  ],
+  'latch retirement must re-prove the independently retired boundary and the live read-only Owner bind immediately before its unlink transaction',
+);
+assertInOrder(
+  guardedIncompleteRecovery,
+  [
+    'inspect_kemerbet_recovery_fallback',
+    '[[ "$fallback_status" -eq 1 ]]',
+    'inspect_kemerbet_recovery_latch',
+    '[[ "$latch_status" -eq 1 ]]',
+    'require_owner_kemerbet_receipt_service_access',
+    'publish_kemerbet_recovery_latch',
+    'require_owned_kemerbet_recovery_latch',
+    'recover_incomplete_kemerbet_recheck_promotion',
+    'require_retired_kemerbet_recovery_boundary',
+    'retire_owned_kemerbet_recovery_latch',
+  ],
+  'guarded recovery must prove the live read-only Owner bind before publishing the latch, repeat that proof inside raw recovery, and retire the latch only after an independent success boundary',
+);
+for (const contract of [
+  /expected_claim_id/,
+  /expected_claim_dev_ino/,
+  /expected_player_dev_ino/,
+  /expected_player_digest/,
+  /expected_source_dev_ino/,
+  /expected_source_digest/,
+  /expected_identity_digest/,
+  /require_retryable_kemerbet_binding_source/,
+  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
+  /inspect_owner_staged_kemerbet_cohort/,
+  /owner_kemerbet_cohort_marker require-failed/,
+  /KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME/,
+  /KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME/,
+  /KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME/,
+  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY" \|\| return 1/,
+  /inspect_owner_staged_kemerbet_cohort \|\| return 1/,
+  /require_legacy_owner_kemerbet_receipt_paths_absent \|\| return 1/,
+]) {
+  assert.match(retryableRecoveryBoundary, contract);
+}
+for (const contract of [
+  /require_owned_kemerbet_recovery_latch/,
+  /pre-journal KemerBet recovery retained a derived artifact/,
+  /require_kemerbet_readiness_output_directory/,
+  /hmac-sha256-agent-identity-v1/,
+  /inspect_owner_staged_kemerbet_cohort/,
+  /KEMERBET_OWNER_FAILED_CLAIM_NAME/,
+  /KEMERBET_RECOVERY_LATCH_NAME/,
+  /require_owned_kemerbet_recovery_latch \|\| return 1/,
+  /inspect_owner_staged_kemerbet_cohort \|\| return 1/,
+  /require_legacy_owner_kemerbet_receipt_paths_absent \|\| return 1/,
+]) {
+  assert.match(prejournalRecoveryBoundary, contract);
+}
+for (const contract of [
+  /case "\$KEMERBET_RECHECK_RECOVERY_OUTCOME" in/,
+  /committed\)/,
+  /retryable\)/,
+  /prejournal_no_mutation\)/,
+  /require_committed_kemerbet_recheck_boundary_shape/,
+  /require_retryable_kemerbet_recovery_boundary/,
+  /require_prejournal_kemerbet_recovery_boundary/,
+  /missing or invalid/,
+  /require_committed_kemerbet_recheck_boundary_shape \|\| return 1/,
+  /require_completed_owner_kemerbet_cohort_marker \|\| return 1/,
+  /require_retryable_kemerbet_recovery_boundary \|\| return 1/,
+  /require_prejournal_kemerbet_recovery_boundary \|\| return 1/,
+  /require_owned_kemerbet_recovery_latch \|\| return 1/,
+]) {
+  assert.match(retiredRecoveryBoundary, contract);
+}
+assert.match(
+  committedRecoveryBoundary,
+  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_BINDINGS" \|\| return 1/,
+);
+for (const contract of [
+  /control_mountpoint="\$\(resolve_kemerbet_session_control_volume_mountpoint\)" \|\| return 1/,
+  /require_legacy_owner_kemerbet_receipt_paths_absent \|\| return 1/,
+]) {
+  assert.match(completedOwnerRecoveryBoundary, contract);
 }
 const singleOwnerControlRuntime =
   /require_single_owner_control_runtime_instance\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
@@ -2101,18 +2629,57 @@ for (const contract of [
   /\[\[ "\$owner_ids" =~ \^\[0-9a-f\]\{12,64\}\$ \]\]/,
   /\$PROJECT_NAME\|owner-control/,
   /exactly one Owner control container/,
+  /require_owner_kemerbet_receipt_directory/,
+  /bind\|\$KEMERBET_OWNER_RECEIPT_ROOT\|\$KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT\|false/,
+  /container ls --all --quiet --no-trunc/,
+  /for bind_container in "\$\{all_container_ids\[@\]\}"/,
+  /container inspect "\$bind_container"/,
+  /container_bind_contracts/,
+  /if \[\[ -n "\$container_bind_contracts" \]\]/,
+  /\{\{if eq \.Type "bind"\}\}/,
+  /bind_source_canonical="\$\(realpath -- "\$bind_source"\)"/,
+  /realpath -- "\$bind_source_canonical"/,
+  /"\$bind_source_canonical" == '\/'/,
+  /"\$bind_source_canonical" == "\$KEMERBET_OWNER_RECEIPT_ROOT\/"\*/,
+  /"\$KEMERBET_OWNER_RECEIPT_ROOT" == "\$bind_source_canonical\/"\*/,
+  /\$owner_ids\|bind\|\$KEMERBET_OWNER_RECEIPT_ROOT\|\$KEMERBET_OWNER_RECEIPT_CONTAINER_ROOT\|false/,
+  /overlaps an unexpected container bind/,
+  /require_owner_kemerbet_receipt_directory \|\| return 1/,
+  /require_legacy_owner_kemerbet_receipt_paths_absent \|\| return 1/,
 ]) {
   assert.match(singleOwnerControlRuntime, contract);
 }
 assert.doesNotMatch(
   singleOwnerControlRuntime,
-  /\b(?:start|stop|rm|kill|scale|up|create)\b/iu,
-  'the singleton proof must be read-only',
+  /container inspect "\$\{all_container_ids\[@\]\}"|\b(?:start|stop|rm|kill|scale|up|create)\b/iu,
+  'the singleton proof must be read-only and must inspect bind inventories one container at a time',
 );
-assert.equal(
-  (helper.match(/\brequire_single_owner_control_runtime_instance\b/g) ?? []).length,
-  4,
-  'the singleton proof must be defined once and invoked for stage inspection, success recovery/finalization, and completed-state verification',
+assert.ok(
+  (helper.match(/\brequire_single_owner_control_runtime_instance\b/g) ?? []).length >= 3,
+  'the singleton/mount proof must guard direct stage inspection and the live Owner service-access gate',
+);
+assert.ok(
+  (helper.match(/\brequire_owner_kemerbet_receipt_service_access\b/g) ?? []).length >= 6,
+  'live read-only Owner service access must guard recovery, aggregate transitions, startup, and finalization',
+);
+const receiptServiceAccess =
+  /require_owner_kemerbet_receipt_service_access\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(receiptServiceAccess, 'the running Owner process must prove read-only receipt access');
+for (const contract of [
+  /require_single_owner_control_runtime_instance \|\| return 1/,
+  /container ls --quiet --no-trunc/,
+  /container exec "\$owner_id" node -e/,
+  /readdirSync\(p\)/,
+  /R_OK\|fs\.constants\.X_OK/,
+  /fs\.constants\.W_OK/,
+  /EACCES','EPERM','EROFS/,
+]) {
+  assert.match(receiptServiceAccess, contract);
+}
+assert.doesNotMatch(
+  receiptServiceAccess,
+  /container ls --all/,
+  'receipt service access must reject an exited Owner even when its mount configuration remains present',
 );
 const inspectOwnerCohort = /inspect_owner_staged_kemerbet_cohort\(\) \{[\s\S]*?\n\}/u.exec(
   helper,
@@ -2120,7 +2687,8 @@ const inspectOwnerCohort = /inspect_owner_staged_kemerbet_cohort\(\) \{[\s\S]*?\
 assert.ok(inspectOwnerCohort, 'the helper must inspect both Owner stage files before journaling');
 for (const contract of [
   /10001:10001:400:1/,
-  /require_single_owner_control_runtime_instance/,
+  /require_single_owner_control_runtime_instance \|\| return 1/,
+  /control_mountpoint="\$\(resolve_kemerbet_session_control_volume_mountpoint\)" \|\| return 1/,
   /claim_size" == '37'/,
   /KEMERBET_RECHECK_OWNER_CLAIM_ID/,
   /cmp -s -- "\$claim_path"/,
@@ -2161,10 +2729,13 @@ for (const contract of [
   /docker_local image inspect "\$image_id"/,
   /org\.opencontainers\.image\.revision/,
   /require_exact_fresh_bot_runtime "\$commit_sha" published-steady-state/,
-  /require_single_owner_control_runtime_instance/,
+  /require_owner_kemerbet_receipt_service_access/,
   /require_kemerbet_profile_volume_holders ''/,
   /KEMERBET_RECHECK_CONTAINER/,
   /KEMERBET_RECHECK_NETWORK/,
+  /profile_mountpoint="\$\(resolve_kemerbet_profile_volume_mountpoint\)" \|\| return 1/,
+  /observed_profile_identity_digest="\$\(kemerbet_profile_identity_digest/,
+  /require-absent-singletons\)" \|\| return 1/,
 ]) {
   assert.match(currentKemerbetSuccessRuntimeBoundary, contract);
 }
@@ -2219,6 +2790,11 @@ const cohortMarker = /owner_kemerbet_cohort_marker\(\) \{[\s\S]*?\nPY\n\}/u.exec
 assert.ok(cohortMarker, 'the helper must publish only fixed aggregate cohort markers');
 for (const contract of [
   /ALLOWED = \{/,
+  /require_kemerbet_recovery_latch_authority \|\| return 1/,
+  /require_owner_kemerbet_receipt_service_access \|\| return 1/,
+  /"\$KEMERBET_OWNER_RECEIPT_ROOT\/\$marker_name"/,
+  /\(0, 0, 0o755\)/,
+  /os\.listdir\(directory_descriptor\)/,
   /CLAIM_ID = re\.compile/,
   /os\.O_RDONLY \| os\.O_DIRECTORY \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/,
   /\(0, 10001, 0o440, links, len\(content\)\)/,
@@ -2230,9 +2806,50 @@ for (const contract of [
   /os\.link\(/,
   /os\.fsync\(directory_descriptor\)/,
   /os\.unlink\(installing_name, dir_fd=directory_descriptor\)/,
+  /def exact_installing_prefix\(/,
+  /content\[:named\.st_size\]/,
 ]) {
   assert.match(cohortMarker, contract);
 }
+assertInOrder(
+  cohortMarker,
+  ['require_owner_kemerbet_receipt_service_access', 'env -i PATH="$SAFE_PATH" python3'],
+  'every root receipt transition must prove the exact Owner process is running with live read-only service access immediately before mutation',
+);
+const retryMarkerGuard = /if action == 'guard-retry':([\s\S]*?)\n            return/u.exec(
+  cohortMarker,
+)?.[1];
+assert.ok(
+  retryMarkerGuard,
+  'retry cleanup must normalize only journal-bound marker crash prefixes',
+);
+for (const contract of [
+  /if 'completed' in final_name and \(pending is not None or final is not None\)/,
+  /pending\.st_nlink != 2/,
+  /final\.st_nlink != 2/,
+  /exact_marker\(directory_descriptor, pending_name, pending_path, content, 2\)/,
+  /exact_installing_prefix\(directory_descriptor, pending_name, pending, content\)/,
+  /os\.unlink\(pending_name, dir_fd=directory_descriptor\)/,
+  /os\.fsync\(directory_descriptor\)/,
+  /if len\(observed\) > 1/,
+]) {
+  assert.match(retryMarkerGuard, contract);
+}
+assertInOrder(
+  retryMarkerGuard,
+  ['observed = []', 'if len(observed) > 1:', 'if observed:', 'os.unlink(pending_name'],
+  'retry guard must reject conflicting imported/failed crash prefixes before it normalizes any installer',
+);
+assert.doesNotMatch(
+  cohortMarker,
+  /allow-zero-owner|owner_policy|runtime_policy/,
+  'aggregate receipt mutation must always require the exact live singleton Owner read-only bind',
+);
+assert.doesNotMatch(
+  cohortMarker,
+  /resolve_kemerbet_session_control_volume_mountpoint|\$control_mountpoint\/\$marker_name/,
+  'aggregate markers must never derive their namespace from the Owner-writable session volume',
+);
 assert.doesNotMatch(
   cohortMarker,
   /Player ID|sha256|hexdigest|\bprint\s*\(|sys\.(?:stdout|stderr)|GeneralInfoByExternalId|PlayerEPOSDeposit/iu,
@@ -2359,8 +2976,20 @@ assert.ok(
 );
 assertInOrder(
   restoreRetryableOwnerCohort,
-  ['restore_owner_staged_kemerbet_cohort', 'remove-imported', 'publish-failed', 'require-failed'],
+  [
+    'guard-retry',
+    'restore_owner_staged_kemerbet_cohort',
+    'guard-retry',
+    'remove-imported',
+    'publish-failed',
+    'require-failed',
+  ],
   'retryable failure must restore both sources first and expose only an aggregate failure marker',
+);
+assert.equal(
+  (restoreRetryableOwnerCohort.match(/guard-retry/g) ?? []).length,
+  2,
+  'retry restore must prove the separate completed receipt absent both before and after stage mutation',
 );
 
 const recheckKemerbetReadiness = /\n  recheck-kemerbet-readiness\)([\s\S]*?)\n    ;;/u.exec(
@@ -2400,6 +3029,8 @@ for (const contract of [
   /harden_kemerbet_player_ids_file/,
   /allow-exact-stale-singletons/,
   /require-absent-singletons/,
+  /profile_identity_digest="\$\(kemerbet_profile_identity_digest[\s\S]*?allow-exact-stale-singletons\)" \|\|/,
+  /observed_profile_identity_digest="\$\(kemerbet_profile_identity_digest[\s\S]*?require-absent-singletons\)" \|\|/,
   /source_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
   /identity_key_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
   /selector_stat="\$\(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a'/,
@@ -2688,13 +3319,603 @@ assert.match(
 );
 assert.match(
   helper,
-  /if \[\[ ! "\$command" =~ \^\(recheck-kemerbet-readiness\|expiry-stop\|stop\|stop-bot\|stop-kemerbet-session-provision\|stop-public-edge\)\$ &&\s*\r?\n\s+\( -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" \|\| -L "\$KEMERBET_RECHECK_PROMOTION_ROOT" \) \]\]; then\s*\r?\n\s+die 'an interrupted KemerBet readiness promotion blocks state-expanding staging mutations'/u,
-  'a durable pending recheck must block every state-expanding mutation while retaining fail-safe stop commands',
+  /if \[\[ ! "\$command" =~ \^\(recheck-kemerbet-readiness\|expiry-stop\|stop\|stop-bot\|stop-kemerbet-session-provision\|stop-public-edge\)\$ &&[\s\S]*?KEMERBET_RECHECK_PROMOTION_ROOT[\s\S]*?KEMERBET_RECOVERY_LATCH_NAME[\s\S]*?KEMERBET_RECOVERY_LATCH_INSTALLING_NAME[\s\S]*?die 'an interrupted KemerBet readiness recovery blocks state-expanding staging mutations'/u,
+  'a durable journal, receipt latch, or promotion fallback must block state expansion while retaining fail-safe stop commands',
+);
+const recoverBeforeTeardown = /recover_kemerbet_recheck_before_teardown\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const incompleteRecoveryStart = helper.indexOf('recover_incomplete_kemerbet_recheck_promotion() {');
+const incompleteRecoveryEnd = helper.indexOf(
+  '\n}\n\nrecover_kemerbet_recheck_before_teardown() {',
+  incompleteRecoveryStart,
+);
+assert.ok(incompleteRecoveryStart >= 0 && incompleteRecoveryEnd > incompleteRecoveryStart);
+const incompleteRecovery = helper.slice(incompleteRecoveryStart, incompleteRecoveryEnd + 2);
+assertInOrder(
+  incompleteRecovery,
+  [
+    "die 'an interrupted KemerBet promotion root is unsafe'",
+    'require_owner_kemerbet_receipt_service_access',
+    'actual_entries=',
+  ],
+  'interrupted recovery must reject a stopped Owner before its first journal, candidate, stage, or receipt normalization',
+);
+for (const firstMutation of [
+  'rm -f -- "$entry"',
+  'remove_owned_kemerbet_recheck_promotion_root',
+  'remove_owned_kemerbet_recheck_receipt_root',
+  'owner_kemerbet_cohort_marker',
+]) {
+  assert.ok(
+    incompleteRecovery.indexOf('require_owner_kemerbet_receipt_service_access') <
+      incompleteRecovery.indexOf(firstMutation),
+    `live Owner access must precede interrupted-recovery mutation: ${firstMutation}`,
+  );
+}
+for (const contract of [
+  /KEMERBET_RECHECK_RECOVERY_OUTCOME=''/,
+  /KEMERBET_RECHECK_RECOVERY_OUTCOME='prejournal_no_mutation'/,
+  /KEMERBET_RECHECK_RECOVERY_OUTCOME='retryable'/,
+  /KEMERBET_RECHECK_RECOVERY_OUTCOME='committed'/,
+  /\^\\\.pending-v1\\\.\[A-Za-z0-9\]\+\$/,
+]) {
+  assert.match(incompleteRecovery, contract);
+}
+assert.ok(
+  (incompleteRecovery.match(/KEMERBET_RECHECK_RECOVERY_OUTCOME='prejournal_no_mutation'/g) ?? [])
+    .length >= 2,
+  'both empty-root and sole-journal-temporary prefixes must select the exact no-mutation outcome',
+);
+assert.ok(
+  recoverBeforeTeardown,
+  'every stop family must share one exact recovery-before-teardown boundary',
+);
+for (const contract of [
+  /KEMERBET_RECHECK_PROMOTION_ROOT/,
+  /recover_incomplete_kemerbet_recheck_promotion_guarded/,
+  /! -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /durably_retain_kemerbet_recovery_latch_residue/,
+  /publish_kemerbet_recovery_fallback/,
+  /durably_retain_kemerbet_recovery_fallback_residue/,
+  /teardown was not attempted/,
+  /KEMERBET_TEARDOWN_RECOVERY_FAILED='true'/,
+  /full emergency teardown will continue/,
+]) {
+  assert.match(recoverBeforeTeardown, contract);
+}
+assertInOrder(
+  recoverBeforeTeardown,
+  [
+    'set +e',
+    '( set -e; recover_incomplete_kemerbet_recheck_promotion_guarded )',
+    'recovery_status=$?',
+    'set -e',
+    'if [[ "$recovery_status" -eq 0',
+    'inspect_kemerbet_recovery_latch',
+    'durably_retain_kemerbet_recovery_latch_residue',
+    'inspect_kemerbet_recovery_fallback',
+    'publish_kemerbet_recovery_fallback',
+    'durably_retain_kemerbet_recovery_fallback_residue',
+    "KEMERBET_TEARDOWN_RECOVERY_FAILED='true'",
+  ],
+  'catchable recovery must run as a standalone errexit-enabled subshell so an unguarded failure cannot be mistaken for success',
+);
+assert.doesNotMatch(
+  recoverBeforeTeardown,
+  /if\s+\(\s*recover_incomplete_kemerbet_recheck_promotion_guarded/u,
+  'placing the recovery function in an if-condition would suppress errexit inside its body',
+);
+if (process.platform === 'linux') {
+  const secondRetirementRecheckRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -eu
+root="$(mktemp -d)"
+trap 'rm -rf -- "$root"' EXIT
+latch="$root/recovery-latch"
+resolver_seen="$root/resolver-seen"
+unlink_log="$root/unlink-log"
+printf 'durable recovery latch\n' >"$latch"
+chmod 0400 "$latch"
+before="$(sha256sum -- "$latch")"
+resolve_control_volume_model() {
+  if test -e "$resolver_seen"; then return 1; fi
+  : >"$resolver_seen"
+  printf '%s\n' "$root/control-volume"
+}
+require_completed_marker_model() {
+  local control_mountpoint
+  control_mountpoint="$(resolve_control_volume_model)" || return 1
+  test -n "$control_mountpoint"
+}
+require_retired_boundary_model() {
+  require_completed_marker_model || return 1
+}
+retire_latch_model() {
+  require_retired_boundary_model || return 1
+  printf 'unlink-ran\n' >"$unlink_log"
+  rm -f -- "$latch"
+}
+# The raw recovery's first independent retired-boundary validation succeeds.
+require_retired_boundary_model
+# The real caller uses an OR-list around retire_owned, which suppresses errexit in a function body.
+# Explicit return propagation must nevertheless stop before unlink when the nested resolver fails
+# during the second retirement recheck.
+retire_status=0
+retire_latch_model || retire_status=$?
+test "$retire_status" -ne 0
+test -f "$latch"
+test ! -e "$unlink_log"
+after="$(sha256sum -- "$latch")"
+test "$before" = "$after"
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    secondRetirementRecheckRegression.status,
+    0,
+    `a nested control-volume resolver failure during the second retirement recheck must propagate through an OR-list caller before unlink and leave the durable latch unchanged: ${secondRetirementRecheckRegression.stderr}`,
+  );
+
+  const profileDigestFailureRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -eu
+root="$(mktemp -d)"
+trap 'rm -rf -- "$root"' EXIT
+hash_log="$root/hash-ran"
+require_holders_model() {
+  test "$1" = pass
+}
+final_stat_model() {
+  local value="$1" status="$2"
+  test "$status" = pass || return 1
+  printf '%s' "$value"
+}
+profile_digest_model() {
+  local policy="$1" holder_status="$2" root_status="$3" profile_status="$4"
+  local digest mountpoint_stat profile_stat
+  case "$policy" in
+    allow-exact-stale-singletons) require_holders_model "$holder_status" || return 1 ;;
+    require-absent-singletons) ;;
+    *) return 1 ;;
+  esac
+  mountpoint_stat="$(final_stat_model '1:2:10001:10001:700' "$root_status")" || return 1
+  profile_stat="$(final_stat_model '1:3:10001:10001:700' "$profile_status")" || return 1
+  : >"$hash_log"
+  digest="$(printf 'volume=%s\nroot=%s\nprofile=%s\naccount=%s\n' \
+    volume "$mountpoint_stat" "$profile_stat" account | sha256sum | awk '{print $1}')" || return 1
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "$digest"
+}
+for scenario in holder root-stat profile-stat; do
+  rm -f -- "$hash_log"
+  holder_status=pass
+  root_status=pass
+  profile_status=pass
+  case "$scenario" in
+    holder) holder_status=fail ;;
+    root-stat) root_status=fail ;;
+    profile-stat) profile_status=fail ;;
+  esac
+  set +e
+  result="$(profile_digest_model allow-exact-stale-singletons \
+    "$holder_status" "$root_status" "$profile_status")"
+  digest_status=$?
+  set -e
+  test "$digest_status" -ne 0
+  test -z "$result"
+  test ! -e "$hash_log"
+done
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    profileDigestFailureRegression.status,
+    0,
+    `profile-holder or final-stat failure must propagate through command substitution before any syntactically valid profile digest is emitted: ${profileDigestFailureRegression.stderr}`,
+  );
+
+  const perContainerBindInventoryRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -eu
+container_a='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+container_b='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+inspect_one_model() {
+  case "$1" in
+    "$container_a") printf '%s|/var/lib/fetanagent/kemerbet-owner-receipts|/run/receipts|false\n' "$1" ;;
+    "$container_b") printf '\n' ;;
+    *) return 1 ;;
+  esac
+}
+all_bind_contracts=''
+for bind_container in "$container_a" "$container_b"; do
+  container_bind_contracts="$(inspect_one_model "$bind_container")"
+  if test -n "$container_bind_contracts"; then
+    if test -n "$all_bind_contracts"; then all_bind_contracts+=$'\n'; fi
+    all_bind_contracts+="$container_bind_contracts"
+  fi
+done
+seen=0
+while IFS='|' read -r bind_container bind_source bind_destination bind_rw; do
+  test -n "$bind_container"
+  test -n "$bind_source"
+  test -n "$bind_destination"
+  test "$bind_rw" = false
+  seen=$((seen + 1))
+done <<<"$all_bind_contracts"
+test "$seen" -eq 1
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    perContainerBindInventoryRegression.status,
+    0,
+    `per-container Docker mount inspection must not turn a second container with no binds into an empty classifier record: ${perContainerBindInventoryRegression.stderr}`,
+  );
+
+  const latchServicePreflightRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -eu
+receipt_root="$(mktemp -d)"
+trap 'rm -rf -- "$receipt_root"' EXIT
+printf 'unchanged aggregate receipt sentinel\n' >"$receipt_root/existing-receipt"
+chmod 0440 "$receipt_root/existing-receipt"
+snapshot_receipts() {
+  (
+    stat --format='%u:%g:%a:%h:%s' "$receipt_root"
+    find -P "$receipt_root" -mindepth 1 -maxdepth 1 -printf '%f|%u|%g|%m|%n|%s\n' | LC_ALL=C sort
+    sha256sum -- "$receipt_root/existing-receipt"
+  )
+}
+require_live_readonly_owner_model() {
+  case "$1" in
+    stopped-owner|foreign-rw-ancestor-bind|foreign-rw-descendant-bind) return 1 ;;
+    exact-live-readonly-owner) return 0 ;;
+    *) return 2 ;;
+  esac
+}
+publish_latch_model() {
+  printf 'installing\n' >"$receipt_root/.latch.installing"
+  mv -- "$receipt_root/.latch.installing" "$receipt_root/latch"
+}
+guarded_recovery_model() {
+  require_live_readonly_owner_model "$1"
+  publish_latch_model
+}
+for rejected_topology in stopped-owner foreign-rw-ancestor-bind foreign-rw-descendant-bind; do
+  before="$(snapshot_receipts)"
+  set +e
+  ( set -e; guarded_recovery_model "$rejected_topology" )
+  rejected_status=$?
+  set -e
+  test "$rejected_status" -ne 0
+  after="$(snapshot_receipts)"
+  test "$before" = "$after"
+  test ! -e "$receipt_root/.latch.installing"
+  test ! -e "$receipt_root/latch"
+done
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    latchServicePreflightRegression.status,
+    0,
+    `stopped Owner and foreign writable bind topologies must fail before creating either latch pathname and leave the receipt namespace byte-for-byte unchanged: ${latchServicePreflightRegression.stderr}`,
+  );
+
+  const errexitRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -u
+journal_sentinel="$(mktemp)"
+receipt_sentinel="$(mktemp)"
+owner_sentinel="$(mktemp)"
+bot_sentinel="$(mktemp)"
+session_sentinel="$(mktemp)"
+gateway_sentinel="$(mktemp)"
+network_sentinel="$(mktemp)"
+secret_sentinel="$(mktemp)"
+trap 'rm -f -- "$journal_sentinel" "$receipt_sentinel" "$owner_sentinel" "$bot_sentinel" "$session_sentinel" "$gateway_sentinel" "$network_sentinel" "$secret_sentinel"' EXIT
+recovery_with_unguarded_failure() {
+  test -f "$owner_sentinel"
+  false
+  rm -f -- "$journal_sentinel" "$receipt_sentinel"
+}
+emergency_stop_model() {
+  local recovery_status=0
+  set +e
+  ( set -e; recovery_with_unguarded_failure )
+  recovery_status=$?
+  set -e
+  if test "$recovery_status" -ne 0; then
+    rm -f -- "$owner_sentinel" "$bot_sentinel" "$session_sentinel" "$gateway_sentinel" "$network_sentinel" "$secret_sentinel"
+    return 1
+  fi
+}
+set +e
+emergency_stop_model
+first_status=$?
+emergency_stop_model
+second_status=$?
+set -e
+test "$first_status" -ne 0
+test "$second_status" -ne 0
+test -f "$journal_sentinel"
+test -f "$receipt_sentinel"
+test ! -e "$owner_sentinel"
+test ! -e "$bot_sentinel"
+test ! -e "$session_sentinel"
+test ! -e "$gateway_sentinel"
+test ! -e "$network_sentinel"
+test ! -e "$secret_sentinel"
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    errexitRegression.status,
+    0,
+    `the standalone recovery subshell must preserve evidence, remove the full project, complete idempotent emergency cleanup, and return nonzero after an unguarded failure: ${errexitRegression.stderr}`,
+  );
+
+  const durableBlockRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -euo pipefail
+test_root="$(mktemp -d)"
+trap 'rm -rf -- "$test_root"' EXIT
+receipt_root="$test_root/receipt"
+promotion_root="$test_root/promotion"
+mkdir -m 0755 -- "$receipt_root"
+mkdir -m 0700 -- "$promotion_root"
+printf 'version=1\nstate=prepared\n' >"$promotion_root/pending-v1"
+chmod 0600 "$promotion_root/pending-v1"
+printf evidence >"$test_root/evidence"
+printf owner >"$test_root/owner"
+recovery_count="$test_root/recovery-count"
+: >"$recovery_count"
+primary_durable=false
+fallback_durable=false
+publish_primary_with_directory_fsync_failure() {
+  printf block >"$receipt_root/.latch.installing"
+  mv -- "$receipt_root/.latch.installing" "$receipt_root/latch"
+  return 1
+}
+durabilize_primary() {
+  test -f "$receipt_root/latch"
+  test "\${unsafe_primary_root:-false}" = false
+  test "\${primary_fsync_ok:-false}" = true
+}
+publish_fallback() {
+  test -f "$promotion_root/pending-v1"
+  printf block >"$promotion_root/.fallback.installing"
+  mv -- "$promotion_root/.fallback.installing" "$promotion_root/fallback"
+  sync -f "$promotion_root/fallback"
+  sync -f "$promotion_root"
+}
+durabilize_fallback() {
+  test -f "$promotion_root/pending-v1"
+  test -f "$promotion_root/fallback"
+  sync -f "$promotion_root/fallback"
+  sync -f "$promotion_root"
+}
+guarded_recovery() {
+  if test -e "$receipt_root/latch" || test -e "$promotion_root/fallback"; then
+    return 1
+  fi
+  printf x >>"$recovery_count"
+  publish_primary_with_directory_fsync_failure
+}
+stop_model() {
+  local recovery_status=0
+  set +e
+  ( set -e; guarded_recovery )
+  recovery_status=$?
+  set -e
+  if test "$recovery_status" -eq 0; then
+    return 0
+  fi
+  if durabilize_primary; then
+    primary_durable=true
+  elif test -e "$promotion_root/fallback" && durabilize_fallback; then
+    fallback_durable=true
+  elif publish_fallback && durabilize_fallback; then
+    fallback_durable=true
+  else
+    return 2
+  fi
+  rm -f -- "$test_root/owner" || true
+  return 1
+}
+unsafe_primary_root=true
+primary_fsync_ok=false
+set +e
+stop_model
+first_status=$?
+stop_model
+second_status=$?
+set -e
+test "$first_status" -eq 1
+test "$second_status" -eq 1
+test "$primary_durable" = false
+test "$fallback_durable" = true
+test "$(wc -c <"$recovery_count")" -eq 1
+test -f "$promotion_root/fallback"
+test -f "$promotion_root/pending-v1"
+test -f "$test_root/evidence"
+test ! -e "$test_root/owner"
+
+rm -f -- "$receipt_root/latch" "$promotion_root/fallback"
+printf owner >"$test_root/owner"
+publish_fallback() { return 1; }
+set +e
+stop_model
+no_block_status=$?
+set -e
+test "$no_block_status" -eq 2
+test -f "$test_root/owner"
+test -f "$test_root/evidence"
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    durableBlockRegression.status,
+    0,
+    `a failed primary directory fsync or unsafe primary root must use a durably re-proved fallback, repeats must skip recovery, and dual publication failure must forbid teardown: ${durableBlockRegression.stderr}`,
+  );
+
+  const prejournalOutcomeRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -euo pipefail
+test_root="$(mktemp -d)"
+trap 'rm -rf -- "$test_root"' EXIT
+for prefix in empty temporary; do
+  promotion="$test_root/$prefix"
+  mkdir -m 0700 -- "$promotion"
+  if test "$prefix" = temporary; then
+    printf partial >"$promotion/.pending-v1.ABC123"
+    chmod 0600 "$promotion/.pending-v1.ABC123"
+  fi
+  source="$test_root/$prefix-source"
+  stage="$test_root/$prefix-stage"
+  printf source >"$source"
+  printf stage >"$stage"
+  entries="$(find "$promotion" -mindepth 1 -maxdepth 1 -printf '%f\n')"
+  if test -z "$entries" || [[ "$entries" =~ ^\.pending-v1\.[A-Za-z0-9]+$ ]]; then
+    rm -f -- "$promotion"/.pending-v1.*
+    rmdir -- "$promotion"
+    outcome=prejournal_no_mutation
+  else
+    exit 1
+  fi
+  test "$outcome" = prejournal_no_mutation
+  test -f "$source"
+  test -f "$stage"
+  test ! -e "$promotion"
+done
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    prejournalOutcomeRegression.status,
+    0,
+    `empty and sole-temporary pre-journal crash prefixes must retire only as exact no-mutation outcomes: ${prejournalOutcomeRegression.stderr}`,
+  );
+}
+assert.doesNotMatch(
+  recoverBeforeTeardown,
+  /stop_project|container (?:rm|stop)|network rm|rm -f.*SECRET_ROOT|clear_bot_startup_receipt/,
+  'recovery-before-teardown may attest and retire the journal but must not itself hide a teardown',
+);
+assert.doesNotMatch(
+  helper,
+  /allow-zero-owner-journal-recovery|stop_project_preserving_kemerbet_recovery/,
+  'the helper must not retain a zero-Owner receipt authority or preserve expired credentials for later recovery',
 );
 assert.equal(
   (helper.match(/\brecover_incomplete_kemerbet_recheck_promotion\b/g) ?? []).length,
   2,
-  'interruption recovery must be defined once and invoked only by the explicit recheck command',
+  'raw interruption recovery must be defined once and invoked only by its write-ahead guarded wrapper',
+);
+assert.equal(
+  (helper.match(/\brecover_incomplete_kemerbet_recheck_promotion_guarded\b/g) ?? []).length,
+  3,
+  'guarded interruption recovery must be defined once and invoked only by explicit recheck or the shared pre-teardown hook',
+);
+const teardownRecoveryStatus =
+  /require_kemerbet_teardown_recovery_success\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(teardownRecoveryStatus);
+for (const contract of [
+  /KEMERBET_TEARDOWN_RECOVERY_FAILED/,
+  /KEMERBET_EMERGENCY_TEARDOWN_FAILED/,
+  /emergency teardown is incomplete/,
+  /full staging runtime was stopped/,
+  /requires root remediation/,
+]) {
+  assert.match(teardownRecoveryStatus, contract);
+}
+assert.doesNotMatch(
+  teardownRecoveryStatus,
+  /owner_kemerbet_cohort_marker|remove_owned_kemerbet_recheck_promotion_root/,
+);
+assert.equal(
+  (helper.match(/\brequire_kemerbet_teardown_recovery_success\b/g) ?? []).length,
+  9,
+  'only the five stop-family handlers may report recovery status: one check for full stops and emergency-plus-normal checks for scoped stops',
+);
+const emergencyProjectStop =
+  /emergency_stop_project_after_kemerbet_recovery_failure\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+const emergencyExpiryDisarm =
+  /emergency_disarm_expiry_stop_after_kemerbet_recovery_failure\(\) \{[\s\S]*?\n\}/u.exec(
+    helper,
+  )?.[0];
+assert.ok(emergencyProjectStop && emergencyExpiryDisarm);
+for (const contract of [
+  /remove_project_runtime_best_effort \|\| cleanup_status=1/,
+  /remove_staging_runtime_secrets_best_effort \|\| cleanup_status=1/,
+  /return "\$cleanup_status"/,
+]) {
+  assert.match(emergencyProjectStop, contract);
+}
+for (const contract of [
+  /command -v systemctl/,
+  /systemctl disable --now "\$EXPIRY_STOP_TIMER"[^\n]*\|\| cleanup_status=1/,
+  /rm -f -- "\$EXPIRY_STOP_TIMER_PATH" "\$EXPIRY_STOP_SERVICE_PATH" \|\| cleanup_status=1/,
+  /systemctl daemon-reload \|\| cleanup_status=1/,
+  /"\$timer_load_state" == 'not-found'/,
+  /return "\$cleanup_status"/,
+]) {
+  assert.match(emergencyExpiryDisarm, contract);
+}
+assert.doesNotMatch(
+  helper,
+  /emergency_(?:remove_project_service|disable_bot)_after_kemerbet_recovery_failure/,
+  'recovery failure must not retain a live Owner through a scoped emergency helper',
+);
+assert.doesNotMatch(
+  emergencyProjectStop,
+  /owner_kemerbet_cohort_marker|KEMERBET_OWNER_(?:IMPORTED|COMPLETED|FAILED)|remove_owned_kemerbet_recheck_promotion_root/,
+  'emergency teardown must retain the journal and every aggregate receipt for manual root remediation',
+);
+assert.doesNotMatch(
+  emergencyExpiryDisarm,
+  /owner_kemerbet_cohort_marker|KEMERBET_OWNER_(?:IMPORTED|COMPLETED|FAILED)|remove_owned_kemerbet_recheck_promotion_root/,
+  'emergency expiry cleanup must retain the journal and every aggregate receipt for manual root remediation',
+);
+assert.equal(
+  (helper.match(/\bemergency_stop_project_after_kemerbet_recovery_failure\b/g) ?? []).length,
+  6,
+  'the one full-project emergency helper must be defined once and used by all five stop-family commands',
+);
+assert.equal(
+  (helper.match(/\bemergency_disarm_expiry_stop_after_kemerbet_recovery_failure\b/g) ?? []).length,
+  6,
+  'the one best-effort expiry disarm helper must be defined once and used by all five stop-family commands',
 );
 
 const recordRecheckPromotionJournal =
@@ -3212,11 +4433,14 @@ for (const contract of [
   /sha256sum -- "\$KEMERBET_SELECTOR_CONTRACT"/,
   /kemerbet_profile_identity_digest/,
   /"\$account_id" "\$profile_mountpoint" require-absent-singletons/,
+  /profile_mountpoint="\$\(resolve_kemerbet_profile_volume_mountpoint\)" \|\| return 1/,
+  /observed_profile_identity_digest="\$\(kemerbet_profile_identity_digest/,
+  /require-absent-singletons\)" \|\| return 1/,
   /image inspect "fetanagent-deposit-executor:\$image_tag"/,
   /org\.opencontainers\.image\.revision/,
   /\$commit_sha\|fetanagent-deposit-executor\|10001:10001/,
   /require_exact_fresh_bot_runtime "\$commit_sha" published-steady-state/,
-  /require_single_owner_control_runtime_instance/,
+  /require_owner_kemerbet_receipt_service_access/,
   /require_kemerbet_profile_volume_holders ''/,
   /name=\^\/\$\{KEMERBET_RECHECK_CONTAINER\}\$/,
   /name=\^\$\{KEMERBET_RECHECK_NETWORK\}\$/,
@@ -3240,9 +4464,60 @@ assert.ok(stopKemerbetSession, 'The helper must define the private KemerBet sign
 assert.match(stopKemerbetSession, /container stop --time 70/);
 assert.match(stopKemerbetSession, /container rm/);
 assert.match(stopKemerbetSession, /published-steady-state/);
+assertInOrder(
+  stopKemerbetSession,
+  [
+    '[[ $# -eq 2 ]] ||',
+    '[[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]]',
+    'recover_kemerbet_recheck_before_teardown',
+    'emergency_stop_project_after_kemerbet_recovery_failure',
+    'emergency_disarm_expiry_stop_after_kemerbet_recovery_failure',
+    'require_kemerbet_teardown_recovery_success',
+    'session_container=',
+    'container stop --time 70',
+  ],
+  'session-provision stop must validate the release and recover the journal before removing runtime',
+);
+assert.equal(
+  (stopKemerbetSession.match(/require_kemerbet_teardown_recovery_success/g) ?? []).length,
+  2,
+  'session stop must return a visible nonzero recovery result after full-project emergency cleanup and retain a final normal-path check',
+);
 assert.doesNotMatch(
   stopKemerbetSession,
-  /stop_project|network rm|com\.docker\.compose\.service=(?:gateway|owner-control|bot)|container (?:rm|stop)[^\n]*(?:gateway|owner-control|bot)/,
+  /emergency_(?:disable_bot|remove_project_service)_after_kemerbet_recovery_failure/,
+  'session-stop recovery failure must never leave Owner or another project service running',
+);
+
+const stopPublicEdge = /\n  stop-public-edge\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(stopPublicEdge, 'The helper must define the isolated public-edge stop boundary.');
+assertInOrder(
+  stopPublicEdge,
+  [
+    "[[ $# -eq 1 ]] || die 'stop-public-edge accepts no additional arguments'",
+    'recover_kemerbet_recheck_before_teardown',
+    'emergency_stop_project_after_kemerbet_recovery_failure',
+    'emergency_disarm_expiry_stop_after_kemerbet_recovery_failure',
+    'require_kemerbet_teardown_recovery_success',
+    'gateway_container=',
+    'container rm --force',
+  ],
+  'public-edge stop must validate its invocation and recover the journal before removing runtime',
+);
+assert.equal(
+  (stopPublicEdge.match(/require_kemerbet_teardown_recovery_success/g) ?? []).length,
+  2,
+  'public-edge stop must signal recovery failure after full-project emergency cleanup and retain a final normal-path check',
+);
+assert.doesNotMatch(
+  stopPublicEdge,
+  /emergency_(?:disable_bot|remove_project_service)_after_kemerbet_recovery_failure/,
+  'public-edge recovery failure must never leave Owner or another project service running',
+);
+assert.equal(
+  (helper.match(/\brecover_kemerbet_recheck_before_teardown\b/g) ?? []).length,
+  6,
+  'the shared pre-teardown recovery must be defined once and called by all five stop-family commands',
 );
 
 const botReady = /\n  bot-ready\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];

@@ -3651,9 +3651,9 @@ emergency_stop_model() {
   fi
 }
 set +e
-emergency_stop_model
+( emergency_stop_model )
 first_status=$?
-emergency_stop_model
+( emergency_stop_model )
 second_status=$?
 set -e
 test "$first_status" -ne 0

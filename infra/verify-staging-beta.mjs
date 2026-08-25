@@ -275,7 +275,7 @@ assert.match(kemerbetRecheckService, /restart: 'no'/);
 assert.match(kemerbetRecheckService, /read_only: true/);
 assert.match(
   kemerbetRecheckService,
-  /tmpfs:\s*\r?\n\s+- \/tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777/,
+  /tmpfs:\s*\r?\n\s+- \/tmp:rw,noexec,nosuid,nodev,size=268435456,mode=1777/,
 );
 assert.match(kemerbetRecheckService, /shm_size: 512m/);
 assert.match(kemerbetRecheckService, /cap_drop:\s*\r?\n\s+- ALL/);

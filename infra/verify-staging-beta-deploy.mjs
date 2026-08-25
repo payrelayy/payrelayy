@@ -4321,6 +4321,25 @@ assert.ok(
   recheckRuntimeContract,
   'The helper must inspect the one-shot container before starting it.',
 );
+const recheckComposeService =
+  /(?:^|\n)  kemerbet-no-transfer-readiness:\r?\n([\s\S]*?)(?=\r?\n  [a-z][a-z0-9-]*:\r?\n)/u.exec(
+    compose,
+  )?.[1];
+assert.ok(recheckComposeService, 'The one-shot Compose service must remain separately bounded.');
+const recheckComposeTmpfsOptions = /^    tmpfs:\r?\n      - \/tmp:([^\r\n]+)$/mu.exec(
+  recheckComposeService,
+)?.[1];
+assert.ok(recheckComposeTmpfsOptions, 'The one-shot Compose tmpfs contract must remain exact.');
+const recheckHelperTmpfsLiteral =
+  /\$'([^']+)' \]\] \|\|\r?\n\s+die 'the KemerBet recheck temporary filesystem contract is not exact'/u.exec(
+    recheckRuntimeContract,
+  )?.[1];
+assert.ok(recheckHelperTmpfsLiteral, 'The runtime tmpfs predicate must remain exact.');
+assert.equal(
+  recheckComposeTmpfsOptions.split(',').sort().join('\n'),
+  recheckHelperTmpfsLiteral.replaceAll('\\n', '\n'),
+  'Compose must serialize the same exact tmpfs options that the runtime predicate requires.',
+);
 for (const contract of [
   /\.State\.Status.*'created'/s,
   /fetanagent-deposit-executor:\$image_tag/,

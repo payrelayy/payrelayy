@@ -89,9 +89,7 @@ assert.match(
   /readonly NEW_HELPER='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'/,
 );
 assert.match(transition, new RegExp(`readonly NEW_HELPER_SHA='${baseHelperSha}'`));
-const expectedRotatedHelperSha = createHash('sha256')
-  .update(deployHelper.replaceAll('\r\n', '\n'))
-  .digest('hex');
+const expectedRotatedHelperSha = '121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4';
 assert.match(
   transition,
   new RegExp(`readonly ROTATED_HELPER_SHA='${expectedRotatedHelperSha}'`),

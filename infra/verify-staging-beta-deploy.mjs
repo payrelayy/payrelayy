@@ -40,9 +40,13 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  'af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-af823251';
+  '121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-121e3b36';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
+const retainedAf823HelperBackupSha =
+  'af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833';
+const retainedAf823HelperBackupName = 'fetanagent-staging-deploy-helper.previous-af823251';
+const retainedAf823HelperBackupPath = `/root/fetanagent-helper-rotation/${retainedAf823HelperBackupName}`;
 const retainedB466HelperBackupSha =
   'b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663';
 const retainedB466HelperBackupName = 'fetanagent-staging-deploy-helper.previous-b4664efd';
@@ -52,7 +56,7 @@ const retained33f4HelperBackupSha =
 const retained33f4HelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
 const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retained33f4HelperBackupName}`;
 const reviewedHelperSuccessorSha =
-  '121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4';
+  '5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -120,7 +124,9 @@ for (const ownerClaimRunbookContract of [
   /\/run\/fetanagent-kemerbet-readiness-cohort-receipts/u,
   /exact read-only bind/u,
   /prevent UID 10001 from\s+creating, unlinking, renaming, hard-linking, symlinking, or replacing/u,
-  /Every directory from\s+`\/` through `\/var`, `\/var\/lib`, `\/var\/lib\/fetanagent`/u,
+  /Before the feature's\s+first installation, the parent and receipt root may both be genuinely absent/u,
+  /exact non-symbolic absence as no latch only after proving `\/`, `\/var`, and\s+`\/var\/lib`/u,
+  /Once installed, every directory through `\/var\/lib\/fetanagent` and the receipt root is canonical/u,
   /resolves every inspected bind source to a canonical host path/u,
   /explicitly treating host `\/`/u,
   /normalizes an exact imported\/failed crash prefix/u,
@@ -803,6 +809,13 @@ assert.ok(
 );
 for (const retainedBackup of [
   {
+    variable: 'RETAINED_AF823_BACKUP',
+    shaVariable: 'RETAINED_AF823_BACKUP_SHA',
+    name: retainedAf823HelperBackupName,
+    path: retainedAf823HelperBackupPath,
+    sha: retainedAf823HelperBackupSha,
+  },
+  {
     variable: 'RETAINED_B466_BACKUP',
     shaVariable: 'RETAINED_B466_BACKUP_SHA',
     name: retainedB466HelperBackupName,
@@ -859,8 +872,8 @@ for (const retainedBackup of [
 }
 assert.doesNotMatch(
   helperReplacementRunbook,
-  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_(?:B466|33F4)_BACKUP"/u,
-  'The current rotation must never mutate or remove either retained earlier predecessor backup.',
+  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_(?:AF823|B466|33F4)_BACKUP"/u,
+  'The current rotation must never mutate or remove any retained earlier predecessor backup.',
 );
 assert.doesNotMatch(
   helperReplacementRunbook,
@@ -1070,8 +1083,8 @@ for (const replacementResumeContract of [
   /if \[\[ -e "\$BACKUP" \|\| -L "\$BACKUP" \]\]; then/,
   /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-121e3b36'/,
-  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-af823251\.installing"/,
+  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-5267906f'/,
+  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-121e3b36\.installing"/,
 ]) {
   assert.match(helperReplacement, replacementResumeContract);
 }
@@ -1188,7 +1201,7 @@ for (const restoreResumeContract of [
   /SUDOERS_STATE='enabled'/,
   /SUDOERS_STATE='disabled'/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-af823251'/,
+  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-121e3b36'/,
   /if \[\[ "\$TARGET_SHA" == "\$NEXT_SHA" \]\]; then/,
   /RESTORE_TMP="\$RESTORE_TMP_PATH"/,
 ]) {
@@ -1217,7 +1230,8 @@ for (const exactRollbackResiduePath of [
   /CANONICAL_BINDING='\/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings'/,
   /IMPORT_CANDIDATE='\/etc\/fetanagent\/executor-secrets\/\.kemerbet-readiness-player-ids\.promote-v1'/,
   /READINESS_OUTPUT_ROOT='\/var\/lib\/fetanagent\/kemerbet-readiness-seal-output'/,
-  /OWNER_RECEIPT_ROOT='\/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts'/,
+  /OWNER_RECEIPT_PARENT='\/var\/lib\/fetanagent'/,
+  /OWNER_RECEIPT_ROOT="\$OWNER_RECEIPT_PARENT\/kemerbet-readiness-cohort-receipts"/,
   /SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'/,
   /PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'/,
 ]) {
@@ -1234,8 +1248,17 @@ for (const preRecheckContract of [
   /identity_key_metadata/,
   /READINESS_OUTPUT_ROOT/,
   /READINESS_BINDING/,
+  /OWNER_RECEIPT_PARENT/,
   /OWNER_RECEIPT_ROOT/,
-  /"\$IMPORT_CANDIDATE" \\\n    "\$OWNER_RECEIPT_ROOT"; do/,
+  /0:0:755/,
+  /find -P "\$OWNER_RECEIPT_ROOT"[\s\S]*?-printf 'present\\n' -quit/u,
+  /\[\[ -z "\$receipt_entry" \]\] \|\| return 1/,
+  /stat --format='%u:%g:%a:%d:%i' "\$OWNER_RECEIPT_PARENT"/,
+  /stat --format='%u:%g:%a:%d:%i' "\$OWNER_RECEIPT_ROOT"/,
+  /OWNER_RECEIPT_PARENT_IDENTITY="\$current_parent_identity"/,
+  /OWNER_RECEIPT_ROOT_IDENTITY="\$current_root_identity"/,
+  /"\$current_parent_identity" == "\$OWNER_RECEIPT_PARENT_IDENTITY"/,
+  /"\$current_root_identity" == "\$OWNER_RECEIPT_ROOT_IDENTITY"/,
   /10001:10001:600:1/,
   /kemerbet-readiness-cohort-imported-v1/,
   /kemerbet-readiness-cohort-completed-v1/,
@@ -1250,10 +1273,30 @@ for (const preRecheckContract of [
 ]) {
   assert.match(preRecheckRollbackState, preRecheckContract);
 }
+assertInOrder(
+  preRecheckRollbackState,
+  [
+    'for absent_path in \\',
+    '"$IMPORT_CANDIDATE"; do',
+    'for ancestor in / /var /var/lib "$OWNER_RECEIPT_PARENT" "$OWNER_RECEIPT_ROOT"; do',
+    'receipt_entry="$(find -P "$OWNER_RECEIPT_ROOT" \\',
+    '[[ -z "$receipt_entry" ]] || return 1',
+    'current_parent_identity="$(stat',
+    'current_root_identity="$(stat',
+    '[[ "$current_parent_identity" == "$OWNER_RECEIPT_PARENT_IDENTITY" ]] || return 1',
+    '[[ "$current_root_identity" == "$OWNER_RECEIPT_ROOT_IDENTITY" ]] || return 1',
+  ],
+  'rollback must exclude legacy residue, prove an already installed empty receipt namespace, and retain its inode identities',
+);
+assert.doesNotMatch(
+  helperRestore,
+  /(?:^|\n)\s*(?:chmod|chown|install\s+-d|mkdir|mv|rm|rmdir)\b[^\n]*\$(?:OWNER_RECEIPT_PARENT|OWNER_RECEIPT_ROOT)/u,
+  'rollback must never create, repair, empty, move, or remove either protected receipt directory',
+);
 assert.doesNotMatch(
   preRecheckRollbackState,
-  /if \[\[ -e "\$PLAYER_IDS"|! -e "\$PLAYER_IDS"|"\$profile_mountpoint\/\$absent_path"/,
-  'rollback compatibility must require the predecessor Player-ID source and inspect Chromium singletons only under the exact account profile',
+  /if \[\[ -e "\$PLAYER_IDS"|! -e "\$PLAYER_IDS"|"\$profile_mountpoint\/\$absent_path"|"\$IMPORT_CANDIDATE" \\\n    "\$OWNER_RECEIPT_ROOT"; do/,
+  'rollback compatibility must require the predecessor Player-ID source, require the protected receipt root rather than absence, and inspect Chromium singletons only under the exact account profile',
 );
 assert.equal(
   (helperRestore.match(/\brequire_pre_recheck_rollback_state\b/g) ?? []).length,
@@ -2395,6 +2438,24 @@ for (const contract of [
 ]) {
   assert.match(inspectRecoveryLatch, contract);
 }
+assertInOrder(
+  inspectRecoveryLatch,
+  [
+    'for ancestor in / /var /var/lib; do',
+    'if [[ ! -e "$KEMERBET_OWNER_RECEIPT_PARENT" && ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" ]]; then',
+    '[[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" ]] || return 2',
+    '[[ ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" && -d "$KEMERBET_OWNER_RECEIPT_PARENT"',
+    'if [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" ]]; then',
+    '[[ ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" && -d "$KEMERBET_OWNER_RECEIPT_ROOT"',
+    'for path in \\',
+  ],
+  'recovery-latch inspection must recognize only exact pre-install absence before validating and enumerating an existing protected root',
+);
+assert.doesNotMatch(
+  inspectRecoveryLatch,
+  /\b(?:install|ln|mkdir|mv|rm)\b/u,
+  'recovery-latch inspection must remain read-only when proving a pre-install namespace absent',
+);
 for (const contract of [
   /KEMERBET_RECOVERY_FALLBACK_NAME/,
   /KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME/,
@@ -3407,6 +3468,93 @@ assert.doesNotMatch(
   'placing the recovery function in an if-condition would suppress errexit inside its body',
 );
 if (process.platform === 'linux') {
+  const absentReceiptRootRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      [
+        'set -eu',
+        inspectRecoveryLatch,
+        inspectRecoveryFallback,
+        guardedIncompleteRecovery,
+        recoverBeforeTeardown,
+        String.raw`
+KEMERBET_RECOVERY_LATCH_NAME='kemerbet-readiness-recovery-in-progress-or-failed-v1'
+KEMERBET_RECOVERY_LATCH_INSTALLING_NAME='.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing'
+KEMERBET_RECOVERY_FALLBACK_NAME='recovery-in-progress-or-failed-v1'
+KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME='.recovery-in-progress-or-failed-v1.installing'
+scratch="$(mktemp -d)"
+trap 'rm -rf -- "$scratch"' EXIT
+sentinel="$scratch/unexpected-mutation"
+
+unexpected_call() {
+  : >"$sentinel"
+  return 97
+}
+die() { unexpected_call; }
+require_owner_kemerbet_receipt_service_access() { unexpected_call; }
+publish_kemerbet_recovery_latch() { unexpected_call; }
+require_owned_kemerbet_recovery_latch() { unexpected_call; }
+recover_incomplete_kemerbet_recheck_promotion() { unexpected_call; }
+require_retired_kemerbet_recovery_boundary() { unexpected_call; }
+retire_owned_kemerbet_recovery_latch() { unexpected_call; }
+durably_retain_kemerbet_recovery_latch_residue() { unexpected_call; }
+publish_kemerbet_recovery_fallback() { unexpected_call; }
+durably_retain_kemerbet_recovery_fallback_residue() { unexpected_call; }
+
+run_clean_absence_case() {
+  KEMERBET_OWNER_RECEIPT_PARENT="$1"
+  KEMERBET_OWNER_RECEIPT_ROOT="$2"
+  KEMERBET_RECHECK_PROMOTION_ROOT="$3"
+  test ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && test ! -L "$KEMERBET_OWNER_RECEIPT_ROOT"
+  test ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && test ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT"
+  set +e
+  inspect_kemerbet_recovery_latch
+  inspect_status=$?
+  set -e
+  test "$inspect_status" -eq 1
+  recover_incomplete_kemerbet_recheck_promotion_guarded
+  recover_kemerbet_recheck_before_teardown
+  test "$KEMERBET_TEARDOWN_RECOVERY_FAILED" = 'false'
+  test "$KEMERBET_EMERGENCY_TEARDOWN_FAILED" = 'false'
+  test ! -e "$sentinel"
+  test ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && test ! -L "$KEMERBET_OWNER_RECEIPT_ROOT"
+  test ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && test ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT"
+}
+
+nonce="fetanagent-absent-receipt-regression-$$"
+missing_parent="/var/lib/$nonce-parent"
+missing_root="$missing_parent/receipts"
+missing_promotion="/var/lib/$nonce-promotion"
+test ! -e "$missing_parent" && test ! -L "$missing_parent"
+run_clean_absence_case "$missing_parent" "$missing_root" "$missing_promotion"
+test ! -e "$missing_parent" && test ! -L "$missing_parent"
+
+safe_parent='/var/lib'
+safe_missing_root="/var/lib/$nonce-receipts"
+run_clean_absence_case "$safe_parent" "$safe_missing_root" "$missing_promotion"
+
+dangling_parent="$scratch/dangling-parent"
+ln -s -- "$scratch/absent-target" "$dangling_parent"
+KEMERBET_OWNER_RECEIPT_PARENT="$dangling_parent"
+KEMERBET_OWNER_RECEIPT_ROOT="$dangling_parent/receipts"
+set +e
+inspect_kemerbet_recovery_latch
+dangling_status=$?
+set -e
+test "$dangling_status" -eq 2
+test ! -e "$sentinel"
+`,
+      ].join('\n'),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    absentReceiptRootRegression.status,
+    0,
+    `an absent pre-install receipt namespace must be a no-latch, no-mutation cleanup boundary:\n${absentReceiptRootRegression.stdout}\n${absentReceiptRootRegression.stderr}`,
+  );
+
   const secondRetirementRecheckRegression = spawnSync(
     '/bin/bash',
     [

@@ -219,6 +219,19 @@ services:
       driver: none
     environment:
       NODE_ENV: production
+      # Override every proxy key Docker Compose can inherit from the Docker
+      # client config. Empty values preserve direct egress and keep the
+      # pre-start environment attestation deterministic.
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      NO_PROXY: ''
+      no_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
       FINANCIAL_ACTIONS_MODE: dry_run
       KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'
       KEMERBET_EXECUTOR_ENABLED: 'false'

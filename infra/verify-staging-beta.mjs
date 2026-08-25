@@ -12,6 +12,18 @@ const retiredDepositReferenceProtection = new RegExp(
   ['api', 'deposit', 'reference', 'protection'].join('[_-]'),
   'iu',
 );
+const dockerProxyEnvironmentNames = [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'FTP_PROXY',
+  'ftp_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+];
 
 assert.doesNotMatch(
   compose,
@@ -296,11 +308,51 @@ for (const disabledRecheckGate of [
   assert.match(kemerbetRecheckService, new RegExp(`${disabledRecheckGate}: 'false'`));
 }
 const kemerbetRecheckEnvironment = servicePropertyBlock(kemerbetRecheckService, 'environment');
+assert.deepEqual(
+  [...kemerbetRecheckEnvironment.matchAll(/^      ([A-Za-z_][A-Za-z0-9_]*):/gm)].map(
+    (match) => match[1],
+  ),
+  [
+    'NODE_ENV',
+    ...dockerProxyEnvironmentNames,
+    'FINANCIAL_ACTIONS_MODE',
+    'KEMERBET_NO_TRANSFER_READINESS_ENABLED',
+    'KEMERBET_EXECUTOR_ENABLED',
+    'KEMERBET_FINAL_ACTION_ENABLED',
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+    'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
+  ],
+  'the one-shot recheck environment allowlist must remain exact',
+);
+for (const proxyName of dockerProxyEnvironmentNames) {
+  assert.equal(
+    countMatches(
+      kemerbetRecheckEnvironment,
+      new RegExp(`^      ${escapeRegExp(proxyName)}: ''$`, 'gm'),
+    ),
+    1,
+    `${proxyName} must be present exactly once with an empty value`,
+  );
+}
 assert.doesNotMatch(
   kemerbetRecheckEnvironment,
   /DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY|(?:^|_)AMOUNT|(?:^|_)NOTES|TRANSFER_METHOD/,
   'the independent recheck environment must contain no database, identity, or financial authority',
 );
+const executorRuntimeBase = dockerfile
+  .split('FROM runtime-base AS executor-runtime-base')[1]
+  ?.split('FROM executor-runtime-base AS executor')[0];
+assert.ok(executorRuntimeBase, 'missing executor runtime base body');
+for (const proxyName of dockerProxyEnvironmentNames) {
+  assert.equal(
+    countMatches(
+      executorRuntimeBase,
+      new RegExp(`^\\s+(?:ENV\\s+)?${escapeRegExp(proxyName)}=\\s*(?:\\\\)?$`, 'gm'),
+    ),
+    1,
+    `the executor image must declare exactly one empty ${proxyName} baseline`,
+  );
+}
 const kemerbetRecheckVolumes = servicePropertyBlock(kemerbetRecheckService, 'volumes');
 assert.equal(
   countMatches(kemerbetRecheckVolumes, /^\s+- type: /gm),

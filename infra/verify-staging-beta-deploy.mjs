@@ -20,6 +20,7 @@ const kemerbetSessionWorkflow = readFileSync(
 const botSource = readFileSync(resolve(root, 'apps/bot/src/index.ts'), 'utf8');
 const apiSource = readFileSync(resolve(root, 'apps/api/src/app.ts'), 'utf8');
 const qualityWorkflow = readFileSync(resolve(root, '.github/workflows/quality.yml'), 'utf8');
+const dockerfile = readFileSync(resolve(root, 'Dockerfile'), 'utf8');
 const compose = readFileSync(resolve(root, 'infra/compose.staging-beta.yaml'), 'utf8');
 const stagingRunbook = readFileSync(resolve(root, 'infra/staging-beta.md'), 'utf8');
 const provision = readFileSync(
@@ -4326,6 +4327,53 @@ const recheckComposeService =
     compose,
   )?.[1];
 assert.ok(recheckComposeService, 'The one-shot Compose service must remain separately bounded.');
+const dockerProxyEnvironmentNames = [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'FTP_PROXY',
+  'ftp_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+];
+const recheckComposeEnvironment =
+  /^    environment:\r?\n([\s\S]*?)(?=^    [a-z][a-z0-9_]*:)/mu.exec(recheckComposeService)?.[1];
+assert.ok(recheckComposeEnvironment, 'The one-shot Compose environment must remain explicit.');
+const executorRuntimeBase = dockerfile
+  .split('FROM runtime-base AS executor-runtime-base')[1]
+  ?.split('FROM executor-runtime-base AS executor')[0];
+assert.ok(executorRuntimeBase, 'The executor image must retain a separate runtime base.');
+for (const proxyName of dockerProxyEnvironmentNames) {
+  assert.equal(
+    (recheckComposeEnvironment.match(new RegExp(`^      ${proxyName}: ''$`, 'gmu')) ?? []).length,
+    1,
+    `Compose must override ${proxyName} with one exact empty value.`,
+  );
+  assert.equal(
+    (
+      executorRuntimeBase.match(
+        new RegExp(`^\\s+(?:ENV\\s+)?${proxyName}=\\s*(?:\\\\)?$`, 'gmu'),
+      ) ?? []
+    ).length,
+    1,
+    `The executor image must contribute one exact empty ${proxyName} baseline.`,
+  );
+}
+const recheckExpectedEnvironment =
+  /expected_environment="\$\(\{([\s\S]*?)\}\s*\|\s*LC_ALL=C sort\)"/u.exec(
+    recheckRuntimeContract,
+  )?.[1];
+assert.ok(recheckExpectedEnvironment, 'The runtime must derive one exact expected environment.');
+for (const proxyName of dockerProxyEnvironmentNames) {
+  assert.doesNotMatch(
+    recheckExpectedEnvironment,
+    new RegExp(`\\b${proxyName}\\b`, 'u'),
+    `The runtime must preserve the image's empty ${proxyName} baseline.`,
+  );
+}
 const recheckComposeTmpfsOptions = /^    tmpfs:\r?\n      - \/tmp:([^\r\n]+)$/mu.exec(
   recheckComposeService,
 )?.[1];

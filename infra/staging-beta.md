@@ -410,8 +410,8 @@ file and its root-only backup.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7
-reviewed_successor=022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714
+installed_predecessor=022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714
+reviewed_successor=ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -422,7 +422,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
+NEXT_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -447,7 +447,8 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-d9cdcdec"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-022a9f10"
+RETAINED_D9CD_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-d9cdcdec"
 RETAINED_526_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-5267906f"
 RETAINED_121E_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-121e3b36"
 RETAINED_AF823_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-af823251"
@@ -457,8 +458,9 @@ SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
 MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
-PREVIOUS_SHA='d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7'
-NEXT_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
+PREVIOUS_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
+NEXT_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+RETAINED_D9CD_BACKUP_SHA='d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7'
 RETAINED_526_BACKUP_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
 RETAINED_121E_BACKUP_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
 RETAINED_AF823_BACKUP_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
@@ -467,8 +469,8 @@ RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453
 METADATA='http://169.254.169.254/metadata/v1'
 INSTALL_TMP=''
 BACKUP_TMP=''
-INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-022a9f10'
-BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-d9cdcdec.installing"
+INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-ecd47f5d'
+BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-022a9f10.installing"
 SUDOERS_STATE=''
 TARGET_SHA=''
 expected_sudoers() {
@@ -562,6 +564,10 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
 test ! -L "$STAGING_ROOT" && test "$(stat --format='%U:%G:%a' "$STAGING_ROOT")" = 'root:root:700'
+test ! -L "$RETAINED_D9CD_BACKUP" && test -f "$RETAINED_D9CD_BACKUP"
+test "$(realpath -- "$RETAINED_D9CD_BACKUP")" = "$RETAINED_D9CD_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_D9CD_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_D9CD_BACKUP" | awk '{ print $1 }')" = "$RETAINED_D9CD_BACKUP_SHA"
 test ! -L "$RETAINED_526_BACKUP" && test -f "$RETAINED_526_BACKUP"
 test "$(realpath -- "$RETAINED_526_BACKUP")" = "$RETAINED_526_BACKUP"
 test "$(stat --format='%U:%G:%a:%h' "$RETAINED_526_BACKUP")" = 'root:root:600:1'
@@ -696,14 +702,14 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `022a9f10…` before `deploy-and-smoke` is allowed. A transient SSH failure should
+against successor SHA `ecd47f5d…` before `deploy-and-smoke` is allowed. A transient SSH failure should
 be diagnosed and the read-only verification retried while staging remains offline. Manual rollback
-to `d9cdcdec…` is an exceptional pre-deploy path only: it is forbidden after `deploy-and-smoke` or
+to `022a9f10…` is an exceptional pre-deploy path only: it is forbidden after `deploy-and-smoke` or
 after any successor command other than exact checksum `verify`. It follows the same sudoers
 revocation and exact process-quiescence boundary, verifies the restored predecessor before
 re-enabling its grant, and makes no further mutation afterward. It is resumable with the exact
 disabled grant and either allowed TARGET hash only while the strict rollback shape remains compatible
-with predecessor `d9cdcdec`: the complete promotion and recheck receipt roots, recheck candidate,
+with predecessor `022a9f10`: the complete promotion and recheck receipt roots, recheck candidate,
 canonical binding, fixed Player-ID import candidate, every Owner cohort stage/installer/aggregate
 marker, and every profile singleton must all be absent. The root-anchored Owner aggregate receipt
 parent and root must already exist as canonical `root:root` mode-`0755` directories, retain their
@@ -718,7 +724,8 @@ output/binding; absence is not a rollback-compatible pre-recheck state:
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-d9cdcdec'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-022a9f10'
+RETAINED_D9CD_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-d9cdcdec'
 RETAINED_526_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-5267906f'
 RETAINED_121E_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-121e3b36'
 RETAINED_AF823_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-af823251'
@@ -741,8 +748,9 @@ OWNER_RECEIPT_PARENT='/var/lib/fetanagent'
 OWNER_RECEIPT_ROOT="$OWNER_RECEIPT_PARENT/kemerbet-readiness-cohort-receipts"
 SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'
 PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'
-PREVIOUS_SHA='d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7'
-NEXT_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
+PREVIOUS_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
+NEXT_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+RETAINED_D9CD_BACKUP_SHA='d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7'
 RETAINED_526_BACKUP_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
 RETAINED_121E_BACKUP_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
 RETAINED_AF823_BACKUP_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
@@ -750,7 +758,7 @@ RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c2
 RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 RESTORE_TMP=''
-RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-d9cdcdec'
+RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-022a9f10'
 SUDOERS_STATE=''
 TARGET_SHA=''
 OWNER_RECEIPT_PARENT_IDENTITY=''
@@ -943,6 +951,10 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
   test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$RETAINED_D9CD_BACKUP" && test -f "$RETAINED_D9CD_BACKUP"
+test "$(realpath -- "$RETAINED_D9CD_BACKUP")" = "$RETAINED_D9CD_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_D9CD_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_D9CD_BACKUP" | awk '{ print $1 }')" = "$RETAINED_D9CD_BACKUP_SHA"
 test ! -L "$RETAINED_526_BACKUP" && test -f "$RETAINED_526_BACKUP"
 test "$(realpath -- "$RETAINED_526_BACKUP")" = "$RETAINED_526_BACKUP"
 test "$(stat --format='%U:%G:%a:%h' "$RETAINED_526_BACKUP")" = 'root:root:600:1'
@@ -1047,14 +1059,15 @@ FETANAGENT_HELPER_RESTORE
 ```
 
 Do not hand-edit the installed helper or bypass its checksum gate. After read-only verification
-succeeds, remove only the staged `.next` file. Retain all six versioned predecessor backups: the new
-`fetanagent-staging-deploy-helper.previous-d9cdcdec` backup and the independently verified existing
+succeeds, remove only the staged `.next` file. Retain all seven versioned predecessor backups: the new
+`fetanagent-staging-deploy-helper.previous-022a9f10` backup and the independently verified existing
+`fetanagent-staging-deploy-helper.previous-d9cdcdec`,
 `fetanagent-staging-deploy-helper.previous-5267906f`,
 `fetanagent-staging-deploy-helper.previous-121e3b36`,
 `fetanagent-staging-deploy-helper.previous-af823251`,
 `fetanagent-staging-deploy-helper.previous-b4664efd`, and
 `fetanagent-staging-deploy-helper.previous-33f4a5a4` evidence. Never overwrite or delete any of the
-five older backups during this rotation. This is a one-successor replacement, not ongoing
+six older backups during this rotation. This is a one-successor replacement, not ongoing
 credential rotation and not authority to enable financial actions.
 
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or

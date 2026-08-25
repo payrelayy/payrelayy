@@ -672,6 +672,35 @@ gh workflow run staging-beta-deploy-smoke.yml --ref main \
   -f confirm_legacy_stop=stop-current-staging-predecessor-runtime
 ```
 
+The current helper rotation has one separate cleanup-recovery boundary because the installed helper
+is exactly
+`ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be`, installed by exact release
+`594ce9656311feabd062b6b6360a90ba5d7ee576`, and its normal cleanup was also missed before `main`
+advanced. Use only the digest-named mode `ecd47f5d-predecessor-stop-and-disable` with the distinct
+typed confirmation `stop-exact-ecd47f5d-staging-predecessor-runtime`. This mode is permanently pinned
+to that helper, release, and the exact reviewed runtime-disable SQL checksum. It first proves the
+non-root remote identity and exact installed helper, then stops the fixed Compose project and
+discards only that release's safe incoming directory. An identity or helper-verification failure
+prevents database cleanup. A stop or discard failure still disables the four disposable staging
+database logins and then returns the original remote failure for operator review. It does not
+transfer or install a release, replace a helper, start any service, change a network ban, prepare a
+claim or recheck, authorize Transfer, or move money.
+
+This is a one-use recovery boundary: dispatch it only while the installed helper still has the exact
+`ecd47f5d…` digest and before helper replacement. After a successful dispatch, proceed to the
+separately reviewed root-console replacement; never repin or reuse this mode for a later helper or
+release. The historical `predecessor-stop-and-disable` mode above remains independently frozen to
+`022a9f10…` plus `8f58ff06425160835c94801e564fa6f9066d0930`.
+
+```bash
+gh workflow run staging-beta-deploy-smoke.yml --ref main \
+  -f mode=ecd47f5d-predecessor-stop-and-disable \
+  -f confirm_staging_project_ref=spzpiyxheappsfyswewl \
+  -f confirm_main_commit_sha='<exact-current-reviewed-main-commit>' \
+  -f confirm_droplet_id=593344964 \
+  -f confirm_legacy_stop=stop-exact-ecd47f5d-staging-predecessor-runtime
+```
+
 The current Droplet follows only the fresh-host commands (`fresh-host-ready`, `fresh-start`, and
 `start-fresh-public-edge`). Those commands do not consume the retired Droplet's
 `helper-rotation-v1` receipt. Do not create, copy, or update VM-transition receipts on Droplet

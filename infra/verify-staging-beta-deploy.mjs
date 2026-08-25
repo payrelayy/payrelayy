@@ -421,11 +421,18 @@ assert.match(workflow, /^\s+- transition-ssh-verify$/m);
 assert.match(workflow, /^\s+- transition-stop-legacy$/m);
 assert.match(workflow, /^\s+- recover-v1-retirement-after-expiry$/m);
 assert.match(workflow, /^\s+- predecessor-stop-and-disable$/m);
+assert.match(workflow, /^\s+- ecd47f5d-predecessor-stop-and-disable$/m);
 assert.match(workflow, /stop-legacy-staging-runtime/);
 assert.match(workflow, /stop-current-staging-predecessor-runtime/);
+assert.match(workflow, /stop-exact-ecd47f5d-staging-predecessor-runtime/);
 assert.match(
   workflow,
-  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|stop-and-disable\)\$/,
+  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
+);
+assert.match(
+  workflow,
+  /elif \[\[ "\$REQUESTED_MODE" == 'ecd47f5d-predecessor-stop-and-disable' \]\]; then\s+\[\[ "\$CONFIRMED_LEGACY_STOP" == 'stop-exact-ecd47f5d-staging-predecessor-runtime' \]\]\s+\[\[ -z "\$CONFIRMED_V1_RETIREMENT_RECOVERY" \]\]\s+\[\[ -z "\$CONFIRMED_V1_RETIREMENT_RELEASE" \]\]/u,
+  'The exact installed-predecessor cleanup mode must require its own typed confirmation and reject every retirement-recovery input.',
 );
 assert.match(workflow, /environment: staging/g);
 assert.match(workflow, /fetanagent-admin@/g);
@@ -617,12 +624,12 @@ assert.match(
 );
 assert.equal(
   (validateTarget.match(/\[\[ -z "\$CONFIRMED_V1_RETIREMENT_RECOVERY" \]\]/g) ?? []).length,
-  3,
+  4,
   'Every non-recovery validation branch must reject the recovery confirmation.',
 );
 assert.equal(
   (validateTarget.match(/\[\[ -z "\$CONFIRMED_V1_RETIREMENT_RELEASE" \]\]/g) ?? []).length,
-  3,
+  4,
   'Every non-recovery validation branch must reject an explicit retirement release.',
 );
 
@@ -1613,16 +1620,57 @@ const stopJob = /\n  stop:\n([\s\S]*)$/u.exec(workflow)?.[1];
 assert.ok(stopJob, 'The staging stop job must exist.');
 assert.match(
   stopJob,
-  /if: inputs\.mode == 'predecessor-stop-and-disable' \|\| inputs\.mode == 'stop-and-disable'/,
+  /if: inputs\.mode == 'predecessor-stop-and-disable' \|\| inputs\.mode == 'ecd47f5d-predecessor-stop-and-disable' \|\| inputs\.mode == 'stop-and-disable'/,
 );
 assert.match(stopJob, /REQUESTED_MODE: \$\{\{ inputs\.mode \}\}/);
 assert.match(stopJob, /if \[\[ "\$REQUESTED_MODE" == 'predecessor-stop-and-disable' \]\]; then/u);
+const historicalPredecessorBranch =
+  /if \[\[ "\$REQUESTED_MODE" == 'predecessor-stop-and-disable' \]\]; then([\s\S]*?)\n\s+elif \[\[ "\$REQUESTED_MODE" == 'ecd47f5d-predecessor-stop-and-disable' \]\]; then/u.exec(
+    stopJob,
+  )?.[1];
+assert.ok(
+  historicalPredecessorBranch,
+  'The historical predecessor mode must remain a distinct, unchanged branch.',
+);
 assert.match(
-  stopJob,
+  historicalPredecessorBranch,
+  /test "\$\(sha256sum infra\/sql\/staging-runtimes-disable\.sql \| awk '\{print \$1\}'\)" = \\\s+'956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583'/u,
+);
+assert.match(
+  historicalPredecessorBranch,
   /helper_sha='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'/,
 );
-assert.match(stopJob, /release_sha='8f58ff06425160835c94801e564fa6f9066d0930'/);
-assert.match(stopJob, /predecessor_mode='true'/);
+assert.match(historicalPredecessorBranch, /release_sha='8f58ff06425160835c94801e564fa6f9066d0930'/);
+assert.match(historicalPredecessorBranch, /predecessor_mode='true'/);
+assert.doesNotMatch(
+  historicalPredecessorBranch,
+  /ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be|594ce9656311feabd062b6b6360a90ba5d7ee576/u,
+  'The historical predecessor cleanup mode must never be repinned to the currently installed predecessor.',
+);
+
+const installedPredecessorBranch =
+  /elif \[\[ "\$REQUESTED_MODE" == 'ecd47f5d-predecessor-stop-and-disable' \]\]; then([\s\S]*?)\n\s+else/u.exec(
+    stopJob,
+  )?.[1];
+assert.ok(
+  installedPredecessorBranch,
+  'The currently installed predecessor must have its own exact cleanup branch.',
+);
+assert.match(
+  installedPredecessorBranch,
+  /test "\$\(sha256sum infra\/sql\/staging-runtimes-disable\.sql \| awk '\{print \$1\}'\)" = \\\s+'956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583'/u,
+);
+assert.match(
+  installedPredecessorBranch,
+  new RegExp(`helper_sha='${installedHelperPredecessorSha}'`, 'u'),
+);
+assert.match(installedPredecessorBranch, /release_sha='594ce9656311feabd062b6b6360a90ba5d7ee576'/);
+assert.match(installedPredecessorBranch, /predecessor_mode='true'/);
+assert.doesNotMatch(
+  installedPredecessorBranch,
+  /022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714|8f58ff06425160835c94801e564fa6f9066d0930/u,
+  'The currently installed predecessor cleanup mode must never fall back to the older historical pins.',
+);
 assert.match(stopJob, /else\s+\[\[ "\$REQUESTED_MODE" == 'stop-and-disable' \]\]\s+fi/u);
 assert.match(stopJob, /956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583/);
 assert.match(
@@ -1634,6 +1682,24 @@ assert.match(
   /test \\"\\\$\(id -u\)\\" -ne 0 \|\| exit 190; sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper verify '\$helper_sha' \|\| exit 191; sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper stop \|\| exit 192; sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper discard '\$release_sha' \|\| exit 193/,
 );
 assert.match(stopJob, /psql -X --file=infra\/sql\/staging-runtimes-disable\.sql/);
+assertInOrder(
+  stopJob,
+  [
+    'remote_command="test \\"\\$(id -u)\\" -ne 0 || exit 190;',
+    "fetanagent-staging-deploy-helper verify '$helper_sha' || exit 191;",
+    'fetanagent-staging-deploy-helper stop || exit 192;',
+    "fetanagent-staging-deploy-helper discard '$release_sha' || exit 193",
+    '"$remote_command" || remote_status=$?',
+    'case "$remote_status" in',
+    'psql -X --file=infra/sql/staging-runtimes-disable.sql',
+  ],
+  'Both exact predecessor modes must prove the helper, attempt stop and exact-release discard, classify the remote result, and only then run cleanup SQL.',
+);
+assert.equal(
+  (stopJob.match(/\bpsql\b/g) ?? []).length,
+  1,
+  'The cleanup job must expose exactly one database mutation point after the remote proof boundary.',
+);
 assert.ok(
   stopJob.indexOf('0|192|193) ;;') <
     stopJob.indexOf('psql -X --file=infra/sql/staging-runtimes-disable.sql'),
@@ -1641,13 +1707,22 @@ assert.ok(
 );
 assert.doesNotMatch(
   stopJob,
-  /network-bans|--db-unban-ip|fetanagent-staging-deploy-helper (?:install|fresh-start|start-bot|start-public-edge|start-kemerbet-session-provision)/,
+  /network-bans|--db-unban-ip|\b(?:transfer|deposit|withdraw)\b|fetanagent-staging-deploy-helper (?:install|start(?:-[a-z0-9-]+)?|fresh-start|arm-[a-z0-9-]+|retire-[a-z0-9-]+|recheck-[a-z0-9-]+)/iu,
   'The predecessor cleanup path must only stop the fixed project, discard its exact release, and disable runtime logins.',
 );
 assert.match(stagingRunbook, /`predecessor-stop-and-disable`/u);
 assert.match(stagingRunbook, /`stop-current-staging-predecessor-runtime`/u);
 assert.match(stagingRunbook, /historical `022a9f10` predecessor\s+deployment/u);
 assert.match(stagingRunbook, /8f58ff06425160835c94801e564fa6f9066d0930/u);
+assert.match(stagingRunbook, /`ecd47f5d-predecessor-stop-and-disable`/u);
+assert.match(stagingRunbook, /`stop-exact-ecd47f5d-staging-predecessor-runtime`/u);
+assert.match(stagingRunbook, new RegExp(installedHelperPredecessorSha, 'u'));
+assert.match(stagingRunbook, /`594ce9656311feabd062b6b6360a90ba5d7ee576`/u);
+assert.match(
+  stagingRunbook,
+  /It does not\s+transfer or install a release,[\s\S]*?start any service,[\s\S]*?authorize Transfer, or move money\./u,
+  'The operator runbook must preserve the installed-predecessor cleanup mode as a no-start, no-transfer boundary.',
+);
 assert.ok(
   workflow.indexOf('Stop any prior staging project and disable old logins') <
     workflow.indexOf('Verify the fresh-host deployment boundary is empty') &&

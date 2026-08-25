@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build, verify transition SSH, stop legacy for transition, clean the pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
+        description: Build, verify transition SSH, stop legacy for transition, clean either exact pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
         required: true
         default: plan
         type: choice
@@ -16,6 +16,7 @@ on:
           - deploy-and-smoke
           - recover-v1-retirement-after-expiry
           - predecessor-stop-and-disable
+          - ecd47f5d-predecessor-stop-and-disable
           - stop-and-disable
       confirm_staging_project_ref:
         description: Type the exact staging project ref
@@ -30,7 +31,7 @@ on:
         required: true
         type: string
       confirm_legacy_stop:
-        description: For transition-stop-legacy type stop-legacy-staging-runtime; for predecessor-stop-and-disable type stop-current-staging-predecessor-runtime
+        description: For transition-stop-legacy type stop-legacy-staging-runtime; for predecessor-stop-and-disable type stop-current-staging-predecessor-runtime; for ecd47f5d-predecessor-stop-and-disable type stop-exact-ecd47f5d-staging-predecessor-runtime
         required: false
         default: ''
         type: string
@@ -88,13 +89,17 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
           if [[ "$REQUESTED_MODE" == 'transition-stop-legacy' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RELEASE" ]]
           elif [[ "$REQUESTED_MODE" == 'predecessor-stop-and-disable' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-current-staging-predecessor-runtime' ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RELEASE" ]]
+          elif [[ "$REQUESTED_MODE" == 'ecd47f5d-predecessor-stop-and-disable' ]]; then
+            [[ "$CONFIRMED_LEGACY_STOP" == 'stop-exact-ecd47f5d-staging-predecessor-runtime' ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RELEASE" ]]
           elif [[ "$REQUESTED_MODE" == 'recover-v1-retirement-after-expiry' ]]; then
@@ -1516,7 +1521,7 @@ jobs:
 
   stop:
     name: Stop staging and disable runtime logins
-    if: inputs.mode == 'predecessor-stop-and-disable' || inputs.mode == 'stop-and-disable'
+    if: inputs.mode == 'predecessor-stop-and-disable' || inputs.mode == 'ecd47f5d-predecessor-stop-and-disable' || inputs.mode == 'stop-and-disable'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1560,6 +1565,12 @@ jobs:
               '956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583'
             helper_sha='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
             release_sha='8f58ff06425160835c94801e564fa6f9066d0930'
+            predecessor_mode='true'
+          elif [[ "$REQUESTED_MODE" == 'ecd47f5d-predecessor-stop-and-disable' ]]; then
+            test "$(sha256sum infra/sql/staging-runtimes-disable.sql | awk '{print $1}')" = \
+              '956f1f76c21e46103f0d5439617b94572f7aad28a214930e25cb799a30399583'
+            helper_sha='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+            release_sha='594ce9656311feabd062b6b6360a90ba5d7ee576'
             predecessor_mode='true'
           else
             [[ "$REQUESTED_MODE" == 'stop-and-disable' ]]

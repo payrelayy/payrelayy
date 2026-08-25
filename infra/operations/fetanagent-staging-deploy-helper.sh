@@ -1355,10 +1355,23 @@ remove_journaled_kemerbet_session_provision() {
 
 inspect_kemerbet_recovery_latch() {
   local ancestor latch_path='' path present_count=0
-  for ancestor in / /var /var/lib "$KEMERBET_OWNER_RECEIPT_PARENT" "$KEMERBET_OWNER_RECEIPT_ROOT"; do
+  for ancestor in / /var /var/lib; do
     [[ ! -L "$ancestor" && -d "$ancestor" && "$(realpath -- "$ancestor" 2>/dev/null)" == "$ancestor" &&
       "$(stat --format='%u:%g:%a' "$ancestor" 2>/dev/null)" == '0:0:755' ]] || return 2
   done
+  if [[ ! -e "$KEMERBET_OWNER_RECEIPT_PARENT" && ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" ]]; then
+    [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" ]] || return 2
+    return 1
+  fi
+  [[ ! -L "$KEMERBET_OWNER_RECEIPT_PARENT" && -d "$KEMERBET_OWNER_RECEIPT_PARENT" &&
+    "$(realpath -- "$KEMERBET_OWNER_RECEIPT_PARENT" 2>/dev/null)" == "$KEMERBET_OWNER_RECEIPT_PARENT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_OWNER_RECEIPT_PARENT" 2>/dev/null)" == '0:0:755' ]] || return 2
+  if [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT" && ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" ]]; then
+    return 1
+  fi
+  [[ ! -L "$KEMERBET_OWNER_RECEIPT_ROOT" && -d "$KEMERBET_OWNER_RECEIPT_ROOT" &&
+    "$(realpath -- "$KEMERBET_OWNER_RECEIPT_ROOT" 2>/dev/null)" == "$KEMERBET_OWNER_RECEIPT_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$KEMERBET_OWNER_RECEIPT_ROOT" 2>/dev/null)" == '0:0:755' ]] || return 2
   for path in \
     "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" \
     "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME"; do

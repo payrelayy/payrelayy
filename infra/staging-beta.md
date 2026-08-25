@@ -67,10 +67,15 @@ import failure signal.
 
 The two Owner stages and the private socket remain in the service-owned read/write
 `kemerbet_session_control` volume. Aggregate finals and their hidden installers live only in the
-fixed host directory `/var/lib/fetanagent/kemerbet-readiness-cohort-receipts`. Every directory from
-`/` through `/var`, `/var/lib`, `/var/lib/fetanagent`, and the receipt root is a canonical,
-non-symbolic `root:root` directory with exact mode `0755`, so no service-writable ancestor can rename
-the boundary. Owner sees that directory only at
+fixed host directory `/var/lib/fetanagent/kemerbet-readiness-cohort-receipts`. Before the feature's
+first installation, the parent and receipt root may both be genuinely absent. Read-only recovery-latch
+inspection treats that exact non-symbolic absence as no latch only after proving `/`, `/var`, and
+`/var/lib` are canonical `root:root` directories with exact mode `0755`; an absent receipt root below
+an already installed safe parent has the same narrow meaning. A dangling symlink, regular file,
+unexpected owner or mode, malformed directory, or any existing latch remains unsafe and fails closed.
+Once installed, every directory through `/var/lib/fetanagent` and the receipt root is canonical,
+non-symbolic `root:root` mode `0755`, so no service-writable ancestor can rename the boundary. Owner
+sees that directory only at
 `/run/fetanagent-kemerbet-readiness-cohort-receipts` through an exact read-only bind with implicit
 host-path creation disabled. Host DAC and the read-only mount therefore prevent UID 10001 from
 creating, unlinking, renaming, hard-linking, symlinking, or replacing a receipt or its directory;
@@ -405,8 +410,8 @@ file and its root-only backup.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833
-reviewed_successor=121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4
+installed_predecessor=121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4
+reviewed_successor=5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -417,7 +422,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
+NEXT_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -442,22 +447,24 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-af823251"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-121e3b36"
+RETAINED_AF823_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-af823251"
 RETAINED_B466_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-b4664efd"
 RETAINED_33F4_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-33f4a5a4"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
 MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
-PREVIOUS_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
-NEXT_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
+PREVIOUS_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
+NEXT_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
+RETAINED_AF823_BACKUP_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
 RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
 RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 INSTALL_TMP=''
 BACKUP_TMP=''
-INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-121e3b36'
-BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-af823251.installing"
+INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-5267906f'
+BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-121e3b36.installing"
 SUDOERS_STATE=''
 TARGET_SHA=''
 expected_sudoers() {
@@ -551,6 +558,10 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
 test ! -L "$STAGING_ROOT" && test "$(stat --format='%U:%G:%a' "$STAGING_ROOT")" = 'root:root:700'
+test ! -L "$RETAINED_AF823_BACKUP" && test -f "$RETAINED_AF823_BACKUP"
+test "$(realpath -- "$RETAINED_AF823_BACKUP")" = "$RETAINED_AF823_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_AF823_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_AF823_BACKUP" | awk '{ print $1 }')" = "$RETAINED_AF823_BACKUP_SHA"
 test ! -L "$RETAINED_B466_BACKUP" && test -f "$RETAINED_B466_BACKUP"
 test "$(realpath -- "$RETAINED_B466_BACKUP")" = "$RETAINED_B466_BACKUP"
 test "$(stat --format='%U:%G:%a:%h' "$RETAINED_B466_BACKUP")" = 'root:root:600:1'
@@ -673,25 +684,30 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `121e3b36…` before `deploy-and-smoke` is allowed. If it fails, keep staging
-offline and use the root console to atomically restore only the checksum-proven `previous` file.
-Rollback follows the same sudoers-revocation and exact process-quiescence boundary, verifies the
-restored predecessor before re-enabling its grant, and makes no further mutation afterward. It is
-also resumable with the exact disabled grant and either allowed TARGET hash, but only while the
-strict rollback shape remains compatible with predecessor `af823251`: the complete promotion and
-receipt roots, recheck candidate root, canonical binding, fixed Player-ID import candidate, every
-Owner cohort stage/installer/aggregate marker, and every profile singleton must all be absent. The
-new root-anchored Owner aggregate receipt directory must itself be absent: once that boundary has
-been created for a new Owner runtime, helper-only predecessor rollback is intentionally forbidden
-because the predecessor and successor use different receipt locations. The
-identity key may be either the exact service-readable file or the exact root-frozen file left by the
-bounded recheck. The predecessor requires the exact service-readable one-use Player-ID file and the
-exact still-sealed readiness output/binding; absence is not a rollback-compatible pre-recheck state:
+against successor SHA `5267906f…` before `deploy-and-smoke` is allowed. A transient SSH failure should
+be diagnosed and the read-only verification retried while staging remains offline. Manual rollback
+to `121e3b36…` is an exceptional pre-deploy path only: it is forbidden after `deploy-and-smoke` or
+after any successor command other than exact checksum `verify`. It follows the same sudoers
+revocation and exact process-quiescence boundary, verifies the restored predecessor before
+re-enabling its grant, and makes no further mutation afterward. It is resumable with the exact
+disabled grant and either allowed TARGET hash only while the strict rollback shape remains compatible
+with predecessor `121e3b36`: the complete promotion and recheck receipt roots, recheck candidate,
+canonical binding, fixed Player-ID import candidate, every Owner cohort stage/installer/aggregate
+marker, and every profile singleton must all be absent. The root-anchored Owner aggregate receipt
+parent and root must already exist as canonical `root:root` mode-`0755` directories, retain their
+initial device/inode identities across every authority boundary, and the receipt root must be exactly
+empty. The rollback block never creates, repairs, cleans, deletes, chmods, or chowns either directory.
+If this predecessor-compatible namespace is absent, unsafe, replaced, or nonempty, leave the reviewed
+successor installed, keep staging offline, and remediate forward. The identity key may be either the
+exact service-readable file or the exact root-frozen file left by the bounded recheck. The predecessor
+requires the exact service-readable one-use Player-ID file and exact still-sealed readiness
+output/binding; absence is not a rollback-compatible pre-recheck state:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-af823251'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-121e3b36'
+RETAINED_AF823_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-af823251'
 RETAINED_B466_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-b4664efd'
 RETAINED_33F4_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-33f4a5a4'
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
@@ -707,30 +723,53 @@ IDENTITY_KEY='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
 PLAYER_IDS='/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
 READINESS_OUTPUT_ROOT='/var/lib/fetanagent/kemerbet-readiness-seal-output'
 READINESS_BINDING="$READINESS_OUTPUT_ROOT/kemerbet_agent_identity_bindings"
-OWNER_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-cohort-receipts'
+OWNER_RECEIPT_PARENT='/var/lib/fetanagent'
+OWNER_RECEIPT_ROOT="$OWNER_RECEIPT_PARENT/kemerbet-readiness-cohort-receipts"
 SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'
 PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'
-PREVIOUS_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
-NEXT_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
+PREVIOUS_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
+NEXT_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
+RETAINED_AF823_BACKUP_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
 RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
 RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 RESTORE_TMP=''
-RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-af823251'
+RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-121e3b36'
 SUDOERS_STATE=''
 TARGET_SHA=''
+OWNER_RECEIPT_PARENT_IDENTITY=''
+OWNER_RECEIPT_ROOT_IDENTITY=''
 require_pre_recheck_rollback_state() {
-  local account_id absent_path binding_fingerprint binding_line binding_residue control_mountpoint
-  local identity_key_metadata profile_mountpoint profile_path root_entries volume_name
+  local account_id absent_path ancestor binding_fingerprint binding_line binding_residue control_mountpoint
+  local current_parent_identity current_root_identity identity_key_metadata profile_mountpoint
+  local profile_path receipt_entry root_entries volume_name
   for absent_path in \
     "$RECHECK_PROMOTION_ROOT" \
     "$RECHECK_RECEIPT_ROOT" \
     "$RECHECK_CANDIDATE_ROOT" \
     "$CANONICAL_BINDING" \
-    "$IMPORT_CANDIDATE" \
-    "$OWNER_RECEIPT_ROOT"; do
+    "$IMPORT_CANDIDATE"; do
     [[ ! -e "$absent_path" && ! -L "$absent_path" ]] || return 1
   done
+  for ancestor in / /var /var/lib "$OWNER_RECEIPT_PARENT" "$OWNER_RECEIPT_ROOT"; do
+    [[ ! -L "$ancestor" && -d "$ancestor" && "$(realpath -- "$ancestor")" == "$ancestor" &&
+      "$(stat --format='%u:%g:%a' "$ancestor")" == '0:0:755' ]] || return 1
+  done
+  receipt_entry="$(find -P "$OWNER_RECEIPT_ROOT" \
+    -mindepth 1 -maxdepth 1 -printf 'present\n' -quit)" || return 1
+  [[ -z "$receipt_entry" ]] || return 1
+  current_parent_identity="$(stat --format='%u:%g:%a:%d:%i' "$OWNER_RECEIPT_PARENT")" || return 1
+  current_root_identity="$(stat --format='%u:%g:%a:%d:%i' "$OWNER_RECEIPT_ROOT")" || return 1
+  if [[ -z "$OWNER_RECEIPT_PARENT_IDENTITY" ]]; then
+    OWNER_RECEIPT_PARENT_IDENTITY="$current_parent_identity"
+  else
+    [[ "$current_parent_identity" == "$OWNER_RECEIPT_PARENT_IDENTITY" ]] || return 1
+  fi
+  if [[ -z "$OWNER_RECEIPT_ROOT_IDENTITY" ]]; then
+    OWNER_RECEIPT_ROOT_IDENTITY="$current_root_identity"
+  else
+    [[ "$current_root_identity" == "$OWNER_RECEIPT_ROOT_IDENTITY" ]] || return 1
+  fi
   [[ ! -L "$IDENTITY_KEY" && -f "$IDENTITY_KEY" ]] || return 1
   [[ "$(realpath -- "$IDENTITY_KEY")" == "$IDENTITY_KEY" ]] || return 1
   identity_key_metadata="$(stat --format='%u:%g:%a:%h' "$IDENTITY_KEY")" || return 1
@@ -888,6 +927,10 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
   test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$RETAINED_AF823_BACKUP" && test -f "$RETAINED_AF823_BACKUP"
+test "$(realpath -- "$RETAINED_AF823_BACKUP")" = "$RETAINED_AF823_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_AF823_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_AF823_BACKUP" | awk '{ print $1 }')" = "$RETAINED_AF823_BACKUP_SHA"
 test ! -L "$RETAINED_B466_BACKUP" && test -f "$RETAINED_B466_BACKUP"
 test "$(realpath -- "$RETAINED_B466_BACKUP")" = "$RETAINED_B466_BACKUP"
 test "$(stat --format='%U:%G:%a:%h' "$RETAINED_B466_BACKUP")" = 'root:root:600:1'
@@ -980,12 +1023,13 @@ FETANAGENT_HELPER_RESTORE
 ```
 
 Do not hand-edit the installed helper or bypass its checksum gate. After read-only verification
-succeeds, remove only the staged `.next` file. Retain all three versioned predecessor backups: the
-new `fetanagent-staging-deploy-helper.previous-af823251` backup and the independently verified
-existing `fetanagent-staging-deploy-helper.previous-b4664efd` and
-`fetanagent-staging-deploy-helper.previous-33f4a5a4` evidence. Never overwrite or delete either
-older backup during this rotation. This is a one-successor replacement, not ongoing credential
-rotation and not authority to enable financial actions.
+succeeds, remove only the staged `.next` file. Retain all four versioned predecessor backups: the new
+`fetanagent-staging-deploy-helper.previous-121e3b36` backup and the independently verified existing
+`fetanagent-staging-deploy-helper.previous-af823251`,
+`fetanagent-staging-deploy-helper.previous-b4664efd`, and
+`fetanagent-staging-deploy-helper.previous-33f4a5a4` evidence. Never overwrite or delete any of the
+three older backups during this rotation. This is a one-successor replacement, not ongoing
+credential rotation and not authority to enable financial actions.
 
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or
 `stop-and-disable` is selected. The permanent read-only `transition-ssh-verify` mode and the guarded

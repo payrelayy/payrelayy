@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const infraDirectory = fileURLToPath(new URL('.', import.meta.url));
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const compose = await readFile(`${infraDirectory}compose.executor.yaml`, 'utf8');
+const executorRunbook = await readFile(`${infraDirectory}executor.md`, 'utf8');
 const dockerfile = await readFile(`${repositoryRoot}Dockerfile`, 'utf8');
 const executorImageSmokeWorkflow = await readFile(
   `${repositoryRoot}.github/workflows/executor-image-smoke.yml`,
@@ -24,6 +25,74 @@ const noTransferReadinessSource = await readFile(
 );
 const noTransferReadinessSealSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-no-transfer-readiness-seal.ts`,
+  'utf8',
+);
+const executorRuntimeIsolationSource = await readFile(
+  `${repositoryRoot}apps/executor/src/executor-runtime-isolation.ts`,
+  'utf8',
+);
+const playwrightAgentPageSource = await readFile(
+  `${repositoryRoot}apps/executor/src/playwright-kemerbet-agent-page.ts`,
+  'utf8',
+);
+const readinessNetworkGateSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-network-gate.ts`,
+  'utf8',
+);
+const readinessBrowserRpcSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-browser-rpc.ts`,
+  'utf8',
+);
+const readinessBrowserDriverSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-browser-driver.ts`,
+  'utf8',
+);
+const readinessLayer7AuthorizationSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-layer7-authorization.ts`,
+  'utf8',
+);
+const readinessLayer7CertificateSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-layer7-certificate.ts`,
+  'utf8',
+);
+const readinessLayer7ProxySource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-layer7-proxy.ts`,
+  'utf8',
+);
+const readinessSameAgentIdentitySource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-same-agent-identity.ts`,
+  'utf8',
+);
+const chromiumProfileSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-chromium-profile.ts`,
+  'utf8',
+);
+const readinessAccountIdSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-account-id.ts`,
+  'utf8',
+);
+const readinessAuthorizationPremintSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-authorization-premint.ts`,
+  'utf8',
+);
+const readinessLayer7AuthorizationsSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-layer7-authorizations.ts`,
+  'utf8',
+);
+const readinessCompletionReceiptSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-completion-receipt.ts`,
+  'utf8',
+);
+const readinessFirewallReleaseSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-firewall-release.ts`,
+  'utf8',
+);
+const readinessLookupResponseSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-player-lookup-response.ts`,
+  'utf8',
+);
+const readinessProfileSnapshotSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-readiness-profile-snapshot.ts`,
   'utf8',
 );
 const reviewedSelectorContract = JSON.parse(
@@ -55,6 +124,15 @@ function escapeRegExp(value) {
 
 function countMatches(value, expression) {
   return [...value.matchAll(expression)].length;
+}
+
+function assertOrderedFragments(value, fragments, message) {
+  let cursor = 0;
+  for (const fragment of fragments) {
+    const index = value.indexOf(fragment, cursor);
+    assert.notEqual(index, -1, `${message}: missing ${fragment}`);
+    cursor = index + fragment.length;
+  }
 }
 
 function topLevelSection(value, name) {
@@ -497,6 +575,11 @@ assert.match(
 );
 assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*/);
 assert.match(dockerfile, /ENV HOME=\/tmp/);
+assert.match(
+  dockerfile,
+  /groupadd --gid 10001 fetanagent[\s\S]*?useradd --uid 10001 --gid 10001[\s\S]*?groupadd --gid 10002 fetanagent-readiness-controller[\s\S]*?useradd --uid 10002 --gid 10002[\s\S]*?groupadd --gid 10003 fetanagent-readiness-proxy[\s\S]*?useradd --uid 10003 --gid 10003[\s\S]*?groupadd --gid 10004 fetanagent-readiness-authorizer[\s\S]*?useradd --uid 10004 --gid 10004/,
+  'the executor image must contain distinct browser, controller, proxy, and offline-authorizer identities',
+);
 
 const executorRuntimeBase = dockerfile
   .split('FROM runtime-base AS executor-runtime-base')[1]
@@ -838,10 +921,1049 @@ assert.match(
   /const OUTPUT_ROOT = '\/run\/fetanagent-kemerbet-readiness-seal-output'/,
 );
 assert.match(noTransferReadinessSealSource, /chromiumSandbox: false/);
+for (const providerAuthorizationSealContract of [
+  /const EXACT_PROVIDER_AUTHORIZATION_OBSERVATIONS = 5/,
+  /\^Bearer \[A-Za-z0-9\._~\+\\\/-\]\{16,4096\}=\{0,2\}\$\/u/,
+  /\^sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\$\/u/,
+  /headersArray\?\(\): Promise<readonly KemerBetReadinessTransportHeader\[\]>/,
+  /header\.name\.toLowerCase\(\) === 'authorization'/,
+  /authorizations\.length !== 1/,
+  /encodedAuthorization = Buffer\.from\(authorization, 'utf8'\)/,
+  /createHash\('sha256'\)\.update\(encodedAuthorization\)\.digest\(\)/,
+  /timingSafeEqual\(pinnedDigest, candidateDigest\)/,
+  /observations !== EXACT_PROVIDER_AUTHORIZATION_OBSERVATIONS/,
+  /encodedAuthorization\?\.fill\(0\)/,
+  /candidateDigest\?\.fill\(0\)/,
+  /pinnedDigest\?\.fill\(0\)/,
+  /`sha256-provider-authorization-v1:\$\{pinnedDigest\.toString\('hex'\)\}`/,
+]) {
+  assert.match(noTransferReadinessSealSource, providerAuthorizationSealContract);
+}
+const sealRouteHandlerStart = noTransferReadinessSealSource.indexOf(
+  'const routeHandler = (route: Route)',
+);
+const sealExpectedLookupStart = noTransferReadinessSealSource.indexOf(
+  'const isCurrentExpectedLookup =',
+  sealRouteHandlerStart,
+);
+const sealExpectedLookupBoundary = noTransferReadinessSealSource.slice(
+  sealExpectedLookupStart,
+  noTransferReadinessSealSource.indexOf(
+    'await applyKemerBetReadinessSealRouteDecision',
+    sealExpectedLookupStart,
+  ),
+);
+assertOrderedFragments(
+  sealExpectedLookupBoundary,
+  [
+    'if (isCurrentExpectedLookup && activeExpectedLookupConsumed)',
+    'activeExpectedLookupConsumed = true;',
+    "typeof request.headersArray !== 'function'",
+    'providerAuthorizationDigestTracker.capture(await request.headersArray())',
+  ],
+  'the exact lookup must synchronously reserve before its duplicate-preserving transport header read',
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /const result = await action\(\);[\s\S]*?while \(operations\.size > 0\)[\s\S]*?if \(invalid\(\)\) unavailable\(\);[\s\S]*?if \(!activeExpectedLookupConsumed\) unavailable\(\)/,
+  'every exact lookup, including the initial seal without a Layer-7 token, must consume one real GET',
+);
+assertOrderedFragments(
+  noTransferReadinessSealSource.slice(
+    noTransferReadinessSealSource.indexOf('finalizeReadOnlyProof: async () => {'),
+    noTransferReadinessSealSource.indexOf(
+      'close,',
+      noTransferReadinessSealSource.indexOf('finalizeReadOnlyProof: async () => {'),
+    ),
+  ),
+  [
+    'requestBoundary.completeProviderAuthorizationDigest()',
+    'requestBoundary.beginTerminalClose();',
+    'await options.close();',
+    'await requestBoundary.drain();',
+    'requestBoundary.detachAfterOwnerClose();',
+    'closed = true;',
+    'requestBoundary.destroyProviderAuthorizationDigest();',
+  ],
+  'the seal must retain its terminal request latch through exact owner-context shutdown and detach only locally afterward',
+);
+assert.doesNotMatch(
+  noTransferReadinessSealSource.slice(
+    noTransferReadinessSealSource.indexOf('detachAfterOwnerClose()'),
+    noTransferReadinessSealSource.indexOf(
+      'async drain()',
+      noTransferReadinessSealSource.indexOf('detachAfterOwnerClose()'),
+    ),
+  ),
+  /await options\.removeRoute|\.unroute\(/,
+  'post-close detach must never call Playwright unroute on the destroyed Page',
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /const EXACT_BINDING_FILE_BYTES = 230[\s\S]*?const serializedBinding = `\$\{accountId\} \$\{fingerprint\} \$\{providerAuthorizationDigest\}\\n`[\s\S]*?Buffer\.byteLength\(serializedBinding, 'utf8'\) !== EXACT_BINDING_FILE_BYTES[\s\S]*?await handle\.writeFile\(serializedBinding, \{ encoding: 'utf8' \}\)/,
+  'the seal output must atomically serialize the exact 230-byte v2 three-field binding line',
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /written\.nlink !== 1 \|\|[\s\S]*?written\.size !== EXACT_BINDING_FILE_BYTES[\s\S]*?installed\.nlink !== 1 \|\|[\s\S]*?installed\.size !== EXACT_BINDING_FILE_BYTES/,
+  'both the temporary and installed v2 binding must be exact one-link 230-byte files',
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /constants\.O_DIRECTORY === undefined \|\| constants\.O_NOFOLLOW === undefined/,
+  'binding publication must fail closed unless the platform exposes no-follow directory handles',
+);
+const atomicBindingWriter = noTransferReadinessSealSource.slice(
+  noTransferReadinessSealSource.indexOf('async function writeBindingAtomically('),
+  noTransferReadinessSealSource.indexOf('\nfunction defaultSuccessLog('),
+);
+assert.match(
+  atomicBindingWriter,
+  /`\$\{OUTPUT_ROOT\}\/\.kemerbet_agent_identity_bindings\.\$\{randomUUID\(\)\}\.tmp`/,
+  'the executor may create only one unpredictable output-root-local binding temporary',
+);
+assert.match(
+  atomicBindingWriter,
+  /await open\(\s*OUTPUT_ROOT,\s*constants\.O_RDONLY \| constants\.O_DIRECTORY \| constants\.O_NOFOLLOW/u,
+);
+assert.match(
+  atomicBindingWriter,
+  /openedDirectory\.isDirectory\(\)[\s\S]*?openedDirectory\.isSymbolicLink\(\)[\s\S]*?sameMetadata\(openedDirectory, namedDirectory\)[\s\S]*?realpath\(OUTPUT_ROOT\)/,
+  'the fsynced output directory handle must be bound to the exact safe named directory',
+);
+assertOrderedFragments(
+  atomicBindingWriter,
+  [
+    'await handle.writeFile(serializedBinding',
+    'await handle.sync();',
+    'const written = (await handle.stat()) as SafeStat;',
+    'await handle.close();',
+    'await outputDirectoryHandle.sync();',
+    'await link(temporary, OUTPUT_FILE);',
+    'await unlink(temporary);',
+    'await outputDirectoryHandle.sync();',
+    'const installed = (await lstat(OUTPUT_FILE)) as SafeStat;',
+    'installed.dev !== written.dev',
+    'installed.ino !== written.ino',
+  ],
+  'the exact fsynced temporary inode must be linked, unlinked, directory-fsynced, and reidentified as the final binding',
+);
+assert.match(
+  atomicBindingWriter,
+  /await unlink\(temporary\)[\s\S]*?directoryChanged = true;[\s\S]*?if \(installedByThisRun && !installationComplete\)[\s\S]*?await unlink\(OUTPUT_FILE\)[\s\S]*?directoryChanged = true;[\s\S]*?if \(directoryChanged\) await outputDirectoryHandle\?\.sync\(\)\.catch/u,
+  'every failed temporary or partial-final cleanup must durably fsync the output directory',
+);
+assertOrderedFragments(
+  noTransferReadinessSealSource.slice(
+    noTransferReadinessSealSource.indexOf("reportStage('final_guard')"),
+  ),
+  [
+    'await probe.finalizeReadOnlyProof();',
+    'const providerAuthorizationDigest = probe.providerAuthorizationDigest();',
+    "reportStage('binding_write');",
+    'dependencies.writeBinding ?? writeBindingAtomically',
+  ],
+  'the same-UID browser must be confirmed closed and the five-lookup digest complete before binding installation',
+);
 assert.doesNotMatch(
   noTransferReadinessSealSource,
   /loadExecutorConfig|createKemerBetDepositService|\.prepare\(|submitOnceAfterFence|\.transferOnce\(|\.fillDeposit\(|leaseNext|fenceFinalAction|KEMERBET_EXECUTOR_DATABASE_RUNTIME_ROLE/,
   'the readiness seal must not acquire execution, amount, transfer, database, or history authority',
+);
+
+for (const bindingParserV2Contract of [
+  /const PROVIDER_AUTHORIZATION_DIGEST_PATTERN =\s*\/\^sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\$\/u/,
+  /const fields = line\.split\(' '\)/,
+  /if \(fields\.length !== 3\) return unavailable\(\)/,
+  /!PROVIDER_AUTHORIZATION_DIGEST_PATTERN\.test\(providerAuthorizationDigest\)/,
+  /providerAuthorizationDigests\.has\(providerAuthorizationDigest\)/,
+  /providerAuthorizationDigests\.add\(providerAuthorizationDigest\)/,
+]) {
+  assert.match(executorRuntimeIsolationSource, bindingParserV2Contract);
+}
+assert.doesNotMatch(
+  executorRuntimeIsolationSource,
+  /fields\.length !== 2/,
+  'the runtime parser must reject the obsolete v1 two-field binding',
+);
+
+for (const sealedResponseContract of [
+  /request\.redirectedFrom\(\) === null/,
+  /request\.redirectedTo\(\) === null/,
+  /responseBody = await response\.body\(\)/,
+  /validateKemerBetReadinessPlayerLookupResponse\(\{/,
+  /requestedPlayerId: playerId/,
+  /statusCode: response\.status\(\)/,
+  /new TextDecoder\('utf-8', \{ fatal: true, ignoreBOM: false \}\)\.decode\(responseBody\)/,
+  /finally \{\s*responseBody\?\.fill\(0\)/,
+]) {
+  assert.match(playwrightAgentPageSource, sealedResponseContract);
+}
+assert.match(readinessNetworkGateSource, /readFile\('\/proc\/self\/net\/route', 'utf8'\)/);
+assert.match(readinessNetworkGateSource, /readFile\('\/proc\/self\/net\/ipv6_route', 'utf8'\)/);
+assert.match(
+  readinessNetworkGateSource,
+  /initial\.nonLoopbackInterfaceNames\.length !== options\.exactInterfaceCount \|\|\s*initial\.defaultRouteInterfaceNames\.length !== 0/,
+  'every isolated readiness process must start with an exact interface count and zero usable default routes',
+);
+assert.match(
+  readinessNetworkGateSource,
+  /current\.defaultRouteInterfaceNames\.length !== 0 \|\|\s*current\.nonLoopbackInterfaceNames\.length !== expectedInterfaces\.length \|\|\s*current\.nonLoopbackInterfaceNames\.some/,
+  'the static topology revalidator must reject a new default route or interface drift',
+);
+assert.match(
+  readinessNetworkGateSource,
+  /createKemerBetReadinessControllerIsolatedNetworkRevalidator[\s\S]*?exactInterfaceCount: 1/,
+);
+assert.match(
+  readinessNetworkGateSource,
+  /createKemerBetReadinessFixedIsolatedNetworkRevalidator[\s\S]*?exactInterfaceCount: 2/,
+);
+assert.match(
+  readinessNetworkGateSource,
+  /KEMERBET_READINESS_STATIC_NETWORK_CONTRACT = Object\.freeze\(\{\s*browserInterfaceCount: 2,\s*controllerInterfaceCount: 1,\s*usableDefaultRouteCount: 0,\s*\}\)/,
+);
+assert.doesNotMatch(
+  readinessNetworkGateSource,
+  /GATE_ROOT|GATE_READY|GATE_RELEASE|waitForKemerBetReadinessNetworkRelease|publishReadyFile|O_CREAT|O_EXCL/,
+  'the executor must not retain the writable marker or dynamic attach/release design',
+);
+
+assert.match(noTransferReadinessSource, /const CONTROLLER_EFFECTIVE_USER_ID = 10002/);
+assert.match(noTransferReadinessSource, /KEMERBET_READINESS_BROWSER_RPC_ENABLED !== 'true'/);
+assert.match(
+  noTransferReadinessSource,
+  /createKemerBetReadinessControllerIsolatedNetworkRevalidator/,
+);
+assert.match(
+  noTransferReadinessSource,
+  /waitForKemerBetReadinessFirewallRelease\(\{ role: 'controller' \}\)/,
+);
+assertOrderedFragments(
+  noTransferReadinessSource.slice(
+    noTransferReadinessSource.indexOf('if (useBrowserRpc) {'),
+    noTransferReadinessSource.indexOf(
+      'const [selectorContract]',
+      noTransferReadinessSource.indexOf('if (useBrowserRpc) {'),
+    ),
+  ),
+  [
+    'rpcClient = await (dependencies.openRpcClient ?? productionOpenRpcClient)();',
+    'let rawAgentIdentity: string | null = await rpcClient.open();',
+    'fingerprintAgentIdentity(accountId, rawAgentIdentity)',
+    'rawAgentIdentity = null;',
+    'loadKemerBetReadinessLayer7Authorizations({',
+    'effectiveUserId: CONTROLLER_EFFECTIVE_USER_ID,',
+    'layer7Authorizations.authorizations.length !== players.playerIds.length',
+    'for (const [index, playerId] of players.playerIds.entries())',
+    'await rpcClient.lookup(playerId, layer7Authorizations.authorizations[index]!);',
+    'await rpcClient.finalize();',
+  ],
+  'the UID-10002 controller must send one current Player ID with the matching offline-preminted token and never receive the proxy signing key',
+);
+
+assert.match(
+  readinessBrowserRpcSource,
+  /KEMERBET_READINESS_BROWSER_RPC_CAPABILITY_FILE =\s*'\/run\/secrets\/kemerbet_readiness_browser_rpc_capability'/,
+);
+assert.match(
+  readinessBrowserRpcSource,
+  /KEMERBET_READINESS_BROWSER_RPC_ORIGIN = 'http:\/\/172\.31\.254\.3:4587'/,
+);
+assert.match(
+  readinessBrowserRpcSource,
+  /KEMERBET_READINESS_BROWSER_RPC_BIND_IPV4 = '172\.31\.254\.3'/,
+);
+assert.match(readinessBrowserRpcSource, /const MAX_CALLS = 8/);
+assert.match(readinessBrowserRpcSource, /const MAX_REQUEST_BYTES = 256/);
+assert.match(readinessBrowserRpcSource, /const MAX_RESPONSE_BYTES = 512/);
+assert.match(readinessBrowserRpcSource, /effectiveUserId !== 10001 && effectiveUserId !== 10002/);
+assert.match(
+  readinessBrowserRpcSource,
+  /before\.uid !== effectiveUserId \|\|\s*before\.gid !== effectiveUserId \|\|\s*\(before\.mode & 0o777\) !== 0o400 \|\|\s*before\.nlink !== 1 \|\|\s*before\.size !== 65/,
+  'each side of the RPC must accept only its own one-run 0400 capability file',
+);
+assert.match(
+  readinessBrowserRpcSource,
+  /request\.url === LOOKUP_PATH && state === 'opened' && lookups < 5/,
+);
+assert.match(
+  readinessBrowserRpcSource,
+  /request\.url === FINALIZE_PATH &&\s*state === 'opened' &&\s*lookups === 5/,
+);
+assert.match(
+  readinessBrowserRpcSource,
+  /state !== 'opened' \|\|\s*lookups >= 5[\s\S]*?isKemerBetReadinessLayer7Authorization/,
+);
+assert.doesNotMatch(
+  readinessBrowserRpcSource,
+  /KEMERBET_AGENT_PLAYER_DEPOSIT_PATH|\/Wallet\/PlayerEPOSDeposit|fillDeposit|transferOnce|submitOnceAfterFence|leaseNext|fenceFinalAction/,
+  'the browser RPC must expose lookup/finalize/close only, never a financial endpoint',
+);
+
+assert.match(readinessBrowserDriverSource, /const DRIVER_EFFECTIVE_USER_ID = 10001/);
+assert.match(readinessBrowserDriverSource, /const LAYER7_PROXY_IPV4 = '172\.31\.254\.10'/);
+assert.match(
+  readinessBrowserDriverSource,
+  /createKemerBetReadinessFixedIsolatedNetworkRevalidator\(\)/,
+);
+assert.match(
+  readinessBrowserDriverSource,
+  /address\.address === KEMERBET_READINESS_BROWSER_RPC_BIND_IPV4/,
+);
+assert.match(
+  readinessBrowserDriverSource,
+  /for \(const path of SENSITIVE_PATHS\)[\s\S]*?await lstat\(path\)[\s\S]*?if \(!isMissing\(error\)\) unavailable\(\)/,
+  'the browser must prove every controller, cohort, HMAC, nonce, and output path absent',
+);
+assert.match(
+  readinessBrowserDriverSource,
+  /KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,[\s\S]*?KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,[\s\S]*?KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE,[\s\S]*?KEMERBET_READINESS_LAYER7_AUTHORIZATIONS_FILE,[\s\S]*?KEMERBET_READINESS_LAYER7_HMAC_KEY_FILE,[\s\S]*?KEMERBET_READINESS_LAYER7_RUN_NONCE_FILE,[\s\S]*?'\/run\/output',[\s\S]*?'\/run\/fetanagent-kemerbet-readiness-seal-output'/,
+);
+assert.match(
+  readinessBrowserDriverSource,
+  /environment\.KEMERBET_AGENT_IDENTITY_BINDING_ACCOUNT_ID !== undefined/,
+  'the browser must reject an account identity supplied through its environment',
+);
+assert.match(
+  readinessBrowserDriverSource,
+  /waitForKemerBetReadinessFirewallRelease\(\{ role: 'browser' \}\)/,
+);
+assert.match(
+  readinessBrowserDriverSource,
+  /loadKemerBetReadinessAccountId\(\{ effectiveUserId: DRIVER_EFFECTIVE_USER_ID \}\)/,
+);
+assert.match(readinessBrowserDriverSource, /\(await server\.completed\) !== 'succeeded'/);
+assert.doesNotMatch(
+  readinessBrowserDriverSource,
+  /KEMERBET_AGENT_PLAYER_DEPOSIT_PATH|\/Wallet\/PlayerEPOSDeposit|fillDeposit|transferOnce|submitOnceAfterFence|leaseNext|fenceFinalAction/,
+  'the browser driver must not gain a financial endpoint',
+);
+
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /KEMERBET_READINESS_LAYER7_LOOKUP_HOSTNAME = 'admin-api\.agt-digi\.com'/,
+);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /KEMERBET_READINESS_LAYER7_LOOKUP_PATH = '\/Player\/GeneralInfoByExternalId'/,
+);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /const KEY_PATTERN = \/\^\[0-9a-f\]\{64\}\\n\$\/u/,
+);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /const NONCE_PATTERN = \/\^\[0-9a-f\]\{32\}\\n\$\/u/,
+);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /before\.uid !== options\.ownerUserId \|\|\s*before\.gid !== options\.ownerGroupId \|\|\s*\(before\.mode & 0o777\) !== 0o400/,
+);
+assert.match(readinessLayer7AuthorizationSource, /const PROXY_USER_ID = 10003/);
+assert.match(readinessLayer7AuthorizationSource, /const AUTHORIZER_USER_ID = 10004/);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /hmacKeyFile: KEMERBET_READINESS_LAYER7_HMAC_KEY_FILE,[\s\S]*?ownerGroupId: PROXY_USER_ID,[\s\S]*?ownerUserId: PROXY_USER_ID,[\s\S]*?runNonceFile: KEMERBET_READINESS_LAYER7_RUN_NONCE_FILE/,
+);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /hmacKeyFile: KEMERBET_READINESS_AUTHORIZER_HMAC_KEY_FILE,[\s\S]*?ownerGroupId: AUTHORIZER_USER_ID,[\s\S]*?ownerUserId: AUTHORIZER_USER_ID,[\s\S]*?runNonceFile: KEMERBET_READINESS_AUTHORIZER_RUN_NONCE_FILE/,
+);
+assert.match(
+  readinessLayer7AuthorizationSource,
+  /input\.method === 'GET'[\s\S]*?input\.hostname === KEMERBET_READINESS_LAYER7_LOOKUP_HOSTNAME[\s\S]*?candidateSequence === nextSequence/,
+  'proxy authorization must bind one exact sequential GET lookup',
+);
+
+assert.match(
+  readinessLayer7CertificateSource,
+  /KEMERBET_READINESS_LAYER7_TLS_HOSTS = Object\.freeze\(\[\s*'agentsystem\.admindigi\.com',\s*'agt-client-akm\.agent-digi\.com',\s*'admin-api\.agt-digi\.com',\s*\]/,
+);
+assert.match(
+  readinessLayer7CertificateSource,
+  /KEMERBET_READINESS_LAYER7_TLS_SPKI_SHA256_BASE64 =\s*'Ngu9uL2STHWC7Uton\/GYw7d8hDQdhliykEz2XnJZd3M='/,
+);
+
+assert.match(
+  readinessLayer7ProxySource,
+  /command: Object\.freeze\(\['node', 'apps\/executor\/dist\/kemerbet-readiness-layer7-proxy\.js'\]\)/,
+);
+assert.match(readinessLayer7ProxySource, /groupId: 10003/);
+assert.match(readinessLayer7ProxySource, /userId: 10003/);
+assert.match(readinessLayer7ProxySource, /port: 18443/);
+assert.match(
+  readinessLayer7ProxySource,
+  /secretFiles: Object\.freeze\(\[\s*'\/run\/secrets\/kemerbet_readiness_proxy_hmac_key',\s*'\/run\/secrets\/kemerbet_readiness_proxy_run_nonce',\s*'\/run\/secrets\/kemerbet_readiness_release_sha',\s*KEMERBET_READINESS_PROXY_AGENT_IDENTITY_BINDINGS_FILE,\s*KEMERBET_READINESS_PROXY_AGENT_IDENTITY_HMAC_KEY_FILE,\s*\]\)/,
+);
+assert.match(readinessLayer7ProxySource, /outputRoot: '\/run\/output'/);
+assert.match(
+  readinessLayer7ProxySource,
+  /readinessFile: '\/tmp\/fetanagent-kemerbet-readiness-layer7-proxy\.ready'/,
+);
+assert.match(readinessLayer7ProxySource, /const MAX_UPSTREAM_RESPONSE_BYTES = 8 \* 1024 \* 1024/);
+assert.match(readinessLayer7ProxySource, /const MAX_BOOTSTRAP_CACHE_BYTES = 32 \* 1024 \* 1024/);
+assert.equal(
+  countMatches(readinessLayer7ProxySource, /^  '\/prd\/agt-admin-client\/v84\//gm),
+  7,
+  'the proxy must allow exactly the seven reviewed immutable bootstrap assets',
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /KEMERBET_READINESS_LAYER7_BOOTSTRAP_PREFETCH_CONTRACT = Object\.freeze\(\{[\s\S]*?maximumEntryBytes: MAX_UPSTREAM_RESPONSE_BYTES,[\s\S]*?maximumTotalBytes: MAX_BOOTSTRAP_CACHE_BYTES,[\s\S]*?Object\.freeze\(\{ hostname: AGENT_WEB_HOSTNAME, path: AGENT_WEB_PATH \}\),[\s\S]*?\.\.\.KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS\.map/,
+  'startup must prefetch the exact agent document followed by the seven pinned assets',
+);
+assert.match(readinessLayer7ProxySource, /input\.method !== 'GET' && input\.method !== 'OPTIONS'/);
+assert.match(
+  readinessLayer7ProxySource,
+  /input\.method === 'GET' &&\s*input\.rawTarget === AGENT_WEB_PATH/,
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /input\.method === 'GET' &&\s*BOOTSTRAP_ASSET_PATHS\.has\(input\.rawTarget\)/,
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /const lookupPrefix = `\$\{KEMERBET_AGENT_PLAYER_LOOKUP_PATH\}\?externalId=`/,
+);
+assert.match(readinessLayer7ProxySource, /!hasNoRequestBody\(input\.headers\)/);
+assert.match(readinessLayer7ProxySource, /requestsUpgrade\(input\.headers\)/);
+assert.match(readinessLayer7ProxySource, /rejectUnauthorized: true/);
+assert.match(readinessLayer7ProxySource, /servername: input\.hostname/);
+assert.match(readinessLayer7ProxySource, /if \(input\.signal\.aborted\) return unavailable\(\)/);
+assert.match(readinessLayer7ProxySource, /signal: input\.signal/);
+assert.match(
+  readinessLayer7ProxySource,
+  /input\.signal\.addEventListener\('abort', abort, \{ once: true \}\);\s*if \(input\.signal\.aborted\)/,
+  'the production HTTPS transport must close the pre-abort and construction-to-listener races',
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /response\.statusCode >= 300 && response\.statusCode <= 399/,
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /buildKemerBetReadinessAgentProfileRequestHeaders[\s\S]*?accept: 'application\/json'[\s\S]*?'accept-encoding': 'identity'[\s\S]*?authorization,[\s\S]*?origin: AGENT_WEB_ORIGIN,[\s\S]*?referer: KEMERBET_AGENT_DEPOSIT_URL,[\s\S]*?'sec-fetch-dest': 'empty'[\s\S]*?'sec-fetch-mode': 'cors'[\s\S]*?'sec-fetch-site': 'same-site'/,
+  'the independent Profile GET must use only the exact bearer and fixed lookup-XHR headers',
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /interfaces\.length !== 2 \|\|\s*defaults\.length !== 1[\s\S]*?!interfaces\.includes\(defaults\[0\] \?\? ''\)/,
+  'only the proxy may have a usable default route and it must be confined to one of two interfaces',
+);
+assert.doesNotMatch(
+  readinessLayer7ProxySource,
+  /KEMERBET_AGENT_PLAYER_DEPOSIT_PATH|\/Wallet\/PlayerEPOSDeposit|Withdraw|GiveCredit|PayCommission|fillDeposit|transferOnce|submitOnceAfterFence|leaseNext|fenceFinalAction/,
+  'the Layer-7 proxy must have no financial path or execution primitive',
+);
+
+const bootstrapPrefetchBoundary = readinessLayer7ProxySource.slice(
+  readinessLayer7ProxySource.indexOf('async function prefetchKemerBetReadinessBootstrap'),
+  readinessLayer7ProxySource.indexOf('/**\n * Prove the proxy is dual-homed'),
+);
+assertOrderedFragments(
+  bootstrapPrefetchBoundary,
+  [
+    'for (const request of KEMERBET_READINESS_LAYER7_BOOTSTRAP_PREFETCH_CONTRACT.sequence)',
+    'const response = await upstream({',
+    'sanitizeKemerBetReadinessLayer7RequestHeaders({}, classification)',
+    'response.statusCode !== 200',
+    'response.body.length > MAX_UPSTREAM_RESPONSE_BYTES',
+    'contentEncodings.length > 1',
+    "contentEncodings[0] !== 'identity'",
+    'totalBytes > MAX_BOOTSTRAP_CACHE_BYTES - response.body.length',
+    'const body = Buffer.from(response.body);',
+    'cache.set(',
+    'cache.size !== KEMERBET_READINESS_LAYER7_BOOTSTRAP_PREFETCH_CONTRACT.sequence.length',
+    'totalBytes > MAX_BOOTSTRAP_CACHE_BYTES',
+  ],
+  'the proxy must fetch all eight bootstrap resources sequentially under exact response and byte ceilings',
+);
+assert.match(
+  bootstrapPrefetchBoundary,
+  /finally \{[\s\S]*?clearBootstrapCache\(cache\)/,
+  'a partial startup cache must be zeroed on every failure',
+);
+
+const bootstrapCacheServeBoundary = readinessLayer7ProxySource.slice(
+  readinessLayer7ProxySource.indexOf("if (classification.route !== 'player_lookup')"),
+  readinessLayer7ProxySource.indexOf('let lookupReservation:'),
+);
+for (const cacheOnlyContract of [
+  /bootstrapCache\.get/,
+  /status !== 'ready'/,
+  /cached === undefined/,
+  /bootstrapCache\.size !==/,
+  /response\.writeHead\(cached\.statusCode/,
+  /response\.end\(cached\.body\)/,
+]) {
+  assert.match(bootstrapCacheServeBoundary, cacheOnlyContract);
+}
+assert.doesNotMatch(
+  bootstrapCacheServeBoundary,
+  /\bupstream\s*\(/,
+  'renderer bootstrap requests must be served only from the complete immutable cache',
+);
+
+for (const readinessMarkerContract of [
+  /const READINESS_PENDING_FILE = `\$\{READINESS_FILE\}\.pending`/,
+  /fetanagent-kemerbet-readiness-layer7-proxy-ready-v1\\n/,
+  /O_CREAT[\s\S]*?O_EXCL[\s\S]*?O_NOFOLLOW[\s\S]*?O_WRONLY/,
+  /await handle\.sync\(\)/,
+  /metadata\.uid !== EXECUTOR_USER_ID/,
+  /metadata\.gid !== EXECUTOR_GROUP_ID/,
+  /\(metadata\.mode & 0o7777\) !== 0o600/,
+  /metadata\.nlink !== 1/,
+  /await rename\(READINESS_PENDING_FILE, READINESS_FILE\)/,
+  /await attestProductionReadinessFile\(READINESS_FILE\)/,
+]) {
+  assert.match(readinessLayer7ProxySource, readinessMarkerContract);
+}
+assertOrderedFragments(
+  readinessLayer7ProxySource.slice(readinessLayer7ProxySource.indexOf('start: async () => {')),
+  [
+    'await readinessSignal.clear();',
+    'const before = attestKemerBetReadinessLayer7NetworkTopology',
+    'bootstrapCache = await prefetchKemerBetReadinessBootstrap(',
+    'server.listen(port, host, () => {',
+    'const after = attestKemerBetReadinessLayer7NetworkTopology',
+    'if (!sameTopologyAttestation(before, after))',
+    'bootstrapCache.size !==',
+    "status = 'ready';",
+    'await readinessSignal.publish();',
+  ],
+  'the private application-ready marker must be published only after prefetch, listen, final topology, and complete-cache checks',
+);
+assertOrderedFragments(
+  readinessLayer7ProxySource.slice(readinessLayer7ProxySource.indexOf('let lookupReservation:')),
+  [
+    'options.authorizationVerifier.reserve({',
+    'await options.sameAgentIdentityVerifier.verify({',
+    'path: KEMERBET_READINESS_AGENT_PROFILE_PATH,',
+    'const upstreamResponse = await upstream({',
+    'validateKemerBetReadinessPlayerLookupResponse({',
+    'const onFinish = () => {',
+    'options.authorizationVerifier.complete(lookupReservation)',
+    "response.once('finish', onFinish);",
+    'response.end(upstreamResponse.body);',
+    'if (completion.allCompleted)',
+    'await completionReceiptPublisher({',
+    'agentIdentityBindingSha256:',
+    'sameAgentIdentityValidated: true,',
+  ],
+  'the trusted proxy must reserve an exact token, prove the same agent before the first lookup, validate each response, complete only after response finish, and publish one generic receipt after all five',
+);
+
+assert.match(
+  readinessSameAgentIdentitySource,
+  /KEMERBET_READINESS_PROXY_AGENT_IDENTITY_BINDINGS_FILE =\s*'\/run\/secrets\/kemerbet_readiness_proxy_agent_identity_bindings'/,
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /KEMERBET_READINESS_PROXY_AGENT_IDENTITY_HMAC_KEY_FILE =\s*'\/run\/secrets\/kemerbet_readiness_proxy_agent_identity_hmac_key'/,
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /KEMERBET_READINESS_AGENT_PROFILE_PATH = '\/Account\/Profile'/,
+);
+assert.match(readinessSameAgentIdentitySource, /const PROXY_USER_ID = 10003/);
+assert.match(readinessSameAgentIdentitySource, /const PROXY_GROUP_ID = 10003/);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /stat\.uid === PROXY_USER_ID &&\s*stat\.gid === PROXY_GROUP_ID &&\s*\(stat\.mode & 0o777\) === 0o400 &&\s*stat\.nlink === 1/,
+  'both proxy-only identity files must be exact UID/GID-10003 0400 one-link inodes',
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) sha256-provider-authorization-v1:\(\[0-9a-f\]\{64\}\)\\n\$\/u/,
+  'the proxy binding must be exactly one canonical v2 UUID/fingerprint/provider-digest line with a trailing LF',
+);
+assert.match(readinessSameAgentIdentitySource, /const EXACT_BINDING_FILE_BYTES = 230/);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /expectedBytes: EXACT_BINDING_FILE_BYTES,[\s\S]*?maximumBytes: EXACT_BINDING_FILE_BYTES/,
+  'the proxy must read exactly the 230-byte canonical v2 binding, never a v1 prefix',
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /bindingFileBytes: EXACT_BINDING_FILE_BYTES,[\s\S]*?bindingVersion: 2/,
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /bindingFileSha256: createHash\('sha256'\)\.update\(input\.bindingFile\)\.digest\('hex'\)/,
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /new TextDecoder\('utf-8', \{ fatal: true, ignoreBOM: true \}\)\.decode\(body\)/,
+);
+assert.match(readinessSameAgentIdentitySource, /body\.includes\(0\)/);
+assert.match(readinessSameAgentIdentitySource, /hasOnlyUniqueJsonObjectKeys\(serialized\)/);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /values\.length === 0 \|\| \(values\.length === 1 && values\[0\] === 'identity'\)/,
+  'Profile parsing must reject compressed or duplicate content-encoding values',
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /!plainRecord\(decoded\) \|\| !Object\.is\(decoded\.resultCode, 0\) \|\| !plainRecord\(decoded\.value\)/,
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /createHmac\('sha256', hmacKey\)[\s\S]*?KEMERBET_AGENT_IDENTITY_FINGERPRINT_DOMAIN[\s\S]*?\.update\(accountId\)[\s\S]*?\.update\('\\0', 'utf8'\)[\s\S]*?\.update\(userName\)[\s\S]*?timingSafeEqual\(observedIdentityDigest, expectedIdentityDigest\)/,
+  'the proxy must independently recompute and timing-safely match the bound account identity',
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /createHash\('sha256'\)\.update\(encoded\)\.digest\(\)[\s\S]*?timingSafeEqual\(pinnedBearerDigest, candidateBearerDigest\)/,
+  'the exact complete bearer hash must be pinned and timing-safely compared after sequence one',
+);
+assertOrderedFragments(
+  readinessSameAgentIdentitySource.slice(
+    readinessSameAgentIdentitySource.indexOf('verify: async (verificationInput:'),
+  ),
+  [
+    'candidateBearerDigest = bearerDigest(verificationInput.authorization);',
+    '!timingSafeEqual(expectedProviderAuthorizationDigest, candidateBearerDigest)',
+    "if (state === 'validated')",
+    "if (state !== 'unvalidated')",
+    "state = 'validating';",
+    'await verificationInput.loadProfile(',
+  ],
+  'the proxy must timing-safely match the sealed provider credential before any authenticated Profile call and before every lookup',
+);
+assert.match(
+  readinessSameAgentIdentitySource,
+  /state !== 'unvalidated'[\s\S]*?state = 'validating'[\s\S]*?state !== 'validating'[\s\S]*?state = 'validated'/,
+  'concurrent first identity validation must fail closed instead of racing',
+);
+for (const erasedIdentityBuffer of [
+  'accountId.fill(0)',
+  'expectedIdentityDigest.fill(0)',
+  'expectedProviderAuthorizationDigest.fill(0)',
+  'hmacKey.fill(0)',
+  'pinnedBearerDigest?.fill(0)',
+  'candidateBearerDigest?.fill(0)',
+  'profileResponse?.body.fill(0)',
+  'userName?.fill(0)',
+  'observedIdentityDigest?.fill(0)',
+]) {
+  assert.ok(
+    readinessSameAgentIdentitySource.includes(erasedIdentityBuffer),
+    `missing same-agent identity zeroization ${erasedIdentityBuffer}`,
+  );
+}
+assert.doesNotMatch(
+  readinessSameAgentIdentitySource,
+  /console\.|\/Wallet\/PlayerEPOSDeposit|KEMERBET_AGENT_PLAYER_DEPOSIT_PATH|transferOnce|moneyMoved: true/,
+  'the same-agent identity verifier must neither log sensitive identity material nor gain a financial primitive',
+);
+
+assert.match(
+  readinessAccountIdSource,
+  /KEMERBET_READINESS_ACCOUNT_ID_FILE =\s*'\/run\/secrets\/kemerbet_readiness_account_id'/,
+);
+assert.match(readinessAccountIdSource, /const BROWSER_USER_ID = 10001/);
+assert.match(
+  readinessAccountIdSource,
+  /before\.uid !== BROWSER_USER_ID \|\|\s*before\.gid !== BROWSER_USER_ID \|\|\s*\(before\.mode & 0o777\) !== 0o400 \|\|\s*before\.nlink !== 1 \|\|\s*before\.size !== 37/,
+  'the browser account identity must be a one-link UID-10001 0400 UUID file, never an environment value',
+);
+
+assert.match(readinessAuthorizationPremintSource, /const AUTHORIZER_USER_ID = 10004/);
+assert.match(
+  readinessAuthorizationPremintSource,
+  /const OUTPUT_FILE = `\$\{OUTPUT_ROOT\}\/authorizations`/,
+);
+assert.match(
+  readinessAuthorizationPremintSource,
+  /playerIds\.length !== 5 \|\|\s*new Set\(playerIds\)\.size !== 5/,
+);
+assert.match(
+  readinessAuthorizationPremintSource,
+  /\(dependencies\.assertOfflineNetwork \?\? assertNoNetworkInterfaces\)\(\)/,
+);
+assert.match(
+  readinessAuthorizationPremintSource,
+  /command: Object\.freeze\(\[\s*'node',\s*'apps\/executor\/dist\/kemerbet-readiness-authorization-premint\.js',\s*\]\)[\s\S]*?environment: Object\.freeze\(\[\]\)[\s\S]*?groupId: AUTHORIZER_USER_ID,[\s\S]*?networkMode: 'none'/,
+);
+assertOrderedFragments(
+  readinessAuthorizationPremintSource.slice(
+    readinessAuthorizationPremintSource.indexOf(
+      'export async function writeKemerBetReadinessPremintedAuthorizations',
+    ),
+  ),
+  [
+    'await requireAbsent(OUTPUT_FILE);',
+    'await requireAbsent(INSTALLING_FILE);',
+    'constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL',
+    'await handle.sync();',
+    'await handle.chmod(0o400);',
+    'await rename(INSTALLING_FILE, OUTPUT_FILE);',
+    'await directory.sync();',
+  ],
+  'the offline authorizer must pre-mint its exact-five output through an exclusive, synced, atomic install',
+);
+assert.doesNotMatch(
+  readinessAuthorizationPremintSource,
+  /\/Wallet\/PlayerEPOSDeposit|KEMERBET_AGENT_PLAYER_DEPOSIT_PATH|transferOnce|moneyMoved: true/,
+);
+
+assert.match(readinessLayer7AuthorizationsSource, /const CONTROLLER_USER_ID = 10002/);
+assert.match(readinessLayer7AuthorizationsSource, /const TOKEN_COUNT = 5/);
+assert.match(
+  readinessLayer7AuthorizationsSource,
+  /before\.uid !== CONTROLLER_USER_ID \|\|\s*before\.gid !== CONTROLLER_USER_ID \|\|\s*\(before\.mode & 0o777\) !== 0o400/,
+);
+assert.match(
+  readinessLayer7AuthorizationsSource,
+  /lines\.length !== TOKEN_COUNT[\s\S]*?fields\[2\] !== String\(index \+ 1\)[\s\S]*?exactNonce\(fields\[1\], nonce\)/,
+  'the controller may load exactly five ordered tokens sharing one run nonce, without authorizer material',
+);
+
+assert.match(
+  readinessFirewallReleaseSource,
+  /KEMERBET_READINESS_CONTROLLER_FIREWALL_RELEASE_FILE =\s*'\/run\/secrets\/kemerbet_readiness_controller_firewall_release'/,
+);
+assert.match(
+  readinessFirewallReleaseSource,
+  /KEMERBET_READINESS_BROWSER_FIREWALL_RELEASE_FILE =\s*'\/run\/secrets\/kemerbet_readiness_browser_firewall_release'/,
+);
+assert.match(
+  readinessFirewallReleaseSource,
+  /KEMERBET_READINESS_FIREWALL_RELEASE_CONTENT =\s*'fetanagent-kemerbet-readiness-firewall-v1\\n'/,
+);
+assert.match(
+  readinessFirewallReleaseSource,
+  /await requireAbsent\(fileSystem, forbiddenPath\)[\s\S]*?initialHandle\.uid !== 0 \|\|\s*initialHandle\.gid !== 0 \|\|\s*\(initialHandle\.mode & 0o777\) !== 0o444/,
+  'each process must see only its own root-owned immutable firewall release inode',
+);
+
+assert.match(readinessCompletionReceiptSource, /const PROXY_USER_ID = 10003/);
+assert.match(
+  readinessCompletionReceiptSource,
+  /const OUTPUT_FILE = `\$\{OUTPUT_ROOT\}\/completion-receipt`/,
+);
+assert.match(
+  readinessCompletionReceiptSource,
+  /const RECEIPT_CONTRACT = 'fetanagent-kemerbet-readiness-layer7-completion-v2'/,
+);
+for (const receiptInvariant of [
+  'agentIdentityBindingSha256: input.agentIdentityBindingSha256',
+  'identifiersRedacted: true',
+  'moneyMoved: false',
+  'responsesValidated: true',
+  'sameAgentIdentityValidated: true',
+  'sequences: [1, 2, 3, 4, 5]',
+  'transferDisabled: true',
+  'version: 2',
+]) {
+  assert.ok(
+    readinessCompletionReceiptSource.includes(receiptInvariant),
+    `missing trusted completion receipt invariant ${receiptInvariant}`,
+  );
+}
+assert.match(
+  readinessCompletionReceiptSource,
+  /!SHA256_PATTERN\.test\(input\.agentIdentityBindingSha256\)[\s\S]*?input\.sameAgentIdentityValidated !== true/,
+  'receipt v2 must require the exact binding-file digest and a true same-agent proof',
+);
+assertOrderedFragments(
+  readinessCompletionReceiptSource.slice(
+    readinessCompletionReceiptSource.indexOf(
+      'export async function publishKemerBetReadinessCompletionReceipt',
+    ),
+  ),
+  [
+    'await requireAbsent(OUTPUT_FILE);',
+    'await requireAbsent(INSTALLING_FILE);',
+    'constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL',
+    'await handle.sync();',
+    'await handle.chmod(0o400);',
+    'await rename(INSTALLING_FILE, OUTPUT_FILE);',
+    'await directory.sync();',
+  ],
+  'the proxy-only completion receipt must use an exclusive, synced, atomic install',
+);
+
+assert.match(readinessLookupResponseSource, /input\.statusCode !== 200/);
+assert.match(readinessLookupResponseSource, /value\.externalId !== input\.requestedPlayerId/);
+assert.match(readinessLookupResponseSource, /value\.currencyCode !== 'ETB'/);
+assert.match(
+  readinessLookupResponseSource,
+  /const identities = \[\.\.\.new Set\(\[value\.userName, value\.email\]\)\]\.filter\(boundedIdentity\)/,
+);
+
+assert.match(readinessProfileSnapshotSource, /const ROOT_USER_ID = 0/);
+assert.match(readinessProfileSnapshotSource, /const SOURCE_ROOT = '\/run\/source'/);
+assert.match(readinessProfileSnapshotSource, /const SNAPSHOT_ROOT = '\/run\/snapshot'/);
+assert.match(readinessProfileSnapshotSource, /const OUTPUT_ROOT = '\/run\/output'/);
+assert.match(
+  readinessProfileSnapshotSource,
+  /\(dependencies\.assertOfflineNetwork \?\? assertNoNetworkInterfaces\)\(\)/,
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /source === undefined \|\|\s*!source\.has\('ro'\) \|\|\s*source\.has\('rw'\)[\s\S]*?mode === 'snapshot'[\s\S]*?!snapshot\.has\('rw'\)[\s\S]*?!output\.has\('rw'\)[\s\S]*?mode === 'verify' \|\| mode === 'verify-original'[\s\S]*?snapshot !== undefined[\s\S]*?!output\.has\('ro'\)/,
+  'snapshot mode must mount the source read-only and destinations writable, while both verification modes use a read-only source and manifest with no writable snapshot path',
+);
+assertOrderedFragments(
+  readinessProfileSnapshotSource.slice(
+    readinessProfileSnapshotSource.indexOf('async function productionSnapshot'),
+    readinessProfileSnapshotSource.indexOf('async function productionVerify'),
+  ),
+  [
+    "assertKemerBetReadinessProfileMountInfo(mountInfoBefore, 'snapshot');",
+    'const sourceRecords = await inspectTree({',
+    'copyToRoot: SNAPSHOT_ROOT,',
+    'ignoreTopLevelChromiumSingletonSymlinks: true,',
+    'root: sourceAccount,',
+    'const targetRecords = await inspectTree({ root: targetAccount });',
+    'const sourceAfter = await inspectTree({',
+    'ignoreTopLevelChromiumSingletonSymlinks: true,',
+    'root: sourceAccount,',
+    'sourceManifest.treeSha256 !== createKemerBetReadinessProfileTreeDigest(targetRecords)',
+    'sourceManifest.treeSha256 !== createKemerBetReadinessProfileTreeDigest(sourceAfter)',
+    'await writeManifest(sourceManifest);',
+    'if (mountInfoBefore !== mountInfoAfter) return unavailable();',
+  ],
+  'the offline snapshot must copy and verify the source, target, manifest, and unchanged mount table',
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /const STALE_CHROMIUM_SINGLETON_NAMES: ReadonlySet<string> = new Set\(\[\s*'SingletonCookie',\s*'SingletonLock',\s*'SingletonSocket',\s*\]\)/,
+  'only the three exact Chromium singleton names may receive source-only stale-link treatment',
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /!relativePath\.includes\('\/'\) && STALE_CHROMIUM_SINGLETON_NAMES\.has\(relativePath\)[\s\S]*?ignoreTopLevelChromiumSingletonSymlinks !== true[\s\S]*?!before\.isSymbolicLink\(\)[\s\S]*?const after = \(await lstat\(sourcePath\)\)[\s\S]*?!after\.isSymbolicLink\(\) \|\| !sameStat\(before, after\)[\s\S]*?return;/,
+  'source omission must require an exact top-level, stable symlink and must return before realpath, open, copy, or hashing',
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /async function productionVerify\(accountId: string\)[\s\S]*?const records = await inspectTree\(\{ root: sourceAccount \}\)[\s\S]*?async function productionVerifyOriginal/,
+  'verification must keep singleton omission disabled so every target-side symlink or replacement fails closed',
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /async function productionVerifyOriginal[\s\S]*?assertKemerBetReadinessProfileMountInfo\(mountInfoBefore, 'verify-original'\)[\s\S]*?ignoreTopLevelChromiumSingletonSymlinks: true,[\s\S]*?root: sourceAccount/,
+  'post-run original-profile verification must explicitly reuse only the source singleton-omission policy',
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /snapshot: Object\.freeze\(\[\s*'node',\s*'apps\/executor\/dist\/kemerbet-readiness-profile-snapshot\.js',\s*'snapshot',[\s\S]*?verify: Object\.freeze\(\[\s*'node',\s*'apps\/executor\/dist\/kemerbet-readiness-profile-snapshot\.js',\s*'verify',[\s\S]*?verifyOriginal: Object\.freeze\(\[\s*'node',\s*'apps\/executor\/dist\/kemerbet-readiness-profile-snapshot\.js',\s*'verify-original'/,
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /mode === 'verify-original'[\s\S]*?dependencies\.verifyOriginal \?\? productionVerifyOriginal/,
+  'the explicit original-profile CLI mode must not alias the strict completed-snapshot verifier',
+);
+for (const documentationContract of [
+  /Source traversal alone omits the exact top-level `SingletonCookie`, `SingletonLock`,\s+and `SingletonSocket`/u,
+  /distinct `verify-original` command[\s\S]*?cannot weaken completed-snapshot verification/u,
+  /explicitly trusted, supervised enrollment ceremony/u,
+  /compromised enrollment renderer is outside the confidentiality\/containment guarantee/u,
+  /Compromised-renderer containment begins only after that\s+terminal close/u,
+  /exact 230-byte v2 UUID, identity-HMAC fingerprint,\s+and provider-authorization-digest line/u,
+  /two-field v1 binding[\s\S]*?cannot be\s+upgraded in place/u,
+  /explicit, user-confirmed retirement and same-claim\s+reseal ceremony/u,
+  /normal deploy, start, and seal commands never retire it automatically/u,
+  /previously reviewed v1 file SHA-256 and the exact retirement confirmation/u,
+  /I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL/u,
+  /manual\s+`retire-v1-for-v2-reseal` workflow mode/u,
+  /global helper gate blocks helper\/release replacement and unrelated state-expanding commands/u,
+  /explicit same-commit retirement resume, private-session start\/readiness\/seal/u,
+  /UUID\/fingerprint projection matches the archived v1 artifact/u,
+  /distinct\s+`resealed-awaiting-recheck` state/u,
+  /only the same-release independent recheck plus safe\s+teardown or diagnostics may proceed/u,
+  /gate unlocks only after that recheck commits the immutable\s+canonical binding and exact success receipt/u,
+  /migration alone does not require rotating the provider token/u,
+  /later\s+provider-token rotation\s+does require a new supervised v2 seal/u,
+  /`recover-v1-retirement-after-expiry`/u,
+  /I-UNDERSTAND-THIS-RECOVERS-THE-EXACT-V1-RETIREMENT-RELEASE/u,
+  /separate explicit `confirm_v1_retirement_release_sha`/u,
+  /requires that exact 40-character retirement\s+release to be an ancestor of the current workflow commit/u,
+  /expected helper plus role\s+provision\/disable SQL as canonical LF blobs with `git show <release>:<fixed-path>`/u,
+  /never substitutes the current `GITHUB_SHA`/u,
+  /Before bundle creation, upload, database-role provisioning, or any remote mutation/u,
+  /`kemerbet-v1-retirement-recovery-ready <explicit-release>` preflight/u,
+  /clean initial boundary or an exact helper-recognized safe-to-reset crash\s+residue/u,
+  /malformed or foreign residue fails while every mutation flag remains false/u,
+  /disable stale roles, run the SHA-verified helper `stop`, and\s+call the read-only preflight again/u,
+  /second result must be exactly clean before a local bundle is\s+created/u,
+  /incomplete temp-only binding prefix is discarded/u,
+  /exact complete\s+230-byte temp must first project to the archived v1 identity/u,
+  /atomically hard-links it\s+to the absent final name, removes the temp link, synchronizes the directory/u,
+  /reattests the same\s+inode, single link, and content/u,
+  /final-plus-same-inode temp likewise removes only the temp link and\s+preserves the final v2 artifact/u,
+  /preserved final artifact is then offline-finalized to exact\s+`resealed-awaiting-recheck` continuity/u,
+  /exact 23-file bundle/u,
+  /run-unique mode-`0700` staging\s+directory/u,
+  /captures that directory's device\/inode/u,
+  /atomic no-replace rename plus parent-directory synchronization/u,
+  /provisions fresh\s+24-hour database roles, invokes only `reinstall-kemerbet-v1-retirement-secrets`/u,
+  /starts the exact\s+private core, arms its derived expiry, then starts and verifies the bot and public edge/u,
+  /exactly the two durable project volumes\s+`fetanagent-staging-beta_kemerbet_sessions` and\s+`fetanagent-staging-beta_kemerbet_session_control`/u,
+  /exact local driver\/scope, three\s+Compose labels, canonical Docker mount paths, mode\/owner contract, zero holders/u,
+  /Any readiness snapshot\/RPC\/output volume,\s+third project volume, holder, label\/option drift, or other transient residue fails closed/u,
+  /exact staging, incoming, or atomic `\.consumed` path/u,
+  /preflight failure cannot clean or mutate pre-existing residue/u,
+  /A resealed state\s+must never reopen the private sign-in ceremony/u,
+  /mismatch is sticky-fatal before any\s+authenticated upstream request/u,
+  /trusted Layer-7 proxy is part of the trusted computing base/u,
+  /proxy RCE or proxy-process\s+compromise is outside this fail-closed guarantee/u,
+  /terminates KemerBet TLS[\s\S]*?current bearer and Player identifier[\s\S]*?only egress route/u,
+  /depends on the pinned, reviewed image and source/u,
+]) {
+  assert.match(executorRunbook, documentationContract);
+}
+assert.match(readinessProfileSnapshotSource, /networkMode: 'none'/);
+assert.match(
+  readinessProfileSnapshotSource,
+  /const MAXIMUM_PROFILE_FILE_BYTES = 256 \* 1024 \* 1024/,
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /const MAXIMUM_PROFILE_TREE_BYTES = 1024 \* 1024 \* 1024/,
+);
+assert.match(
+  readinessProfileSnapshotSource,
+  /resourceLimits: KEMERBET_READINESS_PROFILE_SNAPSHOT_LIMITS/,
+);
+for (const snapshotResourceBoundary of [
+  /before\.size > MAXIMUM_PROFILE_FILE_BYTES/,
+  /logicalFileBytes > MAXIMUM_PROFILE_TREE_BYTES - before\.size/,
+  /const readLength = Math\.min\(buffer\.length, remaining \+ 1\)/,
+  /if \(bytesRead > remaining\) return unavailable\(\)/,
+  /Math\.min\(MAXIMUM_PROFILE_FILE_BYTES, MAXIMUM_PROFILE_TREE_BYTES - readFileBytes\)/,
+  /readFileBytes > MAXIMUM_PROFILE_TREE_BYTES/,
+  /hashed\.bytes !== before\.size/,
+  /buffer\.fill\(0\)/,
+]) {
+  assert.match(readinessProfileSnapshotSource, snapshotResourceBoundary);
+}
+assert.match(
+  readinessProfileSnapshotSource,
+  /browserRootGroupId: 10001,[\s\S]*?browserRootMode: 0o700,[\s\S]*?browserRootUserId: 10001/,
+  'only the verified disposable volume root may be handed to the UID-10001 browser',
+);
+
+assert.match(chromiumProfileSource, /const SERVICE_WORKER_DIRECTORY = 'Service Worker'/);
+assert.match(
+  chromiumProfileSource,
+  /const SERVICE_WORKER_TOMBSTONE = '\.Service Worker\.fetanagent-purge-v1'/,
+);
+assertOrderedFragments(
+  chromiumProfileSource.slice(
+    chromiumProfileSource.indexOf('export async function purgeKemerBetPersistedServiceWorkerState'),
+  ),
+  [
+    "const defaultRoot = exactChild(profilePath, 'Default');",
+    'const live = exactChild(defaultRoot, SERVICE_WORKER_DIRECTORY);',
+    'const tombstone = exactChild(defaultRoot, SERVICE_WORKER_TOMBSTONE);',
+    "if (liveState === 'present' && tombstoneState === 'present') unavailable();",
+    'await fileSystem.rename(live, tombstone);',
+    'await syncDirectory(fileSystem, defaultRoot);',
+    'await removeExactOwnedTree(fileSystem, tombstone, tombstone, effectiveUserId);',
+    'await syncDirectory(fileSystem, defaultRoot);',
+  ],
+  'service-worker removal must be exact, crash-resumable, and directory-synced',
+);
+
+const guardedProbeStart = noTransferReadinessSealSource.indexOf(
+  'async function createKemerBetNoTransferReadinessGuardedProbeFromPage',
+);
+const guardedProbeEnd = noTransferReadinessSealSource.indexOf(
+  '\n/**\n * Build the five-lookup proof',
+  guardedProbeStart,
+);
+assert.ok(guardedProbeStart >= 0 && guardedProbeEnd > guardedProbeStart);
+const guardedProbeSource = noTransferReadinessSealSource.slice(guardedProbeStart, guardedProbeEnd);
+assertOrderedFragments(
+  guardedProbeSource,
+  [
+    'requestBoundary.armCanonicalMainNavigation();',
+    'options.startup.armCanonicalNavigation();',
+    'await options.startup.setOnline();',
+    'await options.page.goto(KEMERBET_AGENT_DEPOSIT_URL, {',
+    'await requestBoundary.drain();',
+    'requestBoundary.beginTerminalClose();',
+    'await options.close();',
+    'await requestBoundary.drain();',
+    'if (requestBoundary.internalViolation()) unavailable();',
+  ],
+  'the retained page must arm its exact navigation and enter a sticky terminal abort before close',
+);
+
+const persistentProbeStart = noTransferReadinessSealSource.indexOf(
+  'export async function openKemerBetNoTransferReadinessPersistentProfileProbe',
+);
+const persistentProbeEnd = noTransferReadinessSealSource.indexOf(
+  '\nasync function productionOpenProbe',
+  persistentProbeStart,
+);
+assert.ok(persistentProbeStart >= 0 && persistentProbeEnd > persistentProbeStart);
+const persistentProbeSource = noTransferReadinessSealSource.slice(
+  persistentProbeStart,
+  persistentProbeEnd,
+);
+for (const safeArgument of [
+  "'--restore-last-session'",
+  "'--disable-quic'",
+  "'--dns-prefetch-disable'",
+  "'--disable-features=NetworkPrediction,PreconnectToSearch,SpeculationRulesPrefetchFuture,WebTransport'",
+  "'--disable-network-prediction'",
+  "'--disable-preconnect'",
+  "'--disable-webrtc'",
+  "'--force-webrtc-ip-handling-policy=disable_non_proxied_udp'",
+  '`--host-resolver-rules=${buildKemerBetReadinessIsolatedChromiumHostResolverRules(isolatedBoundary.proxyIpv4)}`',
+  '`--ignore-certificate-errors-spki-list=${isolatedBoundary.proxySpkiSha256}`',
+]) {
+  assert.ok(
+    persistentProbeSource.includes(safeArgument),
+    `missing Chromium safety argument ${safeArgument}`,
+  );
+}
+assert.match(persistentProbeSource, /ignoreDefaultArgs: \['about:blank'\]/);
+assert.match(persistentProbeSource, /offline: true/);
+assert.match(persistentProbeSource, /serviceWorkers: 'block'/);
+assert.match(
+  noTransferReadinessSealSource,
+  /Storage\.clearDataForOrigin'[\s\S]*?storageTypes: 'service_workers,cache_storage'[\s\S]*?ServiceWorker\.stopAllWorkers'[\s\S]*?Network\.setBypassServiceWorker'[\s\S]*?Network\.setCacheDisabled'/,
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /`MAP \$\{KEMERBET_AGENT_WEB_HOSTNAME\}:443 \$\{proxyIpv4\}:\$\{KEMERBET_READINESS_LAYER7_PROXY_PORT\}`,[\s\S]*?`MAP \$\{KEMERBET_AGENT_API_HOSTNAME\}:443 \$\{proxyIpv4\}:\$\{KEMERBET_READINESS_LAYER7_PROXY_PORT\}`,[\s\S]*?`MAP \$\{new URL\(KEMERBET_AGENT_BOOTSTRAP_ORIGIN\)\.hostname\}:443 \$\{proxyIpv4\}:\$\{KEMERBET_READINESS_LAYER7_PROXY_PORT\}`,[\s\S]*?`EXCLUDE \$\{proxyIpv4\}`,[\s\S]*?'EXCLUDE localhost',[\s\S]*?'MAP \* ~NOTFOUND'/,
+  'Chromium DNS must map only the three reviewed KemerBet hosts to the fixed proxy and fail every other hostname closed',
+);
+assert.match(
+  persistentProbeSource,
+  /await purgeKemerBetPersistedServiceWorkerState\(profile, options\.effectiveUserId\)/,
+);
+assert.doesNotMatch(
+  persistentProbeSource,
+  /\.newPage\(|sessionStorage\.getItem|storageState\(/,
+  'the browser must retain the sole restored page without exporting or copying authentication state',
+);
+assertOrderedFragments(
+  persistentProbeSource,
+  [
+    'await isolatedBoundary.revalidateNetworkTopology().catch(() => unavailable());',
+    'context = await chromium.launchPersistentContext(profile, {',
+    'await isolatedBoundary.revalidateNetworkTopology().catch(() => unavailable());',
+    'const restoredPage = selectSoleCanonicalKemerBetAgentRestoredPage(retainedContext.pages());',
+    "retainedContext.on('serviceworker'",
+    'await requestBoundary.install();',
+    "await retainedContext.routeWebSocket('**/*'",
+    'isolatedCdpSession = await prepareKemerBetIsolatedBrowserDriverOfflineContext(',
+    'await isolatedBoundary.revalidateNetworkTopology().catch(() => unavailable());',
+    'const probe = await createKemerBetNoTransferReadinessGuardedProbeFromPage({',
+  ],
+  'static zero-default-route attestations and service-worker/WebSocket guards must surround browser startup before online use',
+);
+assert.doesNotMatch(
+  `${readinessNetworkGateSource}\n${readinessBrowserRpcSource}\n${readinessBrowserDriverSource}\n${readinessLayer7ProxySource}`,
+  /fetanagent-kemerbet-readiness-network-gate-(?:ready|release)-v1|waitForKemerBetReadinessNetworkRelease|publishReadyFile/,
+  'the retired dynamic ready/release marker protocol must stay absent',
 );
 assert.equal(reviewedSelectorContract.version, 2);
 assert.deepEqual(reviewedSelectorContract.depositWorkflow.depositMenuItem, {
@@ -880,6 +2002,49 @@ assert.match(privateSessionProvisionServerSource, /FINANCIAL_ACTIONS_MODE: 'dry_
 assert.match(privateSessionProvisionServerSource, /playersChecked: 5/);
 assert.match(privateSessionProvisionServerSource, /transferDisabled: true/);
 assert.match(privateSessionProvisionServerSource, /moneyMoved: false/);
+assert.match(
+  privateSessionProvisionServerSource,
+  /explicitly trusted supervised enrollment[\s\S]*?not a compromised-renderer confidentiality boundary[\s\S]*?Containment begins only after this exact[\s\S]*?context is terminally closed/u,
+  'source must not overclaim containment for the same-UID manual enrollment renderer',
+);
+assertOrderedFragments(
+  privateSessionProvisionServerSource.slice(
+    privateSessionProvisionServerSource.indexOf(
+      'const closeRetainedContextForSeal = async (): Promise<void> => {',
+    ),
+    privateSessionProvisionServerSource.indexOf('await runReadinessSeal({'),
+  ),
+  [
+    'await retainedContext.close();',
+    'context = undefined;',
+    'page = undefined;',
+    'accountId = undefined;',
+    'expiresAt = undefined;',
+    'signedInLogged = false;',
+    'retainedContextClosed = true;',
+  ],
+  'the supervised same-UID Chromium context must close successfully before the enrollment lane clears and binding write can proceed',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /close: closeRetainedContextForSeal/,
+  'the seal must receive the exact retained-context close callback rather than a no-op',
+);
+assert.doesNotMatch(
+  privateSessionProvisionServerSource.slice(
+    privateSessionProvisionServerSource.indexOf(
+      'const closeRetainedContextForSeal = async (): Promise<void> => {',
+    ),
+    privateSessionProvisionServerSource.indexOf('await runReadinessSeal({'),
+  ),
+  /retainedContext\.close\(\)\.catch|try\s*\{[\s\S]*?await retainedContext\.close\(\)[\s\S]*?\}\s*catch/,
+  'a retained-context close failure must propagate and prevent the binding write',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /!retainedContextClosed \|\|\s*context !== undefined \|\|\s*page !== undefined \|\|\s*accountId !== undefined \|\|\s*expiresAt !== undefined \|\|\s*expiryTimer !== undefined \|\|\s*signedInLogged/,
+  'seal success must require an exact inactive and cleared supervised enrollment session',
+);
 assert.match(
   privateSessionProvisionServerSource,
   /const AUTHENTICATED_SESSION_LIFETIME_MS = 12 \* 60 \* 60 \* 1_000/,
@@ -972,5 +2137,5 @@ assert.ok(
 );
 
 console.log(
-  'executor deployment artifacts verified: immutable image activation, explicit database target, lifetime singleton, isolated provisioning, and no public action surface',
+  'executor deployment artifacts verified: immutable image activation, explicit database target, lifetime singleton, static controller/browser/proxy readiness isolation, offline pre-mint and profile snapshot contracts, trusted completion receipt, and no financial endpoint',
 );

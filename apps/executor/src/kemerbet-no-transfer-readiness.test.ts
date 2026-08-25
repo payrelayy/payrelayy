@@ -14,6 +14,9 @@ import type { KemerBetAgentPageSelectorContractV2 } from './playwright-kemerbet-
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const PLAYER_IDS = ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'] as const;
 const FINGERPRINT = `hmac-sha256-agent-identity-v1:${'1'.repeat(64)}`;
+const AUTHORIZATIONS = PLAYER_IDS.map(
+  (_playerId, index) => `v1.${'a'.repeat(32)}.${index + 1}.${String(index + 1).repeat(64)}`,
+);
 
 function environment(): NodeJS.ProcessEnv {
   return {
@@ -41,7 +44,8 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {
   const logSuccess = vi.fn();
   const dependencies: KemerBetNoTransferReadinessDependencies = {
     environment: environment(),
-    effectiveUserId: 10001,
+    effectiveUserId: 10002,
+    waitForFirewallRelease: async () => undefined,
     assertBrowserExecutable: async () => undefined,
     loadAgentIdentityBindings: async () => ({
       platformAgentAccountIds: [ACCOUNT_ID],
@@ -52,6 +56,7 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {
     createAgentIdentityFingerprinter: async () => fingerprinter(),
     openProbe: async () => ({
       observedAgentIdentityFingerprint: FINGERPRINT,
+      providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
       async probePlayerLookup(target) {
         probes.push(target.playerId);
         return {
@@ -70,6 +75,42 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {
 }
 
 describe('KemerBet server no-transfer readiness', () => {
+  it('uses the split RPC path without loading Chromium/profile and pairs five pre-minted tokens', async () => {
+    const lookup = vi.fn(async () => undefined);
+    const finalize = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const revalidate = vi.fn(async () => undefined);
+    const openProbe = vi.fn();
+    const loadSelectorContract = vi.fn();
+    const assertBrowserExecutable = vi.fn();
+    const test = fixture({
+      environment: { ...environment(), KEMERBET_READINESS_BROWSER_RPC_ENABLED: 'true' },
+      createNetworkRevalidator: async () => revalidate,
+      loadLayer7Authorizations: async () => ({ authorizations: AUTHORIZATIONS }),
+      openRpcClient: async () => ({
+        open: async () => 'raw-agent-identity',
+        lookup,
+        finalize,
+        close,
+      }),
+      openProbe,
+      loadSelectorContract,
+      assertBrowserExecutable,
+    });
+
+    await expect(runKemerBetNoTransferReadiness(test.dependencies)).resolves.toBeUndefined();
+
+    expect(lookup.mock.calls).toEqual(
+      PLAYER_IDS.map((playerId, index) => [playerId, AUTHORIZATIONS[index]]),
+    );
+    expect(revalidate).toHaveBeenCalledTimes(2);
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(openProbe).not.toHaveBeenCalled();
+    expect(loadSelectorContract).not.toHaveBeenCalled();
+    expect(assertBrowserExecutable).not.toHaveBeenCalled();
+  });
+
   it('checks one bound account and exactly five Players sequentially with aggregate output only', async () => {
     const test = fixture();
 
@@ -118,6 +159,7 @@ describe('KemerBet server no-transfer readiness', () => {
     const test = fixture({
       openProbe: async () => ({
         observedAgentIdentityFingerprint: FINGERPRINT,
+        providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
         probePlayerLookup: async (target) =>
           target.playerId === PLAYER_IDS[2]
             ? null
@@ -163,7 +205,7 @@ describe('KemerBet server no-transfer readiness', () => {
     );
   });
 
-  it('requires EUID 10001 before loading any private input', async () => {
+  it('requires controller EUID 10002 before loading any private input', async () => {
     const loadPlayerIds = vi.fn(async () => ({ playerIds: PLAYER_IDS }));
     const test = fixture({ effectiveUserId: 0, loadPlayerIds });
 
@@ -195,6 +237,7 @@ describe('KemerBet server no-transfer readiness', () => {
   it('requires the exact sole binding fingerprint and binds it into the persistent probe', async () => {
     const openProbe = vi.fn(async () => ({
       observedAgentIdentityFingerprint: FINGERPRINT,
+      providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
       probePlayerLookup: async () => ({
         exactPlayerMatch: true as const,
         exactCurrencyMatch: true as const,
@@ -225,6 +268,7 @@ describe('KemerBet server no-transfer readiness', () => {
     const test = fixture({
       openProbe: async () => ({
         observedAgentIdentityFingerprint: `hmac-sha256-agent-identity-v1:${'2'.repeat(64)}`,
+        providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
         probePlayerLookup,
         finalizeReadOnlyProof: async () => undefined,
         close,
@@ -244,6 +288,7 @@ describe('KemerBet server no-transfer readiness', () => {
     const test = fixture({
       openProbe: async () => ({
         observedAgentIdentityFingerprint: FINGERPRINT,
+        providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
         probePlayerLookup: async () => ({
           exactPlayerMatch: true,
           exactCurrencyMatch: true,
@@ -269,7 +314,8 @@ describe('KemerBet server no-transfer readiness', () => {
       'utf8',
     );
 
-    expect(source).toContain('openKemerBetNoTransferReadinessPersistentProfileProbe');
+    expect(source).toContain('createKemerBetReadinessBrowserRpcClient');
+    expect(source).toContain('loadKemerBetReadinessLayer7Authorizations');
     expect(source).toContain('await probe.finalizeReadOnlyProof()');
     expect(source).not.toContain('createKemerBetAgentSessionRegistry');
     expect(source).not.toContain('probeReadiness');

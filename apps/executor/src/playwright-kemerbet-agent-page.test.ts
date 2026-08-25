@@ -275,9 +275,16 @@ class FakeRequest implements PlaywrightRequestPort {
     private readonly requestUrl: string,
     private readonly requestMethod: string,
     private readonly body: unknown = null,
+    private readonly wasRedirected = false,
   ) {}
   method() {
     return this.requestMethod;
+  }
+  redirectedFrom() {
+    return this.wasRedirected ? this : null;
+  }
+  redirectedTo() {
+    return null;
   }
   url() {
     return this.requestUrl;
@@ -292,7 +299,8 @@ class FakeResponse implements PlaywrightResponsePort {
     private readonly responseUrl: string,
     private readonly responseMethod: string,
     private readonly responseStatus: number,
-    private readonly body: unknown,
+    private readonly responseBody: unknown,
+    private readonly responseRedirected = false,
   ) {}
   url() {
     return this.responseUrl;
@@ -301,11 +309,12 @@ class FakeResponse implements PlaywrightResponsePort {
     return this.responseStatus;
   }
   request() {
-    return new FakeRequest(this.responseUrl, this.responseMethod);
+    return new FakeRequest(this.responseUrl, this.responseMethod, null, this.responseRedirected);
   }
-  async json() {
-    if (this.body instanceof Error) throw this.body;
-    return this.body;
+  async body() {
+    if (this.responseBody instanceof Error) throw this.responseBody;
+    if (Buffer.isBuffer(this.responseBody)) return this.responseBody;
+    return Buffer.from(JSON.stringify(this.responseBody), 'utf8');
   }
 }
 
@@ -435,6 +444,7 @@ class FakePage implements PlaywrightPagePort {
   lookupResponseMethod = 'GET';
   lookupResponseStatus = 200;
   lookupResponseBody: unknown | null = null;
+  lookupResponseRedirected = false;
   depositRequestUrl: string = KEMERBET_AGENT_PLAYER_DEPOSIT_URL;
   depositRequestMethod = 'POST';
   depositRequestBody: unknown = { playerId: 78123, amount: 25, notes: '' };
@@ -518,6 +528,7 @@ class FakePage implements PlaywrightPagePort {
       this.lookupResponseMethod,
       this.lookupResponseStatus,
       body,
+      this.lookupResponseRedirected,
     );
     if (!pending.predicate(response)) {
       pending.reject(new Error('response did not match'));
@@ -1415,6 +1426,12 @@ describe('Playwright KemerBet agent page', () => {
       },
     ],
     [
+      'redirect chain',
+      (page) => {
+        page.lookupResponseRedirected = true;
+      },
+    ],
+    [
       'duplicate query key',
       (page) => {
         page.lookupResponseUrl = `${KEMERBET_AGENT_PLAYER_LOOKUP_URL}?externalId=PLAYER-ALPHA&externalId=PLAYER-ALPHA`;
@@ -1450,6 +1467,18 @@ describe('Playwright KemerBet agent page', () => {
         page.lookupResponseBody = new Error('invalid JSON');
       },
     ],
+    [
+      'invalid UTF-8',
+      (page) => {
+        page.lookupResponseBody = Buffer.from([0xc3, 0x28]);
+      },
+    ],
+    [
+      'oversized raw body',
+      (page) => {
+        page.lookupResponseBody = Buffer.alloc(64 * 1024 + 1, 0x20);
+      },
+    ],
   ])('rejects an authoritative lookup response with %s', async (_name, mutate) => {
     const fixture = driver();
     mutate(fixture.page);
@@ -1458,6 +1487,11 @@ describe('Playwright KemerBet agent page', () => {
     await expect(fixture.driver.lookupPlayer('PLAYER-ALPHA')).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
+    if (Buffer.isBuffer(fixture.page.lookupResponseBody)) {
+      expect([...fixture.page.lookupResponseBody]).toEqual(
+        new Array(fixture.page.lookupResponseBody.length).fill(0),
+      );
+    }
     expect(fixture.page.transferClicks).toBe(0);
   });
 

@@ -145,6 +145,19 @@ describe('private KemerBet session provision server', () => {
     );
     expect(source).toMatch(/event: 'readiness_seal_failed'/u);
     expect(source).toMatch(/detailsRedacted: true/u);
+    expect(source).toContain('close: closeRetainedContextForSeal');
+    expect(source).not.toContain('close: async () => undefined');
+    const closeStart = source.indexOf('const closeRetainedContextForSeal');
+    const closeEnd = source.indexOf('await runReadinessSeal', closeStart);
+    const closeBody = source.slice(closeStart, closeEnd);
+    expect(closeBody).toContain('await retainedContext.close()');
+    expect(closeBody).not.toContain('retainedContext.close().catch');
+    expect(closeBody.indexOf('await retainedContext.close()')).toBeLessThan(
+      closeBody.indexOf('context = undefined'),
+    );
+    expect(source).toMatch(
+      /!retainedContextClosed \|\|\s+context !== undefined \|\|\s+page !== undefined \|\|\s+accountId !== undefined/u,
+    );
   });
 
   it('creates only the fixed redacted failure schema for every readiness stage', () => {

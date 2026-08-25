@@ -42,7 +42,13 @@ RUN pnpm --filter @fetanagent/executor... run build
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
 RUN groupadd --gid 10001 fetanagent \
-  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin fetanagent
+  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin fetanagent \
+  && groupadd --gid 10002 fetanagent-readiness-controller \
+  && useradd --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin fetanagent-readiness-controller \
+  && groupadd --gid 10003 fetanagent-readiness-proxy \
+  && useradd --uid 10003 --gid 10003 --no-create-home --shell /usr/sbin/nologin fetanagent-readiness-proxy \
+  && groupadd --gid 10004 fetanagent-readiness-authorizer \
+  && useradd --uid 10004 --gid 10004 --no-create-home --shell /usr/sbin/nologin fetanagent-readiness-authorizer
 
 WORKDIR /workspace
 

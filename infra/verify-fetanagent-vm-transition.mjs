@@ -962,7 +962,7 @@ assertInOrder(
 );
 assert.doesNotMatch(exactPrivateRuntime, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
 
-const helperMain = deployHelper.slice(deployHelper.indexOf('case "$command" in'));
+const helperMain = deployHelper.slice(deployHelper.lastIndexOf('case "$command" in'));
 const privateStartGate = functionBody(deployHelper, 'require_private_start_cutover_ready');
 assertInOrder(
   privateStartGate,
@@ -1248,7 +1248,10 @@ const botRuntimeCalls = [
   ),
 ].map((match) => `${match[1]} ${match[2]}`);
 assert.deepEqual(botRuntimeCalls, [
+  '$commit_sha immediate-startup',
   '$commit_sha steady-state',
+  '$commit_sha steady-state',
+  '$commit_sha immediate-startup',
   '$2 immediate-startup',
   '$2 steady-state',
   '$commit_sha steady-state',

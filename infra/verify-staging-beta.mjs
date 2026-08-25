@@ -74,6 +74,8 @@ const services = topLevelSection(compose, 'services');
 const ownerService = childBlock(services, 'owner-control');
 const kemerbetSessionService = childBlock(services, 'kemerbet-session-provision');
 const kemerbetRecheckService = childBlock(services, 'kemerbet-no-transfer-readiness');
+const kemerbetReadinessBrowserService = childBlock(services, 'kemerbet-readiness-browser');
+const kemerbetReadinessProxyService = childBlock(services, 'kemerbet-readiness-egress-proxy');
 const customerWebService = childBlock(services, 'customer-web');
 const gatewayService = childBlock(services, 'gateway');
 const apiService = childBlock(services, 'api');
@@ -91,6 +93,8 @@ assert.deepEqual(
     'owner-control',
     'kemerbet-session-provision',
     'kemerbet-no-transfer-readiness',
+    'kemerbet-readiness-browser',
+    'kemerbet-readiness-egress-proxy',
     'customer-web',
     'gateway',
     'api',
@@ -206,6 +210,8 @@ assert.doesNotMatch(ownerVolumes, /kemerbet_sessions|docker\.sock|\/run\/secrets
 for (const service of [
   kemerbetSessionService,
   kemerbetRecheckService,
+  kemerbetReadinessBrowserService,
+  kemerbetReadinessProxyService,
   customerWebService,
   gatewayService,
   apiService,
@@ -266,13 +272,41 @@ assert.doesNotMatch(
   /DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY/,
 );
 
-assert.match(kemerbetRecheckService, /profiles: \[kemerbet-no-transfer-readiness\]/);
-assert.match(kemerbetRecheckService, /platform: linux\/amd64/);
-assert.match(
-  kemerbetRecheckService,
-  /image: fetanagent-deposit-executor:\$\{FETANAGENT_IMAGE_TAG:\?set a commit-derived image tag\}/,
-);
-assert.match(kemerbetRecheckService, /pull_policy: never/);
+const readinessServices = [
+  ['controller', kemerbetRecheckService],
+  ['browser', kemerbetReadinessBrowserService],
+  ['Layer-7 proxy', kemerbetReadinessProxyService],
+];
+for (const [name, service] of readinessServices) {
+  assert.match(service, /profiles: \[kemerbet-no-transfer-readiness\]/);
+  assert.match(service, /platform: linux\/amd64/);
+  assert.match(
+    service,
+    /image: fetanagent-deposit-executor:\$\{FETANAGENT_IMAGE_TAG:\?set a commit-derived image tag\}/,
+  );
+  assert.match(service, /pull_policy: never/);
+  assert.match(service, /init: true/);
+  assert.match(service, /restart: 'no'/);
+  assert.match(service, /read_only: true/);
+  assert.match(service, /cap_drop:\s*\r?\n\s+- ALL/);
+  assert.match(service, /no-new-privileges:true/);
+  assert.match(service, /logging:\s*\r?\n\s+driver: none/);
+  assert.match(service, /FINANCIAL_ACTIONS_MODE: dry_run/);
+  for (const disabledGate of [
+    'KEMERBET_EXECUTOR_ENABLED',
+    'KEMERBET_FINAL_ACTION_ENABLED',
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+    'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
+  ]) {
+    assert.match(service, new RegExp(`${disabledGate}: 'false'`), `${name} must remain inert`);
+  }
+  assert.doesNotMatch(
+    service,
+    /^    (?:ports|expose|depends_on|secrets|configs|stdin_open|tty):/m,
+    `${name} must expose no port and inherit no Compose secret/config authority`,
+  );
+}
+
 assert.match(
   kemerbetRecheckService,
   /container_name: fetanagent-staging-beta-kemerbet-no-transfer-readiness-once/,
@@ -281,63 +315,142 @@ assert.match(
   kemerbetRecheckService,
   /command: \['node', 'apps\/executor\/dist\/kemerbet-no-transfer-readiness\.js'\]/,
 );
-assert.match(kemerbetRecheckService, /init: true/);
-assert.match(kemerbetRecheckService, /user: '10001:10001'/);
-assert.match(kemerbetRecheckService, /restart: 'no'/);
-assert.match(kemerbetRecheckService, /read_only: true/);
+assert.match(kemerbetRecheckService, /user: '10002:10002'/);
 assert.match(
   kemerbetRecheckService,
+  /tmpfs:\s*\r?\n\s+- \/tmp:rw,noexec,nosuid,nodev,size=33554432,mode=1777/,
+);
+assert.doesNotMatch(kemerbetRecheckService, /shm_size:/);
+assert.match(kemerbetRecheckService, /pids_limit: 64/);
+assert.match(kemerbetRecheckService, /mem_limit: 128m/);
+assert.match(kemerbetRecheckService, /cpus: 0\.50/);
+assert.match(kemerbetRecheckService, /stop_grace_period: 15s/);
+assert.match(kemerbetRecheckService, /KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'/);
+assert.match(kemerbetRecheckService, /KEMERBET_READINESS_BROWSER_RPC_ENABLED: 'true'/);
+assert.match(
+  kemerbetRecheckService,
+  /dns:\s*\r?\n\s+- 127\.0\.0\.1\s*\r?\n\s+dns_opt:\s*\r?\n\s+- attempts:1\s*\r?\n\s+- timeout:1\s*\r?\n\s+- ndots:0/,
+  'the controller must not use Docker or external DNS',
+);
+
+assert.match(
+  kemerbetReadinessBrowserService,
+  /container_name: fetanagent-staging-beta-kemerbet-readiness-browser-once/,
+);
+assert.match(
+  kemerbetReadinessBrowserService,
+  /command: \['node', 'apps\/executor\/dist\/kemerbet-readiness-browser-driver\.js'\]/,
+);
+assert.match(kemerbetReadinessBrowserService, /user: '10001:10001'/);
+assert.match(
+  kemerbetReadinessBrowserService,
   /tmpfs:\s*\r?\n\s+- \/tmp:rw,noexec,nosuid,nodev,size=268435456,mode=1777/,
 );
-assert.match(kemerbetRecheckService, /shm_size: 512m/);
-assert.match(kemerbetRecheckService, /cap_drop:\s*\r?\n\s+- ALL/);
-assert.match(kemerbetRecheckService, /no-new-privileges:true/);
-assert.match(kemerbetRecheckService, /pids_limit: 512/);
-assert.match(kemerbetRecheckService, /mem_limit: 1536m/);
-assert.match(kemerbetRecheckService, /cpus: 2\.00/);
-assert.match(kemerbetRecheckService, /stop_grace_period: 60s/);
-assert.match(kemerbetRecheckService, /logging:\s*\r?\n\s+driver: none/);
-assert.match(kemerbetRecheckService, /FINANCIAL_ACTIONS_MODE: dry_run/);
-assert.match(kemerbetRecheckService, /KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'/);
-for (const disabledRecheckGate of [
-  'KEMERBET_EXECUTOR_ENABLED',
-  'KEMERBET_FINAL_ACTION_ENABLED',
-  'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
-  'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
-]) {
-  assert.match(kemerbetRecheckService, new RegExp(`${disabledRecheckGate}: 'false'`));
-}
+assert.match(kemerbetReadinessBrowserService, /shm_size: 512m/);
+assert.match(kemerbetReadinessBrowserService, /pids_limit: 512/);
+assert.match(kemerbetReadinessBrowserService, /mem_limit: 1536m/);
+assert.match(kemerbetReadinessBrowserService, /cpus: 2\.00/);
+assert.match(kemerbetReadinessBrowserService, /stop_grace_period: 60s/);
+assert.match(kemerbetReadinessBrowserService, /KEMERBET_READINESS_BROWSER_DRIVER_ENABLED: 'true'/);
+assert.match(kemerbetReadinessBrowserService, /KEMERBET_READINESS_L7_PROXY_IPV4: 172\.31\.254\.10/);
+assert.match(
+  kemerbetReadinessBrowserService,
+  /KEMERBET_READINESS_L7_PROXY_SPKI_SHA256: Ngu9uL2STHWC7Uton\/GYw7d8hDQdhliykEz2XnJZd3M=/,
+);
+assert.match(
+  kemerbetReadinessBrowserService,
+  /dns:\s*\r?\n\s+- 127\.0\.0\.1\s*\r?\n\s+dns_opt:\s*\r?\n\s+- attempts:1\s*\r?\n\s+- timeout:1\s*\r?\n\s+- ndots:0/,
+  'the browser must rely only on fixed IPs and Chromium host mapping',
+);
+
+assert.match(
+  kemerbetReadinessProxyService,
+  /container_name: fetanagent-staging-beta-kemerbet-readiness-egress-proxy-once/,
+);
+assert.match(
+  kemerbetReadinessProxyService,
+  /command: \['node', 'apps\/executor\/dist\/kemerbet-readiness-layer7-proxy\.js'\]/,
+);
+assert.match(kemerbetReadinessProxyService, /user: '10003:10003'/);
+assert.match(
+  kemerbetReadinessProxyService,
+  /tmpfs:\s*\r?\n\s+- \/tmp:rw,noexec,nosuid,nodev,size=33554432,mode=1777/,
+);
+assert.doesNotMatch(kemerbetReadinessProxyService, /shm_size:/);
+assert.match(kemerbetReadinessProxyService, /pids_limit: 64/);
+assert.match(kemerbetReadinessProxyService, /mem_limit: 128m/);
+assert.match(kemerbetReadinessProxyService, /cpus: 0\.50/);
+assert.match(kemerbetReadinessProxyService, /stop_grace_period: 15s/);
+
 const kemerbetRecheckEnvironment = servicePropertyBlock(kemerbetRecheckService, 'environment');
+const kemerbetBrowserEnvironment = servicePropertyBlock(
+  kemerbetReadinessBrowserService,
+  'environment',
+);
+const kemerbetProxyEnvironment = servicePropertyBlock(kemerbetReadinessProxyService, 'environment');
+const readinessEnvironmentNames = (environment) =>
+  [...environment.matchAll(/^      ([A-Za-z_][A-Za-z0-9_]*):/gm)].map((match) => match[1]);
 assert.deepEqual(
-  [...kemerbetRecheckEnvironment.matchAll(/^      ([A-Za-z_][A-Za-z0-9_]*):/gm)].map(
-    (match) => match[1],
-  ),
+  readinessEnvironmentNames(kemerbetRecheckEnvironment),
   [
     'NODE_ENV',
     ...dockerProxyEnvironmentNames,
     'FINANCIAL_ACTIONS_MODE',
     'KEMERBET_NO_TRANSFER_READINESS_ENABLED',
+    'KEMERBET_READINESS_BROWSER_RPC_ENABLED',
     'KEMERBET_EXECUTOR_ENABLED',
     'KEMERBET_FINAL_ACTION_ENABLED',
     'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
     'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
   ],
-  'the one-shot recheck environment allowlist must remain exact',
+  'the readiness controller environment allowlist must remain exact',
 );
-for (const proxyName of dockerProxyEnvironmentNames) {
-  assert.equal(
-    countMatches(
-      kemerbetRecheckEnvironment,
-      new RegExp(`^      ${escapeRegExp(proxyName)}: ''$`, 'gm'),
-    ),
-    1,
-    `${proxyName} must be present exactly once with an empty value`,
-  );
+assert.deepEqual(
+  readinessEnvironmentNames(kemerbetBrowserEnvironment),
+  [
+    'NODE_ENV',
+    ...dockerProxyEnvironmentNames,
+    'FINANCIAL_ACTIONS_MODE',
+    'KEMERBET_READINESS_BROWSER_DRIVER_ENABLED',
+    'KEMERBET_READINESS_L7_PROXY_IPV4',
+    'KEMERBET_READINESS_L7_PROXY_SPKI_SHA256',
+    'KEMERBET_EXECUTOR_ENABLED',
+    'KEMERBET_FINAL_ACTION_ENABLED',
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+    'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
+  ],
+  'the readiness browser environment allowlist must remain exact',
+);
+assert.deepEqual(
+  readinessEnvironmentNames(kemerbetProxyEnvironment),
+  [
+    'NODE_ENV',
+    ...dockerProxyEnvironmentNames,
+    'FINANCIAL_ACTIONS_MODE',
+    'KEMERBET_EXECUTOR_ENABLED',
+    'KEMERBET_FINAL_ACTION_ENABLED',
+    'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED',
+    'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED',
+  ],
+  'the Layer-7 proxy environment allowlist must remain exact',
+);
+for (const environment of [
+  kemerbetRecheckEnvironment,
+  kemerbetBrowserEnvironment,
+  kemerbetProxyEnvironment,
+]) {
+  for (const proxyName of dockerProxyEnvironmentNames) {
+    assert.equal(
+      countMatches(environment, new RegExp(`^      ${escapeRegExp(proxyName)}: ''$`, 'gm')),
+      1,
+      `${proxyName} must be present exactly once with an empty value`,
+    );
+  }
 }
 assert.doesNotMatch(
-  kemerbetRecheckEnvironment,
-  /DATABASE|PASSWORD|TOKEN|HMAC|SUPABASE|PLAYER|RECEIVER|SELECTOR|IDENTITY|(?:^|_)AMOUNT|(?:^|_)NOTES|TRANSFER_METHOD/,
-  'the independent recheck environment must contain no database, identity, or financial authority',
+  `${kemerbetRecheckEnvironment}\n${kemerbetBrowserEnvironment}\n${kemerbetProxyEnvironment}`,
+  /DATABASE|PASSWORD|TOKEN|SUPABASE|RECEIVER|(?:^|_)AMOUNT|(?:^|_)NOTES|TRANSFER_METHOD/,
+  'the readiness services must contain no database, credential, receiver, or financial-action environment authority',
 );
 const executorRuntimeBase = dockerfile
   .split('FROM runtime-base AS executor-runtime-base')[1]
@@ -354,15 +467,17 @@ for (const proxyName of dockerProxyEnvironmentNames) {
   );
 }
 const kemerbetRecheckVolumes = servicePropertyBlock(kemerbetRecheckService, 'volumes');
-assert.equal(
-  countMatches(kemerbetRecheckVolumes, /^\s+- type: /gm),
-  5,
-  'the one-shot recheck must have exactly one browser-profile volume and four read-only inputs',
-);
-assert.match(
-  kemerbetRecheckVolumes,
-  /type: volume\s*\r?\n\s+source: kemerbet_sessions\s*\r?\n\s+target: \/var\/lib\/fetanagent\/kemerbet-sessions/,
-);
+const kemerbetBrowserVolumes = servicePropertyBlock(kemerbetReadinessBrowserService, 'volumes');
+const kemerbetProxyVolumes = servicePropertyBlock(kemerbetReadinessProxyService, 'volumes');
+const assertExactReadOnlyBind = (volumesBlock, source, target) => {
+  assert.match(
+    volumesBlock,
+    new RegExp(
+      `type: bind\\s*\\r?\\n\\s+source: ${escapeRegExp(source)}\\s*\\r?\\n\\s+target: ${escapeRegExp(target)}\\s*\\r?\\n\\s+read_only: true\\s*\\r?\\n\\s+bind:\\s*\\r?\\n\\s+create_host_path: false`,
+    ),
+  );
+};
+assert.equal(countMatches(kemerbetRecheckVolumes, /^\s+- type: /gm), 6);
 for (const [source, target] of [
   [
     '/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate/kemerbet_agent_identity_bindings',
@@ -377,28 +492,139 @@ for (const [source, target] of [
     '/run/secrets/kemerbet_no_transfer_readiness_player_ids',
   ],
   [
-    '/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json',
-    '/etc/fetanagent/kemerbet-selector-contract.v2.json',
+    '/run/fetanagent-kemerbet-readiness-rpc-v1/controller-capability',
+    '/run/secrets/kemerbet_readiness_browser_rpc_capability',
+  ],
+  [
+    '/run/fetanagent-kemerbet-readiness-rpc-v1/layer7-authorizations',
+    '/run/secrets/kemerbet_readiness_layer7_authorizations',
+  ],
+  [
+    '/run/fetanagent-kemerbet-readiness-rpc-v1/controller-firewall-release',
+    '/run/secrets/kemerbet_readiness_controller_firewall_release',
   ],
 ]) {
-  assert.match(
-    kemerbetRecheckVolumes,
-    new RegExp(
-      `type: bind\\s*\\r?\\n\\s+source: ${escapeRegExp(source)}\\s*\\r?\\n\\s+target: ${escapeRegExp(target)}\\s*\\r?\\n\\s+read_only: true\\s*\\r?\\n\\s+bind:\\s*\\r?\\n\\s+create_host_path: false`,
-    ),
-  );
+  assertExactReadOnlyBind(kemerbetRecheckVolumes, source, target);
 }
-assert.match(kemerbetRecheckService, /networks:\s*\r?\n\s+- kemerbet_readiness_egress/);
+assert.doesNotMatch(
+  kemerbetRecheckVolumes,
+  /kemerbet_sessions|kemerbet_readiness_profile_snapshot|kemerbet-selector-contract|browser-capability|browser-account-id|browser-firewall-release|proxy-hmac-key|proxy-run-nonce|proxy-output|kemerbet-readiness-seal-output/,
+  'the controller must have no browser profile, selector, browser-only input, proxy secret, or output mount',
+);
+
+assert.equal(countMatches(kemerbetBrowserVolumes, /^\s+- type: /gm), 5);
+assert.match(
+  kemerbetBrowserVolumes,
+  /type: volume\s*\r?\n\s+source: kemerbet_readiness_profile_snapshot\s*\r?\n\s+target: \/var\/lib\/fetanagent\/kemerbet-sessions/,
+);
+assertExactReadOnlyBind(
+  kemerbetBrowserVolumes,
+  '/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json',
+  '/etc/fetanagent/kemerbet-selector-contract.v2.json',
+);
+assertExactReadOnlyBind(
+  kemerbetBrowserVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/browser-capability',
+  '/run/secrets/kemerbet_readiness_browser_rpc_capability',
+);
+assertExactReadOnlyBind(
+  kemerbetBrowserVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/browser-account-id',
+  '/run/secrets/kemerbet_readiness_account_id',
+);
+assertExactReadOnlyBind(
+  kemerbetBrowserVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/browser-firewall-release',
+  '/run/secrets/kemerbet_readiness_browser_firewall_release',
+);
+assert.doesNotMatch(
+  kemerbetBrowserVolumes,
+  /source: kemerbet_sessions(?:\r?\n)|kemerbet_agent_identity_bindings|kemerbet_agent_identity_hmac_key|kemerbet_no_transfer_readiness_player_ids|layer7-authorizations|proxy-hmac-key|proxy-run-nonce|controller-capability|controller-firewall-release|proxy-output|kemerbet-readiness-seal-output/,
+  'the browser must receive only its disposable snapshot, selector, account file, RPC capability, and browser firewall gate',
+);
+
+assert.equal(countMatches(kemerbetProxyVolumes, /^\s+- type: /gm), 6);
+assertExactReadOnlyBind(
+  kemerbetProxyVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/proxy-hmac-key',
+  '/run/secrets/kemerbet_readiness_proxy_hmac_key',
+);
+assertExactReadOnlyBind(
+  kemerbetProxyVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/proxy-run-nonce',
+  '/run/secrets/kemerbet_readiness_proxy_run_nonce',
+);
+assertExactReadOnlyBind(
+  kemerbetProxyVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/release-sha',
+  '/run/secrets/kemerbet_readiness_release_sha',
+);
+assertExactReadOnlyBind(
+  kemerbetProxyVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/proxy-agent-identity-bindings',
+  '/run/secrets/kemerbet_readiness_proxy_agent_identity_bindings',
+);
+assertExactReadOnlyBind(
+  kemerbetProxyVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/proxy-agent-identity-hmac-key',
+  '/run/secrets/kemerbet_readiness_proxy_agent_identity_hmac_key',
+);
+assert.match(
+  kemerbetProxyVolumes,
+  /type: bind\s*\r?\n\s+source: \/run\/fetanagent-kemerbet-readiness-rpc-v1\/proxy-output\s*\r?\n\s+target: \/run\/output\s*\r?\n\s+bind:\s*\r?\n\s+create_host_path: false/,
+  'the trusted proxy alone must publish the generic completion receipt',
+);
+assert.doesNotMatch(
+  kemerbetProxyVolumes,
+  /kemerbet_sessions|readiness_profile_snapshot|selector|player_ids|kemerbet_agent_identity_bindings|kemerbet_agent_identity_hmac_key|capability|account-id|firewall-release|layer7-authorizations|cohort|seal-output/,
+  'the proxy must receive only its one-run verifier material, exact proxy-only identity copies, release SHA, and completion output, never the cohort',
+);
+
+assert.match(
+  kemerbetRecheckService,
+  /networks:\s*\r?\n\s+kemerbet_readiness_control:\s*\r?\n\s+ipv4_address: 172\.31\.254\.2\s*\r?\n\s+ipv6_address: fd5e:7a9e:1::2/,
+);
+assert.match(
+  kemerbetReadinessBrowserService,
+  /networks:\s*\r?\n\s+kemerbet_readiness_control:\s*\r?\n\s+ipv4_address: 172\.31\.254\.3\s*\r?\n\s+ipv6_address: fd5e:7a9e:1::3\s*\r?\n\s+kemerbet_readiness_proxy:\s*\r?\n\s+ipv4_address: 172\.31\.254\.11\s*\r?\n\s+ipv6_address: fd5e:7a9e:2::3/,
+);
+assert.match(
+  kemerbetReadinessProxyService,
+  /networks:\s*\r?\n\s+kemerbet_readiness_proxy:\s*\r?\n\s+ipv4_address: 172\.31\.254\.10\s*\r?\n\s+ipv6_address: fd5e:7a9e:2::2\s*\r?\n\s+kemerbet_readiness_egress: \{\}/,
+);
 assert.equal(
-  countMatches(services, /^\s+- kemerbet_readiness_egress$/gm),
+  countMatches(services, /^      kemerbet_readiness_egress: \{\}$/gm),
   1,
-  'only the one-shot recheck may join its transient egress bridge',
+  'only the Layer-7 proxy may join the Internet-facing readiness bridge',
 );
 assert.match(kemerbetRecheckService, /healthcheck:\s*\r?\n\s+disable: true/);
+assert.match(kemerbetReadinessBrowserService, /host:'172\.31\.254\.3',port:4587/);
+for (const proxyApplicationReadinessContract of [
+  /p='\/tmp\/fetanagent-kemerbet-readiness-layer7-proxy\.ready'/,
+  /fetanagent-kemerbet-readiness-layer7-proxy-ready-v1\\\\n/,
+  /lstatSync\(p,\{bigint:true\}\)/,
+  /O_RDONLY\|f\.constants\.O_NOFOLLOW/,
+  /fstatSync\(d,\{bigint:true\}\)/,
+  /s\.uid!==10003n\|\|s\.gid!==10003n/,
+  /\(s\.mode&0o7777n\)!==0o600n/,
+  /s\.nlink!==1n/,
+  /s\.dev!==b\.dev\|\|s\.ino!==b\.ino/,
+  /f\.readSync\(d,x,0,1,v\.length\)!==0/,
+  /a\.dev!==s\.dev\|\|a\.ino!==s\.ino/,
+  /retries: 120/,
+  /start_period: 90s/,
+]) {
+  assert.match(kemerbetReadinessProxyService, proxyApplicationReadinessContract);
+}
 assert.doesNotMatch(
-  kemerbetRecheckService,
-  /ports:|expose:|depends_on:|secrets:|configs:|owner_control_service|staging_service|kemerbet_session_control|kemerbet-readiness-seal-output|DATABASE|SUPABASE|RECEIVER|PILOT_MANIFEST|history|docker\.sock/iu,
-  'the one-shot recheck must remain isolated from application, database, pilot, history, and Docker authority',
+  kemerbetReadinessProxyService,
+  /connect\(18443,'127\.0\.0\.1'\)/,
+  'proxy health must require the post-prefetch application marker, not TCP-listen readiness',
+);
+assert.doesNotMatch(
+  `${kemerbetRecheckService}\n${kemerbetReadinessBrowserService}\n${kemerbetReadinessProxyService}`,
+  /owner_control_service|staging_service|kemerbet_session_control|kemerbet-readiness-seal-output|DATABASE|SUPABASE|RECEIVER|PILOT_MANIFEST|history|docker\.sock|kemerbet_readiness_bootstrap|network-gate-ready|network-gate-release/iu,
+  'the static three-service recheck must remain isolated from application, database, pilot, history, Docker, and the retired dynamic gate design',
 );
 
 assert.match(customerWebService, /target: customer-web/);
@@ -789,31 +1015,88 @@ for (const directSecretName of [
 
 const ownerControlNetwork = childBlock(networks, 'owner_control_service');
 const stagingNetwork = childBlock(networks, 'staging_service');
-const kemerbetReadinessNetwork = childBlock(networks, 'kemerbet_readiness_egress');
+const kemerbetReadinessControlNetwork = childBlock(networks, 'kemerbet_readiness_control');
+const kemerbetReadinessProxyNetwork = childBlock(networks, 'kemerbet_readiness_proxy');
+const kemerbetReadinessEgressNetwork = childBlock(networks, 'kemerbet_readiness_egress');
 assert.deepEqual(
   sorted([...networks.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1])),
-  sorted(['owner_control_service', 'staging_service', 'kemerbet_readiness_egress']),
-  'only the two application bridges and the transient no-transfer recheck bridge are allowed',
+  sorted([
+    'owner_control_service',
+    'staging_service',
+    'kemerbet_readiness_control',
+    'kemerbet_readiness_proxy',
+    'kemerbet_readiness_egress',
+  ]),
+  'only the two application bridges and the three static readiness bridges are allowed',
 );
 for (const [networkName, network] of [
   ['owner_control_service', ownerControlNetwork],
   ['staging_service', stagingNetwork],
-  ['kemerbet_readiness_egress', kemerbetReadinessNetwork],
+  ['kemerbet_readiness_egress', kemerbetReadinessEgressNetwork],
 ]) {
   assert.match(network, /driver: bridge/);
   assert.match(network, /internal: false/, `${networkName} must retain outbound Internet access`);
   assert.match(network, /attachable: false/);
+  assert.match(network, /enable_ipv6: true/);
 }
-assert.match(
-  ownerControlNetwork,
-  /enable_ipv6: true/,
-  'the Owner-control service bridge must provide IPv6',
+assert.doesNotMatch(
+  kemerbetReadinessEgressNetwork,
+  /driver_opts:|ipam:|com\.docker\.network\.bridge\.gateway_mode_ipv[46]/,
+  'the proxy-only egress bridge must not inherit isolated static-network configuration',
 );
-assert.match(stagingNetwork, /enable_ipv6: true/, 'the staging service bridge must provide IPv6');
-assert.match(
-  kemerbetReadinessNetwork,
-  /enable_ipv6: true/,
-  'the one-shot KemerBet recheck bridge must provide IPv6 without joining an application network',
+
+const assertExactIsolatedReadinessNetwork = (
+  name,
+  network,
+  ipv4Subnet,
+  ipv4Gateway,
+  ipv6Subnet,
+  ipv6Gateway,
+) => {
+  assert.match(network, /driver: bridge/);
+  assert.match(network, /internal: true/, `${name} must have no Internet route`);
+  assert.match(network, /attachable: false/);
+  assert.match(network, /enable_ipv6: true/);
+  assert.deepEqual(
+    [
+      ...network.matchAll(
+        /^      (com\.docker\.network\.bridge\.gateway_mode_ipv[46]): ([^\r\n]+)$/gm,
+      ),
+    ].map((match) => [match[1], match[2]]),
+    [
+      ['com.docker.network.bridge.gateway_mode_ipv4', 'isolated'],
+      ['com.docker.network.bridge.gateway_mode_ipv6', 'isolated'],
+    ],
+    `${name} must isolate exactly its IPv4 and IPv6 host gateways`,
+  );
+  assert.match(
+    network,
+    new RegExp(
+      `ipam:\\s*\\r?\\n\\s+config:\\s*\\r?\\n\\s+- subnet: ${escapeRegExp(ipv4Subnet)}\\s*\\r?\\n\\s+gateway: ${escapeRegExp(ipv4Gateway)}\\s*\\r?\\n\\s+- subnet: ${escapeRegExp(ipv6Subnet)}\\s*\\r?\\n\\s+gateway: ${escapeRegExp(ipv6Gateway)}`,
+    ),
+    `${name} must retain its reviewed static dual-stack IPAM`,
+  );
+};
+assertExactIsolatedReadinessNetwork(
+  'kemerbet_readiness_control',
+  kemerbetReadinessControlNetwork,
+  '172.31.254.0/29',
+  '172.31.254.1',
+  'fd5e:7a9e:1::/64',
+  'fd5e:7a9e:1::1',
+);
+assertExactIsolatedReadinessNetwork(
+  'kemerbet_readiness_proxy',
+  kemerbetReadinessProxyNetwork,
+  '172.31.254.8/29',
+  '172.31.254.9',
+  'fd5e:7a9e:2::/64',
+  'fd5e:7a9e:2::1',
+);
+assert.doesNotMatch(
+  compose,
+  /kemerbet_readiness_bootstrap|fetanagent-kemerbet-readiness-network-gate-(?:ready|release)-v1/,
+  'the retired dynamic marker/attach topology must remain absent',
 );
 
 assert.equal(
@@ -835,8 +1118,14 @@ assert.doesNotMatch(compose, /xzztugbgtulptnbpoelr/i, 'the production project re
 assert.doesNotMatch(services, /^  (?:worker|executor|maintenance|proxy):\s*$/m);
 assert.deepEqual(
   [...volumes.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1]),
-  ['kemerbet_session_control', 'kemerbet_sessions'],
-  'only the private socket and isolated KemerBet browser profile volumes are allowed',
+  ['kemerbet_session_control', 'kemerbet_sessions', 'kemerbet_readiness_profile_snapshot'],
+  'only the private socket, long-lived profile, and one external disposable readiness snapshot are allowed',
+);
+const readinessSnapshotVolume = childBlock(volumes, 'kemerbet_readiness_profile_snapshot');
+assert.match(readinessSnapshotVolume, /external: true/);
+assert.match(
+  readinessSnapshotVolume,
+  /name: fetanagent-staging-beta-kemerbet-readiness-profile-snapshot-once/,
 );
 
 const reviewedBase =
@@ -860,6 +1149,11 @@ assert.match(dockerfile, /FROM runtime-base AS bot/);
 assert.match(dockerfile, /FROM runtime-base AS admin/);
 assert.match(dockerfile, /FROM runtime-base AS customer-web/);
 assert.match(dockerfile, /USER 10001:10001/);
+assert.match(
+  dockerfile,
+  /groupadd --gid 10001 fetanagent[\s\S]*?useradd --uid 10001 --gid 10001[\s\S]*?groupadd --gid 10002 fetanagent-readiness-controller[\s\S]*?useradd --uid 10002 --gid 10002[\s\S]*?groupadd --gid 10003 fetanagent-readiness-proxy[\s\S]*?useradd --uid 10003 --gid 10003[\s\S]*?groupadd --gid 10004 fetanagent-readiness-authorizer[\s\S]*?useradd --uid 10004 --gid 10004/,
+  'the runtime image must contain distinct browser, controller, proxy, and offline-authorizer identities',
+);
 assert.match(
   dockerfile,
   /caddy:2\.11\.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway/,
@@ -914,5 +1208,5 @@ assert.match(landingPage, /https:\/\/owner\.fetanagent\.com\/owner/);
 assert.doesNotMatch(landingPage, /\bPayRe(?:layy?|playy)\b/i);
 
 console.log(
-  'staging beta artifacts verified: five private services, a gated HTTPS gateway, isolated no-transfer sign-in/recheck tools, and locked financial/provider gates',
+  'staging beta artifacts verified: private application services, a gated HTTPS gateway, a static three-service no-transfer readiness boundary with an external disposable profile snapshot, and locked financial/provider gates',
 );

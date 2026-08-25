@@ -27,12 +27,31 @@ The only services are:
   directory. It shares a private Unix-socket volume with Owner and one isolated persistent browser
   profile. Its route guard always blocks the exact deposit endpoint, locks manual input after the
   signed-in `/agents` page appears, and permits the seal to issue read-only lookups in that same
-  in-memory authenticated Chromium process.
+  in-memory authenticated Chromium process. After the fifth strictly validated lookup, the terminal
+  route latch remains installed while the exact BrowserContext closes; only a successful close and
+  cleared retained session may precede the v2 binding write.
+- `kemerbet-no-transfer-readiness`, `kemerbet-readiness-browser`, and
+  `kemerbet-readiness-egress-proxy`, three normally absent services in the explicit
+  `kemerbet-no-transfer-readiness` profile. They are respectively UID/GID `10002`, `10001`, and
+  `10003`; publish no port; and divide control, browser, and trusted Layer-7 egress authority. The
+  root helper also creates short-lived UID/GID-`10004` authorization-premint and root profile
+  snapshot-copy, strict snapshot-verify, and source-policy original-verify containers with network
+  mode `none`; these are not long-running Compose services.
+
+The private sign-in and seal are an explicitly trusted, supervised enrollment ceremony—not a
+compromised-renderer containment boundary. The operator already trusts the live KemerBet page while
+entering credentials; during enrollment, unsandboxed Chromium and trusted Node share UID `10001`
+while the container holds the seal-only identity HMAC, exact-five Player input, selector, profile,
+and output mounts. A compromised enrollment renderer is therefore outside the confidentiality
+guarantee, although the route guard contains no financial endpoint and successful binding
+installation requires terminal BrowserContext closure. Compromised-renderer containment begins
+after that close, in the disposable snapshot and three-service recheck below.
 
 The five application images use the immutable Linux/amd64 Node base in the repository `Dockerfile`;
-the gateway uses a separately pinned official Caddy image. Every service runs as numeric UID/GID
-10001, uses a read-only root filesystem, prevents privilege escalation, and has PID, memory, and
-CPU limits. Application services drop every Linux capability; the gateway adds only
+the gateway uses a separately pinned official Caddy image. Ordinary application services run as
+numeric UID/GID 10001; the readiness controller and proxy use their separate identities above. Each
+Compose service uses a read-only root filesystem, prevents privilege escalation, and has PID, memory,
+and CPU limits. Application services drop every Linux capability; the gateway adds only
 `NET_BIND_SERVICE` so its non-root process can bind standard HTTPS ports. The two project-scoped bridges are IPv6-enabled
 and permit outbound Internet access for the exact staging Supabase direct database endpoint and
 Telegram HTTPS. The bot and admission service publish
@@ -64,6 +83,232 @@ receipts are fixed aggregate UUID markers named `kemerbet-readiness-cohort-impor
 provider action. The recheck remains the existing lookup-only, transfer-blocked contract and does
 not compare KemerBet balances or transaction history, so unrelated manual agent activity is not an
 import failure signal.
+
+The root helper requires Docker Engine 28 or newer before it creates any readiness artifact. It
+first makes a fresh external snapshot volume, copies the exact account profile with a root,
+network-`none` one-shot, remounts that completed volume read-only into a separate root,
+network-`none` verifier, and re-attests its manifest before changing only the snapshot-volume root to
+`10001:10001` mode `0700`. The long-lived `kemerbet_sessions` volume is never mounted into the
+readiness browser. Each snapshot regular file is bounded to 256 MiB and the complete traversal is
+bounded to 1 GiB of both logical and actually read bytes; a partial or oversized copy fails closed
+and its disposable volume is removed. Only source traversal omits the exact top-level
+`SingletonCookie`, `SingletonLock`, and `SingletonSocket` entries, and only after two stable `lstat`
+checks prove each is a symlink; it never follows, copies, or hashes them. The same names as
+files/directories, every nested or other symlink, and any such entry in the completed snapshot or
+strict `verify` traversal fail closed. Post-run re-attestation of the original profile uses a
+separate `verify-original` command with only the source omission rule. In parallel preparation, a UID/GID-`10004`, network-`none`
+authorizer consumes the exact-five file and separate authorizer-only key/nonce inodes, atomically
+writes exactly five ordered authorization tokens, and is removed before any networked service
+starts. Its Player input and signing material are removed immediately after the token file is
+verified and handed to the controller.
+
+The networked proof then consists of exactly three stopped containers created from the same reviewed
+image: a UID/GID-`10002` controller on the internal control bridge, a UID/GID-`10001` browser on the
+internal control and proxy bridges, and a UID/GID-`10003` trusted Layer-7 proxy on the proxy and
+egress bridges. Their reviewed dual-stack addresses are static; neither the controller nor browser
+has a default route; no service publishes a port; and no network is attached dynamically. The host
+installs exact IPv4/IPv6 namespace firewalls for the controller and browser before atomically
+publishing their separate immutable release files. Every firewall command enters a network namespace
+through a held `/proc/self/fd` descriptor that is opened and re-attested across two exact container
+inspections, held through post-release firewall verification, and closed before cleanup; a recycled
+PID or changed namespace fails closed. The controller receives the frozen identity binding,
+exact-five input, RPC capability, pre-minted tokens, and its firewall gate—but no profile, selector,
+browser, proxy key, or nonce. The browser receives only the disposable snapshot, selector,
+file-based account UUID, RPC capability, and its firewall gate. The proxy receives only its key,
+nonce, reviewed release SHA, separate proxy-only copies of the canonical agent-identity binding and
+identity HMAC key, and write-only proof output—never the Player cohort.
+
+Chromium maps only the three reviewed KemerBet hosts to the fixed proxy and resolves every other
+hostname to `~NOTFOUND`; QUIC, WebRTC, DNS prefetch, preconnect, prediction, speculative prefetch,
+and WebTransport are disabled. Before Compose may report the proxy healthy, the proxy sequentially
+prefetches the exact `/agents` HTML plus seven pinned v84 assets using fixed headers. It requires
+HTTP 200, no redirect, absent or exact `identity` encoding, no entry over 8 MiB, and no aggregate over
+32 MiB. Renderer bootstrap requests are then served only from that private in-memory cache and never
+produce further upstream bootstrap traffic. Only after the cache, listening socket, and post-listen
+network attestation pass does the proxy atomically publish an exact UID/GID-`10003`, mode-`0600`
+marker at `/tmp/fetanagent-kemerbet-readiness-layer7-proxy.ready` in its private tmpfs, containing
+only `fetanagent-kemerbet-readiness-layer7-proxy-ready-v1` plus LF. Compose verifies its no-follow
+inode, metadata, bytes, and EOF with a 90-second start period and 120 retries; the root helper allows
+240 seconds and starts the browser only after exact application health.
+
+The proxy accepts only the reviewed cached bootstrap GET/OPTIONS surface and the exact sequential
+Player lookup. Before every authenticated upstream request, it hashes the exact sanitized bearer and
+timing-safely compares it with the provider-authorization digest in the 230-byte v2 binding created
+by the supervised seal. A mismatch is sticky-fatal with zero Profile or Player upstream calls. For
+the first matching lookup, it then makes one independent read-only `GET /Account/Profile`, strictly
+validates HTTP/encoding/UTF-8/JSON plus `resultCode: 0` and bounded `value.userName`, recomputes the
+agent-identity HMAC, and timing-safely matches the proxy-only binding. It separately pins the
+complete bearer digest for the remaining four lookups; wrong identity, bearer drift, races, aborts,
+and malformed responses are sticky-fatal. It validates
+each lookup response against the requested Player and `ETB`, completes a token only after the browser
+response finishes, and atomically publishes the canonical
+`fetanagent-kemerbet-readiness-layer7-completion-v2` generic identifier-redacted completion receipt
+with `version: 2` after all five. That receipt requires `sameAgentIdentityValidated: true` and the
+SHA-256 of the exact canonical binding-file bytes. Controller and browser exit success is
+insufficient without that exact receipt. Success and every failure path zero the proxy cache and
+remove all seven transient containers, all three readiness networks, all runtime
+capabilities/tokens/firewall files and output
+directories, and the disposable snapshot volume. No endpoint, Amount field, Transfer action, or
+financial switch is introduced by this proof.
+
+The obsolete two-field v1 identity binding cannot be upgraded in place. Its one-time transition is
+available only through the `retire-v1-for-v2-reseal` mode of the manual `Staging private KemerBet
+sign-in` workflow. Before running it, the user must independently review the exact existing v1 file
+SHA-256, supply it as `confirm_v1_binding_sha256`, and explicitly type
+`I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL`. Normal deploy, start, inspect,
+seal, recheck, bot, and public-edge paths never invoke retirement automatically. The command is
+bound to the same exact reviewed commit and failed exact-five claim. It first publishes a durable
+root-owned intent and exact root-only archive, then consumes the obsolete file; it neither rotates a
+provider credential nor contacts a financial endpoint.
+
+Run the retirement only after the exact old file digest has been independently reviewed; the
+workflow never reads the target file to derive that expected value:
+
+```bash
+gh workflow run staging-kemerbet-session-provision.yml --ref main \
+  -f mode=retire-v1-for-v2-reseal \
+  -f confirm_staging_project_ref=spzpiyxheappsfyswewl \
+  -f confirm_main_commit_sha='<exact-40-lowercase-reviewed-main-commit>' \
+  -f confirm_droplet_id=593344964 \
+  -f confirm_v1_binding_sha256='<independently-reviewed-64-lowercase-v1-file-sha256>' \
+  -f confirm_v1_retirement=I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL
+```
+
+Once an intent and archive establish pending retirement, a global gate blocks helper or release
+replacement and every unrelated state-expanding command. Only an explicit same-commit retirement
+resume, the private-session start/readiness/seal sequence required to produce v2, and safe teardown
+or diagnostics are allowed. Repeat the trusted supervised sign-in/seal ceremony on that same
+commit. The seal accepts only a canonical 230-byte v2 binding whose UUID and identity fingerprint
+project to the exact archived v1 SHA-256; it then publishes a distinct
+`resealed-awaiting-recheck` state. That state still blocks install, fresh start, helper or release
+replacement, bot/public-edge expansion, and every unrelated mutation. Only the same-release
+independent recheck and safe teardown or diagnostics may proceed.
+
+The retirement gate unlocks only after the recheck commits the immutable canonical v2 binding and
+exact root-only success receipt and revalidates their release, binding, identity-key, selector, and
+v1-projection continuity. An intent-only, archived, installing, malformed,
+`resealed-awaiting-recheck`, or receipt-incomplete state blocks both helper replacement and rollback
+in the root-console runbook. Migration from v1 does not by itself require changing the provider
+token. Any later provider-token rotation safely requires a new supervised v2 seal before recheck.
+
+If the host-local expiry boundary removes runtime secrets while the retirement is pending or
+`resealed-awaiting-recheck`, normal `deploy-and-smoke`, image/artifact transfer, Compose replacement,
+helper `install`, `fresh-start`, bot activation, and public-edge activation remain blocked. Recover
+only the exact same reviewed release through `Staging beta deploy and smoke` mode
+`recover-v1-retirement-after-expiry`, with all other mode-specific inputs empty and this exact typed
+confirmation:
+
+```text
+I-UNDERSTAND-THIS-RECOVERS-THE-EXACT-V1-RETIREMENT-RELEASE
+```
+
+Supply that job's separate `confirm_v1_retirement_release_sha` as the exact 40-character release
+recorded in the durable retirement intent. `confirm_main_commit_sha` still names the current reviewed
+protected-`main` workflow commit; the recovery release may be an older commit after `main` advances.
+The job requires the explicit release to be an ancestor of the current `GITHUB_SHA`, then obtains the
+expected helper, runtime-role provision SQL, and runtime-role disable SQL as canonical LF blobs with
+`git show <release>:<fixed-path>`. It SHA-verifies the installed helper against that release blob and
+passes the explicit release to every remote helper command, where the durable intent independently
+requires exact equality. It never computes or substitutes the retirement release from the current
+workflow commit.
+
+Before creating the 23-file bundle, making any remote mutation, uploading a path, or enabling a
+database role, the job verifies the installed helper against that historical helper SHA-256 and
+calls only its read-only `kemerbet-v1-retirement-recovery-ready <explicit-release>` command. That
+preflight independently requires the exact durable intent release and current context, the fully
+expired zero-runtime boundary, pinned release assets, installed helper identity, and either a clean
+initial boundary or an exact helper-recognized safe-to-reset crash residue. A wrong-but-ancestral
+release, malformed residue, or foreign residue fails before any rollback flag is armed or staging
+state changes. Only after a safe result does the job arm rollback, run the historical disable SQL,
+invoke the SHA-verified helper `stop`, and call the same read-only preflight a second time. The second
+result must be exactly clean before local bundle creation, remote staging, upload, or role
+provisioning can begin. The stop discards only an incomplete temp-only binding prefix. A complete
+230-byte temp must first project to the archived v1 identity; normalization atomically hard-links it
+to the absent final name, removes the temp link, synchronizes the directory, and reattests the same
+inode, single link, and content. For an exact final-plus-same-inode-temp crash, it removes only the
+temp link and preserves the final v2 artifact. The preserved final is offline-finalized to
+`resealed-awaiting-recheck` before the clean result.
+
+```bash
+gh workflow run staging-beta-deploy-smoke.yml --ref main \
+  -f mode=recover-v1-retirement-after-expiry \
+  -f confirm_staging_project_ref=spzpiyxheappsfyswewl \
+  -f confirm_main_commit_sha='<exact-current-reviewed-main-workflow-commit>' \
+  -f confirm_droplet_id=593344964 \
+  -f confirm_v1_retirement_release_sha='<exact-40-character-release-from-retirement-intent>' \
+  -f confirm_v1_retirement_recovery=I-UNDERSTAND-THIS-RECOVERS-THE-EXACT-V1-RETIREMENT-RELEASE
+```
+
+The dedicated job has no build dependency and cannot transfer an image tar or Compose file. After
+the two read-only preflights and safe reset, it validates the exact real `fetanagentbot` token and
+approved token fingerprint, then creates only this 23-file bundle. It uploads the files only to a
+run-unique deploy-user-owned mode-`0700` staging directory, captures that directory's device/inode,
+and marks only that identity as owned by the run. A descriptor-relative atomic no-replace rename
+publishes the exact
+`/tmp/fetanagent-kemerbet-v1-retirement-secrets-<40-lowercase-hex-release>` path and synchronizes
+`/tmp`; the fixed incoming path and `.consumed` successor must both have been absent. Every file is
+mode `0600` and the helper accepts no extra name:
+
+```text
+api-action-capability-hmac
+api-action-payload-hmac
+api-action-semantic-hmac
+api-action-transport-hmac
+beta-database-url
+beta-payload-hmac
+beta-transport-hmac
+bot-action-transport-hmac
+bot-token
+bot-transport-hmac
+cbe-deposit-reference-encryption-key
+cbe-deposit-reference-fingerprint-key
+cbe-deposit-reference-key-profile.v1.json
+customer-web-database-url
+customer-web-publishable-key
+customer-web-rate-limit-hmac
+deposit-proof-reference-encryption-master
+deposit-proof-reference-fingerprint-master
+deposit-proof-reference-profile.v2.json
+owner-database-url
+player-action-database-url
+publishable-key
+supabase-ca.crt
+```
+
+After publication, the job provisions fresh 24-hour narrow database roles, then calls only
+`reinstall-kemerbet-v1-retirement-secrets` for that release. Its required runtime order is exact
+private-core `start`, `arm-expiry-stop` at the derived time, `start-bot` and `bot-ready`, then
+`start-public-edge` and `public-edge-ready`. Any attempted upload or helper mutation arms an EXIT
+guard first. Failure SHA-verifies the installed helper and calls `stop`; any attempted role
+provision or reset also runs the disable SQL. Independent remote cleanup is disabled until the run
+has captured the staging directory's device/inode. It thereafter accepts only that same identity at
+the exact run-unique staging, incoming, or atomic `.consumed` path, validates a partial or complete
+subset of those 23 regular mode-`0600` files without printing a name or value, removes the safe exact
+directory, and attests all three paths absent. A preflight failure never deletes pre-existing
+residue. Simultaneous paths, a different inode, symlink, extra name, wrong owner/mode/type, or
+teardown failure makes the job fail closed.
+
+Before secret reinstall, the helper accepts exactly two durable labeled project volumes:
+`fetanagent-staging-beta_kemerbet_sessions` and
+`fetanagent-staging-beta_kemerbet_session_control`. Both must use the exact `local` driver and scope,
+null options, exactly the project/Compose-version/volume labels with one shared canonical Compose
+version, canonical `/var/lib/docker/volumes/<exact-name>/_data` mount paths, UID/GID `10001:10001`
+mode-`0700` roots, and zero container holders. The staged failed exact-five cohort and its
+single-account profile identity are re-attested from those volumes. A third project volume, any
+readiness snapshot/RPC/output volume, transient container or network, unexpected label/option,
+noncanonical mount path, holder, or cohort/profile mismatch blocks recovery.
+
+After recovery, exact pending retirement may resume the same-release private-session
+start/readiness/seal sequence. `resealed-awaiting-recheck` must not start another private session;
+it proceeds directly to only the same-release independent recheck and safe teardown/diagnostics.
+Normal mutations unlock only after the immutable final v2 binding and exact success receipt prove
+binding, key, selector, release, and v1-projection continuity.
+
+The trusted Layer-7 proxy is part of the trusted computing base. A proxy RCE or proxy-process
+compromise is outside this fail-closed guarantee: the proxy terminates KemerBet TLS, necessarily sees
+the current bearer and Player identifier, and owns the only egress route, so compromise could bypass
+the reviewed Layer-7 policy. Operation therefore depends on the pinned, reviewed image and source,
+plus the documented privilege, network, mount, and lifecycle isolation around that proxy.
 
 The two Owner stages and the private socket remain in the service-owned read/write
 `kemerbet_session_control` volume. Aggregate finals and their hidden installers live only in the
@@ -106,7 +351,9 @@ The exact crash-recovery topology is:
 - Success keeps the canonical candidate, sealed binding source, internal Player file, and both
   frozen Owner stages intact while it re-proves the reviewed release and image, exact profile digest,
   fresh no-transfer bot runtime, zero profile-volume holders, exactly one Owner-control stage
-  producer, and no transient recheck container or network. Only then does it seal the root-only
+  producer, and no readiness controller/browser/proxy or offline helper container, static readiness
+  network, runtime-input directory, completion-output directory, or disposable snapshot volume.
+  Only then does it seal the root-only
   no-transfer receipt at `/var/lib/fetanagent/kemerbet-readiness-recheck/ready-v1`; that receipt plus
   the canonical binding and digest-bound journal is the durable success authority. Committed cleanup
   validates each exact open descriptor, unlinks its fixed pathname, synchronizes the parent
@@ -403,7 +650,8 @@ logins are disabled. Keep the runtime offline throughout replacement.
 
 If that predecessor cleanup boundary was missed before `main` advanced, do not rotate over the
 running project and do not make the successor helper accept the predecessor. The bounded recovery
-mode `predecessor-stop-and-disable` exists only for the current `022a9f10` predecessor deployment.
+mode `predecessor-stop-and-disable` remains pinned only to the historical `022a9f10` predecessor
+deployment; do not broaden or repin that workflow recovery mode during the current helper rotation.
 It requires the additional typed confirmation `stop-current-staging-predecessor-runtime`, verifies
 the installed helper against the complete pinned predecessor SHA-256, stops the fixed staging
 Compose project, discards only the safe predecessor incoming directory for
@@ -433,8 +681,8 @@ file and its root-only backup.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714
-reviewed_successor=ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be
+installed_predecessor=ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be
+reviewed_successor=43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -445,7 +693,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+NEXT_SHA='43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -456,7 +704,14 @@ At the DigitalOcean root console, use only the fixed paths and hashes below. The
 predecessor and successor share the same root-owned mutation-lock contract. The block atomically
 moves the exact sudoers grant to an ignored same-filesystem name, validates sudoers with the grant
 absent, proves no process has the helper path as an argument, and acquires that mutation lock before
-the checked temporary file is atomically renamed. The grant remains absent throughout replacement.
+the checked temporary file is atomically renamed. Under that lock, its independent retirement
+preflight accepts either a genuinely absent retirement root or the exact canonical intent/completion
+pair plus the immutable post-recheck binding and success receipt with matching installed-helper
+device/inode and SHA-256, release, binding, identity-key, selector, and v1-projection continuity. It rejects an empty root, intent-only state,
+archive, installer, source-only v2 seal, extra entry, malformed record, or incomplete receipt. Thus
+`resealed-awaiting-recheck` cannot be used to rotate the helper. The rollback block is stricter: the
+predecessor cannot understand this migration, so any retirement-root presence makes rollback
+ineligible in addition to its existing pre-recheck guard. The grant remains absent throughout replacement.
 The exact grant is restored only after the installed successor is verified; the held successor lock
 then excludes a new privileged invocation until this root-console block exits. A mismatch or an
 in-flight helper aborts without replacing the helper, and the EXIT trap restores the exact grant.
@@ -470,7 +725,8 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-022a9f10"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-ecd47f5d"
+RETAINED_022_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-022a9f10"
 RETAINED_D9CD_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-d9cdcdec"
 RETAINED_526_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-5267906f"
 RETAINED_121E_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-121e3b36"
@@ -481,8 +737,9 @@ SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
 MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
-PREVIOUS_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
-NEXT_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+PREVIOUS_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+NEXT_SHA='43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619'
+RETAINED_022_BACKUP_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
 RETAINED_D9CD_BACKUP_SHA='d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7'
 RETAINED_526_BACKUP_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
 RETAINED_121E_BACKUP_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
@@ -492,8 +749,8 @@ RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453
 METADATA='http://169.254.169.254/metadata/v1'
 INSTALL_TMP=''
 BACKUP_TMP=''
-INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-ecd47f5d'
-BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-022a9f10.installing"
+INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-43b09de7'
+BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-ecd47f5d.installing"
 SUDOERS_STATE=''
 TARGET_SHA=''
 expected_sudoers() {
@@ -520,6 +777,200 @@ require_no_helper_processes() {
     done <"$cmdline" || true
     [[ "$found" == 'false' ]] || return 1
   done
+}
+require_kemerbet_v1_retirement_rotation_ready() {
+  env -i PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' \
+    python3 -I - "$TARGET" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+TARGET = sys.argv[1]
+ROOT = '/var/lib/fetanagent/kemerbet-readiness-binding-v1-retirement'
+ROOT_INSTALLING = f'{ROOT}.installing'
+INTENT = f'{ROOT}/intent-v1'
+COMPLETION = f'{ROOT}/completed-v1'
+SOURCE = '/var/lib/fetanagent/kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings'
+FINAL = '/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings'
+KEY = '/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
+SELECTOR = '/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json'
+RECEIPT_ROOT = '/var/lib/fetanagent/kemerbet-readiness-recheck'
+RECEIPT = f'{RECEIPT_ROOT}/ready-v1'
+PROMOTION = '/var/lib/fetanagent/kemerbet-readiness-recheck-promotion'
+CANDIDATE = '/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate'
+PLAYERS = '/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
+UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
+HEX = r'[0-9a-f]{64}'
+DEV_INO = r'[0-9]+:[0-9]+'
+BINDING = re.compile(
+    rf'{UUID} hmac-sha256-agent-identity-v1:{HEX} '
+    rf'sha256-provider-authorization-v1:{HEX}'
+)
+
+
+def reject():
+    raise RuntimeError('unsafe KemerBet v1 retirement state blocks helper rotation')
+
+
+def identity(value):
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+            value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
+def exact_directory(path, owner, mode):
+    try:
+        before = os.lstat(path)
+    except OSError:
+        reject()
+    if (not stat.S_ISDIR(before.st_mode) or (before.st_uid, before.st_gid) != owner
+            or stat.S_IMODE(before.st_mode) != mode or os.path.realpath(path) != path):
+        reject()
+    return identity(before)
+
+
+def exact_file(path, allowed_metadata, maximum, exact_size=None):
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        metadata = (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode))
+        if (not stat.S_ISREG(before.st_mode) or identity(before) != identity(named)
+                or before.st_nlink != 1 or metadata not in allowed_metadata
+                or before.st_size > maximum or os.path.realpath(path) != path
+                or (exact_size is not None and before.st_size != exact_size)):
+            reject()
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(65536, maximum + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > maximum:
+                reject()
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if identity(before) != identity(after) or identity(after) != identity(named_after):
+            reject()
+        return b''.join(chunks), f'{before.st_dev}:{before.st_ino}'
+    except OSError:
+        reject()
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def exact_lines(raw, count):
+    if (not raw.endswith(b'\n') or b'\r' in raw or b'\0' in raw
+            or raw.count(b'\n') != count):
+        reject()
+    try:
+        values = raw[:-1].decode('ascii').split('\n')
+    except UnicodeDecodeError:
+        reject()
+    if len(values) != count or ('\n'.join(values) + '\n').encode('ascii') != raw:
+        reject()
+    return values
+
+
+if not os.path.lexists(ROOT):
+    if os.path.lexists(ROOT_INSTALLING):
+        reject()
+    raise SystemExit(0)
+if os.path.lexists(ROOT_INSTALLING):
+    reject()
+
+root_identity = exact_directory(ROOT, (0, 0), 0o700)
+try:
+    entries = sorted(os.listdir(ROOT))
+except OSError:
+    reject()
+if entries != ['completed-v1', 'intent-v1']:
+    reject()
+
+intent_raw, _ = exact_file(INTENT, {(0, 0, 0o600)}, 4096)
+completion_raw, _ = exact_file(COMPLETION, {(0, 0, 0o600)}, 4096)
+intent = exact_lines(intent_raw, 14)
+completion = exact_lines(completion_raw, 16)
+intent_patterns = [
+    r'contract=fetanagent-kemerbet-readiness-binding-v1-retirement-v1',
+    r'state=retirement-authorized', r'release=[0-9a-f]{40}',
+    rf'helper_dev_ino={DEV_INO}', rf'helper_sha256={HEX}',
+    rf'legacy_binding_dev_ino={DEV_INO}', rf'legacy_binding_sha256={HEX}',
+    rf'identity_hmac_key_dev_ino={DEV_INO}', rf'identity_hmac_key_sha256={HEX}',
+    rf'claim_sha256={HEX}', rf'owner_stage_player_ids_dev_ino={DEV_INO}',
+    rf'owner_stage_player_ids_sha256={HEX}', rf'owner_stage_claim_dev_ino={DEV_INO}',
+    rf'release_asset_sha256={HEX}',
+]
+if any(re.fullmatch(pattern, value) is None for pattern, value in zip(intent_patterns, intent)):
+    reject()
+if (completion[0] != intent[0] or completion[1] != 'state=resealed-v2'
+        or completion[2:14] != intent[2:14]
+        or re.fullmatch(rf'v2_binding_dev_ino={DEV_INO}', completion[14]) is None
+        or re.fullmatch(rf'v2_binding_sha256={HEX}', completion[15]) is None):
+    reject()
+
+legacy_sha = intent[6].removeprefix('legacy_binding_sha256=')
+helper_dev_ino = intent[3].removeprefix('helper_dev_ino=')
+helper_sha = intent[4].removeprefix('helper_sha256=')
+key_dev_ino = intent[7].removeprefix('identity_hmac_key_dev_ino=')
+key_sha = intent[8].removeprefix('identity_hmac_key_sha256=')
+release = intent[2].removeprefix('release=')
+v2_sha = completion[15].removeprefix('v2_binding_sha256=')
+helper_raw, observed_helper_dev_ino = exact_file(TARGET, {(0, 0, 0o755)}, 2 * 1024 * 1024)
+if (observed_helper_dev_ino != helper_dev_ino
+        or hashlib.sha256(helper_raw).hexdigest() != helper_sha):
+    reject()
+key_raw, observed_key_dev_ino = exact_file(KEY, {(10001, 10001, 0o400), (0, 0, 0o444)}, 4096)
+if observed_key_dev_ino != key_dev_ino or hashlib.sha256(key_raw).hexdigest() != key_sha:
+    reject()
+
+if (os.path.lexists(SOURCE) or os.path.lexists(PROMOTION)
+        or os.path.lexists(CANDIDATE) or os.path.lexists(PLAYERS)):
+    reject()
+binding_raw, _ = exact_file(FINAL, {(0, 0, 0o444)}, 230, 230)
+receipt_root_identity = exact_directory(RECEIPT_ROOT, (0, 0), 0o700)
+try:
+    if os.listdir(RECEIPT_ROOT) != ['ready-v1']:
+        reject()
+except OSError:
+    reject()
+receipt_raw, _ = exact_file(RECEIPT, {(0, 0, 0o600)}, 4096)
+receipt = exact_lines(receipt_raw, 8)
+if (receipt[0] != 'version=1' or receipt[1] != f'release={release}'
+        or receipt[2] != f'binding_sha256={v2_sha}'
+        or receipt[3] != f'identity_hmac_key_sha256={key_sha}'
+        or re.fullmatch(rf'selector_sha256={HEX}', receipt[4]) is None
+        or re.fullmatch(rf'image_id=sha256:{HEX}', receipt[5]) is None
+        or receipt[6] != 'profile_volume=fetanagent-staging-beta_kemerbet_sessions'
+        or re.fullmatch(rf'profile_identity_sha256={HEX}', receipt[7]) is None):
+    reject()
+selector_raw, _ = exact_file(SELECTOR, {(0, 0, 0o444)}, 1024 * 1024)
+if hashlib.sha256(selector_raw).hexdigest() != receipt[4].removeprefix('selector_sha256='):
+    reject()
+if exact_directory(RECEIPT_ROOT, (0, 0), 0o700) != receipt_root_identity:
+    reject()
+
+if hashlib.sha256(binding_raw).hexdigest() != v2_sha:
+    reject()
+try:
+    binding_line = binding_raw[:-1].decode('ascii')
+except UnicodeDecodeError:
+    reject()
+if (not binding_raw.endswith(b'\n') or binding_raw.count(b'\n') != 1
+        or BINDING.fullmatch(binding_line) is None):
+    reject()
+account_id, fingerprint, authorization_digest = binding_line.split(' ')
+projection = hashlib.sha256(f'{account_id} {fingerprint}\n'.encode('ascii')).hexdigest()
+if projection != legacy_sha or not authorization_digest.startswith('sha256-provider-authorization-v1:'):
+    reject()
+if exact_directory(ROOT, (0, 0), 0o700) != root_identity:
+    reject()
+PY
 }
 require_allowed_helper_for_sudoers_restore() {
   local helper_sha
@@ -587,6 +1038,10 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
 test ! -L "$STAGING_ROOT" && test "$(stat --format='%U:%G:%a' "$STAGING_ROOT")" = 'root:root:700'
+test ! -L "$RETAINED_022_BACKUP" && test -f "$RETAINED_022_BACKUP"
+test "$(realpath -- "$RETAINED_022_BACKUP")" = "$RETAINED_022_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_022_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_022_BACKUP" | awk '{ print $1 }')" = "$RETAINED_022_BACKUP_SHA"
 test ! -L "$RETAINED_D9CD_BACKUP" && test -f "$RETAINED_D9CD_BACKUP"
 test "$(realpath -- "$RETAINED_D9CD_BACKUP")" = "$RETAINED_D9CD_BACKUP"
 test "$(stat --format='%U:%G:%a:%h' "$RETAINED_D9CD_BACKUP")" = 'root:root:600:1'
@@ -656,6 +1111,7 @@ case "$fd_identity" in 0:0:600:1:*) ;; *) false ;; esac
 flock --exclusive --nonblock 9
 test "$(stat --format='%u:%g:%a:%h:%d:%i' "$MUTATION_LOCK")" = "$fd_identity"
 require_no_helper_processes
+require_kemerbet_v1_retirement_rotation_ready
 test "$(systemctl show --property=LoadState --value \
   fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
 test "$(systemctl show --property=LoadState --value \
@@ -725,14 +1181,14 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `ecd47f5d…` before `deploy-and-smoke` is allowed. A transient SSH failure should
+against successor SHA `43b09de7…` before `deploy-and-smoke` is allowed. A transient SSH failure should
 be diagnosed and the read-only verification retried while staging remains offline. Manual rollback
-to `022a9f10…` is an exceptional pre-deploy path only: it is forbidden after `deploy-and-smoke` or
+to `ecd47f5d…` is an exceptional pre-deploy path only: it is forbidden after `deploy-and-smoke` or
 after any successor command other than exact checksum `verify`. It follows the same sudoers
 revocation and exact process-quiescence boundary, verifies the restored predecessor before
 re-enabling its grant, and makes no further mutation afterward. It is resumable with the exact
 disabled grant and either allowed TARGET hash only while the strict rollback shape remains compatible
-with predecessor `022a9f10`: the complete promotion and recheck receipt roots, recheck candidate,
+with predecessor `ecd47f5d`: the complete promotion and recheck receipt roots, recheck candidate,
 canonical binding, fixed Player-ID import candidate, every Owner cohort stage/installer/aggregate
 marker, and every profile singleton must all be absent. The root-anchored Owner aggregate receipt
 parent and root must already exist as canonical `root:root` mode-`0755` directories, retain their
@@ -747,7 +1203,8 @@ output/binding; absence is not a rollback-compatible pre-recheck state:
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-022a9f10'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-ecd47f5d'
+RETAINED_022_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-022a9f10'
 RETAINED_D9CD_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-d9cdcdec'
 RETAINED_526_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-5267906f'
 RETAINED_121E_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-121e3b36'
@@ -771,8 +1228,9 @@ OWNER_RECEIPT_PARENT='/var/lib/fetanagent'
 OWNER_RECEIPT_ROOT="$OWNER_RECEIPT_PARENT/kemerbet-readiness-cohort-receipts"
 SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'
 PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'
-PREVIOUS_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
-NEXT_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+PREVIOUS_SHA='ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be'
+NEXT_SHA='43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619'
+RETAINED_022_BACKUP_SHA='022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714'
 RETAINED_D9CD_BACKUP_SHA='d9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7'
 RETAINED_526_BACKUP_SHA='5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795'
 RETAINED_121E_BACKUP_SHA='121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4'
@@ -781,7 +1239,7 @@ RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c2
 RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 RESTORE_TMP=''
-RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-022a9f10'
+RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-ecd47f5d'
 SUDOERS_STATE=''
 TARGET_SHA=''
 OWNER_RECEIPT_PARENT_IDENTITY=''
@@ -789,7 +1247,7 @@ OWNER_RECEIPT_ROOT_IDENTITY=''
 require_pre_recheck_rollback_state() {
   local account_id absent_path ancestor binding_fingerprint binding_line binding_residue control_mountpoint
   local current_parent_identity current_root_identity identity_key_metadata profile_mountpoint
-  local profile_path receipt_entry root_entries volume_name
+  local profile_path provider_authorization_digest receipt_entry root_entries volume_name
   for absent_path in \
     "$RECHECK_PROMOTION_ROOT" \
     "$RECHECK_RECEIPT_ROOT" \
@@ -831,14 +1289,16 @@ require_pre_recheck_rollback_state() {
     'kemerbet_agent_identity_bindings' ]] || return 1
   [[ ! -L "$READINESS_BINDING" && -f "$READINESS_BINDING" &&
     "$(realpath -- "$READINESS_BINDING")" == "$READINESS_BINDING" &&
-    "$(stat --format='%u:%g:%a:%h' "$READINESS_BINDING")" == '10001:10001:600:1' ]] || return 1
+    "$(stat --format='%u:%g:%a:%h:%s' "$READINESS_BINDING")" == '10001:10001:600:1:230' ]] || return 1
   [[ "$(wc -l <"$READINESS_BINDING")" == '1' ]] || return 1
   LC_ALL=C grep -Eq \
-    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64}$' \
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
     "$READINESS_BINDING" || return 1
   binding_line="$(<"$READINESS_BINDING")"
-  IFS=' ' read -r account_id binding_fingerprint binding_residue <<<"$binding_line"
-  [[ -n "$account_id" && -n "$binding_fingerprint" && -z "$binding_residue" ]] || return 1
+  IFS=' ' read -r account_id binding_fingerprint provider_authorization_digest binding_residue \
+    <<<"$binding_line"
+  [[ -n "$account_id" && -n "$binding_fingerprint" &&
+    -n "$provider_authorization_digest" && -z "$binding_residue" ]] || return 1
   volume_name="$(docker --host unix:///var/run/docker.sock volume ls --quiet \
     --filter 'label=com.docker.compose.project=fetanagent-staging-beta' \
     --filter 'label=com.docker.compose.volume=kemerbet_session_control')" || return 1
@@ -910,6 +1370,12 @@ require_no_helper_processes() {
     [[ "$found" == 'false' ]] || return 1
   done
 }
+require_kemerbet_v1_retirement_rotation_ready() {
+  local retirement_root='/var/lib/fetanagent/kemerbet-readiness-binding-v1-retirement'
+  local retirement_root_installing="${retirement_root}.installing"
+  [[ ! -e "$retirement_root" && ! -L "$retirement_root" &&
+    ! -e "$retirement_root_installing" && ! -L "$retirement_root_installing" ]]
+}
 require_allowed_helper_for_sudoers_restore() {
   local helper_sha
   test ! -L "$TARGET" && test -f "$TARGET" || return 1
@@ -974,6 +1440,10 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
   test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
+test ! -L "$RETAINED_022_BACKUP" && test -f "$RETAINED_022_BACKUP"
+test "$(realpath -- "$RETAINED_022_BACKUP")" = "$RETAINED_022_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_022_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_022_BACKUP" | awk '{ print $1 }')" = "$RETAINED_022_BACKUP_SHA"
 test ! -L "$RETAINED_D9CD_BACKUP" && test -f "$RETAINED_D9CD_BACKUP"
 test "$(realpath -- "$RETAINED_D9CD_BACKUP")" = "$RETAINED_D9CD_BACKUP"
 test "$(stat --format='%U:%G:%a:%h' "$RETAINED_D9CD_BACKUP")" = 'root:root:600:1'
@@ -1037,6 +1507,7 @@ case "$fd_identity" in 0:0:600:1:*) ;; *) false ;; esac
 flock --exclusive --nonblock 9
 test "$(stat --format='%u:%g:%a:%h:%d:%i' "$MUTATION_LOCK")" = "$fd_identity"
 require_no_helper_processes
+require_kemerbet_v1_retirement_rotation_ready
 require_pre_recheck_rollback_state
 test "$(systemctl show --property=LoadState --value \
   fetanagent-staging-runtime-expiry-stop.timer)" = 'not-found'
@@ -1082,15 +1553,16 @@ FETANAGENT_HELPER_RESTORE
 ```
 
 Do not hand-edit the installed helper or bypass its checksum gate. After read-only verification
-succeeds, remove only the staged `.next` file. Retain all seven versioned predecessor backups: the new
-`fetanagent-staging-deploy-helper.previous-022a9f10` backup and the independently verified existing
+succeeds, remove only the staged `.next` file. Retain all eight versioned predecessor backups: the new
+`fetanagent-staging-deploy-helper.previous-ecd47f5d` backup and the independently verified existing
+`fetanagent-staging-deploy-helper.previous-022a9f10`,
 `fetanagent-staging-deploy-helper.previous-d9cdcdec`,
 `fetanagent-staging-deploy-helper.previous-5267906f`,
 `fetanagent-staging-deploy-helper.previous-121e3b36`,
 `fetanagent-staging-deploy-helper.previous-af823251`,
 `fetanagent-staging-deploy-helper.previous-b4664efd`, and
 `fetanagent-staging-deploy-helper.previous-33f4a5a4` evidence. Never overwrite or delete any of the
-six older backups during this rotation. This is a one-successor replacement, not ongoing
+seven older backups during this rotation. This is a one-successor replacement, not ongoing
 credential rotation and not authority to enable financial actions.
 
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or

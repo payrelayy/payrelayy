@@ -15,6 +15,10 @@ const FIRST_ACCOUNT = '99999999-9999-4999-8999-999999999991';
 const SECOND_ACCOUNT = '99999999-9999-4999-8999-999999999992';
 const FIRST_FINGERPRINT = `hmac-sha256-agent-identity-v1:${'a'.repeat(64)}`;
 const SECOND_FINGERPRINT = `hmac-sha256-agent-identity-v1:${'b'.repeat(64)}`;
+const FIRST_PROVIDER_AUTHORIZATION_DIGEST = `sha256-provider-authorization-v1:${'c'.repeat(64)}`;
+const SECOND_PROVIDER_AUTHORIZATION_DIGEST = `sha256-provider-authorization-v1:${'d'.repeat(64)}`;
+const FIRST_BINDING = `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`;
+const SECOND_BINDING = `${SECOND_ACCOUNT} ${SECOND_FINGERPRINT} ${SECOND_PROVIDER_AUTHORIZATION_DIGEST}`;
 
 function fakeFileSystem(
   path: string,
@@ -114,9 +118,7 @@ describe('KemerBet executor runtime isolation', () => {
   });
 
   it('parses exact unique UUID-to-agent-identity bindings and derives the account list', () => {
-    const parsed = parseKemerBetAgentIdentityBindings(
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n${SECOND_ACCOUNT} ${SECOND_FINGERPRINT}\n`,
-    );
+    const parsed = parseKemerBetAgentIdentityBindings(`${FIRST_BINDING}\n${SECOND_BINDING}\n`);
     expect(parsed.platformAgentAccountIds).toEqual([FIRST_ACCOUNT, SECOND_ACCOUNT]);
     expect([...parsed.expectedAgentIdentityBindings]).toEqual([
       [FIRST_ACCOUNT, FIRST_FINGERPRINT],
@@ -124,16 +126,19 @@ describe('KemerBet executor runtime isolation', () => {
     ]);
     for (const invalid of [
       '',
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n\n${SECOND_ACCOUNT} ${SECOND_FINGERPRINT}`,
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n${FIRST_ACCOUNT} ${SECOND_FINGERPRINT}`,
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n${SECOND_ACCOUNT} ${FIRST_FINGERPRINT}`,
-      `AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1 ${FIRST_FINGERPRINT}`,
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\r\n`,
-      `${FIRST_ACCOUNT}  ${FIRST_FINGERPRINT}`,
-      `${FIRST_ACCOUNT}\t${FIRST_FINGERPRINT}`,
-      `${FIRST_ACCOUNT} hmac-sha256-v1:${'a'.repeat(64)}`,
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT.toUpperCase()}`,
-      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n\n`,
+      `${FIRST_BINDING}\n\n${SECOND_BINDING}`,
+      `${FIRST_BINDING}\n${FIRST_ACCOUNT} ${SECOND_FINGERPRINT} ${SECOND_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_BINDING}\n${SECOND_ACCOUNT} ${FIRST_FINGERPRINT} ${SECOND_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_BINDING}\n${SECOND_ACCOUNT} ${SECOND_FINGERPRINT} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAA1 ${FIRST_FINGERPRINT} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_BINDING}\r\n`,
+      `${FIRST_ACCOUNT}  ${FIRST_FINGERPRINT} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_ACCOUNT}\t${FIRST_FINGERPRINT} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_ACCOUNT} hmac-sha256-v1:${'a'.repeat(64)} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT.toUpperCase()} ${FIRST_PROVIDER_AUTHORIZATION_DIGEST}`,
+      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT} sha256-provider-authorization-v1:${'C'.repeat(64)}`,
+      `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}`,
+      `${FIRST_BINDING}\n\n`,
       'not-a-uuid',
     ]) {
       expect(() => parseKemerBetAgentIdentityBindings(invalid)).toThrow(
@@ -144,7 +149,7 @@ describe('KemerBet executor runtime isolation', () => {
 
   it('loads bindings from an immutable root/effective-user-owned non-symlink regular file', async () => {
     const path = '/run/secrets/kemerbet_agent_identity_bindings';
-    const content = `${FIRST_ACCOUNT} ${FIRST_FINGERPRINT}\n`;
+    const content = `${FIRST_BINDING}\n`;
     await expect(
       loadKemerBetAgentIdentityBindings({
         filePath: path,

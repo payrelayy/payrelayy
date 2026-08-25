@@ -201,27 +201,29 @@ services:
     container_name: fetanagent-staging-beta-kemerbet-no-transfer-readiness-once
     command: ['node', 'apps/executor/dist/kemerbet-no-transfer-readiness.js']
     init: true
-    user: '10001:10001'
+    user: '10002:10002'
     restart: 'no'
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=268435456,mode=1777
-    shm_size: 512m
+      - /tmp:rw,noexec,nosuid,nodev,size=33554432,mode=1777
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
-    pids_limit: 512
-    mem_limit: 1536m
-    cpus: 2.00
-    stop_grace_period: 60s
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.50
+    stop_grace_period: 15s
     logging:
       driver: none
+    dns:
+      - 127.0.0.1
+    dns_opt:
+      - attempts:1
+      - timeout:1
+      - ndots:0
     environment:
       NODE_ENV: production
-      # Override every proxy key Docker Compose can inherit from the Docker
-      # client config. Empty values preserve direct egress and keep the
-      # pre-start environment attestation deterministic.
       HTTP_PROXY: ''
       http_proxy: ''
       HTTPS_PROXY: ''
@@ -234,14 +236,12 @@ services:
       all_proxy: ''
       FINANCIAL_ACTIONS_MODE: dry_run
       KEMERBET_NO_TRANSFER_READINESS_ENABLED: 'true'
+      KEMERBET_READINESS_BROWSER_RPC_ENABLED: 'true'
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
       KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'
       INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'
     volumes:
-      - type: volume
-        source: kemerbet_sessions
-        target: /var/lib/fetanagent/kemerbet-sessions
       - type: bind
         source: /etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate/kemerbet_agent_identity_bindings
         target: /run/secrets/kemerbet_agent_identity_bindings
@@ -261,15 +261,217 @@ services:
         bind:
           create_host_path: false
       - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/controller-capability
+        target: /run/secrets/kemerbet_readiness_browser_rpc_capability
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/layer7-authorizations
+        target: /run/secrets/kemerbet_readiness_layer7_authorizations
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/controller-firewall-release
+        target: /run/secrets/kemerbet_readiness_controller_firewall_release
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      kemerbet_readiness_control:
+        ipv4_address: 172.31.254.2
+        ipv6_address: fd5e:7a9e:1::2
+    healthcheck:
+      disable: true
+
+  kemerbet-readiness-browser:
+    profiles: [kemerbet-no-transfer-readiness]
+    platform: linux/amd64
+    image: fetanagent-deposit-executor:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    container_name: fetanagent-staging-beta-kemerbet-readiness-browser-once
+    command: ['node', 'apps/executor/dist/kemerbet-readiness-browser-driver.js']
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=268435456,mode=1777
+    shm_size: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1536m
+    cpus: 2.00
+    stop_grace_period: 60s
+    logging:
+      driver: none
+    dns:
+      - 127.0.0.1
+    dns_opt:
+      - attempts:1
+      - timeout:1
+      - ndots:0
+    environment:
+      NODE_ENV: production
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      NO_PROXY: ''
+      no_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
+      FINANCIAL_ACTIONS_MODE: dry_run
+      KEMERBET_READINESS_BROWSER_DRIVER_ENABLED: 'true'
+      KEMERBET_READINESS_L7_PROXY_IPV4: 172.31.254.10
+      KEMERBET_READINESS_L7_PROXY_SPKI_SHA256: Ngu9uL2STHWC7Uton/GYw7d8hDQdhliykEz2XnJZd3M=
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'
+      INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'
+    volumes:
+      - type: volume
+        source: kemerbet_readiness_profile_snapshot
+        target: /var/lib/fetanagent/kemerbet-sessions
+      - type: bind
         source: /etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json
         target: /etc/fetanagent/kemerbet-selector-contract.v2.json
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/browser-capability
+        target: /run/secrets/kemerbet_readiness_browser_rpc_capability
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/browser-account-id
+        target: /run/secrets/kemerbet_readiness_account_id
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/browser-firewall-release
+        target: /run/secrets/kemerbet_readiness_browser_firewall_release
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
-      - kemerbet_readiness_egress
+      kemerbet_readiness_control:
+        ipv4_address: 172.31.254.3
+        ipv6_address: fd5e:7a9e:1::3
+      kemerbet_readiness_proxy:
+        ipv4_address: 172.31.254.11
+        ipv6_address: fd5e:7a9e:2::3
     healthcheck:
-      disable: true
+      test:
+        - CMD
+        - node
+        - -e
+        - "const n=require('node:net');const s=n.connect({host:'172.31.254.3',port:4587});const f=()=>process.exit(1);s.setTimeout(750,f);s.once('connect',()=>{s.destroy();process.exit(0)});s.once('error',f)"
+      interval: 1s
+      timeout: 1s
+      retries: 60
+      start_period: 1s
+
+  kemerbet-readiness-egress-proxy:
+    profiles: [kemerbet-no-transfer-readiness]
+    platform: linux/amd64
+    image: fetanagent-deposit-executor:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    container_name: fetanagent-staging-beta-kemerbet-readiness-egress-proxy-once
+    command: ['node', 'apps/executor/dist/kemerbet-readiness-layer7-proxy.js']
+    init: true
+    user: '10003:10003'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=33554432,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: none
+    environment:
+      NODE_ENV: production
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      NO_PROXY: ''
+      no_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
+      FINANCIAL_ACTIONS_MODE: dry_run
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+      KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'
+      INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'
+    volumes:
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-hmac-key
+        target: /run/secrets/kemerbet_readiness_proxy_hmac_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-run-nonce
+        target: /run/secrets/kemerbet_readiness_proxy_run_nonce
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-agent-identity-bindings
+        target: /run/secrets/kemerbet_readiness_proxy_agent_identity_bindings
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-agent-identity-hmac-key
+        target: /run/secrets/kemerbet_readiness_proxy_agent_identity_hmac_key
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/release-sha
+        target: /run/secrets/kemerbet_readiness_release_sha
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-output
+        target: /run/output
+        bind:
+          create_host_path: false
+    networks:
+      kemerbet_readiness_proxy:
+        ipv4_address: 172.31.254.10
+        ipv6_address: fd5e:7a9e:2::2
+      kemerbet_readiness_egress: {}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const f=require('node:fs'),p='/tmp/fetanagent-kemerbet-readiness-layer7-proxy.ready',e=Buffer.from('fetanagent-kemerbet-readiness-layer7-proxy-ready-v1\\n');let d=-1;try{const b=f.lstatSync(p,{bigint:true});if(!b.isFile()||b.isSymbolicLink())throw 0;d=f.openSync(p,f.constants.O_RDONLY|f.constants.O_NOFOLLOW);const s=f.fstatSync(d,{bigint:true});if(!s.isFile()||s.uid!==10003n||s.gid!==10003n||(s.mode&0o7777n)!==0o600n||s.nlink!==1n||s.size!==BigInt(e.length)||s.dev!==b.dev||s.ino!==b.ino)throw 0;const v=Buffer.alloc(e.length),x=Buffer.alloc(1);if(f.readSync(d,v,0,v.length,0)!==v.length||!v.equals(e)||f.readSync(d,x,0,1,v.length)!==0)throw 0;const a=f.lstatSync(p,{bigint:true});if(!a.isFile()||a.dev!==s.dev||a.ino!==s.ino||a.uid!==s.uid||a.gid!==s.gid||(a.mode&0o7777n)!==0o600n||a.nlink!==1n||a.size!==s.size)throw 0;f.closeSync(d);process.exit(0)}catch{if(d>=0)try{f.closeSync(d)}catch{}process.exit(1)}"
+      interval: 1s
+      timeout: 1s
+      retries: 120
+      start_period: 90s
 
   customer-web:
     profiles: [staging-manual]
@@ -748,6 +950,34 @@ services:
         restart: true
 
 networks:
+  kemerbet_readiness_control:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+    enable_ipv6: true
+    internal: true
+    attachable: false
+    ipam:
+      config:
+        - subnet: 172.31.254.0/29
+          gateway: 172.31.254.1
+        - subnet: fd5e:7a9e:1::/64
+          gateway: fd5e:7a9e:1::1
+  kemerbet_readiness_proxy:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+    enable_ipv6: true
+    internal: true
+    attachable: false
+    ipam:
+      config:
+        - subnet: 172.31.254.8/29
+          gateway: 172.31.254.9
+        - subnet: fd5e:7a9e:2::/64
+          gateway: fd5e:7a9e:2::1
   kemerbet_readiness_egress:
     driver: bridge
     enable_ipv6: true
@@ -767,6 +997,9 @@ networks:
 volumes:
   kemerbet_session_control:
   kemerbet_sessions:
+  kemerbet_readiness_profile_snapshot:
+    external: true
+    name: fetanagent-staging-beta-kemerbet-readiness-profile-snapshot-once
 
 # This is the public CA downloaded for the staging Supabase project, verified out of band before
 # use. It is mounted only into the four database clients so Node extends (rather than replaces) its

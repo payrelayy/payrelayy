@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build, verify transition SSH, stop legacy for transition, clean the pinned predecessor once, unban and check staging once, deploy and smoke, or stop staging
+        description: Build, verify transition SSH, stop legacy for transition, clean the pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
         required: true
         default: plan
         type: choice
@@ -14,6 +14,7 @@ on:
           - transition-stop-legacy
           - unban-and-connectivity-check
           - deploy-and-smoke
+          - recover-v1-retirement-after-expiry
           - predecessor-stop-and-disable
           - stop-and-disable
       confirm_staging_project_ref:
@@ -30,6 +31,16 @@ on:
         type: string
       confirm_legacy_stop:
         description: For transition-stop-legacy type stop-legacy-staging-runtime; for predecessor-stop-and-disable type stop-current-staging-predecessor-runtime
+        required: false
+        default: ''
+        type: string
+      confirm_v1_retirement_recovery:
+        description: For recover-v1-retirement-after-expiry type I-UNDERSTAND-THIS-RECOVERS-THE-EXACT-V1-RETIREMENT-RELEASE
+        required: false
+        default: ''
+        type: string
+      confirm_v1_retirement_release_sha:
+        description: For recover-v1-retirement-after-expiry type the exact 40-character retirement release commit SHA
         required: false
         default: ''
         type: string
@@ -64,6 +75,8 @@ jobs:
       CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
       CONFIRMED_LEGACY_STOP: ${{ inputs.confirm_legacy_stop }}
       CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_V1_RETIREMENT_RECOVERY: ${{ inputs.confirm_v1_retirement_recovery }}
+      CONFIRMED_V1_RETIREMENT_RELEASE: ${{ inputs.confirm_v1_retirement_release_sha }}
       REQUESTED_MODE: ${{ inputs.mode }}
     steps:
       - name: Reject every non-staging target
@@ -75,13 +88,24 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|predecessor-stop-and-disable|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|stop-and-disable)$ ]]
           if [[ "$REQUESTED_MODE" == 'transition-stop-legacy' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RELEASE" ]]
           elif [[ "$REQUESTED_MODE" == 'predecessor-stop-and-disable' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-current-staging-predecessor-runtime' ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RELEASE" ]]
+          elif [[ "$REQUESTED_MODE" == 'recover-v1-retirement-after-expiry' ]]; then
+            [[ -z "$CONFIRMED_LEGACY_STOP" ]]
+            [[ "$CONFIRMED_V1_RETIREMENT_RECOVERY" == \
+              'I-UNDERSTAND-THIS-RECOVERS-THE-EXACT-V1-RETIREMENT-RELEASE' ]]
+            [[ "$CONFIRMED_V1_RETIREMENT_RELEASE" =~ ^[0-9a-f]{40}$ ]]
           else
             [[ -z "$CONFIRMED_LEGACY_STOP" ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
+            [[ -z "$CONFIRMED_V1_RETIREMENT_RELEASE" ]]
           fi
 
   build:
@@ -852,6 +876,643 @@ jobs:
             echo '::error::Staging runtime logins could not be disabled after four bounded attempts.'
             exit "$cleanup_status"
           fi
+
+  recover-v1-retirement:
+    name: Recover exact v1 retirement release after full expiry
+    if: inputs.mode == 'recover-v1-retirement-after-expiry'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact recovery contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore only the exact same-release secrets and runtime
+        shell: bash
+        env:
+          API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
+          API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
+          API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
+          BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
+          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          BOT_TO_API_ACTION_HMAC_SECRET: ${{ secrets.BOT_TO_API_ACTION_HMAC_SECRET }}
+          BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
+          CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
+          CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
+          CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
+          CONFIRMED_V1_RETIREMENT_RECOVERY: ${{ inputs.confirm_v1_retirement_recovery }}
+          CONFIRMED_V1_RETIREMENT_RELEASE: ${{ inputs.confirm_v1_retirement_release_sha }}
+          CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: ${{ secrets.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET }}
+          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
+          DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
+          EXPECTED_TELEGRAM_BOT_TOKEN_SHA256: ${{ vars.STAGING_TELEGRAM_BOT_TOKEN_SHA256 }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
+          STAGING_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.STAGING_SUPABASE_PUBLISHABLE_KEY }}
+          STAGING_TELEGRAM_BOT_TOKEN: ${{ secrets.STAGING_TELEGRAM_BOT_TOKEN }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_V1_RETIREMENT_RECOVERY" == \
+            'I-UNDERSTAND-THIS-RECOVERS-THE-EXACT-V1-RETIREMENT-RELEASE' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_V1_RETIREMENT_RELEASE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          release_sha="$CONFIRMED_V1_RETIREMENT_RELEASE"
+          [[ "$(git rev-parse "$release_sha^{commit}")" == "$release_sha" ]]
+          git merge-base --is-ancestor "$release_sha" "$GITHUB_SHA"
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ "$BETA_ADMISSION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CUSTOMER_WEB_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PLAYER_ACTION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$BOT_TO_API_ACTION_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$STAGING_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,}$ ]]
+
+          distinct_count="$(printf '%s\n' \
+            "$BETA_ADMISSION_RUNTIME_PASSWORD" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
+            "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$PLAYER_ACTION_RUNTIME_PASSWORD" \
+            "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" \
+            "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" "$BOT_TO_API_ACTION_HMAC_SECRET" \
+            "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" \
+            "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" \
+            "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" \
+            "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" \
+            "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" \
+            "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" \
+            "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" | sort -u | wc -l)"
+          [[ "$distinct_count" -eq 15 ]]
+
+          connection_dir="$RUNNER_TEMP/v1-retirement-recovery-session"
+          contract_dir="$RUNNER_TEMP/v1-retirement-contract"
+          secret_dir="$RUNNER_TEMP/v1-retirement-recovery-bundle"
+          incoming="/tmp/fetanagent-kemerbet-v1-retirement-secrets-$release_sha"
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          remote_bundle_staging="/tmp/fetanagent-kemerbet-v1-retirement-secrets-stage-$release_sha-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          [[ "$connection_dir" == "$RUNNER_TEMP/v1-retirement-recovery-session" ]]
+          [[ "$contract_dir" == "$RUNNER_TEMP/v1-retirement-contract" ]]
+          [[ "$secret_dir" == "$RUNNER_TEMP/v1-retirement-recovery-bundle" ]]
+          [[ "$incoming" =~ ^/tmp/fetanagent-kemerbet-v1-retirement-secrets-[0-9a-f]{40}$ ]]
+          [[ "$remote_bundle_staging" =~ ^/tmp/fetanagent-kemerbet-v1-retirement-secrets-stage-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ ! -e "$connection_dir" && ! -L "$connection_dir" ]]
+          [[ ! -e "$contract_dir" && ! -L "$contract_dir" ]]
+          [[ ! -e "$secret_dir" && ! -L "$secret_dir" ]]
+          install -d -m 0700 "$connection_dir"
+          install -d -m 0700 "$contract_dir"
+          umask 077
+
+          cleanup_local_recovery_inputs() {
+            local original_status="$1"
+            trap - EXIT
+            set +e
+            for local_path in "$secret_dir" "$connection_dir" "$contract_dir"; do
+              case "$local_path" in
+                "$RUNNER_TEMP/v1-retirement-recovery-bundle"|\
+                "$RUNNER_TEMP/v1-retirement-recovery-session"|\
+                "$RUNNER_TEMP/v1-retirement-contract")
+                  [[ ! -L "$local_path" && -d "$local_path" ]] && rm -rf -- "$local_path"
+                  ;;
+              esac
+            done
+            exit "$original_status"
+          }
+          trap 'cleanup_local_recovery_inputs "$?"' EXIT
+
+          recovery_contracts=(
+            'infra/operations/fetanagent-staging-deploy-helper.sh:fetanagent-staging-deploy-helper.sh'
+            'infra/sql/staging-runtimes-provision-for-deploy.sql:staging-runtimes-provision-for-deploy.sql'
+            'infra/sql/staging-runtimes-disable.sql:staging-runtimes-disable.sql'
+          )
+          for contract in "${recovery_contracts[@]}"; do
+            source_path="${contract%%:*}"
+            target_name="${contract#*:}"
+            [[ "$source_path" != "$target_name" && "$target_name" != */* ]]
+            [[ "$(git cat-file -t "$release_sha:$source_path")" == 'blob' ]]
+            git show "$release_sha:$source_path" >"$contract_dir/$target_name"
+          done
+          python3 - "$contract_dir/fetanagent-staging-deploy-helper.sh" \
+            "$contract_dir/staging-runtimes-provision-for-deploy.sql" \
+            "$contract_dir/staging-runtimes-disable.sql" <<'PY'
+          import os
+          import stat
+          import sys
+
+          for path in sys.argv[1:]:
+              value = os.lstat(path)
+              raw = open(path, 'rb').read()
+              if (
+                  not stat.S_ISREG(value.st_mode)
+                  or value.st_nlink != 1
+                  or stat.S_IMODE(value.st_mode) != 0o600
+                  or not raw
+                  or not raw.endswith(b'\n')
+                  or b'\r' in raw
+                  or b'\0' in raw
+              ):
+                  raise SystemExit(1)
+              raw.decode('utf-8', errors='strict')
+          PY
+          bash -n "$contract_dir/fetanagent-staging-deploy-helper.sh"
+
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$connection_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$connection_dir/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$connection_dir/supabase-ca.crt"
+          export PGSSLROOTCERT="$connection_dir/supabase-ca.crt"
+          openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$connection_dir/deploy-key" >/dev/null
+
+          helper_sha="$(sha256sum "$contract_dir/fetanagent-staging-deploy-helper.sh" | awk '{print $1}')"
+          [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          ssh_opts=(
+            -F /dev/null -i "$connection_dir/deploy-key" -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$connection_dir/known-hosts"
+          )
+          remote="fetanagent-admin@$STAGING_VM_HOST"
+          remote_prefix="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$helper_sha'"
+          recovery_mutation_attempted='false'
+          remote_bundle_dev_ino=''
+          remote_bundle_owned_by_run='false'
+          roles_disable_attempted='false'
+          roles_provision_attempted='false'
+
+          cleanup_recovery_reset() {
+            local original_status="$1" stop_status=0 database_status=0
+            trap - EXIT
+            set +e
+            if [[ "$original_status" -ne 0 && "$recovery_mutation_attempted" == 'true' ]]; then
+              ssh "${ssh_opts[@]}" "$remote" \
+                "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop" || \
+                stop_status=$?
+            fi
+            if [[ "$original_status" -ne 0 && "$roles_disable_attempted" == 'true' ]]; then
+              psql -X --file="$contract_dir/staging-runtimes-disable.sql" || database_status=$?
+            fi
+            for local_path in "$secret_dir" "$connection_dir" "$contract_dir"; do
+              case "$local_path" in
+                "$RUNNER_TEMP/v1-retirement-recovery-bundle"|\
+                "$RUNNER_TEMP/v1-retirement-recovery-session"|\
+                "$RUNNER_TEMP/v1-retirement-contract")
+                  [[ ! -L "$local_path" && -d "$local_path" ]] && rm -rf -- "$local_path"
+                  ;;
+              esac
+            done
+            if [[ "$original_status" -ne 0 ]]; then exit "$original_status"; fi
+            if [[ "$stop_status" -ne 0 ]]; then exit "$stop_status"; fi
+            exit "$database_status"
+          }
+          trap 'cleanup_recovery_reset "$?"' EXIT
+
+          recovery_preflight_state="$(ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-v1-retirement-recovery-ready '$release_sha'")"
+          [[ "$recovery_preflight_state" == 'KemerBet v1 retirement recovery preflight: clean.' || \
+            "$recovery_preflight_state" == 'KemerBet v1 retirement recovery preflight: safe-to-reset.' ]]
+
+          recovery_mutation_attempted='true'
+          roles_disable_attempted='true'
+          psql -X --file="$contract_dir/staging-runtimes-disable.sql"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop"
+          recovery_clean_state="$(ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-v1-retirement-recovery-ready '$release_sha'")"
+          [[ "$recovery_clean_state" == 'KemerBet v1 retirement recovery preflight: clean.' ]]
+
+          [[ ! -e "$secret_dir" && ! -L "$secret_dir" ]]
+          install -d -m 0700 "$secret_dir"
+          install -m 0600 "$connection_dir/supabase-ca.crt" "$secret_dir/supabase-ca.crt"
+
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+
+          function requireProfile(encoded, version, fields) {
+            const fingerprint = /^sha256:[0-9a-f]{64}$/u;
+            const profile = JSON.parse(encoded);
+            if (typeof profile !== 'object' || profile === null || Array.isArray(profile)) {
+              throw new Error('The protected reference-key profile is invalid.');
+            }
+            if (
+              Object.keys(profile).sort().join(',') !== [...fields, 'version'].sort().join(',') ||
+              profile.version !== version ||
+              fields.some((field) => typeof profile[field] !== 'string' || !fingerprint.test(profile[field])) ||
+              profile[fields[0]] === profile[fields[1]]
+            ) {
+              throw new Error('The protected reference-key profile is invalid.');
+            }
+          }
+
+          requireProfile(process.env.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON, 1, [
+            'encryptionKeyFingerprint',
+            'fingerprintKeyFingerprint',
+          ]);
+          requireProfile(process.env.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON, 2, [
+            'encryptionMasterFingerprint',
+            'fingerprintMasterFingerprint',
+          ]);
+
+          const token = process.env.STAGING_TELEGRAM_BOT_TOKEN;
+          const expected = process.env.EXPECTED_TELEGRAM_BOT_TOKEN_SHA256;
+          if (typeof token !== 'string' || !/^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$/u.test(token)) {
+            throw new Error('The protected staging Telegram token shape is invalid.');
+          }
+          if (typeof expected !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(expected)) {
+            throw new Error('The approved staging Telegram token fingerprint is absent.');
+          }
+          if (`sha256:${createHash('sha256').update(token).digest('hex')}` !== expected) {
+            throw new Error('The protected staging Telegram token fingerprint is wrong.');
+          }
+
+          async function telegram(method) {
+            const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+              method: 'POST',
+              signal: AbortSignal.timeout(10_000),
+            });
+            if (!response.ok) throw new Error(`Telegram ${method} returned a non-success status.`);
+            const body = await response.json();
+            if (body?.ok !== true || typeof body.result !== 'object' || body.result === null) {
+              throw new Error(`Telegram ${method} returned an invalid result.`);
+            }
+            return body.result;
+          }
+
+          const identity = await telegram('getMe');
+          if (
+            identity.is_bot !== true ||
+            typeof identity.username !== 'string' ||
+            identity.username.toLowerCase() !== 'fetanagentbot'
+          ) {
+            throw new Error('The protected token does not belong to the exact staging bot.');
+          }
+          const webhook = await telegram('getWebhookInfo');
+          if (
+            webhook.url !== '' ||
+            !Number.isSafeInteger(webhook.pending_update_count) ||
+            webhook.pending_update_count !== 0
+          ) {
+            throw new Error('The staging bot must have no webhook and no pending updates.');
+          }
+          NODE
+
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$secret_dir/beta-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$secret_dir/owner-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$CUSTOMER_WEB_RUNTIME_ROLE" "$CUSTOMER_WEB_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$secret_dir/customer-web-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$secret_dir/player-action-database-url"
+          printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"
+          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/beta-transport-hmac"
+          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/bot-transport-hmac"
+          printf '%s\n' "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" >"$secret_dir/beta-payload-hmac"
+          printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/api-action-transport-hmac"
+          printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/bot-action-transport-hmac"
+          printf '%s\n' "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" >"$secret_dir/api-action-payload-hmac"
+          printf '%s\n' "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" >"$secret_dir/api-action-capability-hmac"
+          printf '%s\n' "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" >"$secret_dir/api-action-semantic-hmac"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" >"$secret_dir/cbe-deposit-reference-encryption-key"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" >"$secret_dir/cbe-deposit-reference-fingerprint-key"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" >"$secret_dir/cbe-deposit-reference-key-profile.v1.json"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-encryption-master"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-fingerprint-master"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" >"$secret_dir/deposit-proof-reference-profile.v2.json"
+          printf '%s\n' "$STAGING_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
+          printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
+          printf '%s\n' "$STAGING_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/customer-web-publishable-key"
+          chmod 0600 "$secret_dir"/*
+
+          bundle_files=(
+            api-action-capability-hmac
+            api-action-payload-hmac
+            api-action-semantic-hmac
+            api-action-transport-hmac
+            beta-database-url
+            beta-payload-hmac
+            beta-transport-hmac
+            bot-action-transport-hmac
+            bot-token
+            bot-transport-hmac
+            cbe-deposit-reference-encryption-key
+            cbe-deposit-reference-fingerprint-key
+            cbe-deposit-reference-key-profile.v1.json
+            customer-web-database-url
+            customer-web-publishable-key
+            customer-web-rate-limit-hmac
+            deposit-proof-reference-encryption-master
+            deposit-proof-reference-fingerprint-master
+            deposit-proof-reference-profile.v2.json
+            owner-database-url
+            player-action-database-url
+            publishable-key
+            supabase-ca.crt
+          )
+          [[ "${#bundle_files[@]}" -eq 23 ]]
+          expected_bundle="$(printf '%s\n' "${bundle_files[@]}" | LC_ALL=C sort)"
+          observed_bundle="$(find -P "$secret_dir" -mindepth 1 -maxdepth 1 \
+            ! -name deploy-key ! -name known-hosts -printf '%f\n' | LC_ALL=C sort)"
+          [[ "$observed_bundle" == "$expected_bundle" ]]
+
+          cleanup_remote_bundle() {
+            ssh "${ssh_opts[@]}" "$remote" \
+              "bash -s -- '$incoming' '$remote_bundle_staging' '$remote_bundle_dev_ino'" <<'REMOTE_CLEANUP'
+          set -euo pipefail
+          incoming="$1"
+          staging="$2"
+          expected_dev_ino="$3"
+          [[ "$incoming" =~ ^/tmp/fetanagent-kemerbet-v1-retirement-secrets-[0-9a-f]{40}$ ]]
+          [[ "$staging" =~ ^/tmp/fetanagent-kemerbet-v1-retirement-secrets-stage-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          [[ "$expected_dev_ino" =~ ^[0-9]+:[0-9]+$ ]]
+          allowed_names=(
+            api-action-capability-hmac api-action-payload-hmac
+            api-action-semantic-hmac api-action-transport-hmac
+            beta-database-url beta-payload-hmac beta-transport-hmac
+            bot-action-transport-hmac bot-token bot-transport-hmac
+            cbe-deposit-reference-encryption-key cbe-deposit-reference-fingerprint-key
+            cbe-deposit-reference-key-profile.v1.json customer-web-database-url
+            customer-web-publishable-key customer-web-rate-limit-hmac
+            deposit-proof-reference-encryption-master deposit-proof-reference-fingerprint-master
+            deposit-proof-reference-profile.v2.json owner-database-url
+            player-action-database-url publishable-key supabase-ca.crt
+          )
+          cleanup_failed=0
+          present_count=0
+          for candidate in "$staging" "$incoming" "$incoming.consumed"; do
+            if [[ -e "$candidate" || -L "$candidate" ]]; then
+              present_count=$((present_count + 1))
+            fi
+          done
+          if [[ "$present_count" -gt 1 ]]; then cleanup_failed=1; fi
+          for candidate in "$staging" "$incoming" "$incoming.consumed"; do
+            if [[ ! -e "$candidate" && ! -L "$candidate" ]]; then continue; fi
+            candidate_safe='true'
+            if [[ -L "$candidate" || ! -d "$candidate" ]]; then
+              candidate_safe='false'
+            elif [[ "$(realpath -- "$candidate")" != "$candidate" ]]; then
+              candidate_safe='false'
+            elif [[ "$(stat --format='%U:%a' "$candidate")" != 'fetanagent-admin:700' ]]; then
+              candidate_safe='false'
+            elif [[ "$(stat --format='%d:%i' "$candidate")" != "$expected_dev_ino" ]]; then
+              candidate_safe='false'
+            elif [[ -n "$(find -P "$candidate" -mindepth 1 -maxdepth 1 \
+              ! \( -name api-action-capability-hmac -o -name api-action-payload-hmac \
+              -o -name api-action-semantic-hmac -o -name api-action-transport-hmac \
+              -o -name beta-database-url -o -name beta-payload-hmac \
+              -o -name beta-transport-hmac -o -name bot-action-transport-hmac \
+              -o -name bot-token -o -name bot-transport-hmac \
+              -o -name cbe-deposit-reference-encryption-key \
+              -o -name cbe-deposit-reference-fingerprint-key \
+              -o -name cbe-deposit-reference-key-profile.v1.json \
+              -o -name customer-web-database-url -o -name customer-web-publishable-key \
+              -o -name customer-web-rate-limit-hmac \
+              -o -name deposit-proof-reference-encryption-master \
+              -o -name deposit-proof-reference-fingerprint-master \
+              -o -name deposit-proof-reference-profile.v2.json \
+              -o -name owner-database-url -o -name player-action-database-url \
+              -o -name publishable-key -o -name supabase-ca.crt \) -print -quit)" ]]; then
+              candidate_safe='false'
+            else
+              for name in "${allowed_names[@]}"; do
+                target="$candidate/$name"
+                if [[ ! -e "$target" && ! -L "$target" ]]; then continue; fi
+                if [[ -L "$target" || ! -f "$target" || \
+                  "$(stat --format='%U:%a:%h' "$target")" != 'fetanagent-admin:600:1' ]]; then
+                  candidate_safe='false'
+                  break
+                fi
+              done
+            fi
+            if [[ "$candidate_safe" == 'true' ]]; then
+              rm -rf -- "$candidate"
+            else
+              cleanup_failed=1
+            fi
+          done
+          for candidate in "$staging" "$incoming" "$incoming.consumed"; do
+            if [[ -e "$candidate" || -L "$candidate" ]]; then cleanup_failed=1; fi
+          done
+          [[ "$cleanup_failed" -eq 0 ]]
+          REMOTE_CLEANUP
+          }
+
+          cleanup() {
+            local original_status="$1" cleanup_status=0 stop_status=0 database_status=0
+            trap - EXIT
+            set +e
+            if [[ "$original_status" -ne 0 && "$recovery_mutation_attempted" == 'true' ]]; then
+              ssh "${ssh_opts[@]}" "$remote" \
+                "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper stop" || \
+                stop_status=$?
+            fi
+            if [[ "$remote_bundle_owned_by_run" == 'true' ]]; then
+              cleanup_remote_bundle || cleanup_status=$?
+            fi
+            if [[ "$original_status" -ne 0 && \
+              ( "$roles_disable_attempted" == 'true' || "$roles_provision_attempted" == 'true' ) ]]; then
+              psql -X --file="$contract_dir/staging-runtimes-disable.sql" || database_status=$?
+            fi
+            [[ "$secret_dir" == "$RUNNER_TEMP/v1-retirement-recovery-bundle" && \
+              ! -L "$secret_dir" && -d "$secret_dir" ]] && rm -rf -- "$secret_dir"
+            [[ "$connection_dir" == "$RUNNER_TEMP/v1-retirement-recovery-session" && \
+              ! -L "$connection_dir" && -d "$connection_dir" ]] && rm -rf -- "$connection_dir"
+            [[ "$contract_dir" == "$RUNNER_TEMP/v1-retirement-contract" && \
+              ! -L "$contract_dir" && -d "$contract_dir" ]] && rm -rf -- "$contract_dir"
+            if [[ "$original_status" -ne 0 ]]; then exit "$original_status"; fi
+            if [[ "$cleanup_status" -ne 0 ]]; then exit "$cleanup_status"; fi
+            if [[ "$stop_status" -ne 0 ]]; then exit "$stop_status"; fi
+            exit "$database_status"
+          }
+          trap 'cleanup "$?"' EXIT
+
+          remote_bundle_dev_ino="$(ssh "${ssh_opts[@]}" "$remote" \
+            "set -euo pipefail; staging='$remote_bundle_staging'; incoming='$incoming';
+             [[ ! -e \"\$staging\" && ! -L \"\$staging\" ]];
+             [[ ! -e \"\$incoming\" && ! -L \"\$incoming\" ]];
+             [[ ! -e \"\$incoming.consumed\" && ! -L \"\$incoming.consumed\" ]];
+             install -d -m 0700 \"\$staging\";
+             [[ ! -L \"\$staging\" && -d \"\$staging\" && \"\$(realpath -- \"\$staging\")\" == \"\$staging\" ]];
+             [[ \"\$(stat --format='%U:%a' \"\$staging\")\" == 'fetanagent-admin:700' ]];
+             stat --format='%d:%i' \"\$staging\"")"
+          [[ "$remote_bundle_dev_ino" =~ ^[0-9]+:[0-9]+$ ]]
+          remote_bundle_owned_by_run='true'
+          scp "${ssh_opts[@]}" "${bundle_files[@]/#/$secret_dir/}" "$remote:$remote_bundle_staging/"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "set -euo pipefail; staging='$remote_bundle_staging'; chmod 0600 \"\$staging\"/*;
+             [[ \"\$(find -P \"\$staging\" -mindepth 1 -maxdepth 1 -type f | wc -l)\" -eq 23 ]];
+             [[ -z \"\$(find -P \"\$staging\" -mindepth 1 -maxdepth 1 ! -type f -print -quit)\" ]]"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "python3 -I - '$remote_bundle_staging' '$incoming' '$remote_bundle_dev_ino'" <<'REMOTE_PUBLISH'
+          import ctypes
+          import errno
+          import os
+          import re
+          import stat
+          import sys
+
+          def reject():
+              raise RuntimeError()
+
+          try:
+              if len(sys.argv) != 4:
+                  reject()
+              staging, incoming, expected_dev_ino = sys.argv[1:]
+              if (
+                  re.fullmatch(r'/tmp/fetanagent-kemerbet-v1-retirement-secrets-stage-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*', staging) is None
+                  or re.fullmatch(r'/tmp/fetanagent-kemerbet-v1-retirement-secrets-[0-9a-f]{40}', incoming) is None
+                  or re.fullmatch(r'[0-9]+:[0-9]+', expected_dev_ino) is None
+              ):
+                  reject()
+              parent = '/tmp'
+              staging_name = os.path.basename(staging)
+              incoming_name = os.path.basename(incoming)
+              flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+              if hasattr(os, 'O_NOFOLLOW'):
+                  flags |= os.O_NOFOLLOW
+              parent_fd = os.open(parent, flags)
+              try:
+                  parent_before = os.fstat(parent_fd)
+                  staged = os.stat(staging_name, dir_fd=parent_fd, follow_symlinks=False)
+                  if (
+                      not stat.S_ISDIR(staged.st_mode)
+                      or staged.st_uid != os.getuid()
+                      or stat.S_IMODE(staged.st_mode) != 0o700
+                      or f'{staged.st_dev}:{staged.st_ino}' != expected_dev_ino
+                  ):
+                      reject()
+                  for absent_name in (incoming_name, incoming_name + '.consumed'):
+                      try:
+                          os.stat(absent_name, dir_fd=parent_fd, follow_symlinks=False)
+                          reject()
+                      except FileNotFoundError:
+                          pass
+                  libc = ctypes.CDLL(None, use_errno=True)
+                  renameat2 = libc.renameat2
+                  renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+                  renameat2.restype = ctypes.c_int
+                  if renameat2(parent_fd, os.fsencode(staging_name), parent_fd, os.fsencode(incoming_name), 1) != 0:
+                      error = ctypes.get_errno()
+                      if error in (errno.EEXIST, errno.ENOTEMPTY):
+                          reject()
+                      raise OSError(error, os.strerror(error))
+                  os.fsync(parent_fd)
+                  published = os.stat(incoming_name, dir_fd=parent_fd, follow_symlinks=False)
+                  if (
+                      not stat.S_ISDIR(published.st_mode)
+                      or published.st_uid != os.getuid()
+                      or stat.S_IMODE(published.st_mode) != 0o700
+                      or (published.st_dev, published.st_ino) != (staged.st_dev, staged.st_ino)
+                  ):
+                      reject()
+                  try:
+                      os.stat(staging_name, dir_fd=parent_fd, follow_symlinks=False)
+                      reject()
+                  except FileNotFoundError:
+                      pass
+                  parent_after = os.fstat(parent_fd)
+                  if (
+                      parent_after.st_mode != parent_before.st_mode
+                      or parent_after.st_uid != parent_before.st_uid
+                      or parent_after.st_gid != parent_before.st_gid
+                      or (parent_after.st_dev, parent_after.st_ino) != (parent_before.st_dev, parent_before.st_ino)
+                  ):
+                      reject()
+              finally:
+                  os.close(parent_fd)
+          except Exception:
+              raise SystemExit(1)
+          REMOTE_PUBLISH
+
+          roles_provision_attempted='true'
+          psql -X --file="$contract_dir/staging-runtimes-provision-for-deploy.sql"
+          stop_at="$(psql -X --tuples-only --no-align --set=ON_ERROR_STOP=1 <<'SQL'
+          with expected(role_name) as (
+            values
+              ('fetanagent_beta_admission_runtime'::text),
+              ('fetanagent_customer_web_runtime'::text),
+              ('fetanagent_owner_control_runtime'::text),
+              ('fetanagent_player_actions_runtime'::text)
+          ),
+          observed as (
+            select role.oid, role.rolcanlogin, role.rolvaliduntil
+            from expected
+            left join pg_catalog.pg_roles role on role.rolname = expected.role_name
+          )
+          select pg_catalog.to_char(
+                   (pg_catalog.min(rolvaliduntil) - interval '2 hours') at time zone 'UTC',
+                   'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+                 )
+          from observed
+          having pg_catalog.count(oid) = 4
+             and pg_catalog.count(rolvaliduntil) = 4
+             and pg_catalog.bool_and(rolcanlogin)
+             and pg_catalog.bool_and(pg_catalog.isfinite(rolvaliduntil))
+             and pg_catalog.min(rolvaliduntil) > pg_catalog.clock_timestamp() + interval '23 hours 30 minutes'
+             and pg_catalog.max(rolvaliduntil) <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+             and pg_catalog.max(rolvaliduntil) - pg_catalog.min(rolvaliduntil) <= interval '10 seconds';
+          SQL
+          )"
+          [[ "$stop_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          stop_epoch="$(date -u -d "$stop_at" +%s)"
+          [[ "$(date -u -d "@$stop_epoch" '+%Y-%m-%dT%H:%M:%SZ')" == "$stop_at" ]]
+          now_epoch="$(date -u +%s)"
+          (( stop_epoch > now_epoch + 21 * 60 * 60 ))
+          (( stop_epoch <= now_epoch + 23 * 60 * 60 ))
+
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper reinstall-kemerbet-v1-retirement-secrets '$release_sha' '$incoming'"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start '$release_sha' '${release_sha:0:12}'"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper arm-expiry-stop '$release_sha' '$stop_at'"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-bot '$release_sha' '${release_sha:0:12}'"
+          bot_ready='false'
+          for attempt in {1..12}; do
+            if ssh "${ssh_opts[@]}" "$remote" \
+              "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper bot-ready '$release_sha'"; then
+              bot_ready='true'
+              break
+            fi
+            if [[ "$attempt" -lt 12 ]]; then sleep 5; fi
+          done
+          [[ "$bot_ready" == 'true' ]]
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-public-edge '$release_sha' '${release_sha:0:12}'"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "$remote_prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper public-edge-ready '$release_sha'"
+          echo 'v1_retirement_same_release_recovery=pass'
 
   stop:
     name: Stop staging and disable runtime logins

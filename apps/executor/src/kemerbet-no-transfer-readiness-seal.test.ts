@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import type { Page, Route } from 'playwright-core';
@@ -5,15 +6,22 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
 import {
+  buildKemerBetReadinessIsolatedChromiumHostResolverRules,
   classifyKemerBetReadinessSealRequest,
+  createKemerBetNoTransferReadinessRequestBoundary,
+  createKemerBetReadinessProviderAuthorizationDigestTracker,
+  createKemerBetReadinessPersistentLifecycleBoundary,
   createKemerBetNoTransferReadinessSealProbeFromPage,
   guardKemerBetReadinessSealRoute,
   isAllowedKemerBetReadinessSealRequest,
   isExactKemerBetReadinessSealPlayerLookupRequest,
   KemerBetNoTransferReadinessSealUnavailableError,
+  prepareKemerBetIsolatedBrowserDriverOfflineContext,
   runKemerBetNoTransferReadinessSeal,
   runKemerBetNoTransferReadinessSealMain,
+  selectSoleCanonicalKemerBetAgentRestoredPage,
   type KemerBetNoTransferReadinessSealDependencies,
+  type KemerBetReadinessPersistentLifecycleBoundary,
   type KemerBetReadinessSealForbiddenRequestDiagnostic,
 } from './kemerbet-no-transfer-readiness-seal.js';
 import {
@@ -24,6 +32,11 @@ import {
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const PLAYER_IDS = ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'] as const;
 const FINGERPRINT = `hmac-sha256-agent-identity-v1:${'1'.repeat(64)}`;
+const LAYER7_AUTHORIZATION = `v1.${'a'.repeat(32)}.1.${'b'.repeat(64)}`;
+const PROVIDER_AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
+const PROVIDER_AUTHORIZATION_DIGEST = `sha256-provider-authorization-v1:${createHash('sha256')
+  .update(PROVIDER_AUTHORIZATION, 'utf8')
+  .digest('hex')}`;
 const SELECTOR_CONTRACT = JSON.parse(
   readFileSync(
     new URL('../../../infra/config/kemerbet-selector-contract.v2.json', import.meta.url),
@@ -52,6 +65,10 @@ function guardedRouteFixture(input: {
   readonly method: string;
   readonly requestUrl: string;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly completeHeaders?: readonly { readonly name: string; readonly value: string }[];
+  readonly completeHeadersPromise?: Promise<
+    readonly { readonly name: string; readonly value: string }[]
+  >;
   readonly isMainFrame?: boolean;
   readonly isNavigationRequest?: boolean;
   readonly resourceType?: string;
@@ -60,10 +77,19 @@ function guardedRouteFixture(input: {
   const subframe = {};
   const abort = vi.fn(async (_errorCode: 'blockedbyclient'): Promise<void> => undefined);
   const continueRequest = vi.fn(async (): Promise<void> => undefined);
+  const isLookup =
+    input.method === 'GET' && input.requestUrl.includes('/Player/GeneralInfoByExternalId?');
+  const headers = {
+    ...(isLookup ? { authorization: PROVIDER_AUTHORIZATION } : {}),
+    ...input.headers,
+  };
+  const completeHeaders =
+    input.completeHeaders ?? Object.entries(headers).map(([name, value]) => ({ name, value }));
   const route = {
     request: () => ({
       frame: () => (input.isMainFrame === true ? mainFrame : subframe),
-      headers: () => ({ ...input.headers }),
+      headers: () => ({ ...headers }),
+      headersArray: async () => input.completeHeadersPromise ?? completeHeaders,
       isNavigationRequest: () => input.isNavigationRequest === true,
       method: () => input.method,
       resourceType: () => input.resourceType ?? 'xhr',
@@ -178,6 +204,7 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
   const probes: string[] = [];
   const close = vi.fn(async () => undefined);
   const finalizeReadOnlyProof = vi.fn(async () => undefined);
+  const providerAuthorizationDigest = vi.fn(() => PROVIDER_AUTHORIZATION_DIGEST);
   const writeBinding = vi.fn(async () => undefined);
   const logSuccess = vi.fn();
   const dependencies: KemerBetNoTransferReadinessSealDependencies = {
@@ -189,6 +216,7 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
     createAgentIdentityFingerprinter: async () => fingerprinter(),
     openProbe: async () => ({
       observedAgentIdentityFingerprint: FINGERPRINT,
+      providerAuthorizationDigest,
       async probePlayerLookup(target) {
         probes.push(target.playerId);
         return {
@@ -209,12 +237,121 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
     probes,
     close,
     finalizeReadOnlyProof,
+    providerAuthorizationDigest,
     writeBinding,
     logSuccess,
   };
 }
 
 describe('KemerBet no-transfer readiness seal', () => {
+  it('pins exactly five duplicate-preserving transport Authorization observations', () => {
+    const tracker = createKemerBetReadinessProviderAuthorizationDigestTracker();
+    for (let index = 0; index < 5; index += 1) {
+      tracker.capture([
+        { name: 'Accept', value: 'application/json' },
+        {
+          name: index % 2 === 0 ? 'Authorization' : 'authorization',
+          value: PROVIDER_AUTHORIZATION,
+        },
+      ]);
+    }
+    expect(tracker.complete()).toBe(PROVIDER_AUTHORIZATION_DIGEST);
+    expect(JSON.stringify(tracker)).not.toContain(PROVIDER_AUTHORIZATION);
+    tracker.destroy();
+  });
+
+  it.each([
+    ['missing', []],
+    [
+      'duplicate',
+      [
+        { name: 'Authorization', value: PROVIDER_AUTHORIZATION },
+        { name: 'authorization', value: PROVIDER_AUTHORIZATION },
+      ],
+    ],
+    ['malformed', [{ name: 'Authorization', value: 'Basic secret' }]],
+  ] as const)('makes a %s provider Authorization observation sticky-fatal', (_name, headers) => {
+    const tracker = createKemerBetReadinessProviderAuthorizationDigestTracker();
+    expect(() => tracker.capture(headers)).toThrow(KemerBetNoTransferReadinessSealUnavailableError);
+    expect(tracker.invalid()).toBe(true);
+    expect(() =>
+      tracker.capture([{ name: 'Authorization', value: PROVIDER_AUTHORIZATION }]),
+    ).toThrow(KemerBetNoTransferReadinessSealUnavailableError);
+  });
+
+  it('makes provider Authorization drift across the five seal lookups sticky-fatal', () => {
+    const tracker = createKemerBetReadinessProviderAuthorizationDigestTracker();
+    tracker.capture([{ name: 'Authorization', value: PROVIDER_AUTHORIZATION }]);
+    expect(() =>
+      tracker.capture([
+        {
+          name: 'Authorization',
+          value: 'Bearer abcdefghijklmnop.qrstuvwxyz012345.DIFFERENTTOKEN',
+        },
+      ]),
+    ).toThrow(KemerBetNoTransferReadinessSealUnavailableError);
+    expect(tracker.invalid()).toBe(true);
+  });
+
+  it('maps only the three reviewed HTTPS hosts to the fixed proxy and denies every other host', () => {
+    expect(buildKemerBetReadinessIsolatedChromiumHostResolverRules('172.31.254.10')).toBe(
+      [
+        'MAP agentsystem.admindigi.com:443 172.31.254.10:18443',
+        'MAP admin-api.agt-digi.com:443 172.31.254.10:18443',
+        'MAP agt-client-akm.agent-digi.com:443 172.31.254.10:18443',
+        'EXCLUDE 172.31.254.10',
+        'EXCLUDE localhost',
+        'MAP * ~NOTFOUND',
+      ].join(', '),
+    );
+    expect(() => buildKemerBetReadinessIsolatedChromiumHostResolverRules('127.0.0.1/24')).toThrow(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+  });
+
+  it('clears all three exact Service Worker origins offline before enabling bypass and cache denial', async () => {
+    const sends: Array<{ readonly method: string; readonly params?: unknown }> = [];
+    const session = {
+      send: async (method: string, params?: unknown) => {
+        sends.push({ method, params });
+      },
+    };
+    const context = {
+      newCDPSession: async () => session,
+      serviceWorkers: () => [],
+    };
+
+    await expect(
+      prepareKemerBetIsolatedBrowserDriverOfflineContext(context as never, {} as Page),
+    ).resolves.toBe(session);
+    expect(sends).toEqual([
+      {
+        method: 'Storage.clearDataForOrigin',
+        params: {
+          origin: 'https://agentsystem.admindigi.com',
+          storageTypes: 'service_workers,cache_storage',
+        },
+      },
+      {
+        method: 'Storage.clearDataForOrigin',
+        params: {
+          origin: 'https://admin-api.agt-digi.com',
+          storageTypes: 'service_workers,cache_storage',
+        },
+      },
+      {
+        method: 'Storage.clearDataForOrigin',
+        params: {
+          origin: 'https://agt-client-akm.agent-digi.com',
+          storageTypes: 'service_workers,cache_storage',
+        },
+      },
+      { method: 'ServiceWorker.stopAllWorkers', params: undefined },
+      { method: 'Network.setBypassServiceWorker', params: { bypass: true } },
+      { method: 'Network.setCacheDisabled', params: { cacheDisabled: true } },
+    ]);
+  });
+
   it('reuses the exact signed-in page without navigating or reloading it', () => {
     const source = readFileSync(
       new URL('./kemerbet-no-transfer-readiness-seal.ts', import.meta.url),
@@ -251,7 +388,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(publicBody).not.toContain('.reload(');
   });
 
-  it('installs context-wide HTTP and WebSocket guards before the persistent page goes online', () => {
+  it('retains the exact restored page and installs both context guards before it goes online', () => {
     const source = readFileSync(
       new URL('./kemerbet-no-transfer-readiness-seal.ts', import.meta.url),
       'utf8',
@@ -274,21 +411,72 @@ describe('KemerBet no-transfer readiness seal', () => {
 
     expect(body).toContain('offline: true');
     expect(body).toContain("serviceWorkers: 'block'");
+    expect(body).toContain("'--restore-last-session'");
+    expect(body).toContain("'--disable-quic'");
+    expect(body).toContain("'--dns-prefetch-disable'");
+    expect(body).toContain("'--disable-network-prediction'");
+    expect(body).toContain("'--disable-preconnect'");
+    expect(body).toContain("'--disable-webrtc'");
+    expect(body).toContain("'--force-webrtc-ip-handling-policy=disable_non_proxied_udp'");
+    expect(body).toContain('buildKemerBetReadinessIsolatedChromiumHostResolverRules');
+    expect(body).toContain("ignoreDefaultArgs: ['about:blank']");
     expect(body).toContain("retainedContext.route('**/*', handler)");
     expect(body).toContain("retainedContext.routeWebSocket('**/*'");
     expect(body).toContain("retainedContext.unroute('**/*', handler)");
     expect(body).not.toContain("page.routeWebSocket('**/*'");
-    const restoredPageCloseIndex = body.indexOf('restoredPage.close()');
-    expect(restoredPageCloseIndex).toBeGreaterThanOrEqual(0);
-    expect(restoredPageCloseIndex).toBeLessThan(body.indexOf('requestBoundary.install()'));
+    expect(body).not.toContain('restoredPage.close()');
+    expect(body).not.toContain('retainedContext.newPage()');
+    expect(body).not.toContain('ignoreAllDefaultArgs');
+    expect(body).not.toContain('authorizationData');
+    expect(body).not.toContain('sessionStorage.getItem');
+    expect(body).not.toContain('storageState(');
+    expect(body).toContain("restoredPage.on('crash'");
+    expect(body).toContain("restoredPage.on('framenavigated'");
+    expect(body).toContain("retainedContext.on('serviceworker'");
+    expect(body).toContain("retainedContext.on('close'");
+    expect(body).toContain('retainedContext.serviceWorkers().length === 0');
+
+    const restoredPageSelection = body.indexOf(
+      'const restoredPage = selectSoleCanonicalKemerBetAgentRestoredPage',
+    );
+    const retainedPageCloseObserver = body.indexOf("restoredPage.on('close'");
+    const contextPageObserver = body.indexOf("retainedContext.on('page'");
+    const httpGuard = body.indexOf('requestBoundary.install()');
+    const webSocketGuard = body.indexOf("retainedContext.routeWebSocket('**/*'");
+    const preGateBoundaryCheck = body.indexOf(
+      'if (externalBoundaryInvalid() || requestBoundary.invalid())',
+    );
+    const networkGate = body.indexOf(
+      'const revalidateReleasedNetworkTopology = isolatedBoundary.revalidateNetworkTopology',
+    );
+    const guardedProbe = body.indexOf(
+      'const probe = await createKemerBetNoTransferReadinessGuardedProbeFromPage',
+      networkGate,
+    );
+    const topologyRevalidationBeforeOnline = body.indexOf(
+      'await revalidateReleasedNetworkTopology()',
+      guardedProbe,
+    );
+    const setOnline = body.indexOf('retainedContext.setOffline(false)');
+    const topologyRevalidationAfterOnline = body.indexOf(
+      'await revalidateReleasedNetworkTopology()',
+      setOnline,
+    );
+
+    expect(restoredPageSelection).toBeGreaterThanOrEqual(0);
+    expect(body).toContain('let page: Page | null = restoredPage');
+    expect(retainedPageCloseObserver).toBeGreaterThan(restoredPageSelection);
+    expect(contextPageObserver).toBeGreaterThan(retainedPageCloseObserver);
+    expect(httpGuard).toBeGreaterThan(contextPageObserver);
+    expect(webSocketGuard).toBeGreaterThan(httpGuard);
+    expect(preGateBoundaryCheck).toBeGreaterThan(webSocketGuard);
+    expect(networkGate).toBeGreaterThan(preGateBoundaryCheck);
+    expect(guardedProbe).toBeGreaterThan(networkGate);
+    expect(topologyRevalidationBeforeOnline).toBeGreaterThan(guardedProbe);
+    expect(setOnline).toBeGreaterThan(topologyRevalidationBeforeOnline);
+    expect(topologyRevalidationAfterOnline).toBeGreaterThan(setOnline);
     expect(body.indexOf('requestBoundary.install()')).toBeLessThan(
       body.indexOf("retainedContext.routeWebSocket('**/*'"),
-    );
-    expect(body.indexOf("retainedContext.routeWebSocket('**/*'")).toBeLessThan(
-      body.indexOf('retainedContext.newPage()'),
-    );
-    expect(body.indexOf('retainedContext.newPage()')).toBeLessThan(
-      body.indexOf('retainedContext.setOffline(false)'),
     );
     expect(body).not.toContain('requestBoundary?.remove()');
 
@@ -300,14 +488,378 @@ describe('KemerBet no-transfer readiness seal', () => {
       guardedStart,
     );
     const guardedBody = source.slice(guardedStart, guardedEnd);
+    expect(guardedBody).toContain(
+      "options.startup.mode === 'offline_restored_canonical_navigation'",
+    );
+    expect(guardedBody).toContain('const expectedStartupUrl = KEMERBET_AGENT_DEPOSIT_URL');
+    expect(guardedBody.indexOf('requestBoundary.armCanonicalMainNavigation()')).toBeLessThan(
+      guardedBody.indexOf('await options.startup.setOnline()'),
+    );
+    expect(guardedBody.indexOf('options.startup.armCanonicalNavigation()')).toBeLessThan(
+      guardedBody.indexOf('await options.startup.setOnline()'),
+    );
+    expect(guardedBody.indexOf('await options.startup.setOnline()')).toBeLessThan(
+      guardedBody.indexOf('await options.page.goto(KEMERBET_AGENT_DEPOSIT_URL'),
+    );
+    expect(guardedBody).toContain('requestBoundary.canonicalMainNavigationConsumed()');
     const persistentCloseStart = guardedBody.indexOf(
-      "if (options.startup.mode === 'offline_canonical_navigation')",
+      "if (options.startup.mode === 'offline_restored_canonical_navigation')",
     );
     const persistentCloseEnd = guardedBody.indexOf('} else {', persistentCloseStart);
     const persistentClose = guardedBody.slice(persistentCloseStart, persistentCloseEnd);
     expect(persistentClose).toContain('await options.close()');
     expect(persistentClose).not.toContain('.catch(');
     expect(persistentClose).not.toContain('requestBoundary.remove');
+  });
+
+  it('selects the same sole canonical restored page without touching its opaque session state', () => {
+    const restoredPage = {
+      opaqueSessionState: 'present',
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+    };
+
+    expect(selectSoleCanonicalKemerBetAgentRestoredPage([restoredPage])).toBe(restoredPage);
+    expect(selectSoleCanonicalKemerBetAgentRestoredPage([restoredPage], restoredPage)).toBe(
+      restoredPage,
+    );
+    expect(restoredPage.opaqueSessionState).toBe('present');
+  });
+
+  it.each([
+    ['no restored page', []],
+    [
+      'two canonical pages',
+      [
+        { isClosed: () => false, url: () => KEMERBET_AGENT_DEPOSIT_URL },
+        { isClosed: () => false, url: () => KEMERBET_AGENT_DEPOSIT_URL },
+      ],
+    ],
+    ['blank page', [{ isClosed: () => false, url: () => 'about:blank' }]],
+    [
+      'login page',
+      [{ isClosed: () => false, url: () => 'https://agentsystem.admindigi.com/login' }],
+    ],
+    [
+      'query-bearing page',
+      [{ isClosed: () => false, url: () => `${KEMERBET_AGENT_DEPOSIT_URL}?et=1` }],
+    ],
+    [
+      'fragment-bearing page',
+      [{ isClosed: () => false, url: () => `${KEMERBET_AGENT_DEPOSIT_URL}#restored` }],
+    ],
+    [
+      'trailing-slash page',
+      [{ isClosed: () => false, url: () => `${KEMERBET_AGENT_DEPOSIT_URL}/` }],
+    ],
+    ['wrong-origin page', [{ isClosed: () => false, url: () => 'https://example.invalid/agents' }]],
+    ['closed canonical page', [{ isClosed: () => true, url: () => KEMERBET_AGENT_DEPOSIT_URL }]],
+  ])('rejects an unsafe restored-page topology: %s', (_label, pages) => {
+    expect(selectSoleCanonicalKemerBetAgentRestoredPage(pages)).toBeNull();
+  });
+
+  it('rejects replacement or unreadable restored page objects during topology revalidation', () => {
+    const retainedPage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+    };
+    const replacementPage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+    };
+    const unreadablePage = {
+      isClosed: () => false,
+      url: (): string => {
+        throw new Error('details must remain unavailable');
+      },
+    };
+
+    expect(
+      selectSoleCanonicalKemerBetAgentRestoredPage([replacementPage], retainedPage),
+    ).toBeNull();
+    expect(selectSoleCanonicalKemerBetAgentRestoredPage([unreadablePage])).toBeNull();
+  });
+
+  it.each([
+    [
+      'page close',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) => boundary.observePageClose(),
+    ],
+    [
+      'page crash',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) => boundary.observePageCrash(),
+    ],
+    [
+      'new page',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) =>
+        boundary.observePage({ isRetainedPage: false }),
+    ],
+    [
+      'service worker',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) => boundary.observeServiceWorker(),
+    ],
+    [
+      'unexpected context close',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) => boundary.observeContextClose(),
+    ],
+    [
+      'WebSocket',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) => boundary.observeWebSocket(),
+    ],
+    [
+      'subframe navigation',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) =>
+        boundary.observeFrameNavigation({
+          isMainFrame: false,
+          url: KEMERBET_AGENT_DEPOSIT_URL,
+        }),
+    ],
+    [
+      'wrong main-frame navigation',
+      (boundary: KemerBetReadinessPersistentLifecycleBoundary) =>
+        boundary.observeFrameNavigation({
+          isMainFrame: true,
+          url: 'https://agentsystem.admindigi.com/login',
+        }),
+    ],
+  ] as const)('keeps a %s lifecycle violation permanently sticky', (_label, violate) => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => true,
+      noServiceWorkers: () => true,
+    });
+    expect(boundary.invalid()).toBe(false);
+
+    violate(boundary);
+
+    expect(boundary.invalid()).toBe(true);
+    boundary.observePage({ isRetainedPage: true });
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it.each([
+    ['a pre-existing service worker', true, false],
+    ['a replacement page topology', false, true],
+  ])('rejects %s from the dynamic inventory', (_label, exactPage, workersAbsent) => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => exactPage,
+      noServiceWorkers: () => workersAbsent,
+    });
+
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it('accepts exactly one armed canonical frame commit and rejects a second commit', () => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => true,
+      noServiceWorkers: () => true,
+    });
+    expect(boundary.canonicalNavigationCommitted()).toBe(false);
+    boundary.armCanonicalNavigation();
+    expect(boundary.canonicalNavigationCommitted()).toBe(false);
+
+    boundary.observeFrameNavigation({
+      isMainFrame: true,
+      url: KEMERBET_AGENT_DEPOSIT_URL,
+    });
+
+    expect(boundary.invalid()).toBe(false);
+    expect(boundary.canonicalNavigationCommitted()).toBe(true);
+    boundary.observeFrameNavigation({
+      isMainFrame: true,
+      url: KEMERBET_AGENT_DEPOSIT_URL,
+    });
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it('does not accept a routed-navigation window without its exact frame commit', () => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => true,
+      noServiceWorkers: () => true,
+    });
+
+    boundary.armCanonicalNavigation();
+
+    expect(boundary.canonicalNavigationCommitted()).toBe(false);
+    expect(boundary.invalid()).toBe(false);
+  });
+
+  it('allows only an explicitly expected context close', () => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => true,
+      noServiceWorkers: () => true,
+    });
+
+    boundary.expectContextClose();
+    boundary.expectContextClose();
+    boundary.observeContextClose();
+
+    expect(boundary.invalid()).toBe(false);
+  });
+
+  it('allows only expected page/context close after the terminal latch and keeps later events sticky', () => {
+    let topologyPresent = true;
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => topologyPresent,
+      noServiceWorkers: () => topologyPresent,
+    });
+
+    boundary.beginTerminalClose();
+    boundary.observePageClose();
+    boundary.observeContextClose();
+    topologyPresent = false;
+
+    expect(boundary.internalViolation()).toBe(false);
+    boundary.observeFrameNavigation({ isMainFrame: true, url: KEMERBET_AGENT_DEPOSIT_URL });
+    expect(boundary.internalViolation()).toBe(true);
+  });
+
+  it('reserves a one-use Layer-7 token before continuing and aborts a concurrent duplicate', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: () => undefined,
+    });
+    await boundary.install();
+    let releaseFirst!: () => void;
+    const firstContinuation = new Promise<void>((resolvePromise) => {
+      releaseFirst = resolvePromise;
+    });
+    const first = guardedRouteFixture({
+      isMainFrame: true,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1',
+    });
+    first.continueRequest.mockImplementation(() => firstContinuation);
+    const second = guardedRouteFixture({
+      isMainFrame: true,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1',
+    });
+
+    await expect(
+      boundary.withExpectedPlayerLookup('PLAYER-1', LAYER7_AUTHORIZATION, async () => {
+        const firstOperation = handler!(first.route as unknown as Route);
+        await vi.waitFor(() => expect(first.continueRequest).toHaveBeenCalledOnce());
+        await handler!(second.route as unknown as Route);
+        releaseFirst();
+        await firstOperation;
+      }),
+    ).rejects.toBeInstanceOf(KemerBetNoTransferReadinessSealUnavailableError);
+
+    expect(first.continueRequest).toHaveBeenCalledWith({
+      headers: {
+        authorization: PROVIDER_AUTHORIZATION,
+        'x-fetanagent-readiness-authorization': LAYER7_AUTHORIZATION,
+      },
+    });
+    expect(second.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(second.continueRequest).not.toHaveBeenCalled();
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it('keeps the terminal route latch through owner close and detaches locally without Page.unroute', async () => {
+    const mainFrame = {};
+    const removeRoute = vi.fn(async () => {
+      throw new Error('Target page has already closed.');
+    });
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async () => undefined,
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute,
+      reportStage: () => undefined,
+    });
+    await boundary.install();
+    boundary.beginTerminalClose();
+    await boundary.drain();
+    expect(() => boundary.detachAfterOwnerClose()).not.toThrow();
+    expect(removeRoute).not.toHaveBeenCalled();
+  });
+
+  it('reserves the sole exact GET before awaiting complete headers so a concurrent route cannot pass', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: () => undefined,
+    });
+    await boundary.install();
+    let releaseHeaders!: (
+      headers: readonly { readonly name: string; readonly value: string }[],
+    ) => void;
+    const delayedHeaders = new Promise<
+      readonly { readonly name: string; readonly value: string }[]
+    >((resolvePromise) => {
+      releaseHeaders = resolvePromise;
+    });
+    const first = guardedRouteFixture({
+      completeHeadersPromise: delayedHeaders,
+      isMainFrame: true,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1',
+    });
+    const second = guardedRouteFixture({
+      isMainFrame: true,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1',
+    });
+
+    await expect(
+      boundary.withExpectedPlayerLookup('PLAYER-1', null, async () => {
+        const firstOperation = handler!(first.route as unknown as Route);
+        await Promise.resolve();
+        expect(first.continueRequest).not.toHaveBeenCalled();
+        await handler!(second.route as unknown as Route);
+        releaseHeaders([{ name: 'Authorization', value: PROVIDER_AUTHORIZATION }]);
+        await firstOperation;
+      }),
+    ).rejects.toBeInstanceOf(KemerBetNoTransferReadinessSealUnavailableError);
+
+    expect(first.continueRequest).toHaveBeenCalledOnce();
+    expect(second.continueRequest).not.toHaveBeenCalled();
+    expect(second.abort).toHaveBeenCalledWith('blockedbyclient');
+  });
+
+  it('rejects a browser-supplied internal Layer-7 authorization header', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: () => undefined,
+    });
+    await boundary.install();
+    const route = guardedRouteFixture({
+      headers: { 'X-FetanAgent-Readiness-Authorization': LAYER7_AUTHORIZATION },
+      isMainFrame: true,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1',
+    });
+
+    await expect(
+      boundary.withExpectedPlayerLookup('PLAYER-1', LAYER7_AUTHORIZATION, async () => {
+        await handler!(route.route as unknown as Route);
+      }),
+    ).rejects.toBeInstanceOf(KemerBetNoTransferReadinessSealUnavailableError);
+    expect(route.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(route.continueRequest).not.toHaveBeenCalled();
+    expect(boundary.invalid()).toBe(true);
   });
 
   it('permits only the guarded unforced native Find click in readiness mode', () => {
@@ -351,7 +903,12 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(test.finalizeReadOnlyProof.mock.invocationCallOrder[0]).toBeLessThan(
       test.writeBinding.mock.invocationCallOrder[0]!,
     );
-    expect(test.writeBinding).toHaveBeenCalledWith(ACCOUNT_ID, FINGERPRINT, 10001);
+    expect(test.writeBinding).toHaveBeenCalledWith(
+      ACCOUNT_ID,
+      FINGERPRINT,
+      PROVIDER_AUTHORIZATION_DIGEST,
+      10001,
+    );
     expect(test.close).toHaveBeenCalledOnce();
     expect(test.logSuccess).toHaveBeenCalledWith({
       component: 'kemerbet_no_transfer_readiness_seal',
@@ -364,6 +921,74 @@ describe('KemerBet no-transfer readiness seal', () => {
       moneyMoved: false,
     });
     expect(JSON.stringify(test.logSuccess.mock.calls)).not.toMatch(/PLAYER-|hmac-sha256/u);
+  });
+
+  it('awaits the terminal same-UID browser close before installing the v2 binding', async () => {
+    let releaseClose!: () => void;
+    let closed = false;
+    const closeGate = new Promise<void>((resolvePromise) => {
+      releaseClose = resolvePromise;
+    });
+    const close = vi.fn(async () => {
+      if (closed) return;
+      await closeGate;
+      closed = true;
+    });
+    const writeBinding = vi.fn(async () => {
+      expect(closed).toBe(true);
+    });
+    const test = fixture({
+      openProbe: async () => ({
+        observedAgentIdentityFingerprint: FINGERPRINT,
+        providerAuthorizationDigest: () => {
+          if (!closed) throw new Error('browser still active');
+          return PROVIDER_AUTHORIZATION_DIGEST;
+        },
+        probePlayerLookup: async () => ({
+          exactPlayerMatch: true,
+          exactCurrencyMatch: true,
+          transferDisabled: true,
+        }),
+        finalizeReadOnlyProof: async () => close(),
+        close,
+      }),
+      writeBinding,
+    });
+
+    const run = runKemerBetNoTransferReadinessSeal(test.dependencies);
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(writeBinding).not.toHaveBeenCalled();
+    releaseClose();
+    await expect(run).resolves.toBeUndefined();
+    expect(writeBinding).toHaveBeenCalledOnce();
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
+      writeBinding.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('writes no binding when the terminal same-UID browser close fails', async () => {
+    const close = vi.fn(async () => {
+      throw new Error('close failed');
+    });
+    const test = fixture({
+      openProbe: async () => ({
+        observedAgentIdentityFingerprint: FINGERPRINT,
+        providerAuthorizationDigest: () => PROVIDER_AUTHORIZATION_DIGEST,
+        probePlayerLookup: async () => ({
+          exactPlayerMatch: true,
+          exactCurrencyMatch: true,
+          transferDisabled: true,
+        }),
+        finalizeReadOnlyProof: async () => close(),
+        close,
+      }),
+    });
+
+    await expect(runKemerBetNoTransferReadinessSeal(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    expect(test.writeBinding).not.toHaveBeenCalled();
+    expect(test.logSuccess).not.toHaveBeenCalled();
   });
 
   it('reports only fixed, redacted workflow stages', async () => {
@@ -407,6 +1032,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     const test = fixture({
       openProbe: async () => ({
         observedAgentIdentityFingerprint: FINGERPRINT,
+        providerAuthorizationDigest: () => PROVIDER_AUTHORIZATION_DIGEST,
         probePlayerLookup: async (target) =>
           target.playerId === PLAYER_IDS[2]
             ? null
@@ -500,7 +1126,7 @@ describe('KemerBet no-transfer readiness seal', () => {
       observedFinalization,
     ]);
 
-    expect(routeResult).toEqual({ reason: routeFailure, status: 'rejected' });
+    expect(routeResult).toEqual({ status: 'fulfilled' });
     expect(finalizationResult.status).toBe('rejected');
     if (finalizationResult.status === 'rejected') {
       expect(finalizationResult.reason).toBeInstanceOf(
@@ -522,6 +1148,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     const test = fixture({
       openProbe: async () => ({
         observedAgentIdentityFingerprint: FINGERPRINT,
+        providerAuthorizationDigest: () => PROVIDER_AUTHORIZATION_DIGEST,
         probePlayerLookup: async () => ({
           exactPlayerMatch: true,
           exactCurrencyMatch: true,
@@ -757,7 +1384,15 @@ describe('KemerBet no-transfer readiness seal', () => {
         method: 'GET',
         requestUrl: 'https://www.google.com/recaptcha/api2/anchor?secret=redacted',
       }),
-    ).toEqual({ decision: 'abort_optional', target: 'recaptcha' });
+    ).toEqual({
+      decision: 'forbid',
+      diagnostic: {
+        reason: 'noncanonical_navigation',
+        target: 'recaptcha',
+        method: 'GET',
+        kind: 'subframe_navigation',
+      },
+    });
 
     const sensitive = 'credential=raw-secret playerId=raw-player';
     const diagnostic = classifyKemerBetReadinessSealRequest({
@@ -905,6 +1540,26 @@ describe('KemerBet no-transfer readiness seal', () => {
     }
   });
 
+  it('treats optional-provider main-frame navigation as sticky forbidden', () => {
+    for (const requestUrl of [
+      'https://send.sentry.report/api/306/envelope/?dsn=redacted',
+      'https://www.google.com/recaptcha/api2/anchor',
+    ]) {
+      expect(
+        classifyKemerBetReadinessSealRequest({
+          isMainFrame: true,
+          isNavigationRequest: true,
+          method: 'GET',
+          requestUrl,
+          resourceType: 'document',
+        }),
+      ).toMatchObject({
+        decision: 'forbid',
+        diagnostic: { reason: 'noncanonical_navigation', kind: 'main_navigation' },
+      });
+    }
+  });
+
   it.each([
     ['non_https', 'GET', 'http://agentsystem.admindigi.com/agents'],
     ['url_credentials', 'GET', 'https://user:secret@agentsystem.admindigi.com/agents'],
@@ -995,7 +1650,12 @@ describe('KemerBet no-transfer readiness seal', () => {
       expect(request.continueRequest).not.toHaveBeenCalled();
     }
     expect(harness.forbiddenRequests).toEqual([]);
-    await expect(harness.probe.finalizeReadOnlyProof()).resolves.toBeUndefined();
+    // This harness intentionally performs no Player lookups, so the new exact-five transport
+    // digest contract prevents completion independently of the non-poisoning optional requests.
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
     expect(harness.closeOwner).toHaveBeenCalledOnce();
   });
 
@@ -1069,6 +1729,81 @@ describe('KemerBet no-transfer readiness seal', () => {
       KemerBetNoTransferReadinessSealUnavailableError,
     );
     await harness.probe.close();
+  });
+
+  it('best-effort aborts a frame-less service-worker route and keeps the boundary invalid', async () => {
+    const harness = await realProbePageHarness();
+    const abort = vi.fn(async (_errorCode: 'blockedbyclient') => undefined);
+    const continueRequest = vi.fn(async () => undefined);
+    const route = {
+      request: () => ({
+        frame: (): never => {
+          throw new Error('service-worker request has no frame');
+        },
+        headers: () => ({}),
+        isNavigationRequest: () => false,
+        method: () => 'GET',
+        resourceType: () => 'fetch',
+        url: () => 'https://agentsystem.admindigi.com/agents',
+      }),
+      abort,
+      continue: continueRequest,
+    } as unknown as Route;
+
+    await expect(harness.dispatchRoute(route)).resolves.toBeUndefined();
+
+    expect(abort).toHaveBeenCalledOnce();
+    expect(abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(continueRequest).not.toHaveBeenCalled();
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
+  });
+
+  it('blocks a canonical main-frame navigation when no one-shot startup window is armed', async () => {
+    const harness = await realProbePageHarness();
+    const navigation = guardedRouteFixture({
+      isMainFrame: true,
+      isNavigationRequest: true,
+      method: 'GET',
+      requestUrl: KEMERBET_AGENT_DEPOSIT_URL,
+      resourceType: 'document',
+    });
+
+    await harness.dispatchRoute(navigation.route as unknown as Route);
+
+    expect(navigation.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(navigation.continueRequest).not.toHaveBeenCalled();
+    await expect(harness.probe.finalizeReadOnlyProof()).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+    await harness.probe.close();
+  });
+
+  it('best-effort aborts with a fixed failure when the exported guard cannot inspect a request frame', async () => {
+    const abort = vi.fn(async (_errorCode: 'blockedbyclient') => undefined);
+    const continueRequest = vi.fn(async () => undefined);
+    const route = {
+      request: () => ({
+        frame: (): never => {
+          throw new Error('service-worker request has no frame');
+        },
+        headers: () => ({}),
+        isNavigationRequest: () => false,
+        method: () => 'GET',
+        resourceType: () => 'fetch',
+        url: () => 'https://agentsystem.admindigi.com/agents',
+      }),
+      abort,
+      continue: continueRequest,
+    };
+
+    await expect(
+      guardKemerBetReadinessSealRoute(route, { mainFrame: () => ({}) }, () => undefined),
+    ).rejects.toBeInstanceOf(KemerBetNoTransferReadinessSealUnavailableError);
+    expect(abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(continueRequest).not.toHaveBeenCalled();
   });
 
   it('continues the exact Player lookup GET and reports only its fixed network stage', async () => {

@@ -701,6 +701,43 @@ export function createKemerBetSessionProvisionServer(
     const retainedPage = page;
     const retainedAccountId = accountId;
     const retainedExpiresAt = expiresAt;
+    let retainedContextClosed = false;
+    // This private manual sign-in/seal lane is an explicitly trusted supervised enrollment
+    // ceremony, not a compromised-renderer confidentiality boundary: Chromium and trusted Node
+    // share UID 10001 while seal-only inputs are mounted. Containment begins only after this exact
+    // context is terminally closed and the retained enrollment state below is cleared.
+    const closeRetainedContextForSeal = async (): Promise<void> => {
+      if (retainedContextClosed) return;
+      if (
+        context !== retainedContext ||
+        page !== retainedPage ||
+        accountId !== retainedAccountId ||
+        expiresAt !== retainedExpiresAt
+      ) {
+        return unavailable();
+      }
+      // Keep the terminal request latch installed through the awaited Chromium shutdown. Only a
+      // confirmed close may make the same-UID provision lane inactive before the seal file is
+      // installed; a close failure propagates and therefore emits no binding.
+      await retainedContext.close();
+      if (
+        context !== retainedContext ||
+        page !== retainedPage ||
+        accountId !== retainedAccountId ||
+        expiresAt !== retainedExpiresAt
+      ) {
+        return unavailable();
+      }
+      if (expiryTimer !== undefined) clearTimer(expiryTimer);
+      expiryTimer = undefined;
+      context = undefined;
+      page = undefined;
+      accountId = undefined;
+      expiresAt = undefined;
+      signedInLogged = false;
+      retainedContextClosed = true;
+      log('stopped');
+    };
     await runReadinessSeal({
       environment: {
         NODE_ENV: 'production',
@@ -729,7 +766,7 @@ export function createKemerBetSessionProvisionServer(
         }
         return createReadinessProbeFromPage({
           accountId: retainedAccountId,
-          close: async () => undefined,
+          close: closeRetainedContextForSeal,
           fingerprintAgentIdentity: options.fingerprintAgentIdentity,
           page: retainedPage,
           reportForbiddenRequest: options.reportForbiddenRequest,
@@ -739,12 +776,13 @@ export function createKemerBetSessionProvisionServer(
       },
     });
     if (
-      context !== retainedContext ||
-      page !== retainedPage ||
-      accountId !== retainedAccountId ||
-      expiresAt !== retainedExpiresAt ||
-      now().getTime() >= retainedExpiresAt.getTime() ||
-      validPageUrl(retainedPage.url()) !== 'agents'
+      !retainedContextClosed ||
+      context !== undefined ||
+      page !== undefined ||
+      accountId !== undefined ||
+      expiresAt !== undefined ||
+      expiryTimer !== undefined ||
+      signedInLogged
     ) {
       return unavailable();
     }

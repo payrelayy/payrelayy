@@ -1,3 +1,5 @@
+import { TextDecoder } from 'node:util';
+
 import type { Page } from 'playwright-core';
 
 import {
@@ -9,6 +11,7 @@ import {
   type KemerBetBrowserPage,
 } from './kemerbet-deposit-browser-adapter.js';
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
+import { validateKemerBetReadinessPlayerLookupResponse } from './kemerbet-readiness-player-lookup-response.js';
 
 export const KEMERBET_AGENT_DEPOSIT_URL = 'https://agentsystem.admindigi.com/agents' as const;
 export const KEMERBET_AGENT_HISTORY_URL =
@@ -151,15 +154,17 @@ export interface PlaywrightDomControlPort {
 
 export interface PlaywrightRequestPort {
   method(): string;
+  redirectedFrom(): PlaywrightRequestPort | null;
+  redirectedTo(): PlaywrightRequestPort | null;
   url(): string;
   postDataJSON(): unknown;
 }
 
 export interface PlaywrightResponsePort {
+  body(): Promise<Buffer>;
   url(): string;
   status(): number;
-  request(): Pick<PlaywrightRequestPort, 'method'>;
-  json(): Promise<unknown>;
+  request(): Pick<PlaywrightRequestPort, 'method' | 'redirectedFrom' | 'redirectedTo'>;
 }
 
 export interface PlaywrightRoutePort {
@@ -504,8 +509,11 @@ function isExactPlayerLookupResponse(
 ): boolean {
   const url = parseLookupRequestUrl(response.url());
   const queryEntries = url === null ? [] : [...url.searchParams.entries()];
+  const request = response.request();
   return (
-    response.request().method() === 'GET' &&
+    request.method() === 'GET' &&
+    request.redirectedFrom() === null &&
+    request.redirectedTo() === null &&
     queryEntries.length === 1 &&
     queryEntries[0]?.[0] === 'externalId' &&
     queryEntries[0]?.[1] === expectedPlayerId
@@ -518,7 +526,14 @@ function parseAuthoritativePlayerLookup(
   body: unknown,
 ): AuthoritativePlayerLookup {
   const url = parseLookupRequestUrl(response.url());
-  if (response.status() !== 200 || response.request().method() !== 'GET' || url === null) {
+  const request = response.request();
+  if (
+    response.status() !== 200 ||
+    request.method() !== 'GET' ||
+    request.redirectedFrom() !== null ||
+    request.redirectedTo() !== null ||
+    url === null
+  ) {
     return unavailable();
   }
   const queryEntries = [...url.searchParams.entries()];
@@ -1397,11 +1412,26 @@ export function createPlaywrightKemerBetAgentPage(
         const response = await responsePromise;
         reportLookupStage('lookup_response');
         reportLookupStage('lookup_contract');
+        let responseBody: Buffer | null = null;
         let body: unknown;
         try {
-          body = await response.json();
+          responseBody = await response.body();
+          if (
+            !validateKemerBetReadinessPlayerLookupResponse({
+              body: responseBody,
+              requestedPlayerId: playerId,
+              statusCode: response.status(),
+            })
+          ) {
+            unavailable();
+          }
+          body = JSON.parse(
+            new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(responseBody),
+          ) as unknown;
         } catch {
           unavailable();
+        } finally {
+          responseBody?.fill(0);
         }
         authoritativeLookup = parseAuthoritativePlayerLookup(response, playerId, body);
       } catch {

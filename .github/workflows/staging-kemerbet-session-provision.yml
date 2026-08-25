@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Start, inspect, seal, independently recheck, or stop the private no-transfer KemerBet browser
+        description: Start, inspect, explicitly retire v1 for v2 reseal, seal, independently recheck, or stop the private no-transfer KemerBet browser
         required: true
         default: inspect
         type: choice
         options:
           - inspect
           - start
+          - retire-v1-for-v2-reseal
           - seal
           - recheck
           - stop
@@ -29,6 +30,16 @@ on:
         type: string
       confirm_prior_seal_run_id:
         description: For recheck, type the exact prior successful GitHub Actions seal run ID
+        required: false
+        default: ''
+        type: string
+      confirm_v1_binding_sha256:
+        description: For explicit v1 retirement only, type the previously reviewed exact v1 binding SHA-256
+        required: false
+        default: ''
+        type: string
+      confirm_v1_retirement:
+        description: For explicit v1 retirement only, type I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL
         required: false
         default: ''
         type: string
@@ -67,6 +78,8 @@ jobs:
       CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
       CONFIRMED_PRIOR_SEAL_COMMIT: ${{ inputs.confirm_prior_seal_commit_sha }}
       CONFIRMED_PRIOR_SEAL_RUN_ID: ${{ inputs.confirm_prior_seal_run_id }}
+      CONFIRMED_V1_BINDING_SHA256: ${{ inputs.confirm_v1_binding_sha256 }}
+      CONFIRMED_V1_RETIREMENT: ${{ inputs.confirm_v1_retirement }}
       REQUESTED_MODE: ${{ inputs.mode }}
     steps:
       - name: Reject every non-staging or financial target
@@ -78,29 +91,39 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(inspect|start|seal|recheck|stop)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|start|retire-v1-for-v2-reseal|seal|recheck|stop)$ ]]
           case "$REQUESTED_MODE" in
             start)
               [[ "$CONFIRMED_NO_TRANSFER" == 'private-sign-in-no-transfer' ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
+              ;;
+            retire-v1-for-v2-reseal)
+              [[ -z "$CONFIRMED_NO_TRANSFER" ]]
+              [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              [[ "$CONFIRMED_V1_BINDING_SHA256" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$CONFIRMED_V1_RETIREMENT" == 'I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL' ]]
               ;;
             seal)
               [[ "$CONFIRMED_NO_TRANSFER" == 'seal-five-player-no-transfer' ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
               ;;
             recheck)
               [[ "$CONFIRMED_NO_TRANSFER" == 'independent-five-player-no-transfer-recheck' ]]
               [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" =~ ^[0-9a-f]{40}$ ]]
               [[ "$CONFIRMED_PRIOR_SEAL_RUN_ID" =~ ^[1-9][0-9]{7,19}$ ]]
+              [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
               ;;
             inspect|stop)
               [[ -z "$CONFIRMED_NO_TRANSFER" ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
               ;;
           esac
 
   session-action:
-    name: Start, attest, or stop private KemerBet sign-in
+    name: Start, retire, attest, or stop private KemerBet sign-in
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -111,6 +134,8 @@ jobs:
     env:
       CONFIRMED_PRIOR_SEAL_COMMIT: ${{ inputs.confirm_prior_seal_commit_sha }}
       CONFIRMED_PRIOR_SEAL_RUN_ID: ${{ inputs.confirm_prior_seal_run_id }}
+      CONFIRMED_V1_BINDING_SHA256: ${{ inputs.confirm_v1_binding_sha256 }}
+      CONFIRMED_V1_RETIREMENT: ${{ inputs.confirm_v1_retirement }}
     steps:
       - name: Check out the exact sign-in contract
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -226,6 +251,13 @@ jobs:
               ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
                 "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-session-provision-ready '$GITHUB_SHA'"
               ;;
+            retire-v1-for-v2-reseal)
+              [[ "$CONFIRMED_V1_BINDING_SHA256" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$CONFIRMED_V1_RETIREMENT" == 'I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL' ]]
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper retire-kemerbet-readiness-binding-v1-for-v2-reseal '$GITHUB_SHA' '$CONFIRMED_V1_BINDING_SHA256' '$CONFIRMED_V1_RETIREMENT'"
+              echo 'private_kemerbet_v1_binding_retired_for_v2_reseal=confirmed'
+              ;;
             seal)
               ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
                 "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper seal-kemerbet-readiness '$GITHUB_SHA'"
@@ -236,7 +268,7 @@ jobs:
               echo 'private_kemerbet_independent_no_transfer_recheck=pass'
               ;;
           esac
-          if [[ '${{ inputs.mode }}' != 'recheck' ]]; then
+          if [[ '${{ inputs.mode }}' =~ ^(start|inspect|seal)$ ]]; then
             echo 'private_kemerbet_sign_in_no_transfer=pass'
           fi
 

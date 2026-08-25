@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -21,10 +22,20 @@ import {
   type KemerBetAgentIdentityFingerprinter,
 } from './kemerbet-agent-identity-fingerprint.js';
 import {
-  openKemerBetNoTransferReadinessPersistentProfileProbe,
   type KemerBetNoTransferReadinessPersistentProfileProbeOptions,
   type KemerBetNoTransferReadinessSealProbe,
 } from './kemerbet-no-transfer-readiness-seal.js';
+import {
+  createKemerBetReadinessBrowserRpcClient,
+  loadKemerBetReadinessBrowserRpcCapability,
+  type KemerBetReadinessBrowserRpcClient,
+} from './kemerbet-readiness-browser-rpc.js';
+import {
+  loadKemerBetReadinessLayer7Authorizations,
+  type KemerBetReadinessLayer7Authorizations,
+} from './kemerbet-readiness-layer7-authorizations.js';
+import { createKemerBetReadinessControllerIsolatedNetworkRevalidator } from './kemerbet-readiness-network-gate.js';
+import { waitForKemerBetReadinessFirewallRelease } from './kemerbet-readiness-firewall-release.js';
 import {
   assertKemerBetAgentPageSelectorContractV2,
   type KemerBetAgentPageSelectorContractV2,
@@ -40,6 +51,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const FINGERPRINT_PATTERN = /^hmac-sha256-agent-identity-v1:[0-9a-f]{64}$/u;
 const KEY_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const CONTROLLER_EFFECTIVE_USER_ID = 10002;
+const BROWSER_EFFECTIVE_USER_ID = 10001;
 
 export interface KemerBetNoTransferReadinessDependencies {
   readonly environment?: NodeJS.ProcessEnv;
@@ -52,6 +65,10 @@ export interface KemerBetNoTransferReadinessDependencies {
   readonly openProbe?: (
     options: KemerBetNoTransferReadinessPersistentProfileProbeOptions,
   ) => Promise<KemerBetNoTransferReadinessSealProbe>;
+  readonly openRpcClient?: () => Promise<KemerBetReadinessBrowserRpcClient>;
+  readonly loadLayer7Authorizations?: () => Promise<KemerBetReadinessLayer7Authorizations>;
+  readonly createNetworkRevalidator?: () => Promise<() => Promise<void>>;
+  readonly waitForFirewallRelease?: () => Promise<void>;
   readonly logSuccess?: (result: {
     readonly component: 'kemerbet_no_transfer_readiness';
     readonly event: 'passed';
@@ -75,7 +92,7 @@ function unavailable(): never {
   throw new KemerBetNoTransferReadinessUnavailableError();
 }
 
-function assertInertEnvironment(environment: NodeJS.ProcessEnv): void {
+function assertInertEnvironment(environment: NodeJS.ProcessEnv): boolean {
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
@@ -84,10 +101,14 @@ function assertInertEnvironment(environment: NodeJS.ProcessEnv): void {
     environment.KEMERBET_FINAL_ACTION_ENABLED !== 'false' ||
     environment.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED !== 'false' ||
     environment.INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED !== 'false' ||
+    (environment.KEMERBET_READINESS_BROWSER_RPC_ENABLED !== undefined &&
+      environment.KEMERBET_READINESS_BROWSER_RPC_ENABLED !== 'true') ||
+    environment.KEMERBET_READINESS_BROWSER_RPC_ORIGIN !== undefined ||
     DISALLOWED_ENVIRONMENT_KEYS.some((key) => environment[key] !== undefined)
   ) {
     return unavailable();
   }
+  return environment.KEMERBET_READINESS_BROWSER_RPC_ENABLED === 'true';
 }
 
 function validateSelectorContract(value: unknown): KemerBetAgentPageSelectorContractV2 {
@@ -101,6 +122,42 @@ function defaultSuccessLog(
   console.info(result, 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.');
 }
 
+async function productionOpenRpcClient(): Promise<KemerBetReadinessBrowserRpcClient> {
+  const capability = await loadKemerBetReadinessBrowserRpcCapability({
+    effectiveUserId: CONTROLLER_EFFECTIVE_USER_ID,
+  });
+  try {
+    return createKemerBetReadinessBrowserRpcClient({ capability });
+  } finally {
+    capability.fill(0);
+  }
+}
+
+function exactFingerprint(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, 'utf8');
+  const rightBytes = Buffer.from(right, 'utf8');
+  const comparable =
+    rightBytes.length === leftBytes.length ? rightBytes : Buffer.alloc(leftBytes.length);
+  const equal = timingSafeEqual(leftBytes, comparable);
+  leftBytes.fill(0);
+  if (comparable !== rightBytes) comparable.fill(0);
+  rightBytes.fill(0);
+  return equal && comparable === rightBytes;
+}
+
+function reportSuccess(dependencies: KemerBetNoTransferReadinessDependencies): void {
+  (dependencies.logSuccess ?? defaultSuccessLog)({
+    component: 'kemerbet_no_transfer_readiness',
+    event: 'passed',
+    accountsChecked: 1,
+    playersChecked: 5,
+    currency: 'ETB',
+    transferDisabled: true,
+    identifiersRedacted: true,
+    moneyMoved: false,
+  });
+}
+
 /**
  * Verify one bound, pre-provisioned agent profile and exactly five private Player lookups. This
  * process has no database credential, pilot manifest, history key, amount input, transfer method,
@@ -109,31 +166,38 @@ function defaultSuccessLog(
 export async function runKemerBetNoTransferReadiness(
   dependencies: KemerBetNoTransferReadinessDependencies = {},
 ): Promise<void> {
-  assertInertEnvironment(dependencies.environment ?? process.env);
+  const useBrowserRpc = assertInertEnvironment(dependencies.environment ?? process.env);
   const effectiveUserId =
     dependencies.effectiveUserId ??
     (typeof process.geteuid === 'function' ? process.geteuid() : Number.NaN);
-  if (effectiveUserId !== 10001) return unavailable();
+  if (effectiveUserId !== CONTROLLER_EFFECTIVE_USER_ID) return unavailable();
+  await (
+    dependencies.waitForFirewallRelease ??
+    (() => waitForKemerBetReadinessFirewallRelease({ role: 'controller' }))
+  )();
   let probe: KemerBetNoTransferReadinessSealProbe | null = null;
+  let rpcClient: KemerBetReadinessBrowserRpcClient | null = null;
+  let rpcOpened = false;
+  let layer7Authorizations: KemerBetReadinessLayer7Authorizations | null = null;
+  let revalidateNetworkTopology: (() => Promise<void>) | null = null;
   try {
-    const [bindings, players, selectorContract, fingerprintAgentIdentity] = await Promise.all([
+    if (useBrowserRpc) {
+      revalidateNetworkTopology = await (
+        dependencies.createNetworkRevalidator ??
+        createKemerBetReadinessControllerIsolatedNetworkRevalidator
+      )();
+    }
+    const [bindings, players, fingerprintAgentIdentity] = await Promise.all([
       dependencies.loadAgentIdentityBindings?.() ??
         loadKemerBetAgentIdentityBindings({ filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE }),
       dependencies.loadPlayerIds?.() ??
         loadKemerBetNoTransferReadinessPlayerIds({
           filePath: KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE,
         }),
-      dependencies.loadSelectorContract?.() ??
-        loadKemerBetSelectorContract({
-          filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
-          validate: validateSelectorContract,
-        }),
       dependencies.createAgentIdentityFingerprinter?.() ??
         createKemerBetAgentIdentityFingerprinter({
           secretFilePath: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
         }),
-      dependencies.assertBrowserExecutable?.() ??
-        assertKemerBetBrowserExecutable({ executablePath: KEMERBET_BROWSER_EXECUTABLE_PATH }),
     ]);
     if (
       bindings.platformAgentAccountIds.length !== 1 ||
@@ -156,17 +220,58 @@ export async function runKemerBetNoTransferReadiness(
     ) {
       return unavailable();
     }
-    probe = await (dependencies.openProbe ?? openKemerBetNoTransferReadinessPersistentProfileProbe)(
-      {
-        accountId,
-        effectiveUserId,
-        expectedAgentIdentityFingerprint,
-        fingerprintAgentIdentity,
-        reportForbiddenRequest: () => undefined,
-        reportStage: () => undefined,
-        selectorContract,
-      },
-    );
+
+    if (useBrowserRpc) {
+      rpcClient = await (dependencies.openRpcClient ?? productionOpenRpcClient)();
+      let rawAgentIdentity: string | null = await rpcClient.open();
+      rpcOpened = true;
+      let observedAgentIdentityFingerprint: string;
+      try {
+        observedAgentIdentityFingerprint = fingerprintAgentIdentity(accountId, rawAgentIdentity);
+      } catch {
+        return unavailable();
+      } finally {
+        rawAgentIdentity = null;
+      }
+      if (!exactFingerprint(observedAgentIdentityFingerprint, expectedAgentIdentityFingerprint)) {
+        unavailable();
+      }
+      layer7Authorizations =
+        (await dependencies.loadLayer7Authorizations?.()) ??
+        (await loadKemerBetReadinessLayer7Authorizations({
+          effectiveUserId: CONTROLLER_EFFECTIVE_USER_ID,
+        }));
+      if (layer7Authorizations.authorizations.length !== players.playerIds.length) unavailable();
+      await revalidateNetworkTopology?.();
+      for (const [index, playerId] of players.playerIds.entries()) {
+        await rpcClient.lookup(playerId, layer7Authorizations.authorizations[index]!);
+      }
+      await revalidateNetworkTopology?.();
+      await rpcClient.finalize();
+      reportSuccess(dependencies);
+      return;
+    }
+
+    const [selectorContract] = await Promise.all([
+      dependencies.loadSelectorContract?.() ??
+        loadKemerBetSelectorContract({
+          filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
+          validate: validateSelectorContract,
+        }),
+      dependencies.assertBrowserExecutable?.() ??
+        assertKemerBetBrowserExecutable({ executablePath: KEMERBET_BROWSER_EXECUTABLE_PATH }),
+    ]);
+    const openProbe = dependencies.openProbe;
+    if (openProbe === undefined) unavailable();
+    probe = await openProbe({
+      accountId,
+      effectiveUserId: BROWSER_EFFECTIVE_USER_ID,
+      expectedAgentIdentityFingerprint,
+      fingerprintAgentIdentity,
+      reportForbiddenRequest: () => undefined,
+      reportStage: () => undefined,
+      selectorContract,
+    });
     if (probe.observedAgentIdentityFingerprint !== expectedAgentIdentityFingerprint) unavailable();
     for (const playerId of players.playerIds) {
       const result = await probe.probePlayerLookup({ playerId, currencyCode: 'ETB' });
@@ -179,19 +284,12 @@ export async function runKemerBetNoTransferReadiness(
       }
     }
     await probe.finalizeReadOnlyProof();
-    (dependencies.logSuccess ?? defaultSuccessLog)({
-      component: 'kemerbet_no_transfer_readiness',
-      event: 'passed',
-      accountsChecked: 1,
-      playersChecked: 5,
-      currency: 'ETB',
-      transferDisabled: true,
-      identifiersRedacted: true,
-      moneyMoved: false,
-    });
+    reportSuccess(dependencies);
   } catch {
     return unavailable();
   } finally {
+    if (rpcOpened) await rpcClient?.close().catch(() => undefined);
+    layer7Authorizations = null;
     await probe?.close().catch(() => undefined);
   }
 }

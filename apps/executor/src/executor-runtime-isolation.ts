@@ -5,6 +5,7 @@ import { TextDecoder } from 'node:util';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const AGENT_IDENTITY_FINGERPRINT_PATTERN = /^hmac-sha256-agent-identity-v1:[0-9a-f]{64}$/u;
+const PROVIDER_AUTHORIZATION_DIGEST_PATTERN = /^sha256-provider-authorization-v1:[0-9a-f]{64}$/u;
 const MAXIMUM_AGENT_ACCOUNTS = 64;
 const MAXIMUM_BINDING_FILE_BYTES = 16_384;
 const MAXIMUM_SELECTOR_FILE_BYTES = 128 * 1_024;
@@ -164,23 +165,29 @@ export function parseKemerBetAgentIdentityBindings(value: string): KemerBetAgent
   const accountIds: string[] = [];
   const bindings = new Map<string, string>();
   const fingerprints = new Set<string>();
+  const providerAuthorizationDigests = new Set<string>();
   for (const line of lines) {
-    const separator = line.indexOf(' ');
-    if (separator < 1 || separator !== line.lastIndexOf(' ')) return unavailable();
-    const accountId = line.slice(0, separator);
-    const fingerprint = line.slice(separator + 1);
+    const fields = line.split(' ');
+    if (fields.length !== 3) return unavailable();
+    const [accountId, fingerprint, providerAuthorizationDigest] = fields;
     if (
+      accountId === undefined ||
+      fingerprint === undefined ||
+      providerAuthorizationDigest === undefined ||
       !UUID_PATTERN.test(accountId) ||
       accountId === '00000000-0000-0000-0000-000000000000' ||
       !AGENT_IDENTITY_FINGERPRINT_PATTERN.test(fingerprint) ||
+      !PROVIDER_AUTHORIZATION_DIGEST_PATTERN.test(providerAuthorizationDigest) ||
       bindings.has(accountId) ||
-      fingerprints.has(fingerprint)
+      fingerprints.has(fingerprint) ||
+      providerAuthorizationDigests.has(providerAuthorizationDigest)
     ) {
       return unavailable();
     }
     accountIds.push(accountId);
     bindings.set(accountId, fingerprint);
     fingerprints.add(fingerprint);
+    providerAuthorizationDigests.add(providerAuthorizationDigest);
   }
 
   return Object.freeze({

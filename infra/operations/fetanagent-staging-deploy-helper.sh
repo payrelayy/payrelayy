@@ -3257,6 +3257,591 @@ PY
     die 'the Owner-staged KemerBet cohort changed during inspection'
 }
 
+prepare_retryable_kemerbet_session_player_ids() {
+  local after_claim_dev_ino after_claim_id after_digest after_player_dev_ino
+  local before_claim_dev_ino before_claim_id before_digest before_player_dev_ino
+  local binding_size candidate_path claim_source control_mountpoint failed_installing_path
+  local failed_path metadata_fd python_status source
+
+  failed_path="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME"
+  failed_installing_path="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"
+  candidate_path="$(dirname -- "$KEMERBET_READINESS_PLAYER_IDS")/.kemerbet-readiness-player-ids.promote-v1"
+
+  if [[ -e "$KEMERBET_READINESS_PLAYER_IDS" || -L "$KEMERBET_READINESS_PLAYER_IDS" ]]; then
+    require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
+    if [[ ! -e "$failed_path" && ! -L "$failed_path" &&
+      ! -e "$failed_installing_path" && ! -L "$failed_installing_path" &&
+      ! -e "$candidate_path" && ! -L "$candidate_path" ]]; then
+      [[ "$(stat --format='%h' "$KEMERBET_READINESS_PLAYER_IDS")" == '1' ]] ||
+        die 'the private KemerBet session Player-ID file has an unsafe hard-link count'
+      return 0
+    fi
+  fi
+
+  # A failed one-shot recheck consumes its internal Player-ID copy before restoring the same
+  # immutable Owner cohort for retry. Reopen sign-in only from that exact failed cohort. This
+  # creates a new service copy without changing either Owner-stage inode, ownership, content, or
+  # claim marker; the next recheck will independently freeze and consume the copy again.
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+    ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+    ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_NAME" &&
+    ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" &&
+    ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_RECOVERY_LATCH_INSTALLING_NAME" &&
+    ! -e "$failed_installing_path" && ! -L "$failed_installing_path" ]] ||
+    die 'the retryable KemerBet session boundary contains recovery or committed residue'
+  require_kemerbet_readiness_output_directory
+  [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" &&
+    "$(realpath -- "$KEMERBET_READINESS_BINDING")" == "$KEMERBET_READINESS_BINDING" &&
+    "$(stat --format='%u:%g:%a:%h' "$KEMERBET_READINESS_BINDING")" == '10001:10001:600:1' ]] ||
+    die 'the sealed KemerBet readiness binding is unavailable or unsafe for retry'
+  binding_size="$(stat --format='%s' "$KEMERBET_READINESS_BINDING")"
+  [[ "$binding_size" =~ ^[0-9]+$ && "$binding_size" -ge 100 && "$binding_size" -le 256 &&
+    "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
+    die 'the sealed KemerBet readiness binding shape is invalid for retry'
+  LC_ALL=C grep -Eq \
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64}$' \
+    "$KEMERBET_READINESS_BINDING" ||
+    die 'the sealed KemerBet readiness binding contract is invalid for retry'
+  inspect_owner_staged_kemerbet_cohort
+  before_player_dev_ino="$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO"
+  before_claim_dev_ino="$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO"
+  before_claim_id="$KEMERBET_RECHECK_OWNER_CLAIM_ID"
+  before_digest="$KEMERBET_RECHECK_PLAYER_IDS_DIGEST"
+  owner_kemerbet_cohort_marker require-failed "$before_claim_id" ||
+    die 'the retryable KemerBet cohort failure marker is unavailable'
+
+  command -v python3 >/dev/null 2>&1 ||
+    die 'the retryable KemerBet session input verifier is unavailable'
+  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)"
+  source="$control_mountpoint/$KEMERBET_OWNER_STAGED_PLAYER_IDS_NAME"
+  claim_source="$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_NAME"
+  exec {metadata_fd}<<<"$before_claim_id
+$before_digest" ||
+    die 'the private retryable KemerBet cohort metadata channel could not be opened'
+  if env -i PATH="$SAFE_PATH" python3 -I - \
+    "$source" "$claim_source" "$KEMERBET_READINESS_PLAYER_IDS" \
+    "$before_player_dev_ino" "$before_claim_dev_ino" "$metadata_fd" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+EXPECTED_SOURCE_NAME = 'kemerbet-readiness-player-ids.stage-v1'
+EXPECTED_CLAIM_NAME = 'kemerbet-readiness-cohort-claim.stage-v1'
+EXPECTED_TARGET = '/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
+CANDIDATE_NAME = '.kemerbet-readiness-player-ids.promote-v1'
+PLAYER_ID = re.compile(rb'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')
+CLAIM_ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+DEV_INO = re.compile(r'([0-9]+):([0-9]+)')
+DIGEST = re.compile(r'[0-9a-f]{64}')
+MAXIMUM_BYTES = 1024
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_mode(value):
+    return stat.S_IMODE(value.st_mode)
+
+
+def read_private_metadata(descriptor_text):
+    if not descriptor_text.isascii() or not descriptor_text.isdecimal():
+        reject()
+    descriptor = int(descriptor_text, 10)
+    if descriptor < 3 or descriptor > 1024:
+        reject()
+    try:
+        content = os.read(descriptor, 103)
+    finally:
+        os.close(descriptor)
+    if len(content) != 102 or not content.endswith(b'\n'):
+        reject()
+    try:
+        values = content[:-1].decode('ascii').split('\n')
+    except UnicodeDecodeError:
+        reject()
+    if (
+        len(values) != 2
+        or CLAIM_ID.fullmatch(values[0]) is None
+        or DIGEST.fullmatch(values[1]) is None
+    ):
+        reject()
+    return values[0], values[1]
+
+
+def parse_identity(value):
+    match = DEV_INO.fullmatch(value)
+    if match is None:
+        reject()
+    return int(match.group(1)), int(match.group(2))
+
+
+def validate_player_content(content):
+    if len(content) < 10 or len(content) > MAXIMUM_BYTES:
+        reject()
+    if not content.endswith(b'\n') or b'\r' in content or b'\0' in content:
+        reject()
+    lines = content[:-1].split(b'\n')
+    if len(lines) != 5 or len(set(lines)) != 5:
+        reject()
+    if any(PLAYER_ID.fullmatch(line) is None for line in lines):
+        reject()
+
+
+def open_exact_directory(path, expected_uid, expected_gid, expected_mode):
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or not stat.S_ISDIR(named.st_mode)
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or (opened.st_uid, opened.st_gid, exact_mode(opened))
+            != (expected_uid, expected_gid, expected_mode)
+            or opened.st_mode != named.st_mode
+            or opened.st_uid != named.st_uid
+            or opened.st_gid != named.st_gid
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def optional_named_file(directory_descriptor, name, path):
+    try:
+        relative = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        try:
+            os.lstat(path)
+        except FileNotFoundError:
+            return None
+        reject()
+    absolute = os.lstat(path)
+    if (
+        (relative.st_dev, relative.st_ino) != (absolute.st_dev, absolute.st_ino)
+        or relative.st_mode != absolute.st_mode
+        or relative.st_uid != absolute.st_uid
+        or relative.st_gid != absolute.st_gid
+        or relative.st_nlink != absolute.st_nlink
+        or relative.st_size != absolute.st_size
+    ):
+        reject()
+    return relative
+
+
+def read_exact_file(directory_descriptor, name, path, expected_metadata, expected_content):
+    named = optional_named_file(directory_descriptor, name, path)
+    expected_uid, expected_gid, expected_mode, expected_links = expected_metadata
+    if (
+        named is None
+        or not stat.S_ISREG(named.st_mode)
+        or (named.st_uid, named.st_gid, exact_mode(named), named.st_nlink)
+        != (expected_uid, expected_gid, expected_mode, expected_links)
+        or named.st_size != len(expected_content)
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_descriptor,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or opened.st_mode != named.st_mode
+            or opened.st_uid != named.st_uid
+            or opened.st_gid != named.st_gid
+            or opened.st_nlink != named.st_nlink
+            or opened.st_size != named.st_size
+            or os.pread(descriptor, len(expected_content) + 1, 0) != expected_content
+        ):
+            reject()
+        return descriptor, (opened.st_dev, opened.st_ino)
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def read_exact_source(directory_descriptor, name, path, expected_identity):
+    named = optional_named_file(directory_descriptor, name, path)
+    if (
+        named is None
+        or not stat.S_ISREG(named.st_mode)
+        or (named.st_dev, named.st_ino) != expected_identity
+        or (named.st_uid, named.st_gid, exact_mode(named), named.st_nlink)
+        != (10001, 10001, 0o400, 1)
+        or named.st_size < 10
+        or named.st_size > MAXIMUM_BYTES
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_descriptor,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            (opened.st_dev, opened.st_ino) != expected_identity
+            or opened.st_mode != named.st_mode
+            or opened.st_uid != named.st_uid
+            or opened.st_gid != named.st_gid
+            or opened.st_nlink != 1
+            or opened.st_size != named.st_size
+        ):
+            reject()
+        content = os.pread(descriptor, MAXIMUM_BYTES + 1, 0)
+        if len(content) != opened.st_size:
+            reject()
+        validate_player_content(content)
+        return descriptor, content
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def require_source_unchanged(
+    descriptor,
+    directory_descriptor,
+    name,
+    path,
+    expected_identity,
+    expected_content,
+):
+    opened = os.fstat(descriptor)
+    named = optional_named_file(directory_descriptor, name, path)
+    if (
+        named is None
+        or (opened.st_dev, opened.st_ino) != expected_identity
+        or (named.st_dev, named.st_ino) != expected_identity
+        or opened.st_mode != named.st_mode
+        or opened.st_uid != named.st_uid
+        or opened.st_gid != named.st_gid
+        or opened.st_nlink != named.st_nlink
+        or opened.st_size != named.st_size
+        or (opened.st_uid, opened.st_gid, exact_mode(opened), opened.st_nlink)
+        != (10001, 10001, 0o400, 1)
+        or os.pread(descriptor, len(expected_content) + 1, 0) != expected_content
+    ):
+        reject()
+
+
+def remove_safe_candidate(
+    directory_descriptor,
+    candidate_name,
+    candidate_path,
+    source_content,
+):
+    candidate = optional_named_file(directory_descriptor, candidate_name, candidate_path)
+    if candidate is None:
+        return
+    if (
+        not stat.S_ISREG(candidate.st_mode)
+        or candidate.st_nlink != 1
+        or candidate.st_size > len(source_content)
+        or (candidate.st_uid, candidate.st_gid, exact_mode(candidate))
+        not in {(0, 0, 0o600), (10001, 10001, 0o600), (10001, 10001, 0o400)}
+    ):
+        reject()
+    descriptor = os.open(
+        candidate_name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_descriptor,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        content = os.pread(descriptor, len(source_content) + 1, 0)
+        if (
+            (opened.st_dev, opened.st_ino) != (candidate.st_dev, candidate.st_ino)
+            or opened.st_mode != candidate.st_mode
+            or opened.st_uid != candidate.st_uid
+            or opened.st_gid != candidate.st_gid
+            or opened.st_nlink != 1
+            or opened.st_size != candidate.st_size
+            or content != source_content[: len(content)]
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+    os.unlink(candidate_name, dir_fd=directory_descriptor)
+    os.fsync(directory_descriptor)
+    if optional_named_file(directory_descriptor, candidate_name, candidate_path) is not None:
+        reject()
+
+
+def write_all(descriptor, content):
+    offset = 0
+    while offset < len(content):
+        written = os.write(descriptor, content[offset:])
+        if written < 1:
+            reject()
+        offset += written
+
+
+def prepare(
+    source,
+    claim_source,
+    target,
+    expected_identity_text,
+    expected_claim_identity_text,
+    expected_claim_id,
+    expected_digest,
+):
+    if (
+        os.path.basename(source) != EXPECTED_SOURCE_NAME
+        or os.path.basename(claim_source) != EXPECTED_CLAIM_NAME
+        or target != EXPECTED_TARGET
+        or os.path.basename(target) != 'kemerbet_no_transfer_readiness_player_ids'
+        or CLAIM_ID.fullmatch(expected_claim_id) is None
+        or DIGEST.fullmatch(expected_digest) is None
+    ):
+        reject()
+    expected_identity = parse_identity(expected_identity_text)
+    expected_claim_identity = parse_identity(expected_claim_identity_text)
+    source_parent = os.path.dirname(source)
+    source_name = os.path.basename(source)
+    claim_parent = os.path.dirname(claim_source)
+    claim_name = os.path.basename(claim_source)
+    if claim_parent != source_parent:
+        reject()
+    claim_content = expected_claim_id.encode('ascii') + b'\n'
+    target_parent = os.path.dirname(target)
+    target_name = os.path.basename(target)
+    candidate_path = os.path.join(target_parent, CANDIDATE_NAME)
+    source_directory_descriptor = open_exact_directory(source_parent, 10001, 10001, 0o700)
+    target_directory_descriptor = open_exact_directory(target_parent, 0, 0, 0o700)
+    source_descriptor = None
+    claim_descriptor = None
+    candidate_descriptor = None
+    target_descriptor = None
+    try:
+        source_descriptor, source_content = read_exact_source(
+            source_directory_descriptor,
+            source_name,
+            source,
+            expected_identity,
+        )
+        if hashlib.sha256(source_content).hexdigest() != expected_digest:
+            reject()
+        claim_descriptor, claim_identity = read_exact_file(
+            source_directory_descriptor,
+            claim_name,
+            claim_source,
+            (10001, 10001, 0o400, 1),
+            claim_content,
+        )
+        if claim_identity != expected_claim_identity:
+            reject()
+
+        target_value = optional_named_file(target_directory_descriptor, target_name, target)
+        candidate_value = optional_named_file(
+            target_directory_descriptor,
+            CANDIDATE_NAME,
+            candidate_path,
+        )
+        if target_value is not None:
+            target_descriptor, target_identity = read_exact_file(
+                target_directory_descriptor,
+                target_name,
+                target,
+                (10001, 10001, 0o400, target_value.st_nlink),
+                source_content,
+            )
+            if target_value.st_nlink == 2 and candidate_value is not None:
+                candidate_descriptor, candidate_identity = read_exact_file(
+                    target_directory_descriptor,
+                    CANDIDATE_NAME,
+                    candidate_path,
+                    (10001, 10001, 0o400, 2),
+                    source_content,
+                )
+                if candidate_identity != target_identity:
+                    reject()
+                os.close(candidate_descriptor)
+                candidate_descriptor = None
+                os.unlink(CANDIDATE_NAME, dir_fd=target_directory_descriptor)
+                os.fsync(target_directory_descriptor)
+            elif target_value.st_nlink == 1:
+                remove_safe_candidate(
+                    target_directory_descriptor,
+                    CANDIDATE_NAME,
+                    candidate_path,
+                    source_content,
+                )
+            else:
+                reject()
+        else:
+            remove_safe_candidate(
+                target_directory_descriptor,
+                CANDIDATE_NAME,
+                candidate_path,
+                source_content,
+            )
+            candidate_descriptor = os.open(
+                CANDIDATE_NAME,
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | os.O_NOFOLLOW
+                | os.O_CLOEXEC,
+                0o600,
+                dir_fd=target_directory_descriptor,
+            )
+            write_all(candidate_descriptor, source_content)
+            os.fchown(candidate_descriptor, 10001, 10001)
+            os.fchmod(candidate_descriptor, 0o400)
+            os.fsync(candidate_descriptor)
+            candidate_identity = os.fstat(candidate_descriptor)
+            read_descriptor, read_identity = read_exact_file(
+                target_directory_descriptor,
+                CANDIDATE_NAME,
+                candidate_path,
+                (10001, 10001, 0o400, 1),
+                source_content,
+            )
+            os.close(read_descriptor)
+            if read_identity != (candidate_identity.st_dev, candidate_identity.st_ino):
+                reject()
+            require_source_unchanged(
+                source_descriptor,
+                source_directory_descriptor,
+                source_name,
+                source,
+                expected_identity,
+                source_content,
+            )
+            require_source_unchanged(
+                claim_descriptor,
+                source_directory_descriptor,
+                claim_name,
+                claim_source,
+                expected_claim_identity,
+                claim_content,
+            )
+            os.link(
+                CANDIDATE_NAME,
+                target_name,
+                src_dir_fd=target_directory_descriptor,
+                dst_dir_fd=target_directory_descriptor,
+                follow_symlinks=False,
+            )
+            os.fsync(target_directory_descriptor)
+            target_descriptor, target_identity = read_exact_file(
+                target_directory_descriptor,
+                target_name,
+                target,
+                (10001, 10001, 0o400, 2),
+                source_content,
+            )
+            if target_identity != (candidate_identity.st_dev, candidate_identity.st_ino):
+                reject()
+            os.unlink(CANDIDATE_NAME, dir_fd=target_directory_descriptor)
+            os.fsync(target_directory_descriptor)
+
+        if target_descriptor is not None:
+            os.close(target_descriptor)
+            target_descriptor = None
+        final_descriptor, _ = read_exact_file(
+            target_directory_descriptor,
+            target_name,
+            target,
+            (10001, 10001, 0o400, 1),
+            source_content,
+        )
+        os.close(final_descriptor)
+        require_source_unchanged(
+            source_descriptor,
+            source_directory_descriptor,
+            source_name,
+            source,
+            expected_identity,
+            source_content,
+        )
+        require_source_unchanged(
+            claim_descriptor,
+            source_directory_descriptor,
+            claim_name,
+            claim_source,
+            expected_claim_identity,
+            claim_content,
+        )
+        if optional_named_file(
+            target_directory_descriptor,
+            CANDIDATE_NAME,
+            candidate_path,
+        ) is not None:
+            reject()
+        os.fsync(target_directory_descriptor)
+        os.fsync(source_directory_descriptor)
+    finally:
+        if target_descriptor is not None:
+            os.close(target_descriptor)
+        if candidate_descriptor is not None:
+            os.close(candidate_descriptor)
+        if source_descriptor is not None:
+            os.close(source_descriptor)
+        if claim_descriptor is not None:
+            os.close(claim_descriptor)
+        os.close(target_directory_descriptor)
+        os.close(source_directory_descriptor)
+
+
+try:
+    if len(sys.argv) != 7:
+        reject()
+    claim_id, digest = read_private_metadata(sys.argv[6])
+    prepare(
+        sys.argv[1],
+        sys.argv[2],
+        sys.argv[3],
+        sys.argv[4],
+        sys.argv[5],
+        claim_id,
+        digest,
+    )
+except Exception:
+    raise SystemExit(1)
+PY
+  then
+    python_status=0
+  else
+    python_status=$?
+  fi
+  exec {metadata_fd}<&- ||
+    die 'the private retryable KemerBet cohort metadata channel could not be closed'
+  [[ "$python_status" -eq 0 ]] ||
+    die 'the retryable KemerBet session Player-ID copy could not be prepared safely'
+
+  inspect_owner_staged_kemerbet_cohort
+  after_player_dev_ino="$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO"
+  after_claim_dev_ino="$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO"
+  after_claim_id="$KEMERBET_RECHECK_OWNER_CLAIM_ID"
+  after_digest="$KEMERBET_RECHECK_PLAYER_IDS_DIGEST"
+  [[ "$after_player_dev_ino" == "$before_player_dev_ino" &&
+    "$after_claim_dev_ino" == "$before_claim_dev_ino" &&
+    "$after_claim_id" == "$before_claim_id" && "$after_digest" == "$before_digest" ]] ||
+    die 'the retryable KemerBet Owner cohort changed while preparing private sign-in'
+  owner_kemerbet_cohort_marker require-failed "$before_claim_id" ||
+    die 'the retryable KemerBet cohort failure marker changed during private sign-in preparation'
+  require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
+  [[ "$(stat --format='%h' "$KEMERBET_READINESS_PLAYER_IDS")" == '1' &&
+    "$(sha256sum -- "$KEMERBET_READINESS_PLAYER_IDS" | awk '{print $1}')" == "$before_digest" ]] ||
+    die 'the retryable KemerBet session Player-ID copy is not exact'
+}
+
 promote_owner_staged_kemerbet_player_ids() {
   local claim_source control_mountpoint digest_fd python_status source
   command -v python3 >/dev/null 2>&1 ||
@@ -6781,6 +7366,7 @@ case "$command" in
       --format '{{.Config.User}}')" == '10001:10001' ]] ||
       die 'the private KemerBet session image user is not exact'
     require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
+    prepare_retryable_kemerbet_session_player_ids
     require_service_file "$KEMERBET_READINESS_PLAYER_IDS"
     require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
     require_kemerbet_readiness_output_directory

@@ -41,9 +41,13 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  'd9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-d9cdcdec';
+  '022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-022a9f10';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
+const retainedD9cdHelperBackupSha =
+  'd9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7';
+const retainedD9cdHelperBackupName = 'fetanagent-staging-deploy-helper.previous-d9cdcdec';
+const retainedD9cdHelperBackupPath = `/root/fetanagent-helper-rotation/${retainedD9cdHelperBackupName}`;
 const retained526HelperBackupSha =
   '5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795';
 const retained526HelperBackupName = 'fetanagent-staging-deploy-helper.previous-5267906f';
@@ -65,7 +69,7 @@ const retained33f4HelperBackupSha =
 const retained33f4HelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
 const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retained33f4HelperBackupName}`;
 const reviewedHelperSuccessorSha =
-  '022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714';
+  'ecd47f5d6aff8cd955ed8b68d7313b79fde5547a6827743e1e5f1b0d1fca04be';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -818,6 +822,13 @@ assert.ok(
 );
 for (const retainedBackup of [
   {
+    variable: 'RETAINED_D9CD_BACKUP',
+    shaVariable: 'RETAINED_D9CD_BACKUP_SHA',
+    name: retainedD9cdHelperBackupName,
+    path: retainedD9cdHelperBackupPath,
+    sha: retainedD9cdHelperBackupSha,
+  },
+  {
     variable: 'RETAINED_526_BACKUP',
     shaVariable: 'RETAINED_526_BACKUP_SHA',
     name: retained526HelperBackupName,
@@ -895,9 +906,11 @@ for (const retainedBackup of [
 }
 assert.doesNotMatch(
   helperReplacementRunbook,
-  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_(?:526|121E|AF823|B466|33F4)_BACKUP"/u,
+  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_(?:D9CD|526|121E|AF823|B466|33F4)_BACKUP"/u,
   'The current rotation must never mutate or remove any retained earlier predecessor backup.',
 );
+assert.match(helperReplacementRunbook, /Retain all seven versioned predecessor backups/);
+assert.match(helperReplacementRunbook, /six older backups during this rotation/);
 assert.doesNotMatch(
   helperReplacementRunbook,
   /BACKUP=(?:"\$STAGING_ROOT\/|')fetanagent-staging-deploy-helper\.previous(?:"|')/u,
@@ -1106,8 +1119,8 @@ for (const replacementResumeContract of [
   /if \[\[ -e "\$BACKUP" \|\| -L "\$BACKUP" \]\]; then/,
   /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-022a9f10'/,
-  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-d9cdcdec\.installing"/,
+  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-ecd47f5d'/,
+  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-022a9f10\.installing"/,
 ]) {
   assert.match(helperReplacement, replacementResumeContract);
 }
@@ -1224,7 +1237,7 @@ for (const restoreResumeContract of [
   /SUDOERS_STATE='enabled'/,
   /SUDOERS_STATE='disabled'/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-d9cdcdec'/,
+  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-022a9f10'/,
   /if \[\[ "\$TARGET_SHA" == "\$NEXT_SHA" \]\]; then/,
   /RESTORE_TMP="\$RESTORE_TMP_PATH"/,
 ]) {
@@ -2028,6 +2041,7 @@ assert.match(
   startKemerbetSession,
   /require_kemerbet_identity_key_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
 );
+assert.match(startKemerbetSession, /prepare_retryable_kemerbet_session_player_ids/);
 assert.match(startKemerbetSession, /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/);
 assert.match(startKemerbetSession, /require_immutable_config_file "\$KEMERBET_SELECTOR_CONTRACT"/);
 assert.match(startKemerbetSession, /require_kemerbet_readiness_output_directory/);
@@ -2038,6 +2052,17 @@ assert.match(
 );
 assert.match(startKemerbetSession, /require_kemerbet_session_provision_runtime "\$commit_sha"/);
 assert.doesNotMatch(startKemerbetSession, /FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
+assertInOrder(
+  startKemerbetSession,
+  [
+    'require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"',
+    'prepare_retryable_kemerbet_session_player_ids',
+    'require_service_file "$KEMERBET_READINESS_PLAYER_IDS"',
+    'require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"',
+    'up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision',
+  ],
+  'private sign-in must rebuild only an exact retry service copy before the existing no-transfer runtime starts',
+);
 
 const kemerbetSessionRuntime =
   /require_kemerbet_session_provision_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
@@ -2229,6 +2254,150 @@ for (const contract of [
 ]) {
   assert.match(kemerbetSessionControlVolumeResolver, contract);
 }
+
+const prepareRetryableKemerbetSessionPlayerIds =
+  /prepare_retryable_kemerbet_session_player_ids\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  prepareRetryableKemerbetSessionPlayerIds,
+  'the helper must rebuild only the consumed private-session Player copy from an exact retryable cohort',
+);
+for (const contract of [
+  /if \[\[ -e "\$KEMERBET_READINESS_PLAYER_IDS" \|\| -L "\$KEMERBET_READINESS_PLAYER_IDS" \]\]/,
+  /failed_path="\$KEMERBET_OWNER_RECEIPT_ROOT\/\$KEMERBET_OWNER_FAILED_CLAIM_NAME"/,
+  /failed_installing_path="\$KEMERBET_OWNER_RECEIPT_ROOT\/\$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"/,
+  /candidate_path="\$\(dirname -- "\$KEMERBET_READINESS_PLAYER_IDS"\)\/\.kemerbet-readiness-player-ids\.promote-v1"/,
+  /! -e "\$failed_path" && ! -L "\$failed_path"/,
+  /! -e "\$failed_installing_path" && ! -L "\$failed_installing_path"/,
+  /! -e "\$candidate_path" && ! -L "\$candidate_path"/,
+  /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /stat --format='%h' "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /! -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+  /! -e "\$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "\$KEMERBET_RECHECK_RECEIPT_ROOT"/,
+  /! -e "\$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/,
+  /! -e "\$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /KEMERBET_RECOVERY_LATCH_NAME/,
+  /KEMERBET_RECOVERY_LATCH_INSTALLING_NAME/,
+  /require_kemerbet_readiness_output_directory/,
+  /realpath -- "\$KEMERBET_READINESS_BINDING"/,
+  /stat --format='%u:%g:%a:%h' "\$KEMERBET_READINESS_BINDING"/,
+  /== '10001:10001:600:1'/,
+  /binding_size.*-ge 100.*-le 256/s,
+  /wc -l <"\$KEMERBET_READINESS_BINDING"/,
+  /hmac-sha256-agent-identity-v1:\[0-9a-f\]\{64\}/,
+  /inspect_owner_staged_kemerbet_cohort/,
+  /owner_kemerbet_cohort_marker require-failed "\$before_claim_id"/,
+  /exec \{metadata_fd\}<<<"\$before_claim_id\n\$before_digest"/,
+  /"\$before_player_dev_ino" "\$before_claim_dev_ino" "\$metadata_fd" <<'PY'/,
+  /EXPECTED_SOURCE_NAME = 'kemerbet-readiness-player-ids\.stage-v1'/,
+  /EXPECTED_CLAIM_NAME = 'kemerbet-readiness-cohort-claim\.stage-v1'/,
+  /EXPECTED_TARGET = '\/etc\/fetanagent\/executor-secrets\/kemerbet_no_transfer_readiness_player_ids'/,
+  /CANDIDATE_NAME = '\.kemerbet-readiness-player-ids\.promote-v1'/,
+  /PLAYER_ID = re\.compile\(rb'\[A-Za-z0-9\]\[A-Za-z0-9\._-\]\{0,63\}'\)/,
+  /CLAIM_ID = re\.compile\(r'\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[1-8\]\[0-9a-f\]\{3\}-\[89ab\]\[0-9a-f\]\{3\}-\[0-9a-f\]\{12\}'\)/,
+  /def read_private_metadata\(descriptor_text\):/,
+  /claim_id, digest = read_private_metadata\(sys\.argv\[6\]\)/,
+  /len\(lines\) != 5 or len\(set\(lines\)\) != 5/,
+  /source_directory_descriptor = open_exact_directory\(source_parent, 10001, 10001, 0o700\)/,
+  /target_directory_descriptor = open_exact_directory\(target_parent, 0, 0, 0o700\)/,
+  /os\.O_RDONLY \| os\.O_DIRECTORY \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/,
+  /\(10001, 10001, 0o400, 1\)/,
+  /hashlib\.sha256\(source_content\)\.hexdigest\(\) != expected_digest/,
+  /claim_descriptor, claim_identity = read_exact_file\(/,
+  /if claim_identity != expected_claim_identity:/,
+  /remove_safe_candidate\(/,
+  /if target_value is not None:/,
+  /if target_value\.st_nlink == 2 and candidate_value is not None:/,
+  /elif target_value\.st_nlink == 1:/,
+  /os\.O_CREAT\s+\| os\.O_EXCL\s+\| os\.O_NOFOLLOW/u,
+  /os\.fchown\(candidate_descriptor, 10001, 10001\)/,
+  /os\.fchmod\(candidate_descriptor, 0o400\)/,
+  /os\.fsync\(candidate_descriptor\)/,
+  /src_dir_fd=target_directory_descriptor/,
+  /dst_dir_fd=target_directory_descriptor/,
+  /follow_symlinks=False/,
+  /os\.unlink\(CANDIDATE_NAME, dir_fd=target_directory_descriptor\)/,
+  /require_source_unchanged\(/,
+  /after_player_dev_ino.*before_player_dev_ino/s,
+  /after_claim_dev_ino.*before_claim_dev_ino/s,
+  /after_claim_id.*before_claim_id/s,
+  /after_digest.*before_digest/s,
+  /sha256sum -- "\$KEMERBET_READINESS_PLAYER_IDS"/,
+]) {
+  assert.match(prepareRetryableKemerbetSessionPlayerIds, contract);
+}
+assert.equal(
+  (prepareRetryableKemerbetSessionPlayerIds.match(/inspect_owner_staged_kemerbet_cohort/g) ?? [])
+    .length,
+  2,
+  'retry sign-in must attest the same Owner stage pair before and after copying',
+);
+assert.equal(
+  (
+    prepareRetryableKemerbetSessionPlayerIds.match(
+      /owner_kemerbet_cohort_marker require-failed "\$before_claim_id"/g,
+    ) ?? []
+  ).length,
+  2,
+  'retry sign-in must pin the same aggregate failed marker before and after copying',
+);
+assert.equal(
+  (
+    prepareRetryableKemerbetSessionPlayerIds.match(
+      /! -e "\$failed_installing_path" && ! -L "\$failed_installing_path"/g,
+    ) ?? []
+  ).length,
+  2,
+  'retry sign-in must keep an incomplete failed-marker installer out of both the legacy fast path and the retry boundary',
+);
+assertInOrder(
+  prepareRetryableKemerbetSessionPlayerIds,
+  [
+    'failed_path="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME"',
+    'failed_installing_path="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"',
+    'candidate_path="$(dirname -- "$KEMERBET_READINESS_PLAYER_IDS")/.kemerbet-readiness-player-ids.promote-v1"',
+    'if [[ -e "$KEMERBET_READINESS_PLAYER_IDS" || -L "$KEMERBET_READINESS_PLAYER_IDS" ]]; then',
+    'if [[ ! -e "$failed_path" && ! -L "$failed_path" &&',
+    '! -e "$candidate_path" && ! -L "$candidate_path" ]]; then',
+    'return 0',
+    '[[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT"',
+  ],
+  'the legacy target-present fast path must be unreachable for a failed retry or fixed-candidate crash prefix',
+);
+assertInOrder(
+  prepareRetryableKemerbetSessionPlayerIds,
+  [
+    'inspect_owner_staged_kemerbet_cohort',
+    'owner_kemerbet_cohort_marker require-failed "$before_claim_id"',
+    'source_descriptor, source_content = read_exact_source(',
+    'claim_descriptor, claim_identity = read_exact_file(',
+    'os.fsync(candidate_descriptor)',
+    'require_source_unchanged(',
+    'os.link(',
+    'os.fsync(target_directory_descriptor)',
+    'os.unlink(CANDIDATE_NAME, dir_fd=target_directory_descriptor)',
+    'os.fsync(target_directory_descriptor)',
+    'final_descriptor, _ = read_exact_file(',
+    'inspect_owner_staged_kemerbet_cohort',
+    'owner_kemerbet_cohort_marker require-failed "$before_claim_id"',
+    'require_service_file "$KEMERBET_READINESS_PLAYER_IDS"',
+  ],
+  'retry sign-in must validate, atomically copy, re-attest the unchanged Owner cohort, and only then expose the service copy',
+);
+assert.doesNotMatch(
+  prepareRetryableKemerbetSessionPlayerIds,
+  /owner_kemerbet_cohort_marker guard-retry|promote_owner_staged_kemerbet_player_ids|restore_owner_staged_kemerbet_cohort|publish-(?:imported|completed|failed)|remove-(?:imported|completed|failed)|record_kemerbet_recheck|\bpsql\b|DATABASE_URL|container (?:create|start|run|logs)|PlayerEPOSDeposit|GeneralInfoByExternalId|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION|PRIVATE_LIVE_DEPOSIT_PILOT)_ENABLED=true|tempfile|mkstemp|\bprint\s*\(|os\.environ|sys\.(?:stdout|stderr)|\bsubprocess\b|os\.system|os\.(?:fchmod|fchown|pwrite|ftruncate)\((?:source|claim)_descriptor|os\.(?:unlink|rename)\((?:source_name|claim_name)/iu,
+  'retry sign-in must only create the exact private service copy without stage, marker, database, provider, financial, or logging side effects',
+);
+assert.doesNotMatch(
+  prepareRetryableKemerbetSessionPlayerIds,
+  /"\$before_claim_id" \\\n|"\$before_digest" \\\n/u,
+  'retry sign-in must carry the private claim ID and Player digest only through the inherited metadata descriptor',
+);
+assert.equal(
+  (helper.match(/\bprepare_retryable_kemerbet_session_player_ids\b/g) ?? []).length,
+  2,
+  'the retry-only service-copy helper must be defined once and invoked only by private sign-in start',
+);
 
 const promoteOwnerStagedKemerbetPlayerIds =
   /promote_owner_staged_kemerbet_player_ids\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];

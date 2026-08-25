@@ -124,6 +124,37 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           <div class="request-list" id="player-eligibility-list"></div>
         </section>
 
+        <section class="review-section" aria-labelledby="kemerbet-readiness-cohort-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">One-use no-transfer bridge</p>
+              <h2 id="kemerbet-readiness-cohort-title">KemerBet readiness cohort</h2>
+            </div>
+          </div>
+          <p class="receipt-label">
+            Prepare the server-only one-use input for exactly five active, valid, currently
+            eligible KemerBet Players. The browser sends no Player identifiers, amount, or digest;
+            the server re-checks the current Owner eligibility records before preparing it.
+          </p>
+          <p class="pilot-warning">
+            This does not click Transfer, enable the executor, credit KemerBet, or move money.
+            A different cohort cannot replace an already prepared one-use input.
+          </p>
+          <p class="request-meta" id="kemerbet-readiness-cohort-status">
+            Sign in to load the current eligible Player count.
+          </p>
+          <form id="kemerbet-readiness-cohort-form">
+            <label class="confirmation-row" for="kemerbet-readiness-cohort-confirmation">
+              <input id="kemerbet-readiness-cohort-confirmation" type="checkbox" />
+              I approve preparing the current exact five-Player readiness cohort. Transfer remains
+              disabled and no money will move.
+            </label>
+            <button id="kemerbet-readiness-cohort-button" type="submit" disabled>
+              Prepare one-use readiness cohort
+            </button>
+          </form>
+        </section>
+
         <section class="review-section" aria-labelledby="receiver-title">
           <div class="panel-heading">
             <div>
@@ -379,6 +410,10 @@ const refreshRequestsButton = document.querySelector('#refresh-requests-button')
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
 const playerEligibilityList = document.querySelector('#player-eligibility-list');
+const kemerbetReadinessCohortForm = document.querySelector('#kemerbet-readiness-cohort-form');
+const kemerbetReadinessCohortConfirmation = document.querySelector('#kemerbet-readiness-cohort-confirmation');
+const kemerbetReadinessCohortButton = document.querySelector('#kemerbet-readiness-cohort-button');
+const kemerbetReadinessCohortStatus = document.querySelector('#kemerbet-readiness-cohort-status');
 const receiverList = document.querySelector('#receiver-list');
 const receiverForm = document.querySelector('#receiver-form');
 const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
@@ -417,6 +452,8 @@ let ownerAuthGeneration = 0;
 let currentInvite;
 let currentPilot;
 let eligiblePilotPlayers = [];
+let eligibleReadinessCohortPlayerCount = 0;
+let readinessCohortPrepared = false;
 let activeKemerbetAgentProfileId;
 let currentKemerbetSession;
 let kemerbetSessionPollTimer;
@@ -453,6 +490,15 @@ function clearAssociationCandidates() {
 
 function clearPlayerEligibility() {
   playerEligibilityList.replaceChildren();
+}
+
+function clearKemerbetReadinessCohort() {
+  eligibleReadinessCohortPlayerCount = 0;
+  readinessCohortPrepared = false;
+  kemerbetReadinessCohortConfirmation.checked = false;
+  kemerbetReadinessCohortButton.disabled = true;
+  kemerbetReadinessCohortStatus.textContent =
+    'Sign in to load the current eligible Player count.';
 }
 
 function clearReceivers() {
@@ -563,6 +609,7 @@ function signOut(message = 'Signed out.') {
   clearPlayerRequests();
   clearAssociationCandidates();
   clearPlayerEligibility();
+  clearKemerbetReadinessCohort();
   clearReceivers();
   clearKemerbetAgentProfiles();
   clearPilot();
@@ -1218,6 +1265,39 @@ function validPilotStatus(value) {
   };
 }
 
+function validKemerbetReadinessCohortReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'alreadyPrepared,identifiersRedacted,moneyMoved,playersPrepared,transferDisabled' ||
+      typeof value.alreadyPrepared !== 'boolean' || value.identifiersRedacted !== true ||
+      value.moneyMoved !== false || value.playersPrepared !== 5 ||
+      value.transferDisabled !== true) return undefined;
+  return { alreadyPrepared: value.alreadyPrepared };
+}
+
+function updateKemerbetReadinessCohortAvailability() {
+  kemerbetReadinessCohortButton.disabled = readinessCohortPrepared ||
+    eligibleReadinessCohortPlayerCount !== 5 ||
+    !kemerbetReadinessCohortConfirmation.checked;
+  if (readinessCohortPrepared) {
+    kemerbetReadinessCohortStatus.textContent =
+      'Prepared for five Players. Identifiers are redacted, Transfer is disabled, and no money moved.';
+    return;
+  }
+  kemerbetReadinessCohortStatus.textContent = eligibleReadinessCohortPlayerCount +
+    '/5 currently eligible Players are available. ' +
+    (eligibleReadinessCohortPlayerCount === 5
+      ? 'The server will independently re-check this exact count.'
+      : 'Preparation remains blocked unless the current eligible count is exactly five.');
+}
+
+function renderKemerbetReadinessCohortAvailability(players) {
+  eligibleReadinessCohortPlayerCount = players.filter((player) =>
+    player.playerStatus === 'active' && player.validationStatus === 'valid' &&
+    player.decision === 'eligible').length;
+  updateKemerbetReadinessCohortAvailability();
+}
+
 function updatePilotPreparationAvailability() {
   pilotPrepareButton.disabled = Boolean(currentPilot) || selectedPilotPlayerIds.size !== 5 ||
     !pilotConfirmation.checked;
@@ -1539,6 +1619,7 @@ async function decidePlayerEligibility(player, decision) {
 
 function renderPlayerEligibility(players) {
   clearPlayerEligibility();
+  renderKemerbetReadinessCohortAvailability(players);
   renderPilotCandidates(players);
   if (players.length === 0) {
     const empty = document.createElement('p');
@@ -1670,6 +1751,8 @@ async function loadPlayerEligibility() {
     renderPlayerEligibility(players);
   } catch (error) {
     clearPlayerEligibility();
+    eligibleReadinessCohortPlayerCount = 0;
+    updateKemerbetReadinessCohortAvailability();
     if (!isSignedOutError(error)) setNotice('Player-ID deposit eligibility is unavailable.');
   }
 }
@@ -1688,6 +1771,52 @@ async function loadDepositIntake() {
   if (deposits.some((deposit) => !deposit)) throw new Error('deposit_queue');
   if (assessments.some((assessment) => !assessment)) throw new Error('deposit_queue');
   renderDepositIntake(deposits, assessments);
+}
+
+function kemerbetReadinessCohortMutationHeaders(requestId) {
+  return {
+    'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-kemerbet-readiness-cohort-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+async function prepareKemerbetReadinessCohort() {
+  if (readinessCohortPrepared || eligibleReadinessCohortPlayerCount !== 5 ||
+      !kemerbetReadinessCohortConfirmation.checked) return;
+  if (!window.confirm(
+    'Prepare the server-only one-use input from the current exact five eligible KemerBet Players? No identifier or amount is sent by this browser, Transfer remains disabled, and no money moves.',
+  )) return;
+  const requestId = crypto.randomUUID();
+  setBusy(kemerbetReadinessCohortForm, true);
+  setNotice('Preparing the one-use KemerBet readiness cohort with identifiers redacted…');
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-readiness-cohort/prepare', {
+      method: 'POST',
+      headers: kemerbetReadinessCohortMutationHeaders(requestId),
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId,
+      }),
+    });
+    if (response.status !== 200 && response.status !== 201) {
+      throw new Error('readiness_cohort_prepare');
+    }
+    const prepared = validKemerbetReadinessCohortReceipt(await response.json());
+    if (!prepared || (response.status === 200) !== prepared.alreadyPrepared) {
+      throw new Error('readiness_cohort_prepare');
+    }
+    readinessCohortPrepared = true;
+    kemerbetReadinessCohortConfirmation.checked = false;
+    setNotice('One-use readiness cohort prepared for five Players. Identifiers are redacted, Transfer is disabled, and no money moved.');
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      setNotice('Readiness-cohort preparation was rejected or unavailable. Nothing was transferred and no money moved.');
+    }
+  } finally {
+    setBusy(kemerbetReadinessCohortForm, false);
+    updateKemerbetReadinessCohortAvailability();
+  }
 }
 
 function pilotMutationHeaders(requestId) {
@@ -1951,6 +2080,14 @@ logoutButton.addEventListener('click', async () => {
   signOut();
 });
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
+kemerbetReadinessCohortConfirmation.addEventListener(
+  'change',
+  updateKemerbetReadinessCohortAvailability,
+);
+kemerbetReadinessCohortForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await prepareKemerbetReadinessCohort();
+});
 receiverRefreshButton.addEventListener('click', loadReceivers);
 receiverForm.addEventListener('submit', async (event) => {
   event.preventDefault();

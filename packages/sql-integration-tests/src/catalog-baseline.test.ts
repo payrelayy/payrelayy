@@ -14,6 +14,7 @@ import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-depos
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
 import { registerOwnerKemerbetAgentProfileControlSqlTests } from './owner-kemerbet-agent-profile-control.suite.js';
+import { registerOwnerKemerbetReadinessCohortSqlTests } from './owner-kemerbet-readiness-cohort.suite.js';
 import { registerOwnerReceiverAccountControlSqlTests } from './owner-receiver-account-control.suite.js';
 import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pilot-owner-control.suite.js';
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
@@ -9502,6 +9503,10 @@ registerOwnerReceiverAccountControlSqlTests(
   () => ownerAdminId,
 );
 registerOwnerKemerbetAgentProfileControlSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerOwnerKemerbetReadinessCohortSqlTests(
   () => client,
   () => ownerAdminId,
 );

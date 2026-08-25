@@ -262,15 +262,25 @@ describe('KemerBet no-transfer readiness seal', () => {
     const end = source.indexOf('async function productionOpenProbe', start);
     const body = start >= 0 && end > start ? source.slice(start, end) : '';
 
+    const resolveProfile = body.indexOf('resolveSafeProfile(');
+    const removeSingletons = body.indexOf('removeStaleChromiumSingletonArtifacts(');
+    const revalidateProfile = body.indexOf('assertSafeDirectory(profile');
+    const launchPersistentContext = body.indexOf('chromium.launchPersistentContext(');
+
+    expect(resolveProfile).toBeGreaterThanOrEqual(0);
+    expect(removeSingletons).toBeGreaterThan(resolveProfile);
+    expect(revalidateProfile).toBeGreaterThan(removeSingletons);
+    expect(launchPersistentContext).toBeGreaterThan(revalidateProfile);
+
     expect(body).toContain('offline: true');
     expect(body).toContain("serviceWorkers: 'block'");
     expect(body).toContain("retainedContext.route('**/*', handler)");
     expect(body).toContain("retainedContext.routeWebSocket('**/*'");
     expect(body).toContain("retainedContext.unroute('**/*', handler)");
     expect(body).not.toContain("page.routeWebSocket('**/*'");
-    expect(body.indexOf('restoredPage.close()')).toBeLessThan(
-      body.indexOf('requestBoundary.install()'),
-    );
+    const restoredPageCloseIndex = body.indexOf('restoredPage.close()');
+    expect(restoredPageCloseIndex).toBeGreaterThanOrEqual(0);
+    expect(restoredPageCloseIndex).toBeLessThan(body.indexOf('requestBoundary.install()'));
     expect(body.indexOf('requestBoundary.install()')).toBeLessThan(
       body.indexOf("retainedContext.routeWebSocket('**/*'"),
     );

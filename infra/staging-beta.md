@@ -53,6 +53,77 @@ KemerBet actions remain explicitly false. `FINANCIAL_ACTIONS_MODE` is fixed to `
 This is not an authorization to start the profile. A later, explicit staging activation must first
 review the commit, runtime credentials, startup preflight, and resulting rendered Compose model.
 
+### Owner exact-five cohort import and claim freeze
+
+The Owner-side readiness export is a one-use, exact-five bridge into the root helper. It creates the
+fixed Player stage plus a fixed claim sidecar containing only a lowercase claim UUID. The root
+helper never prints, logs, hashes into a receipt, or returns a Player ID. Its only app-readable
+receipts are fixed aggregate UUID markers named `kemerbet-readiness-cohort-imported-v1`,
+`kemerbet-readiness-cohort-completed-v1`, and retryable
+`kemerbet-readiness-cohort-failed-v1`. These markers do not authorize a deposit, withdrawal, or
+provider action. The recheck remains the existing lookup-only, transfer-blocked contract and does
+not compare KemerBet balances or transaction history, so unrelated manual agent activity is not an
+import failure signal.
+
+The exact crash-recovery topology is:
+
+- Before import, `kemerbet-readiness-player-ids.stage-v1` and
+  `kemerbet-readiness-cohort-claim.stage-v1` are each UID/GID `10001:10001`, mode `0400`, and
+  link-count one. The sidecar is exactly one lowercase UUID plus LF.
+- The root journal `/var/lib/fetanagent/kemerbet-readiness-recheck-promotion/pending-v1` binds that
+  UUID, both source device/inode identities, and the exact Player-stage SHA-256 before either source
+  changes. That digest stays inside the root-only journal and helper process; it is never printed,
+  logged, returned to the app, copied into an aggregate marker or public receipt, placed in a child
+  process argument/environment, or exposed through `/proc/*/cmdline`. Descriptor helpers receive it
+  only through an inherited root-process file descriptor. Import freezes
+  both sources at `root:root`, mode `0444`, link-count one, durably prepares the private Player input,
+  then publishes `kemerbet-readiness-cohort-imported-v1` as `root:10001`, mode `0440`, link-count
+  one. Every freeze, promotion, restore, consume, and recovery step revalidates the journaled Player
+  digest through an exact `O_NOFOLLOW` descriptor. During committed consumption recovery, imported
+  may coexist with either frozen source already absent; it never makes a financial action live.
+- A retryable failure restores both exact source inodes first to `10001:10001`, mode `0400`, removes
+  imported, and publishes matching `kemerbet-readiness-cohort-failed-v1` last. The database claim
+  stays active/exported and all claim source writes stay frozen; failed is not terminal.
+- Success keeps the canonical candidate, sealed binding source, internal Player file, and both
+  frozen Owner stages intact while it re-proves the reviewed release and image, exact profile digest,
+  fresh no-transfer bot runtime, zero profile-volume holders, exactly one Owner-control stage
+  producer, and no transient recheck container or network. Only then does it seal the root-only
+  no-transfer receipt at `/var/lib/fetanagent/kemerbet-readiness-recheck/ready-v1`; that receipt plus
+  the canonical binding and digest-bound journal is the durable success authority. Committed cleanup
+  validates each exact open descriptor, unlinks its fixed pathname, synchronizes the parent
+  directory, proves the pathname absent, and only afterward may best-effort wipe the already-unlinked
+  descriptor. It never overwrites a reachable source. The helper re-proves the complete current
+  release/image/profile/runtime/no-holder/singleton/no-transient boundary before publishing matching
+  `kemerbet-readiness-cohort-completed-v1`, re-proves it again after publication, and retires the
+  journal last. Completed therefore has no stage-file residue. If the host stops after any unlink,
+  the receipt, canonical binding, journaled digest, and durable pathname absence reconstruct this
+  same completed topology rather than retrying the browser probe.
+
+Every aggregate marker contains only the same UUID plus LF and uses a fixed hidden installer that
+the root journal can resume safely. An installer conflict, foreign UUID, symlink, hard link,
+unexpected owner/mode, or conflicting final marker fails closed. Operators must not print a stage
+file, marker UUID, journal digest, or binding digest during recovery.
+
+An active database cohort claim intentionally freezes writes to every table from which its cohort
+was derived, including otherwise unrelated customer/platform writes. That freeze begins before
+export and remains through `prepared`/`exported`, an interrupted import, and retryable `failed-v1`.
+It never auto-expires. Only reconciliation of the root-owned `completed-v1` marker may advance the
+claim to success; only a separately reviewed root-certified terminal cleanup may release the frozen
+membership. Operators must treat any active claim whose aggregate age exceeds the current
+readiness-maintenance window as a stale-claim alert: check the authenticated Owner status card and
+the root promotion journal/aggregate markers, then resume recovery. Never delete a claim, marker,
+journal, or source-table lock merely because it is old, and never query or copy Player identifiers
+for diagnosis.
+
+The two singleton proofs are intentionally separate. Exactly one `owner-control` container is the
+only accepted producer of the staged pair. While the private session container is live, the helper
+also proves that `/var/lib/fetanagent/kemerbet-sessions` is mounted from the exact
+`fetanagent-staging-beta_kemerbet_sessions` volume and that this container is its sole holder; the
+holder set must be empty before and after the isolated recheck. Chromium singleton artifacts are
+checked only inside the exact account directory (`$profile_mountpoint/$account_id/Singleton*`),
+never at the profile-volume root. These checks do not read balance or transaction history and do not
+change any provider state.
+
 ## External secret files
 
 No secret value belongs in this repository, an `.env` file, a Compose environment value, an image,
@@ -253,8 +324,8 @@ file and its root-only backup.
 For this replacement only, the accepted predecessor and successor LF SHA-256 values are:
 
 ```text
-installed_predecessor=b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663
-reviewed_successor=af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833
+installed_predecessor=af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833
+reviewed_successor=7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077
 ```
 
 Extract the successor from a clean checkout of the exact reviewed `main` commit, verify it before
@@ -265,7 +336,7 @@ predecessor digest, fetch a moving branch, or put any credential in that directo
 
 ```bash
 C1='<exact-40-lowercase-reviewed-main-commit>'
-NEXT_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
+NEXT_SHA='7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077'
 [[ "$C1" =~ ^[0-9a-f]{40}$ ]]
 git show "$C1:infra/operations/fetanagent-staging-deploy-helper.sh" > fetanagent-staging-deploy-helper.next
 test "$(sha256sum fetanagent-staging-deploy-helper.next | awk '{ print $1 }')" = "$NEXT_SHA"
@@ -290,20 +361,22 @@ bash -euo pipefail <<'FETANAGENT_HELPER_REPLACE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
 STAGING_ROOT='/root/fetanagent-helper-rotation'
 STAGED="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
-BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-b4664efd"
-RETAINED_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-33f4a5a4"
+BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-af823251"
+RETAINED_B466_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-b4664efd"
+RETAINED_33F4_BACKUP="$STAGING_ROOT/fetanagent-staging-deploy-helper.previous-33f4a5a4"
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
 MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
-PREVIOUS_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
-NEXT_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
-RETAINED_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
+PREVIOUS_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
+NEXT_SHA='7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077'
+RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
+RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 INSTALL_TMP=''
 BACKUP_TMP=''
-INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-af823251'
-BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-b4664efd.installing"
+INSTALL_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.installing-7861082f'
+BACKUP_TMP_PATH="$STAGING_ROOT/.fetanagent-staging-deploy-helper.previous-af823251.installing"
 SUDOERS_STATE=''
 TARGET_SHA=''
 expected_sudoers() {
@@ -397,10 +470,14 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
 test ! -L "$STAGING_ROOT" && test "$(stat --format='%U:%G:%a' "$STAGING_ROOT")" = 'root:root:700'
-test ! -L "$RETAINED_BACKUP" && test -f "$RETAINED_BACKUP"
-test "$(realpath -- "$RETAINED_BACKUP")" = "$RETAINED_BACKUP"
-test "$(stat --format='%U:%G:%a:%h' "$RETAINED_BACKUP")" = 'root:root:600:1'
-test "$(sha256sum "$RETAINED_BACKUP" | awk '{ print $1 }')" = "$RETAINED_BACKUP_SHA"
+test ! -L "$RETAINED_B466_BACKUP" && test -f "$RETAINED_B466_BACKUP"
+test "$(realpath -- "$RETAINED_B466_BACKUP")" = "$RETAINED_B466_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_B466_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_B466_BACKUP" | awk '{ print $1 }')" = "$RETAINED_B466_BACKUP_SHA"
+test ! -L "$RETAINED_33F4_BACKUP" && test -f "$RETAINED_33F4_BACKUP"
+test "$(realpath -- "$RETAINED_33F4_BACKUP")" = "$RETAINED_33F4_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_33F4_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_33F4_BACKUP" | awk '{ print $1 }')" = "$RETAINED_33F4_BACKUP_SHA"
 test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
 TARGET_SHA="$(sha256sum "$TARGET" | awk '{ print $1 }')"
 [[ "$TARGET_SHA" == "$PREVIOUS_SHA" || "$TARGET_SHA" == "$NEXT_SHA" ]]
@@ -515,19 +592,24 @@ FETANAGENT_HELPER_REPLACE
 ```
 
 Then dispatch only `transition-ssh-verify` from the same exact reviewed `main` commit. It must pass
-against successor SHA `af823251…` before `deploy-and-smoke` is allowed. If it fails, keep staging
+against successor SHA `7861082f…` before `deploy-and-smoke` is allowed. If it fails, keep staging
 offline and use the root console to atomically restore only the checksum-proven `previous` file.
 Rollback follows the same sudoers-revocation and exact process-quiescence boundary, verifies the
 restored predecessor before re-enabling its grant, and makes no further mutation afterward. It is
 also resumable with the exact disabled grant and either allowed TARGET hash, but only while the
-strict pre-recheck secret/output shape remains compatible with predecessor `b4664efd`; any journal,
-receipt, candidate, canonical binding, hardened key, or consumed Player-ID input forbids downgrade:
+strict rollback shape remains compatible with predecessor `af823251`: the complete promotion and
+receipt roots, recheck candidate root, canonical binding, fixed Player-ID import candidate, every
+Owner cohort stage/installer/aggregate marker, and every profile singleton must all be absent. The
+identity key may be either the exact service-readable file or the exact root-frozen file left by the
+bounded recheck. The predecessor requires the exact service-readable one-use Player-ID file and the
+exact still-sealed readiness output/binding; absence is not a rollback-compatible pre-recheck state:
 
 ```bash
 bash -euo pipefail <<'FETANAGENT_HELPER_RESTORE'
 TARGET='/usr/local/sbin/fetanagent-staging-deploy-helper'
-BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-b4664efd'
-RETAINED_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-33f4a5a4'
+BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-af823251'
+RETAINED_B466_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-b4664efd'
+RETAINED_33F4_BACKUP='/root/fetanagent-helper-rotation/fetanagent-staging-deploy-helper.previous-33f4a5a4'
 SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.rotation-disabled'
 MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
@@ -536,40 +618,100 @@ RECHECK_PROMOTION_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck-promotion
 RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
 RECHECK_CANDIDATE_ROOT='/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate'
 CANONICAL_BINDING='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings'
+IMPORT_CANDIDATE='/etc/fetanagent/executor-secrets/.kemerbet-readiness-player-ids.promote-v1'
 IDENTITY_KEY='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_hmac_key'
 PLAYER_IDS='/etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids'
 READINESS_OUTPUT_ROOT='/var/lib/fetanagent/kemerbet-readiness-seal-output'
 READINESS_BINDING="$READINESS_OUTPUT_ROOT/kemerbet_agent_identity_bindings"
-PREVIOUS_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
-NEXT_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
-RETAINED_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
+SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_control'
+PROFILE_VOLUME='fetanagent-staging-beta_kemerbet_sessions'
+PREVIOUS_SHA='af823251e2374b77898c813f5f7fe74e78280b69ba89d0b1dd0901b8851c8833'
+NEXT_SHA='7861082f90020462583db3550a178960385dd88fd2ff60ebf1f243a1b88cd077'
+RETAINED_B466_BACKUP_SHA='b4664efdbe3297b7b0ddee8122bf431608571e84dd0987892f58c20f48bdb663'
+RETAINED_33F4_BACKUP_SHA='33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba'
 METADATA='http://169.254.169.254/metadata/v1'
 RESTORE_TMP=''
-RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-b4664efd'
+RESTORE_TMP_PATH='/usr/local/sbin/.fetanagent-staging-deploy-helper.restoring-af823251'
 SUDOERS_STATE=''
 TARGET_SHA=''
 require_pre_recheck_rollback_state() {
-  local absent_path entries service_file
+  local account_id absent_path binding_fingerprint binding_line binding_residue control_mountpoint
+  local identity_key_metadata profile_mountpoint profile_path root_entries volume_name
   for absent_path in \
     "$RECHECK_PROMOTION_ROOT" \
     "$RECHECK_RECEIPT_ROOT" \
     "$RECHECK_CANDIDATE_ROOT" \
-    "$CANONICAL_BINDING"; do
+    "$CANONICAL_BINDING" \
+    "$IMPORT_CANDIDATE"; do
     [[ ! -e "$absent_path" && ! -L "$absent_path" ]] || return 1
   done
-  for service_file in "$IDENTITY_KEY" "$PLAYER_IDS"; do
-    [[ ! -L "$service_file" && -f "$service_file" ]] || return 1
-    [[ "$(realpath -- "$service_file")" == "$service_file" ]] || return 1
-    [[ "$(stat --format='%u:%g:%a:%h' "$service_file")" == '10001:10001:400:1' ]] || return 1
+  [[ ! -L "$IDENTITY_KEY" && -f "$IDENTITY_KEY" ]] || return 1
+  [[ "$(realpath -- "$IDENTITY_KEY")" == "$IDENTITY_KEY" ]] || return 1
+  identity_key_metadata="$(stat --format='%u:%g:%a:%h' "$IDENTITY_KEY")" || return 1
+  [[ "$identity_key_metadata" == '10001:10001:400:1' ||
+    "$identity_key_metadata" == '0:0:444:1' ]] || return 1
+  [[ ! -L "$PLAYER_IDS" && -f "$PLAYER_IDS" && "$(realpath -- "$PLAYER_IDS")" == "$PLAYER_IDS" &&
+    "$(stat --format='%u:%g:%a:%h' "$PLAYER_IDS")" == '10001:10001:400:1' ]] || return 1
+  [[ ! -L "$READINESS_OUTPUT_ROOT" && -d "$READINESS_OUTPUT_ROOT" &&
+    "$(realpath -- "$READINESS_OUTPUT_ROOT")" == "$READINESS_OUTPUT_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$READINESS_OUTPUT_ROOT")" == '10001:10001:700' ]] || return 1
+  [[ "$(find -P "$READINESS_OUTPUT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" == \
+    'kemerbet_agent_identity_bindings' ]] || return 1
+  [[ ! -L "$READINESS_BINDING" && -f "$READINESS_BINDING" &&
+    "$(realpath -- "$READINESS_BINDING")" == "$READINESS_BINDING" &&
+    "$(stat --format='%u:%g:%a:%h' "$READINESS_BINDING")" == '10001:10001:600:1' ]] || return 1
+  [[ "$(wc -l <"$READINESS_BINDING")" == '1' ]] || return 1
+  LC_ALL=C grep -Eq \
+    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64}$' \
+    "$READINESS_BINDING" || return 1
+  binding_line="$(<"$READINESS_BINDING")"
+  IFS=' ' read -r account_id binding_fingerprint binding_residue <<<"$binding_line"
+  [[ -n "$account_id" && -n "$binding_fingerprint" && -z "$binding_residue" ]] || return 1
+  volume_name="$(docker --host unix:///var/run/docker.sock volume ls --quiet \
+    --filter 'label=com.docker.compose.project=fetanagent-staging-beta' \
+    --filter 'label=com.docker.compose.volume=kemerbet_session_control')" || return 1
+  [[ "$volume_name" == "$SESSION_CONTROL_VOLUME" ]] || return 1
+  [[ "$(docker --host unix:///var/run/docker.sock volume inspect "$volume_name" \
+    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}')" == \
+    "$SESSION_CONTROL_VOLUME|local|local|fetanagent-staging-beta|kemerbet_session_control" ]] || return 1
+  control_mountpoint="$(docker --host unix:///var/run/docker.sock volume inspect \
+    "$volume_name" --format '{{.Mountpoint}}')" || return 1
+  [[ "$control_mountpoint" == /* && ! -L "$control_mountpoint" && -d "$control_mountpoint" &&
+    "$(realpath -- "$control_mountpoint")" == "$control_mountpoint" &&
+    "$(stat --format='%u:%g:%a' "$control_mountpoint")" == '10001:10001:700' ]] || return 1
+  for absent_path in \
+    kemerbet-readiness-player-ids.stage-v1 \
+    .kemerbet-readiness-player-ids.stage-v1.installing \
+    kemerbet-readiness-cohort-claim.stage-v1 \
+    .kemerbet-readiness-cohort-claim.stage-v1.installing \
+    kemerbet-readiness-cohort-imported-v1 \
+    .kemerbet-readiness-cohort-imported-v1.installing \
+    kemerbet-readiness-cohort-completed-v1 \
+    .kemerbet-readiness-cohort-completed-v1.installing \
+    kemerbet-readiness-cohort-failed-v1 \
+    .kemerbet-readiness-cohort-failed-v1.installing; do
+    [[ ! -e "$control_mountpoint/$absent_path" && ! -L "$control_mountpoint/$absent_path" ]] || return 1
   done
-  [[ ! -L "$READINESS_OUTPUT_ROOT" && -d "$READINESS_OUTPUT_ROOT" ]] || return 1
-  [[ "$(realpath -- "$READINESS_OUTPUT_ROOT")" == "$READINESS_OUTPUT_ROOT" ]] || return 1
-  [[ "$(stat --format='%u:%g:%a' "$READINESS_OUTPUT_ROOT")" == '10001:10001:700' ]] || return 1
-  entries="$(find -P "$READINESS_OUTPUT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" || return 1
-  [[ "$entries" == 'kemerbet_agent_identity_bindings' ]] || return 1
-  [[ ! -L "$READINESS_BINDING" && -f "$READINESS_BINDING" ]] || return 1
-  [[ "$(realpath -- "$READINESS_BINDING")" == "$READINESS_BINDING" ]] || return 1
-  [[ "$(stat --format='%u:%g:%a:%h' "$READINESS_BINDING")" == '10001:10001:600:1' ]] || return 1
+  volume_name="$(docker --host unix:///var/run/docker.sock volume ls --quiet \
+    --filter 'label=com.docker.compose.project=fetanagent-staging-beta' \
+    --filter 'label=com.docker.compose.volume=kemerbet_sessions')" || return 1
+  [[ "$volume_name" == "$PROFILE_VOLUME" ]] || return 1
+  [[ "$(docker --host unix:///var/run/docker.sock volume inspect "$volume_name" \
+    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}')" == \
+    "$PROFILE_VOLUME|local|local|fetanagent-staging-beta|kemerbet_sessions" ]] || return 1
+  profile_mountpoint="$(docker --host unix:///var/run/docker.sock volume inspect \
+    "$volume_name" --format '{{.Mountpoint}}')" || return 1
+  [[ "$profile_mountpoint" == /* && ! -L "$profile_mountpoint" && -d "$profile_mountpoint" &&
+    "$(realpath -- "$profile_mountpoint")" == "$profile_mountpoint" &&
+    "$(stat --format='%u:%g:%a' "$profile_mountpoint")" == '10001:10001:700' ]] || return 1
+  root_entries="$(find -P "$profile_mountpoint" -mindepth 1 -maxdepth 1 -printf '%f\n')" || return 1
+  [[ "$root_entries" == "$account_id" ]] || return 1
+  profile_path="$profile_mountpoint/$account_id"
+  [[ ! -L "$profile_path" && -d "$profile_path" && "$(realpath -- "$profile_path")" == "$profile_path" &&
+    "$(stat --format='%u:%g:%a' "$profile_path")" == '10001:10001:700' ]] || return 1
+  for absent_path in SingletonCookie SingletonLock SingletonSocket; do
+    [[ ! -e "$profile_path/$absent_path" && ! -L "$profile_path/$absent_path" ]] || return 1
+  done
 }
 expected_sudoers() {
   printf '%s\n' \
@@ -660,10 +802,14 @@ test ! -e /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service && 
   test ! -L /etc/systemd/system/fetanagent-staging-runtime-expiry-stop.service
 test -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
   --filter 'label=com.docker.compose.project=fetanagent-staging-beta')"
-test ! -L "$RETAINED_BACKUP" && test -f "$RETAINED_BACKUP"
-test "$(realpath -- "$RETAINED_BACKUP")" = "$RETAINED_BACKUP"
-test "$(stat --format='%U:%G:%a:%h' "$RETAINED_BACKUP")" = 'root:root:600:1'
-test "$(sha256sum "$RETAINED_BACKUP" | awk '{ print $1 }')" = "$RETAINED_BACKUP_SHA"
+test ! -L "$RETAINED_B466_BACKUP" && test -f "$RETAINED_B466_BACKUP"
+test "$(realpath -- "$RETAINED_B466_BACKUP")" = "$RETAINED_B466_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_B466_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_B466_BACKUP" | awk '{ print $1 }')" = "$RETAINED_B466_BACKUP_SHA"
+test ! -L "$RETAINED_33F4_BACKUP" && test -f "$RETAINED_33F4_BACKUP"
+test "$(realpath -- "$RETAINED_33F4_BACKUP")" = "$RETAINED_33F4_BACKUP"
+test "$(stat --format='%U:%G:%a:%h' "$RETAINED_33F4_BACKUP")" = 'root:root:600:1'
+test "$(sha256sum "$RETAINED_33F4_BACKUP" | awk '{ print $1 }')" = "$RETAINED_33F4_BACKUP_SHA"
 test ! -L "$TARGET" && test "$(stat --format='%U:%G:%a' "$TARGET")" = 'root:root:755'
 TARGET_SHA="$(sha256sum "$TARGET" | awk '{ print $1 }')"
 [[ "$TARGET_SHA" == "$PREVIOUS_SHA" || "$TARGET_SHA" == "$NEXT_SHA" ]]
@@ -748,9 +894,11 @@ FETANAGENT_HELPER_RESTORE
 ```
 
 Do not hand-edit the installed helper or bypass its checksum gate. After read-only verification
-succeeds, remove only the staged `.next` file. Retain both versioned predecessor backups, including
-the existing `fetanagent-staging-deploy-helper.previous-33f4a5a4`; never overwrite or delete that
-earlier evidence during this rotation. This is a one-successor replacement, not ongoing credential
+succeeds, remove only the staged `.next` file. Retain all three versioned predecessor backups: the
+new `fetanagent-staging-deploy-helper.previous-af823251` backup and the independently verified
+existing `fetanagent-staging-deploy-helper.previous-b4664efd` and
+`fetanagent-staging-deploy-helper.previous-33f4a5a4` evidence. Never overwrite or delete either
+older backup during this rotation. This is a one-successor replacement, not ongoing credential
 rotation and not authority to enable financial actions.
 
 The protected `staging` environment must hold these deploy inputs before `deploy-and-smoke` or

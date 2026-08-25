@@ -5189,8 +5189,10 @@ require_kemerbet_recheck_container_contract() {
     die 'the KemerBet recheck environment is not exact'
 
   mount_contract="$(docker_local container inspect "$container_id" --format \
-    '{{range .Mounts}}{{if eq .Type "volume"}}{{printf "%s|%s|%s|%t\n" .Type .Name .Destination .RW}}{{else}}{{printf "%s|%s|%s|%t\n" .Type .Source .Destination .RW}}{{end}}{{end}}' | LC_ALL=C sort)" ||
+    '{{range .Mounts}}{{if eq .Type "volume"}}{{printf "%s|%s|%s|%t\n" .Type .Name .Destination .RW}}{{else}}{{printf "%s|%s|%s|%t\n" .Type .Source .Destination .RW}}{{end}}{{end}}')" ||
     die 'the KemerBet recheck mount contract could not be inspected'
+  mount_contract="$(LC_ALL=C sort <<<"$mount_contract")" ||
+    die 'the KemerBet recheck mount contract could not be normalized'
   [[ "$mount_contract" == "$(printf '%s\n' \
     "bind|$KEMERBET_RECHECK_CANDIDATE_BINDING|/run/secrets/kemerbet_agent_identity_bindings|false" \
     "bind|$KEMERBET_AGENT_IDENTITY_HMAC_KEY|/run/secrets/kemerbet_agent_identity_hmac_key|false" \

@@ -5176,9 +5176,15 @@ require_kemerbet_recheck_container_contract() {
       'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false' \
       'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false'
   } | LC_ALL=C sort)"
+  # Capture the Docker template output before sorting it. The CLI appends its own
+  # newline after the template, while each `println` already emits one; piping
+  # that double terminator directly into sort manufactures a leading empty
+  # record that is not part of Config.Env.
   actual_environment="$(docker_local container inspect "$container_id" \
-    --format '{{range .Config.Env}}{{println .}}{{end}}' | LC_ALL=C sort)" ||
+    --format '{{range .Config.Env}}{{println .}}{{end}}')" ||
     die 'the KemerBet recheck environment could not be inspected'
+  actual_environment="$(LC_ALL=C sort <<<"$actual_environment")" ||
+    die 'the KemerBet recheck environment could not be normalized'
   [[ "$actual_environment" == "$expected_environment" ]] ||
     die 'the KemerBet recheck environment is not exact'
 

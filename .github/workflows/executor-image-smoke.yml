@@ -67,6 +67,55 @@ jobs:
             test "$(grep -Fxc "$proxy_name=" <<<"$image_environment")" -eq 1
           done
 
+      - name: Verify exact created-container environment serialization
+        shell: bash
+        env:
+          EXECUTOR_IMAGE: fetanagent-deposit-executor:ci
+        run: |
+          set -euo pipefail
+          container_name='fetanagent-executor-environment-smoke'
+          trap 'docker rm --force "$container_name" >/dev/null 2>&1 || true' EXIT
+
+          docker create --name "$container_name" \
+            --env NODE_ENV=production \
+            --env HTTP_PROXY= \
+            --env http_proxy= \
+            --env HTTPS_PROXY= \
+            --env https_proxy= \
+            --env NO_PROXY= \
+            --env no_proxy= \
+            --env FTP_PROXY= \
+            --env ftp_proxy= \
+            --env ALL_PROXY= \
+            --env all_proxy= \
+            --env FINANCIAL_ACTIONS_MODE=dry_run \
+            --env KEMERBET_NO_TRANSFER_READINESS_ENABLED=true \
+            --env KEMERBET_EXECUTOR_ENABLED=false \
+            --env KEMERBET_FINAL_ACTION_ENABLED=false \
+            --env KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false \
+            "$EXECUTOR_IMAGE" >/dev/null
+
+          image_environment="$(docker image inspect "$EXECUTOR_IMAGE" \
+            --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          expected_environment="$({
+            grep -Ev '^(NODE_ENV|FINANCIAL_ACTIONS_MODE|KEMERBET_NO_TRANSFER_READINESS_ENABLED|KEMERBET_EXECUTOR_ENABLED|KEMERBET_FINAL_ACTION_ENABLED|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED)=' \
+              <<<"$image_environment" || true
+            printf '%s\n' \
+              'NODE_ENV=production' \
+              'FINANCIAL_ACTIONS_MODE=dry_run' \
+              'KEMERBET_NO_TRANSFER_READINESS_ENABLED=true' \
+              'KEMERBET_EXECUTOR_ENABLED=false' \
+              'KEMERBET_FINAL_ACTION_ENABLED=false' \
+              'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false'
+          } | LC_ALL=C sort)"
+          actual_environment="$(docker container inspect "$container_name" \
+            --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          actual_environment="$(LC_ALL=C sort <<<"$actual_environment")"
+
+          test "$actual_environment" = "$expected_environment"
+          test "$(grep -c '^' <<<"$actual_environment")" -eq \
+            "$(grep -c '^' <<<"$expected_environment")"
+
       - name: Verify default startup fails closed without live inputs
         shell: bash
         env:

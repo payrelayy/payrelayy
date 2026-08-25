@@ -143,7 +143,21 @@ RUN apt-get update \
   && install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control /var/lib/fetanagent/kemerbet-sessions \
   && rm -rf /var/lib/apt/lists/*
 
-ENV HOME=/tmp
+# Docker Compose can otherwise inherit proxy authority from the Docker client's
+# config.json. Keep an explicit no-proxy baseline in the executor image; the
+# one-shot readiness service repeats these exact empty overrides so Compose
+# cannot replace them with host-configured proxy values.
+ENV HOME=/tmp \
+    HTTP_PROXY= \
+    http_proxy= \
+    HTTPS_PROXY= \
+    https_proxy= \
+    NO_PROXY= \
+    no_proxy= \
+    FTP_PROXY= \
+    ftp_proxy= \
+    ALL_PROXY= \
+    all_proxy=
 
 USER 10001:10001
 

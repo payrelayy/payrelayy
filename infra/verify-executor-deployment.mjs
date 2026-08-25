@@ -504,6 +504,29 @@ const executorRuntimeBase = dockerfile
 assert.ok(executorRuntimeBase, 'missing executor runtime base body');
 assert.match(executorRuntimeBase, /USER root/);
 assert.match(executorRuntimeBase, /USER 10001:10001/);
+for (const proxyName of [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'FTP_PROXY',
+  'ftp_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+]) {
+  assert.equal(
+    countMatches(
+      executorRuntimeBase,
+      new RegExp(`^\\s+(?:ENV\\s+)?${proxyName}=\\s*(?:\\\\)?$`, 'gmu'),
+    ),
+    1,
+    `the executor runtime image must contain one empty ${proxyName} baseline`,
+  );
+  assert.match(executorImageSmokeWorkflow, new RegExp(`\\b${proxyName}\\b`, 'u'));
+}
+assert.match(executorImageSmokeWorkflow, /grep -Fxc "\$proxy_name="/u);
 
 const executorImage = dockerfile
   .split('FROM executor-runtime-base AS executor')[1]

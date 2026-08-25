@@ -59,6 +59,13 @@ jobs:
           test "$(docker image inspect "$EXECUTOR_IMAGE" \
             --format '{{index .Config.Labels "org.opencontainers.image.chromium-package-version"}}')" = \
             "$CHROMIUM_PACKAGE_VERSION"
+          image_environment="$(docker image inspect "$EXECUTOR_IMAGE" \
+            --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          for proxy_name in \
+            HTTP_PROXY http_proxy HTTPS_PROXY https_proxy NO_PROXY no_proxy \
+            FTP_PROXY ftp_proxy ALL_PROXY all_proxy; do
+            test "$(grep -Fxc "$proxy_name=" <<<"$image_environment")" -eq 1
+          done
 
       - name: Verify default startup fails closed without live inputs
         shell: bash

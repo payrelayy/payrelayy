@@ -716,6 +716,10 @@ export function buildOwnerControlApp(
         kemerbetReadinessCohortControl,
         dependencies.runtime.kemerbetReadinessCohorts,
       );
+      const openPilot = await dependencies.runtime.privateLivePilot.current(authUserId);
+      if (openPilot?.pilotStatus === 'draft' || openPilot?.pilotStatus === 'armed') {
+        return reply.code(409).send({ error: 'readiness_cohort_open_pilot' });
+      }
       const claim = await dependencies.runtime.kemerbetReadinessCohorts.claim(
         authUserId,
         requestId,
@@ -745,7 +749,8 @@ export function buildOwnerControlApp(
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
-        error instanceof OwnerPlayerDepositEligibilityRejectedError
+        error instanceof OwnerPlayerDepositEligibilityRejectedError ||
+        error instanceof OwnerPrivateLivePilotRejectedError
       ) {
         return reply.code(403).send({ error: 'forbidden' });
       }
@@ -755,6 +760,7 @@ export function buildOwnerControlApp(
       if (
         error instanceof OwnerAuthenticationUnavailableError ||
         error instanceof OwnerPlayerDepositEligibilityUnavailableError ||
+        error instanceof OwnerPrivateLivePilotUnavailableError ||
         error instanceof OwnerKemerbetReadinessCohortUnavailableError
       ) {
         request.log.warn('Owner KemerBet readiness-cohort preparation is unavailable.');

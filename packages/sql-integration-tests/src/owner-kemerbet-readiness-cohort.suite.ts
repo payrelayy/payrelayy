@@ -332,7 +332,7 @@ export function registerOwnerKemerbetReadinessCohortSqlTests(
       }
     });
 
-    it('refuses to prepare while a private live-money pilot remains open', async () => {
+    it('refuses to prepare while an expired draft private live-money pilot remains open', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -371,8 +371,8 @@ export function registerOwnerKemerbetReadinessCohortSqlTests(
                   2500,
                   12500,
                   5,
-                  clock_timestamp(),
-                  clock_timestamp() + interval '2 hours',
+                  clock_timestamp() - interval '3 hours',
+                  clock_timestamp() - interval '1 hour',
                   $2::uuid
              from app.platforms platform
              join app.platform_agent_accounts agent on agent.platform_id = platform.id

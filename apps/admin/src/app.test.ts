@@ -18,7 +18,10 @@ import type {
 } from './owner-kemerbet-session-control.js';
 import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
-import type { PrivateLivePilotStatus } from './owner-private-live-pilot.js';
+import {
+  OwnerPrivateLivePilotUnavailableError,
+  type PrivateLivePilotStatus,
+} from './owner-private-live-pilot.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 
 const authUserId = '11111111-1111-4111-8111-111111111111';
@@ -452,6 +455,14 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(script.body).toContain(
       "confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer'",
+    );
+    expect(script.body).toContain("currentPilot?.pilotStatus === 'draft'");
+    expect(script.body).toContain("currentPilot?.pilotStatus === 'armed'");
+    expect(script.body).toContain('!currentPilotLoaded || hasOpenPilot');
+    expect(script.body).toContain("failure?.error === 'readiness_cohort_open_pilot'");
+    expect(script.body).toContain('Date.parse(pilot.expiresAt) <= Date.now()');
+    expect(script.body).toContain(
+      'Stop that pilot below before preparing the one-use KemerBet readiness',
     );
     const handler = script.body.slice(
       script.body.indexOf('async function prepareKemerbetReadinessCohort()'),
@@ -949,6 +960,115 @@ describe('Owner-control HTTP boundary', () => {
       await app.close();
     },
   );
+
+  it('reports an expired open pilot before creating or staging a readiness claim', async () => {
+    const events: string[] = [];
+    const defaultPrivateLivePilot = runtime().privateLivePilot;
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => {
+          throw new Error('completion probe must not run');
+        },
+        prepare: async () => {
+          throw new Error('cohort staging must not run');
+        },
+        rootReceipt: async () => {
+          events.push('root-receipt');
+          return undefined;
+        },
+      },
+      runtime: runtime({
+        kemerbetReadinessCohorts: {
+          claim: async () => {
+            throw new Error('readiness claim must not run');
+          },
+          markExported: async () => {
+            throw new Error('export must not run');
+          },
+          recordRootReceipt: async () => {
+            throw new Error('root receipt persistence must not run');
+          },
+        },
+        privateLivePilot: {
+          ...defaultPrivateLivePilot,
+          current: async () =>
+            pilotStatus({
+              expiresAt: '2026-08-22T23:50:06.000Z',
+              pilotStatus: 'draft',
+              withinActiveWindow: false,
+            }),
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(events).toEqual(['root-receipt']);
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'readiness_cohort_open_pilot' });
+    expect(response.body).not.toContain(pilotRevisionId);
+    expect(response.body).not.toContain('PLAYER_');
+    await app.close();
+  });
+
+  it('fails closed when the private-pilot preflight is unavailable', async () => {
+    const defaultPrivateLivePilot = runtime().privateLivePilot;
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => {
+          throw new Error('completion probe must not run');
+        },
+        prepare: async () => {
+          throw new Error('cohort staging must not run');
+        },
+        rootReceipt: async () => undefined,
+      },
+      runtime: runtime({
+        kemerbetReadinessCohorts: {
+          claim: async () => {
+            throw new Error('readiness claim must not run');
+          },
+          markExported: async () => {
+            throw new Error('export must not run');
+          },
+          recordRootReceipt: async () => {
+            throw new Error('root receipt persistence must not run');
+          },
+        },
+        privateLivePilot: {
+          ...defaultPrivateLivePilot,
+          current: async () => {
+            throw new OwnerPrivateLivePilotUnavailableError();
+          },
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'owner_control_unavailable' });
+    expect(response.body).not.toContain('PLAYER_');
+    await app.close();
+  });
 
   it.each([
     ['imported', 'imported'],

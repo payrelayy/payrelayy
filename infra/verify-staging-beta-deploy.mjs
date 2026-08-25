@@ -41,9 +41,13 @@ const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
 const legacyHelperSha = '4007e616b5d0b8b29b9e8f80de6a86485d60e0fb28ad54028cc2f3b1bb080d69';
 const installedHelperPredecessorSha =
-  '5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795';
-const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-5267906f';
+  'd9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7';
+const installedHelperBackupName = 'fetanagent-staging-deploy-helper.previous-d9cdcdec';
 const installedHelperBackupPath = `/root/fetanagent-helper-rotation/${installedHelperBackupName}`;
+const retained526HelperBackupSha =
+  '5267906f1b0fe07c8d4a2da05f2e101240a39ee8ab73cf323d4b41d7a30b6795';
+const retained526HelperBackupName = 'fetanagent-staging-deploy-helper.previous-5267906f';
+const retained526HelperBackupPath = `/root/fetanagent-helper-rotation/${retained526HelperBackupName}`;
 const retained121eHelperBackupSha =
   '121e3b360fc8e68aacd87a6d6a39611d2e6005c347a782798a1204d85b42b5b4';
 const retained121eHelperBackupName = 'fetanagent-staging-deploy-helper.previous-121e3b36';
@@ -61,7 +65,7 @@ const retained33f4HelperBackupSha =
 const retained33f4HelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
 const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retained33f4HelperBackupName}`;
 const reviewedHelperSuccessorSha =
-  'd9cdcdec53e0a408bc15b205f161fd19e3204ed8e81a32e5921342c2bfa867f7';
+  '022a9f10335fb570efb7638e2029ce663525ed742296268471b4c3a444ada714';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -814,6 +818,13 @@ assert.ok(
 );
 for (const retainedBackup of [
   {
+    variable: 'RETAINED_526_BACKUP',
+    shaVariable: 'RETAINED_526_BACKUP_SHA',
+    name: retained526HelperBackupName,
+    path: retained526HelperBackupPath,
+    sha: retained526HelperBackupSha,
+  },
+  {
     variable: 'RETAINED_121E_BACKUP',
     shaVariable: 'RETAINED_121E_BACKUP_SHA',
     name: retained121eHelperBackupName,
@@ -884,7 +895,7 @@ for (const retainedBackup of [
 }
 assert.doesNotMatch(
   helperReplacementRunbook,
-  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_(?:121E|AF823|B466|33F4)_BACKUP"/u,
+  /(?:^|\n)\s*(?:rm|mv|install|cp|truncate|shred)\b[^\n]*"\$RETAINED_(?:526|121E|AF823|B466|33F4)_BACKUP"/u,
   'The current rotation must never mutate or remove any retained earlier predecessor backup.',
 );
 assert.doesNotMatch(
@@ -1095,8 +1106,8 @@ for (const replacementResumeContract of [
   /if \[\[ -e "\$BACKUP" \|\| -L "\$BACKUP" \]\]; then/,
   /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-d9cdcdec'/,
-  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-5267906f\.installing"/,
+  /INSTALL_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.installing-022a9f10'/,
+  /BACKUP_TMP_PATH="\$STAGING_ROOT\/\.fetanagent-staging-deploy-helper\.previous-d9cdcdec\.installing"/,
 ]) {
   assert.match(helperReplacement, replacementResumeContract);
 }
@@ -1213,7 +1224,7 @@ for (const restoreResumeContract of [
   /SUDOERS_STATE='enabled'/,
   /SUDOERS_STATE='disabled'/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
-  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-5267906f'/,
+  /RESTORE_TMP_PATH='\/usr\/local\/sbin\/\.fetanagent-staging-deploy-helper\.restoring-d9cdcdec'/,
   /if \[\[ "\$TARGET_SHA" == "\$NEXT_SHA" \]\]; then/,
   /RESTORE_TMP="\$RESTORE_TMP_PATH"/,
 ]) {
@@ -4399,6 +4410,21 @@ assert.doesNotMatch(
   recheckRuntimeContract,
   /--format '\{\{range \.Config\.Env\}\}\{\{println \.\}\}\{\{end\}\}' \| LC_ALL=C sort/u,
   'Docker template output must never be piped directly to sort.',
+);
+assert.match(
+  recheckRuntimeContract,
+  /mount_contract="\$\(docker_local container inspect "\$container_id" --format\s*\\\s*\n\s*'\{\{range \.Mounts\}\}[\s\S]*?\{\{end\}\}'\)"/u,
+  'The runtime must capture Docker mount template output before sorting it.',
+);
+assert.match(
+  recheckRuntimeContract,
+  /mount_contract="\$\(LC_ALL=C sort <<<"\$mount_contract"\)"/u,
+  'The runtime must sort the captured mount contract without manufacturing an empty record.',
+);
+assert.doesNotMatch(
+  recheckRuntimeContract,
+  /\.Mounts\}\}[\s\S]*?\{\{end\}\}' \| LC_ALL=C sort\)"/u,
+  'Docker mount template output must never be piped directly to sort.',
 );
 const recheckComposeTmpfsOptions = /^    tmpfs:\r?\n      - \/tmp:([^\r\n]+)$/mu.exec(
   recheckComposeService,

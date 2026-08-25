@@ -67,16 +67,31 @@ jobs:
             test "$(grep -Fxc "$proxy_name=" <<<"$image_environment")" -eq 1
           done
 
-      - name: Verify exact created-container environment serialization
+      - name: Verify exact created-container serialization
         shell: bash
         env:
           EXECUTOR_IMAGE: fetanagent-deposit-executor:ci
         run: |
           set -euo pipefail
           container_name='fetanagent-executor-environment-smoke'
-          trap 'docker rm --force "$container_name" >/dev/null 2>&1 || true' EXIT
+          volume_name='fetanagent-executor-mount-smoke'
+          mount_root="$(mktemp -d)"
+          identity_binding="$mount_root/identity-binding.json"
+          player_ids="$mount_root/player-ids.json"
+          trap '
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+            docker volume rm "$volume_name" >/dev/null 2>&1 || true
+            rm -f -- "$identity_binding" "$player_ids"
+            rmdir -- "$mount_root" >/dev/null 2>&1 || true
+          ' EXIT
+          (umask 077 && touch "$identity_binding" "$player_ids")
+          chmod 0444 "$identity_binding" "$player_ids"
+          docker volume create "$volume_name" >/dev/null
 
           docker create --name "$container_name" \
+            --mount "type=bind,source=$identity_binding,target=/run/secrets/identity-binding.json,readonly" \
+            --mount "type=bind,source=$player_ids,target=/run/secrets/player-ids.json,readonly" \
+            --mount "type=volume,source=$volume_name,target=/var/lib/fetanagent/smoke-volume" \
             --env NODE_ENV=production \
             --env HTTP_PROXY= \
             --env http_proxy= \
@@ -115,6 +130,18 @@ jobs:
           test "$actual_environment" = "$expected_environment"
           test "$(grep -c '^' <<<"$actual_environment")" -eq \
             "$(grep -c '^' <<<"$expected_environment")"
+
+          expected_mounts="$(printf '%s\n' \
+            "bind|$identity_binding|/run/secrets/identity-binding.json|false" \
+            "bind|$player_ids|/run/secrets/player-ids.json|false" \
+            "volume|$volume_name|/var/lib/fetanagent/smoke-volume|true" | LC_ALL=C sort)"
+          actual_mounts="$(docker container inspect "$container_name" --format \
+            '{{range .Mounts}}{{if eq .Type "volume"}}{{printf "%s|%s|%s|%t\n" .Type .Name .Destination .RW}}{{else}}{{printf "%s|%s|%s|%t\n" .Type .Source .Destination .RW}}{{end}}{{end}}')"
+          actual_mounts="$(LC_ALL=C sort <<<"$actual_mounts")"
+
+          test "$actual_mounts" = "$expected_mounts"
+          test "$(grep -c '^' <<<"$actual_mounts")" -eq \
+            "$(grep -c '^' <<<"$expected_mounts")"
 
       - name: Verify default startup fails closed without live inputs
         shell: bash

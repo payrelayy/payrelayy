@@ -599,6 +599,59 @@ assert.match(
 );
 assert.match(executorImageSmokeWorkflow, /'10001:10001'/);
 assert.match(executorImageSmokeWorkflow, /'\["node","apps\/executor\/dist\/index\.js"\]'/);
+const createdContainerSerializationStep =
+  /^      - name: Verify exact created-container serialization\r?\n([\s\S]*?)(?=^      - name: )/mu.exec(
+    executorImageSmokeWorkflow,
+  )?.[1];
+assert.ok(
+  createdContainerSerializationStep,
+  'the executor smoke must retain one isolated created-container serialization step',
+);
+assert.equal(
+  (createdContainerSerializationStep.match(/^\s*docker create\b/gmu) ?? []).length,
+  1,
+  'the serialization smoke must create exactly one dormant container',
+);
+assert.doesNotMatch(
+  createdContainerSerializationStep,
+  /^\s*docker(?:\s+container)?\s+(?:run|start)\b/mu,
+  'the serialization smoke must never start or run its dormant container',
+);
+const createdContainerCleanup = /^\s*trap '\r?\n([\s\S]*?)^\s*' EXIT$/mu.exec(
+  createdContainerSerializationStep,
+)?.[1];
+assert.ok(createdContainerCleanup, 'the serialization smoke must retain an EXIT cleanup trap');
+const cleanupContainer = createdContainerCleanup.indexOf('docker rm --force "$container_name"');
+const cleanupVolume = createdContainerCleanup.indexOf('docker volume rm "$volume_name"');
+const cleanupFiles = createdContainerCleanup.indexOf('rm -f -- "$identity_binding" "$player_ids"');
+const cleanupDirectory = createdContainerCleanup.indexOf('rmdir -- "$mount_root"');
+assert.ok(
+  cleanupContainer >= 0 &&
+    cleanupContainer < cleanupVolume &&
+    cleanupVolume < cleanupFiles &&
+    cleanupFiles < cleanupDirectory,
+  'the serialization smoke must clean the container, volume, files, and temporary directory in order',
+);
+assert.match(
+  createdContainerSerializationStep,
+  /docker create --name "\$container_name"[\s\S]*--mount "type=bind,[\s\S]*--mount "type=volume,[\s\S]*"\$EXECUTOR_IMAGE" >\/dev\/null/,
+  'the executor smoke must create but never start a container with synthetic bind and volume mounts',
+);
+assert.match(
+  createdContainerSerializationStep,
+  /actual_mounts="\$\(docker container inspect "\$container_name" --format[\s\S]*?\{\{range \.Mounts\}\}[\s\S]*?\{\{end\}\}'\)"/,
+  'the executor smoke must capture Docker mount template output before sorting it',
+);
+assert.match(
+  createdContainerSerializationStep,
+  /actual_mounts="\$\(LC_ALL=C sort <<<"\$actual_mounts"\)"/,
+  'the executor smoke must normalize the captured mount contract',
+);
+assert.doesNotMatch(
+  createdContainerSerializationStep,
+  /\.Mounts\}\}[\s\S]*?\{\{end\}\}' \| LC_ALL=C sort\)"/,
+  'the executor smoke must not pipe Docker mount template output directly to sort',
+);
 
 assert.match(
   executorImageSmokeWorkflow,

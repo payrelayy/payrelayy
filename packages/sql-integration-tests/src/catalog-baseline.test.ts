@@ -6816,11 +6816,13 @@ describe('disposable SQL migration baseline', () => {
         signature:
           'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)',
       },
+      { signature: 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)' },
       {
         signature:
           'app.prepare_private_live_deposit_pilot_by_admin_id(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
       },
       { signature: 'app.require_private_live_deposit_pilot_authorization(uuid,uuid)' },
+      { signature: 'app.require_private_owner_kemerbet_readiness_claim_current(uuid)' },
       { signature: 'app.reserve_private_live_deposit_pilot_claim(uuid)' },
       { signature: 'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)' },
       { signature: 'app.resolve_dry_run_deposit_proof_boundary(text,text)' },
@@ -6874,8 +6876,10 @@ describe('disposable SQL migration baseline', () => {
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
            'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamptz)'::regprocedure,
+           'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)'::regprocedure,
            'app.prepare_private_live_deposit_pilot_by_admin_id(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamptz,timestamptz)'::regprocedure,
            'app.require_private_live_deposit_pilot_authorization(uuid,uuid)'::regprocedure,
+           'app.require_private_owner_kemerbet_readiness_claim_current(uuid)'::regprocedure,
            'app.reserve_private_live_deposit_pilot_claim(uuid)'::regprocedure,
            'app.resolve_current_live_customer_deposit_boundary(uuid,text,bigint)'::regprocedure,
            'app.resolve_dry_run_deposit_proof_boundary(text,text)'::regprocedure
@@ -6979,6 +6983,15 @@ describe('disposable SQL migration baseline', () => {
       {
         customer_web_runtime: false,
         deposit_executor_runtime: false,
+        owner_control_runtime: true,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
         owner_control_runtime: false,
         player_actions_runtime: false,
         public_execute: false,
@@ -6994,6 +7007,15 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.require_private_live_deposit_pilot_authorization(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.require_private_owner_kemerbet_readiness_claim_current(uuid)',
       },
       {
         customer_web_runtime: false,

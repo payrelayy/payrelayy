@@ -451,6 +451,7 @@ let ownerRefreshPromise;
 let ownerAuthGeneration = 0;
 let currentInvite;
 let currentPilot;
+let currentPilotLoaded = false;
 let eligiblePilotPlayers = [];
 let eligibleReadinessCohortPlayerCount = 0;
 let readinessCohortPrepared = false;
@@ -533,6 +534,7 @@ function clearKemerbetSession() {
 
 function clearPilot() {
   currentPilot = undefined;
+  currentPilotLoaded = false;
   eligiblePilotPlayers = [];
   selectedPilotPlayerIds.clear();
   pilotCandidateList.replaceChildren();
@@ -1276,12 +1278,27 @@ function validKemerbetReadinessCohortReceipt(value) {
 }
 
 function updateKemerbetReadinessCohortAvailability() {
+  const hasOpenPilot = currentPilot?.pilotStatus === 'draft' ||
+    currentPilot?.pilotStatus === 'armed';
   kemerbetReadinessCohortButton.disabled = readinessCohortPrepared ||
+    !currentPilotLoaded || hasOpenPilot ||
     eligibleReadinessCohortPlayerCount !== 5 ||
     !kemerbetReadinessCohortConfirmation.checked;
   if (readinessCohortPrepared) {
     kemerbetReadinessCohortStatus.textContent =
       'Prepared for five Players. Identifiers are redacted, Transfer is disabled, and no money moved.';
+    return;
+  }
+  if (!currentPilotLoaded) {
+    kemerbetReadinessCohortStatus.textContent =
+      'Checking the current private-pilot state before readiness preparation.';
+    return;
+  }
+  if (hasOpenPilot) {
+    kemerbetReadinessCohortStatus.textContent =
+      'Preparation is blocked by the current ' + currentPilot.pilotStatus +
+      ' TeleBirr pilot. Stop that pilot below before preparing the one-use KemerBet readiness ' +
+      'cohort. Money remains disabled.';
     return;
   }
   kemerbetReadinessCohortStatus.textContent = eligibleReadinessCohortPlayerCount +
@@ -1342,12 +1359,14 @@ function renderPilotCandidates(players) {
   updatePilotPreparationAvailability();
 }
 
-function renderPilotStatus(pilot) {
+function renderPilotStatus(pilot, statusLoaded = true) {
+  currentPilotLoaded = statusLoaded;
   currentPilot = pilot;
   pilotStatusFacts.replaceChildren();
   pilotStatusPanel.hidden = !pilot;
   if (!pilot) {
     renderPilotCandidates(eligiblePilotPlayers);
+    updateKemerbetReadinessCohortAvailability();
     return;
   }
   const facts = [
@@ -1366,9 +1385,11 @@ function renderPilotStatus(pilot) {
     detail.textContent = value;
     pilotStatusFacts.append(term, detail);
   }
-  pilotArmButton.disabled = pilot.pilotStatus !== 'draft' || pilot.financiallyActive;
+  pilotArmButton.disabled = pilot.pilotStatus !== 'draft' || pilot.financiallyActive ||
+    Date.parse(pilot.expiresAt) <= Date.now();
   pilotStopButton.disabled = pilot.pilotStatus === 'stopped';
   renderPilotCandidates(eligiblePilotPlayers);
+  updateKemerbetReadinessCohortAvailability();
 }
 
 async function loadCurrentPilot() {
@@ -1382,7 +1403,9 @@ async function loadCurrentPilot() {
     if (!payload || (payload.pilot !== null && !validPilotStatus(payload.pilot))) throw new Error('pilot_status');
     renderPilotStatus(payload.pilot === null ? undefined : validPilotStatus(payload.pilot));
   } catch (error) {
-    if (!currentPilot) renderPilotStatus(undefined);
+    currentPilotLoaded = false;
+    if (!currentPilot) renderPilotStatus(undefined, false);
+    else updateKemerbetReadinessCohortAvailability();
     if (!isSignedOutError(error)) setNotice('Current private-pilot status is unavailable. Do not prepare or arm.');
   } finally {
     pilotRefreshButton.disabled = false;
@@ -1782,7 +1805,10 @@ function kemerbetReadinessCohortMutationHeaders(requestId) {
 }
 
 async function prepareKemerbetReadinessCohort() {
-  if (readinessCohortPrepared || eligibleReadinessCohortPlayerCount !== 5 ||
+  const hasOpenPilot = currentPilot?.pilotStatus === 'draft' ||
+    currentPilot?.pilotStatus === 'armed';
+  if (readinessCohortPrepared || !currentPilotLoaded || hasOpenPilot ||
+      eligibleReadinessCohortPlayerCount !== 5 ||
       !kemerbetReadinessCohortConfirmation.checked) return;
   if (!window.confirm(
     'Prepare the server-only one-use input from the current exact five eligible KemerBet Players? No identifier or amount is sent by this browser, Transfer remains disabled, and no money moves.',
@@ -1799,6 +1825,17 @@ async function prepareKemerbetReadinessCohort() {
         requestId,
       }),
     });
+    if (response.status === 409) {
+      const failure = await response.json();
+      await loadCurrentPilot();
+      if (failure?.error === 'readiness_cohort_open_pilot') {
+        setNotice(
+          'Stop the current TeleBirr pilot below before preparing the one-use KemerBet readiness cohort. Money remains disabled.',
+        );
+        return;
+      }
+      throw new Error('readiness_cohort_prepare');
+    }
     if (response.status !== 200 && response.status !== 201) {
       throw new Error('readiness_cohort_prepare');
     }
@@ -1897,7 +1934,10 @@ async function armFixedPilot() {
       await loadCurrentPilot();
     }
   } finally {
-    if (currentPilot) pilotArmButton.disabled = currentPilot.pilotStatus !== 'draft';
+    if (currentPilot) {
+      pilotArmButton.disabled = currentPilot.pilotStatus !== 'draft' ||
+        Date.parse(currentPilot.expiresAt) <= Date.now();
+    }
   }
 }
 

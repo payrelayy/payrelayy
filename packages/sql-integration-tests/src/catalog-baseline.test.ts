@@ -6564,13 +6564,42 @@ describe('disposable SQL migration baseline', () => {
       order by trigger_name
     `);
     expect(decisionTriggers.rows.map((row) => row.trigger_name)).toEqual([
+      'eligibility_decisions_serialize_kemerbet_readiness',
+      'eligibility_decisions_serialize_kemerbet_readiness_truncate',
       'player_deposit_eligibility_decisions_enforce_insert',
       'player_deposit_eligibility_decisions_immutable',
       'player_deposit_eligibility_decisions_no_truncate',
     ]);
-    expect(decisionTriggers.rows[0]!.trigger_definition).toContain('BEFORE INSERT');
-    expect(decisionTriggers.rows[1]!.trigger_definition).toContain('BEFORE DELETE OR UPDATE');
-    expect(decisionTriggers.rows[2]!.trigger_definition).toContain('BEFORE TRUNCATE');
+    const decisionTriggerDefinitions = new Map(
+      decisionTriggers.rows.map((row) => [row.trigger_name, row.trigger_definition]),
+    );
+    expect(
+      decisionTriggerDefinitions.get('eligibility_decisions_serialize_kemerbet_readiness'),
+    ).toContain('BEFORE INSERT OR DELETE OR UPDATE');
+    expect(
+      decisionTriggerDefinitions.get('eligibility_decisions_serialize_kemerbet_readiness'),
+    ).toContain('FOR EACH STATEMENT');
+    expect(
+      decisionTriggerDefinitions.get('eligibility_decisions_serialize_kemerbet_readiness'),
+    ).toContain('app.serialize_private_owner_kemerbet_readiness_source_mutation()');
+    expect(
+      decisionTriggerDefinitions.get('eligibility_decisions_serialize_kemerbet_readiness_truncate'),
+    ).toContain('BEFORE TRUNCATE');
+    expect(
+      decisionTriggerDefinitions.get('eligibility_decisions_serialize_kemerbet_readiness_truncate'),
+    ).toContain('FOR EACH STATEMENT');
+    expect(
+      decisionTriggerDefinitions.get('eligibility_decisions_serialize_kemerbet_readiness_truncate'),
+    ).toContain('app.serialize_private_owner_kemerbet_readiness_source_mutation()');
+    expect(
+      decisionTriggerDefinitions.get('player_deposit_eligibility_decisions_enforce_insert'),
+    ).toContain('BEFORE INSERT');
+    expect(
+      decisionTriggerDefinitions.get('player_deposit_eligibility_decisions_immutable'),
+    ).toContain('BEFORE DELETE OR UPDATE');
+    expect(
+      decisionTriggerDefinitions.get('player_deposit_eligibility_decisions_no_truncate'),
+    ).toContain('BEFORE TRUNCATE');
 
     const depositInsertTriggers = await client.query<{ readonly trigger_name: string }>(`
       select trigger.tgname as trigger_name

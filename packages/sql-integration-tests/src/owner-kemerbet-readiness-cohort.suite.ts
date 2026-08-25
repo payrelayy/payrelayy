@@ -276,7 +276,7 @@ export function registerOwnerKemerbetReadinessCohortSqlTests(
           'app.require_private_owner_kemerbet_readiness_claim_current(uuid)'::regprocedure
         ) as definition
       `);
-      expect(source.rows[0]!.definition).toContain('COLLATE pg_catalog."C"');
+      expect(source.rows[0]!.definition).toMatch(/\b(?:COLLATE|collate)\s+pg_catalog\."C"/u);
       expect(source.rows[0]!.definition).not.toMatch(/\blimit\s+(?:5|50)\b/iu);
     });
 

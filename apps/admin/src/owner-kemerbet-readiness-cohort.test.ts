@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
   symlink,
@@ -15,7 +16,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -387,6 +388,54 @@ interface LinuxBoundary {
 }
 
 const linuxRoots: string[] = [];
+const LINUX_ROOT_PREFIXES = [
+  'fetanagent-readiness-cohort-',
+  'fetanagent-readiness-dotdot-name-',
+  'fetanagent-readiness-overlap-',
+  'fetanagent-readiness-prepare-receipt-race-',
+  'fetanagent-readiness-receipt-dac-',
+] as const;
+
+async function removeLinuxRoot(root: string): Promise<void> {
+  const [canonicalTemporaryRoot, rootMetadata, canonicalRoot] = await Promise.all([
+    realpath(tmpdir()),
+    lstat(root),
+    realpath(root),
+  ]);
+  const resolvedRoot = resolve(root);
+  const rootBasename = basename(canonicalRoot);
+  if (
+    rootMetadata.isSymbolicLink() ||
+    !rootMetadata.isDirectory() ||
+    root !== resolvedRoot ||
+    canonicalRoot !== resolvedRoot ||
+    dirname(canonicalRoot) !== canonicalTemporaryRoot ||
+    !LINUX_ROOT_PREFIXES.some(
+      (prefix) => rootBasename.startsWith(prefix) && rootBasename.length > prefix.length,
+    )
+  ) {
+    throw new Error('refusing to remove an unexpected Linux readiness-cohort test root');
+  }
+  const receiptRoot = join(root, 'receipts');
+  const receiptMetadata = await lstat(receiptRoot).catch((error: unknown) => {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw error;
+  });
+  if (receiptMetadata !== undefined) {
+    if (
+      receiptMetadata.isSymbolicLink() ||
+      !receiptMetadata.isDirectory() ||
+      (await realpath(receiptRoot)) !== receiptRoot
+    ) {
+      throw new Error('refusing to change an unexpected Linux receipt test root');
+    }
+  }
+  await chmod(root, 0o700);
+  if (receiptMetadata !== undefined) await chmod(receiptRoot, 0o700);
+  await rm(root, { recursive: true });
+}
 
 async function linuxBoundary(): Promise<LinuxBoundary> {
   const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-cohort-'));
@@ -472,7 +521,7 @@ describe.skipIf(process.platform !== 'linux')(
   () => {
     afterEach(async () => {
       const roots = linuxRoots.splice(0);
-      await Promise.all(roots.map(async (root) => rm(root, { force: true, recursive: true })));
+      await Promise.all(roots.map(removeLinuxRoot));
     });
 
     it('rejects either boundary root nested beneath the other root', async () => {

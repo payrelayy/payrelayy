@@ -3694,8 +3694,8 @@ printf evidence >"$test_root/evidence"
 printf owner >"$test_root/owner"
 recovery_count="$test_root/recovery-count"
 : >"$recovery_count"
-primary_durable=false
-fallback_durable=false
+primary_durable_marker="$test_root/primary-durable"
+fallback_durable_marker="$test_root/fallback-durable"
 publish_primary_with_directory_fsync_failure() {
   printf block >"$receipt_root/.latch.installing"
   mv -- "$receipt_root/.latch.installing" "$receipt_root/latch"
@@ -3736,11 +3736,11 @@ stop_model() {
     return 0
   fi
   if durabilize_primary; then
-    primary_durable=true
+    : >"$primary_durable_marker"
   elif test -e "$promotion_root/fallback" && durabilize_fallback; then
-    fallback_durable=true
+    : >"$fallback_durable_marker"
   elif publish_fallback && durabilize_fallback; then
-    fallback_durable=true
+    : >"$fallback_durable_marker"
   else
     return 2
   fi
@@ -3750,29 +3750,32 @@ stop_model() {
 unsafe_primary_root=true
 primary_fsync_ok=false
 set +e
-stop_model
+( stop_model )
 first_status=$?
-stop_model
+( stop_model )
 second_status=$?
 set -e
 test "$first_status" -eq 1
 test "$second_status" -eq 1
-test "$primary_durable" = false
-test "$fallback_durable" = true
+test ! -e "$primary_durable_marker"
+test -f "$fallback_durable_marker"
 test "$(wc -c <"$recovery_count")" -eq 1
 test -f "$promotion_root/fallback"
 test -f "$promotion_root/pending-v1"
 test -f "$test_root/evidence"
 test ! -e "$test_root/owner"
 
-rm -f -- "$receipt_root/latch" "$promotion_root/fallback"
+rm -f -- "$receipt_root/latch" "$promotion_root/fallback" \
+  "$primary_durable_marker" "$fallback_durable_marker"
 printf owner >"$test_root/owner"
 publish_fallback() { return 1; }
 set +e
-stop_model
+( stop_model )
 no_block_status=$?
 set -e
 test "$no_block_status" -eq 2
+test ! -e "$primary_durable_marker"
+test ! -e "$fallback_durable_marker"
 test -f "$test_root/owner"
 test -f "$test_root/evidence"
 `,

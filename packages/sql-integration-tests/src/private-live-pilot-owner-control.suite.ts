@@ -157,6 +157,9 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
          order by signature
       `);
       expect(effectiveRoutines.rows).toEqual([
+        {
+          signature: 'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)',
+        },
         { signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)' },
         {
           signature: 'app.associate_owner_validated_player_registration_request(uuid,uuid,text)',
@@ -183,8 +186,12 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
             'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',
         },
         { signature: 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)' },
+        { signature: 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)' },
         {
           signature: 'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)',
+        },
+        {
+          signature: 'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)',
         },
         { signature: 'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)' },
         {

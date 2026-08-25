@@ -56,7 +56,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows exactly twenty-three reviewed Owner procedures including safe agent-profile control', () => {
+  it('allows exactly twenty-six reviewed Owner procedures including the atomic readiness claim and root receipt', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -115,7 +115,16 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 23');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 26');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');

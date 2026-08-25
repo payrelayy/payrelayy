@@ -28,6 +28,13 @@ import {
   type OwnerKemerbetAgentProfileReason,
 } from './owner-kemerbet-agent-profile.js';
 import {
+  FileOwnerKemerbetReadinessCohortControl,
+  OwnerKemerbetReadinessCohortRejectedError,
+  OwnerKemerbetReadinessCohortUnavailableError,
+  type OwnerKemerbetReadinessCohortControl,
+} from './owner-kemerbet-readiness-cohort.js';
+import { reconcileOwnerKemerbetReadinessRootReceipt } from './owner-kemerbet-readiness-reconciler.js';
+import {
   OwnerKemerbetSessionRejectedError,
   OwnerKemerbetSessionUnavailableError,
   UnixOwnerKemerbetSessionControl,
@@ -67,6 +74,7 @@ import {
 
 export interface OwnerControlAppDependencies {
   readonly fetch?: typeof fetch;
+  readonly kemerbetReadinessCohortControl?: OwnerKemerbetReadinessCohortControl;
   readonly kemerbetSessionControl?: OwnerKemerbetSessionControl;
   readonly now?: () => Date;
   readonly runtime: OwnerControlPostgresRuntime;
@@ -114,6 +122,7 @@ const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
+const OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE = 'owner-kemerbet-readiness-cohort-v1';
 const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
 const OWNER_KEMERBET_AGENT_PROFILE_REASONS = new Set<OwnerKemerbetAgentProfileReason>([
   'agent_rotation',
@@ -149,6 +158,32 @@ function exactIsoDate(value: unknown): Date | undefined {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value ? parsed : undefined;
 }
 
+function projectKemerbetReadinessCohortReceipt(value: unknown) {
+  const receipt = exactObject(value, [
+    'alreadyPrepared',
+    'identifiersRedacted',
+    'moneyMoved',
+    'playersPrepared',
+    'transferDisabled',
+  ]);
+  if (
+    typeof receipt?.alreadyPrepared !== 'boolean' ||
+    receipt.identifiersRedacted !== true ||
+    receipt.moneyMoved !== false ||
+    receipt.playersPrepared !== 5 ||
+    receipt.transferDisabled !== true
+  ) {
+    throw new OwnerKemerbetReadinessCohortUnavailableError();
+  }
+  return {
+    alreadyPrepared: receipt.alreadyPrepared,
+    identifiersRedacted: true,
+    moneyMoved: false,
+    playersPrepared: 5,
+    transferDisabled: true,
+  } as const;
+}
+
 function statusCode(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !('statusCode' in error)) return undefined;
   return typeof error.statusCode === 'number' ? error.statusCode : undefined;
@@ -160,6 +195,8 @@ export function buildOwnerControlApp(
 ) {
   if (!config.runtime.enabled) throw new Error('The Owner-control runtime is disabled.');
   const runtimeConfig = config.runtime;
+  const kemerbetReadinessCohortControl =
+    dependencies.kemerbetReadinessCohortControl ?? new FileOwnerKemerbetReadinessCohortControl();
   const kemerbetSessionControl =
     dependencies.kemerbetSessionControl ?? new UnixOwnerKemerbetSessionControl();
   const privatePilotMutationOrigins = new Set([
@@ -286,6 +323,21 @@ export function buildOwnerControlApp(
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
         OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validKemerbetReadinessCohortMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -642,6 +694,74 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.post('/v1/owner/kemerbet-readiness-cohort/prepare', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        typeof request.query !== 'object' ||
+        request.query === null ||
+        Object.keys(request.query).length !== 0 ||
+        body?.confirmation !== 'owner_confirmed_kemerbet_readiness_five_player_no_transfer' ||
+        !validKemerbetReadinessCohortMutationHeaders(request.raw.rawHeaders, body?.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const requestId = body.requestId as string;
+      // Reconcile any exact root-owned import/completion receipt before deciding whether the
+      // one-use input is still absent. This closes the crash window where root consumed the files
+      // before the Owner request could persist its exported transition.
+      await reconcileOwnerKemerbetReadinessRootReceipt(
+        kemerbetReadinessCohortControl,
+        dependencies.runtime.kemerbetReadinessCohorts,
+      );
+      const claim = await dependencies.runtime.kemerbetReadinessCohorts.claim(
+        authUserId,
+        requestId,
+      );
+      if (claim.state === 'failed_terminal') {
+        throw new OwnerKemerbetReadinessCohortRejectedError();
+      }
+      const prepared = projectKemerbetReadinessCohortReceipt(
+        claim.state === 'prepared'
+          ? await kemerbetReadinessCohortControl.prepare(claim.players, requestId, claim.claimId)
+          : {
+              alreadyPrepared: true,
+              identifiersRedacted: true,
+              moneyMoved: false,
+              playersPrepared: 5,
+              transferDisabled: true,
+            },
+      );
+      if (claim.state === 'prepared') {
+        await dependencies.runtime.kemerbetReadinessCohorts.markExported(
+          authUserId,
+          requestId,
+          claim.claimId,
+        );
+      }
+      return reply.code(prepared.alreadyPrepared ? 200 : 201).send(prepared);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerPlayerDepositEligibilityRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof OwnerKemerbetReadinessCohortRejectedError) {
+        return reply.code(409).send({ error: 'readiness_cohort_not_ready' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerPlayerDepositEligibilityUnavailableError ||
+        error instanceof OwnerKemerbetReadinessCohortUnavailableError
+      ) {
+        request.log.warn('Owner KemerBet readiness-cohort preparation is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post<{ Params: { playerAccountId: string } }>(
     '/v1/owner/player-deposit-eligibility/:playerAccountId/decide',

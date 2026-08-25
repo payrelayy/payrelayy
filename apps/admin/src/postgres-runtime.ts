@@ -3,6 +3,7 @@ import { Pool, type PoolConfig } from 'pg';
 
 import { PostgresOwnerInviteControl } from './owner-invites.js';
 import { PostgresOwnerKemerbetAgentProfiles } from './owner-kemerbet-agent-profile.js';
+import { PostgresOwnerKemerbetReadinessCohortClaims } from './owner-kemerbet-readiness-cohort.js';
 import { PostgresOwnerPlayerDepositEligibility } from './owner-player-deposit-eligibility.js';
 import { PostgresOwnerDryRunDepositIntake } from './owner-deposit-intake.js';
 import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-assessments.js';
@@ -16,6 +17,10 @@ export interface OwnerControlPostgresRuntime {
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
   readonly kemerbetAgentProfiles: Pick<PostgresOwnerKemerbetAgentProfiles, 'list' | 'prepare'>;
+  readonly kemerbetReadinessCohorts: Pick<
+    PostgresOwnerKemerbetReadinessCohortClaims,
+    'claim' | 'markExported' | 'recordRootReceipt'
+  >;
   readonly playerRegistrations: Pick<
     PostgresOwnerPlayerRegistrationReviews,
     'associate' | 'list' | 'listAssociationCandidates' | 'review'
@@ -136,6 +141,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
     has_function_privilege(current_user, 'app.list_owner_kemerbet_agent_profiles(uuid)', 'execute') as kemerbet_agent_profile_list_allowed,
     has_function_privilege(current_user, 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)', 'execute') as kemerbet_agent_profile_prepare_allowed,
+    has_function_privilege(current_user, 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)', 'execute') as kemerbet_readiness_claim_prepare_allowed,
+    has_function_privilege(current_user, 'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)', 'execute') as kemerbet_readiness_claim_advance_allowed,
+    has_function_privilege(current_user, 'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)', 'execute') as kemerbet_readiness_root_receipt_allowed,
     not exists (
       select 1
       from pg_class relation
@@ -163,7 +171,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 23
+      select count(*) = 26
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -199,6 +207,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
           ,'app.list_owner_kemerbet_agent_profiles(uuid)'::regprocedure
           ,'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)'::regprocedure
+          ,'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)'::regprocedure
+          ,'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)'::regprocedure
+          ,'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -256,6 +267,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     kemerbetAgentProfiles: new PostgresOwnerKemerbetAgentProfiles({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    kemerbetReadinessCohorts: new PostgresOwnerKemerbetReadinessCohortClaims({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     playerRegistrations: new PostgresOwnerPlayerRegistrationReviews({

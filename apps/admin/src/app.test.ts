@@ -7,6 +7,11 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { buildOwnerControlApp } from './app.js';
+import {
+  OwnerKemerbetReadinessCohortRejectedError,
+  type OwnerKemerbetReadinessCohortControl,
+  type OwnerKemerbetReadinessCohortReceipt,
+} from './owner-kemerbet-readiness-cohort.js';
 import type {
   OwnerKemerbetSessionControl,
   OwnerKemerbetSessionStatus,
@@ -95,6 +100,16 @@ function kemerbetSessionMutationHeaders(requestId = pilotRequestId) {
   };
 }
 
+function kemerbetReadinessCohortMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-kemerbet-readiness-cohort-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
 const inactiveKemerbetSession: OwnerKemerbetSessionStatus = {
   active: false,
   loginRequired: false,
@@ -111,6 +126,21 @@ const activeKemerbetSession: OwnerKemerbetSessionStatus = {
   signedIn: false,
   transferDisabled: true,
 };
+
+function readinessEligiblePlayers() {
+  return [1, 2, 3, 4, 5].map((index) => ({
+    decidedAt: '2026-08-25T09:00:00.000Z',
+    decision: 'eligible' as const,
+    decisionId: `10000000-0000-4000-8000-00000000000${index}`,
+    decisionVersion: index,
+    playerAccountId: `00000000-0000-4000-8000-00000000000${index}`,
+    playerId: `PLAYER_${index}`,
+    playerStatus: 'active' as const,
+    platformCode: 'kemerbet' as const,
+    reasonCode: 'financial_eligibility_approved' as const,
+    validationStatus: 'valid' as const,
+  }));
+}
 
 function config() {
   return loadOwnerControlConfig({
@@ -186,6 +216,23 @@ function runtime(
         profileRevision: 1,
         profileStatus: 'active',
       }),
+    },
+    kemerbetReadinessCohorts: {
+      claim: async () => ({
+        alreadyClaimed: false,
+        claimId: '88888888-8888-4888-8888-888888888888',
+        players: readinessEligiblePlayers(),
+        state: 'prepared',
+      }),
+      markExported: async (_actor, _requestId, claimId) => ({
+        alreadyRecorded: false,
+        claimId,
+        state: 'exported',
+        transitionedAt: '2026-08-25T09:05:00.000Z',
+      }),
+      recordRootReceipt: async () => {
+        throw new Error('root receipt must not run without an exact filesystem receipt');
+      },
     },
     playerRegistrations: {
       associate: async (_actor, requestId) => ({
@@ -384,6 +431,39 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain("url.pathname !== '/fetanagentbot'");
     expect(response.body).not.toContain('/FetanAgentBot');
     expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
+    await app.close();
+  });
+
+  it('serves an aggregate-only one-use KemerBet readiness-cohort control', async () => {
+    const app = buildOwnerControlApp(config(), { runtime: runtime() });
+    const [page, script] = await Promise.all([
+      app.inject({ method: 'GET', url: '/owner' }),
+      app.inject({ method: 'GET', url: '/owner/app.js' }),
+    ]);
+
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain('KemerBet readiness cohort');
+    expect(page.body).toContain('id="kemerbet-readiness-cohort-button"');
+    expect(page.body).toContain('The browser sends no Player identifiers, amount, or digest');
+    expect(script.statusCode).toBe(200);
+    expect(script.body).toContain('/v1/owner/kemerbet-readiness-cohort/prepare');
+    expect(script.body).toContain(
+      "'x-fetanagent-owner-csrf': 'owner-kemerbet-readiness-cohort-v1'",
+    );
+    expect(script.body).toContain(
+      "confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer'",
+    );
+    const handler = script.body.slice(
+      script.body.indexOf('async function prepareKemerbetReadinessCohort()'),
+      script.body.indexOf('function pilotMutationHeaders(requestId)'),
+    );
+    expect(handler).toContain('body: JSON.stringify({');
+    expect(handler).not.toMatch(/playerIds|playerId\b|configurationDigest|amountMinor/u);
+    expect(handler).toContain('validKemerbetReadinessCohortReceipt');
+    expect(script.body).toContain(
+      "'alreadyPrepared,identifiersRedacted,moneyMoved,playersPrepared,transferDisabled'",
+    );
+    expect(() => new Function(script.body)).not.toThrow();
     await app.close();
   });
 
@@ -782,6 +862,327 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'invalid_request' });
+    await app.close();
+  });
+
+  it.each([
+    [false, 201],
+    [true, 200],
+  ] as const)(
+    'prepares the current five-Player readiness cohort with an aggregate-only receipt (replay %s)',
+    async (alreadyPrepared, expectedStatus) => {
+      let observedRequestId: string | undefined;
+      let observedClaimRequest: readonly string[] | undefined;
+      let observedExport: readonly string[] | undefined;
+      const control: OwnerKemerbetReadinessCohortControl = {
+        completed: async () => false,
+        rootReceipt: async () => undefined,
+        prepare: async (players, requestId) => {
+          expect(players).toEqual(readinessEligiblePlayers());
+          observedRequestId = requestId;
+          return {
+            alreadyPrepared,
+            identifiersRedacted: true,
+            moneyMoved: false,
+            playersPrepared: 5,
+            transferDisabled: true,
+          };
+        },
+      };
+      const app = buildOwnerControlApp(config(), {
+        fetch: verifiedAuthFetch(),
+        kemerbetReadinessCohortControl: control,
+        runtime: runtime({
+          kemerbetReadinessCohorts: {
+            claim: async (actor, requestId) => {
+              observedClaimRequest = [actor, requestId];
+              return {
+                alreadyClaimed: false,
+                claimId: '88888888-8888-4888-8888-888888888888',
+                players: readinessEligiblePlayers(),
+                state: 'prepared',
+              };
+            },
+            markExported: async (actor, requestId, claimId) => {
+              observedExport = [actor, requestId, claimId];
+              return {
+                alreadyRecorded: false,
+                claimId,
+                state: 'exported',
+                transitionedAt: '2026-08-25T09:05:00.000Z',
+              };
+            },
+            recordRootReceipt: async () => {
+              throw new Error('root receipt must not run');
+            },
+          },
+        }),
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+        headers: kemerbetReadinessCohortMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+          requestId: pilotRequestId,
+        },
+      });
+
+      expect(response.statusCode).toBe(expectedStatus);
+      expect(observedRequestId).toBe(pilotRequestId);
+      expect(observedClaimRequest).toEqual([authUserId, pilotRequestId]);
+      expect(observedExport).toEqual([
+        authUserId,
+        pilotRequestId,
+        '88888888-8888-4888-8888-888888888888',
+      ]);
+      expect(response.json()).toEqual({
+        alreadyPrepared,
+        identifiersRedacted: true,
+        moneyMoved: false,
+        playersPrepared: 5,
+        transferDisabled: true,
+      });
+      expect(response.body).not.toContain('PLAYER_');
+      expect(response.body).not.toContain('sha256:');
+      await app.close();
+    },
+  );
+
+  it.each([
+    ['imported', 'imported'],
+    ['completed', 'succeeded'],
+  ] as const)(
+    'reconciles an exact root %s receipt before reusing the %s DB claim',
+    async (event, claimState) => {
+      const order: string[] = [];
+      let observedReceipt: readonly string[] | undefined;
+      const claimId = '88888888-8888-4888-8888-888888888888';
+      const app = buildOwnerControlApp(config(), {
+        fetch: verifiedAuthFetch(),
+        kemerbetReadinessCohortControl: {
+          completed: async () => {
+            throw new Error('legacy completion probe must not run');
+          },
+          prepare: async () => {
+            throw new Error('the consumed one-use input must not be restaged');
+          },
+          rootReceipt: async () => {
+            order.push('root-receipt');
+            return { claimId, event };
+          },
+        },
+        runtime: runtime({
+          kemerbetReadinessCohorts: {
+            claim: async () => {
+              order.push('claim');
+              return {
+                alreadyClaimed: true,
+                claimId,
+                players: readinessEligiblePlayers(),
+                state: claimState,
+              };
+            },
+            markExported: async () => {
+              throw new Error('export must not repeat after root import');
+            },
+            recordRootReceipt: async (recordedClaimId, receiptId, recordedEvent) => {
+              order.push('record-root-receipt');
+              observedReceipt = [recordedClaimId, receiptId, recordedEvent];
+              return {
+                alreadyRecorded: false,
+                claimId: recordedClaimId,
+                event: recordedEvent,
+                receiptId,
+                state: recordedEvent === 'completed' ? 'succeeded' : 'imported',
+                recordedAt: '2026-08-25T09:10:00.000Z',
+              };
+            },
+          },
+        }),
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+        headers: kemerbetReadinessCohortMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+          requestId: pilotRequestId,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(order).toEqual(['root-receipt', 'record-root-receipt', 'claim']);
+      expect(observedReceipt?.[0]).toBe(claimId);
+      expect(observedReceipt?.[1]).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      );
+      expect(observedReceipt?.[2]).toBe(event);
+      expect(response.json()).toEqual({
+        alreadyPrepared: true,
+        identifiersRedacted: true,
+        moneyMoved: false,
+        playersPrepared: 5,
+        transferDisabled: true,
+      });
+      expect(response.body).not.toContain(claimId);
+      expect(response.body).not.toContain('PLAYER_');
+      await app.close();
+    },
+  );
+
+  it('rejects readiness-cohort identifier fields before authentication', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: async () => {
+        throw new Error('authentication must not run');
+      },
+      kemerbetReadinessCohortControl: {
+        completed: async () => {
+          throw new Error('cohort control must not run');
+        },
+        rootReceipt: async () => {
+          throw new Error('cohort control must not run');
+        },
+        prepare: async () => {
+          throw new Error('cohort control must not run');
+        },
+      },
+      runtime: runtime(),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        playerIds: ['PLAYER_1'],
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'invalid_request' });
+    await app.close();
+  });
+
+  it.each([
+    ['invalid CSRF header', { 'x-fetanagent-owner-csrf': 'wrong-boundary' }],
+    ['mismatched idempotency header', { 'x-idempotency-key': inviteId }],
+  ])('rejects %s before authentication', async (_label, override) => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: async () => {
+        throw new Error('authentication must not run');
+      },
+      kemerbetReadinessCohortControl: {
+        completed: async () => {
+          throw new Error('cohort control must not run');
+        },
+        rootReceipt: async () => {
+          throw new Error('cohort control must not run');
+        },
+        prepare: async () => {
+          throw new Error('cohort control must not run');
+        },
+      },
+      runtime: runtime(),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: { ...kemerbetReadinessCohortMutationHeaders(), ...override },
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'invalid_request' });
+    await app.close();
+  });
+
+  it('maps a rejected readiness cohort to a fixed conflict without exposing identifiers', async () => {
+    const control: OwnerKemerbetReadinessCohortControl = {
+      completed: async () => false,
+      rootReceipt: async () => undefined,
+      prepare: async () => {
+        throw new OwnerKemerbetReadinessCohortRejectedError();
+      },
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: control,
+      runtime: runtime({
+        eligibility: {
+          decide: async () => {
+            throw new Error('decision must not run');
+          },
+          list: async () => readinessEligiblePlayers(),
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'readiness_cohort_not_ready' });
+    expect(response.body).not.toContain('PLAYER_');
+    await app.close();
+  });
+
+  it('refuses a non-fixed readiness receipt without leaking injected fields', async () => {
+    const injectedPlayerId = 'DO_NOT_RETURN_PLAYER';
+    const control: OwnerKemerbetReadinessCohortControl = {
+      completed: async () => false,
+      rootReceipt: async () => undefined,
+      prepare: async () =>
+        ({
+          alreadyPrepared: false,
+          identifiersRedacted: true,
+          moneyMoved: false,
+          playerIds: [injectedPlayerId],
+          playersPrepared: 5,
+          transferDisabled: true,
+        }) as OwnerKemerbetReadinessCohortReceipt,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: control,
+      runtime: runtime({
+        eligibility: {
+          decide: async () => {
+            throw new Error('decision must not run');
+          },
+          list: async () => readinessEligiblePlayers(),
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'owner_control_unavailable' });
+    expect(response.body).not.toContain(injectedPlayerId);
     await app.close();
   });
 

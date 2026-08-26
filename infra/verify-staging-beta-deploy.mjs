@@ -3216,6 +3216,7 @@ import hashlib
 import os
 import re
 
+sha = re.compile(r'[0-9a-f]{64}')
 effective_release = '${'b'.repeat(40)}'
 effective_helper_sha = '${'c'.repeat(64)}'
 later_helper_bytes = b'later ordinary reviewed helper bytes'
@@ -3248,6 +3249,9 @@ receipt_lines = [
     'profile_identity_sha256=${'f'.repeat(64)}',
 ]
 receipt_data = ('\\n'.join(receipt_lines) + '\\n').encode('ascii')
+
+def reject():
+    raise AssertionError('terminal completion fixture rejected')
 
 def require_live_successor_helper():
     raise AssertionError('terminal completion re-pinned later helper bytes')

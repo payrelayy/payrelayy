@@ -79,7 +79,7 @@ const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retaine
 const historicalReviewedHelperSuccessorSha =
   '43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619';
 const reviewedV3HelperSuccessorSha =
-  'e94dfdcfe90ff6021446fc66e2850ae13198b03d9e2210f454181ab00177f97d';
+  '6a2ce1c67507df3f09b789fea9a399a6089455c61d5affe962163dea9028f402';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -1159,6 +1159,19 @@ assert.match(workflow, /fetanagent-staging-deploy-helper discard/g);
 assert.match(
   workflow,
   /fetanagent-staging-deploy-helper arm-expiry-stop '\$GITHUB_SHA' '\$STOP_AT'/g,
+);
+assertInOrder(
+  workflow,
+  [
+    '- name: Transfer and install sealed release inputs',
+    "fetanagent-staging-deploy-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'",
+    '- name: Arm the host-local stop before database credential expiry',
+    "fetanagent-staging-deploy-helper arm-expiry-stop '$GITHUB_SHA' '$STOP_AT'",
+    '- name: Start the private staging profile and smoke readiness',
+    "fetanagent-staging-deploy-helper fresh-start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'",
+    "fetanagent-staging-deploy-helper bot-disabled-ready '$GITHUB_SHA'",
+  ],
+  'the deployment must install the stopped successor, arm its exact expiry guard, and only then start and attest the private runtime',
 );
 assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
@@ -2468,6 +2481,7 @@ for (const successorGateEnforcementContract of [
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'/u,
   /retire-kemerbet-readiness-binding-v1-for-v2-reseal\|reinstall-kemerbet-v1-retirement-secrets\|seal-kemerbet-readiness\|kemerbet-v1-retirement-recovery-ready/u,
   /permanently forbids legacy v1\/v2 reseal or recovery commands/u,
+  /stop-bot\|stop-kemerbet-session-provision\)[\s\S]*?return 0/u,
   /recheck-kemerbet-readiness\)[\s\S]*?"\$release" == "\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-recheck-recoverable'/u,
   /an interrupted KemerBet v3 recheck permits only exact-release recovery/u,
@@ -2482,6 +2496,80 @@ for (const successorGateEnforcementContract of [
   /permits only no-transfer deployment, private sign-in, and readiness recheck/u,
 ]) {
   assert.match(enforceV2V3SuccessorGate, successorGateEnforcementContract);
+}
+assertInOrder(
+  enforceV2V3SuccessorGate,
+  [
+    'if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == \'successor-completed\' ]]; then',
+    'stop-bot|stop-kemerbet-session-provision)',
+    'return 0',
+    'recheck-kemerbet-readiness)',
+    'stop|expiry-stop|stop-public-edge)',
+    'stop-bot|stop-kemerbet-session-provision)',
+    '"$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+  ],
+  'completed component stops must reach their current-runtime handler without comparing the historical overlay release, while installed stops remain same-release',
+);
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const currentRelease = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const successorGateHarness = [
+    'set -euo pipefail',
+    `CURRENT_RELEASE='${currentRelease}'`,
+    'die() { return 1; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; }',
+    enforceV2V3SuccessorGate,
+    'enforce_kemerbet_v2_v3_successor_gate "$COMPONENT_COMMAND" "$CURRENT_RELEASE"',
+  ].join('\n');
+  for (const [name, command, overlayState, overlayRelease, expectedStatus] of [
+    [
+      'completed historical-overlay bot stop dispatch',
+      'stop-bot',
+      'successor-completed',
+      '1'.repeat(40),
+      0,
+    ],
+    [
+      'completed historical-overlay session stop dispatch',
+      'stop-kemerbet-session-provision',
+      'successor-completed',
+      '1'.repeat(40),
+      0,
+    ],
+    [
+      'installed current-release bot stop dispatch',
+      'stop-bot',
+      'successor-installed',
+      currentRelease,
+      0,
+    ],
+    [
+      'installed wrong-release bot stop dispatch',
+      'stop-bot',
+      'successor-installed',
+      '1'.repeat(40),
+      1,
+    ],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: successorGateHarness,
+      env: {
+        PATH: process.env.PATH,
+        COMPONENT_COMMAND: command,
+        OVERLAY_STATE: overlayState,
+        OVERLAY_RELEASE: overlayRelease,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
 }
 const successorInstalledCommandAllowlist =
   /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision\|recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u.exec(
@@ -2532,27 +2620,64 @@ assert.doesNotMatch(
   /docker|compose|GeneralInfoByExternalId|PlayerEPOSDeposit|curl|FINANCIAL_ACTIONS_MODE=live/iu,
   'the v3 overlay readiness command must only re-attest the completed local overlay',
 );
-const v3SuccessorInstallBoundary = extractShellFunction(
+const v3SuccessorStoppedDurableBoundary = extractShellFunction(
   helper,
+  'require_kemerbet_v3_successor_stopped_durable_boundary',
   'require_kemerbet_v3_successor_install_boundary',
-  'require_fresh_host_identity',
 );
-for (const installBoundaryContract of [
-  /inspect_kemerbet_v2_v3_successor_gate/u,
-  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/u,
-  /KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/u,
-  /require_kemerbet_v1_retirement_expiry_guard_disarmed/u,
-  /! -e "\$BOT_STARTUP_RECEIPT" && ! -L "\$BOT_STARTUP_RECEIPT"/u,
-  /! -e "\$BOT_STARTUP_RECEIPT_ROOT" && ! -L "\$BOT_STARTUP_RECEIPT_ROOT"/u,
+for (const stoppedDurableContract of [
   /container ls --all --quiet/u,
   /network ls --quiet/u,
   /require_kemerbet_recheck_transients_absent/u,
   /volume ls --quiet/u,
   /KEMERBET_PROFILE_VOLUME/u,
   /KEMERBET_SESSION_CONTROL_VOLUME/u,
+  /resolve_kemerbet_profile_volume_mountpoint/u,
   /require_kemerbet_profile_volume_holders ''/u,
   /resolve_kemerbet_session_control_volume_offline_mountpoint/u,
   /--filter "volume=\$KEMERBET_SESSION_CONTROL_VOLUME"/u,
+]) {
+  assert.match(v3SuccessorStoppedDurableBoundary, stoppedDurableContract);
+}
+assertInOrder(
+  v3SuccessorStoppedDurableBoundary,
+  [
+    'containers=',
+    '[[ -z "$containers" ]]',
+    'networks=',
+    '[[ -z "$networks" ]]',
+    'require_kemerbet_recheck_transients_absent',
+    'project_volumes=',
+    '[[ "$project_volumes" == "$expected_volumes" ]]',
+    'resolve_kemerbet_profile_volume_mountpoint',
+    "require_kemerbet_profile_volume_holders ''",
+    'resolve_kemerbet_session_control_volume_offline_mountpoint',
+    '[[ -z "$session_holders" ]]',
+  ],
+  'the shared stopped successor predicate must prove exact empty runtime and holder-free durable volumes',
+);
+assert.doesNotMatch(
+  v3SuccessorStoppedDurableBoundary,
+  /^[ \t]*(?:rm|mv|install|cp|truncate|tee)\s+|docker_local (?:container|network|volume) (?:rm|create)\b|compose_command|docker_local compose|docker --host/imu,
+  'the shared stopped successor predicate must remain read-only and fail closed',
+);
+
+const v3SuccessorInstallBoundary = extractShellFunction(
+  helper,
+  'require_kemerbet_v3_successor_install_boundary',
+  'require_kemerbet_v3_successor_armed_stopped_boundary',
+);
+for (const installBoundaryContract of [
+  /inspect_kemerbet_v2_v3_successor_gate/u,
+  /successor_state="\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"/u,
+  /successor_release="\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
+  /successor-installed\)/u,
+  /successor-completed\)/u,
+  /successor_release" == "\$commit_sha"/u,
+  /require_kemerbet_v1_retirement_expiry_guard_disarmed/u,
+  /! -e "\$BOT_STARTUP_RECEIPT" && ! -L "\$BOT_STARTUP_RECEIPT"/u,
+  /! -e "\$BOT_STARTUP_RECEIPT_ROOT" && ! -L "\$BOT_STARTUP_RECEIPT_ROOT"/u,
+  /require_kemerbet_v3_successor_stopped_durable_boundary/u,
 ]) {
   assert.match(v3SuccessorInstallBoundary, installBoundaryContract);
 }
@@ -2565,17 +2690,14 @@ assertInOrder(
   v3SuccessorInstallBoundary,
   [
     'inspect_kemerbet_v2_v3_successor_gate',
+    'successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    'case "$successor_state" in',
     'require_kemerbet_v1_retirement_expiry_guard_disarmed',
-    'containers=',
-    '[[ -z "$containers" ]]',
-    'networks=',
-    '[[ -z "$networks" ]]',
-    'require_kemerbet_recheck_transients_absent',
-    'project_volumes=',
-    '[[ "$project_volumes" == "$expected_volumes" ]]',
-    'require_kemerbet_profile_volume_holders',
-    '[[ -z "$session_holders" ]]',
+    'require_kemerbet_v3_successor_stopped_durable_boundary',
     'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_release"',
   ],
   'successor installation must prove the complete stopped holder-free boundary before re-attesting it',
 );
@@ -2584,6 +2706,346 @@ assert.doesNotMatch(
   /^[ \t]*(?:rm|mv|install|cp|truncate|tee)\s+|docker_local (?:container|network|volume) (?:rm|create)\b|compose_command|docker_local compose|docker --host/imu,
   'the successor install preflight must remain read-only and fail closed',
 );
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const installBoundaryHarness = [
+    'set -euo pipefail',
+    `EXPECTED_RELEASE='${release}'`,
+    'BOT_STARTUP_RECEIPT="/tmp/fetanagent-install-boundary-fixture-$BASHPID/receipt"',
+    'BOT_STARTUP_RECEIPT_ROOT="/tmp/fetanagent-install-boundary-fixture-$BASHPID"',
+    "INSPECTION_COUNT='0'",
+    "TRACE=''",
+    'die() { return 1; }',
+    'require_kemerbet_v1_retirement_expiry_guard_disarmed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
+    'require_kemerbet_v3_successor_stopped_durable_boundary() { TRACE="${TRACE}D"; [[ "$DURABLE_STATE" == exact ]]; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; INSPECTION_COUNT="$((INSPECTION_COUNT + 1))"; if [[ "$INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    v3SuccessorInstallBoundary,
+    'require_kemerbet_v3_successor_install_boundary "$EXPECTED_RELEASE"',
+    '[[ "$TRACE" == OGDO ]]',
+  ].join('\n');
+  for (const [name, initialState, initialRelease, finalState, finalRelease, expectedStatus] of [
+    [
+      'exact installed install boundary',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      0,
+    ],
+    [
+      'exact completed install boundary',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '1'.repeat(40),
+      0,
+    ],
+    [
+      'wrong installed install release',
+      'successor-installed',
+      '0'.repeat(40),
+      'successor-installed',
+      '0'.repeat(40),
+      1,
+    ],
+    [
+      'changed completed install release',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '2'.repeat(40),
+      1,
+    ],
+    ['invalid install overlay state', 'invalid', release, 'invalid', release, 1],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: installBoundaryHarness,
+      env: {
+        PATH: process.env.PATH,
+        GUARD_STATE: 'exact',
+        DURABLE_STATE: 'exact',
+        INITIAL_OVERLAY_STATE: initialState,
+        INITIAL_OVERLAY_RELEASE: initialRelease,
+        FINAL_OVERLAY_STATE: finalState,
+        FINAL_OVERLAY_RELEASE: finalRelease,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+}
+const v3SuccessorArmedStoppedBoundary = extractShellFunction(
+  helper,
+  'require_kemerbet_v3_successor_armed_stopped_boundary',
+  'require_fresh_host_identity',
+);
+assertInOrder(
+  v3SuccessorArmedStoppedBoundary,
+  [
+    '[[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]]',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    'successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    'case "$successor_state" in',
+    'successor-installed)',
+    '[[ "$successor_release" == "$commit_sha" ]]',
+    'successor-completed)',
+    'require_kemerbet_v1_retirement_expiry_guard_armed',
+    'require_fresh_host_start_ready "$commit_sha"',
+    '[[ ! -e "$BOT_STARTUP_RECEIPT" && ! -L "$BOT_STARTUP_RECEIPT"',
+    'require_kemerbet_v3_successor_stopped_durable_boundary',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_release"',
+  ],
+  'the armed successor boundary must prove the exact guard and stopped host before re-attesting the unchanged installed or completed overlay',
+);
+assert.doesNotMatch(
+  v3SuccessorArmedStoppedBoundary,
+  /\b(?:Transfer|GeneralInfoByExternalId|PlayerEPOSDeposit)\b|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|docker_local compose|^[ \t]*(?:docker|install|rm|mv)\s+/imu,
+  'the armed stopped-host successor boundary must remain read-only and grant no money-moving authority',
+);
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const boundaryHarness = [
+    'set -euo pipefail',
+    `EXPECTED_RELEASE='${release}'`,
+    'BOT_STARTUP_RECEIPT="/tmp/fetanagent-expiry-boundary-fixture-$BASHPID/receipt"',
+    'BOT_STARTUP_RECEIPT_ROOT="/tmp/fetanagent-expiry-boundary-fixture-$BASHPID"',
+    "INSPECTION_COUNT='0'",
+    "TRACE=''",
+    'die() { return 1; }',
+    'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
+    'require_fresh_host_start_ready() { TRACE="${TRACE}S"; [[ "$STOPPED_STATE" == exact ]]; }',
+    'require_kemerbet_v3_successor_stopped_durable_boundary() { TRACE="${TRACE}D"; [[ "$DURABLE_STATE" == exact ]]; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; INSPECTION_COUNT="$((INSPECTION_COUNT + 1))"; if [[ "$INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    v3SuccessorArmedStoppedBoundary,
+    'require_kemerbet_v3_successor_armed_stopped_boundary "$EXPECTED_RELEASE"',
+    '[[ "$TRACE" == OGSDO ]]',
+  ].join('\n');
+  for (const [
+    name,
+    guardState,
+    stoppedState,
+    durableState,
+    initialOverlayState,
+    initialOverlayRelease,
+    finalOverlayState,
+    finalOverlayRelease,
+    expectedStatus,
+  ] of [
+    [
+      'exact armed stopped installed successor',
+      'exact',
+      'exact',
+      'exact',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      0,
+    ],
+    [
+      'exact armed stopped completed successor',
+      'exact',
+      'exact',
+      'exact',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '1'.repeat(40),
+      0,
+    ],
+    [
+      'missing expiry guard',
+      'missing',
+      'exact',
+      'exact',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'invalid expiry guard',
+      'invalid',
+      'exact',
+      'exact',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'running successor host',
+      'exact',
+      'running',
+      'exact',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'invalid durable boundary',
+      'exact',
+      'exact',
+      'invalid',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'invalid initial overlay',
+      'exact',
+      'exact',
+      'exact',
+      'invalid',
+      release,
+      'invalid',
+      release,
+      1,
+    ],
+    [
+      'wrong installed release',
+      'exact',
+      'exact',
+      'exact',
+      'successor-installed',
+      '0'.repeat(40),
+      'successor-installed',
+      '0'.repeat(40),
+      1,
+    ],
+    [
+      'changed successor overlay state',
+      'exact',
+      'exact',
+      'exact',
+      'successor-installed',
+      release,
+      'successor-completed',
+      release,
+      1,
+    ],
+    [
+      'changed successor overlay release',
+      'exact',
+      'exact',
+      'exact',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '2'.repeat(40),
+      1,
+    ],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: boundaryHarness,
+      env: {
+        PATH: process.env.PATH,
+        GUARD_STATE: guardState,
+        STOPPED_STATE: stoppedState,
+        DURABLE_STATE: durableState,
+        INITIAL_OVERLAY_STATE: initialOverlayState,
+        INITIAL_OVERLAY_RELEASE: initialOverlayRelease,
+        FINAL_OVERLAY_STATE: finalOverlayState,
+        FINAL_OVERLAY_RELEASE: finalOverlayRelease,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} armed-successor fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+}
+
+const helperArmExpiryStopCase = /\n  arm-expiry-stop\)([\s\S]*?)\n    ;;\n\n  expiry-stop\)/u.exec(
+  helper,
+)?.[1];
+assert.ok(helperArmExpiryStopCase, 'the helper must expose one exact expiry-arm command');
+assertInOrder(
+  helperArmExpiryStopCase,
+  [
+    'arm_expiry_stop "$2" "$3"',
+    `if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]`,
+    'require_kemerbet_v3_successor_armed_stopped_boundary "$2"',
+    'else',
+  ],
+  'expiry arming must attest the exact stopped successor before the separately guarded fresh-start',
+);
+assert.doesNotMatch(
+  helperArmExpiryStopCase.slice(0, helperArmExpiryStopCase.indexOf('    else')),
+  /require_exact_fresh_private_runtime|docker_local compose|\b(?:start|up)\b/u,
+  'arming an installed or completed successor must not require or start a runtime before fresh-start',
+);
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const armHarness = [
+    'set -euo pipefail',
+    `EXPECTED_RELEASE='${release}'`,
+    `set -- arm-expiry-stop "$EXPECTED_RELEASE" '2026-08-27 00:00:00 UTC'`,
+    'KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$ARM_OVERLAY_STATE"',
+    'KEMERBET_V2_V3_SUCCESSOR_RELEASE="$ARM_OVERLAY_RELEASE"',
+    'BOT_STARTUP_RECEIPT="/tmp/fetanagent-expiry-arm-fixture-$BASHPID/receipt"',
+    'BOT_STARTUP_RECEIPT_ROOT="/tmp/fetanagent-expiry-arm-fixture-$BASHPID"',
+    "TRACE=''",
+    'die() { return 1; }',
+    'arm_expiry_stop() { TRACE="${TRACE}A"; }',
+    'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; return 0; }',
+    'require_fresh_host_start_ready() { TRACE="${TRACE}S"; return 0; }',
+    'require_kemerbet_v3_successor_stopped_durable_boundary() { TRACE="${TRACE}D"; return 0; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$ARM_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$ARM_OVERLAY_RELEASE"; }',
+    'require_exact_fresh_private_runtime() { TRACE="${TRACE}X"; return 1; }',
+    v3SuccessorArmedStoppedBoundary,
+    helperArmExpiryStopCase,
+    '[[ "$TRACE" == AOGSDO ]]',
+  ].join('\n');
+  for (const [name, overlayState, overlayRelease] of [
+    ['installed successor', 'successor-installed', release],
+    ['completed successor', 'successor-completed', '1'.repeat(40)],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: armHarness,
+      env: {
+        PATH: process.env.PATH,
+        ARM_OVERLAY_STATE: overlayState,
+        ARM_OVERLAY_RELEASE: overlayRelease,
+      },
+    });
+    assert.equal(
+      result.status,
+      0,
+      `the exact stopped ${name} must arm without a premature runtime predicate: ${result.stderr}`,
+    );
+  }
+}
 const helperStopCase = /\n  stop\)\n([\s\S]*?)\n    ;;\n\n  arm-expiry-stop\)/u.exec(helper)?.[1];
 const helperExpiryStopCase = /\n  expiry-stop\)\n([\s\S]*?)\n    ;;\n\n  cutover-ready\)/u.exec(
   helper,
@@ -3897,7 +4359,7 @@ for (const contract of [
 }
 assert.match(
   helper,
-  /if \[\[ "\$command" == 'fresh-start' \]\]; then\s+require_fresh_host_start_ready "\$commit_sha"\s+clear_bot_startup_receipt/,
+  /if \[\[ "\$command" == 'fresh-start' \]\]; then\s+require_kemerbet_v1_retirement_expiry_guard_armed \|\|[\s\S]*?if \[\[ "\$successor_start_state" != 'absent' \]\]; then\s+require_kemerbet_v3_successor_armed_stopped_boundary "\$commit_sha"\s+else\s+require_fresh_host_start_ready "\$commit_sha"\s+fi\s+clear_bot_startup_receipt/u,
 );
 const freshHostIdentity = /require_fresh_host_identity\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(freshHostIdentity, 'The helper must define the exact fresh-host identity gate.');
@@ -4131,10 +4593,17 @@ assertInOrder(
   installRelease,
   [
     'validate_commit_and_tag "$commit_sha" "$image_tag"',
-    `if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then`,
+    'successor_install_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'successor_install_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    `if [[ "$successor_install_state" != 'absent' ]]; then`,
     'require_kemerbet_v3_successor_install_boundary "$commit_sha"',
     'expected_files=',
     'install -d -o root -g root -m 0755 "$release/infra" "$SECRET_ROOT"',
+    'rm -rf -- "$incoming"',
+    `if [[ "$successor_install_state" != 'absent' ]]; then`,
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_install_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_install_release"',
   ],
   'successor installation must prove the stopped preflight before examining or replacing release bytes',
 );
@@ -4150,6 +4619,267 @@ assert.equal(
 const startOrFreshStart =
   /\n  start\|fresh-start\)([\s\S]*?)\n    ;;\n\n  bot-disabled-ready\)/u.exec(helper)?.[1];
 assert.ok(startOrFreshStart, 'The helper must define the private-core startup boundary.');
+assertInOrder(
+  startOrFreshStart,
+  [
+    'validate_commit_and_tag "$commit_sha" "$image_tag"',
+    'successor_start_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'successor_start_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    `if [[ "$command" == 'fresh-start' ]]`,
+    'require_kemerbet_v1_retirement_expiry_guard_armed',
+    `if [[ "$successor_start_state" != 'absent' ]]`,
+    'require_kemerbet_v3_successor_armed_stopped_boundary "$commit_sha"',
+    'clear_bot_startup_receipt',
+    'up -d --no-build --wait --wait-timeout 90 owner-control customer-web api beta-admission',
+    'require_owner_kemerbet_receipt_service_access',
+    `if [[ "$successor_start_state" != 'absent' ]]`,
+    'require_kemerbet_v1_retirement_expiry_guard_armed',
+    'require_exact_fresh_private_runtime "$commit_sha"',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_start_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_start_release"',
+  ],
+  'fresh-start must validate the exact armed stopped successor before activation and attest its private runtime afterward',
+);
+assert.doesNotMatch(
+  startOrFreshStart.slice(
+    0,
+    startOrFreshStart.indexOf('up -d --no-build --wait --wait-timeout 90'),
+  ),
+  /require_exact_fresh_private_runtime/u,
+  'the stopped successor must be guarded by the expiry boundary, not a premature live-runtime predicate',
+);
+const freshStartInitializationStart = startOrFreshStart.indexOf('    [[ $# -eq 3 ]]');
+const freshStartInitializationEnd = startOrFreshStart.indexOf('    compose_file=');
+assert.ok(
+  freshStartInitializationStart >= 0 && freshStartInitializationEnd > freshStartInitializationStart,
+  'the fresh-start initialization boundary must be extractable for executable guard fixtures',
+);
+const freshStartInitialization = startOrFreshStart.slice(
+  freshStartInitializationStart,
+  freshStartInitializationEnd,
+);
+assertInOrder(
+  freshStartInitialization,
+  [
+    `if [[ "$command" == 'fresh-start' ]]`,
+    'require_kemerbet_v1_retirement_expiry_guard_armed',
+    `if [[ "$successor_start_state" != 'absent' ]]`,
+    'require_kemerbet_v3_successor_armed_stopped_boundary "$commit_sha"',
+    'clear_bot_startup_receipt',
+    'else',
+    'require_private_start_cutover_ready "$commit_sha"',
+  ],
+  'fresh-start must require an expiry guard before its first mutation while historical start remains on its cutover boundary',
+);
+assert.equal(
+  (freshStartInitialization.match(/require_kemerbet_v1_retirement_expiry_guard_armed/g) ?? [])
+    .length,
+  1,
+  'fresh-start initialization must contain one unconditional literal expiry-guard check',
+);
+
+const postStartSuccessorStart = startOrFreshStart.indexOf(
+  '    require_owner_kemerbet_receipt_service_access',
+);
+const postStartSuccessorEnd = startOrFreshStart.indexOf(
+  `    if [[ "$migration_recovery_start" == 'true' ]]`,
+  postStartSuccessorStart,
+);
+assert.ok(
+  postStartSuccessorStart >= 0 && postStartSuccessorEnd > postStartSuccessorStart,
+  'the post-start successor boundary must be extractable for executable guard fixtures',
+);
+const postStartSuccessorBoundary = startOrFreshStart.slice(
+  postStartSuccessorStart,
+  postStartSuccessorEnd,
+);
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const preStartHarness = [
+    'set -euo pipefail',
+    `EXPECTED_RELEASE='${release}'`,
+    "EXPECTED_TAG='de14588d4e5b'",
+    'set -- fresh-start "$EXPECTED_RELEASE" "$EXPECTED_TAG"',
+    "command='fresh-start'",
+    'KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$PRE_OVERLAY_STATE"',
+    'KEMERBET_V2_V3_SUCCESSOR_RELEASE="$PRE_OVERLAY_RELEASE"',
+    "TRACE=''",
+    'die() { return 1; }',
+    'validate_commit_and_tag() { TRACE="${TRACE}V"; [[ "$1" == "$EXPECTED_RELEASE" && "$2" == "$EXPECTED_TAG" ]]; }',
+    'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
+    'require_kemerbet_v3_successor_armed_stopped_boundary() { TRACE="${TRACE}B"; [[ "$STOPPED_STATE" == exact ]]; }',
+    'require_fresh_host_start_ready() { TRACE="${TRACE}F"; return 1; }',
+    'clear_bot_startup_receipt() { TRACE="${TRACE}C"; }',
+    freshStartInitialization,
+    '[[ "$TRACE" == VGBC ]]',
+  ].join('\n');
+  for (const [name, overlayState, overlayRelease, guardState, stoppedState, expectedStatus] of [
+    ['exact installed fresh-start boundary', 'successor-installed', release, 'exact', 'exact', 0],
+    [
+      'exact completed fresh-start boundary',
+      'successor-completed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      0,
+    ],
+    ['missing fresh-start guard', 'successor-installed', release, 'missing', 'exact', 1],
+    ['invalid fresh-start guard', 'successor-installed', release, 'invalid', 'exact', 1],
+    ['invalid stopped successor boundary', 'successor-installed', release, 'exact', 'invalid', 1],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: preStartHarness,
+      env: {
+        PATH: process.env.PATH,
+        PRE_OVERLAY_STATE: overlayState,
+        PRE_OVERLAY_RELEASE: overlayRelease,
+        GUARD_STATE: guardState,
+        STOPPED_STATE: stoppedState,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} pre-start fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+
+  const postStartHarness = [
+    'set -euo pipefail',
+    `commit_sha='${release}'`,
+    'successor_start_state="$INITIAL_OVERLAY_STATE"',
+    'successor_start_release="$INITIAL_OVERLAY_RELEASE"',
+    'KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$successor_start_state"',
+    'KEMERBET_V2_V3_SUCCESSOR_RELEASE="$successor_start_release"',
+    "TRACE=''",
+    'die() { return 1; }',
+    'require_owner_kemerbet_receipt_service_access() { TRACE="${TRACE}A"; }',
+    'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
+    'require_exact_fresh_private_runtime() { TRACE="${TRACE}R"; [[ "$RUNTIME_STATE" == exact ]]; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; }',
+    postStartSuccessorBoundary,
+    '[[ "$TRACE" == AGRO ]]',
+  ].join('\n');
+  for (const [
+    name,
+    initialOverlayState,
+    initialOverlayRelease,
+    guardState,
+    runtimeState,
+    finalOverlayState,
+    finalOverlayRelease,
+    expectedStatus,
+  ] of [
+    [
+      'exact installed post-start runtime',
+      'successor-installed',
+      release,
+      'exact',
+      'exact',
+      'successor-installed',
+      release,
+      0,
+    ],
+    [
+      'exact completed post-start runtime',
+      'successor-completed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      'successor-completed',
+      '1'.repeat(40),
+      0,
+    ],
+    [
+      'missing post-start guard',
+      'successor-installed',
+      release,
+      'missing',
+      'exact',
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'invalid post-start guard',
+      'successor-installed',
+      release,
+      'invalid',
+      'exact',
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'invalid post-start runtime',
+      'successor-installed',
+      release,
+      'exact',
+      'invalid',
+      'successor-installed',
+      release,
+      1,
+    ],
+    [
+      'changed post-start overlay',
+      'successor-installed',
+      release,
+      'exact',
+      'exact',
+      'successor-completed',
+      release,
+      1,
+    ],
+    [
+      'changed post-start release',
+      'successor-completed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      'successor-completed',
+      '2'.repeat(40),
+      1,
+    ],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: postStartHarness,
+      env: {
+        PATH: process.env.PATH,
+        INITIAL_OVERLAY_STATE: initialOverlayState,
+        INITIAL_OVERLAY_RELEASE: initialOverlayRelease,
+        GUARD_STATE: guardState,
+        RUNTIME_STATE: runtimeState,
+        OVERLAY_STATE: finalOverlayState,
+        OVERLAY_RELEASE: finalOverlayRelease,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} post-start fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+}
+
+for (const [label, controlSlice] of [
+  ['expiry arming', helperArmExpiryStopCase],
+  ['fresh-start initialization', freshStartInitialization],
+  ['successor post-start', postStartSuccessorBoundary],
+]) {
+  assert.doesNotMatch(
+    controlSlice,
+    /FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true|GeneralInfoByExternalId|PlayerEPOSDeposit|--profile kemerbet-session-provision|up[^\n]*deposit-executor/u,
+    `${label} must not broaden the dry-run no-transfer authority`,
+  );
+}
 
 function assertSuccessorInstalledPostcondition(
   commandCase,
@@ -4175,22 +4905,6 @@ function assertSuccessorInstalledPostcondition(
 }
 
 assertSuccessorInstalledPostcondition(
-  installRelease,
-  'rm -rf -- "$incoming"',
-  [],
-  [],
-  '$commit_sha',
-  'release installation',
-);
-assertSuccessorInstalledPostcondition(
-  startOrFreshStart,
-  'require_owner_kemerbet_receipt_service_access',
-  [],
-  ['require_exact_fresh_private_runtime "$commit_sha"'],
-  '$commit_sha',
-  'private-core startup',
-);
-assertSuccessorInstalledPostcondition(
   installBotToken,
   'rm -f -- "$incoming"',
   ['require_service_file "$SECRET_ROOT/bot-token"'],
@@ -4206,6 +4920,143 @@ assertSuccessorInstalledPostcondition(
   '$commit_sha',
   'Telegram startup',
 );
+
+const exactCurrentComponentContainer = extractShellFunction(
+  helper,
+  'require_exact_current_component_container',
+  'require_exact_private_runtime',
+);
+for (const componentContainerContract of [
+  /\^\(bot\|gateway\|kemerbet-session-provision\)\$/u,
+  /com\.docker\.compose\.project/u,
+  /com\.docker\.compose\.service/u,
+  /org\.opencontainers\.image\.revision/u,
+  /image_id=.*\{\{\.Image\}\}/u,
+  /\^sha256:\[0-9a-f\]\{64\}\$/u,
+  /docker_local image inspect "\$image_id"/u,
+]) {
+  assert.match(exactCurrentComponentContainer, componentContainerContract);
+}
+assertInOrder(
+  exactCurrentComponentContainer,
+  [
+    'observed_project=',
+    '[[ "$observed_project" == "$PROJECT_NAME" ]]',
+    'observed_service=',
+    '[[ "$observed_service" == "$service" ]]',
+    'container_revision=',
+    '[[ "$container_revision" == "$commit_sha" ]]',
+    'image_id=',
+    'image_revision=',
+    '[[ "$image_revision" == "$commit_sha" ]]',
+  ],
+  'component teardown must bind the exact project, service, container revision, and immutable image revision',
+);
+assert.doesNotMatch(
+  exactCurrentComponentContainer,
+  /container (?:rm|stop)|image rm|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true/u,
+  'the component-container provenance check must remain read-only and grant no money-moving authority',
+);
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const containerId = 'a'.repeat(64);
+  const imageId = `sha256:${'b'.repeat(64)}`;
+  const componentContainerHarness = [
+    'set -euo pipefail',
+    `PROJECT_NAME='fetanagent-staging-beta'`,
+    `EXPECTED_RELEASE='${release}'`,
+    `CONTAINER_ID='${containerId}'`,
+    'die() { return 1; }',
+    'docker_local() {',
+    '  if [[ "$1" == container && "$2" == inspect ]]; then',
+    '    case "${*: -1}" in',
+    '      *com.docker.compose.project*) printf "%s" "$OBSERVED_PROJECT" ;;',
+    '      *com.docker.compose.service*) printf "%s" "$OBSERVED_SERVICE" ;;',
+    '      *org.opencontainers.image.revision*) printf "%s" "$CONTAINER_REVISION" ;;',
+    '      *\{\{.Image\}\}*) printf "%s" "$OBSERVED_IMAGE_ID" ;;',
+    '      *) return 91 ;;',
+    '    esac',
+    '  elif [[ "$1" == image && "$2" == inspect ]]; then',
+    '    [[ "$3" == "$OBSERVED_IMAGE_ID" ]] || return 92',
+    '    printf "%s" "$IMAGE_REVISION"',
+    '  else',
+    '    return 93',
+    '  fi',
+    '}',
+    exactCurrentComponentContainer,
+    'require_exact_current_component_container "$CONTAINER_ID" bot "$EXPECTED_RELEASE"',
+  ].join('\n');
+  for (const [
+    name,
+    observedProject,
+    observedService,
+    containerRevision,
+    observedImageId,
+    imageRevision,
+    expectedStatus,
+  ] of [
+    ['exact current bot container', 'fetanagent-staging-beta', 'bot', release, imageId, release, 0],
+    ['foreign component project', 'foreign', 'bot', release, imageId, release, 1],
+    [
+      'foreign component service',
+      'fetanagent-staging-beta',
+      'gateway',
+      release,
+      imageId,
+      release,
+      1,
+    ],
+    [
+      'stale component container revision',
+      'fetanagent-staging-beta',
+      'bot',
+      '1'.repeat(40),
+      imageId,
+      release,
+      1,
+    ],
+    [
+      'malformed component image identity',
+      'fetanagent-staging-beta',
+      'bot',
+      release,
+      'b'.repeat(64),
+      release,
+      1,
+    ],
+    [
+      'stale component image revision',
+      'fetanagent-staging-beta',
+      'bot',
+      release,
+      imageId,
+      '1'.repeat(40),
+      1,
+    ],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: componentContainerHarness,
+      env: {
+        PATH: process.env.PATH,
+        OBSERVED_PROJECT: observedProject,
+        OBSERVED_SERVICE: observedService,
+        CONTAINER_REVISION: containerRevision,
+        OBSERVED_IMAGE_ID: observedImageId,
+        IMAGE_REVISION: imageRevision,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+}
 
 const stopBot = /\n  stop-bot\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(stopBot, 'The helper must define a fail-closed Telegram bot stop boundary.');
@@ -4246,21 +5097,188 @@ assertInOrder(
     'if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == \'absent\' ]]; then',
     'inspect_kemerbet_v1_retirement_gate',
     'else',
+    'case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in',
+    'successor-installed)',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
+    'successor-completed)',
     "successor_component_stop='true'",
+    '"$session_container" kemerbet-session-provision "$commit_sha"',
+    'container stop --time 70 "$session_container"',
+    'require_exact_current_component_container "$gateway_container" gateway "$commit_sha"',
+    'container rm --force "$gateway_container"',
+    'require_exact_current_component_container "$bot_container" bot "$commit_sha"',
+    'container rm --force "$bot_container"',
     'clear_bot_startup_receipt',
     'if [[ "$successor_component_stop" == \'true\' ]]; then',
     'inspect_kemerbet_v2_v3_successor_gate',
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release"',
   ],
-  'bot stop must use successor-native control flow and preserve the exact same-release durable overlay',
+  'bot stop must preserve the historical completed overlay while proving every removed component belongs to the current release',
+);
+assert.equal(
+  (stopBot.match(/require_exact_current_component_container/g) ?? []).length,
+  3,
+  'bot stop must prove the exact current session, gateway, and bot containers before removal',
 );
 assert.equal(
   (stopBot.match(/inspect_kemerbet_v1_retirement_gate/g) ?? []).length,
   1,
   'bot stop may inspect historical v1 state only in the explicit successor-absent branch',
 );
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const stopBotHarness = [
+    'set -euo pipefail',
+    `EXPECTED_RELEASE='${release}'`,
+    'set -- stop-bot "$EXPECTED_RELEASE"',
+    "PROJECT_NAME='fetanagent-staging-beta'",
+    "KEMERBET_TEARDOWN_RECOVERY_FAILED='false'",
+    "KEMERBET_V2_V3_SUCCESSOR_GATE_STATE=''",
+    "KEMERBET_V2_V3_SUCCESSOR_RELEASE=''",
+    "OVERLAY_INSPECTION_COUNT='0'",
+    "BOT_PRESENT='true'",
+    "TRACE=''",
+    'trap \'printf "__TRACE__%s" "$TRACE"\' EXIT',
+    'die() { return 1; }',
+    'recover_kemerbet_recheck_before_teardown() { TRACE="${TRACE}R"; }',
+    'require_kemerbet_teardown_recovery_success() { TRACE="${TRACE}Q"; }',
+    'inspect_kemerbet_v1_retirement_gate() { return 95; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; OVERLAY_INSPECTION_COUNT="$((OVERLAY_INSPECTION_COUNT + 1))"; if [[ "$OVERLAY_INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    'docker_local() {',
+    '  if [[ "$1" == container && "$2" == ls ]]; then',
+    '    case "$*" in',
+    '      *com.docker.compose.service=kemerbet-session-provision*) return 0 ;;',
+    '      *com.docker.compose.service=gateway*) return 0 ;;',
+    '      *com.docker.compose.service=bot*) [[ "$BOT_PRESENT" == true ]] && printf "%s" "${BOT_ID:-aaaaaaaaaaaa}" ;;',
+    '      *) printf "%s" "cccccccccccc" ;;',
+    '    esac',
+    '  elif [[ "$1" == container && "$2" == rm ]]; then',
+    '    TRACE="${TRACE}M"; BOT_PRESENT=false',
+    '  else',
+    '    return 96',
+    '  fi',
+    '}',
+    'require_exact_current_component_container() { TRACE="${TRACE}P"; [[ "$TARGET_STATE" == exact ]]; }',
+    'clear_bot_startup_receipt() { TRACE="${TRACE}C"; }',
+    'require_exact_fresh_private_runtime() { TRACE="${TRACE}X"; [[ "$RUNTIME_STATE" == exact ]]; }',
+    stopBot,
+  ].join('\n');
+  for (const [
+    name,
+    initialState,
+    initialRelease,
+    finalState,
+    finalRelease,
+    targetState,
+    runtimeState,
+    expectedStatus,
+    mutationExpected,
+  ] of [
+    [
+      'installed current-release bot stop',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      'exact',
+      'exact',
+      0,
+      true,
+    ],
+    [
+      'completed historical-release bot stop',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      0,
+      true,
+    ],
+    [
+      'wrong installed bot-stop release',
+      'successor-installed',
+      '1'.repeat(40),
+      'successor-installed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      1,
+      false,
+    ],
+    [
+      'invalid bot-stop successor state',
+      'invalid',
+      release,
+      'invalid',
+      release,
+      'exact',
+      'exact',
+      1,
+      false,
+    ],
+    [
+      'foreign bot target release',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '1'.repeat(40),
+      'invalid',
+      'exact',
+      1,
+      false,
+    ],
+    [
+      'changed completed bot-stop overlay',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '2'.repeat(40),
+      'exact',
+      'exact',
+      1,
+      true,
+    ],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: stopBotHarness,
+      env: {
+        PATH: process.env.PATH,
+        INITIAL_OVERLAY_STATE: initialState,
+        INITIAL_OVERLAY_RELEASE: initialRelease,
+        FINAL_OVERLAY_STATE: finalState,
+        FINAL_OVERLAY_RELEASE: finalRelease,
+        TARGET_STATE: targetState,
+        RUNTIME_STATE: runtimeState,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} fixture returned ${result.status}: ${result.stderr}`,
+    );
+    assert.equal(
+      result.stdout.includes('M'),
+      mutationExpected,
+      `${name} fixture mutation trace was ${result.stdout}`,
+    );
+    if (mutationExpected) {
+      assert.match(
+        result.stdout,
+        /P.*M/u,
+        `${name} must prove the current bot container before removing it`,
+      );
+    }
+  }
+}
 
 const startKemerbetSession = /\n  start-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
   helper,
@@ -7852,9 +8870,13 @@ assertInOrder(
   [
     'recover_kemerbet_recheck_before_teardown',
     'inspect_kemerbet_v2_v3_successor_gate',
+    'case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in',
+    'successor-installed)',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
+    'successor-completed)',
     'session_stop_successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
     'session_stop_successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    '"$session_container" kemerbet-session-provision "$commit_sha"',
     'container stop --time 70',
     'require_exact_fresh_bot_runtime "$commit_sha" published-steady-state',
     'if [[ -n "$session_stop_successor_state" ]]; then',
@@ -7862,8 +8884,149 @@ assertInOrder(
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$session_stop_successor_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$session_stop_successor_release"',
   ],
-  'session stop must preserve the exact installed-or-completed successor after recovery and teardown',
+  'session stop must preserve the historical completed overlay while proving the removed session belongs to the current release',
 );
+assert.equal(
+  (stopKemerbetSession.match(/require_exact_current_component_container/g) ?? []).length,
+  1,
+  'session stop must prove the exact current session container before removal',
+);
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const release = 'de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3';
+  const stopSessionHarness = [
+    'set -euo pipefail',
+    `EXPECTED_RELEASE='${release}'`,
+    'set -- stop-kemerbet-session-provision "$EXPECTED_RELEASE"',
+    "PROJECT_NAME='fetanagent-staging-beta'",
+    "KEMERBET_TEARDOWN_RECOVERY_FAILED='false'",
+    "KEMERBET_V2_V3_SUCCESSOR_GATE_STATE=''",
+    "KEMERBET_V2_V3_SUCCESSOR_RELEASE=''",
+    "OVERLAY_INSPECTION_COUNT='0'",
+    "TRACE=''",
+    'trap \'printf "__TRACE__%s" "$TRACE"\' EXIT',
+    'die() { return 1; }',
+    'recover_kemerbet_recheck_before_teardown() { TRACE="${TRACE}R"; }',
+    'require_kemerbet_teardown_recovery_success() { TRACE="${TRACE}Q"; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; OVERLAY_INSPECTION_COUNT="$((OVERLAY_INSPECTION_COUNT + 1))"; if [[ "$OVERLAY_INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    'docker_local() {',
+    '  if [[ "$1" == container && "$2" == ls ]]; then',
+    '    printf "%s" "aaaaaaaaaaaa"',
+    '  elif [[ "$1" == container && "$2" == stop ]]; then',
+    '    TRACE="${TRACE}S"',
+    '  elif [[ "$1" == container && "$2" == rm ]]; then',
+    '    TRACE="${TRACE}M"',
+    '  else',
+    '    return 96',
+    '  fi',
+    '}',
+    'require_exact_current_component_container() { TRACE="${TRACE}P"; [[ "$TARGET_STATE" == exact ]]; }',
+    'require_exact_fresh_bot_runtime() { TRACE="${TRACE}X"; [[ "$RUNTIME_STATE" == exact ]]; }',
+    stopKemerbetSession,
+  ].join('\n');
+  for (const [
+    name,
+    initialState,
+    initialRelease,
+    finalState,
+    finalRelease,
+    targetState,
+    runtimeState,
+    expectedStatus,
+    mutationExpected,
+  ] of [
+    [
+      'installed current-release session stop',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      'exact',
+      'exact',
+      0,
+      true,
+    ],
+    [
+      'completed historical-release session stop',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      0,
+      true,
+    ],
+    [
+      'wrong installed session-stop release',
+      'successor-installed',
+      '1'.repeat(40),
+      'successor-installed',
+      '1'.repeat(40),
+      'exact',
+      'exact',
+      1,
+      false,
+    ],
+    [
+      'foreign session target release',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '1'.repeat(40),
+      'invalid',
+      'exact',
+      1,
+      false,
+    ],
+    [
+      'changed completed session-stop overlay',
+      'successor-completed',
+      '1'.repeat(40),
+      'successor-completed',
+      '2'.repeat(40),
+      'exact',
+      'exact',
+      1,
+      true,
+    ],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: stopSessionHarness,
+      env: {
+        PATH: process.env.PATH,
+        INITIAL_OVERLAY_STATE: initialState,
+        INITIAL_OVERLAY_RELEASE: initialRelease,
+        FINAL_OVERLAY_STATE: finalState,
+        FINAL_OVERLAY_RELEASE: finalRelease,
+        TARGET_STATE: targetState,
+        RUNTIME_STATE: runtimeState,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} fixture returned ${result.status}: ${result.stderr}`,
+    );
+    assert.equal(
+      result.stdout.includes('M'),
+      mutationExpected,
+      `${name} fixture mutation trace was ${result.stdout}`,
+    );
+    if (mutationExpected) {
+      assert.match(
+        result.stdout,
+        /P.*S.*M.*X/u,
+        `${name} must prove the current session before stopping it and re-attest the remaining runtime`,
+      );
+    }
+  }
+}
 
 const startPublicEdge =
   /\n  start-public-edge\|start-fresh-public-edge\)([\s\S]*?)\n    ;;\n\n  stop-public-edge\)/u.exec(

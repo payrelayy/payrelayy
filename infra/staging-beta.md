@@ -29,7 +29,7 @@ The only services are:
   signed-in `/agents` page appears, and permits the seal to issue read-only lookups in that same
   in-memory authenticated Chromium process. After the fifth strictly validated lookup, the terminal
   route latch remains installed while the exact BrowserContext closes; only a successful close and
-  cleared retained session may precede the v2 binding write.
+  cleared retained session may precede the v3 stable-profile binding write.
 - `kemerbet-no-transfer-readiness`, `kemerbet-readiness-browser`, and
   `kemerbet-readiness-egress-proxy`, three normally absent services in the explicit
   `kemerbet-no-transfer-readiness` profile. They are respectively UID/GID `10002`, `10001`, and
@@ -132,24 +132,100 @@ inode, metadata, bytes, and EOF with a 90-second start period and 120 retries; t
 240 seconds and starts the browser only after exact application health.
 
 The proxy accepts only the reviewed cached bootstrap GET/OPTIONS surface and the exact sequential
-Player lookup. Before every authenticated upstream request, it hashes the exact sanitized bearer and
-timing-safely compares it with the provider-authorization digest in the 230-byte v2 binding created
-by the supervised seal. A mismatch is sticky-fatal with zero Profile or Player upstream calls. For
-the first matching lookup, it then makes one independent read-only `GET /Account/Profile`, strictly
-validates HTTP/encoding/UTF-8/JSON plus `resultCode: 0` and bounded `value.userName`, recomputes the
-agent-identity HMAC, and timing-safely matches the proxy-only binding. It separately pins the
-complete bearer digest for the remaining four lookups; wrong identity, bearer drift, races, aborts,
-and malformed responses are sticky-fatal. It validates
+Player lookup. For the first lookup it accepts only a syntactically exact sanitized bearer and sends
+it only to one independent read-only `GET /Account/Profile`; no Player lookup reaches KemerBet first.
+It strictly validates HTTP/encoding/UTF-8/JSON plus `resultCode: 0` and bounded `value.userName`,
+recomputes the account-scoped Profile HMAC, and timing-safely matches the stable Profile pin in the
+exact 230-byte v3 binding. Only after that match does it pin the complete bearer digest in memory and
+permit the first Player lookup. The same bearer must match for the remaining four lookups; wrong
+identity, bearer drift, races, aborts, and malformed responses are sticky-fatal. A later run may
+validate a fresh bearer for the same stable Profile because no bearer or refresh material is stored
+in v3. The proxy validates
 each lookup response against the requested Player and `ETB`, completes a token only after the browser
 response finishes, and atomically publishes the canonical
-`fetanagent-kemerbet-readiness-layer7-completion-v2` generic identifier-redacted completion receipt
-with `version: 2` after all five. That receipt requires `sameAgentIdentityValidated: true` and the
-SHA-256 of the exact canonical binding-file bytes. Controller and browser exit success is
+`fetanagent-kemerbet-readiness-layer7-completion-v3` generic identifier-redacted completion receipt
+with `version: 3` after all five. That receipt requires `sameAgentIdentityValidated: true`,
+`stableAgentProfileValidated: true`, and the SHA-256 of the exact canonical binding-file bytes.
+Controller and browser exit success is
 insufficient without that exact receipt. Success and every failure path zero the proxy cache and
 remove all seven transient containers, all three readiness networks, all runtime
 capabilities/tokens/firewall files and output
 directories, and the disposable snapshot volume. No endpoint, Amount field, Transfer action, or
 financial switch is introduced by this proof.
+
+#### Current v2-to-v3 stable-profile successor migration
+
+The current runtime and recheck accept only this exact 230-byte binding, including LF:
+
+```text
+<canonical UUID> hmac-sha256-agent-identity-v1:<64-lowercase-hex> hmac-sha256-agent-profile-pin-v3:<same 64-lowercase-hex>
+```
+
+If the Droplet still holds the failed, never-committed v2 readiness source and completed historical
+v1-to-v2 retirement, do not run ordinary deploy, helper replacement, rollback, a second v1
+retirement, or a hand-edited conversion. Use only the reviewed root-console script
+[`infra/operations/fetanagent-kemerbet-v2-v3-successor-migration.sh`](operations/fetanagent-kemerbet-v2-v3-successor-migration.sh).
+The detailed invariants are also recorded in [`executor.md`](executor.md#current-v2-to-v3-stable-profile-successor-migration).
+
+Independently review the predecessor and successor 40-character release SHAs, predecessor-helper
+SHA-256, exact v2 binding SHA-256, successor-helper SHA-256, and the migration script itself. From
+the exact successor commit, stage the script and
+`fetanagent-staging-deploy-helper.next` in the root-owned mode-`0700` directory
+`/root/fetanagent-v3-successor-<successor-release>/`; both files are public code artifacts, not
+credentials, and the staged helper must be root-owned mode `0600`. Then use only the direct
+DigitalOcean `root` console identity and the exact confirmation shown below:
+
+```bash
+bash "/root/fetanagent-v3-successor-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v2-v3-successor-migration.sh" \
+  "$PREDECESSOR_RELEASE" \
+  "$SUCCESSOR_RELEASE" \
+  "$PREDECESSOR_HELPER_SHA256" \
+  "$V2_BINDING_SHA256" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-ARCHIVES-V2-AND-INSTALLS-THE-V3-SUCCESSOR
+```
+
+The script verifies the fixed Droplet and exact predecessor state, stops staging, takes the root
+mutation lock, and disables the helper sudoers grant before creating or synchronizing any successor
+namespace. It preserves the canonical root-owned v1 retirement
+directory in place and creates a separate exact four-entry overlay that archives only the v2 binding
+and predecessor helper with its intent/completion records. It deterministically replaces only the v2
+bearer-digest field with the existing stable identity digest under the v3 Profile-pin label. It then
+installs the exact successor helper, writes
+durable intent/completion evidence under
+`/var/lib/fetanagent/kemerbet-readiness-v2-v3-successor/`, reattests the exact v3 source, and restores
+the sudoers grant. Transfer remains disabled and no money moves.
+
+After migration, keep the executor stopped. `successor-installed` permits only the exact same-release
+no-transfer deployment, private-sign-in, readiness-recheck, diagnostic, and safe-stop commands. Before
+`install` may replace any sealed Compose, service-secret, or image input, the helper independently
+requires a disarmed expiry guard, absent Telegram receipt, zero project containers and networks, no
+recheck transient, exactly the two durable KemerBet volumes, and zero profile or session-control volume
+holders; it reattests the same successor before and after that read-only preflight. Both install and
+startup also require the `deposit-executor` image revision to match the reviewed release. Component
+stops inspect v3 directly, use historical v1 state only when the successor overlay is absent, and
+reattest the exact successor release and lifecycle state after teardown.
+
+Perform a fresh private sign-in if the KemerBet session has expired, then run only the successor
+release's exact-five no-transfer recheck. An interrupted promotion becomes
+`successor-recheck-recoverable` and permits only exact-release recovery or safe teardown. Completion is
+derived without writing a new overlay marker: the root-only `ready-v1` receipt, canonical root-owned v3
+binding, and Owner completion record must agree, while the promotion journal, v3 source, one-use Player
+file, candidate directory, and RPC directory must all be absent. This terminal `successor-completed`
+proof no longer pins future helper upgrades to the historical successor-helper digest, but it
+permanently blocks all legacy v1/v2 seal, retirement, and recovery commands. The script is resumable
+only with the same six inputs. A no-prefix disabled-grant state is accepted only after exact
+predecessor, stopped-project, retirement, and v2-source attestation; the script creates and
+synchronizes its prefix only while the grant is disabled. After interruption, do not manually delete, rename, restore, or
+rewrite anything; rerun the same reviewed script or inspect read-only. A completed rerun may reattest
+only before the independent recheck consumes the v3 source and only while the original successor
+helper remains installed. Do not rerun this migration after `successor-completed` or a later approved
+helper rotation.
+
+#### Historical audit record: v1-to-v2 retirement and recovery
+
+The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only
+as historical audit evidence. They must not be used to operate or recreate the v3 successor.
 
 The obsolete two-field v1 identity binding cannot be upgraded in place. Its one-time transition is
 available only through the `retire-v1-for-v2-reseal` mode of the manual `Staging private KemerBet
@@ -303,6 +379,8 @@ start/readiness/seal sequence. `resealed-awaiting-recheck` must not start anothe
 it proceeds directly to only the same-release independent recheck and safe teardown/diagnostics.
 Normal mutations unlock only after the immutable final v2 binding and exact success receipt prove
 binding, key, selector, release, and v1-projection continuity.
+
+#### Current shared readiness controls
 
 The trusted Layer-7 proxy is part of the trusted computing base. A proxy RCE or proxy-process
 compromise is outside this fail-closed guarantee: the proxy terminates KemerBet TLS, necessarily sees
@@ -640,7 +718,17 @@ labels, sealed service-file metadata, local Docker socket, and fixed Compose pro
 checks its SHA-256 before every privileged operation, so an absent, stale, writable, or broader
 helper fails closed.
 
-### Exact helper replacement on the current staging Droplet
+An exact host that still carries the v2 successor-migration precondition is an exception to that
+ordinary helper-install rule. Follow
+[Current v2-to-v3 stable-profile successor migration](#current-v2-to-v3-stable-profile-successor-migration)
+instead; the dedicated script installs the successor helper inside the same locked transaction that
+archives v2 and creates v3.
+
+### Historical audit record: exact v1/v2 helper replacement on the staging Droplet
+
+This long-form replacement and rollback transcript is retained to explain the historical v1/v2
+state and hashes. It is not the v3 migration runbook and must not be repinned or replayed for the v3
+successor.
 
 The VM-transition controller is permanently pinned to retired Droplet `590666364`; never run it on
 current staging Droplet `593344964`. The current Droplet uses a separate, bounded root-console helper

@@ -50,7 +50,7 @@ The operator already trusts the live KemerBet page while typing the credential; 
 the enrollment container's unsandboxed Chromium renderer and trusted Node process share UID `10001`
 and the seal-only selector, identity HMAC, exact-five Player input, profile, and output mounts.
 Therefore a compromised enrollment renderer is outside the confidentiality/containment guarantee,
-even though the route guard exposes no financial endpoint and the v2 binding cannot be installed
+even though the route guard exposes no financial endpoint and the v3 binding cannot be installed
 until the exact BrowserContext has closed. Compromised-renderer containment begins only after that
 terminal close, when the retained profile enters the isolated snapshot/recheck architecture below.
 
@@ -114,18 +114,18 @@ secret or configuration object.
 Nothing below belongs in Git or a shared `.env` file. Production paths inside the container are
 fixed by `@fetanagent/config`:
 
-| Container path                                                                    | Required content                                                                                                                                                                                                 |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/run/secrets/kemerbet_executor_database_url`                                     | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`                                                           |
-| `/run/secrets/kemerbet_agent_identity_bindings`                                   | Unique v2 lines of `<canonical UUID> hmac-sha256-agent-identity-v1:<64-lowercase-hex> sha256-provider-authorization-v1:<64-lowercase-hex>`; the one-account readiness artifact is exactly 230 bytes including LF |
-| `/run/secrets/kemerbet_history_reference_hmac_key`                                | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                                                                                      |
-| `/run/secrets/kemerbet_agent_identity_hmac_key`                                   | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                                                                             |
-| `/run/secrets/kemerbet_no_transfer_readiness_player_ids`                          | Exactly five distinct canonical Player IDs, one per line; one-use Phase 1 input, never logged, committed, retained as a pilot manifest, or mounted into the long-lived executor                                  |
-| `/run/fetanagent-kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings` | One-time, atomically created mode-`0600` identity-binding output; the command refuses to overwrite an existing file                                                                                              |
-| `/run/configs/private_live_deposit_pilot.v1.json`                                 | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers                                                         |
-| `/etc/fetanagent/kemerbet-selector-contract.v2.json`                              | Separately reviewed selector contract v2                                                                                                                                                                         |
-| `/run/configs/supabase_ca_certificate`                                            | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                                                                        |
-| `/var/lib/fetanagent/kemerbet-sessions`                                           | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                                                                                  |
+| Container path                                                                    | Required content                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/run/secrets/kemerbet_executor_database_url`                                     | Exact target-matched direct-PostgreSQL URL for only `fetanagent_deposit_executor_runtime`, database `postgres`, port `5432`, and `sslmode=verify-full`                                                                |
+| `/run/secrets/kemerbet_agent_identity_bindings`                                   | Unique v3 lines of `<canonical UUID> hmac-sha256-agent-identity-v1:<64-lowercase-hex> hmac-sha256-agent-profile-pin-v3:<same 64-lowercase-hex>`; the one-account readiness artifact is exactly 230 bytes including LF |
+| `/run/secrets/kemerbet_history_reference_hmac_key`                                | Exactly 64 lowercase hexadecimal characters encoding an independently generated 32-byte key                                                                                                                           |
+| `/run/secrets/kemerbet_agent_identity_hmac_key`                                   | Exactly 64 lowercase hexadecimal characters encoding a different independently generated 32-byte key                                                                                                                  |
+| `/run/secrets/kemerbet_no_transfer_readiness_player_ids`                          | Exactly five distinct canonical Player IDs, one per line; one-use Phase 1 input, never logged, committed, retained as a pilot manifest, or mounted into the long-lived executor                                       |
+| `/run/fetanagent-kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings` | One-time, atomically created mode-`0600` identity-binding output; the command refuses to overwrite an existing file                                                                                                   |
+| `/run/configs/private_live_deposit_pilot.v1.json`                                 | Canonical one-line JSON with exact ordered keys `contractVersion`, `pilotRevisionId`, `configurationDigest`; no Player, customer, or account identifiers                                                              |
+| `/etc/fetanagent/kemerbet-selector-contract.v2.json`                              | Separately reviewed selector contract v2                                                                                                                                                                              |
+| `/run/configs/supabase_ca_certificate`                                            | Public Supabase CA downloaded and fingerprint-verified through the reviewed operator path                                                                                                                             |
+| `/var/lib/fetanagent/kemerbet-sessions`                                           | Service-owned `0700` root with one service-owned `0700` child per bound account                                                                                                                                       |
 
 The executor rejects symlinks, path substitution, unsafe owner/mode metadata, file replacement while
 reading, equal HMAC keys, malformed or duplicate bindings, missing profiles, unauthenticated or
@@ -155,9 +155,11 @@ one of the exact five actual GETs, it reads the transport-visible duplicate-pres
 requires exactly one canonical bearer, and timing-safely pins the SHA-256 of the exact `Bearer …`
 bytes. It accepts each observation only after that request's HTTP 200, non-redirected, bounded raw
 Player/ETB response passes the strict validator. Raw authorization and response buffers are cleared;
-only the labeled authorization digest survives. After all five validations and the confirmed
-BrowserContext close, it atomically writes the exact 230-byte v2 UUID, identity-HMAC fingerprint,
-and provider-authorization-digest line. Its only successful log projection is:
+only an in-memory digest survives between observations, and that digest is destroyed after the
+five-request consistency proof. After all five validations and the confirmed BrowserContext close,
+the seal atomically writes the exact 230-byte v3 UUID, identity-HMAC fingerprint, and stable Profile
+pin. The two labeled HMAC fields contain the same 64-lowercase-hex digest; no bearer-derived value is
+written. Its only successful log projection is:
 
 ```text
 KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.
@@ -187,6 +189,98 @@ successful response is aggregate-only: five Players checked, ETB, Transfer disab
 and identifiers redacted. After success, install the atomically produced binding as the fixed
 Owner-managed identity-binding secret without printing its contents. Securely delete the one-use
 Player file after the later independent recheck no longer needs it.
+
+### Current v2-to-v3 stable-profile successor migration
+
+The runtime and recheck accept only the exact v3 stable-profile binding above. An existing 230-byte
+v2 source binding is migration evidence, not a runtime credential: do not edit it, copy its bearer
+digest into v3, run an ordinary helper replacement, or repeat the v1 retirement ceremony. Use only
+the reviewed, one-use root-console migration
+[`infra/operations/fetanagent-kemerbet-v2-v3-successor-migration.sh`](operations/fetanagent-kemerbet-v2-v3-successor-migration.sh).
+It is intentionally separate from the deployment helper because the predecessor retirement gate
+blocks ordinary release and helper replacement.
+
+Before opening the DigitalOcean root console, independently approve all six positional inputs: the
+40-lowercase-hex predecessor release, 40-lowercase-hex successor release, predecessor-helper
+SHA-256, exact v2 binding SHA-256, successor-helper SHA-256, and this exact confirmation:
+
+```text
+I-UNDERSTAND-THIS-ARCHIVES-V2-AND-INSTALLS-THE-V3-SUCCESSOR
+```
+
+From the exact reviewed successor commit, stage the migration script and successor helper in the
+root-owned mode-`0700` directory
+`/root/fetanagent-v3-successor-<successor-release>/`. The helper must be the root-owned mode-`0600`
+file `fetanagent-staging-deploy-helper.next`. Independently SHA-verify both staged files against that
+commit before continuing; never fetch a moving branch or print the binding. Then run exactly once as
+the direct `root` console identity, without `sudo`, `DOCKER_HOST`, or `DOCKER_CONTEXT` overrides:
+
+```bash
+bash "/root/fetanagent-v3-successor-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v2-v3-successor-migration.sh" \
+  "$PREDECESSOR_RELEASE" \
+  "$SUCCESSOR_RELEASE" \
+  "$PREDECESSOR_HELPER_SHA256" \
+  "$V2_BINDING_SHA256" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-ARCHIVES-V2-AND-INSTALLS-THE-V3-SUCCESSOR
+```
+
+The script verifies the fixed Droplet, stops the staging project through the exact predecessor
+helper, reattests the completed v1-to-v2 evidence and exact v2 source, acquires the root mutation
+lock, and disables the helper sudoers grant before it creates or synchronizes any successor
+namespace. The canonical root-owned v1 retirement directory remains
+in place as immutable continuity evidence; the separate four-entry successor overlay archives only
+the exact v2 binding and predecessor helper alongside its intent and completion records. The script
+derives v3 only by replacing the bearer-digest field with
+`hmac-sha256-agent-profile-pin-v3:<identity-HMAC-digest>`, preserving the exact UUID, stable identity
+digest, 230-byte size, and LF. It installs the reviewed successor helper, writes durable intent and
+completion records below `/var/lib/fetanagent/kemerbet-readiness-v2-v3-successor/`, reattests the v3
+source, and restores the exact sudoers grant. It does not contact a financial endpoint, enable
+Transfer, or move money.
+
+After success, do not start the long-lived executor or use an ordinary deployment as a substitute
+for proof. Use only the reviewed successor release to perform a fresh private KemerBet sign-in when
+needed and the independent exact-five no-transfer recheck. The first candidate bearer may reach only
+the fixed read-only Profile request until its stable Profile HMAC matches the v3 pin; only then may a
+Player lookup proceed. A later fresh bearer for that same stable Profile can be validated in a new
+run without resealing.
+
+The helper derives three fail-closed lifecycle states from existing artifacts. `successor-installed`
+requires the exact four-entry overlay, service-owned one-use v3 source, and the historical successor
+helper bytes, and permits only the bounded same-release no-transfer deployment/sign-in/recheck path.
+Before its `install` handler may replace a sealed Compose file, service secret, or image, the helper
+requires a disarmed expiry guard, no Telegram startup receipt, zero project containers and networks,
+no recheck transients, the exact two durable KemerBet volumes, and no profile or session-control volume
+holders. It reattests `successor-installed` before and after that read-only preflight, and both install
+and startup require the `deposit-executor` image revision to match the reviewed release. A retryable
+existing Player-ID service copy returns only after exact v3 binding and same-release successor
+reattestation. Component stops use the successor state directly, consult historical v1 state only when
+the successor overlay is absent, and preserve the exact successor release/state across teardown.
+`successor-recheck-recoverable` additionally requires a canonical root-owned promotion boundary;
+the recheck-recovery handler then validates its exact journal and artifact topology before any
+mutation. This state permits only exact-release recheck recovery or safe teardown.
+`successor-completed` is derived only
+after the promotion journal, one-use source, one-use Player file, candidate directory, and RPC
+directory are absent and the durable root-only `ready-v1` receipt, canonical root-owned v3 binding,
+and exact Owner completion record agree. No additional overlay completion marker is written. Once
+that durable terminal state exists, ordinary future helper/release changes may resume without being
+bound to the historical successor-helper digest, but every legacy v1/v2 seal, retirement, and
+recovery command remains permanently forbidden.
+
+The migration is resumable only by rerunning the same reviewed script with the same six inputs. An
+exact disabled-grant state with no prefix is accepted only as a bounded `fresh-disabled` recovery;
+the script then creates the durable prefix while the grant remains disabled. If the script leaves an
+`.installing` directory or reports any continuity error, do not manually restore, rename, delete, or
+rewrite an artifact. Leave staging offline and rerun the exact migration or investigate read-only.
+Before the independent recheck consumes the one-use v3 source, a completed rerun with the original
+successor helper only reattests the installed successor. After `successor-completed` is derived—or
+after a later approved helper rotation—do not rerun the migration; use the normal helper path.
+
+### Historical audit record: v1-to-v2 retirement and recovery
+
+The remainder of this section records the superseded v1-to-v2 transition and its recovery controls.
+It is retained for evidence continuity only. Do not use its v2 seal, provider-token rotation, helper
+replacement, or recovery commands to operate the v3 successor.
 
 The former two-field v1 binding is deliberately incompatible with this boundary and cannot be
 upgraded in place. Its one-time transition is an explicit, user-confirmed retirement and same-claim
@@ -321,21 +415,21 @@ attestation pass does the proxy atomically publish a mode-`0600`, UID/GID-`10003
 `O_NOFOLLOW`, inode-stability, exact content, and extra-byte checks; the browser cannot mount or read
 that tmpfs. The host does not start the browser until this application health check is exact.
 
-For each of the five lookups, the proxy first hashes the exact sanitized bearer and timing-safely
-compares it with the v2 digest sealed during enrollment. A mismatch is sticky-fatal before any
-authenticated upstream request, so it cannot send an attacker-selected credential to KemerBet. On
-the first matching lookup it then reserves the matching pre-minted token and performs one independent,
-read-only `GET /Account/Profile` before any Player lookup reaches KemerBet. It requires HTTP 200,
-identity encoding, strict bounded UTF-8/JSON, `resultCode: 0`, and the exact bounded
-`value.userName`; it recomputes the bound agent-identity HMAC from the proxy-only account
-UUID/binding/key and timing-safely compares it. The complete bearer digest is independently pinned
-and timing-safely matched for sequences two through five. Any malformed profile, wrong agent,
-bearer drift, race, abort, timeout, or disconnect is sticky-fatal and produces no receipt. For
+For the first lookup, the proxy accepts only a syntactically exact sanitized bearer and sends it only
+to one independent, read-only `GET /Account/Profile`; no Player lookup reaches KemerBet first. It
+requires HTTP 200, identity encoding, strict bounded UTF-8/JSON, `resultCode: 0`, and the exact bounded
+`value.userName`; it recomputes the account-scoped Profile HMAC from the proxy-only account
+UUID/binding/key and timing-safely compares it with the v3 stable Profile pin. Only after that match
+does it pin the complete bearer digest in memory and permit the first Player lookup. The same bearer
+must match for sequences two through five. Any malformed profile, wrong agent, bearer drift, race,
+abort, timeout, or disconnect is sticky-fatal and produces no receipt. A new run may validate a new
+bearer for the same stable Profile; no bearer or refresh material is stored in the binding. For
 each accepted lookup, the proxy independently validates the exact requested Player response and ETB
 currency and completes the sequence only after the downstream response finishes. After sequence five
-it atomically writes the canonical `fetanagent-kemerbet-readiness-layer7-completion-v2` generic,
-identifier-redacted completion receipt with `version: 2`, `sameAgentIdentityValidated: true`, and the
-SHA-256 of the exact canonical binding-file bytes, bound to the reviewed release and one-run nonce.
+it atomically writes the canonical `fetanagent-kemerbet-readiness-layer7-completion-v3` generic,
+identifier-redacted completion receipt with `version: 3`, `sameAgentIdentityValidated: true`,
+`stableAgentProfileValidated: true`, and the SHA-256 of the exact canonical binding-file bytes, bound
+to the reviewed release and one-run nonce.
 The host accepts controller/browser success only with that exact proxy receipt, then removes every
 transient container, network, capability, token, firewall release, output directory, and disposable
 snapshot volume.

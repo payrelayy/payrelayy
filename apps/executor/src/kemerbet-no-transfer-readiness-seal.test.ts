@@ -19,6 +19,7 @@ import {
   prepareKemerBetIsolatedBrowserDriverOfflineContext,
   runKemerBetNoTransferReadinessSeal,
   runKemerBetNoTransferReadinessSealMain,
+  serializeKemerBetNoTransferReadinessAgentIdentityBinding,
   selectSoleCanonicalKemerBetAgentRestoredPage,
   type KemerBetNoTransferReadinessSealDependencies,
   type KemerBetReadinessPersistentLifecycleBoundary,
@@ -32,6 +33,7 @@ import {
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const PLAYER_IDS = ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'] as const;
 const FINGERPRINT = `hmac-sha256-agent-identity-v1:${'1'.repeat(64)}`;
+const AGENT_PROFILE_PIN = `hmac-sha256-agent-profile-pin-v3:${'1'.repeat(64)}`;
 const LAYER7_AUTHORIZATION = `v1.${'a'.repeat(32)}.1.${'b'.repeat(64)}`;
 const PROVIDER_AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
 const PROVIDER_AUTHORIZATION_DIGEST = `sha256-provider-authorization-v1:${createHash('sha256')
@@ -258,6 +260,30 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(tracker.complete()).toBe(PROVIDER_AUTHORIZATION_DIGEST);
     expect(JSON.stringify(tracker)).not.toContain(PROVIDER_AUTHORIZATION);
     tracker.destroy();
+  });
+
+  it('serializes one exact 230-byte v3 binding with a duplicate stable Profile digest', () => {
+    const serialized = serializeKemerBetNoTransferReadinessAgentIdentityBinding(
+      ACCOUNT_ID,
+      FINGERPRINT,
+      AGENT_PROFILE_PIN,
+    );
+    expect(serialized).toBe(`${ACCOUNT_ID} ${FINGERPRINT} ${AGENT_PROFILE_PIN}\n`);
+    expect(Buffer.byteLength(serialized, 'utf8')).toBe(230);
+    expect(() =>
+      serializeKemerBetNoTransferReadinessAgentIdentityBinding(
+        ACCOUNT_ID,
+        FINGERPRINT,
+        `hmac-sha256-agent-profile-pin-v3:${'2'.repeat(64)}`,
+      ),
+    ).toThrow(KemerBetNoTransferReadinessSealUnavailableError);
+    expect(() =>
+      serializeKemerBetNoTransferReadinessAgentIdentityBinding(
+        ACCOUNT_ID,
+        FINGERPRINT,
+        PROVIDER_AUTHORIZATION_DIGEST,
+      ),
+    ).toThrow(KemerBetNoTransferReadinessSealUnavailableError);
   });
 
   it.each([
@@ -906,7 +932,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(test.writeBinding).toHaveBeenCalledWith(
       ACCOUNT_ID,
       FINGERPRINT,
-      PROVIDER_AUTHORIZATION_DIGEST,
+      AGENT_PROFILE_PIN,
       10001,
     );
     expect(test.close).toHaveBeenCalledOnce();
@@ -923,7 +949,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(JSON.stringify(test.logSuccess.mock.calls)).not.toMatch(/PLAYER-|hmac-sha256/u);
   });
 
-  it('awaits the terminal same-UID browser close before installing the v2 binding', async () => {
+  it('awaits the terminal same-UID browser close before installing the v3 binding', async () => {
     let releaseClose!: () => void;
     let closed = false;
     const closeGate = new Promise<void>((resolvePromise) => {

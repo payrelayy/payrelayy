@@ -23,10 +23,6 @@ const HMAC_KEY_FILE = HMAC_KEY.toString('hex');
 const AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
 const OTHER_AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.DIFFERENTTOKEN';
 
-function providerAuthorizationDigest(authorization = AUTHORIZATION): string {
-  return createHash('sha256').update(authorization, 'utf8').digest('hex');
-}
-
 function identityDigest(accountId: string, userName: string): string {
   return createHmac('sha256', HMAC_KEY)
     .update(KEMERBET_AGENT_IDENTITY_FINGERPRINT_DOMAIN, 'utf8')
@@ -40,12 +36,9 @@ function bindingFile(
   accountId = ACCOUNT_ONE,
   userName = USER_NAME,
   digestAccountId = accountId,
-  authorization = AUTHORIZATION,
 ): string {
-  return `${accountId} hmac-sha256-agent-identity-v1:${identityDigest(
-    digestAccountId,
-    userName,
-  )} sha256-provider-authorization-v1:${providerAuthorizationDigest(authorization)}\n`;
+  const digest = identityDigest(digestAccountId, userName);
+  return `${accountId} hmac-sha256-agent-identity-v1:${digest} hmac-sha256-agent-profile-pin-v3:${digest}\n`;
 }
 
 function verifier(serializedBinding = bindingFile()) {
@@ -255,17 +248,24 @@ describe('KemerBet readiness trusted same-agent identity verifier', () => {
     ).rejects.toBeInstanceOf(KemerBetReadinessSameAgentIdentityUnavailableError);
   });
 
-  it('rejects a bearer that does not match the sealed provider digest before any Profile call', async () => {
+  it('accepts a fresh bearer for the same stable Profile identity and pins it for this run', async () => {
     const test = verifier();
-    const loadProfile = vi.fn(async () => profileResponse());
+    const loadProfile = vi.fn(async (exactAuthorization: string) => {
+      expect(exactAuthorization).toBe(OTHER_AUTHORIZATION);
+      return profileResponse();
+    });
     await expect(
       test.result.verify({ authorization: OTHER_AUTHORIZATION, loadProfile }),
-    ).rejects.toBeInstanceOf(KemerBetReadinessSameAgentIdentityUnavailableError);
-    expect(loadProfile).not.toHaveBeenCalled();
+    ).resolves.toBeUndefined();
     await expect(
-      test.result.verify({ authorization: AUTHORIZATION, loadProfile }),
-    ).rejects.toBeInstanceOf(KemerBetReadinessSameAgentIdentityUnavailableError);
-    expect(loadProfile).not.toHaveBeenCalled();
+      test.result.verify({
+        authorization: OTHER_AUTHORIZATION,
+        loadProfile: async () => {
+          throw new Error('Profile must be fetched exactly once.');
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(loadProfile).toHaveBeenCalledTimes(1);
   });
 
   it('makes concurrent first validations race-fatal and never validates either request', async () => {
@@ -312,8 +312,16 @@ describe('KemerBet readiness trusted same-agent identity verifier', () => {
       bindingFile().slice(0, -1),
       `${bindingFile()}${bindingFile()}`,
       bindingFile().replace('hmac-sha256', 'HMAC-SHA256'),
-      bindingFile().replace(/ sha256-provider-authorization-v1:[0-9a-f]{64}/u, ''),
-      bindingFile().replace('sha256-provider-authorization-v1', 'sha256-provider-token-v1'),
+      bindingFile().replace(/ hmac-sha256-agent-profile-pin-v3:[0-9a-f]{64}/u, ''),
+      bindingFile().replace('hmac-sha256-agent-profile-pin-v3', 'hmac-sha256-agent-profile-pin-v2'),
+      bindingFile().replace(
+        /hmac-sha256-agent-profile-pin-v3:[0-9a-f]{64}/u,
+        `hmac-sha256-agent-profile-pin-v3:${'f'.repeat(64)}`,
+      ),
+      bindingFile().replace(
+        /hmac-sha256-agent-profile-pin-v3:[0-9a-f]{64}/u,
+        `sha256-provider-authorization-v1:${'f'.repeat(64)}`,
+      ),
     ]) {
       const bindingInput = Buffer.from(serializedBinding, 'utf8');
       const keyInput = Buffer.from(HMAC_KEY_FILE, 'ascii');
@@ -426,6 +434,7 @@ describe('KemerBet readiness proxy-only identity material loader', () => {
     expect(result.agentIdentityBindingSha256).toBe(
       createHash('sha256').update(bindingFile(), 'utf8').digest('hex'),
     );
+    expect(Buffer.byteLength(bindingFile(), 'utf8')).toBe(230);
     expect(fixture.observedFlags).toHaveLength(2);
     if (constants.O_NOFOLLOW !== undefined) {
       for (const flags of fixture.observedFlags) {
@@ -438,7 +447,7 @@ describe('KemerBet readiness proxy-only identity material loader', () => {
     expect(KEMERBET_READINESS_SAME_AGENT_IDENTITY_CONTRACT).toMatchObject({
       bindingFile: KEMERBET_READINESS_PROXY_AGENT_IDENTITY_BINDINGS_FILE,
       bindingFileBytes: 230,
-      bindingVersion: 2,
+      bindingVersion: 3,
       hmacKeyFile: KEMERBET_READINESS_PROXY_AGENT_IDENTITY_HMAC_KEY_FILE,
       ownerGroupId: 10003,
       ownerUserId: 10003,

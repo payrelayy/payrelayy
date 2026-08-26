@@ -19,7 +19,7 @@ const EXACT_BINDING_FILE_BYTES = 230;
 const PROVIDER_AUTHORIZATION_PATTERN = /^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const BINDING_PATTERN =
-  /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}) hmac-sha256-agent-identity-v1:([0-9a-f]{64}) sha256-provider-authorization-v1:([0-9a-f]{64})\n$/u;
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}) hmac-sha256-agent-identity-v1:([0-9a-f]{64}) hmac-sha256-agent-profile-pin-v3:([0-9a-f]{64})\n$/u;
 const HMAC_KEY_FILE_PATTERN = /^[0-9a-f]{64}$/u;
 
 interface SameAgentIdentityFileStat {
@@ -163,13 +163,12 @@ function decodeExactMaterial(input: {
 }): {
   readonly accountId: Buffer;
   readonly bindingFileSha256: string;
-  readonly expectedIdentityDigest: Buffer;
-  readonly expectedProviderAuthorizationDigest: Buffer;
+  readonly expectedAgentProfilePinDigest: Buffer;
   readonly hmacKey: Buffer;
 } {
   let accountId: Buffer | null = null;
   let expectedIdentityDigest: Buffer | null = null;
-  let expectedProviderAuthorizationDigest: Buffer | null = null;
+  let expectedAgentProfilePinDigest: Buffer | null = null;
   let hmacKey: Buffer | null = null;
   try {
     const bindingText = input.bindingFile.toString('utf8');
@@ -187,27 +186,29 @@ function decodeExactMaterial(input: {
     }
     accountId = Buffer.from(binding[1], 'utf8');
     expectedIdentityDigest = Buffer.from(binding[2], 'hex');
-    expectedProviderAuthorizationDigest = Buffer.from(binding[3], 'hex');
+    expectedAgentProfilePinDigest = Buffer.from(binding[3], 'hex');
     hmacKey = Buffer.from(hmacKeyText, 'hex');
     if (
       accountId.length !== 36 ||
       expectedIdentityDigest.length !== 32 ||
-      expectedProviderAuthorizationDigest.length !== 32 ||
-      hmacKey.length !== 32
+      expectedAgentProfilePinDigest.length !== 32 ||
+      hmacKey.length !== 32 ||
+      !timingSafeEqual(expectedIdentityDigest, expectedAgentProfilePinDigest)
     ) {
       return unavailable();
     }
+    expectedIdentityDigest.fill(0);
+    expectedIdentityDigest = null;
     return {
       accountId,
       bindingFileSha256: createHash('sha256').update(input.bindingFile).digest('hex'),
-      expectedIdentityDigest,
-      expectedProviderAuthorizationDigest,
+      expectedAgentProfilePinDigest,
       hmacKey,
     };
   } catch {
     accountId?.fill(0);
     expectedIdentityDigest?.fill(0);
-    expectedProviderAuthorizationDigest?.fill(0);
+    expectedAgentProfilePinDigest?.fill(0);
     hmacKey?.fill(0);
     return unavailable();
   }
@@ -420,8 +421,7 @@ export function createKemerBetReadinessSameAgentIdentityVerifier(input: {
   }
 
   const accountId = material.accountId;
-  const expectedIdentityDigest = material.expectedIdentityDigest;
-  const expectedProviderAuthorizationDigest = material.expectedProviderAuthorizationDigest;
+  const expectedAgentProfilePinDigest = material.expectedAgentProfilePinDigest;
   const hmacKey = material.hmacKey;
   const agentIdentityBindingSha256 = material.bindingFileSha256;
   let pinnedBearerDigest: Buffer | null = null;
@@ -429,8 +429,7 @@ export function createKemerBetReadinessSameAgentIdentityVerifier(input: {
 
   const eraseSecrets = (): void => {
     accountId.fill(0);
-    expectedIdentityDigest.fill(0);
-    expectedProviderAuthorizationDigest.fill(0);
+    expectedAgentProfilePinDigest.fill(0);
     hmacKey.fill(0);
     pinnedBearerDigest?.fill(0);
     pinnedBearerDigest = null;
@@ -461,13 +460,6 @@ export function createKemerBetReadinessSameAgentIdentityVerifier(input: {
       let observedIdentityDigest: Buffer | null = null;
       try {
         candidateBearerDigest = bearerDigest(verificationInput.authorization);
-        if (
-          candidateBearerDigest.length !== expectedProviderAuthorizationDigest.length ||
-          !timingSafeEqual(expectedProviderAuthorizationDigest, candidateBearerDigest)
-        ) {
-          fail();
-          return unavailable();
-        }
         if (state === 'validated') {
           if (
             pinnedBearerDigest === null ||
@@ -506,8 +498,8 @@ export function createKemerBetReadinessSameAgentIdentityVerifier(input: {
           .digest();
         if (
           state !== 'validating' ||
-          observedIdentityDigest.length !== expectedIdentityDigest.length ||
-          !timingSafeEqual(observedIdentityDigest, expectedIdentityDigest)
+          observedIdentityDigest.length !== expectedAgentProfilePinDigest.length ||
+          !timingSafeEqual(observedIdentityDigest, expectedAgentProfilePinDigest)
         ) {
           fail();
           return unavailable();
@@ -580,7 +572,7 @@ export const KEMERBET_READINESS_SAME_AGENT_IDENTITY_CONTRACT = Object.freeze({
   bindingFile: KEMERBET_READINESS_PROXY_AGENT_IDENTITY_BINDINGS_FILE,
   bindingFileDigest: 'sha256-of-exact-single-line-binding-file',
   bindingFileBytes: EXACT_BINDING_FILE_BYTES,
-  bindingVersion: 2,
+  bindingVersion: 3,
   hmacKeyFile: KEMERBET_READINESS_PROXY_AGENT_IDENTITY_HMAC_KEY_FILE,
   maximumProfileResponseBytes: MAXIMUM_PROFILE_RESPONSE_BYTES,
   maximumUserNameBytes: MAXIMUM_USER_NAME_BYTES,

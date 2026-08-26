@@ -92,21 +92,14 @@ function authorizationVerifier(): KemerBetReadinessLayer7AuthorizationVerifier {
   });
 }
 
-function agentIdentityBinding(
-  accountId = AGENT_ACCOUNT_ID,
-  userName = AGENT_USER_NAME,
-  authorization = AUTHORIZATION,
-): string {
+function agentIdentityBinding(accountId = AGENT_ACCOUNT_ID, userName = AGENT_USER_NAME): string {
   const digest = createHmac('sha256', AGENT_IDENTITY_HMAC_KEY)
     .update(KEMERBET_AGENT_IDENTITY_FINGERPRINT_DOMAIN, 'utf8')
     .update(accountId, 'utf8')
     .update('\0', 'utf8')
     .update(userName, 'utf8')
     .digest('hex');
-  const providerAuthorizationDigest = createHash('sha256')
-    .update(authorization, 'utf8')
-    .digest('hex');
-  return `${accountId} hmac-sha256-agent-identity-v1:${digest} sha256-provider-authorization-v1:${providerAuthorizationDigest}\n`;
+  return `${accountId} hmac-sha256-agent-identity-v1:${digest} hmac-sha256-agent-profile-pin-v3:${digest}\n`;
 }
 
 function sameAgentIdentityVerifier(
@@ -123,6 +116,21 @@ function successfulAgentProfileBody(userName = AGENT_USER_NAME): Buffer {
     JSON.stringify({
       resultCode: 0,
       value: { userName },
+    }),
+    'utf8',
+  );
+}
+
+function successfulLookupBody(playerId = PLAYER_IDS[0] ?? ''): Buffer {
+  return Buffer.from(
+    JSON.stringify({
+      value: {
+        currencyCode: 'ETB',
+        email: 'redacted@example.invalid',
+        externalId: playerId,
+        id: 7001,
+        userName: 'redacted@example.invalid',
+      },
     }),
     'utf8',
   );
@@ -477,6 +485,7 @@ describe('KemerBet readiness Layer-7 header sanitizers', () => {
       authorization: AUTHORIZATION,
       origin: `https://${WEB_HOST}`,
       referer: `https://${WEB_HOST}/agents`,
+      'sec-fetch-site': 'cross-site',
     });
     expect(
       sanitizeKemerBetReadinessLayer7RequestHeaders(lookupHeaders, lookupClassification)[
@@ -682,7 +691,7 @@ describe('KemerBet readiness Layer-7 server seams', () => {
     }
   });
 
-  it('makes a sealed provider-authorization mismatch sticky-fatal with zero Profile or lookup upstream calls', async () => {
+  it('accepts a fresh bearer only after its Profile matches the stable v3 agent pin', async () => {
     const upstreamCalls: KemerBetReadinessLayer7UpstreamRequest[] = [];
     const completionReceiptPublisher = vi.fn(async () => undefined);
     const control = createKemerBetReadinessLayer7Proxy({
@@ -693,32 +702,28 @@ describe('KemerBet readiness Layer-7 server seams', () => {
       effectiveGroupId: 10003,
       effectiveUserId: 10003,
       port: 0,
-      sameAgentIdentityVerifier: sameAgentIdentityVerifier(
-        agentIdentityBinding(AGENT_ACCOUNT_ID, AGENT_USER_NAME, OTHER_AUTHORIZATION),
-      ),
+      sameAgentIdentityVerifier: sameAgentIdentityVerifier(),
       upstream: async (input) => {
         const bootstrap = successfulBootstrapResponse(input);
         if (bootstrap !== null) return bootstrap;
         upstreamCalls.push(input);
-        throw new Error('No authenticated upstream request may occur for a digest mismatch.');
+        if (input.path === KEMERBET_READINESS_AGENT_PROFILE_PATH) {
+          return {
+            body: successfulAgentProfileBody(),
+            headers: { 'content-encoding': 'identity' },
+            statusCode: 200,
+          };
+        }
+        return {
+          body: successfulLookupBody(),
+          headers: { 'content-encoding': 'identity' },
+          statusCode: 200,
+        };
       },
     });
     try {
       await control.start();
-      const mismatch = await requestLocalProxy({
-        control,
-        headers: {
-          authorization: AUTHORIZATION,
-          [KEMERBET_READINESS_LAYER7_AUTHORIZATION_HEADER]: lookupAuthorization(1),
-        },
-        host: API_HOST,
-        path: `${LOOKUP_PATH}?externalId=${PLAYER_IDS[0]}`,
-      });
-      expect(mismatch).toMatchObject({ body: '{"status":"unavailable"}\n', statusCode: 502 });
-      expect(upstreamCalls).toHaveLength(0);
-      expect(completionReceiptPublisher).not.toHaveBeenCalled();
-
-      const retry = await requestLocalProxy({
+      const result = await requestLocalProxy({
         control,
         headers: {
           authorization: OTHER_AUTHORIZATION,
@@ -727,8 +732,15 @@ describe('KemerBet readiness Layer-7 server seams', () => {
         host: API_HOST,
         path: `${LOOKUP_PATH}?externalId=${PLAYER_IDS[0]}`,
       });
-      expect(retry.statusCode).toBe(404);
-      expect(upstreamCalls).toHaveLength(0);
+      expect(result.statusCode).toBe(200);
+      expect(upstreamCalls.map((call) => call.path)).toEqual([
+        KEMERBET_READINESS_AGENT_PROFILE_PATH,
+        `${LOOKUP_PATH}?externalId=${PLAYER_IDS[0]}`,
+      ]);
+      expect(
+        upstreamCalls.every((call) => call.headers.authorization === OTHER_AUTHORIZATION),
+      ).toBe(true);
+      expect(completionReceiptPublisher).not.toHaveBeenCalled();
     } finally {
       await control.close();
     }
@@ -1160,6 +1172,7 @@ describe('KemerBet readiness Layer-7 server seams', () => {
           accept: 'application/json',
           'accept-encoding': 'identity',
           authorization: AUTHORIZATION,
+          'sec-fetch-site': 'cross-site',
         },
         hostname: API_HOST,
         method: 'GET',
@@ -1187,6 +1200,9 @@ describe('KemerBet readiness Layer-7 server seams', () => {
         ],
       ).toBeUndefined();
       expect(upstreamCalls[bootstrapUpstreamCount + 1]?.headers.authorization).toBe(AUTHORIZATION);
+      expect(upstreamCalls[bootstrapUpstreamCount + 1]?.headers['sec-fetch-site']).toBe(
+        'cross-site',
+      );
 
       const replayedLookup = await requestLocalProxy({
         control,

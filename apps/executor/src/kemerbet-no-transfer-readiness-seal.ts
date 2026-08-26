@@ -55,6 +55,9 @@ const OUTPUT_ROOT = '/run/fetanagent-kemerbet-readiness-seal-output';
 const OUTPUT_FILE = `${OUTPUT_ROOT}/kemerbet_agent_identity_bindings`;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const FINGERPRINT_PATTERN = /^hmac-sha256-agent-identity-v1:[0-9a-f]{64}$/u;
+const AGENT_PROFILE_PIN_PATTERN = /^hmac-sha256-agent-profile-pin-v3:[0-9a-f]{64}$/u;
+const AGENT_IDENTITY_FINGERPRINT_PREFIX = 'hmac-sha256-agent-identity-v1:';
+const AGENT_PROFILE_PIN_PREFIX = 'hmac-sha256-agent-profile-pin-v3:';
 const PROVIDER_AUTHORIZATION_PATTERN = /^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
 const PROVIDER_AUTHORIZATION_DIGEST_PATTERN = /^sha256-provider-authorization-v1:[0-9a-f]{64}$/u;
 const EXACT_PROVIDER_AUTHORIZATION_OBSERVATIONS = 5;
@@ -255,7 +258,7 @@ export interface KemerBetNoTransferReadinessSealDependencies {
   readonly writeBinding?: (
     accountId: string,
     fingerprint: string,
-    providerAuthorizationDigest: string,
+    agentProfilePin: string,
     effectiveUserId: number,
   ) => Promise<void>;
   readonly logSuccess?: (result: {
@@ -1764,19 +1767,36 @@ async function productionOpenProbe(options: {
   return openKemerBetNoTransferReadinessPersistentProfileProbe(options);
 }
 
-async function writeBindingAtomically(
+export function serializeKemerBetNoTransferReadinessAgentIdentityBinding(
   accountId: string,
   fingerprint: string,
-  providerAuthorizationDigest: string,
-  effectiveUserId: number,
-): Promise<void> {
+  agentProfilePin: string,
+): string {
   if (
     !UUID_PATTERN.test(accountId) ||
     !FINGERPRINT_PATTERN.test(fingerprint) ||
-    !PROVIDER_AUTHORIZATION_DIGEST_PATTERN.test(providerAuthorizationDigest)
+    !AGENT_PROFILE_PIN_PATTERN.test(agentProfilePin) ||
+    fingerprint.slice(AGENT_IDENTITY_FINGERPRINT_PREFIX.length) !==
+      agentProfilePin.slice(AGENT_PROFILE_PIN_PREFIX.length)
   ) {
     unavailable();
   }
+  const serializedBinding = `${accountId} ${fingerprint} ${agentProfilePin}\n`;
+  if (Buffer.byteLength(serializedBinding, 'utf8') !== EXACT_BINDING_FILE_BYTES) unavailable();
+  return serializedBinding;
+}
+
+async function writeBindingAtomically(
+  accountId: string,
+  fingerprint: string,
+  agentProfilePin: string,
+  effectiveUserId: number,
+): Promise<void> {
+  const serializedBinding = serializeKemerBetNoTransferReadinessAgentIdentityBinding(
+    accountId,
+    fingerprint,
+    agentProfilePin,
+  );
   await assertSafeDirectory(OUTPUT_ROOT, effectiveUserId, 0o700);
   try {
     await lstat(OUTPUT_FILE);
@@ -1786,8 +1806,6 @@ async function writeBindingAtomically(
   }
   if (constants.O_DIRECTORY === undefined || constants.O_NOFOLLOW === undefined) unavailable();
   const temporary = `${OUTPUT_ROOT}/.kemerbet_agent_identity_bindings.${randomUUID()}.tmp`;
-  const serializedBinding = `${accountId} ${fingerprint} ${providerAuthorizationDigest}\n`;
-  if (Buffer.byteLength(serializedBinding, 'utf8') !== EXACT_BINDING_FILE_BYTES) unavailable();
   let handle: Awaited<ReturnType<typeof open>> | null = null;
   let outputDirectoryHandle: Awaited<ReturnType<typeof open>> | null = null;
   let installedByThisRun = false;
@@ -1945,11 +1963,15 @@ export async function runKemerBetNoTransferReadinessSeal(
     await probe.finalizeReadOnlyProof();
     const providerAuthorizationDigest = probe.providerAuthorizationDigest();
     if (!PROVIDER_AUTHORIZATION_DIGEST_PATTERN.test(providerAuthorizationDigest)) unavailable();
+    const agentProfilePin = `${AGENT_PROFILE_PIN_PREFIX}${probe.observedAgentIdentityFingerprint.slice(
+      AGENT_IDENTITY_FINGERPRINT_PREFIX.length,
+    )}`;
+    if (!AGENT_PROFILE_PIN_PATTERN.test(agentProfilePin)) unavailable();
     reportStage('binding_write');
     await (dependencies.writeBinding ?? writeBindingAtomically)(
       accountId,
       probe.observedAgentIdentityFingerprint,
-      providerAuthorizationDigest,
+      agentProfilePin,
       effectiveUserId,
     );
     (dependencies.logSuccess ?? defaultSuccessLog)({

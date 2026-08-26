@@ -41,6 +41,7 @@ readonly KEMERBET_V1_RETIREMENT_ARCHIVE="$KEMERBET_V1_RETIREMENT_ROOT/archive-v1
 readonly KEMERBET_V1_RETIREMENT_COMPLETION="$KEMERBET_V1_RETIREMENT_ROOT/completed-v1"
 readonly KEMERBET_V1_RETIREMENT_CONFIRMATION='I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL'
 readonly KEMERBET_V2_V3_SUCCESSOR_PARENT='/var/lib/fetanagent/kemerbet-readiness-v2-v3-successor'
+readonly KEMERBET_V3_HELPER_ROTATION_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3815,7 +3816,7 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
     "$KEMERBET_RECHECK_PROMOTION_ROOT" "$KEMERBET_READINESS_PLAYER_IDS" \
     "$KEMERBET_RECHECK_CANDIDATE_ROOT" "$KEMERBET_RECHECK_RPC_ROOT" \
-    "$KEMERBET_SELECTOR_CONTRACT" <<'PY'
+    "$KEMERBET_SELECTOR_CONTRACT" "$KEMERBET_V3_HELPER_ROTATION_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3836,9 +3837,11 @@ import sys
     candidate_root,
     rpc_root,
     selector_contract,
+    rotation_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
+compose_version = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:[+~-][0-9A-Za-z._-]+)?')
 claim = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n')
 uuid = rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 v2 = re.compile(
@@ -3972,6 +3975,90 @@ if (
 ):
     reject()
 
+effective_release = successor
+effective_helper_sha = successor_helper_sha
+if os.path.lexists(rotation_parent):
+    rotation_parent_value = os.lstat(rotation_parent)
+    if (
+        not stat.S_ISDIR(rotation_parent_value.st_mode)
+        or (rotation_parent_value.st_uid, rotation_parent_value.st_gid,
+            stat.S_IMODE(rotation_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_parent) != rotation_parent
+    ):
+        reject()
+    rotation_children = os.listdir(rotation_parent)
+    if len(rotation_children) != 1 or release.fullmatch(rotation_children[0]) is None:
+        reject()
+    rotation_release = rotation_children[0]
+    rotation_root = f'{rotation_parent}/{rotation_release}'
+    exact_directory(rotation_parent, 0o700, [rotation_release])
+    exact_directory(
+        rotation_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_intent_data = exact_file(
+        f'{rotation_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_completion_data = exact_file(
+        f'{rotation_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_intent = rotation_intent_data.decode('ascii').splitlines()
+    rotation_completion = rotation_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_intent) != 15
+        or len(rotation_completion) != 16
+        or rotation_intent[0] != 'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v1'
+        or rotation_intent[1] != 'state=authorized'
+        or rotation_intent[2] != f'predecessor_release={successor}'
+        or rotation_intent[3] != f'successor_release={rotation_release}'
+        or rotation_release == successor
+        or rotation_intent[4] != f'predecessor_helper_sha256={successor_helper_sha}'
+        or not rotation_intent[5].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_intent[5].split('=', 1)[1]) is None
+        or rotation_intent[5].split('=', 1)[1] == successor_helper_sha
+        or rotation_intent[6] !=
+           f'base_successor_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or rotation_intent[7] !=
+           f'base_successor_completion_sha256={hashlib.sha256(completion_data).hexdigest()}'
+        or rotation_intent[8] != f'base_binding_v2_sha256={v2_sha}'
+        or rotation_intent[9] !=
+           f'base_predecessor_helper_sha256={hashlib.sha256(old_helper_data).hexdigest()}'
+        or rotation_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or not rotation_intent[11].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_intent[11].split('=', 1)[1]) is None
+        or not rotation_intent[12].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_intent[12].split('=', 1)[1]) is None
+        or not rotation_intent[13].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_intent[13].split('=', 1)[1]) is None
+        or not rotation_intent[14].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_intent[14].split('=', 1)[1]) is None
+        or rotation_completion[:1] != rotation_intent[:1]
+        or rotation_completion[1] != 'state=successor-installed'
+        or rotation_completion[2:15] != rotation_intent[2:15]
+        or rotation_completion[15] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_intent_data).hexdigest()}'
+        or rotation_intent_data != ('\n'.join(rotation_intent) + '\n').encode('ascii')
+        or rotation_completion_data != ('\n'.join(rotation_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_successor_helper = exact_file(
+        f'{rotation_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if hashlib.sha256(archived_successor_helper).hexdigest() != successor_helper_sha:
+        reject()
+    effective_release = rotation_release
+    effective_helper_sha = rotation_intent[5].split('=', 1)[1]
+
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
 retirement_completion_data = exact_file(f'{retirement}/completed-v1', (0, 0), 0o600, 4096)
@@ -4017,7 +4104,7 @@ if (
 
 def require_live_successor_helper():
     helper_data = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
-    if hashlib.sha256(helper_data).hexdigest() != successor_helper_sha:
+    if hashlib.sha256(helper_data).hexdigest() != effective_helper_sha:
         reject()
 
 
@@ -4079,7 +4166,7 @@ else:
     if (
         len(receipt_lines) != 8
         or receipt_lines[0] != 'version=1'
-        or receipt_lines[1] != f'release={successor}'
+        or receipt_lines[1] != f'release={effective_release}'
         or receipt_lines[2] != f'binding_sha256={v3_sha}'
         or receipt_lines[3] !=
            f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}'
@@ -4115,7 +4202,7 @@ else:
             reject()
     gate_state = 'successor-completed'
 
-sys.stdout.write(successor + '\n' + successor_helper_sha + '\n' + gate_state + '\n')
+sys.stdout.write(effective_release + '\n' + effective_helper_sha + '\n' + gate_state + '\n')
 PY
 )" || return 0
   mapfile -t inspection_lines <<<"$inspection"
@@ -4138,6 +4225,12 @@ enforce_kemerbet_v2_v3_successor_gate() {
     case "$command" in
       retire-kemerbet-readiness-binding-v1-for-v2-reseal|reinstall-kemerbet-v1-retirement-secrets|seal-kemerbet-readiness|kemerbet-v1-retirement-recovery-ready)
         die 'the completed KemerBet v3 successor permanently forbids legacy v1/v2 reseal or recovery commands'
+        ;;
+      stop-bot|stop-kemerbet-session-provision)
+        # The completed overlay records the historical migration release. The
+        # command handler separately proves the current component release and
+        # re-attests this unchanged terminal overlay around the stop.
+        return 0
         ;;
       recheck-kemerbet-readiness)
         release="${2:-}"
@@ -11948,6 +12041,45 @@ require_reviewed_owner_port_3002() {
     die 'TCP port 3002 has an unexpected or ambiguous listener'
 }
 
+require_exact_current_component_container() {
+  local container_id="$1"
+  local service="$2"
+  local commit_sha="$3"
+  local container_revision image_id image_revision observed_project observed_service
+
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the component container identity is malformed'
+  [[ "$service" =~ ^(bot|gateway|kemerbet-session-provision)$ ]] ||
+    die 'the component service identity is invalid'
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the component release identity is invalid'
+
+  observed_project="$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "com.docker.compose.project" }}')" ||
+    die 'the component container project could not be inspected'
+  [[ "$observed_project" == "$PROJECT_NAME" ]] ||
+    die 'the component container belongs to an unexpected project'
+  observed_service="$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "com.docker.compose.service" }}')" ||
+    die 'the component container service could not be inspected'
+  [[ "$observed_service" == "$service" ]] ||
+    die 'the component container service is not exact'
+  container_revision="$(docker_local container inspect "$container_id" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" ||
+    die 'the component container revision could not be inspected'
+  [[ "$container_revision" == "$commit_sha" ]] ||
+    die 'the component container does not run the reviewed commit'
+  image_id="$(docker_local container inspect "$container_id" --format '{{.Image}}')" ||
+    die 'the component container image identity could not be inspected'
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die 'the component container image identity is malformed'
+  image_revision="$(docker_local image inspect "$image_id" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" ||
+    die 'the component container image revision could not be inspected'
+  [[ "$image_revision" == "$commit_sha" ]] ||
+    die 'the component container image does not match the reviewed commit'
+}
+
 require_exact_private_runtime() {
   local commit_sha="$1"
   local container_id health ids revision service services state
@@ -12715,33 +12847,21 @@ require_fresh_host_start_ready() {
   [[ -z "$networks" ]] || die 'fresh-host startup requires no existing FetanAgent networks'
 }
 
-require_kemerbet_v3_successor_install_boundary() {
-  local commit_sha="$1" containers expected_volumes networks project_volumes session_holders
-
-  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
-    die 'the KemerBet v3 successor install release identity is invalid'
-  inspect_kemerbet_v2_v3_successor_gate
-  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
-    "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
-    die 'release installation requires the exact same-release KemerBet v3 successor boundary'
-  require_kemerbet_v1_retirement_expiry_guard_disarmed ||
-    die 'release installation requires a disarmed staging expiry guard'
-  [[ ! -e "$BOT_STARTUP_RECEIPT" && ! -L "$BOT_STARTUP_RECEIPT" &&
-    ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
-    die 'release installation requires an absent Telegram runtime receipt'
+require_kemerbet_v3_successor_stopped_durable_boundary() {
+  local containers expected_volumes networks project_volumes session_holders
 
   containers="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
     die 'the KemerBet v3 successor project container inventory could not be inspected'
   [[ -z "$containers" ]] ||
-    die 'release installation requires the KemerBet v3 successor project to be fully stopped'
+    die 'the KemerBet v3 successor project must be fully stopped'
   networks="$(docker_local network ls --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
     die 'the KemerBet v3 successor project network inventory could not be inspected'
   [[ -z "$networks" ]] ||
-    die 'release installation requires no KemerBet v3 successor project networks'
+    die 'the KemerBet v3 successor project must have no network'
   require_kemerbet_recheck_transients_absent ||
-    die 'release installation requires an absent KemerBet recheck runtime boundary'
+    die 'the stopped KemerBet v3 successor retained a recheck runtime boundary'
 
   project_volumes="$(docker_local volume ls --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" | LC_ALL=C sort)" ||
@@ -12758,12 +12878,67 @@ require_kemerbet_v3_successor_install_boundary() {
     --filter "volume=$KEMERBET_SESSION_CONTROL_VOLUME")" ||
     die 'the KemerBet session-control volume holder inventory could not be inspected'
   [[ -z "$session_holders" ]] ||
-    die 'release installation requires no KemerBet session-control volume holder'
+    die 'the stopped KemerBet v3 successor retained a session-control volume holder'
+}
+
+require_kemerbet_v3_successor_install_boundary() {
+  local commit_sha="$1"
+  local successor_release successor_state
+
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the KemerBet v3 successor install release identity is invalid'
+  inspect_kemerbet_v2_v3_successor_gate
+  successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
+  successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
+  case "$successor_state" in
+    successor-installed)
+      [[ "$successor_release" == "$commit_sha" ]] ||
+        die 'release installation requires the exact same-release installed KemerBet v3 successor'
+      ;;
+    successor-completed) ;;
+    *) die 'release installation requires an exact installed or completed KemerBet v3 successor' ;;
+  esac
+  require_kemerbet_v1_retirement_expiry_guard_disarmed ||
+    die 'release installation requires a disarmed staging expiry guard'
+  [[ ! -e "$BOT_STARTUP_RECEIPT" && ! -L "$BOT_STARTUP_RECEIPT" &&
+    ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
+    die 'release installation requires an absent Telegram runtime receipt'
+  require_kemerbet_v3_successor_stopped_durable_boundary
 
   inspect_kemerbet_v2_v3_successor_gate
-  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
-    "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_state" &&
+    "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_release" ]] ||
     die 'the KemerBet v3 successor boundary changed during install preflight'
+}
+
+require_kemerbet_v3_successor_armed_stopped_boundary() {
+  local commit_sha="$1"
+  local successor_release successor_state
+
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the KemerBet v3 successor armed-start release identity is invalid'
+  inspect_kemerbet_v2_v3_successor_gate
+  successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
+  successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
+  case "$successor_state" in
+    successor-installed)
+      [[ "$successor_release" == "$commit_sha" ]] ||
+        die 'the installed KemerBet v3 successor belongs to another reviewed release'
+      ;;
+    successor-completed) ;;
+    *) die 'the stopped KemerBet v3 successor state is invalid' ;;
+  esac
+  require_kemerbet_v1_retirement_expiry_guard_armed ||
+    die 'the KemerBet v3 successor requires an exact armed expiry guard before startup'
+  require_fresh_host_start_ready "$commit_sha"
+  [[ ! -e "$BOT_STARTUP_RECEIPT" && ! -L "$BOT_STARTUP_RECEIPT" &&
+    ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
+    die 'the stopped KemerBet v3 successor retained a Telegram runtime receipt'
+  require_kemerbet_v3_successor_stopped_durable_boundary
+  inspect_kemerbet_v2_v3_successor_gate
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_state" &&
+    "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_release" ]] ||
+    die 'the armed expiry guard is not bound to the exact stopped KemerBet v3 successor'
 }
 
 require_fresh_host_identity() {
@@ -12933,17 +13108,7 @@ case "$command" in
     [[ $# -eq 3 ]] || die 'arm-expiry-stop requires a reviewed commit and canonical UTC stop time'
     arm_expiry_stop "$2" "$3"
     if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
-      require_kemerbet_v1_retirement_expiry_guard_armed ||
-        die 'the KemerBet v3 successor expiry guard failed exact post-arm attestation'
-      require_exact_fresh_private_runtime "$2"
-      inspect_kemerbet_v2_v3_successor_gate
-      if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
-        [[ "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$2" ]] ||
-          die 'the armed expiry guard does not match the installed KemerBet v3 successor release'
-      else
-        [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' ]] ||
-          die 'the armed expiry guard changed the KemerBet v3 successor boundary'
-      fi
+      require_kemerbet_v3_successor_armed_stopped_boundary "$2"
     else
       inspect_kemerbet_v1_retirement_gate
       if [[ "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
@@ -13018,11 +13183,13 @@ case "$command" in
     image_tag="$3"
     incoming="$4"
     validate_commit_and_tag "$commit_sha" "$image_tag"
+    successor_install_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
+    successor_install_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
     [[ "$incoming" == "/tmp/fetanagent-$commit_sha" ]] || die 'the incoming directory is outside the approved path'
     [[ ! -L "$incoming" && -d "$incoming" ]] || die 'the incoming directory is absent or symbolic'
     [[ "$(stat --format='%U:%a' "$incoming")" == "$EXPECTED_SUDO_USER:700" ]] ||
       die 'the incoming directory ownership or mode is unsafe'
-    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+    if [[ "$successor_install_state" != 'absent' ]]; then
       require_kemerbet_v3_successor_install_boundary "$commit_sha"
     fi
 
@@ -13079,10 +13246,10 @@ case "$command" in
         die 'a loaded image revision does not match the reviewed commit'
     done
     rm -rf -- "$incoming"
-    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+    if [[ "$successor_install_state" != 'absent' ]]; then
       inspect_kemerbet_v2_v3_successor_gate
-      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
-        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_install_state" &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_install_release" ]] ||
         die 'release installation changed the exact KemerBet v3 successor boundary'
     fi
     ;;
@@ -13092,12 +13259,20 @@ case "$command" in
     commit_sha="$2"
     image_tag="$3"
     validate_commit_and_tag "$commit_sha" "$image_tag"
+    successor_start_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
+    successor_start_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
     # This command is an independently callable privileged boundary. Prove the
     # reviewed transition (legacy cutover or clean fresh-host state) before
     # reading deploy inputs, running database preflights, or starting a container.
     migration_recovery_start='false'
     if [[ "$command" == 'fresh-start' ]]; then
-      require_fresh_host_start_ready "$commit_sha"
+      require_kemerbet_v1_retirement_expiry_guard_armed ||
+        die 'fresh-host startup requires an exact active expiry guard'
+      if [[ "$successor_start_state" != 'absent' ]]; then
+        require_kemerbet_v3_successor_armed_stopped_boundary "$commit_sha"
+      else
+        require_fresh_host_start_ready "$commit_sha"
+      fi
       clear_bot_startup_receipt
     else
       require_private_start_cutover_ready "$commit_sha"
@@ -13219,11 +13394,13 @@ case "$command" in
         up -d --no-build --wait --wait-timeout 90
     fi
     require_owner_kemerbet_receipt_service_access
-    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+    if [[ "$successor_start_state" != 'absent' ]]; then
+      require_kemerbet_v1_retirement_expiry_guard_armed ||
+        die 'the KemerBet v3 successor expiry guard changed during core startup'
       require_exact_fresh_private_runtime "$commit_sha"
       inspect_kemerbet_v2_v3_successor_gate
-      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
-        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_start_state" &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_start_release" ]] ||
         die 'core startup changed the exact KemerBet v3 successor boundary'
     fi
     if [[ "$migration_recovery_start" == 'true' ]]; then
@@ -13401,9 +13578,14 @@ case "$command" in
         migration_component_stop='true'
       fi
     else
-      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$ &&
-        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
-        die 'the Telegram component stop does not match an exact same-release KemerBet v3 successor'
+      case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in
+        successor-installed)
+          [[ "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+            die 'the Telegram component stop does not match the installed KemerBet v3 successor release'
+          ;;
+        successor-completed) ;;
+        *) die 'the Telegram component stop does not match an exact KemerBet v3 successor' ;;
+      esac
       successor_component_stop='true'
       successor_component_stop_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
       successor_component_stop_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
@@ -13417,6 +13599,8 @@ case "$command" in
       if [[ -n "$session_container" ]]; then
         [[ "$session_container" =~ ^[0-9a-f]{12,64}$ ]] ||
           die 'the dependent private KemerBet session inventory is ambiguous'
+        require_exact_current_component_container \
+          "$session_container" kemerbet-session-provision "$commit_sha"
         docker_local container stop --time 70 "$session_container" >/dev/null
         docker_local container rm "$session_container" >/dev/null
       fi
@@ -13427,6 +13611,7 @@ case "$command" in
       if [[ -n "$gateway_container" ]]; then
         [[ "$gateway_container" =~ ^[0-9a-f]{12,64}$ ]] ||
           die 'the dependent gateway inventory is ambiguous'
+        require_exact_current_component_container "$gateway_container" gateway "$commit_sha"
         docker_local container rm --force "$gateway_container" >/dev/null
       fi
     fi
@@ -13436,6 +13621,7 @@ case "$command" in
     if [[ -n "$bot_container" ]]; then
       [[ "$bot_container" =~ ^[0-9a-f]{12,64}$ ]] ||
         die 'the Telegram bot container inventory is ambiguous'
+      require_exact_current_component_container "$bot_container" bot "$commit_sha"
       docker_local container rm --force "$bot_container" >/dev/null
     fi
     clear_bot_startup_receipt
@@ -14485,9 +14671,14 @@ case "$command" in
     session_stop_successor_release=''
     session_stop_successor_state=''
     if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
-      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$ &&
-        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
-        die 'the private KemerBet session stop does not match an exact same-release v3 successor'
+      case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in
+        successor-installed)
+          [[ "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+            die 'the private KemerBet session stop does not match the installed v3 successor release'
+          ;;
+        successor-completed) ;;
+        *) die 'the private KemerBet session stop does not match an exact v3 successor' ;;
+      esac
       session_stop_successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
       session_stop_successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
     fi
@@ -14497,6 +14688,8 @@ case "$command" in
     if [[ -n "$session_container" ]]; then
       [[ "$session_container" =~ ^[0-9a-f]{12,64}$ ]] ||
         die 'the private KemerBet session container inventory is ambiguous'
+      require_exact_current_component_container \
+        "$session_container" kemerbet-session-provision "$commit_sha"
       docker_local container stop --time 70 "$session_container" >/dev/null
       docker_local container rm "$session_container" >/dev/null
     fi

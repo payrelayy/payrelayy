@@ -23,6 +23,9 @@ readonly EXPECTED_DROPLET_ID='593344964'
 readonly EXPECTED_PUBLIC_IPV4='161.35.41.232'
 readonly CONFIRMATION='I-UNDERSTAND-THIS-ARCHIVES-V2-AND-INSTALLS-THE-V3-SUCCESSOR'
 readonly PROJECT_NAME='fetanagent-staging-beta'
+readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
+readonly KEMERBET_PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
+readonly KEMERBET_SESSION_CONTROL_VOLUME="${PROJECT_NAME}_kemerbet_session_control"
 
 export PATH="$SAFE_PATH"
 umask 022
@@ -105,6 +108,183 @@ require_no_helper_processes() {
 
 run_predecessor_helper() {
   runuser -u fetanagent-admin -- sudo -n "$TARGET" "$@"
+}
+
+docker_local_read_only() {
+  env -i PATH="$SAFE_PATH" HOME='/root' DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
+    docker --host "$LOCAL_DOCKER_SOCKET" "$@"
+}
+
+COMPOSE5_DURABLE_VOLUME_DIGEST=''
+COMPOSE5_PROFILE_CONFIG_HASH=''
+COMPOSE5_SESSION_CONTROL_CONFIG_HASH=''
+COMPOSE5_VOLUME_VERSION=''
+
+require_compose5_durable_volume_compatibility() {
+  local compose_config_hash compose_version contract control_contract driver expected_volumes
+  local expected_volume_label holders label_count mountpoint name options profile_contract
+  local project project_volumes residue scope volume volume_label
+  COMPOSE5_DURABLE_VOLUME_DIGEST=''
+  COMPOSE5_PROFILE_CONFIG_HASH=''
+  COMPOSE5_SESSION_CONTROL_CONFIG_HASH=''
+  COMPOSE5_VOLUME_VERSION=''
+  project_volumes="$(docker_local_read_only volume ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" | LC_ALL=C sort)" || return 1
+  expected_volumes="$(printf '%s\n%s\n' \
+    "$KEMERBET_PROFILE_VOLUME" "$KEMERBET_SESSION_CONTROL_VOLUME" | LC_ALL=C sort)"
+  [[ "$project_volumes" == "$expected_volumes" ]] || return 1
+  for volume in "$KEMERBET_PROFILE_VOLUME" "$KEMERBET_SESSION_CONTROL_VOLUME"; do
+    case "$volume" in
+      "$KEMERBET_PROFILE_VOLUME") expected_volume_label='kemerbet_sessions' ;;
+      "$KEMERBET_SESSION_CONTROL_VOLUME") expected_volume_label='kemerbet_session_control' ;;
+      *) return 1 ;;
+    esac
+    contract="$(docker_local_read_only volume inspect "$volume" \
+      --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.version" }}|{{ index .Labels "com.docker.compose.volume" }}|{{with index .Labels "com.docker.compose.config-hash"}}{{.}}{{end}}|{{.Mountpoint}}')" ||
+      return 1
+    IFS='|' read -r name driver scope options label_count project compose_version \
+      volume_label compose_config_hash mountpoint residue <<<"$contract"
+    [[ -z "$residue" && "$name" == "$volume" && "$driver" == 'local' &&
+      "$scope" == 'local' && "$options" == 'null' && "$label_count" == '4' &&
+      "$project" == "$PROJECT_NAME" &&
+      "$compose_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~-][0-9A-Za-z._-]+)?$ &&
+      "$volume_label" == "$expected_volume_label" &&
+      "$compose_config_hash" =~ ^[0-9a-f]{64}$ &&
+      "$mountpoint" == "/var/lib/docker/volumes/$volume/_data" &&
+      ! -L "$mountpoint" && -d "$mountpoint" &&
+      "$(realpath -- "$mountpoint")" == "$mountpoint" ]] || return 1
+    if [[ -z "$COMPOSE5_VOLUME_VERSION" ]]; then
+      COMPOSE5_VOLUME_VERSION="$compose_version"
+    else
+      [[ "$compose_version" == "$COMPOSE5_VOLUME_VERSION" ]] || return 1
+    fi
+    holders="$(docker_local_read_only container ls --all --quiet \
+      --filter "volume=$volume")" || return 1
+    [[ -z "$holders" ]] || return 1
+    case "$volume" in
+      "$KEMERBET_PROFILE_VOLUME")
+        [[ "$(stat --format='%u:%g:%a' "$mountpoint")" == '10001:10001:700' ]] || return 1
+        COMPOSE5_PROFILE_CONFIG_HASH="$compose_config_hash"
+        profile_contract="$contract"
+        ;;
+      "$KEMERBET_SESSION_CONTROL_VOLUME")
+        [[ "$(stat --format='%u:%g:%a:%h' "$mountpoint")" == '10001:10001:700:2' ]] || return 1
+        COMPOSE5_SESSION_CONTROL_CONFIG_HASH="$compose_config_hash"
+        control_contract="$contract"
+        ;;
+    esac
+  done
+  COMPOSE5_DURABLE_VOLUME_DIGEST="$({
+    printf '%s\n' \
+      "profile_contract=$profile_contract" \
+      "control_contract=$control_contract" \
+      "profile=$(stat --format='%d:%i:%u:%g:%a' "/var/lib/docker/volumes/$KEMERBET_PROFILE_VOLUME/_data")" \
+      "control=$(stat --format='%d:%i:%u:%g:%a:%h' "/var/lib/docker/volumes/$KEMERBET_SESSION_CONTROL_VOLUME/_data")"
+  } | sha256sum | awk '{print $1}')" || return 1
+  [[ "$COMPOSE5_DURABLE_VOLUME_DIGEST" =~ ^[0-9a-f]{64}$ &&
+    "$COMPOSE5_PROFILE_CONFIG_HASH" =~ ^[0-9a-f]{64}$ &&
+    "$COMPOSE5_SESSION_CONTROL_CONFIG_HASH" =~ ^[0-9a-f]{64}$ ]]
+}
+
+run_predecessor_recovery_ready_compose5_compat() {
+  local compatibility_digest control_config_hash profile_config_hash volume_version
+  require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 || return 1
+  require_compose5_durable_volume_compatibility || return 1
+  compatibility_digest="$COMPOSE5_DURABLE_VOLUME_DIGEST"
+  profile_config_hash="$COMPOSE5_PROFILE_CONFIG_HASH"
+  control_config_hash="$COMPOSE5_SESSION_CONTROL_CONFIG_HASH"
+  volume_version="$COMPOSE5_VOLUME_VERSION"
+  env -i PATH="$SAFE_PATH" HOME='/root' SUDO_USER='fetanagent-admin' \
+    FETANAGENT_COMPAT_HELPER_SHA256="$PREDECESSOR_HELPER_SHA256" \
+    FETANAGENT_COMPAT_PROFILE_CONFIG_HASH="$profile_config_hash" \
+    FETANAGENT_COMPAT_CONTROL_CONFIG_HASH="$control_config_hash" \
+    FETANAGENT_COMPAT_VOLUME_VERSION="$volume_version" \
+    bash --noprofile --norc -c '
+set -euo pipefail
+readonly COMPAT_HELPER_SHA256="$FETANAGENT_COMPAT_HELPER_SHA256"
+readonly COMPAT_PROFILE_CONFIG_HASH="$FETANAGENT_COMPAT_PROFILE_CONFIG_HASH"
+readonly COMPAT_CONTROL_CONFIG_HASH="$FETANAGENT_COMPAT_CONTROL_CONFIG_HASH"
+readonly COMPAT_VOLUME_VERSION="$FETANAGENT_COMPAT_VOLUME_VERSION"
+readonly COMPAT_PROFILE_VOLUME="fetanagent-staging-beta_kemerbet_sessions"
+readonly COMPAT_CONTROL_VOLUME="fetanagent-staging-beta_kemerbet_session_control"
+readonly COMPAT_LEGACY_VOLUME_FORMAT="{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels \"com.docker.compose.project\" }}|{{ index .Labels \"com.docker.compose.version\" }}|{{ index .Labels \"com.docker.compose.volume\" }}|{{.Mountpoint}}"
+readonly COMPAT_COMPOSE5_VOLUME_FORMAT="{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels \"com.docker.compose.project\" }}|{{ index .Labels \"com.docker.compose.version\" }}|{{ index .Labels \"com.docker.compose.volume\" }}|{{with index .Labels \"com.docker.compose.config-hash\"}}{{.}}{{end}}|{{.Mountpoint}}"
+COMPAT_ACTIVATED=false
+[[ "$COMPAT_HELPER_SHA256" =~ ^[0-9a-f]{64}$ &&
+  "$COMPAT_PROFILE_CONFIG_HASH" =~ ^[0-9a-f]{64}$ &&
+  "$COMPAT_CONTROL_CONFIG_HASH" =~ ^[0-9a-f]{64}$ &&
+  "$COMPAT_VOLUME_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~-][0-9A-Za-z._-]+)?$ &&
+  ! -L "$0" && -f "$0" && "$(realpath -- "$0")" == "$0" &&
+  "$(stat --format="%U:%G:%a:%h" "$0")" == "root:root:755:1" &&
+  "$(sha256sum -- "$0" | awk "{print \$1}")" == "$COMPAT_HELPER_SHA256" ]] || exit 1
+compat_activate_normalizer() {
+  [[ "$BASH_COMMAND" == "command=\"\${1:-}\"" ]] || return 0
+  trap - DEBUG
+  set +T
+  docker_local() {
+    local compose_config_hash compose_version contract driver expected_config_hash
+    local expected_volume_label label_count mountpoint name options project residue scope
+    local volume volume_label
+    if [[ $# -eq 5 && "$1" == volume && "$2" == inspect &&
+      ( "$3" == "$COMPAT_PROFILE_VOLUME" || "$3" == "$COMPAT_CONTROL_VOLUME" ) &&
+      "$4" == --format && "$5" == "$COMPAT_LEGACY_VOLUME_FORMAT" ]]; then
+      volume="$3"
+      case "$volume" in
+        "$COMPAT_PROFILE_VOLUME")
+          expected_volume_label=kemerbet_sessions
+          expected_config_hash="$COMPAT_PROFILE_CONFIG_HASH"
+          ;;
+        "$COMPAT_CONTROL_VOLUME")
+          expected_volume_label=kemerbet_session_control
+          expected_config_hash="$COMPAT_CONTROL_CONFIG_HASH"
+          ;;
+        *) return 1 ;;
+      esac
+      contract="$(env -i PATH="$SAFE_PATH" HOME=/root DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
+        docker --host "$LOCAL_DOCKER_SOCKET" volume inspect "$volume" \
+        --format "$COMPAT_COMPOSE5_VOLUME_FORMAT")" || return 1
+      IFS="|" read -r name driver scope options label_count project compose_version \
+        volume_label compose_config_hash mountpoint residue <<<"$contract"
+      [[ -z "$residue" && "$name" == "$volume" && "$driver" == local &&
+        "$scope" == local && "$options" == null && "$label_count" == 4 &&
+        "$project" == "$PROJECT_NAME" && "$compose_version" == "$COMPAT_VOLUME_VERSION" &&
+        "$volume_label" == "$expected_volume_label" &&
+        "$compose_config_hash" == "$expected_config_hash" &&
+        "$mountpoint" == "/var/lib/docker/volumes/$volume/_data" ]] || return 1
+      printf "%s\n" "$name|$driver|$scope|$options|3|$project|$compose_version|$volume_label|$mountpoint"
+      return 0
+    fi
+    env -i PATH="$SAFE_PATH" HOME=/root DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
+      docker --host "$LOCAL_DOCKER_SOCKET" "$@"
+  }
+  COMPAT_ACTIVATED=true
+}
+set -- kemerbet-v1-retirement-recovery-ready "$1"
+set -T
+trap compat_activate_normalizer DEBUG
+source "$0"
+[[ "$COMPAT_ACTIVATED" == true ]]
+' "$TARGET" "$PREDECESSOR_RELEASE" || return 1
+  require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 || return 1
+  require_compose5_durable_volume_compatibility || return 1
+  [[ "$COMPOSE5_DURABLE_VOLUME_DIGEST" == "$compatibility_digest" &&
+    "$COMPOSE5_PROFILE_CONFIG_HASH" == "$profile_config_hash" &&
+    "$COMPOSE5_SESSION_CONTROL_CONFIG_HASH" == "$control_config_hash" &&
+    "$COMPOSE5_VOLUME_VERSION" == "$volume_version" ]]
+}
+
+require_predecessor_recovery_ready() {
+  if run_predecessor_helper \
+    kemerbet-v1-retirement-recovery-ready "$PREDECESSOR_RELEASE" >/dev/null; then
+    return 0
+  fi
+  run_predecessor_recovery_ready_compose5_compat >/dev/null
+}
+
+require_fresh_disabled_predecessor_boundary() {
+  [[ -z "$(docker_local_read_only container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ]] || return 1
+  validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE"
 }
 
 require_migration_intent() {
@@ -204,7 +384,7 @@ import sys
 retirement, binding, helper, release, helper_sha, binding_sha = sys.argv[1:]
 uuid = rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 v2_pattern = re.compile(
-    uuid + rb' hmac-sha256-agent-identity-v1:[0-9a-f]{64} '
+    rb'(' + uuid + rb') hmac-sha256-agent-identity-v1:([0-9a-f]{64}) '
     rb'sha256-provider-authorization-v1:[0-9a-f]{64}\n'
 )
 
@@ -302,6 +482,7 @@ helper_data = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
 binding_data = exact_file(binding, (10001, 10001), 0o600, 230, 230)
 helper_stat = os.stat(helper, follow_symlinks=False)
 binding_stat = os.stat(binding, follow_symlinks=False)
+binding_match = v2_pattern.fullmatch(binding_data)
 if (
     hashlib.sha256(helper_data).hexdigest() != helper_sha
     or intent[3] != f'helper_dev_ino={helper_stat.st_dev}:{helper_stat.st_ino}'
@@ -310,8 +491,16 @@ if (
 if (
     hashlib.sha256(binding_data).hexdigest() != binding_sha
     or completion[14] != f'v2_binding_dev_ino={binding_stat.st_dev}:{binding_stat.st_ino}'
-    or v2_pattern.fullmatch(binding_data) is None
+    or binding_match is None
 ):
+    reject()
+legacy_projection = (
+    binding_match.group(1)
+    + b' hmac-sha256-agent-identity-v1:'
+    + binding_match.group(2)
+    + b'\n'
+)
+if hashlib.sha256(legacy_projection).hexdigest() != intent[6].split('=', 1)[1]:
     reject()
 PY
 }
@@ -932,17 +1121,15 @@ if [[ ! -e "$MIGRATION_ROOT" && ! -L "$MIGRATION_ROOT" &&
       die 'both enabled and disabled deployment grants exist'
     run_predecessor_helper verify "$PREDECESSOR_HELPER_SHA256" >/dev/null
     run_predecessor_helper stop >/dev/null
-    run_predecessor_helper kemerbet-v1-retirement-recovery-ready "$PREDECESSOR_RELEASE" >/dev/null
+    require_predecessor_recovery_ready ||
+      die 'the predecessor recovery boundary failed outside the exact Compose 5 durable-volume compatibility contract'
     validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE" ||
       die 'the predecessor retirement and v2 source failed exact continuity validation'
   elif [[ ! -e "$SUDOERS" && ! -L "$SUDOERS" ]] &&
     require_exact_sudoers_file "$SUDOERS_DISABLED"; then
     migration_state='fresh-disabled'
-    [[ -z "$(docker --host unix:///var/run/docker.sock container ls --all --quiet \
-      --filter "label=com.docker.compose.project=$PROJECT_NAME")" ]] ||
-      die 'disabled-grant recovery requires the staging project to remain fully stopped'
-    validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE" ||
-      die 'the disabled-grant predecessor retirement and v2 source failed exact continuity validation'
+    require_fresh_disabled_predecessor_boundary ||
+      die 'disabled-grant recovery requires an exactly stopped predecessor with intact v2 continuity'
   else
     die 'the deployment sudoers grant topology is unavailable or ambiguous'
   fi
@@ -990,6 +1177,24 @@ fi
 exec 9<>"$LOCK"
 flock --exclusive --nonblock 9 || die 'another staging mutation is active'
 require_no_helper_processes || die 'a helper process appeared after the mutation lock was acquired'
+
+# Classification above is deliberately read-only except for the predecessor stop. Re-attest the
+# complete fresh boundary while holding the root mutation lock so no authorized helper invocation
+# can change the durable volumes, retirement evidence, or binding between proof and grant removal.
+case "$migration_state" in
+  fresh)
+    require_predecessor_recovery_ready ||
+      die 'the locked predecessor recovery boundary failed outside the exact Compose 5 durable-volume compatibility contract'
+    validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE" ||
+      die 'the locked predecessor retirement and v2 source failed exact continuity validation'
+    require_no_helper_processes ||
+      die 'a helper process remained after the locked predecessor recovery proof'
+    ;;
+  fresh-disabled)
+    require_fresh_disabled_predecessor_boundary ||
+      die 'the locked disabled-grant boundary lost its stopped predecessor or exact v2 continuity'
+    ;;
+esac
 
 if [[ "$migration_state" == 'completed' ]]; then
   require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755 || die 'the installed successor helper is invalid'

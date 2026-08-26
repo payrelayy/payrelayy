@@ -41,6 +41,7 @@ readonly KEMERBET_V1_RETIREMENT_ARCHIVE="$KEMERBET_V1_RETIREMENT_ROOT/archive-v1
 readonly KEMERBET_V1_RETIREMENT_COMPLETION="$KEMERBET_V1_RETIREMENT_ROOT/completed-v1"
 readonly KEMERBET_V1_RETIREMENT_CONFIRMATION='I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL'
 readonly KEMERBET_V2_V3_SUCCESSOR_PARENT='/var/lib/fetanagent/kemerbet-readiness-v2-v3-successor'
+readonly KEMERBET_V3_HELPER_ROTATION_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3815,7 +3816,7 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
     "$KEMERBET_RECHECK_PROMOTION_ROOT" "$KEMERBET_READINESS_PLAYER_IDS" \
     "$KEMERBET_RECHECK_CANDIDATE_ROOT" "$KEMERBET_RECHECK_RPC_ROOT" \
-    "$KEMERBET_SELECTOR_CONTRACT" <<'PY'
+    "$KEMERBET_SELECTOR_CONTRACT" "$KEMERBET_V3_HELPER_ROTATION_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3836,9 +3837,11 @@ import sys
     candidate_root,
     rpc_root,
     selector_contract,
+    rotation_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
+compose_version = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+(?:[+~-][0-9A-Za-z._-]+)?')
 claim = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n')
 uuid = rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 v2 = re.compile(
@@ -3972,6 +3975,90 @@ if (
 ):
     reject()
 
+effective_release = successor
+effective_helper_sha = successor_helper_sha
+if os.path.lexists(rotation_parent):
+    rotation_parent_value = os.lstat(rotation_parent)
+    if (
+        not stat.S_ISDIR(rotation_parent_value.st_mode)
+        or (rotation_parent_value.st_uid, rotation_parent_value.st_gid,
+            stat.S_IMODE(rotation_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_parent) != rotation_parent
+    ):
+        reject()
+    rotation_children = os.listdir(rotation_parent)
+    if len(rotation_children) != 1 or release.fullmatch(rotation_children[0]) is None:
+        reject()
+    rotation_release = rotation_children[0]
+    rotation_root = f'{rotation_parent}/{rotation_release}'
+    exact_directory(rotation_parent, 0o700, [rotation_release])
+    exact_directory(
+        rotation_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_intent_data = exact_file(
+        f'{rotation_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_completion_data = exact_file(
+        f'{rotation_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_intent = rotation_intent_data.decode('ascii').splitlines()
+    rotation_completion = rotation_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_intent) != 15
+        or len(rotation_completion) != 16
+        or rotation_intent[0] != 'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v1'
+        or rotation_intent[1] != 'state=authorized'
+        or rotation_intent[2] != f'predecessor_release={successor}'
+        or rotation_intent[3] != f'successor_release={rotation_release}'
+        or rotation_release == successor
+        or rotation_intent[4] != f'predecessor_helper_sha256={successor_helper_sha}'
+        or not rotation_intent[5].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_intent[5].split('=', 1)[1]) is None
+        or rotation_intent[5].split('=', 1)[1] == successor_helper_sha
+        or rotation_intent[6] !=
+           f'base_successor_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or rotation_intent[7] !=
+           f'base_successor_completion_sha256={hashlib.sha256(completion_data).hexdigest()}'
+        or rotation_intent[8] != f'base_binding_v2_sha256={v2_sha}'
+        or rotation_intent[9] !=
+           f'base_predecessor_helper_sha256={hashlib.sha256(old_helper_data).hexdigest()}'
+        or rotation_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or not rotation_intent[11].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_intent[11].split('=', 1)[1]) is None
+        or not rotation_intent[12].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_intent[12].split('=', 1)[1]) is None
+        or not rotation_intent[13].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_intent[13].split('=', 1)[1]) is None
+        or not rotation_intent[14].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_intent[14].split('=', 1)[1]) is None
+        or rotation_completion[:1] != rotation_intent[:1]
+        or rotation_completion[1] != 'state=successor-installed'
+        or rotation_completion[2:15] != rotation_intent[2:15]
+        or rotation_completion[15] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_intent_data).hexdigest()}'
+        or rotation_intent_data != ('\n'.join(rotation_intent) + '\n').encode('ascii')
+        or rotation_completion_data != ('\n'.join(rotation_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_successor_helper = exact_file(
+        f'{rotation_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if hashlib.sha256(archived_successor_helper).hexdigest() != successor_helper_sha:
+        reject()
+    effective_release = rotation_release
+    effective_helper_sha = rotation_intent[5].split('=', 1)[1]
+
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
 retirement_completion_data = exact_file(f'{retirement}/completed-v1', (0, 0), 0o600, 4096)
@@ -4017,7 +4104,7 @@ if (
 
 def require_live_successor_helper():
     helper_data = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
-    if hashlib.sha256(helper_data).hexdigest() != successor_helper_sha:
+    if hashlib.sha256(helper_data).hexdigest() != effective_helper_sha:
         reject()
 
 
@@ -4079,7 +4166,7 @@ else:
     if (
         len(receipt_lines) != 8
         or receipt_lines[0] != 'version=1'
-        or receipt_lines[1] != f'release={successor}'
+        or receipt_lines[1] != f'release={effective_release}'
         or receipt_lines[2] != f'binding_sha256={v3_sha}'
         or receipt_lines[3] !=
            f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}'
@@ -4115,7 +4202,7 @@ else:
             reject()
     gate_state = 'successor-completed'
 
-sys.stdout.write(successor + '\n' + successor_helper_sha + '\n' + gate_state + '\n')
+sys.stdout.write(effective_release + '\n' + effective_helper_sha + '\n' + gate_state + '\n')
 PY
 )" || return 0
   mapfile -t inspection_lines <<<"$inspection"

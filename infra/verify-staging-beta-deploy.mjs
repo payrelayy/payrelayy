@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const workflow = readFileSync(
@@ -38,6 +47,10 @@ const helper = readFileSync(
 );
 const v2V3SuccessorMigration = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v2-v3-successor-migration.sh'),
+  'utf8',
+);
+const v3SuccessorHelperRotation = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation.sh'),
   'utf8',
 );
 const legacyBrand = 'pay' + 'replayy';
@@ -79,7 +92,7 @@ const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retaine
 const historicalReviewedHelperSuccessorSha =
   '43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619';
 const reviewedV3HelperSuccessorSha =
-  '6a2ce1c67507df3f09b789fea9a399a6089455c61d5affe962163dea9028f402';
+  'f98047953fb9249d7dbcd13be6cf1a145b53a4952a760b36d5ba8bfab2f36f82';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -104,6 +117,12 @@ function extractShellFunction(source, name, nextName) {
   const end = source.indexOf(`\n}\n\n${nextName}() {`, start);
   assert.ok(start >= 0 && end > start, `missing shell function boundary: ${name}`);
   return source.slice(start, end + 2);
+}
+
+function extractSingleQuotedPythonHeredoc(shellFunction, name) {
+  const extracted = /<<'PY'\r?\n([\s\S]*?)\r?\nPY/u.exec(shellFunction)?.[1];
+  assert.ok(extracted, `missing embedded Python boundary: ${name}`);
+  return extracted;
 }
 
 const v2V3MigrationConfirmation = 'I-UNDERSTAND-THIS-ARCHIVES-V2-AND-INSTALLS-THE-V3-SUCCESSOR';
@@ -806,6 +825,664 @@ assert.doesNotMatch(
   'the canonical v1 retirement root must remain in place while the four-entry successor overlay archives only the v2 binding and predecessor helper',
 );
 
+const v3HelperRotationConfirmation =
+  'I-UNDERSTAND-THIS-APPENDS-ONE-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED';
+for (const fixedRotationContract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly TARGET='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'$/mu,
+  /^readonly BASE_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v2-v3-successor'$/mu,
+  /^readonly ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation'$/mu,
+  /^readonly SUDOERS_DISABLED='\/etc\/sudoers\.d\/\.fetanagent-staging-deploy-helper\.v3-rotation-disabled'$/mu,
+  /^readonly LOCK="\$LOCK_ROOT\/mutation\.lock"$/mu,
+  /^readonly EXPECTED_DROPLET_ID='593344964'$/mu,
+  /^readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'$/mu,
+  /^readonly PREDECESSOR_RELEASE='de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3'$/mu,
+  /^readonly PREDECESSOR_HELPER_SHA256='e94dfdcfe90ff6021446fc66e2850ae13198b03d9e2210f454181ab00177f97d'$/mu,
+  new RegExp(`^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3HelperSuccessorSha}'$`, 'mu'),
+  /\[\[ \$# -eq 3 \]\]/u,
+  /"\$SUCCESSOR_HELPER_SHA256" == "\$REVIEWED_SUCCESSOR_HELPER_SHA256"/u,
+  /the supplied successor helper digest is not the hard-pinned reviewed artifact/u,
+  /\[\[ "\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION" \]\]/u,
+  /\[\[ "\$\(id -u\)" == '0' && "\$\(id -un\)" == 'root' \]\]/u,
+  /\[\[ -z "\$\{SUDO_USER:-\}" && -z "\$\{DOCKER_HOST:-\}" && -z "\$\{DOCKER_CONTEXT:-\}" \]\]/u,
+]) {
+  assert.match(v3SuccessorHelperRotation, fixedRotationContract);
+}
+assert.equal(
+  v3SuccessorHelperRotation.split(`readonly CONFIRMATION='${v3HelperRotationConfirmation}'`)
+    .length - 1,
+  1,
+  'the installed-v3 rotation must expose one exact one-use root confirmation',
+);
+assert.doesNotMatch(
+  v3SuccessorHelperRotation,
+  /(?:^|[;\s])(?:rm|unlink|shred|truncate)\b|os\.(?:unlink|remove)\s*\(|shutil\.rmtree\s*\(|find[^\r\n]*-delete|docker[^\r\n]*(?:container|volume|image|network)\s+rm\b/imu,
+  'the helper rotation must append evidence and atomically replace only the reviewed helper without destructive cleanup primitives',
+);
+assert.doesNotMatch(
+  v3SuccessorHelperRotation,
+  /GeneralInfoByExternalId|PlayerEPOSDeposit|Transfer\/|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true/iu,
+  'the helper rotation must never enable Transfer or a live money-moving executor',
+);
+
+const rotationBaseEvidence = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'load_exact_base_successor_evidence',
+  'expected_intent',
+);
+for (const baseEvidenceContract of [
+  /exact_directory\(parent, \[expected_release\]\)/u,
+  /\['binding-v2', 'completed-v1', 'intent-v1', 'predecessor-helper'\]/u,
+  /len\(intent\) != 9/u,
+  /len\(completion\) != 10/u,
+  /retirement_intent_sha256=/u,
+  /retirement_completion_sha256=/u,
+  /hashlib\.sha256\(retirement_intent_data\)\.hexdigest\(\) != retirement_intent_sha/u,
+  /hashlib\.sha256\(retirement_completion_data\)\.hexdigest\(\) != retirement_completion_sha/u,
+  /v2_match\.group\(1\) != v3_match\.group\(1\)/u,
+  /v2_match\.group\(2\) != v3_match\.group\(2\)/u,
+  /retirement_intent\[2\] != f'release=\{predecessor_release\}'/u,
+  /retirement_intent\[4\] != f'helper_sha256=\{predecessor_helper_sha\}'/u,
+  /identity_hmac_key_dev_ino=/u,
+  /identity_hmac_key_sha256=/u,
+  /owner_stage_player_ids_dev_ino=/u,
+  /owner_stage_player_ids_sha256=/u,
+  /owner_stage_claim_dev_ino=/u,
+  /release_asset_sha256=/u,
+  /v2_binding_dev_ino=/u,
+  /v2_binding_sha256=/u,
+  /for forbidden_installed_residue in \(/u,
+]) {
+  assert.match(rotationBaseEvidence, baseEvidenceContract);
+}
+assert.doesNotMatch(
+  rotationBaseEvidence,
+  /sys\.stdout\.write\(\s*(?:binding_v[23]|intent_data|completion_data|identity_key_data)\s*\)|print\(\s*(?:binding_v[23]|intent_data|completion_data|identity_key_data)\s*\)/u,
+  'the locked base-evidence parser must output only digests, never IDs, bindings, or secrets',
+);
+
+const rotationDurableCapture = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'capture_rotation_durable_boundary',
+  'require_preserved_rotation_durable_boundary',
+);
+for (const durableCaptureContract of [
+  /ROTATION_COMPOSE5_DURABLE_VOLUME_DIGEST="\$COMPOSE5_DURABLE_VOLUME_DIGEST"/u,
+  /ROTATION_COMPOSE5_PROFILE_CONFIG_HASH="\$COMPOSE5_PROFILE_CONFIG_HASH"/u,
+  /ROTATION_COMPOSE5_SESSION_CONTROL_CONFIG_HASH="\$COMPOSE5_SESSION_CONTROL_CONFIG_HASH"/u,
+  /ROTATION_COMPOSE5_VOLUME_VERSION="\$COMPOSE5_VOLUME_VERSION"/u,
+]) {
+  assert.match(rotationDurableCapture, durableCaptureContract);
+}
+const rotationDurablePreserverBody =
+  /require_preserved_rotation_durable_boundary\(\) \{([\s\S]*?)\n\}\n\nBASE_SUCCESSOR_INTENT_SHA256/u.exec(
+    v3SuccessorHelperRotation,
+  )?.[1];
+assert.ok(
+  rotationDurablePreserverBody,
+  'the rotation must expose one exact durable-volume preservation checkpoint',
+);
+const rotationDurablePreserver = `require_preserved_rotation_durable_boundary() {${rotationDurablePreserverBody}\n}`;
+assertInOrder(
+  rotationDurablePreserver,
+  [
+    'durable_digest="$ROTATION_COMPOSE5_DURABLE_VOLUME_DIGEST"',
+    'profile_hash="$ROTATION_COMPOSE5_PROFILE_CONFIG_HASH"',
+    'session_control_hash="$ROTATION_COMPOSE5_SESSION_CONTROL_CONFIG_HASH"',
+    'volume_version="$ROTATION_COMPOSE5_VOLUME_VERSION"',
+    'require_stopped_no_transfer_boundary',
+    '"$COMPOSE5_DURABLE_VOLUME_DIGEST" == "$durable_digest"',
+    '"$COMPOSE5_PROFILE_CONFIG_HASH" == "$profile_hash"',
+    '"$COMPOSE5_SESSION_CONTROL_CONFIG_HASH" == "$session_control_hash"',
+    '"$COMPOSE5_VOLUME_VERSION" == "$volume_version"',
+  ],
+  'every later checkpoint must recompute and compare the exact frozen durable-volume identity',
+);
+for (const durableEvidenceField of [
+  'compose5_durable_volume_digest',
+  'compose5_profile_config_hash',
+  'compose5_session_control_config_hash',
+  'compose5_volume_version',
+]) {
+  assert.equal(
+    (v3SuccessorHelperRotation.match(new RegExp(`${durableEvidenceField}=`, 'gu')) ?? []).length,
+    3,
+    `intent, completion, and the atomic publisher must bind ${durableEvidenceField}`,
+  );
+}
+
+const rotationClassifier = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'classify_rotation',
+  'require_rotation_prefix',
+);
+for (const classifierContract of [
+  /if not os\.path\.lexists\(parent\):\s+print\('absent'\)/u,
+  /entries = sorted\(os\.listdir\(parent\)\)/u,
+  /if entries == \[\]:\s+print\('empty-parent'\)/u,
+  /elif entries == \[f'\{successor\}\.installing'\]:\s+print\('interrupted'\)/u,
+  /elif entries == \[successor\]:\s+print\('completed'\)/u,
+]) {
+  assert.match(rotationClassifier, classifierContract);
+}
+const rotationPrefix = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'require_rotation_prefix',
+  'publish_record',
+);
+for (const prefixContract of [
+  /'\.completed-v1\.installing': \(0o600, 4096\)/u,
+  /'\.intent-v1\.installing': \(0o600, 4096\)/u,
+  /'\.predecessor-helper\.installing': \(0o400, 2 \* 1024 \* 1024\)/u,
+  /if any\(name not in allowed for name in entries\):/u,
+  /if final in entries and f'\.\{final\}\.installing' in entries:/u,
+]) {
+  assert.match(rotationPrefix, prefixContract);
+}
+const rotationCleanup = /cleanup\(\) \{([\s\S]*?)\n\}\n\n\[\[ "\$\(curl/u.exec(
+  v3SuccessorHelperRotation,
+)?.[1];
+assert.ok(rotationCleanup, 'the one-use rotation must expose an exact EXIT cleanup boundary');
+assert.match(rotationCleanup, /if \[\[ "\$rotation_finalized" == 'false' \]\]/u);
+assert.match(rotationCleanup, /rollback_precompletion_helper/u);
+assert.match(
+  rotationCleanup,
+  /rerun this exact operation with the same successor release and helper digest from the root console; do not restore the grant manually/u,
+);
+assert.doesNotMatch(
+  rotationCleanup,
+  /restore_sudoers|mv -- "\$SUDOERS_DISABLED" "\$SUDOERS"/u,
+  'error cleanup must leave the exact grant disabled until a same-input resume succeeds',
+);
+
+const rotationPublisher = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'publish_record',
+  'copy_root_file_atomically',
+);
+for (const atomicRecordContract of [
+  /"\$ROTATION_COMPOSE5_DURABLE_VOLUME_DIGEST"/u,
+  /"\$ROTATION_COMPOSE5_PROFILE_CONFIG_HASH"/u,
+  /"\$ROTATION_COMPOSE5_SESSION_CONTROL_CONFIG_HASH"/u,
+  /"\$ROTATION_COMPOSE5_VOLUME_VERSION"/u,
+  /f'compose5_durable_volume_digest=\{compose5_durable_volume_digest\}\\n'/u,
+  /f'compose5_profile_config_hash=\{compose5_profile_config_hash\}\\n'/u,
+  /f'compose5_session_control_config_hash=\{compose5_session_control_config_hash\}\\n'/u,
+  /f'compose5_volume_version=\{compose5_volume_version\}\\n'/u,
+  /os\.O_WRONLY \| os\.O_CREAT \| os\.O_EXCL \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /expected\.startswith\(existing\)/u,
+  /os\.fsync\(descriptor\)/u,
+  /os\.rename\(temporary, target, src_dir_fd=directory, dst_dir_fd=directory\)/u,
+  /os\.fsync\(directory\)/u,
+]) {
+  assert.match(rotationPublisher, atomicRecordContract);
+}
+const rotationHelperCopier = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'copy_root_file_atomically',
+  'require_exact_rotation',
+);
+for (const atomicHelperContract of [
+  /os\.O_RDONLY \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /hashlib\.sha256\(data\)\.hexdigest\(\) != expected_digest/u,
+  /bytes\(data\)\.startswith\(existing\)/u,
+  /os\.O_WRONLY \| os\.O_CREAT \| os\.O_EXCL \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /os\.rename\(temporary, target\)/u,
+  /os\.fsync\(directory\)/u,
+]) {
+  assert.match(rotationHelperCopier, atomicHelperContract);
+}
+const exactRotation = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'require_exact_rotation',
+  'restore_sudoers',
+);
+for (const finalRotationContract of [
+  /\$'completed-v1\\nintent-v1\\npredecessor-helper'/u,
+  /load_rotation_intent_sha256/u,
+  /cmp -s -- "\$root\/\$ROTATION_COMPLETION_NAME" <\(expected_completion\)/u,
+  /require_helper_file "\$root\/\$HELPER_ARCHIVE_NAME" "\$PREDECESSOR_HELPER_SHA256" 400/u,
+]) {
+  assert.match(exactRotation, finalRotationContract);
+}
+const rotationGrantRestore = extractShellFunction(
+  v3SuccessorHelperRotation,
+  'restore_sudoers',
+  'rollback_precompletion_helper',
+);
+assertInOrder(
+  rotationGrantRestore,
+  [
+    'require_exact_sudoers_file "$SUDOERS_DISABLED"',
+    'visudo -cf "$SUDOERS_DISABLED"',
+    'visudo -cf /etc/sudoers',
+    'mv -- "$SUDOERS_DISABLED" "$SUDOERS"',
+    'sync -f /etc/sudoers.d && require_exact_sudoers_file "$SUDOERS"',
+    'visudo -cf /etc/sudoers',
+    'require_exact_sudoers_file "$SUDOERS"',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    'sync -f /etc/sudoers.d',
+    'require_exact_sudoers_file "$SUDOERS_DISABLED"',
+  ],
+  'grant restoration must prevalidate, publish, and roll the same exact grant back to disabled after any post-move failure',
+);
+
+const rotationMainStart = v3SuccessorHelperRotation.indexOf(
+  'rotation_state="$(classify_rotation)"',
+);
+assert.ok(rotationMainStart >= 0, 'the one-use rotation main transaction must be extractable');
+const rotationMain = v3SuccessorHelperRotation.slice(rotationMainStart);
+assertInOrder(
+  rotationMain,
+  [
+    'rotation_state="$(classify_rotation)"',
+    'case "$rotation_state" in',
+    'absent)',
+    'run_predecessor_helper verify "$PREDECESSOR_HELPER_SHA256"',
+    'run_predecessor_helper kemerbet-v3-successor-ready',
+    'run_predecessor_helper stop',
+    'run_predecessor_helper kemerbet-v3-successor-ready',
+    'empty-parent)',
+    "die 'an empty rotation parent may resume only with the deployment grant disabled'",
+    'interrupted)',
+    "die 'an interrupted rotation must retain the disabled deployment grant'",
+    'completed)',
+    'require_no_helper_processes',
+    'flock --exclusive --nonblock 9',
+    '[[ "$(classify_rotation)" == "$rotation_state" ]]',
+    'load_exact_base_successor_evidence',
+    'require_stopped_no_transfer_boundary',
+    'capture_rotation_durable_boundary',
+    'trap cleanup EXIT',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    "sudoers_disabled='true'",
+    'sync -f /etc/sudoers.d',
+    'require_no_helper_processes',
+    'load_exact_base_successor_evidence',
+    'require_preserved_rotation_durable_boundary',
+    'publish_record "$ROTATION_INSTALLING" intent',
+    'copy_root_file_atomically "$TARGET"',
+    'copy_root_file_atomically "$STAGED_HELPER"',
+    'mv -- "$INSTALLING_HELPER" "$TARGET"',
+    'publish_record "$ROTATION_INSTALLING" completion',
+    'require_exact_rotation "$ROTATION_INSTALLING"',
+    'mv -- "$ROTATION_INSTALLING" "$ROTATION_ROOT"',
+    "rotation_finalized='true'",
+    'require_exact_rotation "$ROTATION_ROOT"',
+    'require_global_installer_residue_absent',
+    'require_preserved_rotation_durable_boundary',
+    'flock --unlock 9',
+    'run_successor_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_successor_helper_direct kemerbet-v3-successor-ready',
+    'flock --exclusive --nonblock 9',
+    'require_no_helper_processes',
+    'load_exact_base_successor_evidence',
+    'require_exact_rotation "$ROTATION_ROOT"',
+    'require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755',
+    'require_global_installer_residue_absent',
+    'require_preserved_rotation_durable_boundary',
+    'restore_sudoers',
+    "sudoers_disabled='false'",
+    'trap - EXIT',
+  ],
+  'the rotation must quiesce the old helper, lock and disable sudo, append exact evidence, self-attest the successor while disabled, and only then restore the grant',
+);
+assert.equal(
+  (rotationMain.match(/restore_sudoers/g) ?? []).length,
+  1,
+  'the deployment grant may be restored at exactly one final post-attestation point',
+);
+assert.match(
+  rotationMain,
+  /if \[\[ "\$rotation_state" == 'completed' \]\]; then[\s\S]*?require_global_installer_residue_absent[\s\S]*?rotation_finalized='true'/u,
+  'a completed resume must reject every global install or rollback residue before successor self-attestation',
+);
+assert.match(
+  rotationMain,
+  /run_successor_helper_direct kemerbet-v3-successor-ready[\s\S]*?flock --exclusive --nonblock 9[\s\S]*?require_global_installer_residue_absent[\s\S]*?restore_sudoers/u,
+  'residue, evidence, helper, and stopped-boundary checks must repeat after temporary lock release and before grant restoration',
+);
+assert.doesNotMatch(
+  rotationMain.slice(
+    rotationMain.indexOf('mv -- "$SUDOERS" "$SUDOERS_DISABLED"'),
+    rotationMain.indexOf('restore_sudoers'),
+  ),
+  /run_predecessor_helper|sudo -n/u,
+  'the disabled-grant transaction must never regain the predecessor sudo path',
+);
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const restoreHarness = [
+    'set -euo pipefail',
+    'fixture_dir="$(mktemp -d)"',
+    'trap \'command rm -rf -- "$fixture_dir"\' EXIT',
+    'SUDOERS="$fixture_dir/active"',
+    'SUDOERS_DISABLED="$fixture_dir/disabled"',
+    'printf "%s\\n" exact-grant >"$SUDOERS_DISABLED"',
+    'chmod 0440 "$SUDOERS_DISABLED"',
+    "MOVED='false'",
+    "SYNC_FAILED='false'",
+    "VALIDATION_FAILED='false'",
+    "VISUDO_CALLS='0'",
+    'require_exact_sudoers_file() {',
+    '  local path="$1"',
+    '  if [[ "$FAULT_POINT" == validation && "$path" == "$SUDOERS" && "$MOVED" == true && "$VALIDATION_FAILED" == false ]]; then VALIDATION_FAILED=true; return 1; fi',
+    '  [[ ! -L "$path" && -f "$path" && "$(cat "$path")" == exact-grant ]]',
+    '}',
+    'visudo() {',
+    '  VISUDO_CALLS="$((VISUDO_CALLS + 1))"',
+    '  if [[ "$FAULT_POINT" == visudo && "$VISUDO_CALLS" == 3 ]]; then return 1; fi',
+    '  return 0',
+    '}',
+    'sync() {',
+    '  if [[ "$FAULT_POINT" == sync && "$MOVED" == true && "$SYNC_FAILED" == false ]]; then SYNC_FAILED=true; return 1; fi',
+    '  return 0',
+    '}',
+    'mv() {',
+    '  local source="${@: -2:1}" target="${@: -1}"',
+    '  command mv "$@" || return 1',
+    '  if [[ "$source" == "$SUDOERS_DISABLED" && "$target" == "$SUDOERS" ]]; then MOVED=true; fi',
+    '}',
+    rotationGrantRestore,
+    'set +e',
+    'restore_sudoers',
+    'status=$?',
+    'set -e',
+    'if [[ "$FAULT_POINT" == none ]]; then',
+    '  [[ "$status" == 0 && -f "$SUDOERS" && ! -e "$SUDOERS_DISABLED" ]]',
+    'else',
+    '  [[ "$status" != 0 && ! -e "$SUDOERS" && -f "$SUDOERS_DISABLED" ]]',
+    '  require_exact_sudoers_file "$SUDOERS_DISABLED"',
+    'fi',
+  ].join('\n');
+  for (const faultPoint of ['none', 'sync', 'validation', 'visudo']) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: restoreHarness,
+      env: { PATH: process.env.PATH, FAULT_POINT: faultPoint },
+    });
+    assert.equal(
+      result.status,
+      0,
+      `the ${faultPoint} grant-restore fault fixture must leave an exact active success or exact disabled rollback: ${result.stderr}`,
+    );
+  }
+
+  const durableHarness = [
+    'set -euo pipefail',
+    `ROTATION_COMPOSE5_DURABLE_VOLUME_DIGEST='${'a'.repeat(64)}'`,
+    `ROTATION_COMPOSE5_PROFILE_CONFIG_HASH='${'b'.repeat(64)}'`,
+    `ROTATION_COMPOSE5_SESSION_CONTROL_CONFIG_HASH='${'c'.repeat(64)}'`,
+    "ROTATION_COMPOSE5_VOLUME_VERSION='5.2.1'",
+    'require_stopped_no_transfer_boundary() {',
+    '  COMPOSE5_DURABLE_VOLUME_DIGEST="$CURRENT_DURABLE_DIGEST"',
+    '  COMPOSE5_PROFILE_CONFIG_HASH="$CURRENT_PROFILE_HASH"',
+    '  COMPOSE5_SESSION_CONTROL_CONFIG_HASH="$CURRENT_SESSION_HASH"',
+    '  COMPOSE5_VOLUME_VERSION="$CURRENT_VERSION"',
+    '}',
+    rotationDurablePreserver,
+    'require_preserved_rotation_durable_boundary',
+  ].join('\n');
+  for (const [
+    name,
+    currentDurableDigest,
+    currentProfileHash,
+    currentSessionHash,
+    currentVersion,
+    expectedStatus,
+  ] of [
+    ['unchanged volumes', 'a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64), '5.2.1', 0],
+    ['recreated same-name volumes', 'd'.repeat(64), 'b'.repeat(64), 'c'.repeat(64), '5.2.1', 1],
+    ['changed profile contract', 'a'.repeat(64), 'd'.repeat(64), 'c'.repeat(64), '5.2.1', 1],
+    ['changed control contract', 'a'.repeat(64), 'b'.repeat(64), 'd'.repeat(64), '5.2.1', 1],
+    ['changed Compose version', 'a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64), '5.2.2', 1],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: durableHarness,
+      env: {
+        PATH: process.env.PATH,
+        CURRENT_DURABLE_DIGEST: currentDurableDigest,
+        CURRENT_PROFILE_HASH: currentProfileHash,
+        CURRENT_SESSION_HASH: currentSessionHash,
+        CURRENT_VERSION: currentVersion,
+      },
+    });
+    assert.equal(
+      result.status === 0 ? 0 : 1,
+      expectedStatus,
+      `${name} durable-boundary fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+}
+
+if (process.platform === 'linux') {
+  const fixtureSha256 = (value) => createHash('sha256').update(value).digest('hex');
+  const exactWrite = (path, value, mode) => {
+    writeFileSync(path, value, { mode });
+    chmodSync(path, mode);
+  };
+  const adaptRootOwnedPython = (source) =>
+    source
+      .replaceAll('(0, 0, 0o700)', '(os.getuid(), os.getgid(), 0o700)')
+      .replaceAll('(0, 0, 0o444)', '(os.getuid(), os.getgid(), 0o444)')
+      .replaceAll('(10001, 10001, 0o400)', '(os.getuid(), os.getgid(), 0o400)')
+      .replaceAll('(0, 0)', '(os.getuid(), os.getgid())')
+      .replaceAll('(10001, 10001)', '(os.getuid(), os.getgid())');
+
+  const classifierPython = adaptRootOwnedPython(
+    extractSingleQuotedPythonHeredoc(rotationClassifier, 'classify_rotation'),
+  );
+  const classifierFixtureRoot = mkdtempSync(join(tmpdir(), 'fetanagent-v3-rotation-classifier-'));
+  const classifierParent = join(classifierFixtureRoot, 'rotation');
+  const classifierRelease = 'a'.repeat(40);
+  const runClassifier = () =>
+    spawnSync('/usr/bin/python3', ['-I', '-', classifierParent, classifierRelease], {
+      encoding: 'utf8',
+      input: classifierPython,
+    });
+  try {
+    let classifierResult = runClassifier();
+    assert.equal(classifierResult.status, 0, classifierResult.stderr);
+    assert.equal(classifierResult.stdout.trim(), 'absent');
+
+    mkdirSync(classifierParent, { mode: 0o700 });
+    chmodSync(classifierParent, 0o700);
+    classifierResult = runClassifier();
+    assert.equal(classifierResult.status, 0, classifierResult.stderr);
+    assert.equal(
+      classifierResult.stdout.trim(),
+      'empty-parent',
+      'a crash after publishing only the exact empty parent must remain resumable',
+    );
+
+    mkdirSync(join(classifierParent, `${classifierRelease}.installing`), { mode: 0o700 });
+    classifierResult = runClassifier();
+    assert.equal(classifierResult.status, 0, classifierResult.stderr);
+    assert.equal(classifierResult.stdout.trim(), 'interrupted');
+    rmSync(join(classifierParent, `${classifierRelease}.installing`), { recursive: true });
+
+    mkdirSync(join(classifierParent, classifierRelease), { mode: 0o700 });
+    classifierResult = runClassifier();
+    assert.equal(classifierResult.status, 0, classifierResult.stderr);
+    assert.equal(classifierResult.stdout.trim(), 'completed');
+    mkdirSync(join(classifierParent, 'foreign'), { mode: 0o700 });
+    classifierResult = runClassifier();
+    assert.notEqual(
+      classifierResult.status,
+      0,
+      'any second or foreign rotation entry must fail closed',
+    );
+  } finally {
+    rmSync(classifierFixtureRoot, { recursive: true, force: true });
+  }
+
+  const baseEvidencePython = adaptRootOwnedPython(
+    extractSingleQuotedPythonHeredoc(rotationBaseEvidence, 'load_exact_base_successor_evidence'),
+  );
+  const fixtureUuid = '00000000-0000-1000-8000-000000000001';
+  const alternateFixtureUuid = '00000000-0000-1000-8000-000000000002';
+  const fixtureIdentityHmac = '1'.repeat(64);
+  const fixtureAuthorization = '2'.repeat(64);
+  const fixtureV2 = Buffer.from(
+    `${fixtureUuid} hmac-sha256-agent-identity-v1:${fixtureIdentityHmac} ` +
+      `sha256-provider-authorization-v1:${fixtureAuthorization}\n`,
+    'ascii',
+  );
+  const v3Binding = (account = fixtureUuid, hmac = fixtureIdentityHmac) =>
+    Buffer.from(
+      `${account} hmac-sha256-agent-identity-v1:${hmac} ` +
+        `hmac-sha256-agent-profile-pin-v3:${hmac}\n`,
+      'ascii',
+    );
+  assert.equal(fixtureV2.length, 230);
+  assert.equal(v3Binding().length, 230);
+
+  const buildBaseEvidenceFixture = (name, options = {}) => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), `fetanagent-v3-base-${name}-`));
+    const parent = join(fixtureRoot, 'base');
+    const expectedRelease = 'b'.repeat(40);
+    const predecessorRelease = 'a'.repeat(40);
+    const retirementRelease = options.retirementRelease ?? predecessorRelease;
+    const expectedHelper = 'c'.repeat(64);
+    const successorRoot = join(parent, expectedRelease);
+    const retirement = join(fixtureRoot, 'retirement');
+    const source = join(fixtureRoot, 'binding-v3');
+    const identityKey = join(fixtureRoot, 'identity-key');
+    const oldHelper = Buffer.from('#!/usr/bin/env bash\nexit 0\n', 'ascii');
+    const oldHelperSha = fixtureSha256(oldHelper);
+    const identityKeyData = Buffer.from('3'.repeat(64), 'ascii');
+    const selectedV3 = v3Binding(
+      options.v3Account ?? fixtureUuid,
+      options.v3Hmac ?? fixtureIdentityHmac,
+    );
+
+    mkdirSync(parent, { mode: 0o700 });
+    mkdirSync(successorRoot, { mode: 0o700 });
+    mkdirSync(retirement, { mode: 0o700 });
+    chmodSync(parent, 0o700);
+    chmodSync(successorRoot, 0o700);
+    chmodSync(retirement, 0o700);
+    exactWrite(identityKey, identityKeyData, 0o400);
+    const identityStat = statSync(identityKey);
+
+    const retirementIntentLines = [
+      'contract=fetanagent-kemerbet-readiness-binding-v1-retirement-v1',
+      'state=retirement-authorized',
+      `release=${retirementRelease}`,
+      'helper_dev_ino=10:20',
+      `helper_sha256=${oldHelperSha}`,
+      'legacy_binding_dev_ino=30:40',
+      `legacy_binding_sha256=${'4'.repeat(64)}`,
+      `identity_hmac_key_dev_ino=${identityStat.dev}:${identityStat.ino}`,
+      `identity_hmac_key_sha256=${fixtureSha256(identityKeyData)}`,
+      `claim_sha256=${'5'.repeat(64)}`,
+      'owner_stage_player_ids_dev_ino=50:60',
+      `owner_stage_player_ids_sha256=${'6'.repeat(64)}`,
+      'owner_stage_claim_dev_ino=70:80',
+      `release_asset_sha256=${'7'.repeat(64)}`,
+    ];
+    const retirementIntent = `${retirementIntentLines.join('\n')}\n`;
+    const retirementCompletionLines = [
+      retirementIntentLines[0],
+      'state=resealed-v2',
+      ...retirementIntentLines.slice(2),
+      'v2_binding_dev_ino=90:100',
+      `v2_binding_sha256=${fixtureSha256(fixtureV2)}`,
+    ];
+    let retirementCompletion = `${retirementCompletionLines.join('\n')}\n`;
+    let publishedRetirementIntent = retirementIntent;
+    if (options.unboundRetirementEvidence) {
+      publishedRetirementIntent = retirementIntent.replace(
+        `claim_sha256=${'5'.repeat(64)}`,
+        `claim_sha256=${'8'.repeat(64)}`,
+      );
+    }
+    exactWrite(join(retirement, 'intent-v1'), publishedRetirementIntent, 0o600);
+    exactWrite(join(retirement, 'completed-v1'), retirementCompletion, 0o600);
+
+    const baseIntentLines = [
+      'contract=fetanagent-kemerbet-readiness-v2-v3-successor-v1',
+      'state=authorized',
+      `predecessor_release=${predecessorRelease}`,
+      `successor_release=${expectedRelease}`,
+      `predecessor_helper_sha256=${oldHelperSha}`,
+      `successor_helper_sha256=${expectedHelper}`,
+      `v2_binding_sha256=${fixtureSha256(fixtureV2)}`,
+      `retirement_intent_sha256=${fixtureSha256(retirementIntent)}`,
+      `retirement_completion_sha256=${fixtureSha256(retirementCompletion)}`,
+    ];
+    const baseIntent = `${baseIntentLines.join('\n')}\n`;
+    const baseCompletion = `${[
+      baseIntentLines[0],
+      'state=successor-installed',
+      ...baseIntentLines.slice(2),
+      `v3_binding_sha256=${fixtureSha256(selectedV3)}`,
+    ].join('\n')}\n`;
+    exactWrite(join(successorRoot, 'intent-v1'), baseIntent, 0o600);
+    exactWrite(join(successorRoot, 'completed-v1'), baseCompletion, 0o600);
+    exactWrite(join(successorRoot, 'binding-v2'), fixtureV2, 0o400);
+    exactWrite(join(successorRoot, 'predecessor-helper'), oldHelper, 0o400);
+    exactWrite(source, selectedV3, 0o600);
+
+    return {
+      fixtureRoot,
+      args: [
+        parent,
+        source,
+        expectedRelease,
+        expectedHelper,
+        retirement,
+        identityKey,
+        join(fixtureRoot, 'committed-binding'),
+        join(fixtureRoot, 'recheck-receipt'),
+        join(fixtureRoot, 'owner-completion'),
+        join(fixtureRoot, 'promotion'),
+        join(fixtureRoot, 'candidate'),
+        join(fixtureRoot, 'rpc'),
+      ],
+    };
+  };
+  const runBaseEvidenceFixture = (fixture) =>
+    spawnSync('/usr/bin/python3', ['-I', '-', ...fixture.args], {
+      encoding: 'utf8',
+      input: baseEvidencePython,
+    });
+  for (const [name, options, expectedStatus] of [
+    ['exact immutable base', {}, 0],
+    ['changed retirement evidence digest', { unboundRetirementEvidence: true }, 1],
+    ['different coherent retirement predecessor', { retirementRelease: 'd'.repeat(40) }, 1],
+    ['valid-shaped different v3 account', { v3Account: alternateFixtureUuid }, 1],
+    ['valid-shaped different v3 hmac', { v3Hmac: '9'.repeat(64) }, 1],
+  ]) {
+    const fixture = buildBaseEvidenceFixture(name.replaceAll(' ', '-'), options);
+    try {
+      const result = runBaseEvidenceFixture(fixture);
+      assert.equal(
+        result.status === 0 ? 0 : 1,
+        expectedStatus,
+        `${name} base-evidence fixture returned ${result.status}: ${result.stderr}`,
+      );
+      if (expectedStatus === 0) {
+        assert.match(
+          result.stdout,
+          /^(?:[0-9a-f]{64}\n){5}$/u,
+          'the valid base parser may expose only its five non-secret digests',
+        );
+      } else {
+        assert.equal(result.stdout, '', `${name} must fail without exposing any partial evidence`);
+      }
+    } finally {
+      rmSync(fixture.fixtureRoot, { recursive: true, force: true });
+    }
+  }
+}
+
 for (const artifact of [
   workflow,
   botWorkflow,
@@ -813,6 +1490,7 @@ for (const artifact of [
   qualityWorkflow,
   compose,
   helper,
+  v3SuccessorHelperRotation,
   stagingRunbook,
 ]) {
   assert.doesNotMatch(
@@ -2360,7 +3038,7 @@ for (const successorGateContract of [
   /hashlib\.sha256\(retirement_intent_data\)\.hexdigest\(\) != retirement_intent_sha/u,
   /hashlib\.sha256\(retirement_completion_data\)\.hexdigest\(\) != retirement_completion_sha/u,
   /helper_data = exact_file\(helper, \(0, 0\), 0o755, 2 \* 1024 \* 1024\)/u,
-  /hashlib\.sha256\(helper_data\)\.hexdigest\(\) != successor_helper_sha/u,
+  /hashlib\.sha256\(helper_data\)\.hexdigest\(\) != effective_helper_sha/u,
   /require_v3_binding\(binding, \(10001, 10001\), 0o600\)/u,
   /os\.path\.lexists\(committed_binding\)[\s\S]*?os\.path\.lexists\(os\.path\.dirname\(recheck_receipt\)\)[\s\S]*?os\.path\.lexists\(owner_completion\)[\s\S]*?os\.path\.lexists\(candidate_root\)[\s\S]*?os\.path\.lexists\(rpc_root\)/u,
   /gate_state = 'successor-installed'/u,
@@ -2368,7 +3046,7 @@ for (const successorGateContract of [
   /exact_directory\(os\.path\.dirname\(recheck_receipt\), 0o700, \['ready-v1'\]\)/u,
   /identity_key_owner_mode != \(0, 0, 0o444\)/u,
   /selector_data = exact_file\(selector_contract, \(0, 0\), 0o444, 1024 \* 1024\)/u,
-  /receipt_lines\[1\] != f'release=\{successor\}'/u,
+  /receipt_lines\[1\] != f'release=\{effective_release\}'/u,
   /receipt_lines\[2\] != f'binding_sha256=\{v3_sha\}'/u,
   /identity_hmac_key_sha256=\{hashlib\.sha256\(identity_key_data\)\.hexdigest\(\)\}/u,
   /selector_sha256=\{hashlib\.sha256\(selector_data\)\.hexdigest\(\)\}/u,
@@ -2378,7 +3056,7 @@ for (const successorGateContract of [
   /for consumed_or_transient in \([\s\S]*?binding,[\s\S]*?readiness_player_ids,[\s\S]*?candidate_root,[\s\S]*?promotion_root,[\s\S]*?rpc_root,[\s\S]*?\)/u,
   /gate_state = 'successor-recheck-recoverable'/u,
   /gate_state = 'successor-completed'/u,
-  /sys\.stdout\.write\(successor \+ '\\n' \+ successor_helper_sha \+ '\\n' \+ gate_state \+ '\\n'\)/u,
+  /sys\.stdout\.write\(effective_release \+ '\\n' \+ effective_helper_sha \+ '\\n' \+ gate_state \+ '\\n'\)/u,
   /\^\(successor-installed\|successor-recheck-recoverable\|successor-completed\)\$/u,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="\$\{inspection_lines\[2\]\}"/u,
 ]) {
@@ -2392,6 +3070,80 @@ assert.equal(
   ).length,
   1,
   'the successor inspector must define one exact immutable four-entry overlay',
+);
+const successorRotationChainStart = inspectV2V3SuccessorGate.indexOf(
+  'effective_release = successor',
+);
+const successorRotationChainEnd = inspectV2V3SuccessorGate.indexOf(
+  'def require_live_successor_helper():',
+  successorRotationChainStart,
+);
+assert.ok(
+  successorRotationChainStart >= 0 && successorRotationChainEnd > successorRotationChainStart,
+  'the successor inspector must expose one bounded effective-helper rotation-chain parser',
+);
+const successorRotationChain = inspectV2V3SuccessorGate.slice(
+  successorRotationChainStart,
+  successorRotationChainEnd,
+);
+for (const rotationChainContract of [
+  /effective_release = successor/u,
+  /effective_helper_sha = successor_helper_sha/u,
+  /if os\.path\.lexists\(rotation_parent\):/u,
+  /rotation_parent_value = os\.lstat\(rotation_parent\)/u,
+  /stat\.S_ISDIR\(rotation_parent_value\.st_mode\)/u,
+  /exact_directory\(rotation_parent, 0o700, \[rotation_release\]\)/u,
+  /\['completed-v1', 'intent-v1', 'predecessor-helper'\]/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v1/u,
+  /len\(rotation_intent\) != 15/u,
+  /len\(rotation_completion\) != 16/u,
+  /rotation_intent\[2\] != f'predecessor_release=\{successor\}'/u,
+  /rotation_intent\[3\] != f'successor_release=\{rotation_release\}'/u,
+  /rotation_intent\[4\] != f'predecessor_helper_sha256=\{successor_helper_sha\}'/u,
+  /base_successor_intent_sha256=/u,
+  /base_successor_completion_sha256=/u,
+  /base_binding_v2_sha256=/u,
+  /base_predecessor_helper_sha256=/u,
+  /base_binding_v3_sha256=/u,
+  /compose5_durable_volume_digest=/u,
+  /compose5_profile_config_hash=/u,
+  /compose5_session_control_config_hash=/u,
+  /compose5_volume_version=/u,
+  /compose_version\.fullmatch\(rotation_intent\[14\]\.split\('=', 1\)\[1\]\)/u,
+  /rotation_completion\[2:15\] != rotation_intent\[2:15\]/u,
+  /rotation_completion\[15\] !=/u,
+  /rotation_intent_sha256=/u,
+  /hashlib\.sha256\(archived_successor_helper\)\.hexdigest\(\) != successor_helper_sha/u,
+  /effective_release = rotation_release/u,
+  /effective_helper_sha = rotation_intent\[5\]\.split\('=', 1\)\[1\]/u,
+]) {
+  assert.match(successorRotationChain, rotationChainContract);
+}
+assertInOrder(
+  successorRotationChain,
+  [
+    'effective_release = successor',
+    'if os.path.lexists(rotation_parent):',
+    'rotation_parent_value = os.lstat(rotation_parent)',
+    'exact_directory(rotation_parent, 0o700, [rotation_release])',
+    "['completed-v1', 'intent-v1', 'predecessor-helper']",
+    "rotation_completion[1] != 'state=successor-installed'",
+    'rotation_intent_sha256=',
+    'archived_successor_helper = exact_file(',
+    'effective_release = rotation_release',
+    "effective_helper_sha = rotation_intent[5].split('=', 1)[1]",
+  ],
+  'only one exact completed append-only rotation may change the effective release and helper identity',
+);
+assert.doesNotMatch(
+  successorRotationChain,
+  /os\.(?:rename|replace|unlink|mkdir|makedirs)|open\([^\n]*O_(?:WRONLY|RDWR|CREAT)/u,
+  'the helper rotation-chain inspector must remain read-only',
+);
+assert.match(
+  inspectV2V3SuccessorGate,
+  /receipt_lines\[1\] != f'release=\{effective_release\}/u,
+  'a later terminal ready receipt must bind the effective rotated recheck release, not the immutable base migration release',
 );
 const successorRecoverableBranch =
   /promotion_exists = promotion_exists_and_is_safe\(\)\nif promotion_exists:([\s\S]*?)\nelif os\.path\.lexists\(binding\):/u.exec(
@@ -2444,6 +3196,91 @@ assert.doesNotMatch(
   /require_live_successor_helper/u,
   'terminal successor completion must survive later approved helper rotation',
 );
+const terminalCompletedStart = inspectV2V3SuccessorGate.indexOf(
+  'else:\n    require_v3_binding(committed_binding',
+);
+const terminalCompletedAssignment = "    gate_state = 'successor-completed'";
+const terminalCompletedEnd =
+  inspectV2V3SuccessorGate.indexOf(terminalCompletedAssignment, terminalCompletedStart) +
+  terminalCompletedAssignment.length;
+assert.ok(
+  terminalCompletedStart >= 0 && terminalCompletedEnd > terminalCompletedStart,
+  'the exact terminal successor-completed Python branch must be extractable',
+);
+const executableTerminalCompletedBranch = inspectV2V3SuccessorGate
+  .slice(terminalCompletedStart, terminalCompletedEnd)
+  .replace(/^else:/u, 'if True:');
+if (process.platform === 'linux') {
+  const completedFixture = `
+import hashlib
+import os
+import re
+
+effective_release = '${'b'.repeat(40)}'
+effective_helper_sha = '${'c'.repeat(64)}'
+later_helper_bytes = b'later ordinary reviewed helper bytes'
+assert hashlib.sha256(later_helper_bytes).hexdigest() != effective_helper_sha
+v3_sha = '${'d'.repeat(64)}'
+identity_key_data = b'identity-key-fixture'
+selector_bytes = b'{"fixture":true}\n'
+owner_completion_data = b'00000000-0000-1000-8000-000000000000\n'
+claim = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\n')
+retirement_intent = [''] * 10
+retirement_intent[9] = 'claim_sha256=' + hashlib.sha256(owner_completion_data).hexdigest()
+identity_key_owner_mode = (0, 0, 0o444)
+committed_binding = '/fixture/committed-binding'
+recheck_receipt = '/fixture/ready/ready-v1'
+owner_completion = '/fixture/owner/completed-v1'
+selector_contract = '/fixture/selector'
+binding = '/fixture/consumed-binding'
+readiness_player_ids = '/fixture/consumed-player-ids'
+candidate_root = '/fixture/candidate'
+promotion_root = '/fixture/promotion'
+rpc_root = '/fixture/rpc'
+receipt_lines = [
+    'version=1',
+    f'release={effective_release}',
+    f'binding_sha256={v3_sha}',
+    f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}',
+    f'selector_sha256={hashlib.sha256(selector_bytes).hexdigest()}',
+    'image_id=sha256:${'e'.repeat(64)}',
+    'profile_volume=fetanagent-staging-beta_kemerbet_sessions',
+    'profile_identity_sha256=${'f'.repeat(64)}',
+]
+receipt_data = ('\\n'.join(receipt_lines) + '\\n').encode('ascii')
+
+def require_live_successor_helper():
+    raise AssertionError('terminal completion re-pinned later helper bytes')
+
+def require_v3_binding(*_args):
+    return b'binding'
+
+def exact_directory(*_args):
+    return None
+
+def exact_file(path, *_args):
+    if path == recheck_receipt:
+        return receipt_data
+    if path == selector_contract:
+        return selector_bytes
+    if path == owner_completion:
+        return owner_completion_data
+    raise AssertionError(path)
+
+os.path.lexists = lambda _path: False
+${executableTerminalCompletedBranch}
+assert gate_state == 'successor-completed'
+`;
+  const completedFixtureResult = spawnSync('/usr/bin/python3', ['-I', '-'], {
+    encoding: 'utf8',
+    input: completedFixture,
+  });
+  assert.equal(
+    completedFixtureResult.status,
+    0,
+    `terminal completion must accept later helper bytes while retaining the rotated receipt release: ${completedFixtureResult.stderr}`,
+  );
+}
 for (const successorState of [
   'successor-recheck-recoverable',
   'successor-installed',
@@ -2460,7 +3297,8 @@ for (const forbiddenSuccessorCompletionMarker of [
   /publish_kemerbet_v3_successor_recheck_completion/u,
   /completion_name/u,
   /completion_temporary_name/u,
-  /successor_completion/u,
+  /\bKEMERBET_V3_SUCCESSOR_COMPLETION(?:_NAME|_PATH|_ROOT)?\b/u,
+  /\bsuccessor_completion(?:_name|_path|_root)?=/u,
   /contract=fetanagent-kemerbet-v2-v3-successor-recheck-v1/u,
   /successor-commit-prefix/u,
 ]) {

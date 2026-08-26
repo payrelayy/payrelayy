@@ -222,6 +222,67 @@ only before the independent recheck consumes the v3 source and only while the or
 helper remains installed. Do not rerun this migration after `successor-completed` or a later approved
 helper rotation.
 
+#### One-use installed-v3 helper/release rotation
+
+While the v3 source is still `successor-installed`, an approved helper repair cannot use ordinary
+deployment: the immutable base overlay pins release
+`de14588d4e5b8ee9e80a1a667f2e4d59ef6a62e3` and helper SHA-256
+`e94dfdcfe90ff6021446fc66e2850ae13198b03d9e2210f454181ab00177f97d`. Use only the reviewed
+root-console operation
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation.sh).
+The script itself hard-pins the reviewed successor-helper SHA-256; the supplied digest must equal
+that constant. The successor release remains an exact 40-character merged-`main` input because a
+commit cannot contain its own Git SHA.
+
+From the exact successor checkout, place the public script and the LF-exact successor helper in
+root-owned mode-`0700` directory
+`/root/fetanagent-v3-helper-rotation-<successor-release>/`; the helper filename must be
+`fetanagent-staging-deploy-helper.next`, root-owned mode `0600`. Review its SHA-256 independently,
+then run from the direct DigitalOcean root console:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-ONE-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+The operation verifies the fixed Droplet, frozen predecessor helper, complete immutable base
+successor and retirement evidence, v2-to-v3 account/HMAC continuity, exact installed v3 source,
+disarmed expiry guard, absent Telegram receipt and recheck transients, zero project containers and
+networks, and exactly two holder-free Compose-5 durable volumes including their lower-case config
+hashes. It uses the existing root mutation lock and disables the exact deployment sudoers grant
+before publishing any rotation namespace or changing helper bytes.
+
+The base four-entry successor directory and canonical retirement directory are never changed. One
+new root-owned append-only record under
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation/<successor-release>/` contains exact
+intent/completion files and a read-only archive of the frozen predecessor helper. The records bind
+both releases, both helper digests, the SHA-256 of every base successor artifact, the exact durable
+volume identity digest, both lower-case Compose config hashes, and the exact Compose version. The
+operation freezes those volume values under the mutation lock, recomputes them at every later
+checkpoint, and rejects recreated same-name volumes or changed volume metadata on same-input
+resume. Only that exact completed chain changes the helper inspector's effective release and helper
+identity. An absent record keeps the base identity; an intent-only, `.installing`, foreign, or
+malformed record is invalid to the new helper.
+
+The operation is resumable only with the same successor release, hard-pinned helper digest, and
+staged bytes. Exact empty-parent and partial-record crash points are resumable only while the grant
+remains disabled. Before completion, a failure can atomically restore only the archived frozen
+helper, but it never restores sudo; rerun the same inputs. After the final record is published, any
+self-attestation or grant-restoration failure also leaves sudo disabled and requires the same-input
+rerun. Grant restoration prevalidates the disabled file and complete sudoers configuration; if
+directory synchronization, active-file validation, or final `visudo` fails after the rename, it
+atomically moves the same exact grant back to the disabled path. Do not delete a prefix, remove an
+installer residue, restore sudo manually, or start the runtime while recovery is pending.
+
+After completion, `successor-installed` returns the effective repair release so ordinary sealed
+install, private sign-in, and exact-five recheck bind that release. If the recheck later becomes
+`successor-completed`, `ready-v1` must also name this effective release. Terminal completion still
+does not pin the live helper digest, so a later separately approved ordinary helper upgrade does not
+invalidate durable completion; all legacy v1/v2 commands remain permanently forbidden. This
+rotation never starts `deposit-executor`, enables a financial flag, invokes Transfer, or moves money.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only

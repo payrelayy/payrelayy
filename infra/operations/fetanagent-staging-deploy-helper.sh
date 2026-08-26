@@ -2089,10 +2089,42 @@ require_kemerbet_v1_retirement_expiry_guard_armed() {
 
 KEMERBET_V1_RETIREMENT_DURABLE_VOLUME_DIGEST=''
 
+inspect_kemerbet_durable_volume_contract() {
+  [[ $# -eq 2 ]] || return 1
+  local compose_config_hash compose_version driver expected_volume_label="$2" label_count
+  local mountpoint name options project residue scope volume="$1" volume_contract volume_label
+  case "$expected_volume_label" in
+    kemerbet_sessions|kemerbet_session_control) ;;
+    *) return 1 ;;
+  esac
+  volume_contract="$(docker_local volume inspect "$volume" \
+    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.version" }}|{{ index .Labels "com.docker.compose.volume" }}|{{with index .Labels "com.docker.compose.config-hash"}}{{.}}{{end}}|{{.Mountpoint}}')" ||
+    return 1
+  IFS='|' read -r name driver scope options label_count project compose_version \
+    volume_label compose_config_hash mountpoint residue <<<"$volume_contract"
+  [[ -z "$residue" && "$name" == "$volume" && "$driver" == 'local' &&
+    "$scope" == 'local' && "$options" == 'null' && "$project" == "$PROJECT_NAME" &&
+    "$compose_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~-][0-9A-Za-z._-]+)?$ &&
+    "$volume_label" == "$expected_volume_label" &&
+    "$mountpoint" == "/var/lib/docker/volumes/$volume/_data" ]] || return 1
+  case "$label_count" in
+    3)
+      [[ -z "$compose_config_hash" ]] || return 1
+      printf '%s' \
+        "$name|$driver|$scope|$options|$label_count|$project|$compose_version|$volume_label|$mountpoint"
+      ;;
+    4) [[ "$compose_config_hash" =~ ^[0-9a-f]{64}$ ]] || return 1 ;;
+    *) return 1 ;;
+  esac
+  if [[ "$label_count" == '4' ]]; then
+    printf '%s' "$volume_contract"
+  fi
+}
+
 require_kemerbet_v1_retirement_durable_volumes() {
   local account_id binding_line claim_digest control_mountpoint expected_volumes identity_binding profile_digest
   local control_contract profile_contract profile_mountpoint project_volumes provider_binding residue
-  local volume volume_compose_version volume_contract
+  local volume volume_compose_version volume_contract volume_label_count volume_label_schema
   KEMERBET_V1_RETIREMENT_DURABLE_VOLUME_DIGEST=''
   project_volumes="$(docker_local volume ls --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" | LC_ALL=C sort)" || return 1
@@ -2100,29 +2132,35 @@ require_kemerbet_v1_retirement_durable_volumes() {
     "$KEMERBET_PROFILE_VOLUME" "$KEMERBET_SESSION_CONTROL_VOLUME" | LC_ALL=C sort)"
   [[ "$project_volumes" == "$expected_volumes" ]] || return 1
   volume_compose_version=''
+  volume_label_schema=''
   for volume in "$KEMERBET_PROFILE_VOLUME" "$KEMERBET_SESSION_CONTROL_VOLUME"; do
-    volume_contract="$(docker_local volume inspect "$volume" \
-      --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.version" }}|{{ index .Labels "com.docker.compose.volume" }}|{{.Mountpoint}}')" ||
-      return 1
+    case "$volume" in
+      "$KEMERBET_PROFILE_VOLUME")
+        volume_contract="$(inspect_kemerbet_durable_volume_contract \
+          "$volume" kemerbet_sessions)" || return 1
+        ;;
+      "$KEMERBET_SESSION_CONTROL_VOLUME")
+        volume_contract="$(inspect_kemerbet_durable_volume_contract \
+          "$volume" kemerbet_session_control)" || return 1
+        ;;
+    esac
     if [[ -z "$volume_compose_version" ]]; then
       volume_compose_version="$(cut -d '|' -f 7 <<<"$volume_contract")"
-      [[ "$volume_compose_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~-][0-9A-Za-z._-]+)?$ ]] ||
-        return 1
     else
       [[ "$(cut -d '|' -f 7 <<<"$volume_contract")" == "$volume_compose_version" ]] ||
         return 1
     fi
+    volume_label_count="$(cut -d '|' -f 5 <<<"$volume_contract")"
+    if [[ -z "$volume_label_schema" ]]; then
+      volume_label_schema="$volume_label_count"
+    else
+      [[ "$volume_label_count" == "$volume_label_schema" ]] || return 1
+    fi
     case "$volume" in
       "$KEMERBET_PROFILE_VOLUME")
-        [[ "$volume_contract" == \
-          "$volume|local|local|null|3|$PROJECT_NAME|$volume_compose_version|kemerbet_sessions|/var/lib/docker/volumes/$volume/_data" ]] ||
-          return 1
         profile_contract="$volume_contract"
         ;;
       "$KEMERBET_SESSION_CONTROL_VOLUME")
-        [[ "$volume_contract" == \
-          "$volume|local|local|null|3|$PROJECT_NAME|$volume_compose_version|kemerbet_session_control|/var/lib/docker/volumes/$volume/_data" ]] ||
-          return 1
         control_contract="$volume_contract"
         ;;
     esac
@@ -7997,19 +8035,17 @@ PY
 }
 
 resolve_kemerbet_session_control_volume_mountpoint() {
-  local mountpoint volume_name
+  local mountpoint volume_contract volume_name
   volume_name="$(docker_local volume ls --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" \
     --filter 'label=com.docker.compose.volume=kemerbet_session_control')" ||
     die 'the KemerBet session-control volume inventory could not be inspected'
   [[ "$volume_name" == "$KEMERBET_SESSION_CONTROL_VOLUME" ]] ||
     die 'the KemerBet session-control volume identity is not exact'
-  [[ "$(docker_local volume inspect "$volume_name" \
-    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}')" == \
-    "$KEMERBET_SESSION_CONTROL_VOLUME|local|local|$PROJECT_NAME|kemerbet_session_control" ]] ||
+  volume_contract="$(inspect_kemerbet_durable_volume_contract \
+    "$volume_name" kemerbet_session_control)" ||
     die 'the KemerBet session-control volume contract is not exact'
-  mountpoint="$(docker_local volume inspect "$volume_name" --format '{{.Mountpoint}}')" ||
-    die 'the KemerBet session-control volume mountpoint could not be inspected'
+  mountpoint="${volume_contract##*|}"
   [[ "$mountpoint" == /* && ! -L "$mountpoint" && -d "$mountpoint" ]] ||
     die 'the KemerBet session-control volume mountpoint is unsafe'
   [[ "$(realpath -- "$mountpoint")" == "$mountpoint" ]] ||
@@ -8020,18 +8056,13 @@ resolve_kemerbet_session_control_volume_mountpoint() {
 }
 
 resolve_kemerbet_session_control_volume_offline_mountpoint() {
-  local compose_version holders mountpoint volume_contract
-  volume_contract="$(docker_local volume inspect "$KEMERBET_SESSION_CONTROL_VOLUME" \
-    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.version" }}|{{ index .Labels "com.docker.compose.volume" }}|{{.Mountpoint}}')" ||
-    return 1
-  compose_version="$(cut -d '|' -f 7 <<<"$volume_contract")"
-  [[ "$compose_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+~-][0-9A-Za-z._-]+)?$ &&
-    "$volume_contract" == \
-      "$KEMERBET_SESSION_CONTROL_VOLUME|local|local|null|3|$PROJECT_NAME|$compose_version|kemerbet_session_control|/var/lib/docker/volumes/$KEMERBET_SESSION_CONTROL_VOLUME/_data" ]] || return 1
+  local holders mountpoint volume_contract
+  volume_contract="$(inspect_kemerbet_durable_volume_contract \
+    "$KEMERBET_SESSION_CONTROL_VOLUME" kemerbet_session_control)" || return 1
   holders="$(docker_local container ls --all --quiet \
     --filter "volume=$KEMERBET_SESSION_CONTROL_VOLUME")" || return 1
   [[ -z "$holders" ]] || return 1
-  mountpoint="/var/lib/docker/volumes/$KEMERBET_SESSION_CONTROL_VOLUME/_data"
+  mountpoint="${volume_contract##*|}"
   [[ ! -L "$mountpoint" && -d "$mountpoint" &&
     "$(realpath -- "$mountpoint")" == "$mountpoint" &&
     "$(stat --format='%u:%g:%a:%h' "$mountpoint")" == '10001:10001:700:2' ]] ||
@@ -10937,19 +10968,17 @@ restore_retryable_owner_staged_kemerbet_cohort() {
 }
 
 resolve_kemerbet_profile_volume_mountpoint() {
-  local mountpoint volume_name
+  local mountpoint volume_contract volume_name
   volume_name="$(docker_local volume ls --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME" \
     --filter 'label=com.docker.compose.volume=kemerbet_sessions')" ||
     die 'the KemerBet profile volume inventory could not be inspected'
   [[ "$volume_name" == "$KEMERBET_PROFILE_VOLUME" ]] ||
     die 'the KemerBet profile volume identity is not exact'
-  [[ "$(docker_local volume inspect "$volume_name" \
-    --format '{{.Name}}|{{.Driver}}|{{.Scope}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}')" == \
-    "$KEMERBET_PROFILE_VOLUME|local|local|$PROJECT_NAME|kemerbet_sessions" ]] ||
+  volume_contract="$(inspect_kemerbet_durable_volume_contract \
+    "$volume_name" kemerbet_sessions)" ||
     die 'the KemerBet profile volume contract is not exact'
-  mountpoint="$(docker_local volume inspect "$volume_name" --format '{{.Mountpoint}}')" ||
-    die 'the KemerBet profile volume mountpoint could not be inspected'
+  mountpoint="${volume_contract##*|}"
   [[ "$mountpoint" == /* && ! -L "$mountpoint" && -d "$mountpoint" ]] ||
     die 'the KemerBet profile volume mountpoint is unsafe'
   [[ "$(realpath -- "$mountpoint")" == "$mountpoint" ]] ||

@@ -79,7 +79,7 @@ const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retaine
 const historicalReviewedHelperSuccessorSha =
   '43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619';
 const reviewedV3HelperSuccessorSha =
-  '5e1fc83bf07cfc7e0bf22c34a82f502413c42d2d005ac1b7b70fb07bd634885e';
+  'e94dfdcfe90ff6021446fc66e2850ae13198b03d9e2210f454181ab00177f97d';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -134,6 +134,441 @@ assert.doesNotMatch(
   v2V3SuccessorMigration,
   /(?:^|[;\s])(?:rm|unlink|shred|truncate)\b|os\.(?:unlink|remove|replace)\s*\(|shutil\.rmtree\s*\(|find[^\r\n]*-delete|docker[^\r\n]*(?:container|volume|image|network)\s+rm\b/imu,
   'the successor migration must archive predecessor evidence and must contain no destructive deletion primitive',
+);
+
+const successorDurableVolumeContract = extractShellFunction(
+  helper,
+  'inspect_kemerbet_durable_volume_contract',
+  'require_kemerbet_v1_retirement_durable_volumes',
+);
+for (const composeVolumeContract of [
+  /\{\{len \.Labels\}\}/u,
+  /com\.docker\.compose\.project/u,
+  /com\.docker\.compose\.version/u,
+  /com\.docker\.compose\.volume/u,
+  /com\.docker\.compose\.config-hash/u,
+  /"\$options" == 'null'/u,
+  /"\$mountpoint" == "\/var\/lib\/docker\/volumes\/\$volume\/_data"/u,
+  /3\)\s+\[\[ -z "\$compose_config_hash" \]\] \|\| return 1/u,
+  /"\$name\|\$driver\|\$scope\|\$options\|\$label_count\|\$project\|\$compose_version\|\$volume_label\|\$mountpoint"/u,
+  /4\) \[\[ "\$compose_config_hash" =~ \^\[0-9a-f\]\{64\}\$ \]\] \|\| return 1/u,
+  /if \[\[ "\$label_count" == '4' \]\]; then\s+printf '%s' "\$volume_contract"/u,
+  /\*\) return 1/u,
+]) {
+  assert.match(successorDurableVolumeContract, composeVolumeContract);
+}
+assert.equal(
+  (successorDurableVolumeContract.match(/com\.docker\.compose\.[a-z-]+/gu) ?? []).length,
+  4,
+  'the successor durable-volume inspector must bind exactly the four recognized Compose label keys',
+);
+const successorDurableVolumeAttestor = extractShellFunction(
+  helper,
+  'require_kemerbet_v1_retirement_durable_volumes',
+  'kemerbet_v1_retirement_recovery_context_digest',
+);
+assertInOrder(
+  successorDurableVolumeAttestor,
+  [
+    'inspect_kemerbet_durable_volume_contract',
+    "volume_label_count=\"$(cut -d '|' -f 5",
+    'volume_label_schema="$volume_label_count"',
+    '"$volume_label_count" == "$volume_label_schema"',
+    'profile_contract="$volume_contract"',
+    'control_contract="$volume_contract"',
+    '"control_contract=$control_contract"',
+    '"profile_contract=$profile_contract"',
+    '} | sha256sum',
+  ],
+  'the successor must bind each exact legacy-or-Compose-5 label contract into the durable-volume digest',
+);
+for (const exactVolumeResolver of [
+  extractShellFunction(
+    helper,
+    'resolve_kemerbet_session_control_volume_mountpoint',
+    'resolve_kemerbet_session_control_volume_offline_mountpoint',
+  ),
+  extractShellFunction(
+    helper,
+    'resolve_kemerbet_session_control_volume_offline_mountpoint',
+    'require_owner_kemerbet_receipt_ancestors',
+  ),
+  extractShellFunction(
+    helper,
+    'resolve_kemerbet_profile_volume_mountpoint',
+    'kemerbet_profile_volume_holders_match',
+  ),
+]) {
+  assert.match(exactVolumeResolver, /inspect_kemerbet_durable_volume_contract/u);
+}
+
+const compose5MigrationAttestor = extractShellFunction(
+  v2V3SuccessorMigration,
+  'require_compose5_durable_volume_compatibility',
+  'run_predecessor_recovery_ready_compose5_compat',
+);
+for (const compose5MigrationContract of [
+  /volume ls --quiet[\s\S]*?label=com\.docker\.compose\.project=\$PROJECT_NAME/u,
+  /"\$project_volumes" == "\$expected_volumes"/u,
+  /\{\{len \.Labels\}\}/u,
+  /com\.docker\.compose\.config-hash/u,
+  /"\$label_count" == '4'/u,
+  /"\$compose_config_hash" =~ \^\[0-9a-f\]\{64\}\$/u,
+  /container ls --all --quiet[\s\S]*?--filter "volume=\$volume"/u,
+  /"\$holders" \]\] \|\| return 1/u,
+  /10001:10001:700/u,
+  /10001:10001:700:2/u,
+  /COMPOSE5_DURABLE_VOLUME_DIGEST="\$\(\{/u,
+]) {
+  assert.match(compose5MigrationAttestor, compose5MigrationContract);
+}
+assert.equal(
+  (compose5MigrationAttestor.match(/com\.docker\.compose\.[a-z-]+/gu) ?? []).length,
+  5,
+  'the migration must use only the project filter plus the exact four Compose volume label keys',
+);
+assert.doesNotMatch(
+  compose5MigrationAttestor,
+  /\bdocker\s+(?:volume|container|network)\s+(?:create|rm|update)\b|\b(?:mv|rm|install)\b/u,
+  'the Compose 5 compatibility attestor must remain read-only',
+);
+
+const compose5PredecessorCompatibility = extractShellFunction(
+  v2V3SuccessorMigration,
+  'run_predecessor_recovery_ready_compose5_compat',
+  'require_migration_intent',
+);
+const compose5NormalizerStart = compose5PredecessorCompatibility.indexOf(
+  'compat_activate_normalizer() {',
+);
+const compose5NormalizerEnd = compose5PredecessorCompatibility.indexOf(
+  '\nset -- kemerbet-v1-retirement-recovery-ready "$1"',
+  compose5NormalizerStart,
+);
+assert.ok(
+  compose5NormalizerStart >= 0 && compose5NormalizerEnd > compose5NormalizerStart,
+  'the predecessor compatibility path must expose one DEBUG/source normalizer',
+);
+const compose5DebugNormalizer = compose5PredecessorCompatibility.slice(
+  compose5NormalizerStart,
+  compose5NormalizerEnd,
+);
+assertInOrder(
+  compose5PredecessorCompatibility,
+  [
+    'require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755',
+    'require_compose5_durable_volume_compatibility',
+    'compatibility_digest="$COMPOSE5_DURABLE_VOLUME_DIGEST"',
+    "env -i PATH=\"$SAFE_PATH\" HOME='/root' SUDO_USER='fetanagent-admin'",
+    '"$(sha256sum -- "$0"',
+    'trap compat_activate_normalizer DEBUG',
+    'source "$0"',
+    'require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755',
+    'require_compose5_durable_volume_compatibility',
+    '"$COMPOSE5_DURABLE_VOLUME_DIGEST" == "$compatibility_digest"',
+  ],
+  'the compatibility subprocess must source only the exact predecessor and re-attest the unchanged Compose 5 boundary afterward',
+);
+for (const constrainedCompatibilityContract of [
+  /"\$BASH_COMMAND" == "command=\\"\\\$\{1:-\}\\""/u,
+  /\[\[ \$# -eq 5 && "\$1" == volume && "\$2" == inspect/u,
+  /"\$5" == "\$COMPAT_LEGACY_VOLUME_FORMAT"/u,
+  /"\$label_count" == 4/u,
+  /"\$compose_config_hash" == "\$expected_config_hash"/u,
+  /\|3\|\$project\|\$compose_version\|\$volume_label\|\$mountpoint/u,
+  /docker --host "\$LOCAL_DOCKER_SOCKET" "\$@"/u,
+  /set -- kemerbet-v1-retirement-recovery-ready "\$1"/u,
+  /\[\[ "\$COMPAT_ACTIVATED" == true \]\]/u,
+]) {
+  assert.match(compose5PredecessorCompatibility, constrainedCompatibilityContract);
+}
+assert.doesNotMatch(
+  compose5PredecessorCompatibility,
+  /\b(?:sed|head|tail|eval)\b|\bdocker\s+(?:volume|container|network)\s+(?:create|rm|update)\b/u,
+  'the predecessor compatibility path must neither rewrite helper definitions nor mutate Docker state',
+);
+assert.match(
+  helper,
+  /kemerbet-v1-retirement-recovery-ready\)\s+\[\[ \$# -eq 2 \]\][\s\S]*?require_kemerbet_v1_retirement_recovery_ready "\$commit_sha"/u,
+  'sourcing the exact predecessor with the compatibility command must still execute its complete recovery-ready predicate',
+);
+
+const predecessorRecoveryReadyCompatibility = extractShellFunction(
+  v2V3SuccessorMigration,
+  'require_predecessor_recovery_ready',
+  'require_fresh_disabled_predecessor_boundary',
+);
+assertInOrder(
+  predecessorRecoveryReadyCompatibility,
+  [
+    'run_predecessor_helper',
+    'kemerbet-v1-retirement-recovery-ready "$PREDECESSOR_RELEASE"',
+    'return 0',
+    'run_predecessor_recovery_ready_compose5_compat',
+  ],
+  'every predecessor recovery proof must first run the unmodified helper and fall back only to the exact Compose 5 adapter',
+);
+
+const freshDisabledPredecessorBoundary = extractShellFunction(
+  v2V3SuccessorMigration,
+  'require_fresh_disabled_predecessor_boundary',
+  'require_migration_intent',
+);
+assertInOrder(
+  freshDisabledPredecessorBoundary,
+  [
+    'docker_local_read_only container ls --all --quiet',
+    'label=com.docker.compose.project=$PROJECT_NAME',
+    'validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE"',
+  ],
+  'the disabled-grant boundary must re-attest an exactly stopped predecessor and exact v2 continuity',
+);
+assert.doesNotMatch(
+  freshDisabledPredecessorBoundary,
+  /run_predecessor_helper|sudo -n/u,
+  'the disabled-grant boundary must not invoke the predecessor helper through its disabled grant',
+);
+
+const migrationRetirementContinuity = extractShellFunction(
+  v2V3SuccessorMigration,
+  'validate_retirement_and_binding',
+  'require_v3_binding',
+);
+for (const legacyProjectionContract of [
+  /binding_match = v2_pattern\.fullmatch\(binding_data\)/u,
+  /binding_match\.group\(1\)[\s\S]*?hmac-sha256-agent-identity-v1:[\s\S]*?binding_match\.group\(2\)/u,
+  /hashlib\.sha256\(legacy_projection\)\.hexdigest\(\) != intent\[6\]\.split\('=', 1\)\[1\]/u,
+]) {
+  assert.match(migrationRetirementContinuity, legacyProjectionContract);
+}
+
+if (process.platform === 'linux' || process.platform === 'win32') {
+  const bashExecutable =
+    process.platform === 'win32'
+      ? resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Git/bin/bash.exe')
+      : '/bin/bash';
+  const project = 'fetanagent-staging-beta';
+  const profileVolume = `${project}_kemerbet_sessions`;
+  const controlVolume = `${project}_kemerbet_session_control`;
+  const composeVersion = '5.1.4';
+  const lowerHash = 'a'.repeat(64);
+  const volumeContract = ({
+    volume = profileVolume,
+    count,
+    logical = 'kemerbet_sessions',
+    hash = '',
+    projectName = project,
+    version = composeVersion,
+  }) =>
+    `${volume}|local|local|null|${count}|${projectName}|${version}|${logical}|${hash}|/var/lib/docker/volumes/${volume}/_data`;
+  const inspectorHarness = [
+    'set -euo pipefail',
+    `PROJECT_NAME='${project}'`,
+    'docker_local() { printf \'%s\' "$MOCK_VOLUME_CONTRACT"; }',
+    successorDurableVolumeContract,
+    `observed="$(inspect_kemerbet_durable_volume_contract '${profileVolume}' kemerbet_sessions)"`,
+    '[[ "$observed" == "$MOCK_EXPECTED_CONTRACT" ]]',
+  ].join('\n');
+  const legacyProfileContract = volumeContract({ count: 3 });
+  const historicalLegacyProfileContract = `${profileVolume}|local|local|null|3|${project}|${composeVersion}|kemerbet_sessions|/var/lib/docker/volumes/${profileVolume}/_data`;
+  const compose5ProfileContract = volumeContract({ count: 4, hash: lowerHash });
+  const contractCases = [
+    ['exact legacy three-label', legacyProfileContract, historicalLegacyProfileContract, 0],
+    ['exact Compose 5 four-label', compose5ProfileContract, compose5ProfileContract, 0],
+    ['foreign fourth label', volumeContract({ count: 4 }), '', 1],
+    ['foreign fifth label', volumeContract({ count: 5, hash: lowerHash }), '', 1],
+    ['missing logical label', volumeContract({ count: 3, logical: '' }), '', 1],
+    ['uppercase hash', volumeContract({ count: 4, hash: lowerHash.toUpperCase() }), '', 1],
+    ['short hash', volumeContract({ count: 4, hash: 'a'.repeat(63) }), '', 1],
+    ['hash on legacy count', volumeContract({ count: 3, hash: lowerHash }), '', 1],
+    ['foreign logical label', volumeContract({ count: 3, logical: 'foreign' }), '', 1],
+  ];
+  for (const [name, contract, expectedContract, expectedStatus] of contractCases) {
+    const result = spawnSync(bashExecutable, ['-c', inspectorHarness], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        MOCK_VOLUME_CONTRACT: contract,
+        MOCK_EXPECTED_CONTRACT: expectedContract,
+      },
+    });
+    assert.equal(
+      result.status,
+      expectedStatus,
+      `${name} durable-volume fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+
+  const normalizedProfileContract = `${profileVolume}|local|local|null|3|${project}|${composeVersion}|kemerbet_sessions|/var/lib/docker/volumes/${profileVolume}/_data`;
+  for (const [name, contract, expectedStatus] of [
+    ['exact DEBUG/source Compose 5 adapter', volumeContract({ count: 4, hash: lowerHash }), 0],
+    ['DEBUG/source adapter rejects foreign fourth label', volumeContract({ count: 4 }), 1],
+    [
+      'DEBUG/source adapter rejects foreign fifth label',
+      volumeContract({ count: 5, hash: lowerHash }),
+      1,
+    ],
+    [
+      'DEBUG/source adapter rejects uppercase hash',
+      volumeContract({ count: 4, hash: lowerHash.toUpperCase() }),
+      1,
+    ],
+    [
+      'DEBUG/source adapter rejects foreign project',
+      volumeContract({ count: 4, hash: lowerHash, projectName: 'foreign' }),
+      1,
+    ],
+  ]) {
+    const adapterHarness = [
+      'set -euo pipefail',
+      'SCRATCH="$(mktemp -d)"',
+      'trap \'rm -rf -- "$SCRATCH"\' EXIT',
+      'mkdir -p "$SCRATCH/bin"',
+      `printf '%s\\n' '#!/usr/bin/env bash' "printf '%s' '${contract}'" >"$SCRATCH/bin/docker"`,
+      'chmod 0700 "$SCRATCH/bin/docker"',
+      'SAFE_PATH="$SCRATCH/bin:/usr/bin:/bin"',
+      "LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'",
+      `PROJECT_NAME='${project}'`,
+      `COMPAT_PROFILE_VOLUME='${profileVolume}'`,
+      `COMPAT_CONTROL_VOLUME='${controlVolume}'`,
+      `COMPAT_PROFILE_CONFIG_HASH='${lowerHash}'`,
+      `COMPAT_CONTROL_CONFIG_HASH='${'f'.repeat(64)}'`,
+      `COMPAT_VOLUME_VERSION='${composeVersion}'`,
+      'COMPAT_LEGACY_VOLUME_FORMAT=\'{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.version" }}|{{ index .Labels "com.docker.compose.volume" }}|{{.Mountpoint}}\'',
+      'COMPAT_COMPOSE5_VOLUME_FORMAT=\'{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{len .Labels}}|{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.version" }}|{{ index .Labels "com.docker.compose.volume" }}|{{with index .Labels "com.docker.compose.config-hash"}}{{.}}{{end}}|{{.Mountpoint}}\'',
+      'COMPAT_ACTIVATED=false',
+      'CHAIN_SENTINEL="$SCRATCH/full-chain-called"',
+      compose5DebugNormalizer,
+      'cat >"$SCRATCH/predecessor-helper" <<\'BASH\'',
+      'docker_local() { return 97; }',
+      'require_kemerbet_v1_retirement_recovery_ready() {',
+      '  local observed',
+      '  observed="$(docker_local volume inspect "$COMPAT_PROFILE_VOLUME" --format "$COMPAT_LEGACY_VOLUME_FORMAT")" || return 1',
+      `  [[ "$observed" == '${normalizedProfileContract}' ]] || return 1`,
+      '  printf \'%s\' called >"$CHAIN_SENTINEL"',
+      '}',
+      'command="${1:-}"',
+      'case "$command" in',
+      '  kemerbet-v1-retirement-recovery-ready)',
+      '    require_kemerbet_v1_retirement_recovery_ready "$2" || exit 1',
+      '    ;;',
+      '  *) exit 1 ;;',
+      'esac',
+      'BASH',
+      'set -- kemerbet-v1-retirement-recovery-ready 0123456789abcdef0123456789abcdef01234567',
+      'set -T',
+      'trap compat_activate_normalizer DEBUG',
+      'source "$SCRATCH/predecessor-helper"',
+      '[[ "$COMPAT_ACTIVATED" == true && -f "$CHAIN_SENTINEL" ]]',
+    ].join('\n');
+    const result = spawnSync(bashExecutable, ['-c', adapterHarness], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH },
+    });
+    assert.equal(
+      result.status,
+      expectedStatus,
+      `${name} fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+
+  const pairHarness = [
+    'set -euo pipefail',
+    'SCRATCH="$(mktemp -d)"',
+    'trap \'rm -rf -- "$SCRATCH"\' EXIT',
+    `PROJECT_NAME='${project}'`,
+    `KEMERBET_PROFILE_VOLUME='${profileVolume}'`,
+    `KEMERBET_SESSION_CONTROL_VOLUME='${controlVolume}'`,
+    'KEMERBET_V1_RETIREMENT_ARCHIVE="$SCRATCH/absent-archive"',
+    'KEMERBET_READINESS_BINDING="$SCRATCH/binding"',
+    'KEMERBET_RECHECK_OWNER_CLAIM_ID="11111111-1111-4111-8111-111111111111"',
+    `KEMERBET_RECHECK_PLAYER_IDS_DIGEST='${'b'.repeat(64)}'`,
+    'KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO="1:2"',
+    'KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO="3:4"',
+    'KEMERBET_V1_RETIREMENT_DURABLE_VOLUME_DIGEST=""',
+    'docker_local() {',
+    '  if [[ "$1" == volume && "$2" == ls ]]; then',
+    '    printf \'%s\\n%s\\n\' "$KEMERBET_PROFILE_VOLUME" "$KEMERBET_SESSION_CONTROL_VOLUME"',
+    '  elif [[ "$1" == volume && "$2" == inspect ]]; then',
+    '    case "$3" in',
+    '      "$KEMERBET_PROFILE_VOLUME") printf \'%s\' "$PROFILE_CONTRACT" ;;',
+    '      "$KEMERBET_SESSION_CONTROL_VOLUME") printf \'%s\' "$CONTROL_CONTRACT" ;;',
+    '      *) return 1 ;;',
+    '    esac',
+    '  elif [[ "$1" == container && "$2" == ls ]]; then',
+    '    :',
+    '  else',
+    '    return 1',
+    '  fi',
+    '}',
+    'resolve_kemerbet_session_control_volume_mountpoint() { printf \'%s\' "/var/lib/docker/volumes/$KEMERBET_SESSION_CONTROL_VOLUME/_data"; }',
+    'resolve_kemerbet_profile_volume_mountpoint() { printf \'%s\' "/var/lib/docker/volumes/$KEMERBET_PROFILE_VOLUME/_data"; }',
+    'inspect_owner_staged_kemerbet_cohort_for_retirement_context() { :; }',
+    'require_owner_kemerbet_failed_marker_read_only() { :; }',
+    `kemerbet_profile_identity_digest() { printf '%s' '${'c'.repeat(64)}'; }`,
+    'stat() {',
+    '  local path="${!#}"',
+    '  case "$path" in',
+    '    "/var/lib/docker/volumes/$KEMERBET_PROFILE_VOLUME/_data") printf \'%s\' "11:21:10001:10001:700:3" ;;',
+    '    "/var/lib/docker/volumes/$KEMERBET_SESSION_CONTROL_VOLUME/_data") printf \'%s\' "10:20:10001:10001:700:2" ;;',
+    '    *) command stat "$@" ;;',
+    '  esac',
+    '}',
+    successorDurableVolumeContract,
+    successorDurableVolumeAttestor,
+    `printf '%s\\n' '11111111-1111-4111-8111-111111111111 hmac-sha256-agent-identity-v1:${'d'.repeat(64)} sha256-provider-authorization-v1:${'e'.repeat(64)}' >"$KEMERBET_READINESS_BINDING"`,
+    'require_kemerbet_v1_retirement_durable_volumes >/dev/null',
+  ].join('\n');
+  const profileLegacy = volumeContract({ count: 3 });
+  const controlLegacy = volumeContract({
+    volume: controlVolume,
+    count: 3,
+    logical: 'kemerbet_session_control',
+  });
+  const profileCompose5 = volumeContract({ count: 4, hash: lowerHash });
+  const controlCompose5 = volumeContract({
+    volume: controlVolume,
+    count: 4,
+    logical: 'kemerbet_session_control',
+    hash: 'f'.repeat(64),
+  });
+  for (const [name, profileContract, controlContract, expectedStatus] of [
+    ['matched legacy pair', profileLegacy, controlLegacy, 0],
+    ['matched Compose 5 pair', profileCompose5, controlCompose5, 0],
+    ['mixed legacy and Compose 5 pair', profileLegacy, controlCompose5, 1],
+  ]) {
+    const result = spawnSync(bashExecutable, ['-s'], {
+      encoding: 'utf8',
+      input: pairHarness,
+      env: {
+        PATH: process.env.PATH,
+        PROFILE_CONTRACT: profileContract,
+        CONTROL_CONTRACT: controlContract,
+      },
+    });
+    assert.equal(
+      result.status,
+      expectedStatus,
+      `${name} durable-volume pair fixture returned ${result.status}: ${result.stderr}`,
+    );
+  }
+}
+
+const migrationFreshBranch =
+  /if require_exact_sudoers_file "\$SUDOERS"; then([\s\S]*?)\n  elif \[\[ ! -e "\$SUDOERS"/u.exec(
+    v2V3SuccessorMigration,
+  )?.[1];
+assert.ok(migrationFreshBranch, 'the migration must expose one enabled-grant fresh path');
+assertInOrder(
+  migrationFreshBranch,
+  [
+    'run_predecessor_helper verify "$PREDECESSOR_HELPER_SHA256"',
+    'run_predecessor_helper stop',
+    'require_predecessor_recovery_ready',
+    'failed outside the exact Compose 5 durable-volume compatibility contract',
+    'validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE"',
+  ],
+  'the migration must try the unmodified predecessor first and use compatibility only before exact continuity validation',
 );
 
 const v2V3BindingTransform = extractShellFunction(
@@ -215,9 +650,8 @@ assertInOrder(
   migrationFreshDisabledBranch,
   [
     "migration_state='fresh-disabled'",
-    'docker --host unix:///var/run/docker.sock container ls --all --quiet',
-    'disabled-grant recovery requires the staging project to remain fully stopped',
-    'validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE"',
+    'require_fresh_disabled_predecessor_boundary',
+    'disabled-grant recovery requires an exactly stopped predecessor with intact v2 continuity',
   ],
   'fresh-disabled recovery must prove the stopped predecessor and exact v2 continuity without invoking the disabled helper',
 );
@@ -341,11 +775,17 @@ assertInOrder(
   [
     'require_no_helper_processes',
     'flock --exclusive --nonblock 9',
+    'case "$migration_state" in',
+    'fresh)',
+    'require_predecessor_recovery_ready',
+    'validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE"',
+    'fresh-disabled)',
+    'require_fresh_disabled_predecessor_boundary',
     'if [[ "$migration_state" == \'completed\' ]]',
     'trap cleanup EXIT',
     'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
   ],
-  'the migration must acquire the root mutation lock and finish completed-overlay recovery before disabling the exact deployment grant',
+  'the migration must acquire the root mutation lock, re-attest each fresh boundary, and finish completed-overlay recovery before disabling the exact deployment grant',
 );
 assert.doesNotMatch(
   migrationCriticalSection.slice(0, migrationCriticalSection.indexOf("sudoers_may_restore='true'")),
@@ -1675,12 +2115,12 @@ for (const durableVolumeContract of [
   /docker_local volume ls --quiet \\\n\s+--filter "label=com\.docker\.compose\.project=\$PROJECT_NAME" \| LC_ALL=C sort/u,
   /"\$KEMERBET_PROFILE_VOLUME" "\$KEMERBET_SESSION_CONTROL_VOLUME" \| LC_ALL=C sort/,
   /\[\[ "\$project_volumes" == "\$expected_volumes" \]\] \|\| return 1/,
-  /\{\{\.Name\}\}\|\{\{\.Driver\}\}\|\{\{\.Scope\}\}\|\{\{json \.Options\}\}\|\{\{len \.Labels\}\}/,
-  /com\.docker\.compose\.project/,
-  /com\.docker\.compose\.version/,
-  /com\.docker\.compose\.volume/,
-  /\$volume\|local\|local\|null\|3\|\$PROJECT_NAME\|\$volume_compose_version\|kemerbet_sessions\|\/var\/lib\/docker\/volumes\/\$volume\/_data/,
-  /\$volume\|local\|local\|null\|3\|\$PROJECT_NAME\|\$volume_compose_version\|kemerbet_session_control\|\/var\/lib\/docker\/volumes\/\$volume\/_data/,
+  /inspect_kemerbet_durable_volume_contract[\s\S]*?"\$volume" kemerbet_sessions/u,
+  /inspect_kemerbet_durable_volume_contract[\s\S]*?"\$volume" kemerbet_session_control/u,
+  /profile_contract="\$volume_contract"/,
+  /control_contract="\$volume_contract"/,
+  /"control_contract=\$control_contract"/,
+  /"profile_contract=\$profile_contract"/,
   /docker_local container ls --all --quiet --filter "volume=\$volume"/,
   /resolve_kemerbet_session_control_volume_mountpoint/,
   /resolve_kemerbet_profile_volume_mountpoint/,
@@ -4057,8 +4497,8 @@ for (const contract of [
   /label=com\.docker\.compose\.project=\$PROJECT_NAME/,
   /label=com\.docker\.compose\.volume=kemerbet_session_control/,
   /"\$volume_name" == "\$KEMERBET_SESSION_CONTROL_VOLUME"/,
-  /\$KEMERBET_SESSION_CONTROL_VOLUME\|local\|local\|\$PROJECT_NAME\|kemerbet_session_control/,
-  /--format '\{\{\.Mountpoint\}\}'/,
+  /inspect_kemerbet_durable_volume_contract[\s\S]*?"\$volume_name" kemerbet_session_control/u,
+  /mountpoint="\$\{volume_contract##\*\|\}"/u,
   /"\$mountpoint" == \/\*/,
   /! -L "\$mountpoint" && -d "\$mountpoint"/,
   /realpath -- "\$mountpoint"/,

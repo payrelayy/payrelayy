@@ -5735,7 +5735,7 @@ run_kemerbet_recheck_profile_snapshot_copy() {
     "$container_id" "$KEMERBET_RECHECK_SNAPSHOT_CONTAINER" 'profile-snapshot-copy-v1' \
     '0:0' "$image_id" \
     '["apps/executor/dist/kemerbet-readiness-profile-snapshot.js","snapshot"]' \
-    "$expected_mounts" '["CHOWN","DAC_OVERRIDE","FOWNER"]' || return 1
+    "$expected_mounts" '["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FOWNER"]' || return 1
   kemerbet_recheck_original_profile_volume_holders_match "$container_id" || return 1
   kemerbet_recheck_profile_snapshot_volume_holders_match "$container_id" || return 1
   docker_local container start "$container_id" >/dev/null 2>&1 || return 1
@@ -5786,7 +5786,7 @@ run_kemerbet_recheck_profile_snapshot_verify() {
     "$container_id" "$KEMERBET_RECHECK_SNAPSHOT_VERIFY_CONTAINER" 'profile-snapshot-verify-v1' \
     '0:0' "$image_id" \
     '["apps/executor/dist/kemerbet-readiness-profile-snapshot.js","verify"]' \
-    "$expected_mounts" '["DAC_OVERRIDE"]' || return 1
+    "$expected_mounts" '["CAP_DAC_OVERRIDE"]' || return 1
   require_kemerbet_profile_volume_holders ''
   kemerbet_recheck_profile_snapshot_volume_holders_match "$container_id" || return 1
   docker_local container start "$container_id" >/dev/null 2>&1 || return 1
@@ -5833,7 +5833,7 @@ run_kemerbet_recheck_original_profile_verify() {
     "$container_id" "$KEMERBET_RECHECK_ORIGINAL_VERIFY_CONTAINER" 'profile-original-verify-v1' \
     '0:0' "$image_id" \
     '["apps/executor/dist/kemerbet-readiness-profile-snapshot.js","verify-original"]' \
-    "$expected_mounts" '["DAC_OVERRIDE"]' || return 1
+    "$expected_mounts" '["CAP_DAC_OVERRIDE"]' || return 1
   kemerbet_recheck_original_profile_volume_holders_match "$container_id" || return 1
   docker_local container start "$container_id" >/dev/null 2>&1 || return 1
   wait_kemerbet_recheck_container_exit_zero "$container_id" || return 1

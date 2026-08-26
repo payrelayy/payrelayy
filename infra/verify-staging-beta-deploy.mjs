@@ -10138,6 +10138,22 @@ assert.doesNotMatch(
   'the offline authorizer must receive neither a browser profile nor a network',
 );
 
+const profileSnapshotCopy = extractShellFunction(
+  helper,
+  'run_kemerbet_recheck_profile_snapshot_copy',
+  'run_kemerbet_recheck_profile_snapshot_verify',
+);
+assert.match(
+  profileSnapshotCopy,
+  /"\$expected_mounts" '\["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FOWNER"\]' \|\| return 1/u,
+  'snapshot-copy attestation must require Docker 28 canonical capability names',
+);
+assert.doesNotMatch(
+  profileSnapshotCopy,
+  /"\$expected_mounts" '\["CHOWN","DAC_OVERRIDE","FOWNER"\]' \|\| return 1/u,
+  'snapshot-copy attestation must reject the non-canonical unprefixed capability spelling',
+);
+
 const strictProfileSnapshotVerify = extractShellFunction(
   helper,
   'run_kemerbet_recheck_profile_snapshot_verify',
@@ -10150,13 +10166,14 @@ for (const contract of [
   /type=volume,src=\$KEMERBET_RECHECK_PROFILE_SNAPSHOT_VOLUME,dst=\/run\/source,readonly/,
   /kemerbet-readiness-profile-snapshot\.js verify\)/,
   /'\["apps\/executor\/dist\/kemerbet-readiness-profile-snapshot\.js","verify"\]'/,
+  /"\$expected_mounts" '\["CAP_DAC_OVERRIDE"\]' \|\| return 1/,
 ]) {
   assert.match(strictProfileSnapshotVerify, contract);
 }
 assert.doesNotMatch(
   strictProfileSnapshotVerify,
-  /verify-original|KEMERBET_PROFILE_VOLUME/,
-  'completed-snapshot verification must stay strict and must never inspect the mutable original profile',
+  /verify-original|KEMERBET_PROFILE_VOLUME|"\$expected_mounts" '\["DAC_OVERRIDE"\]'/,
+  'completed-snapshot verification must stay strict, use Docker 28 canonical capability names, and never inspect the mutable original profile',
 );
 
 const originalProfileVerify = extractShellFunction(
@@ -10177,6 +10194,7 @@ for (const contract of [
   /src=\$KEMERBET_RECHECK_PROFILE_OUTPUT_ROOT,dst=\/run\/output,readonly/,
   /kemerbet-readiness-profile-snapshot\.js verify-original\)/,
   /'\["apps\/executor\/dist\/kemerbet-readiness-profile-snapshot\.js","verify-original"\]'/,
+  /"\$expected_mounts" '\["CAP_DAC_OVERRIDE"\]' \|\| return 1/,
   /kemerbet_recheck_original_profile_volume_holders_match "\$container_id"/,
   /require_kemerbet_profile_volume_holders ''/,
   /require_kemerbet_recheck_profile_manifest_contract "\$account_id"/,
@@ -10185,8 +10203,8 @@ for (const contract of [
 }
 assert.doesNotMatch(
   originalProfileVerify,
-  /KEMERBET_RECHECK_PROFILE_SNAPSHOT_VOLUME|profile-snapshot-verify-v1|container logs|network connect/,
-  'original-profile verification must have a distinct identity and never receive the disposable snapshot',
+  /KEMERBET_RECHECK_PROFILE_SNAPSHOT_VOLUME|profile-snapshot-verify-v1|container logs|network connect|"\$expected_mounts" '\["DAC_OVERRIDE"\]'/,
+  'original-profile verification must have a distinct identity, use Docker 28 canonical capability names, and never receive the disposable snapshot',
 );
 
 const prepareProfileSnapshot = extractShellFunction(

@@ -336,6 +336,72 @@ This second rotation does not start a service, enable the executor, invoke a Kem
 Transfer, or move money. After it succeeds, use the new effective release for ordinary sealed deploy,
 private sign-in, and the exact-five no-transfer recheck.
 
+#### Current incident order: recover, rotate, deploy, then recheck
+
+For the live `candidate_bound` incident pinned in the root-recovery subsection below, the order of
+subsections in this historical runbook is not the execution order. Execute exactly these four steps:
+
+1. Complete the one-use root-certified `candidate_bound` recovery. It leaves the runtime stopped.
+2. While the runtime is still stopped, complete the one-use third installed-v3 helper/release
+   rotation using the newly merged release.
+3. Run the separately reviewed ordinary sealed deployment for core, Telegram Bot, and public HTTPS.
+4. Only after those deployments pass their normal no-transfer health checks, open private KemerBet
+   sign-in if needed and run the exact-five no-transfer recheck.
+
+Do not run the third rotation before the root recovery, skip the third rotation after recovery, or
+attempt sign-in/recheck while either one-use operation is incomplete.
+
+#### One-use third installed-v3 helper/release rotation
+
+The base successor and both completed helper-rotation records are immutable. For the reviewed
+formatter-normalization repair, do not repin or rerun either consumed predecessor rotation. Use only
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v3.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v3.sh)
+from the direct DigitalOcean root console. It hard-pins the exact second-link predecessor release
+`4bb491943fb88c50b86166184b929bdbe2698dc4`, predecessor-helper SHA-256
+`05b0f2c8eb68716d20ad4878f1fff96c2f6a22e532e0b9c52a664e153b49e6fe`, and the LF-exact reviewed
+successor-helper SHA-256. The successor release must be the exact 40-character merged-`main` commit.
+
+From that checkout, place the public script and LF-exact helper in the root-owned mode-`0700`
+directory `/root/fetanagent-v3-helper-rotation-v3-<successor-release>/`. Name the helper
+`fetanagent-staging-deploy-helper.next`, root-owned mode `0600`, independently confirm its digest,
+then run:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v3-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v3.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-THIRD-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+The operation validates the immutable base, exact first link, and exact second link before accepting
+the installed predecessor helper. It requires the stopped, disarmed, no-transient boundary, absent
+Telegram startup receipt, zero project containers and networks, and the same holder-free Compose-5
+durable volumes, config hashes, and Compose version recorded by both prior links. It rejects all
+first- and second-rotation sudoers, installer, and rollback residue. Only after taking the mutation lock and
+rechecking that boundary does it move and synchronize the deployment grant to the distinct v3
+disabled path; only then may it create the new parent or any record prefix.
+
+The third append-only record lives only at
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v3/<successor-release>/`. It binds both
+current identities, every immutable base digest, the exact SHA-256 values of the second-link intent,
+completion, and archived helper, and the unchanged durable-volume contract. The successor helper
+must validate the base, first link, second link, and third link in order before its effective release
+or helper identity changes. A missing predecessor link, extra child, `.installing` prefix, changed
+archive, changed durable field, or rewritten historical byte fails closed.
+
+The installed second-link helper intentionally does not know the v3 namespace. Containment before
+successor installation therefore depends on the already-stopped runtime and durably disabled grant.
+Never restore sudo manually, call the predecessor helper directly, delete or rename any rotation prefix,
+or remove installer residue. An empty-parent or partial-record resume accepts only the same successor
+release, reviewed helper bytes, exact confirmation, and disabled grant. Cleanup never restores sudo;
+before completion it may atomically restore only the archived predecessor helper. Rerun the exact same
+operation until the successor independently validates the full chain and the single final grant
+restoration succeeds.
+
+This third rotation does not start a service, enable the executor, invoke a KemerBet lookup or Transfer, or move money.
+After it succeeds, use its effective release for ordinary sealed deploy, private sign-in, and the
+exact-five no-transfer recheck.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only
@@ -618,6 +684,78 @@ only full-project emergency cleanup—even if a prior Docker failure left Owner 
 not a resumable completion and must remain stopped for manual root-certified terminal remediation.
 No ordinary helper, install, discard, stop, recheck, or rollback path clears the failed latch. No
 stopped-runtime or zero-Owner exception may publish, remove, or reclassify a root receipt.
+
+### One-use root-certified `candidate_bound` recovery for release `4bb4919`
+
+This recovery is step 1 of the mandatory current-incident sequence above. After it succeeds, go to
+the one-use third installed-v3 helper/release rotation while the runtime remains stopped; do not go
+directly from recovery to ordinary deployment.
+
+This subsection applies only to the independently audited emergency-stopped state for full release
+`4bb491943fb88c50b86166184b929bdbe2698dc4` and installed helper SHA-256
+`05b0f2c8eb68716d20ad4878f1fff96c2f6a22e532e0b9c52a664e153b49e6fe`. It is not a generic latch
+reset. Use the reviewed
+`infra/operations/fetanagent-kemerbet-candidate-bound-root-recovery-v1.sh` and
+`infra/operations/fetanagent-kemerbet-candidate-bound-root-recovery-v1.py` only from the DigitalOcean
+root console. The operation adopts the exact existing latch device/inode into append-only root
+evidence; it never deletes, replaces, or bypasses an unrecognized latch.
+
+Before staging the two files, independently prove that the live state still matches the recorded
+incident: the exact `candidate_bound` `pending-v1` journal and imported marker plus root latch exist;
+the detailed recheck receipt, candidate, canonical binding, runtime, transient networks, RPC root,
+bot startup receipt, expiry units, and disposable runtime secrets are absent; only the two exact
+durable volumes and the one holder-free disposable readiness snapshot volume remain. Do not print a
+Player ID, UUID, journal, binding, stage file, marker, digest derived from private content, secret,
+balance, or transaction. Do not log in to KemerBet or attempt another lookup during recovery.
+
+Stage exactly these two reviewed LF artifacts in the otherwise-empty root-owned mode-`0700`
+directory
+`/root/fetanagent-candidate-bound-recovery-4bb491943fb88c50b86166184b929bdbe2698dc4`.
+Install the shell file as `root:root` mode `0700` and the Python file as `root:root` mode `0600`.
+Before execution, compare their SHA-256 values with these reviewed values and run their local syntax
+checks:
+
+```text
+fetanagent-kemerbet-candidate-bound-root-recovery-v1.sh  ede67ec49a82a87eb3298f0f93fe51a140fceebe673e2af5ddd868e772558552
+fetanagent-kemerbet-candidate-bound-root-recovery-v1.py  206945947823be1db0657aa731a081dbbfdc349d3b76b8560ef2d6c5e94ce4ed
+```
+
+From that exact root directory, invoke only:
+
+```bash
+./fetanagent-kemerbet-candidate-bound-root-recovery-v1.sh \
+  4bb491943fb88c50b86166184b929bdbe2698dc4 \
+  05b0f2c8eb68716d20ad4878f1fff96c2f6a22e532e0b9c52a664e153b49e6fe \
+  I-UNDERSTAND-THIS-ADOPTS-THE-EXACT-FAILED-LATCH-AND-RECOVERS-NO-TRANSFER
+```
+
+Under the existing global mutation lock, the wrapper re-proves the exact Droplet, installed helper
+and sudo grant, zero helper processes, stopped project, absent transient/runtime material, and exact
+holder-free volumes. The Python transaction first archives the exact promotion journal and binds
+the imported marker plus adopted latch identities. It then records the validated snapshot-volume
+contract before the wrapper removes only
+`fetanagent-staging-beta-kemerbet-readiness-profile-snapshot-once` through Docker. A retry after that
+single removal is accepted only with this durable authorization record. No `prune`, project-wide
+volume removal, filesystem deletion of Docker data, container start, network creation, provider
+request, executor enablement, or Transfer action exists in this operation.
+
+After snapshot removal, the filesystem transaction consumes only the journal-bound private Player
+copy if it still exists, restores the exact key and two stage inodes, removes the exact imported
+marker, and publishes the matching failed marker last. It independently proves that retryable
+boundary before publishing `retryable-v1`, removes only the now-archived promotion journal/root,
+re-proves the boundary, then retires only the adopted latch inode and publishes `completed-v1`.
+The private archive and all authorization/completion evidence remain root-only at
+`/var/lib/fetanagent/kemerbet-candidate-bound-root-recovery-v1/4bb491943fb88c50b86166184b929bdbe2698dc4`.
+If any check fails, do not remove a latch, marker, journal, volume, stage, or evidence file manually;
+keep the host stopped, diagnose read-only, and rerun these same reviewed bytes only after the exact
+precondition is restored.
+
+Successful recovery deliberately leaves the public/core containers stopped and all disposable
+runtime secrets absent. It does not deploy or restart FetanAgent. Before any ordinary deployment,
+complete the one-use third installed-v3 helper/release rotation from the newly merged release while
+this stopped boundary is intact. Then run the separately reviewed ordinary deployment to restore the
+public web/API/Owner/Bot runtime. That deployment must independently pass its normal no-transfer
+preflights before any private sign-in or exact-five KemerBet readiness recheck.
 
 An active database cohort claim intentionally freezes writes to every table from which its cohort
 was derived, including otherwise unrelated customer/platform writes. That freeze begins before

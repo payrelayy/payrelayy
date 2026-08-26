@@ -43,6 +43,7 @@ readonly KEMERBET_V1_RETIREMENT_CONFIRMATION='I-UNDERSTAND-THIS-RETIRES-THE-EXAC
 readonly KEMERBET_V2_V3_SUCCESSOR_PARENT='/var/lib/fetanagent/kemerbet-readiness-v2-v3-successor'
 readonly KEMERBET_V3_HELPER_ROTATION_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation'
 readonly KEMERBET_V3_HELPER_ROTATION_V2_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v2'
+readonly KEMERBET_V3_HELPER_ROTATION_V3_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v3'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3818,7 +3819,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_RECHECK_PROMOTION_ROOT" "$KEMERBET_READINESS_PLAYER_IDS" \
     "$KEMERBET_RECHECK_CANDIDATE_ROOT" "$KEMERBET_RECHECK_RPC_ROOT" \
     "$KEMERBET_SELECTOR_CONTRACT" "$KEMERBET_V3_HELPER_ROTATION_PARENT" \
-    "$KEMERBET_V3_HELPER_ROTATION_V2_PARENT" <<'PY'
+    "$KEMERBET_V3_HELPER_ROTATION_V2_PARENT" \
+    "$KEMERBET_V3_HELPER_ROTATION_V3_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3841,6 +3843,7 @@ import sys
     selector_contract,
     rotation_parent,
     rotation_v2_parent,
+    rotation_v3_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
@@ -4065,6 +4068,9 @@ if os.path.lexists(rotation_parent):
     effective_release = rotation_release
     effective_helper_sha = rotation_intent[5].split('=', 1)[1]
 
+rotation_v2_intent_data = None
+rotation_v2_completion_data = None
+archived_rotation_v2_predecessor_helper = None
 if os.path.lexists(rotation_v2_parent):
     if (
         rotation_intent_data is None
@@ -4166,6 +4172,112 @@ if os.path.lexists(rotation_v2_parent):
         reject()
     effective_release = rotation_v2_release
     effective_helper_sha = rotation_v2_intent[5].split('=', 1)[1]
+
+if os.path.lexists(rotation_v3_parent):
+    if (
+        rotation_v2_intent_data is None
+        or rotation_v2_completion_data is None
+        or archived_rotation_v2_predecessor_helper is None
+    ):
+        reject()
+    rotation_v3_parent_value = os.lstat(rotation_v3_parent)
+    if (
+        not stat.S_ISDIR(rotation_v3_parent_value.st_mode)
+        or (rotation_v3_parent_value.st_uid, rotation_v3_parent_value.st_gid,
+            stat.S_IMODE(rotation_v3_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_v3_parent) != rotation_v3_parent
+    ):
+        reject()
+    rotation_v3_children = os.listdir(rotation_v3_parent)
+    if len(rotation_v3_children) != 1 or release.fullmatch(rotation_v3_children[0]) is None:
+        reject()
+    rotation_v3_release = rotation_v3_children[0]
+    rotation_v3_root = f'{rotation_v3_parent}/{rotation_v3_release}'
+    exact_directory(rotation_v3_parent, 0o700, [rotation_v3_release])
+    exact_directory(
+        rotation_v3_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_v3_intent_data = exact_file(
+        f'{rotation_v3_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v3_completion_data = exact_file(
+        f'{rotation_v3_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v3_intent = rotation_v3_intent_data.decode('ascii').splitlines()
+    rotation_v3_completion = rotation_v3_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_v3_intent) != 18
+        or len(rotation_v3_completion) != 19
+        or rotation_v3_intent[0] !=
+           'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v3'
+        or rotation_v3_intent[1] != 'state=authorized'
+        or rotation_v3_intent[2] != f'predecessor_release={effective_release}'
+        or rotation_v3_intent[3] != f'successor_release={rotation_v3_release}'
+        or rotation_v3_release in {successor, rotation_release, effective_release}
+        or rotation_v3_intent[4] !=
+           f'predecessor_helper_sha256={effective_helper_sha}'
+        or not rotation_v3_intent[5].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_v3_intent[5].split('=', 1)[1]) is None
+        or rotation_v3_intent[5].split('=', 1)[1] in {
+            successor_helper_sha,
+            rotation_intent[5].split('=', 1)[1],
+            effective_helper_sha,
+        }
+        or rotation_v3_intent[6] !=
+           f'base_successor_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or rotation_v3_intent[7] !=
+           f'base_successor_completion_sha256={hashlib.sha256(completion_data).hexdigest()}'
+        or rotation_v3_intent[8] != f'base_binding_v2_sha256={v2_sha}'
+        or rotation_v3_intent[9] !=
+           f'base_predecessor_helper_sha256={hashlib.sha256(old_helper_data).hexdigest()}'
+        or rotation_v3_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or rotation_v3_intent[11] !=
+           f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v2_intent_data).hexdigest()}'
+        or rotation_v3_intent[12] !=
+           f'predecessor_rotation_completion_sha256={hashlib.sha256(rotation_v2_completion_data).hexdigest()}'
+        or rotation_v3_intent[13] !=
+           f'predecessor_rotation_helper_archive_sha256={hashlib.sha256(archived_rotation_v2_predecessor_helper).hexdigest()}'
+        or rotation_v3_intent[14] != rotation_v2_intent[14]
+        or rotation_v3_intent[15] != rotation_v2_intent[15]
+        or rotation_v3_intent[16] != rotation_v2_intent[16]
+        or rotation_v3_intent[17] != rotation_v2_intent[17]
+        or not rotation_v3_intent[14].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_v3_intent[14].split('=', 1)[1]) is None
+        or not rotation_v3_intent[15].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_v3_intent[15].split('=', 1)[1]) is None
+        or not rotation_v3_intent[16].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_v3_intent[16].split('=', 1)[1]) is None
+        or not rotation_v3_intent[17].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_v3_intent[17].split('=', 1)[1]) is None
+        or rotation_v3_completion[:1] != rotation_v3_intent[:1]
+        or rotation_v3_completion[1] != 'state=successor-installed'
+        or rotation_v3_completion[2:18] != rotation_v3_intent[2:18]
+        or rotation_v3_completion[18] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_v3_intent_data).hexdigest()}'
+        or rotation_v3_intent_data !=
+           ('\n'.join(rotation_v3_intent) + '\n').encode('ascii')
+        or rotation_v3_completion_data !=
+           ('\n'.join(rotation_v3_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_rotation_v3_predecessor_helper = exact_file(
+        f'{rotation_v3_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if hashlib.sha256(archived_rotation_v3_predecessor_helper).hexdigest() != effective_helper_sha:
+        reject()
+    effective_release = rotation_v3_release
+    effective_helper_sha = rotation_v3_intent[5].split('=', 1)[1]
 
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
@@ -4617,7 +4729,9 @@ resolve_kemerbet_recheck_profile_snapshot_mountpoint() {
     "$volume_name|local|local|$PROJECT_NAME|kemerbet_readiness_profile_snapshot|profile-snapshot-v1" ]] ||
     return 1
   labels="$(docker_local volume inspect "$volume_name" \
-    --format '{{range $key, $value := .Labels}}{{printf "%s=%s\n" $key $value}}{{end}}' | LC_ALL=C sort)" ||
+    --format '{{range $key, $value := .Labels}}{{printf "%s=%s\n" $key $value}}{{end}}' | \
+    LC_ALL=C sed '/^$/d' | \
+    LC_ALL=C sort)" ||
     return 1
   [[ "$labels" == "$(printf '%s\n' \
     "com.docker.compose.project=$PROJECT_NAME" \
@@ -4659,7 +4773,9 @@ remove_kemerbet_recheck_profile_snapshot_volume() {
     "$volume_name|local|local|$PROJECT_NAME|kemerbet_readiness_profile_snapshot|profile-snapshot-v1" ]] ||
     return 1
   labels="$(docker_local volume inspect "$volume_name" \
-    --format '{{range $key, $value := .Labels}}{{printf "%s=%s\n" $key $value}}{{end}}' | LC_ALL=C sort)" ||
+    --format '{{range $key, $value := .Labels}}{{printf "%s=%s\n" $key $value}}{{end}}' | \
+    LC_ALL=C sed '/^$/d' | \
+    LC_ALL=C sort)" ||
     return 1
   [[ "$labels" == "$(printf '%s\n' \
     "com.docker.compose.project=$PROJECT_NAME" \
@@ -4803,12 +4919,15 @@ create_kemerbet_recheck_network() {
       "$network_name|bridge|$expected_internal|false|true|$PROJECT_NAME|$expected_label" ]] ||
       return 1
     observed_options="$(docker_local network inspect "$network_id" \
-      --format '{{range $key, $value := .Options}}{{printf "%s=%s\n" $key $value}}{{end}}' | LC_ALL=C sort)" ||
+      --format '{{range $key, $value := .Options}}{{printf "%s=%s\n" $key $value}}{{end}}' | \
+      LC_ALL=C sed '/^$/d' | \
+      LC_ALL=C sort)" ||
       return 1
     [[ "$observed_options" == "$expected_options" ]] || return 1
     if [[ -n "$expected_ipam" ]]; then
       observed_ipam="$(docker_local network inspect "$network_id" \
         --format '{{range .IPAM.Config}}{{printf "%s|%s|%s\n" .Subnet .IPRange .Gateway}}{{end}}' | \
+        LC_ALL=C sed '/^$/d' | \
         LC_ALL=C sort)" || return 1
       [[ "$observed_ipam" == "$expected_ipam" ]] || return 1
     fi
@@ -11424,10 +11543,13 @@ require_kemerbet_recheck_container_contract() {
   fi
   observed_mounts="$(docker_local container inspect "$container_id" \
     --format '{{range .Mounts}}{{printf "%s|%s|%s|%t|%s\n" .Type .Name .Destination .RW .Source}}{{end}}' | \
+    LC_ALL=C sed '/^$/d' | \
     LC_ALL=C sort)" || return 1
   [[ "$observed_mounts" == "$expected_mounts" ]] || return 1
   observed_networks="$(docker_local container inspect "$container_id" \
-    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | LC_ALL=C sort)" ||
+    --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | \
+    LC_ALL=C sed '/^$/d' | \
+    LC_ALL=C sort)" ||
     return 1
   case "$role" in
     controller)
@@ -11473,10 +11595,14 @@ require_kemerbet_recheck_running_network_contract() {
     --format "{{with index .NetworkSettings.Networks \"$KEMERBET_RECHECK_EGRESS_NETWORK\"}}{{.IPAddress}}{{end}}")" ]] ||
     return 1
   [[ "$(docker_local network inspect "$KEMERBET_RECHECK_CONTROL_NETWORK" \
-    --format '{{range $id, $_ := .Containers}}{{println $id}}{{end}}' | LC_ALL=C sort)" == \
+    --format '{{range $id, $_ := .Containers}}{{println $id}}{{end}}' | \
+    LC_ALL=C sed '/^$/d' | \
+    LC_ALL=C sort)" == \
     "$(printf '%s\n' "$browser_id" "$controller_id" | LC_ALL=C sort)" ]] || return 1
   [[ "$(docker_local network inspect "$KEMERBET_RECHECK_PROXY_NETWORK" \
-    --format '{{range $id, $_ := .Containers}}{{println $id}}{{end}}' | LC_ALL=C sort)" == \
+    --format '{{range $id, $_ := .Containers}}{{println $id}}{{end}}' | \
+    LC_ALL=C sed '/^$/d' | \
+    LC_ALL=C sort)" == \
     "$(printf '%s\n' "$browser_id" "$proxy_id" | LC_ALL=C sort)" ]] || return 1
   [[ "$(docker_local network inspect "$KEMERBET_RECHECK_EGRESS_NETWORK" \
     --format '{{range $id, $_ := .Containers}}{{println $id}}{{end}}')" == "$proxy_id" ]] || return 1

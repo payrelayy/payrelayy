@@ -3222,8 +3222,8 @@ later_helper_bytes = b'later ordinary reviewed helper bytes'
 assert hashlib.sha256(later_helper_bytes).hexdigest() != effective_helper_sha
 v3_sha = '${'d'.repeat(64)}'
 identity_key_data = b'identity-key-fixture'
-selector_bytes = b'{"fixture":true}\n'
-owner_completion_data = b'00000000-0000-1000-8000-000000000000\n'
+selector_bytes = b'{"fixture":true}\\n'
+owner_completion_data = b'00000000-0000-1000-8000-000000000000\\n'
 claim = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\n')
 retirement_intent = [''] * 10
 retirement_intent[9] = 'claim_sha256=' + hashlib.sha256(owner_completion_data).hexdigest()

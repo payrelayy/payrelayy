@@ -5,7 +5,7 @@ const PROXY_USER_ID = 10003;
 const OUTPUT_ROOT = '/run/output';
 const OUTPUT_FILE = `${OUTPUT_ROOT}/completion-receipt`;
 const INSTALLING_FILE = `${OUTPUT_ROOT}/.completion-receipt.installing`;
-const RECEIPT_CONTRACT = 'fetanagent-kemerbet-readiness-layer7-completion-v2';
+const RECEIPT_CONTRACT = 'fetanagent-kemerbet-readiness-layer7-completion-v3';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
@@ -112,9 +112,10 @@ export function serializeKemerBetReadinessCompletionReceipt(
     responsesValidated: true,
     runNonceSha256: input.runNonceSha256,
     sameAgentIdentityValidated: true,
+    stableAgentProfileValidated: true,
     sequences: [1, 2, 3, 4, 5],
     transferDisabled: true,
-    version: 2,
+    version: 3,
   })}\n`;
 }
 
@@ -201,8 +202,9 @@ export const KEMERBET_READINESS_COMPLETION_RECEIPT_CONTRACT = Object.freeze({
     responsesValidated: true,
     runNonceSha256: '<sha256-of-run-nonce>',
     sameAgentIdentityValidated: true,
+    stableAgentProfileValidated: true,
     sequences: Object.freeze([1, 2, 3, 4, 5]),
     transferDisabled: true,
-    version: 2,
+    version: 3,
   }),
 } as const);

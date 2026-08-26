@@ -1000,13 +1000,13 @@ assert.doesNotMatch(
 );
 assert.match(
   noTransferReadinessSealSource,
-  /const EXACT_BINDING_FILE_BYTES = 230[\s\S]*?const serializedBinding = `\$\{accountId\} \$\{fingerprint\} \$\{providerAuthorizationDigest\}\\n`[\s\S]*?Buffer\.byteLength\(serializedBinding, 'utf8'\) !== EXACT_BINDING_FILE_BYTES[\s\S]*?await handle\.writeFile\(serializedBinding, \{ encoding: 'utf8' \}\)/,
-  'the seal output must atomically serialize the exact 230-byte v2 three-field binding line',
+  /const EXACT_BINDING_FILE_BYTES = 230[\s\S]*?export function serializeKemerBetNoTransferReadinessAgentIdentityBinding[\s\S]*?const serializedBinding = `\$\{accountId\} \$\{fingerprint\} \$\{agentProfilePin\}\\n`[\s\S]*?Buffer\.byteLength\(serializedBinding, 'utf8'\) !== EXACT_BINDING_FILE_BYTES[\s\S]*?return serializedBinding;[\s\S]*?async function writeBindingAtomically[\s\S]*?serializeKemerBetNoTransferReadinessAgentIdentityBinding[\s\S]*?await handle\.writeFile\(serializedBinding, \{ encoding: 'utf8' \}\)/,
+  'the seal output must atomically serialize the exact 230-byte v3 stable-profile binding line',
 );
 assert.match(
   noTransferReadinessSealSource,
   /written\.nlink !== 1 \|\|[\s\S]*?written\.size !== EXACT_BINDING_FILE_BYTES[\s\S]*?installed\.nlink !== 1 \|\|[\s\S]*?installed\.size !== EXACT_BINDING_FILE_BYTES/,
-  'both the temporary and installed v2 binding must be exact one-link 230-byte files',
+  'both the temporary and installed v3 binding must be exact one-link 230-byte files',
 );
 assert.match(
   noTransferReadinessSealSource,
@@ -1071,15 +1071,16 @@ assert.doesNotMatch(
   'the readiness seal must not acquire execution, amount, transfer, database, or history authority',
 );
 
-for (const bindingParserV2Contract of [
-  /const PROVIDER_AUTHORIZATION_DIGEST_PATTERN =\s*\/\^sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\$\/u/,
+for (const bindingParserV3Contract of [
+  /const AGENT_PROFILE_PIN_PATTERN =\s*\/\^hmac-sha256-agent-profile-pin-v3:\[0-9a-f\]\{64\}\$\/u/,
   /const fields = line\.split\(' '\)/,
   /if \(fields\.length !== 3\) return unavailable\(\)/,
-  /!PROVIDER_AUTHORIZATION_DIGEST_PATTERN\.test\(providerAuthorizationDigest\)/,
-  /providerAuthorizationDigests\.has\(providerAuthorizationDigest\)/,
-  /providerAuthorizationDigests\.add\(providerAuthorizationDigest\)/,
+  /!AGENT_PROFILE_PIN_PATTERN\.test\(agentProfilePin\)/,
+  /fingerprint\.slice\(AGENT_IDENTITY_FINGERPRINT_PREFIX\.length\) !==\s*agentProfilePin\.slice\(AGENT_PROFILE_PIN_PREFIX\.length\)/,
+  /agentProfilePins\.has\(agentProfilePin\)/,
+  /agentProfilePins\.add\(agentProfilePin\)/,
 ]) {
-  assert.match(executorRuntimeIsolationSource, bindingParserV2Contract);
+  assert.match(executorRuntimeIsolationSource, bindingParserV3Contract);
 }
 assert.doesNotMatch(
   executorRuntimeIsolationSource,
@@ -1343,8 +1344,13 @@ assert.match(
 );
 assert.match(
   readinessLayer7ProxySource,
-  /buildKemerBetReadinessAgentProfileRequestHeaders[\s\S]*?accept: 'application\/json'[\s\S]*?'accept-encoding': 'identity'[\s\S]*?authorization,[\s\S]*?origin: AGENT_WEB_ORIGIN,[\s\S]*?referer: KEMERBET_AGENT_DEPOSIT_URL,[\s\S]*?'sec-fetch-dest': 'empty'[\s\S]*?'sec-fetch-mode': 'cors'[\s\S]*?'sec-fetch-site': 'same-site'/,
+  /buildKemerBetReadinessAgentProfileRequestHeaders[\s\S]*?accept: 'application\/json'[\s\S]*?'accept-encoding': 'identity'[\s\S]*?authorization,[\s\S]*?origin: AGENT_WEB_ORIGIN,[\s\S]*?referer: KEMERBET_AGENT_DEPOSIT_URL,[\s\S]*?'sec-fetch-dest': 'empty'[\s\S]*?'sec-fetch-mode': 'cors'[\s\S]*?'sec-fetch-site': 'cross-site'/,
   'the independent Profile GET must use only the exact bearer and fixed lookup-XHR headers',
+);
+assert.match(
+  readinessLayer7ProxySource,
+  /sanitizeKemerBetReadinessLayer7RequestHeaders[\s\S]*?accept: 'application\/json'[\s\S]*?'accept-encoding': 'identity'[\s\S]*?authorization,[\s\S]*?origin: AGENT_WEB_ORIGIN,[\s\S]*?referer: KEMERBET_AGENT_DEPOSIT_URL,[\s\S]*?'sec-fetch-dest': 'empty'[\s\S]*?'sec-fetch-mode': 'cors'[\s\S]*?'sec-fetch-site': 'cross-site'/,
+  'the Player lookup GET must use only the exact bearer and fixed cross-site XHR headers',
 );
 assert.match(
   readinessLayer7ProxySource,
@@ -1475,18 +1481,18 @@ assert.match(
 );
 assert.match(
   readinessSameAgentIdentitySource,
-  /hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) sha256-provider-authorization-v1:\(\[0-9a-f\]\{64\}\)\\n\$\/u/,
-  'the proxy binding must be exactly one canonical v2 UUID/fingerprint/provider-digest line with a trailing LF',
+  /hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) hmac-sha256-agent-profile-pin-v3:\(\[0-9a-f\]\{64\}\)\\n\$\/u/,
+  'the proxy binding must be exactly one canonical v3 UUID/identity/profile-pin line with a trailing LF',
 );
 assert.match(readinessSameAgentIdentitySource, /const EXACT_BINDING_FILE_BYTES = 230/);
 assert.match(
   readinessSameAgentIdentitySource,
   /expectedBytes: EXACT_BINDING_FILE_BYTES,[\s\S]*?maximumBytes: EXACT_BINDING_FILE_BYTES/,
-  'the proxy must read exactly the 230-byte canonical v2 binding, never a v1 prefix',
+  'the proxy must read exactly the 230-byte canonical v3 binding, never a legacy prefix',
 );
 assert.match(
   readinessSameAgentIdentitySource,
-  /bindingFileBytes: EXACT_BINDING_FILE_BYTES,[\s\S]*?bindingVersion: 2/,
+  /bindingFileBytes: EXACT_BINDING_FILE_BYTES,[\s\S]*?bindingVersion: 3/,
 );
 assert.match(
   readinessSameAgentIdentitySource,
@@ -1509,7 +1515,7 @@ assert.match(
 );
 assert.match(
   readinessSameAgentIdentitySource,
-  /createHmac\('sha256', hmacKey\)[\s\S]*?KEMERBET_AGENT_IDENTITY_FINGERPRINT_DOMAIN[\s\S]*?\.update\(accountId\)[\s\S]*?\.update\('\\0', 'utf8'\)[\s\S]*?\.update\(userName\)[\s\S]*?timingSafeEqual\(observedIdentityDigest, expectedIdentityDigest\)/,
+  /createHmac\('sha256', hmacKey\)[\s\S]*?KEMERBET_AGENT_IDENTITY_FINGERPRINT_DOMAIN[\s\S]*?\.update\(accountId\)[\s\S]*?\.update\('\\0', 'utf8'\)[\s\S]*?\.update\(userName\)[\s\S]*?timingSafeEqual\(observedIdentityDigest, expectedAgentProfilePinDigest\)/,
   'the proxy must independently recompute and timing-safely match the bound account identity',
 );
 assert.match(
@@ -1523,13 +1529,18 @@ assertOrderedFragments(
   ),
   [
     'candidateBearerDigest = bearerDigest(verificationInput.authorization);',
-    '!timingSafeEqual(expectedProviderAuthorizationDigest, candidateBearerDigest)',
     "if (state === 'validated')",
+    '!timingSafeEqual(pinnedBearerDigest, candidateBearerDigest)',
     "if (state !== 'unvalidated')",
     "state = 'validating';",
     'await verificationInput.loadProfile(',
   ],
-  'the proxy must timing-safely match the sealed provider credential before any authenticated Profile call and before every lookup',
+  'the proxy must validate the first bearer through stable Profile identity and then timing-safely pin it for the run',
+);
+assert.doesNotMatch(
+  readinessSameAgentIdentitySource,
+  /expectedProviderAuthorizationDigest/,
+  'the v3 runtime must not persistently bind the agent identity to an expiring bearer digest',
 );
 assert.match(
   readinessSameAgentIdentitySource,
@@ -1539,7 +1550,7 @@ assert.match(
 for (const erasedIdentityBuffer of [
   'accountId.fill(0)',
   'expectedIdentityDigest.fill(0)',
-  'expectedProviderAuthorizationDigest.fill(0)',
+  'expectedAgentProfilePinDigest.fill(0)',
   'hmacKey.fill(0)',
   'pinnedBearerDigest?.fill(0)',
   'candidateBearerDigest?.fill(0)',
@@ -1645,7 +1656,7 @@ assert.match(
 );
 assert.match(
   readinessCompletionReceiptSource,
-  /const RECEIPT_CONTRACT = 'fetanagent-kemerbet-readiness-layer7-completion-v2'/,
+  /const RECEIPT_CONTRACT = 'fetanagent-kemerbet-readiness-layer7-completion-v3'/,
 );
 for (const receiptInvariant of [
   'agentIdentityBindingSha256: input.agentIdentityBindingSha256',
@@ -1653,9 +1664,10 @@ for (const receiptInvariant of [
   'moneyMoved: false',
   'responsesValidated: true',
   'sameAgentIdentityValidated: true',
+  'stableAgentProfileValidated: true',
   'sequences: [1, 2, 3, 4, 5]',
   'transferDisabled: true',
-  'version: 2',
+  'version: 3',
 ]) {
   assert.ok(
     readinessCompletionReceiptSource.includes(receiptInvariant),
@@ -1665,7 +1677,7 @@ for (const receiptInvariant of [
 assert.match(
   readinessCompletionReceiptSource,
   /!SHA256_PATTERN\.test\(input\.agentIdentityBindingSha256\)[\s\S]*?input\.sameAgentIdentityValidated !== true/,
-  'receipt v2 must require the exact binding-file digest and a true same-agent proof',
+  'receipt v3 must require the exact binding-file digest and a true same-agent proof',
 );
 assertOrderedFragments(
   readinessCompletionReceiptSource.slice(
@@ -1763,7 +1775,7 @@ for (const documentationContract of [
   /explicitly trusted, supervised enrollment ceremony/u,
   /compromised enrollment renderer is outside the confidentiality\/containment guarantee/u,
   /Compromised-renderer containment begins only after that\s+terminal close/u,
-  /exact 230-byte v2 UUID, identity-HMAC fingerprint,\s+and provider-authorization-digest line/u,
+  /exact 230-byte v3 UUID, identity-HMAC fingerprint, and stable Profile\s+pin/u,
   /two-field v1 binding[\s\S]*?cannot be\s+upgraded in place/u,
   /explicit, user-confirmed retirement and same-claim\s+reseal ceremony/u,
   /normal deploy, start, and seal commands never retire it automatically/u,
@@ -1808,7 +1820,8 @@ for (const documentationContract of [
   /exact staging, incoming, or atomic `\.consumed` path/u,
   /preflight failure cannot clean or mutate pre-existing residue/u,
   /A resealed state\s+must never reopen the private sign-in ceremony/u,
-  /mismatch is sticky-fatal before any\s+authenticated upstream request/u,
+  /first candidate bearer may reach only\s+the fixed read-only Profile request until its stable Profile HMAC matches the v3 pin/u,
+  /Any malformed profile, wrong agent, bearer drift, race,\s+abort, timeout, or disconnect is sticky-fatal/u,
   /trusted Layer-7 proxy is part of the trusted computing base/u,
   /proxy RCE or proxy-process\s+compromise is outside this fail-closed guarantee/u,
   /terminates KemerBet TLS[\s\S]*?current bearer and Player identifier[\s\S]*?only egress route/u,

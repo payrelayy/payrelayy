@@ -1252,6 +1252,7 @@ assert.deepEqual(botRuntimeCalls, [
   '$commit_sha steady-state',
   '$commit_sha steady-state',
   '$commit_sha immediate-startup',
+  '$commit_sha immediate-startup',
   '$2 immediate-startup',
   '$2 steady-state',
   '$commit_sha steady-state',

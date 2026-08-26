@@ -36,6 +36,10 @@ const helper = readFileSync(
   resolve(root, 'infra/operations/fetanagent-staging-deploy-helper.sh'),
   'utf8',
 );
+const v2V3SuccessorMigration = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-kemerbet-v2-v3-successor-migration.sh'),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -72,8 +76,10 @@ const retained33f4HelperBackupSha =
   '33f4a5a4ba56fa86aa34cdc9a899117d327ed06a58b3cb5d7e9453c28afad5ba';
 const retained33f4HelperBackupName = 'fetanagent-staging-deploy-helper.previous-33f4a5a4';
 const retained33f4HelperBackupPath = `/root/fetanagent-helper-rotation/${retained33f4HelperBackupName}`;
-const reviewedHelperSuccessorSha =
+const historicalReviewedHelperSuccessorSha =
   '43b09de7356bc6237264d8f0b162b237e74c1a59c175a2dccced7ad5b77d6619';
+const reviewedV3HelperSuccessorSha =
+  '5e1fc83bf07cfc7e0bf22c34a82f502413c42d2d005ac1b7b70fb07bd634885e';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -99,6 +105,266 @@ function extractShellFunction(source, name, nextName) {
   assert.ok(start >= 0 && end > start, `missing shell function boundary: ${name}`);
   return source.slice(start, end + 2);
 }
+
+const v2V3MigrationConfirmation = 'I-UNDERSTAND-THIS-ARCHIVES-V2-AND-INSTALLS-THE-V3-SUCCESSOR';
+for (const fixedMigrationContract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly TARGET='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'$/mu,
+  /^readonly METADATA='http:\/\/169\.254\.169\.254\/metadata\/v1'$/mu,
+  /^readonly EXPECTED_DROPLET_ID='593344964'$/mu,
+  /^readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'$/mu,
+  /^readonly PROJECT_NAME='fetanagent-staging-beta'$/mu,
+  /^readonly STAGING_ROOT="\/root\/fetanagent-v3-successor-\$SUCCESSOR_RELEASE"$/mu,
+  /^readonly STAGED_HELPER="\$STAGING_ROOT\/fetanagent-staging-deploy-helper\.next"$/mu,
+  /\[\[ \$# -eq 6 \]\]/u,
+  /^readonly PROVIDED_CONFIRMATION="\$6"$/mu,
+  /\[\[ "\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION" \]\] \|\| die 'the exact one-use migration confirmation is required'/u,
+  /"\$METADATA\/id"\)" ==\s+"\$EXPECTED_DROPLET_ID"/u,
+  /"\$METADATA\/interfaces\/public\/0\/ipv4\/address"\)" == "\$EXPECTED_PUBLIC_IPV4"/u,
+]) {
+  assert.match(v2V3SuccessorMigration, fixedMigrationContract);
+}
+assert.equal(
+  v2V3SuccessorMigration.split(`readonly CONFIRMATION='${v2V3MigrationConfirmation}'`).length - 1,
+  1,
+  'the v2-to-v3 migration must expose one exact, immutable one-use confirmation',
+);
+assert.doesNotMatch(
+  v2V3SuccessorMigration,
+  /(?:^|[;\s])(?:rm|unlink|shred|truncate)\b|os\.(?:unlink|remove|replace)\s*\(|shutil\.rmtree\s*\(|find[^\r\n]*-delete|docker[^\r\n]*(?:container|volume|image|network)\s+rm\b/imu,
+  'the successor migration must archive predecessor evidence and must contain no destructive deletion primitive',
+);
+
+const v2V3BindingTransform = extractShellFunction(
+  v2V3SuccessorMigration,
+  'archive_and_transform_binding',
+  'publish_completion',
+);
+for (const stableV3ProjectionContract of [
+  /v2 = re\.compile\([\s\S]*?b'\(' \+ uuid \+ rb'\) hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) '[\s\S]*?rb'sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\\n'/u,
+  /v3 = re\.compile\([\s\S]*?b'\(' \+ uuid \+ rb'\) hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) '[\s\S]*?rb'hmac-sha256-agent-profile-pin-v3:\\2\\n'/u,
+  /read_exact\(archive_fd, archive_name, \(0, 0\), 0o400\)/u,
+  /hashlib\.sha256\(archived\)\.hexdigest\(\) != expected_sha/u,
+  /match\.group\(1\) \+ b' hmac-sha256-agent-identity-v1:' \+ match\.group\(2\) \+\s+b' hmac-sha256-agent-profile-pin-v3:' \+ match\.group\(2\) \+ b'\\n'/u,
+  /if current == expected_v3 and v3\.fullmatch\(current\) is not None:/u,
+  /os\.rename\(temporary, source_name, src_dir_fd=source_fd, dst_dir_fd=source_fd\)/u,
+  /read_exact\(source_fd, source_name, \(10001, 10001\), 0o600\) != expected_v3/u,
+]) {
+  assert.match(v2V3BindingTransform, stableV3ProjectionContract);
+}
+const expectedV3Projection = /expected_v3 = \(([\s\S]*?)\n    \)\n    current =/u.exec(
+  v2V3BindingTransform,
+)?.[1];
+assert.ok(expectedV3Projection, 'the migration must construct one explicit v3 projection');
+assert.doesNotMatch(
+  expectedV3Projection,
+  /provider-authorization/iu,
+  'the retired provider-authorization digest must not enter the stable v3 identity projection',
+);
+
+const migrationRequireV3Binding = /require_v3_binding\(\) \{[\s\S]*?\n\}/u.exec(
+  v2V3SuccessorMigration,
+)?.[0];
+assert.ok(migrationRequireV3Binding, 'the migration must define an exact v3 binding attestor');
+for (const v3MigrationBindingContract of [
+  /rb'hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) '/u,
+  /rb'hmac-sha256-agent-profile-pin-v3:\\1\\n'/u,
+  /\(10001, 10001, 0o600, 1, 230\)/u,
+  /\(value\.st_dev, value\.st_ino\) != \(named\.st_dev, named\.st_ino\)/u,
+  /os\.path\.realpath\(path\) != path/u,
+  /pattern\.fullmatch\(bytes\(data\)\) is None/u,
+]) {
+  assert.match(migrationRequireV3Binding, v3MigrationBindingContract);
+}
+
+const migrationRestoreSudoers = /restore_sudoers\(\) \{[\s\S]*?\n\}/u.exec(
+  v2V3SuccessorMigration,
+)?.[0];
+assert.ok(migrationRestoreSudoers, 'the migration must define an exact sudoers restoration');
+for (const sudoersRestoreContract of [
+  /\[\[ ! -e "\$SUDOERS" && ! -L "\$SUDOERS" \]\] \|\| return 1/u,
+  /require_exact_sudoers_file "\$SUDOERS_DISABLED" \|\| return 1/u,
+  /visudo -cf "\$SUDOERS_DISABLED" >\/dev\/null \|\| return 1/u,
+  /visudo -cf \/etc\/sudoers >\/dev\/null \|\| return 1/u,
+  /mv -- "\$SUDOERS_DISABLED" "\$SUDOERS" \|\| return 1/u,
+  /sync -f \/etc\/sudoers\.d \|\| return 1/u,
+  /if sync -f \/etc\/sudoers\.d && require_exact_sudoers_file "\$SUDOERS" &&\s+visudo -cf \/etc\/sudoers >\/dev\/null; then/u,
+  /mv -- "\$SUDOERS" "\$SUDOERS_DISABLED" \|\| return 1/u,
+  /require_exact_sudoers_file "\$SUDOERS_DISABLED" \|\| return 1/u,
+]) {
+  assert.match(migrationRestoreSudoers, sudoersRestoreContract);
+}
+const migrationStateClassifier = v2V3SuccessorMigration.slice(
+  v2V3SuccessorMigration.indexOf('if [[ ! -e "$MIGRATION_ROOT" && ! -L "$MIGRATION_ROOT" &&'),
+  v2V3SuccessorMigration.indexOf('if [[ -e "$MIGRATION_PARENT" || -L "$MIGRATION_PARENT" ]]'),
+);
+assert.ok(
+  migrationStateClassifier.length > 0,
+  'the migration must classify fresh, disabled-fresh, completed, and interrupted topologies',
+);
+const migrationFreshDisabledBranch =
+  /elif \[\[ ! -e "\$SUDOERS" && ! -L "\$SUDOERS" \]\] &&\s+require_exact_sudoers_file "\$SUDOERS_DISABLED"; then([\s\S]*?)\n  else\n    die 'the deployment sudoers grant topology is unavailable or ambiguous'/u.exec(
+    migrationStateClassifier,
+  )?.[1];
+assert.ok(
+  migrationFreshDisabledBranch,
+  'the migration must expose one exact no-prefix disabled-grant recovery branch',
+);
+assertInOrder(
+  migrationFreshDisabledBranch,
+  [
+    "migration_state='fresh-disabled'",
+    'docker --host unix:///var/run/docker.sock container ls --all --quiet',
+    'disabled-grant recovery requires the staging project to remain fully stopped',
+    'validate_retirement_and_binding "$RETIREMENT_ROOT" "$SOURCE"',
+  ],
+  'fresh-disabled recovery must prove the stopped predecessor and exact v2 continuity without invoking the disabled helper',
+);
+assert.doesNotMatch(
+  migrationFreshDisabledBranch,
+  /run_predecessor_helper|sudo -n/u,
+  'fresh-disabled recovery must not invoke the predecessor helper through its disabled grant',
+);
+const migrationInterruptedBranch = /else\s+migration_state='interrupted'([\s\S]*?)\nfi\s*$/u.exec(
+  migrationStateClassifier,
+)?.[1];
+assert.ok(
+  migrationInterruptedBranch,
+  'the migration must expose one exact interrupted-prefix classifier',
+);
+for (const interruptedMigrationContract of [
+  /! -e "\$MIGRATION_ROOT" && ! -L "\$MIGRATION_ROOT"/u,
+  /require_migration_installing_prefix "\$MIGRATION_INSTALLING"/u,
+  /! -e "\$SUDOERS" && ! -L "\$SUDOERS"/u,
+  /require_exact_sudoers_file "\$SUDOERS_DISABLED"/u,
+]) {
+  assert.match(migrationInterruptedBranch, interruptedMigrationContract);
+}
+for (const migrationParentStateContract of [
+  /fresh\|fresh-disabled\) \[\[ -z "\$migration_parent_entries" \]\]/u,
+  /interrupted\) \[\[ "\$migration_parent_entries" == "\$\{SUCCESSOR_RELEASE\}\.installing" \]\]/u,
+  /completed\) \[\[ "\$migration_parent_entries" == "\$SUCCESSOR_RELEASE" \]\]/u,
+  /elif \[\[ "\$migration_state" != 'fresh' && "\$migration_state" != 'fresh-disabled' \]\]; then\s+die 'the existing migration lost its canonical parent'/u,
+]) {
+  assert.match(v2V3SuccessorMigration, migrationParentStateContract);
+}
+const migrationCompletedFastPath =
+  /if \[\[ "\$migration_state" == 'completed' \]\]; then([\s\S]*?)\nfi\n\ntrap cleanup EXIT/u.exec(
+    v2V3SuccessorMigration,
+  )?.[1];
+assert.ok(
+  migrationCompletedFastPath,
+  'the completed successor must have one lock-protected, non-mutating re-attestation path',
+);
+assertInOrder(
+  migrationCompletedFastPath,
+  [
+    'require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755',
+    'require_v3_binding "$SOURCE"',
+    'kemerbet-v3-successor-ready "$SUCCESSOR_RELEASE" "$SUCCESSOR_HELPER_SHA256"',
+    'if [[ -e "$SUDOERS_DISABLED" || -L "$SUDOERS_DISABLED" ]]',
+    'restore_sudoers',
+    'require_exact_sudoers_file "$SUDOERS"',
+    'exit 0',
+  ],
+  'completed migration recovery must re-attest the exact successor, normalize the grant, and exit before mutation',
+);
+const migrationCriticalSection = v2V3SuccessorMigration.slice(
+  v2V3SuccessorMigration.indexOf('trap cleanup EXIT'),
+);
+const migrationGrantDisableBoundary =
+  /trap cleanup EXIT\n([\s\S]*?)\n# Disable the predecessor helper grant before publishing any successor namespace\./u.exec(
+    migrationCriticalSection,
+  )?.[1];
+assert.ok(
+  migrationGrantDisableBoundary,
+  'the migration must expose one exact enabled-or-already-disabled grant transition',
+);
+assertInOrder(
+  migrationGrantDisableBoundary,
+  [
+    'if [[ -e "$SUDOERS" || -L "$SUDOERS" ]]',
+    'require_exact_sudoers_file "$SUDOERS"',
+    '[[ ! -e "$SUDOERS_DISABLED" && ! -L "$SUDOERS_DISABLED" ]]',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    "sudoers_disabled='true'",
+    'sync -f /etc/sudoers.d',
+    'else',
+    "sudoers_disabled='true'",
+    'require_exact_sudoers_file "$SUDOERS_DISABLED"',
+    '[[ ! -e "$SUDOERS" && ! -L "$SUDOERS" ]]',
+    'visudo -cf /etc/sudoers',
+    'require_no_helper_processes',
+  ],
+  'the migration must normalize both enabled and already-disabled grant entries before creating successor evidence',
+);
+assertInOrder(
+  migrationCriticalSection,
+  [
+    'trap cleanup EXIT',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    'require_exact_sudoers_file "$SUDOERS_DISABLED"',
+    '[[ ! -e "$SUDOERS" && ! -L "$SUDOERS" ]]',
+    'visudo -cf /etc/sudoers',
+    'require_no_helper_processes',
+    'if [[ ! -e "$MIGRATION_INSTALLING" && ! -L "$MIGRATION_INSTALLING" ]]',
+    'sync -f "$MIGRATION_PARENT"',
+    'publish_intent "$MIGRATION_INSTALLING"',
+    'require_migration_intent "$MIGRATION_INSTALLING"',
+    'archive_and_transform_binding "$MIGRATION_INSTALLING"',
+    'require_v3_binding "$SOURCE"',
+    'require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755',
+    'publish_completion "$MIGRATION_INSTALLING"',
+    'mv -- "$MIGRATION_INSTALLING" "$MIGRATION_ROOT"',
+    "sudoers_may_restore='true'",
+    'restore_sudoers',
+    "sudoers_may_restore='false'",
+    'trap - EXIT',
+  ],
+  'the successor migration must keep the deployment grant disabled across archival, transformation, helper replacement, and final v3 attestation',
+);
+const migrationGrantMoveIndex = migrationCriticalSection.indexOf(
+  'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+);
+const migrationIntentPublishIndex = migrationCriticalSection.indexOf(
+  'publish_intent "$MIGRATION_INSTALLING"',
+);
+assert.ok(
+  migrationGrantMoveIndex >= 0 &&
+    migrationIntentPublishIndex >= 0 &&
+    migrationGrantMoveIndex < migrationIntentPublishIndex,
+  'the predecessor helper grant must be disabled before any successor intent is published',
+);
+assertInOrder(
+  v2V3SuccessorMigration,
+  [
+    'require_no_helper_processes',
+    'flock --exclusive --nonblock 9',
+    'if [[ "$migration_state" == \'completed\' ]]',
+    'trap cleanup EXIT',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+  ],
+  'the migration must acquire the root mutation lock and finish completed-overlay recovery before disabling the exact deployment grant',
+);
+assert.doesNotMatch(
+  migrationCriticalSection.slice(0, migrationCriticalSection.indexOf("sudoers_may_restore='true'")),
+  /run_predecessor_helper|sudo -n/u,
+  'the disabled-grant critical section must never regain helper sudo through the predecessor path',
+);
+for (const canonicalRetirementContract of [
+  /\[\[ ! -L "\$RETIREMENT_ROOT" && -d "\$RETIREMENT_ROOT" &&\s+"\$\(realpath -- "\$RETIREMENT_ROOT"\)" == "\$RETIREMENT_ROOT" &&\s+"\$\(stat --format='%U:%G:%a' "\$RETIREMENT_ROOT"\)" == 'root:root:700' \]\]/u,
+  /die 'the canonical predecessor retirement root changed under lock'/u,
+  /\[\[ ! -L "\$RETIREMENT_ROOT" && -d "\$RETIREMENT_ROOT" \]\] \|\|\s+die 'the canonical predecessor retirement root was not preserved'/u,
+  /kemerbet-v3-successor-ready "\$SUCCESSOR_RELEASE" "\$SUCCESSOR_HELPER_SHA256"/u,
+]) {
+  assert.match(v2V3SuccessorMigration, canonicalRetirementContract);
+}
+assert.doesNotMatch(
+  v2V3SuccessorMigration,
+  /RETIREMENT_ARCHIVE_NAME|mv -- "\$RETIREMENT_ROOT"|os\.rename\([^\r\n]*retirement/iu,
+  'the canonical v1 retirement root must remain in place while the four-entry successor overlay archives only the v2 binding and predecessor helper',
+);
 
 for (const artifact of [
   workflow,
@@ -158,8 +424,8 @@ for (const ownerClaimRunbookContract of [
   /explicitly trusted, supervised enrollment ceremony/u,
   /compromised enrollment renderer is therefore outside the confidentiality\s+guarantee/u,
   /Compromised-renderer containment begins\s+after that close/u,
-  /230-byte v2 binding created\s+by the supervised seal/u,
-  /mismatch is sticky-fatal with zero Profile or Player upstream calls/u,
+  /exact 230-byte v3 binding\. Only after that match does it pin the complete bearer digest in memory/u,
+  /wrong\s+identity, bearer drift, races, aborts, and malformed responses are sticky-fatal/u,
   /two-field v1 identity binding cannot be upgraded in place/u,
   /`retire-v1-for-v2-reseal` mode of the manual `Staging private KemerBet\s+sign-in` workflow/u,
   /confirm_v1_binding_sha256/u,
@@ -1457,17 +1723,27 @@ const retirementBindingPublicationNormalizer = extractShellFunction(
 for (const publicationNormalizerContract of [
   /action="\$\{1:-normalize\}"/,
   /action" == 'normalize' \|\| "\$action" == 'inspect'/,
+  /BINDING_V2 = re\.compile\([\s\S]*?sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\\n/u,
+  /BINDING_V3 = re\.compile\([\s\S]*?hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{\{64\}\}\) '[\s\S]*?hmac-sha256-agent-profile-pin-v3:\\1\\n/u,
+  /def binding_v2_prefix_contract\(\):/,
+  /def binding_v3_prefix_contract\(\):/,
+  /def is_binding_v2_prefix\(content\):/,
+  /def is_binding_v3_prefix\(content\):/,
   /if len\(temporary_names\) > 1:/,
   /final_before\.st_nlink != \(2 if temporary else 1\)/,
   /\(temporary_before\.st_dev, temporary_before\.st_ino\) !=\s+\(final_before\.st_dev, final_before\.st_ino\)/u,
-  /publication_state = 'v2-hardlink-prefix'/,
+  /publication_state = f'\{final_version\}-hardlink-prefix'/,
   /if action == 'normalize':\s+os\.unlink\(temporary, dir_fd=root_fd\)\s+os\.fsync\(root_fd\)/u,
   /normalized\.st_nlink != 1/,
   /temporary_before\.st_size > 230/,
   /if len\(temporary_content\) == 230:/,
-  /BINDING_V2\.fullmatch\(temporary_content\.decode\('ascii', errors='strict'\)\)/,
-  /elif not is_binding_v2_prefix\(temporary_content\):/,
-  /'v2-temp-complete-prefix'\s+if len\(temporary_content\) == 230\s+else 'v2-temp-prefix'/u,
+  /if BINDING_V3\.fullmatch\(temporary_text\) is not None:/,
+  /elif BINDING_V2\.fullmatch\(temporary_text\) is not None:/,
+  /v2_prefix = is_binding_v2_prefix\(temporary_content\)/,
+  /v3_prefix = is_binding_v3_prefix\(temporary_content\)/,
+  /if not v2_prefix and not v3_prefix:/,
+  /temporary_version = 'v3' if v3_prefix and not v2_prefix else 'v2'/,
+  /f'\{temporary_version\}-temp-complete-prefix'\s+if len\(temporary_content\) == 230\s+else f'\{temporary_version\}-temp-prefix'/u,
   /if action == 'normalize' and len\(temporary_content\) == 230:/,
   /os\.link\(\s+temporary,\s+final_name,\s+src_dir_fd=root_fd,\s+dst_dir_fd=root_fd,\s+follow_symlinks=False,/u,
   /\(normalized\.st_dev, normalized\.st_ino\) !=\s+\(temporary_before\.st_dev, temporary_before\.st_ino\)/u,
@@ -1488,6 +1764,24 @@ const retirementTemporaryProjection = extractShellFunction(
   helper,
   'require_kemerbet_v1_retirement_v2_temporary_projection',
   'require_kemerbet_v1_retirement_seal_finalization_prefix',
+);
+const retirementStableV2Projection = extractShellFunction(
+  helper,
+  'require_kemerbet_v1_retirement_v2_binding_projection',
+  'require_kemerbet_v1_retirement_v2_temporary_projection',
+);
+for (const stableRetirementProjectionContract of [
+  /10001:10001:600:\$links:230/u,
+  /sha256-provider-authorization-v1:\[0-9a-f\]\{64\}/u,
+  /printf '%s %s\\n' "\$account_id" "\$identity_fingerprint" \| sha256sum/u,
+  /KEMERBET_V1_RETIREMENT_LEGACY_SHA256/u,
+]) {
+  assert.match(retirementStableV2Projection, stableRetirementProjectionContract);
+}
+assert.doesNotMatch(
+  retirementStableV2Projection,
+  /hmac-sha256-agent-profile-pin-v3|require_kemerbet_v3_binding_content/u,
+  'the historical v1-retirement continuity projection must continue validating the exact v2 source',
 );
 for (const temporaryProjectionContract of [
   /entries="\$\(find -P "\$KEMERBET_READINESS_OUTPUT_ROOT"/,
@@ -1582,7 +1876,273 @@ assert.match(
 );
 assert.match(
   helper,
-  /if \[\[ "\$command" != 'kemerbet-v1-retirement-recovery-ready' \]\]; then\s+enforce_kemerbet_v1_retirement_gate "\$command" "\$\{@:2\}"\s+fi/u,
+  /inspect_kemerbet_v2_v3_successor_gate\s+if \[\[ "\$command" == 'kemerbet-v1-retirement-recovery-ready' \]\]; then\s+\[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' \]\] \|\|\s+die 'the KemerBet v3 successor permanently forbids legacy v1 retirement recovery'\s+else\s+if \[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' \]\]; then\s+enforce_kemerbet_v1_retirement_gate "\$command" "\$\{@:2\}"\s+fi\s+enforce_kemerbet_v2_v3_successor_gate "\$command" "\$\{@:2\}"\s+fi/u,
+  'successor inspection must precede dispatch and permanently block legacy recovery once any successor overlay exists',
+);
+const inspectV2V3SuccessorGate = extractShellFunction(
+  helper,
+  'inspect_kemerbet_v2_v3_successor_gate',
+  'enforce_kemerbet_v2_v3_successor_gate',
+);
+for (const successorGateContract of [
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'/,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='invalid'/,
+  /\['binding-v2', 'completed-v1', 'intent-v1', 'predecessor-helper'\]/u,
+  /contract=fetanagent-kemerbet-readiness-v2-v3-successor-v1/u,
+  /state=successor-installed/u,
+  /len\(intent\) != 9/u,
+  /len\(completion\) != 10/u,
+  /retirement_intent_sha256=/u,
+  /retirement_completion_sha256=/u,
+  /completion\[9\].*v3_binding_sha256/u,
+  /exact_file\(f'\{root\}\/binding-v2', \(0, 0\), 0o400, 230, 230\)/u,
+  /rb'sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\\n'/u,
+  /rb'hmac-sha256-agent-profile-pin-v3:\\2\\n'/u,
+  /v2_match\.group\(1\) != matched\.group\(1\)/u,
+  /v2_match\.group\(2\) != matched\.group\(2\)/u,
+  /exact_directory\(retirement, 0o700, \['completed-v1', 'intent-v1'\]\)/u,
+  /retirement_completion\[1\] != 'state=resealed-v2'/u,
+  /retirement_completion\[15\] != f'v2_binding_sha256=\{v2_sha\}'/u,
+  /retirement_intent\[9\]\.startswith\('claim_sha256='\)/u,
+  /hashlib\.sha256\(retirement_intent_data\)\.hexdigest\(\) != retirement_intent_sha/u,
+  /hashlib\.sha256\(retirement_completion_data\)\.hexdigest\(\) != retirement_completion_sha/u,
+  /helper_data = exact_file\(helper, \(0, 0\), 0o755, 2 \* 1024 \* 1024\)/u,
+  /hashlib\.sha256\(helper_data\)\.hexdigest\(\) != successor_helper_sha/u,
+  /require_v3_binding\(binding, \(10001, 10001\), 0o600\)/u,
+  /os\.path\.lexists\(committed_binding\)[\s\S]*?os\.path\.lexists\(os\.path\.dirname\(recheck_receipt\)\)[\s\S]*?os\.path\.lexists\(owner_completion\)[\s\S]*?os\.path\.lexists\(candidate_root\)[\s\S]*?os\.path\.lexists\(rpc_root\)/u,
+  /gate_state = 'successor-installed'/u,
+  /require_v3_binding\(committed_binding, \(0, 0\), 0o444\)/u,
+  /exact_directory\(os\.path\.dirname\(recheck_receipt\), 0o700, \['ready-v1'\]\)/u,
+  /identity_key_owner_mode != \(0, 0, 0o444\)/u,
+  /selector_data = exact_file\(selector_contract, \(0, 0\), 0o444, 1024 \* 1024\)/u,
+  /receipt_lines\[1\] != f'release=\{successor\}'/u,
+  /receipt_lines\[2\] != f'binding_sha256=\{v3_sha\}'/u,
+  /identity_hmac_key_sha256=\{hashlib\.sha256\(identity_key_data\)\.hexdigest\(\)\}/u,
+  /selector_sha256=\{hashlib\.sha256\(selector_data\)\.hexdigest\(\)\}/u,
+  /exact_directory\([\s\S]*?os\.path\.dirname\(owner_completion\)[\s\S]*?0o755[\s\S]*?os\.path\.basename\(owner_completion\)/u,
+  /exact_file\(owner_completion, \(0, 10001\), 0o440, 37, 37\)/u,
+  /hashlib\.sha256\(owner_completion_data\)\.hexdigest\(\) !=\s+retirement_intent\[9\]\.split\('=', 1\)\[1\]/u,
+  /for consumed_or_transient in \([\s\S]*?binding,[\s\S]*?readiness_player_ids,[\s\S]*?candidate_root,[\s\S]*?promotion_root,[\s\S]*?rpc_root,[\s\S]*?\)/u,
+  /gate_state = 'successor-recheck-recoverable'/u,
+  /gate_state = 'successor-completed'/u,
+  /sys\.stdout\.write\(successor \+ '\\n' \+ successor_helper_sha \+ '\\n' \+ gate_state \+ '\\n'\)/u,
+  /\^\(successor-installed\|successor-recheck-recoverable\|successor-completed\)\$/u,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="\$\{inspection_lines\[2\]\}"/u,
+]) {
+  assert.match(inspectV2V3SuccessorGate, successorGateContract);
+}
+assert.equal(
+  (
+    inspectV2V3SuccessorGate.match(
+      /base_entries = \['binding-v2', 'completed-v1', 'intent-v1', 'predecessor-helper'\]/gu,
+    ) ?? []
+  ).length,
+  1,
+  'the successor inspector must define one exact immutable four-entry overlay',
+);
+const successorRecoverableBranch =
+  /promotion_exists = promotion_exists_and_is_safe\(\)\nif promotion_exists:([\s\S]*?)\nelif os\.path\.lexists\(binding\):/u.exec(
+    inspectV2V3SuccessorGate,
+  )?.[1];
+const successorInstalledBranch =
+  /elif os\.path\.lexists\(binding\):([\s\S]*?)\nelse:\n    require_v3_binding\(committed_binding/u.exec(
+    inspectV2V3SuccessorGate,
+  )?.[1];
+const successorCompletedBranch =
+  /else:\n    require_v3_binding\(committed_binding([\s\S]*?)\n    gate_state = 'successor-completed'/u.exec(
+    inspectV2V3SuccessorGate,
+  )?.[1];
+assert.ok(
+  successorRecoverableBranch && successorInstalledBranch && successorCompletedBranch,
+  'the successor inspector must expose promotion-first recoverable, installed, and completed branches',
+);
+assertInOrder(
+  successorRecoverableBranch,
+  ['require_live_successor_helper()', "gate_state = 'successor-recheck-recoverable'"],
+  'a safe promotion root must force exact-helper recovery before any installed/completed classification',
+);
+assertInOrder(
+  successorInstalledBranch,
+  [
+    'require_v3_binding(binding, (10001, 10001), 0o600)',
+    'require_live_successor_helper()',
+    'os.path.lexists(committed_binding)',
+    'os.path.lexists(os.path.dirname(recheck_receipt))',
+    'os.path.lexists(owner_completion)',
+    'os.path.lexists(candidate_root)',
+    'os.path.lexists(rpc_root)',
+    "gate_state = 'successor-installed'",
+  ],
+  'installed classification must prove the live source and helper while excluding terminal or transient residue',
+);
+assertInOrder(
+  successorCompletedBranch,
+  [
+    ', (0, 0), 0o444)',
+    "exact_directory(os.path.dirname(recheck_receipt), 0o700, ['ready-v1'])",
+    'receipt_data = exact_file(recheck_receipt, (0, 0), 0o600, 4096)',
+    'owner_completion_data = exact_file(owner_completion, (0, 10001), 0o440, 37, 37)',
+    'for consumed_or_transient in (',
+  ],
+  'completed classification must derive solely from exact durable binding, receipt, Owner claim, and consumed-input absence',
+);
+assert.doesNotMatch(
+  successorCompletedBranch,
+  /require_live_successor_helper/u,
+  'terminal successor completion must survive later approved helper rotation',
+);
+for (const successorState of [
+  'successor-recheck-recoverable',
+  'successor-installed',
+  'successor-completed',
+]) {
+  assert.equal(
+    (inspectV2V3SuccessorGate.match(new RegExp(`gate_state = '${successorState}'`, 'gu')) ?? [])
+      .length,
+    1,
+    `the successor inspector must assign ${successorState} in exactly one branch`,
+  );
+}
+for (const forbiddenSuccessorCompletionMarker of [
+  /publish_kemerbet_v3_successor_recheck_completion/u,
+  /completion_name/u,
+  /completion_temporary_name/u,
+  /successor_completion/u,
+  /contract=fetanagent-kemerbet-v2-v3-successor-recheck-v1/u,
+  /successor-commit-prefix/u,
+]) {
+  assert.doesNotMatch(
+    helper,
+    forbiddenSuccessorCompletionMarker,
+    'terminal v3 completion must be derived from existing durable artifacts without a fifth overlay marker',
+  );
+}
+const enforceV2V3SuccessorGate = extractShellFunction(
+  helper,
+  'enforce_kemerbet_v2_v3_successor_gate',
+  'consume_exact_one_use_kemerbet_file',
+);
+for (const successorGateEnforcementContract of [
+  /if \[\[ "\$command" == 'verify' \]\]; then\s+return 0\s+fi/u,
+  /inspect_kemerbet_v2_v3_successor_gate/,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'/u,
+  /retire-kemerbet-readiness-binding-v1-for-v2-reseal\|reinstall-kemerbet-v1-retirement-secrets\|seal-kemerbet-readiness\|kemerbet-v1-retirement-recovery-ready/u,
+  /permanently forbids legacy v1\/v2 reseal or recovery commands/u,
+  /recheck-kemerbet-readiness\)[\s\S]*?"\$release" == "\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-recheck-recoverable'/u,
+  /an interrupted KemerBet v3 recheck permits only exact-release recovery/u,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/,
+  /incomplete or invalid KemerBet v2-to-v3 successor migration blocks staging mutations/u,
+  /stop\|expiry-stop\|stop-public-edge/u,
+  /stop-bot\|stop-kemerbet-session-provision/u,
+  /the KemerBet v3 successor stop command belongs to another reviewed release/u,
+  /network-ready\)\s+return 0/u,
+  /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision\|recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u,
+  /"\$release" == "\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
+  /permits only no-transfer deployment, private sign-in, and readiness recheck/u,
+]) {
+  assert.match(enforceV2V3SuccessorGate, successorGateEnforcementContract);
+}
+const successorInstalledCommandAllowlist =
+  /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision\|recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u.exec(
+    enforceV2V3SuccessorGate,
+  )?.[0];
+assert.ok(
+  successorInstalledCommandAllowlist,
+  'the installed successor must expose one exact no-transfer command allowlist',
+);
+assert.doesNotMatch(
+  successorInstalledCommandAllowlist,
+  /(?:^|\|)(?:public-edge-ready|start-public-edge)(?:\||$)/u,
+  'the migrated fixed host must never expose the retired-host public-edge commands',
+);
+const retryableKemerbetBindingSource = extractShellFunction(
+  helper,
+  'require_retryable_kemerbet_binding_source',
+  'consume_exact_kemerbet_binding_source',
+);
+for (const retryableV3Contract of [
+  /\$expected_dev_ino:10001:10001:600:1:230/u,
+  /sha256sum -- "\$KEMERBET_READINESS_BINDING"/u,
+  /"\$expected_digest"/u,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_READINESS_BINDING"/u,
+]) {
+  assert.match(retryableKemerbetBindingSource, retryableV3Contract);
+}
+assert.doesNotMatch(
+  retryableKemerbetBindingSource,
+  /sha256-provider-authorization-v1|require_kemerbet_v1_retired_awaiting_v2/iu,
+  'every retryable successor source must be exact v3 and must never fall back to the historical provider-authorization binding',
+);
+const v3SuccessorReadyCase =
+  /\n  kemerbet-v3-successor-ready\)([\s\S]*?)\n    ;;\n\n  stop\)/u.exec(helper)?.[1];
+assert.ok(v3SuccessorReadyCase, 'the helper must expose one read-only v3 overlay readiness check');
+for (const v3SuccessorReadyContract of [
+  /\[\[ \$# -eq 3 && "\$2" =~ \^\[0-9a-f\]\{40\}\$ && "\$3" =~ \^\[0-9a-f\]\{64\}\$ \]\]/u,
+  /inspect_kemerbet_v2_v3_successor_gate/,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/,
+  /KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$2"/,
+  /KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "\$3"/,
+  /v3 successor overlay ready: stable Profile binding, Transfer disabled/u,
+]) {
+  assert.match(v3SuccessorReadyCase, v3SuccessorReadyContract);
+}
+assert.doesNotMatch(
+  v3SuccessorReadyCase,
+  /docker|compose|GeneralInfoByExternalId|PlayerEPOSDeposit|curl|FINANCIAL_ACTIONS_MODE=live/iu,
+  'the v3 overlay readiness command must only re-attest the completed local overlay',
+);
+const v3SuccessorInstallBoundary = extractShellFunction(
+  helper,
+  'require_kemerbet_v3_successor_install_boundary',
+  'require_fresh_host_identity',
+);
+for (const installBoundaryContract of [
+  /inspect_kemerbet_v2_v3_successor_gate/u,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/u,
+  /KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/u,
+  /require_kemerbet_v1_retirement_expiry_guard_disarmed/u,
+  /! -e "\$BOT_STARTUP_RECEIPT" && ! -L "\$BOT_STARTUP_RECEIPT"/u,
+  /! -e "\$BOT_STARTUP_RECEIPT_ROOT" && ! -L "\$BOT_STARTUP_RECEIPT_ROOT"/u,
+  /container ls --all --quiet/u,
+  /network ls --quiet/u,
+  /require_kemerbet_recheck_transients_absent/u,
+  /volume ls --quiet/u,
+  /KEMERBET_PROFILE_VOLUME/u,
+  /KEMERBET_SESSION_CONTROL_VOLUME/u,
+  /require_kemerbet_profile_volume_holders ''/u,
+  /resolve_kemerbet_session_control_volume_offline_mountpoint/u,
+  /--filter "volume=\$KEMERBET_SESSION_CONTROL_VOLUME"/u,
+]) {
+  assert.match(v3SuccessorInstallBoundary, installBoundaryContract);
+}
+assert.equal(
+  (v3SuccessorInstallBoundary.match(/inspect_kemerbet_v2_v3_successor_gate/g) ?? []).length,
+  2,
+  'successor installation must attest the exact overlay before and after its offline preflight',
+);
+assertInOrder(
+  v3SuccessorInstallBoundary,
+  [
+    'inspect_kemerbet_v2_v3_successor_gate',
+    'require_kemerbet_v1_retirement_expiry_guard_disarmed',
+    'containers=',
+    '[[ -z "$containers" ]]',
+    'networks=',
+    '[[ -z "$networks" ]]',
+    'require_kemerbet_recheck_transients_absent',
+    'project_volumes=',
+    '[[ "$project_volumes" == "$expected_volumes" ]]',
+    'require_kemerbet_profile_volume_holders',
+    '[[ -z "$session_holders" ]]',
+    'inspect_kemerbet_v2_v3_successor_gate',
+  ],
+  'successor installation must prove the complete stopped holder-free boundary before re-attesting it',
+);
+assert.doesNotMatch(
+  v3SuccessorInstallBoundary,
+  /^[ \t]*(?:rm|mv|install|cp|truncate|tee)\s+|docker_local (?:container|network|volume) (?:rm|create)\b|compose_command|docker_local compose|docker --host/imu,
+  'the successor install preflight must remain read-only and fail closed',
 );
 const helperStopCase = /\n  stop\)\n([\s\S]*?)\n    ;;\n\n  arm-expiry-stop\)/u.exec(helper)?.[1];
 const helperExpiryStopCase = /\n  expiry-stop\)\n([\s\S]*?)\n    ;;\n\n  cutover-ready\)/u.exec(
@@ -1836,7 +2396,7 @@ assert.match(stagingRunbook, /exactly two hours before the earliest expiry/);
 assert.match(stagingRunbook, /automatic\s+stop-before-expiry boundary/);
 assert.match(stagingRunbook, /not credential rotation or continuous\s+availability/u);
 const helperReplacementRunbook =
-  /### Exact helper replacement on the current staging Droplet([\s\S]*?)\nThe protected `staging` environment/u.exec(
+  /### Historical audit record: exact v1\/v2 helper replacement on the staging Droplet([\s\S]*?)\nThe protected `staging` environment/u.exec(
     stagingRunbook,
   )?.[1];
 assert.ok(helperReplacementRunbook, 'The current staging helper replacement must be documented.');
@@ -2216,7 +2776,7 @@ for (const replacementResumeContract of [
   /test "\$TARGET_SHA" = "\$PREVIOUS_SHA"/,
   /if \[\[ "\$SUDOERS_STATE" == 'enabled' \]\]; then/,
   new RegExp(
-    `INSTALL_TMP_PATH='\\/usr\\/local\\/sbin\\/\\.fetanagent-staging-deploy-helper\\.installing-${reviewedHelperSuccessorSha.slice(0, 8)}'`,
+    `INSTALL_TMP_PATH='\\/usr\\/local\\/sbin\\/\\.fetanagent-staging-deploy-helper\\.installing-${historicalReviewedHelperSuccessorSha.slice(0, 8)}'`,
   ),
   new RegExp(
     `BACKUP_TMP_PATH="\\$STAGING_ROOT\\/\\.fetanagent-staging-deploy-helper\\.previous-${installedHelperPredecessorSha.slice(0, 8)}\\.installing"`,
@@ -3123,6 +3683,90 @@ assert.match(startBot, /clear_bot_startup_receipt/);
 assert.match(startBot, /up -d --no-build --no-deps bot/);
 assert.doesNotMatch(startBot, /gateway|FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
 
+const installRelease = /\n  install\)([\s\S]*?)\n    ;;\n\n  start\|fresh-start\)/u.exec(
+  helper,
+)?.[1];
+assert.ok(installRelease, 'The helper must define the sealed release installation boundary.');
+assertInOrder(
+  installRelease,
+  [
+    'validate_commit_and_tag "$commit_sha" "$image_tag"',
+    `if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then`,
+    'require_kemerbet_v3_successor_install_boundary "$commit_sha"',
+    'expected_files=',
+    'install -d -o root -g root -m 0755 "$release/infra" "$SECRET_ROOT"',
+  ],
+  'successor installation must prove the stopped preflight before examining or replacing release bytes',
+);
+assert.equal(
+  (
+    helper.match(
+      /for image in owner-control customer-web api beta-admission bot deposit-executor gateway; do/g,
+    ) ?? []
+  ).length,
+  2,
+  'both release installation and startup must reject a missing or wrong-release executor image',
+);
+const startOrFreshStart =
+  /\n  start\|fresh-start\)([\s\S]*?)\n    ;;\n\n  bot-disabled-ready\)/u.exec(helper)?.[1];
+assert.ok(startOrFreshStart, 'The helper must define the private-core startup boundary.');
+
+function assertSuccessorInstalledPostcondition(
+  commandCase,
+  mutationFragment,
+  preGateContract,
+  insideGateContract,
+  releaseReference,
+  label,
+) {
+  assertInOrder(
+    commandCase,
+    [
+      mutationFragment,
+      ...preGateContract,
+      `if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then`,
+      ...insideGateContract,
+      'inspect_kemerbet_v2_v3_successor_gate',
+      `[[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&`,
+      `"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "${releaseReference}" ]]`,
+    ],
+    `${label} must re-attest the same-release installed successor after its mutation`,
+  );
+}
+
+assertSuccessorInstalledPostcondition(
+  installRelease,
+  'rm -rf -- "$incoming"',
+  [],
+  [],
+  '$commit_sha',
+  'release installation',
+);
+assertSuccessorInstalledPostcondition(
+  startOrFreshStart,
+  'require_owner_kemerbet_receipt_service_access',
+  [],
+  ['require_exact_fresh_private_runtime "$commit_sha"'],
+  '$commit_sha',
+  'private-core startup',
+);
+assertSuccessorInstalledPostcondition(
+  installBotToken,
+  'rm -f -- "$incoming"',
+  ['require_service_file "$SECRET_ROOT/bot-token"'],
+  [],
+  '$commit_sha',
+  'Telegram token installation',
+);
+assertSuccessorInstalledPostcondition(
+  startBot,
+  'up -d --no-build --no-deps bot',
+  [],
+  ['require_exact_fresh_bot_runtime "$commit_sha" immediate-startup'],
+  '$commit_sha',
+  'Telegram startup',
+);
+
 const stopBot = /\n  stop-bot\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(stopBot, 'The helper must define a fail-closed Telegram bot stop boundary.');
 assert.match(stopBot, /com\.docker\.compose\.service=bot/);
@@ -3153,6 +3797,29 @@ assert.doesNotMatch(
   stopBot,
   /emergency_(?:disable_bot|remove_project_service)_after_kemerbet_recovery_failure/,
   'bot-stop recovery failure must never leave Owner or another project service running',
+);
+assertInOrder(
+  stopBot,
+  [
+    'recover_kemerbet_recheck_before_teardown',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    'if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == \'absent\' ]]; then',
+    'inspect_kemerbet_v1_retirement_gate',
+    'else',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
+    "successor_component_stop='true'",
+    'clear_bot_startup_receipt',
+    'if [[ "$successor_component_stop" == \'true\' ]]; then',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release"',
+  ],
+  'bot stop must use successor-native control flow and preserve the exact same-release durable overlay',
+);
+assert.equal(
+  (stopBot.match(/inspect_kemerbet_v1_retirement_gate/g) ?? []).length,
+  1,
+  'bot stop may inspect historical v1 state only in the explicit successor-absent branch',
 );
 
 const startKemerbetSession = /\n  start-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
@@ -3417,6 +4084,12 @@ for (const contract of [
   /! -e "\$candidate_path" && ! -L "\$candidate_path"/,
   /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/,
   /stat --format='%h' "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /stat --format='%u:%g:%a:%h:%s' "\$KEMERBET_READINESS_BINDING"/,
+  /'10001:10001:600:1:230'/,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_READINESS_BINDING"/,
+  /inspect_kemerbet_v2_v3_successor_gate/,
+  /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/,
+  /KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/,
   /! -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
   /! -e "\$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "\$KEMERBET_RECHECK_RECEIPT_ROOT"/,
   /! -e "\$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/,
@@ -3429,8 +4102,7 @@ for (const contract of [
   /== '10001:10001:600:1'/,
   /binding_size.*== '230'/s,
   /wc -l <"\$KEMERBET_READINESS_BINDING"/,
-  /hmac-sha256-agent-identity-v1:\[0-9a-f\]\{64\}/,
-  /sha256-provider-authorization-v1:\[0-9a-f\]\{64\}/,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_READINESS_BINDING"/,
   /inspect_owner_staged_kemerbet_cohort/,
   /owner_kemerbet_cohort_marker require-failed "\$before_claim_id"/,
   /exec \{metadata_fd\}<<<"\$before_claim_id\n\$before_digest"/,
@@ -3505,6 +4177,11 @@ assertInOrder(
     'if [[ -e "$KEMERBET_READINESS_PLAYER_IDS" || -L "$KEMERBET_READINESS_PLAYER_IDS" ]]; then',
     'if [[ ! -e "$failed_path" && ! -L "$failed_path" &&',
     '! -e "$candidate_path" && ! -L "$candidate_path" ]]; then',
+    `if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then`,
+    'require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING"',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    `[[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&`,
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
     'return 0',
     '[[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT"',
   ],
@@ -3980,7 +4657,7 @@ for (const contract of [
   /require_owned_kemerbet_recovery_latch/,
   /pre-journal KemerBet recovery retained a derived artifact/,
   /require_kemerbet_readiness_output_directory/,
-  /hmac-sha256-agent-identity-v1/,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_READINESS_BINDING"/,
   /inspect_owner_staged_kemerbet_cohort/,
   /KEMERBET_OWNER_FAILED_CLAIM_NAME/,
   /KEMERBET_RECOVERY_LATCH_NAME/,
@@ -4121,6 +4798,8 @@ assert.ok(
 for (const contract of [
   /require_kemerbet_recheck_receipt/,
   /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /agent_profile_pin/,
   /sha256sum -- "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
   /sha256sum -- "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
   /sha256sum -- "\$KEMERBET_SELECTOR_CONTRACT"/,
@@ -4414,6 +5093,7 @@ for (const contract of [
   /owner_kemerbet_cohort_marker publish-imported/,
   /require_kemerbet_identity_key_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
   /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_READINESS_BINDING"/,
   /KEMERBET_RECHECK_CLEANUP_ARMED='true'/,
   /trap kemerbet_recheck_cleanup_trap EXIT/,
   /trap 'kemerbet_recheck_signal_trap 130' INT/,
@@ -4477,6 +5157,21 @@ for (const contract of [
 ]) {
   assert.match(recheckKemerbetReadiness, contract);
 }
+assert.match(
+  recheckKemerbetReadiness,
+  /recover_incomplete_kemerbet_recheck_promotion_guarded\s+inspect_kemerbet_v2_v3_successor_gate\s+if \[\[ -e "\$KEMERBET_RECHECK_RECEIPT_ROOT" \|\| -L "\$KEMERBET_RECHECK_RECEIPT_ROOT" \]\]; then[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/u,
+  'guarded recovery must refresh the successor state before accepting an idempotent completed receipt',
+);
+assert.match(
+  recheckKemerbetReadiness,
+  /if \[\[ -e "\$KEMERBET_V1_RETIREMENT_ROOT" \|\| -L "\$KEMERBET_V1_RETIREMENT_ROOT" \]\]; then\s+if \[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' \]\]; then\s+finalize_kemerbet_v1_retirement_after_v2_seal "\$commit_sha"[\s\S]*?else\s+\[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&\s+"\$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha" \]\]/u,
+  'the legacy v2 finalizer must run only without a successor overlay; v3 must use the exact migrated installed state',
+);
+assert.match(
+  recheckKemerbetReadiness,
+  /remove_owned_kemerbet_recheck_promotion_root[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"\s+inspect_kemerbet_v2_v3_successor_gate[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/u,
+  'normal v3 completion must retire the promotion journal and derive the durable terminal state before reporting success',
+);
 assert.equal(
   (recheckKemerbetReadiness.match(/allow-exact-stale-singletons/g) ?? []).length,
   2,
@@ -5845,8 +6540,33 @@ for (const fixedRuntimeContract of [
   assert.match(helper, fixedRuntimeContract);
 }
 assert.ok(
-  (helper.match(/sha256-provider-authorization-v1:\[0-9a-f\]\{64\}/g) ?? []).length >= 10,
-  'every active helper binding boundary must require the v2 provider-authorization digest',
+  (helper.match(/sha256-provider-authorization-v1:\[0-9a-f\]\{64\}/g) ?? []).length >= 5,
+  'the helper must retain the historical v2 provider-authorization parsers needed for bounded recovery and migration continuity',
+);
+const v3BindingContentContract = /require_kemerbet_v3_binding_content\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+assert.ok(v3BindingContentContract, 'the helper must define one exact stable v3 binding attestor');
+for (const v3BindingContract of [
+  /len\(sys\.argv\) != 2 or os\.path\.realpath\(sys\.argv\[1\]\) != sys\.argv\[1\]/u,
+  /os\.stat\(path, follow_symlinks=False\)/u,
+  /not stat\.S_ISREG\(before\.st_mode\) or before\.st_size != 230/u,
+  /os\.O_RDONLY \| os\.O_CLOEXEC/u,
+  /os\.O_NOFOLLOW/u,
+  /rb'hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) '/u,
+  /rb'hmac-sha256-agent-profile-pin-v3:\\2\\n'/u,
+  /identity\(before\) != identity\(opened\)/u,
+  /identity\(opened\) != identity\(after\)/u,
+  /identity\(after\) != identity\(path_after\)/u,
+  /len\(data\) != 230/u,
+  /PATTERN\.fullmatch\(bytes\(data\)\) is None/u,
+]) {
+  assert.match(v3BindingContentContract, v3BindingContract);
+}
+assert.equal(
+  (helper.match(/require_kemerbet_v3_binding_content/g) ?? []).length,
+  8,
+  'the stable v3 binding attestor must be defined once and used by all seven operational binding boundaries',
 );
 const v1RetirementRuntimeStart = helper.indexOf('publish_kemerbet_v1_retirement_artifact() {');
 const v1RetirementRuntimeEnd = helper.indexOf('\nconsume_exact_one_use_kemerbet_file() {');
@@ -5868,8 +6588,8 @@ const recheckAgentIdentitySourceContract = extractShellFunction(
 );
 for (const contract of [
   /binding = read_exact\(sys\.argv\[1\], 0o444, 230\)/,
-  /rb'hmac-sha256-agent-identity-v1:\[0-9a-f\]\{64\} '/,
-  /rb'sha256-provider-authorization-v1:\[0-9a-f\]\{64\}\\n'/,
+  /rb'hmac-sha256-agent-identity-v1:\(\[0-9a-f\]\{64\}\) '/,
+  /rb'hmac-sha256-agent-profile-pin-v3:\\1\\n'/,
 ]) {
   assert.match(recheckAgentIdentitySourceContract, contract);
 }
@@ -5925,15 +6645,16 @@ const recheckCompletionReceipt = extractShellFunction(
 for (const contract of [
   /10003:10003:400:1/,
   /read_exact\(binding_path, 10003, 10003, 0o400, 230, 230\)/,
-  /fetanagent-kemerbet-readiness-layer7-completion-v2/,
+  /fetanagent-kemerbet-readiness-layer7-completion-v3/,
   /'agentIdentityBindingSha256': hashlib\.sha256\(binding_serialized\)\.hexdigest\(\)/,
   /'identifiersRedacted': True/,
   /'moneyMoved': False/,
   /'responsesValidated': True/,
   /'sameAgentIdentityValidated': True/,
+  /'stableAgentProfileValidated': True/,
   /'sequences': \[1, 2, 3, 4, 5\]/,
   /'transferDisabled': True/,
-  /'version': 2/,
+  /'version': 3/,
   /canonical = json\.dumps\(expected, separators=\(',', ':'\), ensure_ascii=False\)\.encode\(\) \+ b'\\n'/,
   /if data != canonical:/,
 ]) {
@@ -5942,7 +6663,7 @@ for (const contract of [
 assert.doesNotMatch(
   recheckCompletionReceipt,
   /print\(|sys\.stdout|username|account_id|Authorization|bearer/iu,
-  'completion verification must expose only the canonical nonsecret v2 receipt',
+  'completion verification must expose only the canonical nonsecret v3 receipt',
 );
 
 const recheckRuntimeArtifacts = extractShellFunction(
@@ -6244,6 +6965,20 @@ const pinRecheckNetworkNamespace = extractShellFunction(
   'pin_kemerbet_recheck_network_namespace',
   'require_pinned_kemerbet_recheck_network_namespace',
 );
+const canonicalNetnsIdentityRegex = String.raw`^net:\[[0-9]+\]$`;
+const overEscapedNetnsIdentityRegex = String.raw`^net:\\[[0-9]+\\]$`;
+assert.equal(
+  pinRecheckNetworkNamespace.split(canonicalNetnsIdentityRegex).length - 1,
+  2,
+  'both newly observed namespace identities must use the executable Linux netns regex',
+);
+assert.ok(
+  pinRecheckNetworkNamespace.includes(String.raw`"$namespace_identity" =~ ^net:\[[0-9]+\]$ &&`) &&
+    pinRecheckNetworkNamespace.includes(
+      String.raw`"$host_namespace_identity" =~ ^net:\[[0-9]+\]$ &&`,
+    ),
+  'both observed namespace checks must keep the canonical regex as an unquoted Bash operand',
+);
 for (const contract of [
   /\.Id.*\.State\.Pid.*\.State\.Running.*\.State\.Paused.*\.HostConfig\.NetworkMode/s,
   /netns_path="\/proc\/\$observed_pid\/ns\/net"/,
@@ -6269,6 +7004,45 @@ const requirePinnedRecheckNetworkNamespace = extractShellFunction(
   'require_pinned_kemerbet_recheck_network_namespace',
   'close_pinned_kemerbet_recheck_network_namespace',
 );
+assert.equal(
+  requirePinnedRecheckNetworkNamespace.split(canonicalNetnsIdentityRegex).length - 1,
+  1,
+  'the retained namespace identity must use the same executable Linux netns regex',
+);
+assert.ok(
+  requirePinnedRecheckNetworkNamespace.includes(
+    String.raw`"$expected_identity" =~ ^net:\[[0-9]+\]$ ]] || return 1`,
+  ),
+  'the retained namespace check must keep the canonical regex as an unquoted Bash operand',
+);
+assert.ok(
+  !helper.includes(overEscapedNetnsIdentityRegex),
+  'the helper must not double-escape bracket literals in unquoted Bash regex operands',
+);
+if (process.platform === 'linux') {
+  const netnsIdentityRegexRegression = spawnSync(
+    '/bin/bash',
+    [
+      '-c',
+      String.raw`
+set -euo pipefail
+identity="$(readlink -- /proc/self/ns/net)"
+[[ "$identity" =~ ^net:\[[0-9]+\]$ ]]
+for invalid_identity in 'mnt:[123]' 'net:[x]' 'net:\[123\]'; do
+  if [[ "$invalid_identity" =~ ^net:\[[0-9]+\]$ ]]; then
+    exit 1
+  fi
+done
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(
+    netnsIdentityRegexRegression.status,
+    0,
+    `the canonical namespace regex must accept only a real Linux netns identity: ${netnsIdentityRegexRegression.stderr}`,
+  );
+}
 for (const contract of [
   /\/proc\/self\/fd\/\$descriptor/,
   /\.Id.*\.State\.Pid.*\.State\.Running.*\.State\.Paused.*\.HostConfig\.NetworkMode/s,
@@ -6572,6 +7346,8 @@ for (const contract of [
   /require_committed_kemerbet_recheck_boundary_shape/,
   /"\$\{receipt_lines\[1\]\}" == "release=\$commit_sha"/,
   /require_kemerbet_recheck_receipt/,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /agent_profile_pin/,
   /sha256sum -- "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
   /sha256sum -- "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
   /sha256sum -- "\$KEMERBET_SELECTOR_CONTRACT"/,
@@ -6631,6 +7407,37 @@ assert.doesNotMatch(
   /emergency_(?:disable_bot|remove_project_service)_after_kemerbet_recovery_failure/,
   'session-stop recovery failure must never leave Owner or another project service running',
 );
+assertInOrder(
+  stopKemerbetSession,
+  [
+    'recover_kemerbet_recheck_before_teardown',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
+    'session_stop_successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    'session_stop_successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'container stop --time 70',
+    'require_exact_fresh_bot_runtime "$commit_sha" published-steady-state',
+    'if [[ -n "$session_stop_successor_state" ]]; then',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$session_stop_successor_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$session_stop_successor_release"',
+  ],
+  'session stop must preserve the exact installed-or-completed successor after recovery and teardown',
+);
+
+const startPublicEdge =
+  /\n  start-public-edge\|start-fresh-public-edge\)([\s\S]*?)\n    ;;\n\n  stop-public-edge\)/u.exec(
+    helper,
+  )?.[1];
+assert.ok(startPublicEdge, 'The helper must define the public-edge startup boundary.');
+assertSuccessorInstalledPostcondition(
+  startPublicEdge,
+  'up -d --no-build --wait --wait-timeout 90 gateway',
+  [],
+  ['require_exact_fresh_bot_runtime "$commit_sha" published-steady-state'],
+  '$commit_sha',
+  'fresh public-edge startup',
+);
 
 const stopPublicEdge = /\n  stop-public-edge\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
 assert.ok(stopPublicEdge, 'The helper must define the isolated public-edge stop boundary.');
@@ -6657,6 +7464,30 @@ assert.doesNotMatch(
   /emergency_(?:disable_bot|remove_project_service)_after_kemerbet_recovery_failure/,
   'public-edge recovery failure must never leave Owner or another project service running',
 );
+assertInOrder(
+  stopPublicEdge,
+  [
+    'recover_kemerbet_recheck_before_teardown',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    'if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == \'absent\' ]]; then',
+    'inspect_kemerbet_v1_retirement_gate',
+    'else',
+    "successor_component_stop='true'",
+    'successor_component_stop_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    'successor_component_stop_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'container rm --force',
+    'if [[ "$successor_component_stop" == \'true\' ]]; then',
+    'inspect_kemerbet_v2_v3_successor_gate',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release"',
+  ],
+  'public-edge stop must use successor-native control flow and preserve the exact durable overlay',
+);
+assert.equal(
+  (stopPublicEdge.match(/inspect_kemerbet_v1_retirement_gate/g) ?? []).length,
+  1,
+  'public-edge stop may inspect historical v1 state only in the explicit successor-absent branch',
+);
 assert.equal(
   (helper.match(/\brecover_kemerbet_recheck_before_teardown\b/g) ?? []).length,
   6,
@@ -6671,6 +7502,14 @@ assert.ok(
 assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" immediate-startup/);
 assert.match(botReady, /record_fresh_bot_startup_receipt "\$2"/);
 assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" steady-state/);
+assertSuccessorInstalledPostcondition(
+  botReady,
+  'record_fresh_bot_startup_receipt "$2"',
+  ['require_exact_fresh_bot_runtime "$2" steady-state'],
+  [],
+  '$2',
+  'Telegram readiness',
+);
 const botRuntimeCalls = [
   ...helper.matchAll(
     /require_exact_fresh_bot_runtime "(\$(?:commit_sha|2))" (immediate-startup|steady-state)/gu,
@@ -6681,12 +7520,13 @@ assert.deepEqual(botRuntimeCalls, [
   '$commit_sha steady-state',
   '$commit_sha steady-state',
   '$commit_sha immediate-startup',
+  '$commit_sha immediate-startup',
   '$2 immediate-startup',
   '$2 steady-state',
   '$commit_sha steady-state',
 ]);
 
-const ownerDiagnostic = /diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
+const ownerDiagnostic = /\n  diagnose-owner-startup\)([\s\S]*?)\n\s*;;/u.exec(helper)?.[1];
 assert.ok(ownerDiagnostic, 'The helper must define bounded Owner-control startup diagnostics.');
 assert.match(ownerDiagnostic, /com\.docker\.compose\.project=\$PROJECT_NAME/);
 assert.match(ownerDiagnostic, /com\.docker\.compose\.service=owner-control/);
@@ -6696,10 +7536,10 @@ assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container 
 
 assert.equal(
   actualReviewedHelperSuccessorSha,
-  reviewedHelperSuccessorSha,
+  reviewedV3HelperSuccessorSha,
   'the reviewed helper LF bytes must remain frozen at the exact successor pin',
 );
-assert.match(helperReplacementRunbook, new RegExp(reviewedHelperSuccessorSha, 'gu'));
+assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 
 console.log(
   'staging deploy workflow verified: manual exact-target guards, read-only exact-IP ban gate, sealed images, bounded runtime credentials, checksummed root helper, provenance-bound one-shot KemerBet recheck, and explicit stop path',

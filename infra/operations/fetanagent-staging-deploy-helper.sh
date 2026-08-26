@@ -40,6 +40,7 @@ readonly KEMERBET_V1_RETIREMENT_INTENT="$KEMERBET_V1_RETIREMENT_ROOT/intent-v1"
 readonly KEMERBET_V1_RETIREMENT_ARCHIVE="$KEMERBET_V1_RETIREMENT_ROOT/archive-v1"
 readonly KEMERBET_V1_RETIREMENT_COMPLETION="$KEMERBET_V1_RETIREMENT_ROOT/completed-v1"
 readonly KEMERBET_V1_RETIREMENT_CONFIRMATION='I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL'
+readonly KEMERBET_V2_V3_SUCCESSOR_PARENT='/var/lib/fetanagent/kemerbet-readiness-v2-v3-successor'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -274,6 +275,10 @@ BINDING_V2 = re.compile(
     rf'{UUID} hmac-sha256-agent-identity-v1:[0-9a-f]{{64}} '
     r'sha256-provider-authorization-v1:[0-9a-f]{64}\n'
 )
+BINDING_V3 = re.compile(
+    rf'{UUID} hmac-sha256-agent-identity-v1:([0-9a-f]{{64}}) '
+    r'hmac-sha256-agent-profile-pin-v3:\1\n'
+)
 HEX = b'0123456789abcdef'
 
 
@@ -302,6 +307,36 @@ def binding_v2_prefix_contract():
 
 def is_binding_v2_prefix(content):
     contract = binding_v2_prefix_contract()
+    return len(content) <= len(contract) and all(
+        byte in contract[index] for index, byte in enumerate(content)
+    )
+
+
+def binding_v3_prefix_contract():
+    contract = []
+    for index in range(36):
+        if index in (8, 13, 18, 23):
+            contract.append(b'-')
+        elif index == 14:
+            contract.append(b'12345')
+        elif index == 19:
+            contract.append(b'89ab')
+        else:
+            contract.append(HEX)
+    for byte in b' hmac-sha256-agent-identity-v1:':
+        contract.append(bytes((byte,)))
+    contract.extend([HEX] * 64)
+    for byte in b' hmac-sha256-agent-profile-pin-v3:':
+        contract.append(bytes((byte,)))
+    contract.extend([HEX] * 64)
+    contract.append(b'\n')
+    if len(contract) != 230:
+        reject()
+    return contract
+
+
+def is_binding_v3_prefix(content):
+    contract = binding_v3_prefix_contract()
     return len(content) <= len(contract) and all(
         byte in contract[index] for index, byte in enumerate(content)
     )
@@ -393,10 +428,18 @@ try:
         if final_present:
             final_before, final_content = read_bounded(root_fd, final_name, 230)
             final_contract = None
+            final_version = None
             if final_before.st_size == 132:
                 final_contract = BINDING_V1
+                final_version = 'v1'
             elif final_before.st_size == 230:
-                final_contract = BINDING_V2
+                final_text = final_content.decode('ascii', errors='strict')
+                if BINDING_V3.fullmatch(final_text) is not None:
+                    final_contract = BINDING_V3
+                    final_version = 'v3'
+                elif BINDING_V2.fullmatch(final_text) is not None:
+                    final_contract = BINDING_V2
+                    final_version = 'v2'
             if (
                 final_before.st_uid != 10001
                 or final_before.st_gid != 10001
@@ -417,7 +460,7 @@ try:
                     or temporary_content != final_content
                 ):
                     reject()
-                publication_state = 'v2-hardlink-prefix'
+                publication_state = f'{final_version}-hardlink-prefix'
                 if action == 'normalize':
                     os.unlink(temporary, dir_fd=root_fd)
                     os.fsync(root_fd)
@@ -430,7 +473,7 @@ try:
                     ):
                         reject()
             else:
-                publication_state = 'v1' if final_before.st_size == 132 else 'v2'
+                publication_state = final_version
         elif temporary:
             temporary_before, temporary_content = read_bounded(root_fd, temporary, 230)
             if (
@@ -442,14 +485,23 @@ try:
             ):
                 reject()
             if len(temporary_content) == 230:
-                if BINDING_V2.fullmatch(temporary_content.decode('ascii', errors='strict')) is None:
+                temporary_text = temporary_content.decode('ascii', errors='strict')
+                if BINDING_V3.fullmatch(temporary_text) is not None:
+                    temporary_version = 'v3'
+                elif BINDING_V2.fullmatch(temporary_text) is not None:
+                    temporary_version = 'v2'
+                else:
                     reject()
-            elif not is_binding_v2_prefix(temporary_content):
-                reject()
+            else:
+                v2_prefix = is_binding_v2_prefix(temporary_content)
+                v3_prefix = is_binding_v3_prefix(temporary_content)
+                if not v2_prefix and not v3_prefix:
+                    reject()
+                temporary_version = 'v3' if v3_prefix and not v2_prefix else 'v2'
             publication_state = (
-                'v2-temp-complete-prefix'
+                f'{temporary_version}-temp-complete-prefix'
                 if len(temporary_content) == 230
-                else 'v2-temp-prefix'
+                else f'{temporary_version}-temp-prefix'
             )
             if action == 'normalize' and len(temporary_content) == 230:
                 sync_flags = os.O_RDONLY | os.O_CLOEXEC
@@ -544,10 +596,75 @@ require_kemerbet_readiness_output_directory() {
       "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
       die 'the KemerBet readiness binding metadata or shape is unsafe'
     LC_ALL=C grep -Eq \
-      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} (sha256-provider-authorization-v1|hmac-sha256-agent-profile-pin-v3):[0-9a-f]{64}$' \
       "$KEMERBET_READINESS_BINDING" ||
       die 'the KemerBet readiness binding contract is invalid'
   fi
+}
+
+require_kemerbet_v3_binding_content() {
+  local path="$1"
+  env -i PATH="$SAFE_PATH" python3 -I - "$path" <<'PY'
+import os
+import re
+import stat
+import sys
+
+PATTERN = re.compile(
+    rb'([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}) '
+    rb'hmac-sha256-agent-identity-v1:([0-9a-f]{64}) '
+    rb'hmac-sha256-agent-profile-pin-v3:\2\n'
+)
+
+
+def reject():
+    raise RuntimeError()
+
+
+try:
+    if len(sys.argv) != 2 or os.path.realpath(sys.argv[1]) != sys.argv[1]:
+        reject()
+    path = sys.argv[1]
+    before = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode) or before.st_size != 230:
+        reject()
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        data = bytearray()
+        while len(data) <= 230:
+            chunk = os.read(descriptor, 231 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    path_after = os.stat(path, follow_symlinks=False)
+    identity = lambda value: (
+        value.st_dev,
+        value.st_ino,
+        value.st_uid,
+        value.st_gid,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+    )
+    if (
+        identity(before) != identity(opened)
+        or identity(opened) != identity(after)
+        or identity(after) != identity(path_after)
+        or len(data) != 230
+        or PATTERN.fullmatch(bytes(data)) is None
+    ):
+        reject()
+except Exception:
+    raise SystemExit(1)
+PY
 }
 
 KEMERBET_V1_RETIREMENT_RELEASE=''
@@ -3639,6 +3756,396 @@ enforce_kemerbet_v1_retirement_gate() {
   esac
 }
 
+KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'
+KEMERBET_V2_V3_SUCCESSOR_RELEASE=''
+KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256=''
+
+inspect_kemerbet_v2_v3_successor_gate() {
+  local inspection
+  local parent="$KEMERBET_V2_V3_SUCCESSOR_PARENT"
+  KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'
+  KEMERBET_V2_V3_SUCCESSOR_RELEASE=''
+  KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256=''
+  if [[ ! -e "$parent" && ! -L "$parent" ]]; then
+    return 0
+  fi
+  KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='invalid'
+  inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$parent" "$HELPER_PATH" "$KEMERBET_READINESS_BINDING" \
+    "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" "$KEMERBET_V1_RETIREMENT_ROOT" \
+    "$KEMERBET_AGENT_IDENTITY_BINDINGS" "$KEMERBET_RECHECK_RECEIPT" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
+    "$KEMERBET_RECHECK_PROMOTION_ROOT" "$KEMERBET_READINESS_PLAYER_IDS" \
+    "$KEMERBET_RECHECK_CANDIDATE_ROOT" "$KEMERBET_RECHECK_RPC_ROOT" \
+    "$KEMERBET_SELECTOR_CONTRACT" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+(
+    parent,
+    helper,
+    binding,
+    identity_key,
+    retirement,
+    committed_binding,
+    recheck_receipt,
+    owner_completion,
+    promotion_root,
+    readiness_player_ids,
+    candidate_root,
+    rpc_root,
+    selector_contract,
+) = sys.argv[1:]
+sha = re.compile(r'[0-9a-f]{64}')
+release = re.compile(r'[0-9a-f]{40}')
+claim = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n')
+uuid = rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
+v2 = re.compile(
+    b'(' + uuid + rb') hmac-sha256-agent-identity-v1:([0-9a-f]{64}) '
+    rb'sha256-provider-authorization-v1:[0-9a-f]{64}\n'
+)
+v3 = re.compile(
+    b'(' + uuid + rb') hmac-sha256-agent-identity-v1:([0-9a-f]{64}) '
+    rb'hmac-sha256-agent-profile-pin-v3:\2\n'
+)
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_directory(path, mode, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid) != (0, 0)
+        or stat.S_IMODE(value.st_mode) != mode
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != entries
+    ):
+        reject()
+
+
+def exact_file(path, owner, mode, maximum, exact_size=None):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_uid, before.st_gid) != owner
+            or stat.S_IMODE(before.st_mode) != mode
+            or before.st_nlink != 1
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_size > maximum
+            or (exact_size is not None and before.st_size != exact_size)
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = bytearray()
+        while len(data) <= maximum:
+            chunk = os.read(descriptor, maximum + 1 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if (
+            (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+             before.st_nlink, before.st_size, before.st_mtime_ns) !=
+            (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+             after.st_nlink, after.st_size, after.st_mtime_ns)
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+        ):
+            reject()
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
+value = os.lstat(parent)
+if (
+    not stat.S_ISDIR(value.st_mode)
+    or (value.st_uid, value.st_gid) != (0, 0)
+    or stat.S_IMODE(value.st_mode) != 0o700
+    or os.path.realpath(parent) != parent
+):
+    reject()
+
+children = sorted(os.listdir(parent))
+if len(children) != 1 or release.fullmatch(children[0]) is None:
+    reject()
+successor = children[0]
+root = f'{parent}/{successor}'
+base_entries = ['binding-v2', 'completed-v1', 'intent-v1', 'predecessor-helper']
+exact_directory(root, 0o700, base_entries)
+
+intent_data = exact_file(f'{root}/intent-v1', (0, 0), 0o600, 4096)
+completion_data = exact_file(f'{root}/completed-v1', (0, 0), 0o600, 4096)
+intent = intent_data.decode('ascii').splitlines()
+completion = completion_data.decode('ascii').splitlines()
+if (
+    len(intent) != 9
+    or len(completion) != 10
+    or intent[0] != 'contract=fetanagent-kemerbet-readiness-v2-v3-successor-v1'
+    or intent[1] != 'state=authorized'
+    or not intent[2].startswith('predecessor_release=')
+    or release.fullmatch(intent[2].split('=', 1)[1]) is None
+    or intent[3] != f'successor_release={successor}'
+    or not intent[4].startswith('predecessor_helper_sha256=')
+    or sha.fullmatch(intent[4].split('=', 1)[1]) is None
+    or not intent[5].startswith('successor_helper_sha256=')
+    or sha.fullmatch(intent[5].split('=', 1)[1]) is None
+    or not intent[6].startswith('v2_binding_sha256=')
+    or sha.fullmatch(intent[6].split('=', 1)[1]) is None
+    or not intent[7].startswith('retirement_intent_sha256=')
+    or sha.fullmatch(intent[7].split('=', 1)[1]) is None
+    or not intent[8].startswith('retirement_completion_sha256=')
+    or sha.fullmatch(intent[8].split('=', 1)[1]) is None
+    or intent[2].split('=', 1)[1] == successor
+    or completion[:1] != intent[:1]
+    or completion[1] != 'state=successor-installed'
+    or completion[2:9] != intent[2:9]
+    or not completion[9].startswith('v3_binding_sha256=')
+    or sha.fullmatch(completion[9].split('=', 1)[1]) is None
+    or intent_data != ('\n'.join(intent) + '\n').encode('ascii')
+    or completion_data != ('\n'.join(completion) + '\n').encode('ascii')
+):
+    reject()
+
+predecessor = intent[2].split('=', 1)[1]
+predecessor_helper_sha = intent[4].split('=', 1)[1]
+successor_helper_sha = intent[5].split('=', 1)[1]
+v2_sha = intent[6].split('=', 1)[1]
+retirement_intent_sha = intent[7].split('=', 1)[1]
+retirement_completion_sha = intent[8].split('=', 1)[1]
+v3_sha = completion[9].split('=', 1)[1]
+
+old_helper_data = exact_file(f'{root}/predecessor-helper', (0, 0), 0o400, 2 * 1024 * 1024)
+v2_data = exact_file(f'{root}/binding-v2', (0, 0), 0o400, 230, 230)
+v2_match = v2.fullmatch(v2_data)
+if (
+    hashlib.sha256(old_helper_data).hexdigest() != predecessor_helper_sha
+    or hashlib.sha256(v2_data).hexdigest() != v2_sha
+    or v2_match is None
+):
+    reject()
+
+exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
+retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
+retirement_completion_data = exact_file(f'{retirement}/completed-v1', (0, 0), 0o600, 4096)
+retirement_intent = retirement_intent_data.decode('ascii').splitlines()
+retirement_completion = retirement_completion_data.decode('ascii').splitlines()
+if (
+    len(retirement_intent) != 14
+    or len(retirement_completion) != 16
+    or retirement_intent[0] != 'contract=fetanagent-kemerbet-readiness-binding-v1-retirement-v1'
+    or retirement_intent[1] != 'state=retirement-authorized'
+    or retirement_intent[2] != f'release={predecessor}'
+    or retirement_intent[4] != f'helper_sha256={predecessor_helper_sha}'
+    or not retirement_intent[9].startswith('claim_sha256=')
+    or sha.fullmatch(retirement_intent[9].split('=', 1)[1]) is None
+    or retirement_completion[:1] != retirement_intent[:1]
+    or retirement_completion[1] != 'state=resealed-v2'
+    or retirement_completion[2:14] != retirement_intent[2:14]
+    or retirement_completion[15] != f'v2_binding_sha256={v2_sha}'
+    or hashlib.sha256(retirement_intent_data).hexdigest() != retirement_intent_sha
+    or hashlib.sha256(retirement_completion_data).hexdigest() != retirement_completion_sha
+    or retirement_intent_data != ('\n'.join(retirement_intent) + '\n').encode('ascii')
+    or retirement_completion_data != ('\n'.join(retirement_completion) + '\n').encode('ascii')
+):
+    reject()
+
+identity_key_stat = os.stat(identity_key, follow_symlinks=False)
+identity_key_owner_mode = (
+    identity_key_stat.st_uid,
+    identity_key_stat.st_gid,
+    stat.S_IMODE(identity_key_stat.st_mode),
+)
+if identity_key_owner_mode == (0, 0, 0o444):
+    identity_key_data = exact_file(identity_key, (0, 0), 0o444, 64, 64)
+elif identity_key_owner_mode == (10001, 10001, 0o400):
+    identity_key_data = exact_file(identity_key, (10001, 10001), 0o400, 64, 64)
+else:
+    reject()
+if (
+    retirement_intent[7] != f'identity_hmac_key_dev_ino={identity_key_stat.st_dev}:{identity_key_stat.st_ino}'
+    or retirement_intent[8] != f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}'
+):
+    reject()
+
+def require_live_successor_helper():
+    helper_data = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
+    if hashlib.sha256(helper_data).hexdigest() != successor_helper_sha:
+        reject()
+
+
+def require_v3_binding(path, owner, mode):
+    data = exact_file(path, owner, mode, 230, 230)
+    matched = v3.fullmatch(data)
+    if (
+        hashlib.sha256(data).hexdigest() != v3_sha
+        or matched is None
+        or v2_match.group(1) != matched.group(1)
+        or v2_match.group(2) != matched.group(2)
+    ):
+        reject()
+    return data
+
+
+def promotion_exists_and_is_safe():
+    if not os.path.lexists(promotion_root):
+        return False
+    value = os.lstat(promotion_root)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(promotion_root) != promotion_root
+    ):
+        reject()
+    return True
+
+
+promotion_exists = promotion_exists_and_is_safe()
+if promotion_exists:
+    # Classification is deliberately limited to the immutable successor evidence plus a safe,
+    # canonical promotion root. The guarded recheck recovery path validates the exact journal and
+    # every phase-specific artifact before it performs any mutation. This keeps every crash point
+    # recoverable, including the interval after the one-use source is consumed but before the final
+    # binding and receipt have both been published.
+    require_live_successor_helper()
+    gate_state = 'successor-recheck-recoverable'
+elif os.path.lexists(binding):
+    require_v3_binding(binding, (10001, 10001), 0o600)
+    require_live_successor_helper()
+    if (
+        os.path.lexists(committed_binding)
+        or os.path.lexists(os.path.dirname(recheck_receipt))
+        or os.path.lexists(owner_completion)
+        or os.path.lexists(candidate_root)
+        or os.path.lexists(rpc_root)
+    ):
+        reject()
+    gate_state = 'successor-installed'
+else:
+    require_v3_binding(committed_binding, (0, 0), 0o444)
+    exact_directory(os.path.dirname(recheck_receipt), 0o700, ['ready-v1'])
+    receipt_data = exact_file(recheck_receipt, (0, 0), 0o600, 4096)
+    receipt_lines = receipt_data.decode('ascii').splitlines()
+    if identity_key_owner_mode != (0, 0, 0o444):
+        reject()
+    selector_data = exact_file(selector_contract, (0, 0), 0o444, 1024 * 1024)
+    if (
+        len(receipt_lines) != 8
+        or receipt_lines[0] != 'version=1'
+        or receipt_lines[1] != f'release={successor}'
+        or receipt_lines[2] != f'binding_sha256={v3_sha}'
+        or receipt_lines[3] !=
+           f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}'
+        or receipt_lines[4] != f'selector_sha256={hashlib.sha256(selector_data).hexdigest()}'
+        or re.fullmatch(r'image_id=sha256:[0-9a-f]{64}', receipt_lines[5]) is None
+        or receipt_lines[6] != 'profile_volume=fetanagent-staging-beta_kemerbet_sessions'
+        or not receipt_lines[7].startswith('profile_identity_sha256=')
+        or sha.fullmatch(receipt_lines[7].split('=', 1)[1]) is None
+        or receipt_data != ('\n'.join(receipt_lines) + '\n').encode('ascii')
+    ):
+        reject()
+
+    exact_directory(
+        os.path.dirname(owner_completion),
+        0o755,
+        [os.path.basename(owner_completion)],
+    )
+    owner_completion_data = exact_file(owner_completion, (0, 10001), 0o440, 37, 37)
+    if (
+        claim.fullmatch(owner_completion_data) is None
+        or hashlib.sha256(owner_completion_data).hexdigest() !=
+           retirement_intent[9].split('=', 1)[1]
+    ):
+        reject()
+    for consumed_or_transient in (
+        binding,
+        readiness_player_ids,
+        candidate_root,
+        promotion_root,
+        rpc_root,
+    ):
+        if os.path.lexists(consumed_or_transient):
+            reject()
+    gate_state = 'successor-completed'
+
+sys.stdout.write(successor + '\n' + successor_helper_sha + '\n' + gate_state + '\n')
+PY
+)" || return 0
+  mapfile -t inspection_lines <<<"$inspection"
+  [[ "${#inspection_lines[@]}" -eq 3 && "${inspection_lines[0]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[1]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[2]}" =~ ^(successor-installed|successor-recheck-recoverable|successor-completed)$ ]] || return 0
+  KEMERBET_V2_V3_SUCCESSOR_RELEASE="${inspection_lines[0]}"
+  KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="${inspection_lines[1]}"
+  KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="${inspection_lines[2]}"
+}
+
+enforce_kemerbet_v2_v3_successor_gate() {
+  local command="$1" release=''
+  if [[ "$command" == 'verify' ]]; then
+    return 0
+  fi
+  inspect_kemerbet_v2_v3_successor_gate
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]] || return 0
+  if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' ]]; then
+    case "$command" in
+      retire-kemerbet-readiness-binding-v1-for-v2-reseal|reinstall-kemerbet-v1-retirement-secrets|seal-kemerbet-readiness|kemerbet-v1-retirement-recovery-ready)
+        die 'the completed KemerBet v3 successor permanently forbids legacy v1/v2 reseal or recovery commands'
+        ;;
+      recheck-kemerbet-readiness)
+        release="${2:-}"
+        [[ "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
+          die 'the completed KemerBet v3 successor recheck belongs to another reviewed release'
+        return 0
+        ;;
+      *) return 0 ;;
+    esac
+  fi
+  case "$command" in
+    stop|expiry-stop|stop-public-edge)
+      return 0
+      ;;
+    stop-bot|stop-kemerbet-session-provision)
+      release="${2:-}"
+      [[ "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
+        die 'the KemerBet v3 successor stop command belongs to another reviewed release'
+      return 0
+      ;;
+  esac
+  if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-recheck-recoverable' ]]; then
+    release="${2:-}"
+    [[ "$command" == 'recheck-kemerbet-readiness' &&
+      "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
+      die 'an interrupted KemerBet v3 recheck permits only exact-release recovery'
+    return 0
+  fi
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]] ||
+    die 'an incomplete or invalid KemerBet v2-to-v3 successor migration blocks staging mutations'
+  case "$command" in
+    network-ready)
+      return 0
+      ;;
+    install|fresh-start|fresh-host-ready|arm-expiry-stop|bot-disabled-ready|install-bot-token|start-bot|bot-ready|fresh-public-edge-ready|start-fresh-public-edge|diagnose-owner-startup|discard|stop-bot|start-kemerbet-session-provision|kemerbet-session-provision-ready|stop-kemerbet-session-provision|recheck-kemerbet-readiness|kemerbet-v3-successor-ready)
+      release="${2:-}"
+      [[ "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
+        die 'the KemerBet v3 successor gate is bound to another reviewed release'
+      return 0
+      ;;
+    *)
+      die 'the KemerBet v3 successor gate permits only no-transfer deployment, private sign-in, and readiness recheck'
+      ;;
+  esac
+}
+
 consume_exact_one_use_kemerbet_file() {
   local path="$1" expected_dev_ino="$2" expected_digest="$3"
   local digest_fd python_status
@@ -4159,8 +4666,8 @@ try:
     key = read_exact(sys.argv[2], 0o444, 64)
     if not re.fullmatch(
         rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} '
-        rb'hmac-sha256-agent-identity-v1:[0-9a-f]{64} '
-        rb'sha256-provider-authorization-v1:[0-9a-f]{64}\n',
+        rb'hmac-sha256-agent-identity-v1:([0-9a-f]{64}) '
+        rb'hmac-sha256-agent-profile-pin-v3:\1\n',
         binding,
     ):
         reject()
@@ -4424,7 +4931,7 @@ try:
 except Exception:
     reject()
 expected = {
-    'contract': 'fetanagent-kemerbet-readiness-layer7-completion-v2',
+    'contract': 'fetanagent-kemerbet-readiness-layer7-completion-v3',
     'agentIdentityBindingSha256': hashlib.sha256(binding_serialized).hexdigest(),
     'identifiersRedacted': True,
     'moneyMoved': False,
@@ -4432,9 +4939,10 @@ expected = {
     'responsesValidated': True,
     'runNonceSha256': hashlib.sha256(nonce).hexdigest(),
     'sameAgentIdentityValidated': True,
+    'stableAgentProfileValidated': True,
     'sequences': [1, 2, 3, 4, 5],
     'transferDisabled': True,
-    'version': 2,
+    'version': 3,
 }
 canonical = json.dumps(expected, separators=(',', ':'), ensure_ascii=False).encode() + b'\n'
 if data != canonical:
@@ -5101,9 +5609,7 @@ require_retryable_kemerbet_binding_source() {
     "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' &&
     "$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')" == "$expected_digest" ]] ||
     return 1
-  LC_ALL=C grep -Eq \
-    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
-    "$KEMERBET_READINESS_BINDING" || return 1
+  require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" || return 1
   require_kemerbet_readiness_output_directory >/dev/null 2>&1
 }
 
@@ -5746,7 +6252,7 @@ require_current_kemerbet_success_runtime_boundary() {
   local selector_digest="$4" image_id="$5" profile_identity_digest="$6"
   local receipt_policy="$7"
   local account_id binding_fingerprint binding_line binding_residue observed_profile_identity_digest
-  local provider_authorization_digest
+  local agent_profile_pin
   local profile_mountpoint
   [[ "$commit_sha" =~ ^[0-9a-f]{40}$ && "$binding_digest" =~ ^[0-9a-f]{64}$ &&
     "$identity_key_digest" =~ ^[0-9a-f]{64}$ && "$selector_digest" =~ ^[0-9a-f]{64}$ &&
@@ -5775,14 +6281,13 @@ require_current_kemerbet_success_runtime_boundary() {
   [[ "$(stat --format='%s' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '230' &&
     "$(wc -l <"$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '1' ]] ||
     die 'the committed KemerBet binding shape is invalid'
-  LC_ALL=C grep -Eq \
-    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
-    "$KEMERBET_AGENT_IDENTITY_BINDINGS" || die 'the committed KemerBet binding contract is invalid'
+  require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
+    die 'the committed KemerBet v3 binding contract is invalid'
   binding_line="$(<"$KEMERBET_AGENT_IDENTITY_BINDINGS")"
-  IFS=' ' read -r account_id binding_fingerprint provider_authorization_digest binding_residue \
+  IFS=' ' read -r account_id binding_fingerprint agent_profile_pin binding_residue \
     <<<"$binding_line"
   [[ -n "$account_id" && -n "$binding_fingerprint" &&
-    -n "$provider_authorization_digest" && -z "$binding_residue" ]] ||
+    -n "$agent_profile_pin" && -z "$binding_residue" ]] ||
     die 'the committed KemerBet binding fields are invalid'
   profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)" || return 1
   observed_profile_identity_digest="$(kemerbet_profile_identity_digest \
@@ -5875,7 +6380,7 @@ require_completed_kemerbet_recheck_for_release() {
   local commit_sha="$1" image_tag="$2"
   local account_id binding_digest binding_fingerprint binding_line binding_residue
   local identity_key_digest image_id observed_profile_identity_digest profile_identity_digest
-  local profile_mountpoint provider_authorization_digest selector_digest
+  local profile_mountpoint agent_profile_pin selector_digest
   local -a receipt_lines=()
   validate_commit_and_tag "$commit_sha" "$image_tag"
   [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" ]] ||
@@ -5903,14 +6408,13 @@ require_completed_kemerbet_recheck_for_release() {
   [[ "$(stat --format='%s' "$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '230' &&
     "$(wc -l <"$KEMERBET_AGENT_IDENTITY_BINDINGS")" == '1' ]] ||
     die 'the completed KemerBet binding shape is invalid'
-  LC_ALL=C grep -Eq \
-    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
-    "$KEMERBET_AGENT_IDENTITY_BINDINGS" || die 'the completed KemerBet binding contract is invalid'
+  require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
+    die 'the completed KemerBet v3 binding contract is invalid'
   binding_line="$(<"$KEMERBET_AGENT_IDENTITY_BINDINGS")"
-  IFS=' ' read -r account_id binding_fingerprint provider_authorization_digest binding_residue \
+  IFS=' ' read -r account_id binding_fingerprint agent_profile_pin binding_residue \
     <<<"$binding_line"
   [[ -n "$account_id" && -n "$binding_fingerprint" &&
-    -n "$provider_authorization_digest" && -z "$binding_residue" ]] ||
+    -n "$agent_profile_pin" && -z "$binding_residue" ]] ||
     die 'the completed KemerBet binding fields are invalid'
   profile_mountpoint="$(resolve_kemerbet_profile_volume_mountpoint)" || return 1
   observed_profile_identity_digest="$(kemerbet_profile_identity_digest \
@@ -6649,9 +7153,8 @@ require_prejournal_kemerbet_recovery_boundary() {
   [[ "$source_size" == '230' &&
     "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
     die 'the pre-journal KemerBet binding source shape is invalid'
-  LC_ALL=C grep -Eq \
-    '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
-    "$KEMERBET_READINESS_BINDING" || die 'the pre-journal KemerBet binding source contract is invalid'
+  require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" ||
+    die 'the pre-journal KemerBet v3 binding source contract is invalid'
   require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" || return 1
   [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] ||
     die 'the pre-journal KemerBet identity key has an unsafe link count'
@@ -8072,6 +8575,19 @@ prepare_retryable_kemerbet_session_player_ids() {
       ! -e "$candidate_path" && ! -L "$candidate_path" ]]; then
       [[ "$(stat --format='%h' "$KEMERBET_READINESS_PLAYER_IDS")" == '1' ]] ||
         die 'the private KemerBet session Player-ID file has an unsafe hard-link count'
+      if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
+        [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" &&
+          "$(realpath -- "$KEMERBET_READINESS_BINDING")" == "$KEMERBET_READINESS_BINDING" &&
+          "$(stat --format='%u:%g:%a:%h:%s' "$KEMERBET_READINESS_BINDING")" == \
+            '10001:10001:600:1:230' ]] ||
+          die 'the retryable KemerBet v3 binding is unavailable or unsafe'
+        require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" ||
+          die 'the retryable KemerBet v3 binding contract changed'
+        inspect_kemerbet_v2_v3_successor_gate
+        [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+          "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+          die 'the retryable Player-ID input no longer matches the same-release KemerBet v3 successor'
+      fi
       return 0
     fi
   fi
@@ -8100,10 +8616,8 @@ prepare_retryable_kemerbet_session_player_ids() {
     [[ "$binding_size" == '230' &&
       "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
       die 'the sealed KemerBet readiness binding shape is invalid for retry'
-    LC_ALL=C grep -Eq \
-      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
-      "$KEMERBET_READINESS_BINDING" ||
-      die 'the sealed KemerBet readiness binding contract is invalid for retry'
+    require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" ||
+      die 'the sealed KemerBet v3 readiness binding contract is invalid for retry'
   else
     migration_awaiting='true'
   fi
@@ -10765,8 +11279,8 @@ pin_kemerbet_recheck_network_namespace() {
   [[ -d /proc/self/fd && ! -L /proc/self/fd && -e "$netns_path" ]] || return 1
   namespace_identity="$(readlink -- "$netns_path")" || return 1
   host_namespace_identity="$(readlink -- /proc/self/ns/net)" || return 1
-  [[ "$namespace_identity" =~ ^net:\\[[0-9]+\\]$ &&
-    "$host_namespace_identity" =~ ^net:\\[[0-9]+\\]$ &&
+  [[ "$namespace_identity" =~ ^net:\[[0-9]+\]$ &&
+    "$host_namespace_identity" =~ ^net:\[[0-9]+\]$ &&
     "$namespace_identity" != "$host_namespace_identity" ]] || return 1
   path_identity="$(stat -L --format='%d:%i' "$netns_path")" || return 1
   exec {netns_fd}<"$netns_path" || return 1
@@ -10838,7 +11352,7 @@ require_pinned_kemerbet_recheck_network_namespace() {
   esac
   [[ "$container_id" =~ ^[0-9a-f]{64}$ && "$descriptor" =~ ^[1-9][0-9]*$ &&
     "$expected_container_id" == "$container_id" && "$expected_pid" =~ ^[1-9][0-9]*$ &&
-    "$expected_identity" =~ ^net:\\[[0-9]+\\]$ ]] || return 1
+    "$expected_identity" =~ ^net:\[[0-9]+\]$ ]] || return 1
   [[ -e "/proc/self/fd/$descriptor" ]] || return 1
   descriptor_identity="$(stat -L --format='%d:%i' "/proc/self/fd/$descriptor")" || return 1
   namespace_identity="$(readlink -- "/proc/self/fd/$descriptor")" || return 1
@@ -12172,6 +12686,57 @@ require_fresh_host_start_ready() {
   [[ -z "$networks" ]] || die 'fresh-host startup requires no existing FetanAgent networks'
 }
 
+require_kemerbet_v3_successor_install_boundary() {
+  local commit_sha="$1" containers expected_volumes networks project_volumes session_holders
+
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the KemerBet v3 successor install release identity is invalid'
+  inspect_kemerbet_v2_v3_successor_gate
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+    "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+    die 'release installation requires the exact same-release KemerBet v3 successor boundary'
+  require_kemerbet_v1_retirement_expiry_guard_disarmed ||
+    die 'release installation requires a disarmed staging expiry guard'
+  [[ ! -e "$BOT_STARTUP_RECEIPT" && ! -L "$BOT_STARTUP_RECEIPT" &&
+    ! -e "$BOT_STARTUP_RECEIPT_ROOT" && ! -L "$BOT_STARTUP_RECEIPT_ROOT" ]] ||
+    die 'release installation requires an absent Telegram runtime receipt'
+
+  containers="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
+    die 'the KemerBet v3 successor project container inventory could not be inspected'
+  [[ -z "$containers" ]] ||
+    die 'release installation requires the KemerBet v3 successor project to be fully stopped'
+  networks="$(docker_local network ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
+    die 'the KemerBet v3 successor project network inventory could not be inspected'
+  [[ -z "$networks" ]] ||
+    die 'release installation requires no KemerBet v3 successor project networks'
+  require_kemerbet_recheck_transients_absent ||
+    die 'release installation requires an absent KemerBet recheck runtime boundary'
+
+  project_volumes="$(docker_local volume ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" | LC_ALL=C sort)" ||
+    die 'the KemerBet v3 successor project volume inventory could not be inspected'
+  expected_volumes="$(printf '%s\n%s\n' \
+    "$KEMERBET_PROFILE_VOLUME" "$KEMERBET_SESSION_CONTROL_VOLUME" | LC_ALL=C sort)"
+  [[ "$project_volumes" == "$expected_volumes" ]] ||
+    die 'the KemerBet v3 successor project volume inventory is not exact'
+  resolve_kemerbet_profile_volume_mountpoint >/dev/null
+  require_kemerbet_profile_volume_holders ''
+  resolve_kemerbet_session_control_volume_offline_mountpoint >/dev/null ||
+    die 'the KemerBet session-control volume is not exact and holder-free'
+  session_holders="$(docker_local container ls --all --quiet \
+    --filter "volume=$KEMERBET_SESSION_CONTROL_VOLUME")" ||
+    die 'the KemerBet session-control volume holder inventory could not be inspected'
+  [[ -z "$session_holders" ]] ||
+    die 'release installation requires no KemerBet session-control volume holder'
+
+  inspect_kemerbet_v2_v3_successor_gate
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+    "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+    die 'the KemerBet v3 successor boundary changed during install preflight'
+}
+
 require_fresh_host_identity() {
   local metadata_droplet_id metadata_ipv4
 
@@ -12283,8 +12848,15 @@ case "$command" in
     ;;
 esac
 
-if [[ "$command" != 'kemerbet-v1-retirement-recovery-ready' ]]; then
-  enforce_kemerbet_v1_retirement_gate "$command" "${@:2}"
+inspect_kemerbet_v2_v3_successor_gate
+if [[ "$command" == 'kemerbet-v1-retirement-recovery-ready' ]]; then
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]] ||
+    die 'the KemerBet v3 successor permanently forbids legacy v1 retirement recovery'
+else
+  if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]]; then
+    enforce_kemerbet_v1_retirement_gate "$command" "${@:2}"
+  fi
+  enforce_kemerbet_v2_v3_successor_gate "$command" "${@:2}"
 fi
 
 case "$command" in
@@ -12292,6 +12864,17 @@ case "$command" in
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{64}$ ]] || die 'verify requires one SHA-256 digest'
     [[ "$(sha256sum "$HELPER_PATH" | awk '{print $1}')" == "$2" ]] ||
       die 'the installed helper does not match the reviewed repository helper'
+    ;;
+
+  kemerbet-v3-successor-ready)
+    [[ $# -eq 3 && "$2" =~ ^[0-9a-f]{40}$ && "$3" =~ ^[0-9a-f]{64}$ ]] ||
+      die 'kemerbet-v3-successor-ready requires the exact successor release and helper digest'
+    inspect_kemerbet_v2_v3_successor_gate
+    [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+      "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$2" &&
+      "$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$3" ]] ||
+      die 'the KemerBet v3 successor overlay is not exactly ready'
+    printf '%s\n' 'KemerBet v3 successor overlay ready: stable Profile binding, Transfer disabled.'
     ;;
 
   stop)
@@ -12320,18 +12903,32 @@ case "$command" in
   arm-expiry-stop)
     [[ $# -eq 3 ]] || die 'arm-expiry-stop requires a reviewed commit and canonical UTC stop time'
     arm_expiry_stop "$2" "$3"
-    inspect_kemerbet_v1_retirement_gate
-    if [[ "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
-      ^(pending|resealed-awaiting-recheck)$ ]]; then
-      [[ "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" == "$2" ]] ||
-        die 'the armed recovery expiry guard does not match the v1 retirement release'
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
       require_kemerbet_v1_retirement_expiry_guard_armed ||
-        die 'the same-release recovery expiry guard failed exact post-arm attestation'
+        die 'the KemerBet v3 successor expiry guard failed exact post-arm attestation'
       require_exact_fresh_private_runtime "$2"
-      require_kemerbet_v1_retirement_current_context "$2" ||
-        die 'the v1 retirement context changed while arming recovery expiry'
-      kemerbet_v1_retirement_release_asset_digest "$2" >/dev/null ||
-        die 'the same-release recovery assets changed while arming expiry'
+      inspect_kemerbet_v2_v3_successor_gate
+      if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+        [[ "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$2" ]] ||
+          die 'the armed expiry guard does not match the installed KemerBet v3 successor release'
+      else
+        [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' ]] ||
+          die 'the armed expiry guard changed the KemerBet v3 successor boundary'
+      fi
+    else
+      inspect_kemerbet_v1_retirement_gate
+      if [[ "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
+        ^(pending|resealed-awaiting-recheck)$ ]]; then
+        [[ "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" == "$2" ]] ||
+          die 'the armed recovery expiry guard does not match the v1 retirement release'
+        require_kemerbet_v1_retirement_expiry_guard_armed ||
+          die 'the same-release recovery expiry guard failed exact post-arm attestation'
+        require_exact_fresh_private_runtime "$2"
+        require_kemerbet_v1_retirement_current_context "$2" ||
+          die 'the v1 retirement context changed while arming recovery expiry'
+        kemerbet_v1_retirement_release_asset_digest "$2" >/dev/null ||
+          die 'the same-release recovery assets changed while arming expiry'
+      fi
     fi
     ;;
 
@@ -12396,6 +12993,9 @@ case "$command" in
     [[ ! -L "$incoming" && -d "$incoming" ]] || die 'the incoming directory is absent or symbolic'
     [[ "$(stat --format='%U:%a' "$incoming")" == "$EXPECTED_SUDO_USER:700" ]] ||
       die 'the incoming directory ownership or mode is unsafe'
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      require_kemerbet_v3_successor_install_boundary "$commit_sha"
+    fi
 
     expected_files="$({ printf '%s\n' \
       api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
@@ -12445,11 +13045,17 @@ case "$command" in
     install -o root -g root -m 0444 "$incoming/supabase-ca.crt" "$SECRET_ROOT/supabase-ca.crt"
 
     docker_local image load --input "$incoming/fetanagent-staging-images.tar" >/dev/null
-    for image in owner-control customer-web api beta-admission bot gateway; do
+    for image in owner-control customer-web api beta-admission bot deposit-executor gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'a loaded image revision does not match the reviewed commit'
     done
     rm -rf -- "$incoming"
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'release installation changed the exact KemerBet v3 successor boundary'
+    fi
     ;;
 
   start|fresh-start)
@@ -12497,7 +13103,7 @@ case "$command" in
     require_immutable_config_file "$SECRET_ROOT/cbe-deposit-reference-key-profile.v1.json"
     require_immutable_config_file "$SECRET_ROOT/deposit-proof-reference-profile.v2.json"
 
-    for image in owner-control customer-web api beta-admission bot gateway; do
+    for image in owner-control customer-web api beta-admission bot deposit-executor gateway; do
       [[ "$(docker_local image inspect "fetanagent-$image:$image_tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$commit_sha" ]] ||
         die 'an image revision does not match the reviewed commit'
     done
@@ -12584,6 +13190,13 @@ case "$command" in
         up -d --no-build --wait --wait-timeout 90
     fi
     require_owner_kemerbet_receipt_service_access
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      require_exact_fresh_private_runtime "$commit_sha"
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'core startup changed the exact KemerBet v3 successor boundary'
+    fi
     if [[ "$migration_recovery_start" == 'true' ]]; then
       require_exact_fresh_private_runtime "$commit_sha"
       require_kemerbet_v1_retirement_expiry_guard_disarmed ||
@@ -12625,6 +13238,12 @@ case "$command" in
     install -o 10001 -g 10001 -m 0400 "$incoming" "$SECRET_ROOT/bot-token"
     rm -f -- "$incoming"
     require_service_file "$SECRET_ROOT/bot-token"
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'Telegram token installation changed the exact KemerBet v3 successor boundary'
+    fi
     ;;
 
   start-bot)
@@ -12693,6 +13312,13 @@ case "$command" in
       kemerbet_v1_retirement_release_asset_digest "$commit_sha" >/dev/null ||
         die 'the same-release assets changed during Telegram startup'
     fi
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      require_exact_fresh_bot_runtime "$commit_sha" immediate-startup
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'Telegram startup changed the exact KemerBet v3 successor boundary'
+    fi
     ;;
 
   bot-ready)
@@ -12712,6 +13338,12 @@ case "$command" in
       kemerbet_v1_retirement_release_asset_digest "$2" >/dev/null ||
         die 'the same-release assets changed during Telegram attestation'
     fi
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$2" ]] ||
+        die 'Telegram readiness changed the exact KemerBet v3 successor boundary'
+    fi
     ;;
 
   stop-bot)
@@ -12729,10 +13361,26 @@ case "$command" in
         KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
       require_kemerbet_teardown_recovery_success
     fi
-    inspect_kemerbet_v1_retirement_gate
+    inspect_kemerbet_v2_v3_successor_gate
+    successor_component_stop='false'
+    successor_component_stop_release=''
+    successor_component_stop_state=''
     migration_component_stop='false'
-    if [[ ! "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ ^(absent|completed)$ ]]; then
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]]; then
+      inspect_kemerbet_v1_retirement_gate
+      if [[ ! "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ ^(absent|completed)$ ]]; then
+        migration_component_stop='true'
+      fi
+    else
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$ &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'the Telegram component stop does not match an exact same-release KemerBet v3 successor'
+      successor_component_stop='true'
+      successor_component_stop_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
+      successor_component_stop_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
       migration_component_stop='true'
+    fi
+    if [[ "$migration_component_stop" == 'true' ]]; then
       session_container="$(docker_local container ls --all --quiet \
         --filter "label=com.docker.compose.project=$PROJECT_NAME" \
         --filter 'label=com.docker.compose.service=kemerbet-session-provision')" ||
@@ -12769,7 +13417,8 @@ case "$command" in
       if [[ -n "$project_containers" ]]; then
         require_exact_fresh_private_runtime "$commit_sha"
       fi
-      if [[ "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
+      if [[ "$successor_component_stop" == 'false' &&
+        "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
         ^(pending|resealed-awaiting-recheck)$ ]]; then
         require_kemerbet_v1_retirement_current_context "$commit_sha" ||
           die 'the v1 retirement context changed during Telegram component stop'
@@ -12782,6 +13431,12 @@ case "$command" in
       install -o 10001 -g 10001 -m 0400 "$disabled_token" "$SECRET_ROOT/bot-token"
       rm -f -- "$disabled_token"
       require_fresh_bot_disabled_ready "$commit_sha"
+    fi
+    if [[ "$successor_component_stop" == 'true' ]]; then
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state" &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release" ]] ||
+        die 'Telegram component stop changed the exact KemerBet v3 successor boundary'
     fi
     require_kemerbet_teardown_recovery_success
     ;;
@@ -12848,10 +13503,17 @@ case "$command" in
     require_kemerbet_session_provision_runtime "$commit_sha"
     require_kemerbet_v1_retirement_expiry_guard_armed ||
       die 'the recovery expiry guard changed during private KemerBet session startup'
-    require_kemerbet_v1_retirement_current_context "$commit_sha" ||
-      die 'the v1 retirement context changed during private KemerBet session startup'
-    kemerbet_v1_retirement_release_asset_digest "$commit_sha" >/dev/null ||
-      die 'the same-release assets changed during private KemerBet session startup'
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]]; then
+      require_kemerbet_v1_retirement_current_context "$commit_sha" ||
+        die 'the v1 retirement context changed during private KemerBet session startup'
+      kemerbet_v1_retirement_release_asset_digest "$commit_sha" >/dev/null ||
+        die 'the same-release assets changed during private KemerBet session startup'
+    else
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'the private KemerBet session changed the exact v3 successor boundary'
+    fi
     ;;
 
   kemerbet-session-provision-ready)
@@ -12864,10 +13526,17 @@ case "$command" in
     require_kemerbet_session_provision_runtime "$commit_sha"
     require_kemerbet_v1_retirement_expiry_guard_armed ||
       die 'the recovery expiry guard changed before private KemerBet session attestation'
-    require_kemerbet_v1_retirement_current_context "$commit_sha" ||
-      die 'the v1 retirement context changed before private KemerBet session attestation'
-    kemerbet_v1_retirement_release_asset_digest "$commit_sha" >/dev/null ||
-      die 'the same-release assets changed before private KemerBet session attestation'
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]]; then
+      require_kemerbet_v1_retirement_current_context "$commit_sha" ||
+        die 'the v1 retirement context changed before private KemerBet session attestation'
+      kemerbet_v1_retirement_release_asset_digest "$commit_sha" >/dev/null ||
+        die 'the same-release assets changed before private KemerBet session attestation'
+    else
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'the private KemerBet session readiness no longer matches the v3 successor boundary'
+    fi
     ;;
 
   kemerbet-v1-retirement-recovery-ready)
@@ -13220,8 +13889,14 @@ case "$command" in
     command -v sync >/dev/null 2>&1 || die 'the durable synchronization utility is unavailable'
     command -v python3 >/dev/null 2>&1 || die 'the canonical artifact validator is unavailable'
     recover_incomplete_kemerbet_recheck_promotion_guarded
+    inspect_kemerbet_v2_v3_successor_gate
     if [[ -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
       require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
+      if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
+        [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' &&
+          "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+          die 'the durable KemerBet v3 successor completion boundary is not exact'
+      fi
       printf '%s\n' 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.'
       exit 0
     fi
@@ -13271,18 +13946,23 @@ case "$command" in
     [[ "$(stat --format='%s' "$KEMERBET_READINESS_BINDING")" == '230' &&
       "$(wc -l <"$KEMERBET_READINESS_BINDING")" == '1' ]] ||
       die 'the sealed KemerBet identity binding shape is invalid'
-    LC_ALL=C grep -Eq \
-      '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} hmac-sha256-agent-identity-v1:[0-9a-f]{64} sha256-provider-authorization-v1:[0-9a-f]{64}$' \
-      "$KEMERBET_READINESS_BINDING" || die 'the sealed KemerBet identity binding contract is invalid'
+    require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" ||
+      die 'the sealed KemerBet v3 identity binding contract is invalid'
     binding_line="$(<"$KEMERBET_READINESS_BINDING")"
-    IFS=' ' read -r account_id binding_fingerprint provider_authorization_digest binding_residue \
+    IFS=' ' read -r account_id binding_fingerprint agent_profile_pin binding_residue \
       <<<"$binding_line"
     [[ -n "$account_id" && -n "$binding_fingerprint" &&
-      -n "$provider_authorization_digest" && -z "$binding_residue" ]] ||
+      -n "$agent_profile_pin" && -z "$binding_residue" ]] ||
       die 'the sealed KemerBet identity binding fields are invalid'
     if [[ -e "$KEMERBET_V1_RETIREMENT_ROOT" || -L "$KEMERBET_V1_RETIREMENT_ROOT" ]]; then
-      finalize_kemerbet_v1_retirement_after_v2_seal "$commit_sha" ||
-        die 'the v1 retirement is not completed by this exact same-agent v2 binding'
+      if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]]; then
+        finalize_kemerbet_v1_retirement_after_v2_seal "$commit_sha" ||
+          die 'the v1 retirement is not completed by this exact same-agent v2 binding'
+      else
+        [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+          "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+          die 'the v3 successor recheck is not bound to this exact migrated release'
+      fi
     fi
     source_stat="$(stat --format='%d:%i:%h:%s:%Y:%u:%g:%a' "$KEMERBET_READINESS_BINDING")"
     source_dev_ino="$(stat --format='%d:%i' "$KEMERBET_READINESS_BINDING")"
@@ -13743,6 +14423,13 @@ case "$command" in
     remove_owned_kemerbet_recheck_promotion_root ||
       die 'the committed KemerBet promotion journal could not be retired'
     KEMERBET_RECHECK_PROMOTION_OWNED='false'
+    require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
+    inspect_kemerbet_v2_v3_successor_gate
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'the committed KemerBet v3 successor completion boundary is not exact'
+    fi
     KEMERBET_RECHECK_COMMITTED='true'
     KEMERBET_RECHECK_CLEANUP_ARMED='false'
     trap - EXIT INT TERM HUP
@@ -13765,6 +14452,16 @@ case "$command" in
         KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
       require_kemerbet_teardown_recovery_success
     fi
+    inspect_kemerbet_v2_v3_successor_gate
+    session_stop_successor_release=''
+    session_stop_successor_state=''
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$ &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'the private KemerBet session stop does not match an exact same-release v3 successor'
+      session_stop_successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
+      session_stop_successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
+    fi
     session_container="$(docker_local container ls --all --quiet \
       --filter "label=com.docker.compose.project=$PROJECT_NAME" \
       --filter 'label=com.docker.compose.service=kemerbet-session-provision')"
@@ -13775,6 +14472,12 @@ case "$command" in
       docker_local container rm "$session_container" >/dev/null
     fi
     require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+    if [[ -n "$session_stop_successor_state" ]]; then
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$session_stop_successor_state" &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$session_stop_successor_release" ]] ||
+        die 'private KemerBet session stop changed the exact v3 successor boundary'
+    fi
     require_kemerbet_teardown_recovery_success
     ;;
 
@@ -13870,6 +14573,13 @@ case "$command" in
       kemerbet_v1_retirement_release_asset_digest "$commit_sha" >/dev/null ||
         die 'the same-release assets changed during public-edge startup'
     fi
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then
+      require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        die 'public-edge startup changed the exact KemerBet v3 successor boundary'
+    fi
     ;;
 
   stop-public-edge)
@@ -13884,8 +14594,22 @@ case "$command" in
         KEMERBET_EMERGENCY_TEARDOWN_FAILED='true'
       require_kemerbet_teardown_recovery_success
     fi
-    inspect_kemerbet_v1_retirement_gate
-    if [[ ! "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ ^(absent|completed)$ ]]; then
+    inspect_kemerbet_v2_v3_successor_gate
+    successor_component_stop='false'
+    successor_component_stop_release=''
+    successor_component_stop_state=''
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' ]]; then
+      inspect_kemerbet_v1_retirement_gate
+    else
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$ &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" =~ ^[0-9a-f]{40}$ ]] ||
+        die 'the public-edge component stop does not match an exact KemerBet v3 successor'
+      successor_component_stop='true'
+      successor_component_stop_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
+      successor_component_stop_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
+    fi
+    if [[ "$successor_component_stop" == 'true' ||
+      ! "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ ^(absent|completed)$ ]]; then
       session_container="$(docker_local container ls --all --quiet \
         --filter "label=com.docker.compose.project=$PROJECT_NAME" \
         --filter 'label=com.docker.compose.service=kemerbet-session-provision')" ||
@@ -13905,7 +14629,8 @@ case "$command" in
       docker_local container rm --force "$gateway_container" >/dev/null
     fi
     require_kemerbet_profile_volume_holders ''
-    if [[ "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
+    if [[ "$successor_component_stop" == 'false' &&
+      "$KEMERBET_V1_RETIREMENT_GATE_STATE" =~ \
       ^(pending|resealed-awaiting-recheck)$ ]]; then
       require_kemerbet_v1_retirement_current_context \
         "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" ||
@@ -13913,6 +14638,12 @@ case "$command" in
       kemerbet_v1_retirement_release_asset_digest \
         "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" >/dev/null ||
         die 'the same-release assets changed during public-edge component stop'
+    fi
+    if [[ "$successor_component_stop" == 'true' ]]; then
+      inspect_kemerbet_v2_v3_successor_gate
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state" &&
+        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release" ]] ||
+        die 'public-edge component stop changed the exact KemerBet v3 successor boundary'
     fi
     require_kemerbet_teardown_recovery_success
     ;;

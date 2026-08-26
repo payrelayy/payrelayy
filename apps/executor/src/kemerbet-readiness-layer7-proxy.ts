@@ -489,7 +489,7 @@ export function sanitizeKemerBetReadinessLayer7RequestHeaders(
     referer: KEMERBET_AGENT_DEPOSIT_URL,
     'sec-fetch-dest': 'empty',
     'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'same-site',
+    'sec-fetch-site': 'cross-site',
     'user-agent': FIXED_USER_AGENT,
   });
 }
@@ -507,7 +507,7 @@ export function buildKemerBetReadinessAgentProfileRequestHeaders(
     referer: KEMERBET_AGENT_DEPOSIT_URL,
     'sec-fetch-dest': 'empty',
     'sec-fetch-mode': 'cors',
-    'sec-fetch-site': 'same-site',
+    'sec-fetch-site': 'cross-site',
     'user-agent': FIXED_USER_AGENT,
   });
 }

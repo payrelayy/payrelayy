@@ -21,7 +21,7 @@ describe('KemerBet readiness generic completion receipt', () => {
     });
     expect(serialized.endsWith('\n')).toBe(true);
     expect(JSON.parse(serialized) as unknown).toEqual({
-      contract: 'fetanagent-kemerbet-readiness-layer7-completion-v2',
+      contract: 'fetanagent-kemerbet-readiness-layer7-completion-v3',
       agentIdentityBindingSha256: BINDING_SHA,
       identifiersRedacted: true,
       moneyMoved: false,
@@ -29,16 +29,22 @@ describe('KemerBet readiness generic completion receipt', () => {
       responsesValidated: true,
       runNonceSha256: NONCE_SHA,
       sameAgentIdentityValidated: true,
+      stableAgentProfileValidated: true,
       sequences: [1, 2, 3, 4, 5],
       transferDisabled: true,
-      version: 2,
+      version: 3,
     });
     expect(serialized).not.toContain('externalId');
     expect(serialized).not.toContain('Bearer');
     expect(KEMERBET_READINESS_COMPLETION_RECEIPT_CONTRACT).toMatchObject({
+      contract: 'fetanagent-kemerbet-readiness-layer7-completion-v3',
       file: '/run/output/completion-receipt',
       mode: 0o400,
       ownerUserId: 10003,
+      schema: {
+        stableAgentProfileValidated: true,
+        version: 3,
+      },
     });
   });
 

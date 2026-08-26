@@ -283,6 +283,59 @@ does not pin the live helper digest, so a later separately approved ordinary hel
 invalidate durable completion; all legacy v1/v2 commands remain permanently forbidden. This
 rotation never starts `deposit-executor`, enables a financial flag, invokes Transfer, or moves money.
 
+#### One-use second installed-v3 helper/release rotation
+
+The first helper-rotation record is immutable and remains the only child of
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation`. If a later approved repair is required
+while the effective v3 state is still `successor-installed`, do not repin or rerun the first
+rotation. Use only the reviewed root-console operation
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v2.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v2.sh).
+It separately hard-pins the immutable base release/helper and the exact completed first-link
+predecessor release `8fe693b51b5426c3f358bba67519459161a0ebf9` with its reviewed helper digest.
+The second successor release remains the exact merged-`main` 40-character input, while the script
+hard-pins the LF-exact reviewed successor-helper digest.
+
+From the exact second-successor checkout, place the public script and LF-exact helper in root-owned
+mode-`0700` directory `/root/fetanagent-v3-helper-rotation-v2-<successor-release>/`. Name the helper
+`fetanagent-staging-deploy-helper.next`, root-owned mode `0600`, and run only from the direct
+DigitalOcean root console:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v2-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v2.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-SECOND-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+This transaction validates the immutable base and the exact completed first link before it accepts
+the current helper. It requires the stopped, disarmed, no-transient boundary, an absent Telegram
+startup receipt, zero project containers and networks, and the same two holder-free durable volumes,
+config hashes, and Compose version frozen by the first link. It also rejects every first-rotation
+sudoers, installer, and rollback residue. The script moves and synchronizes the exact deployment
+grant to its separate v2 disabled path before it creates the second namespace or publishes any
+record.
+
+The new append-only record lives only at
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v2/<successor-release>/`. Its intent and
+completion bind both effective identities, every immutable base digest, the exact SHA-256 values of
+the first intent, completion, and archived helper, and the unchanged durable-volume contract. The
+new helper first validates the base, then the exact first link, and only then this second link; a v2
+namespace without a complete first link, any `.installing` or foreign child, or any changed
+predecessor/durable digest is invalid.
+
+The installed first-link helper intentionally does not know the v2 namespace. Containment during a
+pre-install interruption therefore depends on the already-stopped runtime and the durably disabled
+deployment grant. Never restore sudo manually, call the old helper directly, delete or rename either
+rotation prefix, or remove installer residue. An empty-parent or partial-record recovery accepts only
+the same successor release, reviewed helper bytes, exact confirmation, and disabled grant. A failure
+never restores sudo. Before completion it may atomically restore only the archived exact predecessor
+helper; after completion it preserves the successor. Rerun the same operation until successor
+self-attestation and the one final fail-closed grant restoration both succeed.
+
+This second rotation does not start a service, enable the executor, invoke a KemerBet lookup or
+Transfer, or move money. After it succeeds, use the new effective release for ordinary sealed deploy,
+private sign-in, and the exact-five no-transfer recheck.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only

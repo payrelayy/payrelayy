@@ -278,6 +278,11 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/controller-stage-output
+        target: /run/fetanagent-kemerbet-readiness-controller-stage-output
+        bind:
+          create_host_path: false
     networks:
       kemerbet_readiness_control:
         ipv4_address: 172.31.254.2
@@ -361,6 +366,11 @@ services:
         source: /run/fetanagent-kemerbet-readiness-rpc-v1/browser-firewall-release
         target: /run/secrets/kemerbet_readiness_browser_firewall_release
         read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/browser-stage-output
+        target: /run/fetanagent-kemerbet-readiness-browser-stage-output
         bind:
           create_host_path: false
     networks:
@@ -455,6 +465,11 @@ services:
       - type: bind
         source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-output
         target: /run/output
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /run/fetanagent-kemerbet-readiness-rpc-v1/proxy-stage-output
+        target: /run/fetanagent-kemerbet-readiness-proxy-stage-output
         bind:
           create_host_path: false
     networks:

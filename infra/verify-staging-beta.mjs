@@ -477,7 +477,15 @@ const assertExactReadOnlyBind = (volumesBlock, source, target) => {
     ),
   );
 };
-assert.equal(countMatches(kemerbetRecheckVolumes, /^\s+- type: /gm), 6);
+const assertExactWritableBind = (volumesBlock, source, target) => {
+  assert.match(
+    volumesBlock,
+    new RegExp(
+      `type: bind\\s*\\r?\\n\\s+source: ${escapeRegExp(source)}\\s*\\r?\\n\\s+target: ${escapeRegExp(target)}\\s*\\r?\\n\\s+bind:\\s*\\r?\\n\\s+create_host_path: false`,
+    ),
+  );
+};
+assert.equal(countMatches(kemerbetRecheckVolumes, /^\s+- type: /gm), 7);
 for (const [source, target] of [
   [
     '/etc/fetanagent/executor-secrets/.kemerbet-readiness-recheck-candidate/kemerbet_agent_identity_bindings',
@@ -506,13 +514,18 @@ for (const [source, target] of [
 ]) {
   assertExactReadOnlyBind(kemerbetRecheckVolumes, source, target);
 }
+assertExactWritableBind(
+  kemerbetRecheckVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/controller-stage-output',
+  '/run/fetanagent-kemerbet-readiness-controller-stage-output',
+);
 assert.doesNotMatch(
   kemerbetRecheckVolumes,
   /kemerbet_sessions|kemerbet_readiness_profile_snapshot|kemerbet-selector-contract|browser-capability|browser-account-id|browser-firewall-release|proxy-hmac-key|proxy-run-nonce|proxy-output|kemerbet-readiness-seal-output/,
   'the controller must have no browser profile, selector, browser-only input, proxy secret, or output mount',
 );
 
-assert.equal(countMatches(kemerbetBrowserVolumes, /^\s+- type: /gm), 5);
+assert.equal(countMatches(kemerbetBrowserVolumes, /^\s+- type: /gm), 6);
 assert.match(
   kemerbetBrowserVolumes,
   /type: volume\s*\r?\n\s+source: kemerbet_readiness_profile_snapshot\s*\r?\n\s+target: \/var\/lib\/fetanagent\/kemerbet-sessions/,
@@ -521,6 +534,11 @@ assertExactReadOnlyBind(
   kemerbetBrowserVolumes,
   '/etc/fetanagent/executor-config/kemerbet-selector-contract.v2.json',
   '/etc/fetanagent/kemerbet-selector-contract.v2.json',
+);
+assertExactWritableBind(
+  kemerbetBrowserVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/browser-stage-output',
+  '/run/fetanagent-kemerbet-readiness-browser-stage-output',
 );
 assertExactReadOnlyBind(
   kemerbetBrowserVolumes,
@@ -543,7 +561,7 @@ assert.doesNotMatch(
   'the browser must receive only its disposable snapshot, selector, account file, RPC capability, and browser firewall gate',
 );
 
-assert.equal(countMatches(kemerbetProxyVolumes, /^\s+- type: /gm), 6);
+assert.equal(countMatches(kemerbetProxyVolumes, /^\s+- type: /gm), 7);
 assertExactReadOnlyBind(
   kemerbetProxyVolumes,
   '/run/fetanagent-kemerbet-readiness-rpc-v1/proxy-hmac-key',
@@ -573,6 +591,11 @@ assert.match(
   kemerbetProxyVolumes,
   /type: bind\s*\r?\n\s+source: \/run\/fetanagent-kemerbet-readiness-rpc-v1\/proxy-output\s*\r?\n\s+target: \/run\/output\s*\r?\n\s+bind:\s*\r?\n\s+create_host_path: false/,
   'the trusted proxy alone must publish the generic completion receipt',
+);
+assertExactWritableBind(
+  kemerbetProxyVolumes,
+  '/run/fetanagent-kemerbet-readiness-rpc-v1/proxy-stage-output',
+  '/run/fetanagent-kemerbet-readiness-proxy-stage-output',
 );
 assert.doesNotMatch(
   kemerbetProxyVolumes,

@@ -21,6 +21,7 @@ import {
   openKemerBetNoTransferReadinessPersistentProfileProbe,
   type KemerBetNoTransferReadinessPersistentProfileProbeOptions,
   type KemerBetNoTransferReadinessSealProbe,
+  type KemerBetNoTransferReadinessSealStage,
 } from './kemerbet-no-transfer-readiness-seal.js';
 import {
   KEMERBET_READINESS_BROWSER_RPC_BIND_IPV4,
@@ -37,6 +38,10 @@ import { KEMERBET_READINESS_LAYER7_AUTHORIZATIONS_FILE } from './kemerbet-readin
 import { createKemerBetReadinessFixedIsolatedNetworkRevalidator } from './kemerbet-readiness-network-gate.js';
 import { waitForKemerBetReadinessFirewallRelease } from './kemerbet-readiness-firewall-release.js';
 import {
+  recordKemerBetReadinessBrowserStage,
+  type KemerBetReadinessBrowserStage,
+} from './kemerbet-readiness-fixed-stage.js';
+import {
   assertKemerBetAgentPageSelectorContractV2,
   type KemerBetAgentPageSelectorContractV2,
 } from './playwright-kemerbet-agent-page.js';
@@ -47,6 +52,13 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const RAW_IDENTITY_PATTERN = /^[^\u0000-\u001f\u007f]{1,256}$/u;
 const SPKI_SHA256_PATTERN = /^[A-Za-z0-9+/]{43}=$/u;
 const INTERNAL_IDENTITY_SENTINEL = `hmac-sha256-agent-identity-v1:${'0'.repeat(64)}`;
+const BROWSER_LOOKUP_STAGES = Object.freeze([
+  'browser_lookup_1',
+  'browser_lookup_2',
+  'browser_lookup_3',
+  'browser_lookup_4',
+  'browser_lookup_5',
+] as const satisfies readonly KemerBetReadinessBrowserStage[]);
 const SENSITIVE_PATHS = Object.freeze([
   KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,
   KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
@@ -86,6 +98,7 @@ export interface KemerBetReadinessBrowserDriverDependencies {
     readonly openSession: () => Promise<KemerBetReadinessBrowserDriverSession>;
   }) => Promise<KemerBetReadinessBrowserRpcServerHandle>;
   readonly waitForFirewallRelease?: () => Promise<void>;
+  readonly reportStage?: (stage: KemerBetReadinessBrowserStage) => void;
 }
 
 export class KemerBetReadinessBrowserDriverUnavailableError extends Error {
@@ -228,11 +241,51 @@ async function openBrowserDriverSession(options: {
   readonly proxyIpv4: string;
   readonly proxySpkiSha256: string;
   readonly revalidateNetworkTopology: () => Promise<void>;
+  readonly reportStage: (stage: KemerBetReadinessBrowserStage) => void;
   readonly selectorContract: KemerBetAgentPageSelectorContractV2;
 }): Promise<KemerBetReadinessBrowserDriverSession> {
   const capture = createKemerBetReadinessRawIdentityCapture(options.accountId);
   let probe: KemerBetNoTransferReadinessSealProbe | null = null;
+  let lookupOrdinal = 0;
   try {
+    options.reportStage('browser_open');
+    const reportProbeStage = (
+      stage:
+        | KemerBetNoTransferReadinessSealStage
+        | 'restored_navigation'
+        | 'refresh_admitted'
+        | 'refresh_forwarded'
+        | 'refresh_response_complete',
+    ): void => {
+      switch (stage) {
+        case 'restored_navigation':
+          options.reportStage('browser_restored_navigation');
+          break;
+        case 'refresh_admitted':
+          options.reportStage('browser_refresh_admitted');
+          break;
+        case 'agent_identity':
+        case 'agent_session_guard':
+        case 'agent_identity_marker':
+        case 'agent_identity_value':
+        case 'agent_identity_stability':
+          options.reportStage('browser_identity');
+          break;
+        case 'page_adoption':
+          // This event marks the start of adoption. Record readiness only after openProbe returns,
+          // which proves the awaited adoption boundary completed successfully.
+          break;
+        case 'forbidden_request':
+          options.reportStage('browser_forbidden_request');
+          break;
+        // Forward/response belong to the UID-10003 proxy stage file. They are deliberately not
+        // written through the browser-owned channel even if a test double emits them here.
+        case 'refresh_forwarded':
+        case 'refresh_response_complete':
+        default:
+          break;
+      }
+    };
     probe = await options.openProbe({
       accountId: options.accountId,
       effectiveUserId: options.effectiveUserId,
@@ -243,9 +296,10 @@ async function openBrowserDriverSession(options: {
         revalidateNetworkTopology: options.revalidateNetworkTopology,
       },
       reportForbiddenRequest: () => undefined,
-      reportStage: () => undefined,
+      reportStage: reportProbeStage,
       selectorContract: options.selectorContract,
     });
+    options.reportStage('browser_probe_ready');
     const retainedProbe = probe;
     const agentIdentity = capture.takeIdentity();
     let closed = false;
@@ -261,6 +315,10 @@ async function openBrowserDriverSession(options: {
     return Object.freeze({
       agentIdentity,
       lookup: async (playerId: string, layer7Authorization: string) => {
+        const stage = BROWSER_LOOKUP_STAGES[lookupOrdinal];
+        if (stage === undefined) unavailable();
+        options.reportStage(stage);
+        lookupOrdinal += 1;
         const result = await retainedProbe.probePlayerLookup({
           playerId,
           currencyCode: 'ETB',
@@ -274,7 +332,12 @@ async function openBrowserDriverSession(options: {
           unavailable();
         }
       },
-      finalize: retainedProbe.finalizeReadOnlyProof,
+      finalize: async () => {
+        options.reportStage('browser_finalize');
+        await retainedProbe.finalizeReadOnlyProof();
+      },
+      // Do not overwrite the last browser operation when the RPC server closes a failed session.
+      // Normal completion is recorded by the driver only after the close handshake succeeds.
       close,
     });
   } catch {
@@ -287,6 +350,8 @@ async function openBrowserDriverSession(options: {
 export async function runKemerBetReadinessBrowserDriver(
   dependencies: KemerBetReadinessBrowserDriverDependencies = {},
 ): Promise<void> {
+  const reportStage = dependencies.reportStage ?? recordKemerBetReadinessBrowserStage;
+  reportStage('browser_bootstrap');
   let capability: Buffer | null = null;
   let server: KemerBetReadinessBrowserRpcServerHandle | null = null;
   try {
@@ -328,6 +393,7 @@ export async function runKemerBetReadinessBrowserDriver(
     const startServer = dependencies.startServer ?? startKemerBetReadinessBrowserRpcServer;
     await revalidateNetworkTopology();
     await revalidateControlIpv4();
+    reportStage('browser_rpc_listen');
     server = await startServer({
       capability,
       host: KEMERBET_READINESS_BROWSER_RPC_BIND_IPV4,
@@ -338,12 +404,17 @@ export async function runKemerBetReadinessBrowserDriver(
           effectiveUserId,
           openProbe,
           revalidateNetworkTopology,
+          reportStage,
           selectorContract,
         }),
     });
     await revalidateNetworkTopology();
     await revalidateControlIpv4();
     if ((await server.completed) !== 'succeeded') unavailable();
+    reportStage('browser_cleanup');
+    await server.close();
+    server = null;
+    reportStage('browser_complete');
   } catch {
     return unavailable();
   } finally {

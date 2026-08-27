@@ -801,6 +801,74 @@ Any v8 failure after the grant is disabled must resume through the exact same v8
 Any later recheck failure remains governed by the same-release recovery; it never authorizes a
 second lookup or any financial action.
 
+#### One-use ninth installed-v3 helper/release rotation
+
+The restored-session startup repair permits exactly one canonical KemerBet refresh-token request
+only during the pre-lookup startup phase. The browser classifier and locked Layer 7 proxy both
+require the exact method, provider origin, path, bounded JSON shape, and header contract; they
+reject redirects, lookalike URLs, a second refresh, and any refresh after the first Player lookup.
+The helper also retains only a fixed, privacy-safe failure-stage enum after teardown. It does not
+retain a Player identifier, request body, token, response, credential, URL, or provider account
+detail. Amount and Notes remain forbidden, Transfer stays disabled, and neither the executor nor
+final action is enabled.
+
+The installed helper cannot rewrite the completed v8 record. Apply the reviewed helper once with
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v9.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v9.sh).
+The v9 script hard-pins completed v8 release
+`ede557b85ce5878b57f2a6abd0775c530276f46d` and its installed helper as the direct predecessor.
+It validates the immutable base plus the exact first, second, third, fourth, fifth, sixth, seventh,
+and eighth links in order.
+
+After merge, derive `SUCCESSOR_RELEASE` from that exact `main` commit and stage only the LF
+Git-blob script plus final LF helper bytes under
+`/root/fetanagent-v3-helper-rotation-v9-<successor-release>/`. The directory and script are
+`root:root` mode `0700`; `fetanagent-staging-deploy-helper.next` is `root:root` mode `0600`.
+Run from the DigitalOcean root console with the reviewed successor helper digest:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v9-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v9.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-NINTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+A fresh invocation verifies the exact completed-v8 helper and release, invokes only its guarded
+stop, and proves the stopped boundary before evidence or helper mutation. It then disables and
+synchronizes the exact sudo deployment grant under the root mutation lock. The sole new evidence
+namespace is
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v9/<successor-release>/`, with exact
+`intent-v1`, `completed-v1`, and archived `predecessor-helper` files. The new records bind the
+v8 intent, completion, helper archive, all immutable base digests, both effective identities, and
+the unchanged Compose durable contract. The successor helper must directly verify its own digest
+and parse the complete nine-link chain before the script restores the exact sudo grant.
+
+The existing root-certified candidate recovery, retryable exact-five recheck evidence, staged
+Player cohort, and durable session profile are outside v9 and must remain byte-for-byte unchanged.
+Do not perform broad cleanup, manually restore sudo, rename a rotation prefix, or remove
+transaction residue. Resume an interrupted transaction only with the same v9 release, digest,
+confirmation, and staged bytes. A successful v9 rotation leaves the runtime stopped, both durable
+volumes holder-free, Transfer and the executor disabled, and makes no KemerBet request, Telegram
+request, provider request, or money movement.
+
+#### Current startup-refresh diagnostics repair order: rotate, deploy, sign in, then recheck
+
+1. Merge the reviewed startup-refresh guard, locked proxy route, fixed-stage diagnostics, optional
+   ninth-link parser, v9 rotation script, verifier, and this runbook. Freeze the final LF helper
+   digest in the script and verifier only after every helper edit has settled.
+2. Stage the exact Git-blob v9 script and helper on the root console, verify owner, mode, digest,
+   and LF bytes, then complete the one-use ninth rotation while the runtime remains stopped.
+3. Deploy and smoke the exact merged release, then activate and smoke the Telegram bot for that
+   same release while every financial gate remains disabled.
+4. Sign in to KemerBet only through the isolated Owner preview. Confirm that the preview locks after
+   authentication and that Transfer remains disabled.
+5. Obtain a fresh explicit authorization, then dispatch exactly one exact-five FIND-only
+   no-transfer recheck. Never automatically retry a failed recheck; never enter Amount or Notes,
+   click Transfer, credit an account, enable the executor, or move money.
+
+Any v9 failure after the grant is disabled must resume through the exact same v9 command and bytes.
+Any later recheck failure remains governed by the same-release recovery and its fixed redacted
+stage; it never authorizes a second lookup, an automatic retry, or any financial action.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only

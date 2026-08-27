@@ -34,6 +34,10 @@ import {
   loadKemerBetReadinessLayer7Authorizations,
   type KemerBetReadinessLayer7Authorizations,
 } from './kemerbet-readiness-layer7-authorizations.js';
+import {
+  recordKemerBetReadinessControllerStage,
+  type KemerBetReadinessControllerStage,
+} from './kemerbet-readiness-fixed-stage.js';
 import { createKemerBetReadinessControllerIsolatedNetworkRevalidator } from './kemerbet-readiness-network-gate.js';
 import { waitForKemerBetReadinessFirewallRelease } from './kemerbet-readiness-firewall-release.js';
 import {
@@ -53,6 +57,13 @@ const KEY_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const CONTROLLER_EFFECTIVE_USER_ID = 10002;
 const BROWSER_EFFECTIVE_USER_ID = 10001;
+const CONTROLLER_LOOKUP_STAGES = Object.freeze([
+  'controller_lookup_1',
+  'controller_lookup_2',
+  'controller_lookup_3',
+  'controller_lookup_4',
+  'controller_lookup_5',
+] as const satisfies readonly KemerBetReadinessControllerStage[]);
 
 export interface KemerBetNoTransferReadinessDependencies {
   readonly environment?: NodeJS.ProcessEnv;
@@ -69,6 +80,7 @@ export interface KemerBetNoTransferReadinessDependencies {
   readonly loadLayer7Authorizations?: () => Promise<KemerBetReadinessLayer7Authorizations>;
   readonly createNetworkRevalidator?: () => Promise<() => Promise<void>>;
   readonly waitForFirewallRelease?: () => Promise<void>;
+  readonly reportStage?: (stage: KemerBetReadinessControllerStage) => void;
   readonly logSuccess?: (result: {
     readonly component: 'kemerbet_no_transfer_readiness';
     readonly event: 'passed';
@@ -166,6 +178,8 @@ function reportSuccess(dependencies: KemerBetNoTransferReadinessDependencies): v
 export async function runKemerBetNoTransferReadiness(
   dependencies: KemerBetNoTransferReadinessDependencies = {},
 ): Promise<void> {
+  const reportStage = dependencies.reportStage ?? recordKemerBetReadinessControllerStage;
+  reportStage('controller_bootstrap');
   const useBrowserRpc = assertInertEnvironment(dependencies.environment ?? process.env);
   const effectiveUserId =
     dependencies.effectiveUserId ??
@@ -180,6 +194,8 @@ export async function runKemerBetNoTransferReadiness(
   let rpcOpened = false;
   let layer7Authorizations: KemerBetReadinessLayer7Authorizations | null = null;
   let revalidateNetworkTopology: (() => Promise<void>) | null = null;
+  let operationCompleted = false;
+  let operationFailed = false;
   try {
     if (useBrowserRpc) {
       revalidateNetworkTopology = await (
@@ -222,9 +238,11 @@ export async function runKemerBetNoTransferReadiness(
     }
 
     if (useBrowserRpc) {
+      reportStage('controller_rpc_open');
       rpcClient = await (dependencies.openRpcClient ?? productionOpenRpcClient)();
       let rawAgentIdentity: string | null = await rpcClient.open();
       rpcOpened = true;
+      reportStage('controller_identity');
       let observedAgentIdentityFingerprint: string;
       try {
         observedAgentIdentityFingerprint = fingerprintAgentIdentity(accountId, rawAgentIdentity);
@@ -236,6 +254,7 @@ export async function runKemerBetNoTransferReadiness(
       if (!exactFingerprint(observedAgentIdentityFingerprint, expectedAgentIdentityFingerprint)) {
         unavailable();
       }
+      reportStage('controller_authorization');
       layer7Authorizations =
         (await dependencies.loadLayer7Authorizations?.()) ??
         (await loadKemerBetReadinessLayer7Authorizations({
@@ -244,54 +263,89 @@ export async function runKemerBetNoTransferReadiness(
       if (layer7Authorizations.authorizations.length !== players.playerIds.length) unavailable();
       await revalidateNetworkTopology?.();
       for (const [index, playerId] of players.playerIds.entries()) {
+        const stage = CONTROLLER_LOOKUP_STAGES[index];
+        if (stage === undefined) unavailable();
+        reportStage(stage);
         await rpcClient.lookup(playerId, layer7Authorizations.authorizations[index]!);
       }
       await revalidateNetworkTopology?.();
+      reportStage('controller_finalize');
       await rpcClient.finalize();
-      reportSuccess(dependencies);
-      return;
-    }
-
-    const [selectorContract] = await Promise.all([
-      dependencies.loadSelectorContract?.() ??
-        loadKemerBetSelectorContract({
-          filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
-          validate: validateSelectorContract,
-        }),
-      dependencies.assertBrowserExecutable?.() ??
-        assertKemerBetBrowserExecutable({ executablePath: KEMERBET_BROWSER_EXECUTABLE_PATH }),
-    ]);
-    const openProbe = dependencies.openProbe;
-    if (openProbe === undefined) unavailable();
-    probe = await openProbe({
-      accountId,
-      effectiveUserId: BROWSER_EFFECTIVE_USER_ID,
-      expectedAgentIdentityFingerprint,
-      fingerprintAgentIdentity,
-      reportForbiddenRequest: () => undefined,
-      reportStage: () => undefined,
-      selectorContract,
-    });
-    if (probe.observedAgentIdentityFingerprint !== expectedAgentIdentityFingerprint) unavailable();
-    for (const playerId of players.playerIds) {
-      const result = await probe.probePlayerLookup({ playerId, currencyCode: 'ETB' });
-      if (
-        result?.exactPlayerMatch !== true ||
-        result.exactCurrencyMatch !== true ||
-        result.transferDisabled !== true
-      ) {
-        return unavailable();
+      operationCompleted = true;
+    } else {
+      const [selectorContract] = await Promise.all([
+        dependencies.loadSelectorContract?.() ??
+          loadKemerBetSelectorContract({
+            filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
+            validate: validateSelectorContract,
+          }),
+        dependencies.assertBrowserExecutable?.() ??
+          assertKemerBetBrowserExecutable({ executablePath: KEMERBET_BROWSER_EXECUTABLE_PATH }),
+      ]);
+      const openProbe = dependencies.openProbe;
+      if (openProbe === undefined) unavailable();
+      reportStage('controller_rpc_open');
+      probe = await openProbe({
+        accountId,
+        effectiveUserId: BROWSER_EFFECTIVE_USER_ID,
+        expectedAgentIdentityFingerprint,
+        fingerprintAgentIdentity,
+        reportForbiddenRequest: () => undefined,
+        reportStage: () => undefined,
+        selectorContract,
+      });
+      reportStage('controller_identity');
+      if (probe.observedAgentIdentityFingerprint !== expectedAgentIdentityFingerprint)
+        unavailable();
+      reportStage('controller_authorization');
+      for (const [index, playerId] of players.playerIds.entries()) {
+        const stage = CONTROLLER_LOOKUP_STAGES[index];
+        if (stage === undefined) unavailable();
+        reportStage(stage);
+        const result = await probe.probePlayerLookup({ playerId, currencyCode: 'ETB' });
+        if (
+          result?.exactPlayerMatch !== true ||
+          result.exactCurrencyMatch !== true ||
+          result.transferDisabled !== true
+        ) {
+          return unavailable();
+        }
       }
+      reportStage('controller_finalize');
+      await probe.finalizeReadOnlyProof();
+      operationCompleted = true;
     }
-    await probe.finalizeReadOnlyProof();
-    reportSuccess(dependencies);
   } catch {
+    operationFailed = true;
     return unavailable();
   } finally {
-    if (rpcOpened) await rpcClient?.close().catch(() => undefined);
+    let cleanupStageUnavailable = false;
+    let cleanupFailed = false;
+    if (!operationFailed && operationCompleted) {
+      try {
+        reportStage('controller_cleanup');
+      } catch {
+        cleanupStageUnavailable = true;
+      }
+    }
+    if (rpcOpened) {
+      try {
+        await rpcClient?.close();
+      } catch {
+        cleanupFailed = true;
+      }
+    }
     layer7Authorizations = null;
-    await probe?.close().catch(() => undefined);
+    try {
+      await probe?.close();
+    } catch {
+      cleanupFailed = true;
+    }
+    if (cleanupStageUnavailable || cleanupFailed) unavailable();
   }
+  if (!operationCompleted) unavailable();
+  reportStage('controller_complete');
+  reportSuccess(dependencies);
 }
 
 export async function runKemerBetNoTransferReadinessMain(

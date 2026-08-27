@@ -49,6 +49,7 @@ readonly KEMERBET_V3_HELPER_ROTATION_V5_PARENT='/var/lib/fetanagent/kemerbet-rea
 readonly KEMERBET_V3_HELPER_ROTATION_V6_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v6'
 readonly KEMERBET_V3_HELPER_ROTATION_V7_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v7'
 readonly KEMERBET_V3_HELPER_ROTATION_V8_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v8'
+readonly KEMERBET_V3_HELPER_ROTATION_V9_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v9'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -108,6 +109,12 @@ readonly KEMERBET_RECHECK_PROXY_OUTPUT_ROOT="$KEMERBET_RECHECK_RPC_ROOT/proxy-ou
 readonly KEMERBET_RECHECK_PROXY_COMPLETION_RECEIPT="$KEMERBET_RECHECK_PROXY_OUTPUT_ROOT/completion-receipt"
 readonly KEMERBET_RECHECK_PROFILE_OUTPUT_ROOT="$KEMERBET_RECHECK_RPC_ROOT/profile-output"
 readonly KEMERBET_RECHECK_PROFILE_MANIFEST="$KEMERBET_RECHECK_PROFILE_OUTPUT_ROOT/profile-manifest"
+readonly KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT="$KEMERBET_RECHECK_RPC_ROOT/controller-stage-output"
+readonly KEMERBET_RECHECK_CONTROLLER_STAGE="$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT/stage-v1"
+readonly KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT="$KEMERBET_RECHECK_RPC_ROOT/browser-stage-output"
+readonly KEMERBET_RECHECK_BROWSER_STAGE="$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT/stage-v1"
+readonly KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT="$KEMERBET_RECHECK_RPC_ROOT/proxy-stage-output"
+readonly KEMERBET_RECHECK_PROXY_STAGE="$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT/stage-v1"
 readonly KEMERBET_RECHECK_FIREWALL_RELEASE_CONTENT='fetanagent-kemerbet-readiness-firewall-v1'
 readonly KEMERBET_RECHECK_FIREWALL_CHAIN='FETANAGENT-READINESS'
 # SHA-256 of the exact four LF-terminated Docker health-test argv entries (CMD, node, -e,
@@ -3830,7 +3837,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_V3_HELPER_ROTATION_V5_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V6_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V7_PARENT" \
-    "$KEMERBET_V3_HELPER_ROTATION_V8_PARENT" <<'PY'
+    "$KEMERBET_V3_HELPER_ROTATION_V8_PARENT" \
+    "$KEMERBET_V3_HELPER_ROTATION_V9_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3859,6 +3867,7 @@ import sys
     rotation_v6_parent,
     rotation_v7_parent,
     rotation_v8_parent,
+    rotation_v9_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
@@ -4891,6 +4900,131 @@ if os.path.lexists(rotation_v8_parent):
         reject()
     effective_release = rotation_v8_release
     effective_helper_sha = rotation_v8_intent[5].split('=', 1)[1]
+
+rotation_v9_intent_data = None
+rotation_v9_completion_data = None
+archived_rotation_v9_predecessor_helper = None
+if os.path.lexists(rotation_v9_parent):
+    if (
+        rotation_v8_intent_data is None
+        or rotation_v8_completion_data is None
+        or archived_rotation_v8_predecessor_helper is None
+    ):
+        reject()
+    rotation_v9_parent_value = os.lstat(rotation_v9_parent)
+    if (
+        not stat.S_ISDIR(rotation_v9_parent_value.st_mode)
+        or (rotation_v9_parent_value.st_uid, rotation_v9_parent_value.st_gid,
+            stat.S_IMODE(rotation_v9_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_v9_parent) != rotation_v9_parent
+    ):
+        reject()
+    rotation_v9_children = os.listdir(rotation_v9_parent)
+    if len(rotation_v9_children) != 1 or release.fullmatch(rotation_v9_children[0]) is None:
+        reject()
+    rotation_v9_release = rotation_v9_children[0]
+    rotation_v9_root = f'{rotation_v9_parent}/{rotation_v9_release}'
+    exact_directory(rotation_v9_parent, 0o700, [rotation_v9_release])
+    exact_directory(
+        rotation_v9_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_v9_intent_data = exact_file(
+        f'{rotation_v9_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v9_completion_data = exact_file(
+        f'{rotation_v9_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v9_intent = rotation_v9_intent_data.decode('ascii').splitlines()
+    rotation_v9_completion = rotation_v9_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_v9_intent) != 18
+        or len(rotation_v9_completion) != 19
+        or rotation_v9_intent[0] !=
+           'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v9'
+        or rotation_v9_intent[1] != 'state=authorized'
+        or rotation_v9_intent[2] != f'predecessor_release={effective_release}'
+        or rotation_v9_intent[3] != f'successor_release={rotation_v9_release}'
+        or rotation_v9_release in {
+            successor,
+            rotation_release,
+            rotation_v2_release,
+            rotation_v3_release,
+            rotation_v4_release,
+            rotation_v5_release,
+            rotation_v6_release,
+            rotation_v7_release,
+            effective_release,
+        }
+        or rotation_v9_intent[4] !=
+           f'predecessor_helper_sha256={effective_helper_sha}'
+        or not rotation_v9_intent[5].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_v9_intent[5].split('=', 1)[1]) is None
+        or rotation_v9_intent[5].split('=', 1)[1] in {
+            successor_helper_sha,
+            rotation_intent[5].split('=', 1)[1],
+            rotation_v2_intent[5].split('=', 1)[1],
+            rotation_v3_intent[5].split('=', 1)[1],
+            rotation_v4_intent[5].split('=', 1)[1],
+            rotation_v5_intent[5].split('=', 1)[1],
+            rotation_v6_intent[5].split('=', 1)[1],
+            rotation_v7_intent[5].split('=', 1)[1],
+            effective_helper_sha,
+        }
+        or rotation_v9_intent[6] !=
+           f'base_successor_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or rotation_v9_intent[7] !=
+           f'base_successor_completion_sha256={hashlib.sha256(completion_data).hexdigest()}'
+        or rotation_v9_intent[8] != f'base_binding_v2_sha256={v2_sha}'
+        or rotation_v9_intent[9] !=
+           f'base_predecessor_helper_sha256={hashlib.sha256(old_helper_data).hexdigest()}'
+        or rotation_v9_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or rotation_v9_intent[11] !=
+           f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v8_intent_data).hexdigest()}'
+        or rotation_v9_intent[12] !=
+           f'predecessor_rotation_completion_sha256={hashlib.sha256(rotation_v8_completion_data).hexdigest()}'
+        or rotation_v9_intent[13] !=
+           f'predecessor_rotation_helper_archive_sha256={hashlib.sha256(archived_rotation_v8_predecessor_helper).hexdigest()}'
+        or rotation_v9_intent[14] != rotation_v8_intent[14]
+        or rotation_v9_intent[15] != rotation_v8_intent[15]
+        or rotation_v9_intent[16] != rotation_v8_intent[16]
+        or rotation_v9_intent[17] != rotation_v8_intent[17]
+        or not rotation_v9_intent[14].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_v9_intent[14].split('=', 1)[1]) is None
+        or not rotation_v9_intent[15].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_v9_intent[15].split('=', 1)[1]) is None
+        or not rotation_v9_intent[16].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_v9_intent[16].split('=', 1)[1]) is None
+        or not rotation_v9_intent[17].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_v9_intent[17].split('=', 1)[1]) is None
+        or rotation_v9_completion[:1] != rotation_v9_intent[:1]
+        or rotation_v9_completion[1] != 'state=successor-installed'
+        or rotation_v9_completion[2:18] != rotation_v9_intent[2:18]
+        or rotation_v9_completion[18] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_v9_intent_data).hexdigest()}'
+        or rotation_v9_intent_data !=
+           ('\n'.join(rotation_v9_intent) + '\n').encode('ascii')
+        or rotation_v9_completion_data !=
+           ('\n'.join(rotation_v9_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_rotation_v9_predecessor_helper = exact_file(
+        f'{rotation_v9_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if hashlib.sha256(archived_rotation_v9_predecessor_helper).hexdigest() != effective_helper_sha:
+        reject()
+    effective_release = rotation_v9_release
+    effective_helper_sha = rotation_v9_intent[5].split('=', 1)[1]
 
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
@@ -5998,6 +6132,153 @@ if data != canonical:
 PY
 }
 
+read_kemerbet_recheck_fixed_stage() {
+  local role="$1" output_root stage_file expected_uid
+  case "$role" in
+    controller)
+      output_root="$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT"
+      stage_file="$KEMERBET_RECHECK_CONTROLLER_STAGE"
+      expected_uid='10002'
+      ;;
+    browser)
+      output_root="$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT"
+      stage_file="$KEMERBET_RECHECK_BROWSER_STAGE"
+      expected_uid='10001'
+      ;;
+    proxy)
+      output_root="$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT"
+      stage_file="$KEMERBET_RECHECK_PROXY_STAGE"
+      expected_uid='10003'
+      ;;
+    *) return 1 ;;
+  esac
+  env -i PATH="$SAFE_PATH" python3 - "$role" "$output_root" "$stage_file" "$expected_uid" <<'PY'
+import os
+import stat
+import sys
+
+role, root, path, uid_serialized = sys.argv[1:]
+uid = int(uid_serialized)
+allowed = {
+    'controller': {
+        'controller_not_started', 'controller_bootstrap', 'controller_rpc_open',
+        'controller_identity', 'controller_authorization', 'controller_lookup_1',
+        'controller_lookup_2', 'controller_lookup_3', 'controller_lookup_4',
+        'controller_lookup_5', 'controller_finalize', 'controller_cleanup',
+        'controller_complete',
+    },
+    'browser': {
+        'browser_not_started', 'browser_bootstrap', 'browser_rpc_listen', 'browser_open',
+        'browser_restored_navigation', 'browser_refresh_admitted', 'browser_identity',
+        'browser_probe_ready', 'browser_lookup_1', 'browser_lookup_2', 'browser_lookup_3',
+        'browser_lookup_4', 'browser_lookup_5', 'browser_forbidden_request',
+        'browser_finalize', 'browser_cleanup', 'browser_complete',
+    },
+    'proxy': {
+        'proxy_not_started', 'proxy_bootstrap', 'proxy_ready',
+        'browser_refresh_forwarded', 'browser_refresh_response_complete',
+    },
+}
+
+def reject():
+    raise SystemExit(1)
+
+def identity(value):
+    return (
+        value.st_dev, value.st_ino, value.st_uid, value.st_gid, value.st_mode,
+        value.st_nlink, value.st_size, value.st_mtime_ns,
+    )
+
+try:
+    if role not in allowed or path != root + '/stage-v1':
+        reject()
+    root_stat = os.stat(root, follow_symlinks=False)
+    entries = sorted(os.listdir(root))
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or stat.S_ISLNK(root_stat.st_mode)
+        or root_stat.st_uid != uid
+        or root_stat.st_gid != uid
+        or stat.S_IMODE(root_stat.st_mode) != 0o700
+        or os.path.realpath(root) != root
+        or entries != ['stage-v1']
+    ):
+        reject()
+    before = os.stat(path, follow_symlinks=False)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or stat.S_ISLNK(before.st_mode)
+        or before.st_uid != uid
+        or before.st_gid != uid
+        or stat.S_IMODE(before.st_mode) != 0o400
+        or before.st_nlink != 1
+        or before.st_size < 2
+        or before.st_size > 64
+        or os.path.realpath(path) != path
+    ):
+        reject()
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    try:
+        opened = os.fstat(descriptor)
+        if identity(opened) != identity(before):
+            reject()
+        data = os.read(descriptor, 65)
+        if os.read(descriptor, 1) != b'':
+            reject()
+        opened_after = os.fstat(descriptor)
+        path_after = os.stat(path, follow_symlinks=False)
+        if identity(opened_after) != identity(opened) or identity(path_after) != identity(opened_after):
+            reject()
+    finally:
+        os.close(descriptor)
+    if len(data) != before.st_size or not data.endswith(b'\n') or b'\n' in data[:-1] or b'\r' in data or b'\0' in data:
+        reject()
+    root_after = os.stat(root, follow_symlinks=False)
+    if identity(root_after) != identity(root_stat) or sorted(os.listdir(root)) != ['stage-v1']:
+        reject()
+    stage = data[:-1].decode('ascii')
+    if stage not in allowed[role]:
+        reject()
+except SystemExit:
+    raise
+except Exception:
+    reject()
+print(stage)
+PY
+}
+
+require_kemerbet_recheck_fixed_stage_contract() {
+  local phase="$1" controller_stage browser_stage proxy_stage
+  [[ "$phase" == 'prepared' || "$phase" == 'released' || "$phase" == 'completed' ]] || return 1
+  controller_stage="$(read_kemerbet_recheck_fixed_stage controller)" || return 1
+  browser_stage="$(read_kemerbet_recheck_fixed_stage browser)" || return 1
+  proxy_stage="$(read_kemerbet_recheck_fixed_stage proxy)" || return 1
+  case "$phase" in
+    prepared)
+      [[ "$controller_stage" == 'controller_not_started' &&
+        "$browser_stage" == 'browser_not_started' &&
+        "$proxy_stage" == 'proxy_not_started' ]]
+      ;;
+    released) return 0 ;;
+    completed)
+      [[ "$controller_stage" == 'controller_complete' &&
+        "$browser_stage" == 'browser_complete' &&
+        ( "$proxy_stage" == 'proxy_ready' ||
+          "$proxy_stage" == 'browser_refresh_response_complete' ) ]]
+      ;;
+  esac
+}
+
+print_kemerbet_recheck_fixed_failure_stages() {
+  local controller_stage browser_stage proxy_stage
+  controller_stage="$(read_kemerbet_recheck_fixed_stage controller)" || return 1
+  browser_stage="$(read_kemerbet_recheck_fixed_stage browser)" || return 1
+  proxy_stage="$(read_kemerbet_recheck_fixed_stage proxy)" || return 1
+  printf 'KemerBet readiness fixed controller stage: %s\n' "$controller_stage" >&2
+  printf 'KemerBet readiness fixed browser stage: %s\n' "$browser_stage" >&2
+  printf 'KemerBet readiness fixed proxy stage: %s\n' "$proxy_stage" >&2
+}
+
 require_kemerbet_recheck_runtime_artifacts() {
   local phase="$1" commit_sha="$2" account_id="$3" browser_digest controller_digest entry
   local authorizer_key_inode authorizer_nonce_inode proxy_key_inode proxy_nonce_inode
@@ -6015,9 +6296,10 @@ require_kemerbet_recheck_runtime_artifacts() {
   while IFS= read -r entry; do
     case "$entry" in
       authorizer-hmac-key|authorizer-player-ids|authorizer-run-nonce|browser-account-id|\
-browser-capability|browser-firewall-release|controller-capability|controller-firewall-release|\
-layer7-authorizations|profile-output|proxy-agent-identity-bindings|proxy-agent-identity-hmac-key|\
-proxy-hmac-key|proxy-output|proxy-run-nonce|release-sha|snapshot-account-id) ;;
+browser-capability|browser-firewall-release|browser-stage-output|controller-capability|\
+controller-firewall-release|controller-stage-output|layer7-authorizations|profile-output|\
+proxy-agent-identity-bindings|proxy-agent-identity-hmac-key|proxy-hmac-key|proxy-output|\
+proxy-run-nonce|proxy-stage-output|release-sha|snapshot-account-id) ;;
       *) return 1 ;;
     esac
   done < <(find -P "$KEMERBET_RECHECK_RPC_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
@@ -6109,6 +6391,7 @@ proxy-hmac-key|proxy-output|proxy-run-nonce|release-sha|snapshot-account-id) ;;
     -mindepth 1 -maxdepth 1 -printf '%f\n')" || return 1
   [[ "$profile_entries" == 'profile-manifest' ]] || return 1
   require_kemerbet_recheck_profile_manifest_contract "$account_id" || return 1
+  require_kemerbet_recheck_fixed_stage_contract "$phase" || return 1
   case "$phase" in
     prepared)
       require_kemerbet_recheck_runtime_file "$KEMERBET_RECHECK_CONTROLLER_FIREWALL_RELEASE" \
@@ -6155,15 +6438,19 @@ remove_kemerbet_recheck_rpc_capabilities() {
     case "$entry" in
       .account-id.installing|.capability.installing|.proxy-hmac-key.installing|\
 .proxy-run-nonce.installing|.release-sha.installing|authorizer-hmac-key|authorizer-player-ids|\
-authorizer-run-nonce|browser-account-id|browser-capability|browser-firewall-release|\
-controller-capability|controller-firewall-release|layer7-authorizations|profile-output|\
-proxy-agent-identity-bindings|proxy-agent-identity-hmac-key|proxy-hmac-key|proxy-output|\
-proxy-run-nonce|release-sha|snapshot-account-id|authorizer-output) ;;
+  authorizer-run-nonce|browser-account-id|browser-capability|browser-firewall-release|\
+  browser-stage-output|controller-capability|controller-firewall-release|controller-stage-output|\
+  layer7-authorizations|profile-output|proxy-agent-identity-bindings|\
+  proxy-agent-identity-hmac-key|proxy-hmac-key|proxy-output|proxy-run-nonce|proxy-stage-output|\
+  release-sha|snapshot-account-id|authorizer-output) ;;
       *) return 1 ;;
     esac
   done < <(find -P "$KEMERBET_RECHECK_RPC_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
   for directory in \
     "$KEMERBET_RECHECK_AUTHORIZER_OUTPUT_ROOT" \
+    "$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT" \
+    "$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT" \
+    "$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT" \
     "$KEMERBET_RECHECK_PROXY_OUTPUT_ROOT" \
     "$KEMERBET_RECHECK_PROFILE_OUTPUT_ROOT"; do
     if [[ -e "$directory" || -L "$directory" ]]; then
@@ -6171,7 +6458,7 @@ proxy-run-nonce|release-sha|snapshot-account-id|authorizer-output) ;;
       while IFS= read -r entry; do
         case "$entry" in
           .authorizations.installing|authorizations|.completion-receipt.installing|\
-completion-receipt|.profile-manifest.installing|profile-manifest) ;;
+completion-receipt|.profile-manifest.installing|profile-manifest|stage-v1|stage-v1.installing) ;;
           *) return 1 ;;
         esac
         [[ ! -L "$directory/$entry" && -f "$directory/$entry" ]] || return 1
@@ -6279,6 +6566,29 @@ create_kemerbet_recheck_rpc_capabilities() {
     return 1
   install -d -o 10003 -g 10003 -m 0700 "$KEMERBET_RECHECK_PROXY_OUTPUT_ROOT" || return 1
   install -d -o root -g root -m 0700 "$KEMERBET_RECHECK_PROFILE_OUTPUT_ROOT" || return 1
+  install -d -o 10002 -g 10002 -m 0700 "$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT" ||
+    return 1
+  install -d -o 10001 -g 10001 -m 0700 "$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT" ||
+    return 1
+  install -d -o 10003 -g 10003 -m 0700 "$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT" ||
+    return 1
+  (umask 077 && printf '%s\n' 'controller_not_started' >"$KEMERBET_RECHECK_CONTROLLER_STAGE") ||
+    return 1
+  (umask 077 && printf '%s\n' 'browser_not_started' >"$KEMERBET_RECHECK_BROWSER_STAGE") ||
+    return 1
+  (umask 077 && printf '%s\n' 'proxy_not_started' >"$KEMERBET_RECHECK_PROXY_STAGE") ||
+    return 1
+  chown 10002:10002 "$KEMERBET_RECHECK_CONTROLLER_STAGE" || return 1
+  chown 10001:10001 "$KEMERBET_RECHECK_BROWSER_STAGE" || return 1
+  chown 10003:10003 "$KEMERBET_RECHECK_PROXY_STAGE" || return 1
+  chmod 0400 "$KEMERBET_RECHECK_CONTROLLER_STAGE" \
+    "$KEMERBET_RECHECK_BROWSER_STAGE" "$KEMERBET_RECHECK_PROXY_STAGE" || return 1
+  sync -f "$KEMERBET_RECHECK_CONTROLLER_STAGE" || return 1
+  sync -f "$KEMERBET_RECHECK_BROWSER_STAGE" || return 1
+  sync -f "$KEMERBET_RECHECK_PROXY_STAGE" || return 1
+  sync -f "$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT" || return 1
+  sync -f "$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT" || return 1
+  sync -f "$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT" || return 1
   rm -f -- "$KEMERBET_RECHECK_RPC_INSTALLING" \
     "$KEMERBET_RECHECK_PROXY_HMAC_INSTALLING" \
     "$KEMERBET_RECHECK_PROXY_NONCE_INSTALLING" \
@@ -6779,12 +7089,31 @@ repair_kemerbet_identity_key_readability() {
 kemerbet_recheck_cleanup_trap() {
   local original_status=$?
   local cleanup_status=0
+  local containers_quiesced='false'
   trap - EXIT
   trap '' INT TERM HUP
   set +e
   if [[ "$KEMERBET_RECHECK_CLEANUP_ARMED" == 'true' ]]; then
     close_all_pinned_kemerbet_recheck_network_namespaces || cleanup_status=1
-    remove_kemerbet_recheck_container || cleanup_status=1
+    if remove_kemerbet_recheck_container; then
+      containers_quiesced='true'
+    else
+      cleanup_status=1
+    fi
+    if [[ "$original_status" -ne 0 ]]; then
+      if [[ "$containers_quiesced" == 'true' &&
+        -e "$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT" &&
+        -e "$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT" &&
+        -e "$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT" ]]; then
+        print_kemerbet_recheck_fixed_failure_stages ||
+          printf '%s\n' 'KemerBet readiness fixed stage output is unavailable.' >&2
+      elif [[ "$containers_quiesced" != 'true' ||
+        -e "$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT" ||
+        -e "$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT" ||
+        -e "$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT" ]]; then
+        printf '%s\n' 'KemerBet readiness fixed stage output is unavailable.' >&2
+      fi
+    fi
     # Retry the disposable snapshot-volume removal independently. The container cleanup normally
     # removes it, but a rejected or partially-created sibling container must not prevent removal
     # of an otherwise holder-free partial snapshot after an offline copy/verification failure.
@@ -12091,6 +12420,7 @@ require_kemerbet_recheck_container_contract() {
         "bind||/run/secrets/kemerbet_agent_identity_bindings|false|$KEMERBET_RECHECK_CANDIDATE_BINDING" \
         "bind||/run/secrets/kemerbet_agent_identity_hmac_key|false|$KEMERBET_AGENT_IDENTITY_HMAC_KEY" \
         "bind||/run/secrets/kemerbet_no_transfer_readiness_player_ids|false|$KEMERBET_READINESS_PLAYER_IDS" \
+        "bind||/run/fetanagent-kemerbet-readiness-controller-stage-output|true|$KEMERBET_RECHECK_CONTROLLER_STAGE_OUTPUT_ROOT" \
         "bind||/run/secrets/kemerbet_readiness_browser_rpc_capability|false|$KEMERBET_RECHECK_RPC_CONTROLLER_CAPABILITY" \
         "bind||/run/secrets/kemerbet_readiness_controller_firewall_release|false|$KEMERBET_RECHECK_CONTROLLER_FIREWALL_RELEASE" \
         "bind||/run/secrets/kemerbet_readiness_layer7_authorizations|false|$KEMERBET_RECHECK_AUTHORIZATIONS" | LC_ALL=C sort)"
@@ -12129,6 +12459,7 @@ require_kemerbet_recheck_container_contract() {
       [[ "$mountpoint" == /var/lib/docker/volumes/*/_data ]] || return 1
       expected_mounts="$(printf '%s\n' \
         "bind||/etc/fetanagent/kemerbet-selector-contract.v2.json|false|$KEMERBET_SELECTOR_CONTRACT" \
+        "bind||/run/fetanagent-kemerbet-readiness-browser-stage-output|true|$KEMERBET_RECHECK_BROWSER_STAGE_OUTPUT_ROOT" \
         "bind||/run/secrets/kemerbet_readiness_account_id|false|$KEMERBET_RECHECK_BROWSER_ACCOUNT_ID" \
         "bind||/run/secrets/kemerbet_readiness_browser_firewall_release|false|$KEMERBET_RECHECK_BROWSER_FIREWALL_RELEASE" \
         "bind||/run/secrets/kemerbet_readiness_browser_rpc_capability|false|$KEMERBET_RECHECK_RPC_BROWSER_CAPABILITY" \
@@ -12169,6 +12500,7 @@ require_kemerbet_recheck_container_contract() {
       expected_stop_timeout='15'
       expected_tmpfs='{"/tmp":"rw,noexec,nosuid,nodev,size=33554432,mode=1777"}'
       expected_mounts="$(printf '%s\n' \
+        "bind||/run/fetanagent-kemerbet-readiness-proxy-stage-output|true|$KEMERBET_RECHECK_PROXY_STAGE_OUTPUT_ROOT" \
         "bind||/run/output|true|$KEMERBET_RECHECK_PROXY_OUTPUT_ROOT" \
         "bind||/run/secrets/kemerbet_readiness_proxy_agent_identity_bindings|false|$KEMERBET_RECHECK_PROXY_AGENT_IDENTITY_BINDINGS" \
         "bind||/run/secrets/kemerbet_readiness_proxy_agent_identity_hmac_key|false|$KEMERBET_RECHECK_PROXY_AGENT_IDENTITY_HMAC_KEY" \

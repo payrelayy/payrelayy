@@ -546,7 +546,7 @@ Do not perform broad cleanup. A successful v5 rotation leaves the runtime stoppe
 volumes holder-free, Transfer and the executor disabled, and makes no KemerBet request, Telegram
 request, or money movement.
 
-#### Current Docker 29 repair order: rotate, deploy, publish, then recheck
+#### Historical Docker 29 IPAM repair order: rotate, deploy, publish, then recheck
 
 1. Merge the reviewed Docker 29 JSON IPAM normalization, optional fifth-link helper parser, v5
    rotation script, verifier, and this runbook into `main`; use that exact merged commit as the
@@ -566,6 +566,112 @@ Any v5 failure after the deployment grant is disabled must be resumed before cor
 recheck failure must use its guarded same-release recovery. Never manually delete or alter its
 journal, failed marker, one-use source, Player stages, candidate, receipt, profile volume, or exact
 Docker resources.
+
+#### One-use sixth installed-v3 helper/release rotation
+
+Docker Compose chooses a created container's primary `HostConfig.NetworkMode` by sorting
+equal-priority networks by logical service-network key. In the readiness proxy service,
+`kemerbet_readiness_egress` sorts before `kemerbet_readiness_proxy`; therefore the proxy's egress
+network is its only accepted primary `HostConfig.NetworkMode`. Its membership is still exactly the
+egress and private proxy networks. In the browser service, `kemerbet_readiness_control` sorts before
+`kemerbet_readiness_proxy`; therefore its control network remains its only accepted primary and its
+membership remains exactly control plus private proxy. The controller remains on control only.
+The v6 attestation does not accept either possible primary, an additional membership, or a missing
+membership. It does not relax healthcheck, mount, environment, DNS, IPAM, firewall, or no-transfer
+requirements.
+
+If this Compose ordering ever needs to be reproduced independently, use a dedicated diagnostic
+project with only two internal networks whose logical service-network keys are
+`kemerbet_readiness_egress` and `kemerbet_readiness_proxy`. Use an already-present local image with
+`pull_policy: never`, `entrypoint: /bin/false`, a read-only filesystem, all capabilities dropped,
+and no ports, mounts, secrets, credentials, or application environment. Run only `docker compose
+create --no-build --pull never`; never start the container. Before inspection, require state
+`created`, `Running=false`, and PID `0`. The exact expected primary is the diagnostic egress network
+and the exact expected membership set is egress plus private proxy. Before removing the diagnostic
+project, validate its exact project/service labels and explicit resource names; remove only those
+validated diagnostic resources and never use a system-wide prune.
+
+The base successor and all five completed helper-rotation records are immutable. Do not repin,
+rewrite, remove, or rerun a consumed predecessor rotation. Use only
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v6.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v6.sh)
+from the direct DigitalOcean root console. It hard-pins the completed v5 release and helper as its
+direct predecessor, preserves every historical v1-through-v5 release/helper pin, and hard-pins the
+LF-exact reviewed successor helper. The successor release must be the exact 40-character merged
+`main` commit containing the v6 script, helper, verifier, and this runbook.
+
+Export both artifacts from that exact Git commit. Place the public script and LF-exact helper in the
+root-owned mode-`0700` directory
+`/root/fetanagent-v3-helper-rotation-v6-<successor-release>/`. The script is root-owned mode `0700`;
+the staged helper is named `fetanagent-staging-deploy-helper.next`, root-owned mode `0600`.
+Independently compare the Git-blob helper digest, the script's reviewed-successor hard pin, and the
+staged helper digest, then run:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v6-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v6.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-SIXTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+A fresh invocation may begin while the completed-v5 runtime is live. Before any evidence, sudoers,
+or helper mutation, the script verifies the exact v5 predecessor helper and effective release,
+invokes its guarded stop, and proves the stopped boundary: zero project containers and networks,
+disarmed expiry guard, absent Telegram startup receipt, no recheck snapshot or RPC transient, and
+the same holder-free durable Compose volumes and frozen configuration values recorded by v5. It
+then validates the immutable base plus the exact first, second, third, fourth, and fifth links in
+order. Every historical disabled-sudoers, installer, partial-installer, rollback, and
+partial-rollback path must be absent before the new append-only transaction begins.
+
+Under the root mutation lock, v6 disables and synchronizes the exact deployment grant and rechecks
+the stopped boundary and full predecessor chain before installing any bytes. Its only evidence
+namespace is
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v6/<successor-release>/`, containing the
+exact `intent-v1`, `completed-v1`, and archived `predecessor-helper`. The new intent and completion
+bind the v5 intent, completion, and helper-archive digests, every immutable base digest, the v5 and
+v6 effective identities, and the unchanged Compose durable contract. The successor helper advances
+the effective identity only after validating the complete six-link chain.
+
+The installed v5 helper intentionally does not know the v6 namespace. While the v6 prefix is empty
+or interrupted, containment depends on the stopped runtime and durably disabled grant. Never
+restore sudo manually, invoke the predecessor helper outside the rotation, delete or rename any
+rotation prefix, or remove transaction residue. Resume only the exact same v6 command with the same
+release, digest, confirmation, and staged bytes. Pre-completion rollback may atomically restore only
+the archived v5 helper and never restores sudo. Completed recovery preserves the v6 successor and
+restores the exact grant once only after direct successor `verify` and
+`kemerbet-v3-successor-ready` both pass.
+
+The existing completed root-certified candidate recovery and retryable exact-five recheck
+failure/source/stage evidence are outside v6 and must remain byte-for-byte unchanged. Do not
+perform broad cleanup. A successful v6 rotation leaves the runtime stopped, both durable volumes
+holder-free, Transfer and the executor disabled, and makes no KemerBet request, Telegram request,
+or money movement.
+
+#### Current Docker 29 proxy-contract repair order: rotate, deploy, publish, then recheck
+
+1. Merge the reviewed proxy-primary correction, optional sixth-link helper parser, v6 rotation
+   script, verifier, and this runbook into `main`; use that exact merged commit as the successor
+   release. Compute the LF helper digest only after its final edit, hard-pin it in the v6 script and
+   verifier, and make no later helper edit.
+2. On SSH alias `codex-dark-forge-7f49`, stage only the exact Git-blob v6 script and helper bytes in
+   the root directory above, verify their owners, modes, and all three matching helper digests, then
+   complete the one-use sixth rotation. Confirm the full six-link chain and successor helper attest
+   while the runtime remains stopped.
+3. Run `.github/workflows/staging-beta-deploy-smoke.yml` in `deploy-and-smoke` mode for that exact
+   release and wait for success before continuing.
+4. Run `.github/workflows/staging-telegram-bot.yml` in `activate-and-smoke` mode for the same release
+   with its exact activation confirmation, then wait for success.
+5. Run `.github/workflows/staging-public-domain.yml` in `inspect` mode with the exact release,
+   staging target, domain, and cloud-firewall confirmation. Only after inspect succeeds, run
+   `publish` for the same values, wait for success, and verify public health. Serialize this after
+   Telegram because public edge has a separate concurrency group.
+6. Only then retry the same exact-five FIND-only no-transfer recheck. If and only if the retained
+   KemerBet session has expired, use private sign-in first. Never enter Amount or Notes, click
+   Transfer, credit an account, enable the executor, or move money.
+
+Any v6 failure after the deployment grant is disabled must be resumed with the exact same v6
+inputs and bytes before core deployment. Any recheck failure must use its guarded same-release
+recovery. Never manually restore sudo or delete or alter the recheck journal, failed marker,
+one-use source, Player stages, candidate, receipt, profile volume, or exact Docker resources.
 
 #### Historical audit record: v1-to-v2 retirement and recovery
 

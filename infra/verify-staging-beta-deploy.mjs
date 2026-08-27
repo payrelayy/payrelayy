@@ -8838,6 +8838,98 @@ assert.doesNotMatch(
   'network cleanup must never prune or select networks through broad labels',
 );
 
+const requireKemerBetRecheckNetworkIpamContract = extractShellFunction(
+  helper,
+  'require_kemerbet_recheck_network_ipam_contract',
+  'create_kemerbet_recheck_network',
+);
+assertInOrder(
+  requireKemerBetRecheckNetworkIpamContract,
+  [
+    "--format '{{json .IPAM.Config}}'",
+    '${#observed_ipam_json} -le 4096',
+    'env -i PATH="$SAFE_PATH" python3 -I -',
+    'object_pairs_hook=unique_object',
+    "allowed_keys = {'AuxiliaryAddresses', 'Gateway', 'IPRange', 'Subnet'}",
+    "required_keys = {'Gateway', 'Subnet'}",
+    "if ip_range is not None and (type(ip_range) is not str or ip_range != ''):",
+    'if auxiliary is not None and (type(auxiliary) is not dict or auxiliary):',
+    'if len(expected_pairs) != 2 or set(observed_pairs) != expected_pairs:',
+  ],
+  'network IPAM attestation must parse one bounded exact JSON contract and compare its pairs order-independently',
+);
+assert.doesNotMatch(
+  requireKemerBetRecheckNetworkIpamContract,
+  /range \.IPAM\.Config|printf [^\r\n]*\.IPRange/u,
+  'network IPAM attestation must not stringify Docker 29 typed prefixes through Go templates',
+);
+
+if (process.platform === 'linux') {
+  const ipamPython = extractSingleQuotedPythonHeredoc(
+    requireKemerBetRecheckNetworkIpamContract,
+    'require_kemerbet_recheck_network_ipam_contract',
+  );
+  const expectedIpam = ['172.31.254.0/29', '172.31.254.1', 'fd5e:7a9e:1::/64', 'fd5e:7a9e:1::1'];
+  const exactIpv4 = { Subnet: expectedIpam[0], Gateway: expectedIpam[1] };
+  const exactIpv6 = { Subnet: expectedIpam[2], Gateway: expectedIpam[3] };
+  const runIpamFixture = (raw) =>
+    spawnSync('/usr/bin/python3', ['-I', '-', raw, ...expectedIpam], {
+      encoding: 'utf8',
+      input: ipamPython,
+    });
+
+  for (const [name, raw] of [
+    ['missing IPRange in reverse Docker config order', JSON.stringify([exactIpv6, exactIpv4])],
+    [
+      'empty Docker 29 typed IPRange',
+      JSON.stringify([
+        { ...exactIpv4, IPRange: '', AuxiliaryAddresses: null },
+        { ...exactIpv6, IPRange: '', AuxiliaryAddresses: {} },
+      ]),
+    ],
+    [
+      'null IPRange',
+      JSON.stringify([
+        { ...exactIpv4, IPRange: null },
+        { ...exactIpv6, IPRange: null },
+      ]),
+    ],
+  ]) {
+    const result = runIpamFixture(raw);
+    assert.equal(result.status, 0, `${name} IPAM fixture failed: ${result.stderr}`);
+    assert.equal(result.stdout, '', `${name} IPAM fixture must expose no output`);
+  }
+
+  for (const [name, raw] of [
+    [
+      'nonempty IPRange',
+      JSON.stringify([{ ...exactIpv4, IPRange: '172.31.254.0/30' }, exactIpv6]),
+    ],
+    ['unexpected field', JSON.stringify([{ ...exactIpv4, Foreign: '' }, exactIpv6])],
+    [
+      'nonempty auxiliary addresses',
+      JSON.stringify([
+        { ...exactIpv4, AuxiliaryAddresses: { reserved: '172.31.254.2' } },
+        exactIpv6,
+      ]),
+    ],
+    [
+      'duplicate JSON key',
+      `[{"Subnet":"${expectedIpam[0]}","Subnet":"${expectedIpam[0]}","Gateway":"${expectedIpam[1]}"},{"Subnet":"${expectedIpam[2]}","Gateway":"${expectedIpam[3]}"}]`,
+    ],
+    ['duplicate config', JSON.stringify([exactIpv4, exactIpv4])],
+    ['extra config', JSON.stringify([exactIpv4, exactIpv6, exactIpv6])],
+    ['wrong subnet', JSON.stringify([{ ...exactIpv4, Subnet: '172.31.254.8/29' }, exactIpv6])],
+    ['missing subnet', JSON.stringify([{ Gateway: expectedIpam[1] }, exactIpv6])],
+    ['wrong gateway', JSON.stringify([{ ...exactIpv4, Gateway: '172.31.254.2' }, exactIpv6])],
+    ['missing gateway', JSON.stringify([{ Subnet: expectedIpam[0] }, exactIpv6])],
+    ['malformed JSON', '[{"Subnet":'],
+  ]) {
+    const result = runIpamFixture(raw);
+    assert.notEqual(result.status, 0, `${name} IPAM fixture was accepted`);
+  }
+}
+
 const createKemerBetRecheckNetwork = extractShellFunction(
   helper,
   'create_kemerbet_recheck_network',
@@ -8862,6 +8954,7 @@ assertInOrder(
     '--internal',
     'gateway_mode_ipv4=isolated',
     'gateway_mode_ipv6=isolated',
+    'require_kemerbet_recheck_network_ipam_contract',
   ],
   'network creation must define the exact two static-IP isolated planes and the otherwise empty egress plane',
 );
@@ -8879,10 +8972,6 @@ for (const [name, formatter] of [
   [
     'network options',
     /--format '\{\{range \$key, \$value := \.Options\}\}\{\{printf "%s=%s\\n" \$key \$value\}\}\{\{end\}\}' \| \\\n\s+LC_ALL=C sed '\/\^\$\/d' \| \\\n\s+LC_ALL=C sort/u,
-  ],
-  [
-    'network IPAM',
-    /--format '\{\{range \.IPAM\.Config\}\}\{\{printf "%s\|%s\|%s\\n" \.Subnet \.IPRange \.Gateway\}\}\{\{end\}\}' \| \\\n\s+LC_ALL=C sed '\/\^\$\/d' \| \\\n\s+LC_ALL=C sort/u,
   ],
 ]) {
   assert.match(
@@ -10286,7 +10375,6 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '}',
       "assert_formatter_contract \"$(printf '%s\\n' 'com.docker.compose.project=fetanagent-staging-beta' 'com.docker.compose.volume=kemerbet_readiness_profile_snapshot' 'com.fetanagent.kemerbet-readiness.snapshot=profile-snapshot-v1' | LC_ALL=C sort)\" 'com.docker.compose.volume=kemerbet_readiness_profile_snapshot' 'com.fetanagent.kemerbet-readiness.snapshot=profile-snapshot-v1' 'com.docker.compose.project=fetanagent-staging-beta'",
       "assert_formatter_contract \"$(printf '%s\\n' 'com.docker.network.bridge.gateway_mode_ipv4=isolated' 'com.docker.network.bridge.gateway_mode_ipv6=isolated' | LC_ALL=C sort)\" 'com.docker.network.bridge.gateway_mode_ipv6=isolated' 'com.docker.network.bridge.gateway_mode_ipv4=isolated'",
-      "assert_formatter_contract \"$(printf '%s\\n' '10.0.0.0/29||10.0.0.1' 'fd00::/125||fd00::1' | LC_ALL=C sort)\" 'fd00::/125||fd00::1' '10.0.0.0/29||10.0.0.1'",
       "assert_formatter_contract \"$(printf '%s\\n' 'bind||/run/output|true|/run/source-output' 'bind||/run/secrets/input|false|/run/source-input' | LC_ALL=C sort)\" 'bind||/run/secrets/input|false|/run/source-input' 'bind||/run/output|true|/run/source-output'",
       "assert_formatter_contract \"$(printf '%s\\n' 'fetanagent-staging-beta_kemerbet-readiness-control' 'fetanagent-staging-beta_kemerbet-readiness-proxy' | LC_ALL=C sort)\" 'fetanagent-staging-beta_kemerbet-readiness-proxy' 'fetanagent-staging-beta_kemerbet-readiness-control'",
       "assert_formatter_contract \"$(printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' | LC_ALL=C sort)\" 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
@@ -10315,15 +10403,15 @@ for (let index = 0; index < helperLines.length; index += 1) {
 }
 assert.equal(
   multilineDockerFormatterSortPipelines.length,
-  10,
+  9,
   'every multiline Docker formatter that is sorted must remain in the audited inventory',
 );
 assert.equal(
   multilineDockerFormatterSortPipelines.filter((pipeline) =>
     pipeline.includes("LC_ALL=C sed '/^$/d' |"),
   ).length,
-  9,
-  'all nine exact Docker inventories must remove only byte-empty formatter records before sorting',
+  8,
+  'all eight exact Docker inventories must remove only byte-empty formatter records before sorting',
 );
 assert.equal(
   multilineDockerFormatterSortPipelines.filter((pipeline) =>

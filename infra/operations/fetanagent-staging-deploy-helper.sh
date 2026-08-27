@@ -4963,9 +4963,84 @@ remove_kemerbet_recheck_network() {
   done
 }
 
+require_kemerbet_recheck_network_ipam_contract() {
+  local network_id="$1" expected_ipv4_subnet="$2" expected_ipv4_gateway="$3"
+  local expected_ipv6_subnet="$4" expected_ipv6_gateway="$5" observed_ipam_json
+  [[ "$network_id" =~ ^[0-9a-f]{12,64}$ && -n "$expected_ipv4_subnet" &&
+    -n "$expected_ipv4_gateway" && -n "$expected_ipv6_subnet" &&
+    -n "$expected_ipv6_gateway" ]] || return 1
+  observed_ipam_json="$(docker_local network inspect "$network_id" \
+    --format '{{json .IPAM.Config}}')" || return 1
+  [[ -n "$observed_ipam_json" && ${#observed_ipam_json} -le 4096 &&
+    "$observed_ipam_json" != *$'\n'* && "$observed_ipam_json" != *$'\r'* ]] || return 1
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$observed_ipam_json" \
+    "$expected_ipv4_subnet" "$expected_ipv4_gateway" \
+    "$expected_ipv6_subnet" "$expected_ipv6_gateway" <<'PY'
+import json
+import sys
+
+
+def reject():
+    raise SystemExit(1)
+
+
+def unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('duplicate JSON key')
+        value[key] = item
+    return value
+
+
+if len(sys.argv) != 6:
+    reject()
+raw = sys.argv[1]
+if raw != raw.strip() or len(raw.encode('utf-8')) > 4096:
+    reject()
+try:
+    configs = json.loads(raw, object_pairs_hook=unique_object)
+except Exception:
+    reject()
+if type(configs) is not list or len(configs) != 2:
+    reject()
+
+allowed_keys = {'AuxiliaryAddresses', 'Gateway', 'IPRange', 'Subnet'}
+required_keys = {'Gateway', 'Subnet'}
+observed_pairs = []
+for config in configs:
+    if type(config) is not dict:
+        reject()
+    keys = set(config)
+    if not required_keys.issubset(keys) or not keys.issubset(allowed_keys):
+        reject()
+    subnet = config['Subnet']
+    gateway = config['Gateway']
+    if type(subnet) is not str or type(gateway) is not str:
+        reject()
+    if 'IPRange' in config:
+        ip_range = config['IPRange']
+        if ip_range is not None and (type(ip_range) is not str or ip_range != ''):
+            reject()
+    if 'AuxiliaryAddresses' in config:
+        auxiliary = config['AuxiliaryAddresses']
+        if auxiliary is not None and (type(auxiliary) is not dict or auxiliary):
+            reject()
+    observed_pairs.append((subnet, gateway))
+
+expected_pairs = {
+    (sys.argv[2], sys.argv[3]),
+    (sys.argv[4], sys.argv[5]),
+}
+if len(expected_pairs) != 2 or set(observed_pairs) != expected_pairs:
+    reject()
+PY
+}
+
 create_kemerbet_recheck_network() {
-  local expected_internal expected_ipam expected_label expected_options network_id network_name
-  local observed_ipam observed_options
+  local expected_internal expected_ipv4_gateway expected_ipv4_subnet expected_ipv6_gateway
+  local expected_ipv6_subnet expected_label expected_options network_id network_name observed_options
   local -a create_arguments=()
   for network_name in \
     "$KEMERBET_RECHECK_CONTROL_NETWORK" \
@@ -4976,25 +5051,28 @@ create_kemerbet_recheck_network() {
         expected_internal='true'
         expected_label='kemerbet_readiness_control'
         expected_options=$'com.docker.network.bridge.gateway_mode_ipv4=isolated\ncom.docker.network.bridge.gateway_mode_ipv6=isolated'
-        expected_ipam="$(printf '%s\n' \
-          "$KEMERBET_RECHECK_CONTROL_IPV4_SUBNET||$KEMERBET_RECHECK_CONTROL_IPV4_GATEWAY" \
-          "$KEMERBET_RECHECK_CONTROL_IPV6_SUBNET||$KEMERBET_RECHECK_CONTROL_IPV6_GATEWAY" | \
-          LC_ALL=C sort)"
+        expected_ipv4_subnet="$KEMERBET_RECHECK_CONTROL_IPV4_SUBNET"
+        expected_ipv4_gateway="$KEMERBET_RECHECK_CONTROL_IPV4_GATEWAY"
+        expected_ipv6_subnet="$KEMERBET_RECHECK_CONTROL_IPV6_SUBNET"
+        expected_ipv6_gateway="$KEMERBET_RECHECK_CONTROL_IPV6_GATEWAY"
         ;;
       "$KEMERBET_RECHECK_PROXY_NETWORK")
         expected_internal='true'
         expected_label='kemerbet_readiness_proxy'
         expected_options=$'com.docker.network.bridge.gateway_mode_ipv4=isolated\ncom.docker.network.bridge.gateway_mode_ipv6=isolated'
-        expected_ipam="$(printf '%s\n' \
-          "$KEMERBET_RECHECK_PROXY_IPV4_SUBNET||$KEMERBET_RECHECK_PROXY_IPV4_GATEWAY" \
-          "$KEMERBET_RECHECK_PROXY_IPV6_SUBNET||$KEMERBET_RECHECK_PROXY_IPV6_GATEWAY" | \
-          LC_ALL=C sort)"
+        expected_ipv4_subnet="$KEMERBET_RECHECK_PROXY_IPV4_SUBNET"
+        expected_ipv4_gateway="$KEMERBET_RECHECK_PROXY_IPV4_GATEWAY"
+        expected_ipv6_subnet="$KEMERBET_RECHECK_PROXY_IPV6_SUBNET"
+        expected_ipv6_gateway="$KEMERBET_RECHECK_PROXY_IPV6_GATEWAY"
         ;;
       "$KEMERBET_RECHECK_EGRESS_NETWORK")
         expected_internal='false'
         expected_label='kemerbet_readiness_egress'
         expected_options=''
-        expected_ipam=''
+        expected_ipv4_subnet=''
+        expected_ipv4_gateway=''
+        expected_ipv6_subnet=''
+        expected_ipv6_gateway=''
         ;;
       *) return 1 ;;
     esac
@@ -5042,12 +5120,11 @@ create_kemerbet_recheck_network() {
       LC_ALL=C sort)" ||
       return 1
     [[ "$observed_options" == "$expected_options" ]] || return 1
-    if [[ -n "$expected_ipam" ]]; then
-      observed_ipam="$(docker_local network inspect "$network_id" \
-        --format '{{range .IPAM.Config}}{{printf "%s|%s|%s\n" .Subnet .IPRange .Gateway}}{{end}}' | \
-        LC_ALL=C sed '/^$/d' | \
-        LC_ALL=C sort)" || return 1
-      [[ "$observed_ipam" == "$expected_ipam" ]] || return 1
+    if [[ -n "$expected_ipv4_subnet" ]]; then
+      require_kemerbet_recheck_network_ipam_contract \
+        "$network_id" \
+        "$expected_ipv4_subnet" "$expected_ipv4_gateway" \
+        "$expected_ipv6_subnet" "$expected_ipv6_gateway" || return 1
     fi
     [[ -z "$(docker_local network inspect "$network_id" \
       --format '{{range $id, $_ := .Containers}}{{println $id}}{{end}}')" ]] || return 1

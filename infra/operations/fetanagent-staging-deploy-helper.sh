@@ -44,6 +44,7 @@ readonly KEMERBET_V2_V3_SUCCESSOR_PARENT='/var/lib/fetanagent/kemerbet-readiness
 readonly KEMERBET_V3_HELPER_ROTATION_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation'
 readonly KEMERBET_V3_HELPER_ROTATION_V2_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v2'
 readonly KEMERBET_V3_HELPER_ROTATION_V3_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v3'
+readonly KEMERBET_V3_HELPER_ROTATION_V4_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v4'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3820,7 +3821,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_RECHECK_CANDIDATE_ROOT" "$KEMERBET_RECHECK_RPC_ROOT" \
     "$KEMERBET_SELECTOR_CONTRACT" "$KEMERBET_V3_HELPER_ROTATION_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V2_PARENT" \
-    "$KEMERBET_V3_HELPER_ROTATION_V3_PARENT" <<'PY'
+    "$KEMERBET_V3_HELPER_ROTATION_V3_PARENT" \
+    "$KEMERBET_V3_HELPER_ROTATION_V4_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3844,6 +3846,7 @@ import sys
     rotation_parent,
     rotation_v2_parent,
     rotation_v3_parent,
+    rotation_v4_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
@@ -4173,6 +4176,9 @@ if os.path.lexists(rotation_v2_parent):
     effective_release = rotation_v2_release
     effective_helper_sha = rotation_v2_intent[5].split('=', 1)[1]
 
+rotation_v3_intent_data = None
+rotation_v3_completion_data = None
+archived_rotation_v3_predecessor_helper = None
 if os.path.lexists(rotation_v3_parent):
     if (
         rotation_v2_intent_data is None
@@ -4278,6 +4284,118 @@ if os.path.lexists(rotation_v3_parent):
         reject()
     effective_release = rotation_v3_release
     effective_helper_sha = rotation_v3_intent[5].split('=', 1)[1]
+
+if os.path.lexists(rotation_v4_parent):
+    if (
+        rotation_v3_intent_data is None
+        or rotation_v3_completion_data is None
+        or archived_rotation_v3_predecessor_helper is None
+    ):
+        reject()
+    rotation_v4_parent_value = os.lstat(rotation_v4_parent)
+    if (
+        not stat.S_ISDIR(rotation_v4_parent_value.st_mode)
+        or (rotation_v4_parent_value.st_uid, rotation_v4_parent_value.st_gid,
+            stat.S_IMODE(rotation_v4_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_v4_parent) != rotation_v4_parent
+    ):
+        reject()
+    rotation_v4_children = os.listdir(rotation_v4_parent)
+    if len(rotation_v4_children) != 1 or release.fullmatch(rotation_v4_children[0]) is None:
+        reject()
+    rotation_v4_release = rotation_v4_children[0]
+    rotation_v4_root = f'{rotation_v4_parent}/{rotation_v4_release}'
+    exact_directory(rotation_v4_parent, 0o700, [rotation_v4_release])
+    exact_directory(
+        rotation_v4_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_v4_intent_data = exact_file(
+        f'{rotation_v4_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v4_completion_data = exact_file(
+        f'{rotation_v4_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v4_intent = rotation_v4_intent_data.decode('ascii').splitlines()
+    rotation_v4_completion = rotation_v4_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_v4_intent) != 18
+        or len(rotation_v4_completion) != 19
+        or rotation_v4_intent[0] !=
+           'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v4'
+        or rotation_v4_intent[1] != 'state=authorized'
+        or rotation_v4_intent[2] != f'predecessor_release={effective_release}'
+        or rotation_v4_intent[3] != f'successor_release={rotation_v4_release}'
+        or rotation_v4_release in {
+            successor,
+            rotation_release,
+            rotation_v2_release,
+            effective_release,
+        }
+        or rotation_v4_intent[4] !=
+           f'predecessor_helper_sha256={effective_helper_sha}'
+        or not rotation_v4_intent[5].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_v4_intent[5].split('=', 1)[1]) is None
+        or rotation_v4_intent[5].split('=', 1)[1] in {
+            successor_helper_sha,
+            rotation_intent[5].split('=', 1)[1],
+            rotation_v2_intent[5].split('=', 1)[1],
+            effective_helper_sha,
+        }
+        or rotation_v4_intent[6] !=
+           f'base_successor_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or rotation_v4_intent[7] !=
+           f'base_successor_completion_sha256={hashlib.sha256(completion_data).hexdigest()}'
+        or rotation_v4_intent[8] != f'base_binding_v2_sha256={v2_sha}'
+        or rotation_v4_intent[9] !=
+           f'base_predecessor_helper_sha256={hashlib.sha256(old_helper_data).hexdigest()}'
+        or rotation_v4_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or rotation_v4_intent[11] !=
+           f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v3_intent_data).hexdigest()}'
+        or rotation_v4_intent[12] !=
+           f'predecessor_rotation_completion_sha256={hashlib.sha256(rotation_v3_completion_data).hexdigest()}'
+        or rotation_v4_intent[13] !=
+           f'predecessor_rotation_helper_archive_sha256={hashlib.sha256(archived_rotation_v3_predecessor_helper).hexdigest()}'
+        or rotation_v4_intent[14] != rotation_v3_intent[14]
+        or rotation_v4_intent[15] != rotation_v3_intent[15]
+        or rotation_v4_intent[16] != rotation_v3_intent[16]
+        or rotation_v4_intent[17] != rotation_v3_intent[17]
+        or not rotation_v4_intent[14].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_v4_intent[14].split('=', 1)[1]) is None
+        or not rotation_v4_intent[15].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_v4_intent[15].split('=', 1)[1]) is None
+        or not rotation_v4_intent[16].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_v4_intent[16].split('=', 1)[1]) is None
+        or not rotation_v4_intent[17].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_v4_intent[17].split('=', 1)[1]) is None
+        or rotation_v4_completion[:1] != rotation_v4_intent[:1]
+        or rotation_v4_completion[1] != 'state=successor-installed'
+        or rotation_v4_completion[2:18] != rotation_v4_intent[2:18]
+        or rotation_v4_completion[18] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_v4_intent_data).hexdigest()}'
+        or rotation_v4_intent_data !=
+           ('\n'.join(rotation_v4_intent) + '\n').encode('ascii')
+        or rotation_v4_completion_data !=
+           ('\n'.join(rotation_v4_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_rotation_v4_predecessor_helper = exact_file(
+        f'{rotation_v4_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if hashlib.sha256(archived_rotation_v4_predecessor_helper).hexdigest() != effective_helper_sha:
+        reject()
+    effective_release = rotation_v4_release
+    effective_helper_sha = rotation_v4_intent[5].split('=', 1)[1]
 
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
@@ -5735,7 +5853,7 @@ run_kemerbet_recheck_profile_snapshot_copy() {
     "$container_id" "$KEMERBET_RECHECK_SNAPSHOT_CONTAINER" 'profile-snapshot-copy-v1' \
     '0:0' "$image_id" \
     '["apps/executor/dist/kemerbet-readiness-profile-snapshot.js","snapshot"]' \
-    "$expected_mounts" '["CHOWN","DAC_OVERRIDE","FOWNER"]' || return 1
+    "$expected_mounts" '["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FOWNER"]' || return 1
   kemerbet_recheck_original_profile_volume_holders_match "$container_id" || return 1
   kemerbet_recheck_profile_snapshot_volume_holders_match "$container_id" || return 1
   docker_local container start "$container_id" >/dev/null 2>&1 || return 1
@@ -5786,7 +5904,7 @@ run_kemerbet_recheck_profile_snapshot_verify() {
     "$container_id" "$KEMERBET_RECHECK_SNAPSHOT_VERIFY_CONTAINER" 'profile-snapshot-verify-v1' \
     '0:0' "$image_id" \
     '["apps/executor/dist/kemerbet-readiness-profile-snapshot.js","verify"]' \
-    "$expected_mounts" '["DAC_OVERRIDE"]' || return 1
+    "$expected_mounts" '["CAP_DAC_OVERRIDE"]' || return 1
   require_kemerbet_profile_volume_holders ''
   kemerbet_recheck_profile_snapshot_volume_holders_match "$container_id" || return 1
   docker_local container start "$container_id" >/dev/null 2>&1 || return 1
@@ -5833,7 +5951,7 @@ run_kemerbet_recheck_original_profile_verify() {
     "$container_id" "$KEMERBET_RECHECK_ORIGINAL_VERIFY_CONTAINER" 'profile-original-verify-v1' \
     '0:0' "$image_id" \
     '["apps/executor/dist/kemerbet-readiness-profile-snapshot.js","verify-original"]' \
-    "$expected_mounts" '["DAC_OVERRIDE"]' || return 1
+    "$expected_mounts" '["CAP_DAC_OVERRIDE"]' || return 1
   kemerbet_recheck_original_profile_volume_holders_match "$container_id" || return 1
   docker_local container start "$container_id" >/dev/null 2>&1 || return 1
   wait_kemerbet_recheck_container_exit_zero "$container_id" || return 1

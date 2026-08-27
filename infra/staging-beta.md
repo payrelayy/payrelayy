@@ -402,6 +402,82 @@ This third rotation does not start a service, enable the executor, invoke a Keme
 After it succeeds, use its effective release for ordinary sealed deploy, private sign-in, and the
 exact-five no-transfer recheck.
 
+#### One-use fourth installed-v3 helper/release rotation
+
+Docker 28 reports inspected capability names with the canonical `CAP_` prefix. The reviewed helper
+normalizes only those three read-only capability attestations; it does not change the permitted
+capabilities, provider requests, or financial boundary. The base successor and all three completed
+helper-rotation records remain immutable. Do not repin or rerun any consumed predecessor rotation.
+Use only
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v4.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v4.sh)
+from the direct DigitalOcean root console. It hard-pins the exact third-link predecessor release
+`9c83821b4959f5ac52b0d642e476063ca7f3590e`, its historical helper digest, and the LF-exact reviewed
+successor-helper digest. The successor release is the exact 40-character merged-`main` commit.
+
+Export both artifacts from that exact Git commit. Place the rotation script and LF-exact helper in
+the root-owned mode-`0700` directory
+`/root/fetanagent-v3-helper-rotation-v4-<successor-release>/`. The script is root-owned mode `0700`;
+the helper is named `fetanagent-staging-deploy-helper.next`, root-owned mode `0600`. Independently
+compare the Git-blob helper digest, the script's hard pin, and the staged helper digest, then run:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v4-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v4.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-FOURTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+A fresh invocation may begin while the predecessor runtime is live. Before any evidence, sudoers,
+or helper mutation, the script verifies the exact installed predecessor helper/release, invokes its
+guarded stop, and proves the stopped boundary: zero project containers and networks, disarmed expiry
+guard, absent Telegram startup receipt, no recheck snapshot or RPC transient, and exactly the same
+two holder-free durable Compose volumes, config hashes, and Compose version frozen by the third
+link. Helper replacement is forbidden until this proof succeeds. If the predecessor is already
+stopped, the same proof is still required.
+
+The operation validates the immutable base and exact first, second, and third links in order. It
+rejects every predecessor disabled-sudoers, installer, partial-installer, and rollback residue.
+Under the root mutation lock it disables and synchronizes the exact deployment grant, revalidates
+the full three-link chain and stopped durable boundary, then appends only
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v4/<successor-release>/`. The exact intent,
+completion, and predecessor-helper archive bind the third-link artifact digests, every immutable
+base digest, both effective identities, and the unchanged durable-volume contract. The successor
+helper advances its effective identity only after validating the complete four-link chain.
+
+The installed third-link helper intentionally does not know the v4 namespace. While a v4 prefix is
+empty or interrupted, containment depends on the already-stopped runtime and durably disabled
+deployment grant. Never restore sudo manually, call the predecessor helper directly, delete or
+rename any rotation prefix, or remove transaction residue. Rerun only the exact same v4 command with
+the same release, digest, confirmation, and staged bytes. Pre-completion rollback can restore only
+the archived predecessor helper and never restores sudo. Completed recovery preserves the successor
+and restores the exact grant once only after direct successor `verify` and
+`kemerbet-v3-successor-ready` both pass.
+
+The existing completed root-certified candidate recovery and the current retryable exact-five
+recheck failure/source/stage evidence are outside this namespace and must remain unchanged. Do not
+clean, replace, or consume them during rotation. A successful v4 rotation leaves the runtime stopped,
+both durable volumes holder-free, Transfer and the executor disabled, and makes no KemerBet request,
+Telegram request, or money movement.
+
+#### Current Docker 28 repair order: rotate, deploy, publish, then recheck
+
+1. Merge the reviewed capability-prefix correction, v4 helper parser, rotation script, verifier, and
+   this runbook into `main`; use that exact merged commit as the successor release.
+2. Stage exact Git-blob bytes and complete the one-use fourth rotation above. Confirm the full
+   four-link chain and new helper attest successfully while the runtime remains stopped.
+3. Run and wait for the ordinary core `deploy-and-smoke` workflow for that exact release.
+4. Run and wait for Telegram `activate-and-smoke` for the same release.
+5. Run public-domain `inspect`; only after it succeeds, run public-domain `publish` and verify public
+   health. Manually serialize this after Telegram because public-edge uses a different concurrency
+   group.
+6. Only then retry the same exact-five FIND-only no-transfer recheck. If and only if the retained
+   KemerBet session has expired, use private sign-in first. Never enter Amount or Notes, click
+   Transfer, credit an account, enable the executor, or move money.
+
+Any v4 rotation failure after the grant is disabled must be resumed before deployment. Any recheck
+failure must use its guarded same-release retry/recovery; do not manually remove its journal,
+failed marker, source, stages, candidate, receipt, profile volume, or Docker resources.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only

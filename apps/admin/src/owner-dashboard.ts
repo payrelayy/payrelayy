@@ -458,13 +458,21 @@ let readinessCohortPrepared = false;
 let activeKemerbetAgentProfileId;
 let currentKemerbetSession;
 let kemerbetSessionPollTimer;
+let kemerbetSessionPollFailures = 0;
+let kemerbetSessionReconnectNeeded = false;
+let displayedKemerbetSessionGeneration;
+let displayedKemerbetFrameSequence = 0;
 let kemerbetInputPending = false;
 let kemerbetInputLane = Promise.resolve();
+let kemerbetPendingText = '';
+let kemerbetTextFlushTimer;
 const selectedPilotPlayerIds = new Set();
 const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
 const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
 const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
+const KEMERBET_TEXT_BATCH_DELAY_MS = 180;
+const KEMERBET_TEXT_BATCH_MAX_CHARS = 64;
 
 function setNotice(message) {
   notice.textContent = message;
@@ -519,8 +527,13 @@ function clearKemerbetSession() {
   currentKemerbetSession = undefined;
   if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
   kemerbetSessionPollTimer = undefined;
+  kemerbetSessionPollFailures = 0;
+  kemerbetSessionReconnectNeeded = false;
+  displayedKemerbetSessionGeneration = undefined;
+  displayedKemerbetFrameSequence = 0;
   kemerbetInputPending = false;
   kemerbetInputLane = Promise.resolve();
+  clearKemerbetPendingText();
   kemerbetSessionCanvas.hidden = true;
   const context = kemerbetSessionCanvas.getContext('2d');
   if (context) context.clearRect(0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
@@ -1021,74 +1034,127 @@ async function loadKemerbetAgentProfiles() {
 function validKemerbetSession(value) {
   if (!value || typeof value !== 'object' || typeof value.active !== 'boolean' ||
       typeof value.loginRequired !== 'boolean' || typeof value.signedIn !== 'boolean' ||
-      value.transferDisabled !== true || (value.signedIn && value.loginRequired)) return undefined;
+      typeof value.phase !== 'string' || value.transferDisabled !== true ||
+      (value.signedIn && value.loginRequired)) return undefined;
   const expectedKeys = value.active
-    ? ['active', 'expiresAt', 'imageBase64', 'imageContentType', 'loginRequired', 'signedIn', 'transferDisabled']
-    : ['active', 'loginRequired', 'signedIn', 'transferDisabled'];
+    ? ['active', 'expiresAt', 'frameSequence', 'generation', 'loginRequired', 'phase', 'signedIn', 'transferDisabled']
+    : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
   if (Object.keys(value).sort().join('\\0') !== expectedKeys.sort().join('\\0')) return undefined;
   if (!value.active) {
-    return value.loginRequired || value.signedIn ? undefined :
-      { active: false, loginRequired: false, signedIn: false, transferDisabled: true };
+    return value.loginRequired || value.signedIn || !['checkpointed', 'idle'].includes(value.phase)
+      ? undefined : value;
   }
   if (typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt)) ||
-      value.imageContentType !== 'image/jpeg' || typeof value.imageBase64 !== 'string' ||
-      value.imageBase64.length < 4 || value.imageBase64.length > 1900000 ||
-      !/^[A-Za-z0-9+/]+={0,2}$/.test(value.imageBase64)) return undefined;
+      typeof value.generation !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.generation) ||
+      !Number.isSafeInteger(value.frameSequence) || value.frameSequence < 0 ||
+      !['authenticated', 'authenticating', 'faulted', 'login_required', 'starting', 'stopping'].includes(value.phase) ||
+      (value.signedIn && value.phase !== 'authenticated') ||
+      (value.loginRequired && value.phase !== 'login_required')) return undefined;
   return value;
 }
 
-async function drawKemerbetSession(imageBase64) {
-  const binary = atob(imageBase64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+async function drawKemerbetSessionFrame(response, generation) {
+  const responseGeneration = response.headers.get('x-fetanagent-session-generation');
+  const sequenceValue = response.headers.get('x-fetanagent-frame-sequence');
+  if (responseGeneration !== generation || !/^[1-9][0-9]{0,9}$/.test(sequenceValue || '')) {
+    throw new Error('kemerbet_frame');
+  }
+  const sequence = Number(sequenceValue);
+  const image = await response.arrayBuffer();
+  if (image.byteLength < 4 || image.byteLength > 2000000 ||
+      currentKemerbetSession?.generation !== generation ||
+      currentKemerbetSession.phase !== 'login_required') throw new Error('kemerbet_frame');
+  const bitmap = await createImageBitmap(new Blob([image], { type: 'image/jpeg' }));
   try {
     const context = kemerbetSessionCanvas.getContext('2d');
     if (!context) throw new Error('canvas');
     context.clearRect(0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
     context.drawImage(bitmap, 0, 0, kemerbetSessionCanvas.width, kemerbetSessionCanvas.height);
     kemerbetSessionCanvas.hidden = false;
+    displayedKemerbetSessionGeneration = generation;
+    displayedKemerbetFrameSequence = sequence;
   } finally {
     bitmap.close();
   }
 }
 
+async function loadKemerbetSessionFrame(session) {
+  if (!session.active || session.phase !== 'login_required') return;
+  const after = displayedKemerbetSessionGeneration === session.generation
+    ? displayedKemerbetFrameSequence : 0;
+  const response = await ownerRequest(
+    '/v1/owner/kemerbet-session/frame?generation=' + encodeURIComponent(session.generation) +
+      '&after=' + String(after),
+    { method: 'GET', headers: {} },
+  );
+  if (response.status === 204) return;
+  if (!response.ok || response.headers.get('content-type') !== 'image/jpeg') {
+    throw new Error('kemerbet_frame');
+  }
+  await drawKemerbetSessionFrame(response, session.generation);
+}
+
 function scheduleKemerbetSessionPoll() {
   if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
-  kemerbetSessionPollTimer = currentKemerbetSession?.active
-    ? window.setTimeout(() => void loadKemerbetSession(), 1500)
-    : undefined;
+  kemerbetSessionPollTimer = undefined;
+  if (!accessToken || !activeKemerbetAgentProfileId ||
+      (!currentKemerbetSession?.active && !kemerbetSessionReconnectNeeded)) return;
+  const baseDelay = currentKemerbetSession?.phase === 'authenticated' ? 30000 :
+    currentKemerbetSession?.phase === 'faulted' ? 5000 : 1500;
+  const delay = kemerbetSessionPollFailures === 0 ? baseDelay :
+    Math.min(30000, baseDelay * (2 ** Math.min(kemerbetSessionPollFailures, 5)));
+  kemerbetSessionPollTimer = window.setTimeout(() => void loadKemerbetSession(), delay);
 }
 
 async function renderKemerbetSession(session) {
   const wasSignedIn = currentKemerbetSession?.signedIn === true;
   currentKemerbetSession = session;
-  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || session.active ||
+  kemerbetSessionPollFailures = 0;
+  kemerbetSessionReconnectNeeded = false;
+  kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId || session.phase !== 'idle' ||
     !kemerbetSessionConfirmation.checked;
-  kemerbetSessionStopButton.disabled = !session.active;
+  kemerbetSessionStopButton.disabled = !session.active || session.phase === 'stopping';
+  if (session.phase !== 'login_required') clearKemerbetPendingText();
   if (!session.active) {
     kemerbetSessionCanvas.hidden = true;
+    displayedKemerbetSessionGeneration = undefined;
+    displayedKemerbetFrameSequence = 0;
     kemerbetSessionStatus.textContent = 'Private sign-in service is stopped.';
     scheduleKemerbetSessionPoll();
     return;
   }
-  await drawKemerbetSession(session.imageBase64);
-  if (session.signedIn) {
+  if (session.phase !== 'login_required') {
+    kemerbetSessionCanvas.hidden = true;
+    displayedKemerbetSessionGeneration = undefined;
+    displayedKemerbetFrameSequence = 0;
+  }
+  if (session.phase === 'authenticated') {
     kemerbetSessionStatus.textContent = 'KemerBet signed in and retained until ' +
       new Date(session.expiresAt).toLocaleString() +
       '. Input is locked and Transfer remains disabled.';
     if (!wasSignedIn) {
       setNotice('KemerBet sign-in complete. The authenticated session is retained and preview input is locked.');
     }
-  } else {
+  } else if (session.phase === 'login_required') {
+    await loadKemerbetSessionFrame(session);
     kemerbetSessionStatus.textContent = 'Private KemerBet login is open until ' +
       new Date(session.expiresAt).toLocaleTimeString() + '. Click the preview, then type your password or OTP.';
+  } else if (session.phase === 'authenticating') {
+    kemerbetSessionStatus.textContent = 'KemerBet opened the signed-in candidate page. Verifying the exact sealed agent identity…';
+  } else if (session.phase === 'starting') {
+    kemerbetSessionStatus.textContent = 'Starting the isolated KemerBet browser. This page will reconnect automatically…';
+  } else if (session.phase === 'stopping') {
+    kemerbetSessionStatus.textContent = 'Closing the KemerBet browser and checkpointing its profile cleanly…';
+  } else {
+    kemerbetSessionStatus.textContent = 'The private browser is faulted and remains locked. Stop it before retrying.';
   }
   scheduleKemerbetSessionPoll();
 }
 
 async function loadKemerbetSession() {
   if (!activeKemerbetAgentProfileId || !accessToken || kemerbetInputPending) return;
+  kemerbetSessionPollTimer = undefined;
   try {
     const response = await ownerRequest('/v1/owner/kemerbet-session', { method: 'GET', headers: {} });
     if (!response.ok) throw new Error('kemerbet_session');
@@ -1098,8 +1164,12 @@ async function loadKemerbetSession() {
     await renderKemerbetSession(session);
   } catch (error) {
     if (!isSignedOutError(error)) {
-      clearKemerbetSession();
-      kemerbetSessionStatus.textContent = 'Private sign-in service is not running yet.';
+      kemerbetSessionPollFailures += 1;
+      kemerbetSessionReconnectNeeded = true;
+      kemerbetSessionStatus.textContent = currentKemerbetSession?.active
+        ? 'Connection to the private browser is temporarily unavailable. The last confirmed state is retained while reconnecting…'
+        : 'Private sign-in status is temporarily unavailable. Reconnecting…';
+      scheduleKemerbetSessionPoll();
     }
   }
 }
@@ -1122,14 +1192,23 @@ async function startKemerbetSession() {
       method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
       body: JSON.stringify({ confirmation: 'owner_confirmed_private_kemerbet_sign_in', requestId }),
     });
-    if (response.status !== 201) throw new Error('kemerbet_session');
+    if (response.status !== 202) throw new Error('kemerbet_session');
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
-    if (!session || !session.active || !session.loginRequired) throw new Error('kemerbet_session');
+    if (!session || !session.active ||
+        !['authenticated', 'authenticating', 'login_required', 'starting'].includes(session.phase)) {
+      throw new Error('kemerbet_session');
+    }
     kemerbetSessionConfirmation.checked = false;
     await renderKemerbetSession(session);
-    kemerbetSessionCanvas.focus();
-    setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
+    if (session.phase === 'login_required') {
+      kemerbetSessionCanvas.focus();
+      setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
+    } else if (session.phase === 'authenticated') {
+      setNotice('KemerBet is already signed in. The restored browser is locked and Transfer remains disabled.');
+    } else {
+      setNotice('Private KemerBet sign-in was accepted. The page will reconnect automatically when the browser is ready.');
+    }
   } catch (error) {
     await loadKemerbetSession();
     if (!isSignedOutError(error)) {
@@ -1150,6 +1229,7 @@ async function startKemerbetSession() {
 async function stopKemerbetSession({ confirm = true } = {}) {
   if (!currentKemerbetSession?.active) return;
   if (confirm && !window.confirm('Stop the private KemerBet sign-in browser now?')) return;
+  clearKemerbetPendingText();
   const requestId = crypto.randomUUID();
   kemerbetSessionStopButton.disabled = true;
   try {
@@ -1157,26 +1237,33 @@ async function stopKemerbetSession({ confirm = true } = {}) {
       method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
       body: JSON.stringify({ confirmation: 'owner_confirmed_stop_private_kemerbet_session', requestId }),
     });
-    if (!response.ok) throw new Error('kemerbet_session');
+    if (response.status !== 202) throw new Error('kemerbet_session');
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
-    if (!session || session.active) throw new Error('kemerbet_session');
+    if (!session || (session.active && session.phase !== 'stopping')) {
+      throw new Error('kemerbet_session');
+    }
     await renderKemerbetSession(session);
-    setNotice('Private KemerBet sign-in browser stopped.');
+    setNotice(session.phase === 'stopping'
+      ? 'Private KemerBet sign-in browser is closing cleanly. This page will confirm when it stops.'
+      : 'Private KemerBet sign-in browser stopped.');
   } catch (error) {
     if (!isSignedOutError(error)) setNotice('Stop acknowledgement is unavailable. Retry Stop immediately.');
   }
 }
 
 async function sendKemerbetSessionInput(input) {
-  if (!currentKemerbetSession?.active || currentKemerbetSession.signedIn) return;
+  if (!currentKemerbetSession?.active || currentKemerbetSession.phase !== 'login_required' ||
+      displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
+      displayedKemerbetFrameSequence < 1) return;
   kemerbetInputPending = true;
   if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
   const requestId = crypto.randomUUID();
   try {
     const response = await ownerRequest('/v1/owner/kemerbet-session/input', {
       method: 'POST', headers: kemerbetSessionMutationHeaders(requestId),
-      body: JSON.stringify({ ...input, requestId }),
+      body: JSON.stringify({ ...input, frameSequence: displayedKemerbetFrameSequence, requestId,
+        sessionGeneration: displayedKemerbetSessionGeneration }),
     });
     if (!response.ok) throw new Error('kemerbet_session');
     const payload = await response.json();
@@ -1195,6 +1282,34 @@ function queueKemerbetSessionInput(input) {
   kemerbetInputLane = kemerbetInputLane.then(
     () => sendKemerbetSessionInput(input),
     () => sendKemerbetSessionInput(input),
+  );
+}
+
+function clearKemerbetPendingText() {
+  if (kemerbetTextFlushTimer !== undefined) window.clearTimeout(kemerbetTextFlushTimer);
+  kemerbetTextFlushTimer = undefined;
+  kemerbetPendingText = '';
+}
+
+function flushKemerbetPendingText() {
+  if (kemerbetTextFlushTimer !== undefined) window.clearTimeout(kemerbetTextFlushTimer);
+  kemerbetTextFlushTimer = undefined;
+  const text = kemerbetPendingText;
+  kemerbetPendingText = '';
+  if (text) queueKemerbetSessionInput({ kind: 'text', text });
+}
+
+function bufferKemerbetSessionText(key) {
+  if (!/^[\u0020-\u007e]$/.test(key) || key === '\u0060') return;
+  kemerbetPendingText += key;
+  if (kemerbetPendingText.length >= KEMERBET_TEXT_BATCH_MAX_CHARS) {
+    flushKemerbetPendingText();
+    return;
+  }
+  if (kemerbetTextFlushTimer !== undefined) window.clearTimeout(kemerbetTextFlushTimer);
+  kemerbetTextFlushTimer = window.setTimeout(
+    flushKemerbetPendingText,
+    KEMERBET_TEXT_BATCH_DELAY_MS,
   );
 }
 
@@ -1217,6 +1332,10 @@ async function prepareKemerbetAgentProfile() {
       body: JSON.stringify({ configurationReason,
         confirmation: 'owner_confirmed_kemerbet_agent_profile', requestId }),
     });
+    if (response.status === 409) {
+      setNotice('Stop the current private KemerBet sign-in browser before preparing a new profile. The existing profile was not changed.');
+      return;
+    }
     if (response.status !== 201) throw new Error('kemerbet_agent_profile');
     const payload = await response.json();
     const profile = validKemerbetAgentProfile(payload && payload.profile);
@@ -2140,12 +2259,14 @@ kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
 });
 kemerbetSessionConfirmation.addEventListener('change', () => {
   kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
-    Boolean(currentKemerbetSession?.active) || !kemerbetSessionConfirmation.checked;
+    currentKemerbetSession?.phase !== 'idle' || !kemerbetSessionConfirmation.checked;
 });
 kemerbetSessionStartButton.addEventListener('click', startKemerbetSession);
 kemerbetSessionStopButton.addEventListener('click', () => stopKemerbetSession());
 kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
-  if (!currentKemerbetSession?.active || currentKemerbetSession.signedIn) return;
+  if (!currentKemerbetSession?.active || currentKemerbetSession.phase !== 'login_required' ||
+      displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
+      displayedKemerbetFrameSequence < 1) return;
   event.preventDefault();
   kemerbetSessionCanvas.focus();
   const bounds = kemerbetSessionCanvas.getBoundingClientRect();
@@ -2153,15 +2274,23 @@ kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
     Math.floor((event.clientX - bounds.left) * kemerbetSessionCanvas.width / bounds.width)));
   const y = Math.max(0, Math.min(719,
     Math.floor((event.clientY - bounds.top) * kemerbetSessionCanvas.height / bounds.height)));
+  flushKemerbetPendingText();
   queueKemerbetSessionInput({ kind: 'pointer', x, y });
 });
 kemerbetSessionCanvas.addEventListener('keydown', (event) => {
-  if (!currentKemerbetSession?.active || currentKemerbetSession.signedIn ||
+  if (!currentKemerbetSession?.active || currentKemerbetSession.phase !== 'login_required' ||
+      displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
+      displayedKemerbetFrameSequence < 1 ||
       event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
   const accepted = ['Backspace', 'Delete', 'Enter', 'Escape', 'Tab'].includes(event.key) ||
     (/^[\\u0020-\\u007e]$/.test(event.key) && event.key !== '\u0060');
   if (!accepted) return;
   event.preventDefault();
+  if (/^[\u0020-\u007e]$/.test(event.key) && event.key !== '\u0060') {
+    bufferKemerbetSessionText(event.key);
+    return;
+  }
+  flushKemerbetPendingText();
   queueKemerbetSessionInput({ key: event.key, kind: 'key' });
 });
 pilotConfirmation.addEventListener('change', updatePilotPreparationAvailability);

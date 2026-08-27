@@ -19,6 +19,10 @@ const privateSessionProvisionServerSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-session-provision-server.ts`,
   'utf8',
 );
+const privateSessionProfileGenerationLeaseSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-session-profile-generation-lease.ts`,
+  'utf8',
+);
 const persistentBrowserCheckpointSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-persistent-browser-checkpoint.ts`,
   'utf8',
@@ -970,6 +974,11 @@ assertOrderedFragments(
     'providerAuthorizationDigestTracker.capture(await request.headersArray())',
   ],
   'the exact lookup must synchronously reserve before its duplicate-preserving transport header read',
+);
+assert.match(
+  chromiumProfileSource,
+  /const profileStat = await fileSystem\.lstat\(profilePath\);[\s\S]*?\(profileStat\.mode & 0o7777\) !== 0o700[\s\S]*?const defaultState = await pathState\(fileSystem, defaultRoot\);[\s\S]*?if \(defaultState === 'absent'\)[\s\S]*?stableProfileStat\.dev !== profileStat\.dev[\s\S]*?stableProfileStat\.ino !== profileStat\.ino/u,
+  'a fresh profile may omit Default only while its exact owned parent directory remains stable',
 );
 assert.match(
   noTransferReadinessSealSource,
@@ -2154,6 +2163,347 @@ assert.doesNotMatch(privateSessionProvisionServerSource, /chromiumSandbox: true/
 assert.match(privateSessionProvisionServerSource, /const LOGIN_LIFETIME_MS = 10 \* 60 \* 1_000/);
 assert.match(
   privateSessionProvisionServerSource,
+  /const MAX_GENERATION_LIFETIME_MS = LOGIN_LIFETIME_MS \+ AUTHENTICATED_SESSION_LIFETIME_MS/,
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /loadKemerBetAgentIdentityBindings\(\{[\s\S]*?filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,[\s\S]*?bindings\.platformAgentAccountIds\.length !== 1[\s\S]*?bindings\.platformAgentAccountIds\[0\] !== accountId[\s\S]*?observedFingerprint !== expectedFingerprint/u,
+  'candidate authentication must compare the observed identity with the sole immutable exact-account binding',
+);
+assert.equal(
+  countMatches(
+    privateSessionProvisionServerSource,
+    /if \(observedFingerprint !== expectedFingerprint\) return unavailable\(\);/g,
+  ),
+  2,
+  'both initial authentication and final checkpoint must compare against the immutable binding rather than self-observation',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /offline: true,[\s\S]*?observedContext\.on\('page'[\s\S]*?observedContext\.route\('\*\*\/\*'[\s\S]*?observedContext\.routeWebSocket\('\*\*\/\*'[\s\S]*?observedContext\.setOffline\(false\)[\s\S]*?nextPage\.goto\(KEMERBET_AGENT_LOGIN_RETRY_URL/u,
+  'the provision browser must remain offline until popup, HTTP, and WebSocket boundaries are installed',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /serviceWorkers: 'block',[\s\S]*?observedContext\.on\('serviceworker'[\s\S]*?observedContext\.serviceWorkers\(\)\.length !== 0[\s\S]*?observedContext\.setOffline\(false\)/u,
+  'service workers must be blocked, observed, and absent before the offline browser is enabled',
+);
+assertOrderedFragments(
+  privateSessionProvisionServerSource.slice(
+    privateSessionProvisionServerSource.indexOf('const initialize = async'),
+    privateSessionProvisionServerSource.indexOf('const start = ('),
+  ),
+  [
+    'generationLease = await acquireProfileGenerationLease(profile, effectiveUserId);',
+    'await purgePersistedServiceWorkerState(profile, effectiveUserId);',
+    'nextContext = await launch(profile, {',
+    'offline: true,',
+  ],
+  'a durable profile generation lease and worker purge must precede every offline Chromium launch',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /closeKemerBetReadinessGuardedWebSocket\(\{[\s\S]*?observeWebSocket: observeForbiddenNetworkAttempt[\s\S]*?webSocket,/u,
+  'every socket must reuse the exact reviewed local-close boundary and unknown sockets must fault the generation',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const forceQuarantineAtHardDeadline = \(generation: string\)[\s\S]*?now\(\)\.getTime\(\) < generationDeadline\.getTime\(\)[\s\S]*?readMonotonicNow\(\) < generationDeadlineMonotonicMs[\s\S]*?checkpointedForRecheck = true;[\s\S]*?forceQuarantine\(1\);/u,
+  'uncertain Chromium cleanup must quarantine the generation no later than its immutable hard deadline',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /exactObject\(decoded, \['password', 'token', 'userName'\]\)[\s\S]*?userName\.length <= 30[\s\S]*?password\.length >= 8[\s\S]*?password\.length <= 24[\s\S]*?token\.length >= 16/u,
+  'login authority must be limited to the exact pinned v84 three-field credential envelope',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /KEMERBET_RECAPTCHA_SITE_KEY_SHA256[\s\S]*?function exactRecaptchaSiteKey[\s\S]*?createHash\('sha256'\)[\s\S]*?expectedSha256[\s\S]*?exactRecaptchaSiteKey\(siteKey, KEMERBET_RECAPTCHA_SITE_KEY_SHA256\)/u,
+  'the application-owned reCAPTCHA bootstrap must pin the exact public site-key digest',
+);
+const privateSessionRecaptchaStart = privateSessionProvisionServerSource.indexOf(
+  'async function fetchKemerBetRecaptchaAsset',
+);
+const privateSessionRecaptchaEnd = privateSessionProvisionServerSource.indexOf(
+  'export function classifyKemerBetSessionRequest',
+  privateSessionRecaptchaStart,
+);
+assert.ok(
+  privateSessionRecaptchaStart >= 0 && privateSessionRecaptchaEnd > privateSessionRecaptchaStart,
+);
+const privateSessionRecaptchaSource = privateSessionProvisionServerSource.slice(
+  privateSessionRecaptchaStart,
+  privateSessionRecaptchaEnd,
+);
+const privateSessionRecaptchaFetchEnd = privateSessionProvisionServerSource.indexOf(
+  'function normalizedMime',
+  privateSessionRecaptchaStart,
+);
+assert.ok(privateSessionRecaptchaFetchEnd > privateSessionRecaptchaStart);
+const privateSessionRecaptchaFetchSource = privateSessionProvisionServerSource.slice(
+  privateSessionRecaptchaStart,
+  privateSessionRecaptchaFetchEnd,
+);
+for (const exactPin of [
+  'GY0lZUzQQgeA0wDxVI-SQEZw',
+  'c5f10b63d9382d2cc53ebdc907cdcbcc22771368a48c0e55b7efa8d2d0db57b7',
+  'fe188a6a0bd9ff48c40f0f4f06065d21476e9027d0efa2f3af5137122eaebcaf',
+  'b22eb15171974449a10e031e6e763990e12969226e448524a1d561cf3882c063',
+  '49d5532804885413cd5ea22576e15b9a0c155d6a85f3f7a3b2d00e5c33255a20',
+  '1b9efb22c938500971aac2b2130a475fa23684dd69e43103894968df83145b8a',
+]) {
+  assert.ok(
+    privateSessionProvisionServerSource.includes(exactPin),
+    `private sign-in must retain the reviewed reCAPTCHA pin ${exactPin}`,
+  );
+}
+for (const exactSize of [
+  'bytes: 1_582',
+  'bytes: 801_607',
+  'bytes: 102',
+  'bytes: 82_980',
+  'bytes: 2_228',
+]) {
+  assert.ok(
+    privateSessionProvisionServerSource.includes(exactSize),
+    `private sign-in must retain the reviewed reCAPTCHA byte contract ${exactSize}`,
+  );
+}
+assert.match(
+  privateSessionRecaptchaSource,
+  /redirect: 'manual'[\s\S]*?declaredLength[\s\S]*?Number\(declaredLength\) > input\.maxBytes[\s\S]*?reader\.cancel\(\)[\s\S]*?bytes > input\.maxBytes[\s\S]*?reader\.cancel\(\)[\s\S]*?fetched\.finalUrl !== url[\s\S]*?fetched\.status !== 200[\s\S]*?normalizedMime\(fetched\.contentType\) !== pin\.mime[\s\S]*?fetched\.accessControlAllowOrigin[\s\S]*?fetched\.crossOriginEmbedderPolicy[\s\S]*?fetched\.crossOriginResourcePolicy[\s\S]*?body\.byteLength !== pin\.bytes[\s\S]*?createHash\('sha256'\)\.update\(body\)\.digest\('hex'\) !== pin\.sha256[\s\S]*?route\.fulfill/u,
+  'executable reCAPTCHA bytes must be streamed under a cap and fulfilled only after URL, status, MIME, length, and digest proof',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /'access-control-allow-origin': pin\.accessControlAllowOrigin[\s\S]*?'cross-origin-embedder-policy': pin\.crossOriginEmbedderPolicy[\s\S]*?'cross-origin-resource-policy': pin\.crossOriginResourcePolicy[\s\S]*?'x-content-type-options': 'nosniff'/u,
+  'synthetic reCAPTCHA fulfills must reproduce only the pinned browser-semantics response headers',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /const controller = new AbortController\(\);[\s\S]*?setTimeout\(\(\) => controller\.abort\(\), input\.timeoutMs\)[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/u,
+  'every pinned asset fetch must retain its independent aborting timeout',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /MAX_KEMERBET_CHROMIUM_USER_AGENT_BYTES = 192[\s\S]*?KEMERBET_CHROMIUM_USER_AGENT_PATTERN =[\s\S]*?HeadlessChrome[\s\S]*?function exactKemerBetChromiumUserAgent[\s\S]*?value\.length >= 96[\s\S]*?value\.length <= MAX_KEMERBET_CHROMIUM_USER_AGENT_BYTES[\s\S]*?Buffer\.byteLength\(value, 'utf8'\) === value\.length[\s\S]*?KEMERBET_CHROMIUM_USER_AGENT_PATTERN\.test\(value\)/u,
+  'only one bounded ASCII retained-browser HeadlessChrome User-Agent grammar may select the reviewed asset variant',
+);
+assert.match(
+  privateSessionRecaptchaFetchSource,
+  /if \(!exactKemerBetChromiumUserAgent\(input\.userAgent\)\) return unavailable\(\);[\s\S]*?credentials: 'omit',[\s\S]*?headers: \{ 'user-agent': input\.userAgent \},[\s\S]*?method: 'GET',[\s\S]*?redirect: 'manual'/u,
+  'the credential-free asset fetch must forward only the validated retained-browser User-Agent',
+);
+assert.doesNotMatch(
+  privateSessionRecaptchaFetchSource,
+  /cookie|authorization|referer|sec-fetch|\.\.\.|headers:\s*(?:input|request)\./iu,
+  'the pinned asset fetch must not accept or forward credentials, referrers, sec headers, or arbitrary header bags',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /requestKemerBetChromiumUserAgent\(request\.headers\(\)\)[\s\S]*?requestUserAgent === undefined[\s\S]*?chromiumUserAgent !== undefined && requestUserAgent !== chromiumUserAgent[\s\S]*?chromiumUserAgent = requestUserAgent[\s\S]*?fulfillPinnedAsset\([\s\S]*?assetPins\.api,[\s\S]*?requestUserAgent/u,
+  'every ceremony request must present one exact stable browser User-Agent and pass only it to the asset fetcher',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /KEMERBET_RECAPTCHA_VERIFIED_CACHE_TTL_MS = 10 \* 60 \* 1_000[\s\S]*?KEMERBET_RECAPTCHA_VERIFIED_CACHE_MAX_ENTRIES = 5[\s\S]*?verifiedRecaptchaAssetCacheKey\([\s\S]*?userAgent: string[\s\S]*?url,[\s\S]*?userAgent,[\s\S]*?pin\.sha256[\s\S]*?pin\.accessControlAllowOrigin[\s\S]*?pin\.crossOriginEmbedderPolicy[\s\S]*?pin\.crossOriginResourcePolicy[\s\S]*?now >= cached\.expiresAtMonotonicMs[\s\S]*?createHash\('sha256'\)\.update\(body\)\.digest\('hex'\) !== pin\.sha256[\s\S]*?Uint8Array\.from\(body\)/u,
+  'the process cache must be bounded, expiring, keyed by User-Agent plus the complete reviewed pin contract, digest-rechecked, and copy-isolated',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /input\.assetPins === undefined[\s\S]*?input\.fetchAsset === undefined \|\| input\.fetchAsset === fetchKemerBetRecaptchaAsset[\s\S]*?readVerifiedRecaptchaAssetCache\(processCacheKey, pin\)[\s\S]*?fetched\.finalUrl !== url[\s\S]*?createHash\('sha256'\)\.update\(body\)\.digest\('hex'\) !== pin\.sha256[\s\S]*?writeVerifiedRecaptchaAssetCache\(processCacheKey, body\)[\s\S]*?route\.fulfill/u,
+  'only production default pins/fetching may reuse process-cached bytes, and cache insertion must follow complete origin proof',
+);
+assertOrderedFragments(
+  privateSessionRecaptchaSource.slice(
+    privateSessionRecaptchaSource.indexOf("if (step === 'api')"),
+    privateSessionRecaptchaSource.indexOf('return forbidden(candidate.route);\n    } catch'),
+  ),
+  [
+    "if (step === 'api')",
+    "if (step === 'runtime_main')",
+    "if (step === 'anchor')",
+    "if (step === 'css')",
+    "if (step === 'static_subresources')",
+    "if (step === 'reload')",
+    "if (step === 'clr')",
+    "if (step === 'bcn')",
+    "step = 'complete'",
+  ],
+  'the cold-fresh reCAPTCHA ceremony must preserve the one-use reviewed request order',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /exactWebworker[\s\S]*?candidate\.requestFrame === undefined[\s\S]*?exactLogo[\s\S]*?candidate\.requestFrame === anchorFrame[\s\S]*?exactWorkerRuntime[\s\S]*?candidate\.requestFrame === undefined[\s\S]*?exactWebworker && !webworkerLoaded[\s\S]*?exactLogo && !logoLoaded[\s\S]*?exactWorkerRuntime && webworkerLoaded && !workerRuntimeLoaded[\s\S]*?webworkerLoaded && logoLoaded && workerRuntimeLoaded/u,
+  'logo and worker startup may race only inside the exact bounded static-subresource set, while the worker import remains causally ordered',
+);
+assert.ok(
+  privateSessionProvisionServerSource.includes(
+    "const KEMERBET_RECAPTCHA_ORIGIN_CO = 'aHR0cHM6Ly9hZ2VudHN5c3RlbS5hZG1pbmRpZ2kuY29tOjQ0Mw..';",
+  ),
+  'the anchor origin binding must retain Google reCAPTCHA dot padding rather than standard base64 padding',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /\^\[0-9\]\{5\}\$[\s\S]*?query\.length !== expectedKeys\.length[\s\S]*?url\.searchParams\.get\('co'\) !== KEMERBET_RECAPTCHA_ORIGIN_CO[\s\S]*?url\.searchParams\.get\('v'\) !== KEMERBET_RECAPTCHA_VERSION[\s\S]*?\^\[a-z0-9\]\{12\}\$/u,
+  'the reCAPTCHA anchor must bind the exact version, origin, query shape, and callback grammar',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /!exactAnchorFrame\(requestFrame, page\)[\s\S]*?exactDynamicPost\([\s\S]*?'\/recaptcha\/api2\/reload'[\s\S]*?'application\/x-protobuffer'[\s\S]*?'\/recaptcha\/api2\/clr'[\s\S]*?undefined[\s\S]*?'\/recaptcha\/api2\/bcn'[\s\S]*?'application\/x-protobuf'/u,
+  'worker imports and all three dynamic POSTs must retain exact provenance, MIME, order, and endpoint contracts',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /deadlineMonotonicMs: number;[\s\S]*?deadlineWallClockMs: number;[\s\S]*?monotonicNow: \(\) => number;[\s\S]*?wallClockNow: \(\) => number;[\s\S]*?monotonicTimestamp < input\.deadlineMonotonicMs[\s\S]*?wallTimestamp < input\.deadlineWallClockMs/u,
+  'every reCAPTCHA ceremony must bind immutable wall-clock and monotonic deadlines',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /verifiedAssetBodies\.set\(url, Buffer\.from\(body\)\);[\s\S]*?if \(poisoned \|\| !beforeDeadline\(\)\) return false;[\s\S]*?await route\.fulfill/u,
+  'a pinned asset may be fulfilled only after an immediate dual-clock deadline check',
+);
+for (const dynamicStep of ['anchor', 'reload', 'clr', 'bcn']) {
+  const dynamicStepStart = privateSessionRecaptchaSource.indexOf(`if (step === '${dynamicStep}')`);
+  const dynamicStepEnd = privateSessionRecaptchaSource.indexOf(
+    dynamicStep === 'bcn' ? "step = 'complete'" : "return 'handled';",
+    dynamicStepStart,
+  );
+  assert.ok(dynamicStepStart >= 0 && dynamicStepEnd > dynamicStepStart);
+  const dynamicStepSource = privateSessionRecaptchaSource.slice(dynamicStepStart, dynamicStepEnd);
+  assert.match(
+    dynamicStepSource,
+    /if \(!beforeDeadline\(\)\) return forbidden\(candidate\.route\);[\s\S]*?await candidate\.route\.continue\(\)/u,
+    `${dynamicStep} may release its request only after an immediate dual-clock deadline check`,
+  );
+}
+assert.match(
+  privateSessionProvisionServerSource,
+  /decision !== 'allow' \|\| !loginRequest[\s\S]*?await recaptchaCeremony\.consumeKemerBetLoginPermit\(\)[\s\S]*?const activeSessionDeadlineAccepted = beforeDeadline\(\);[\s\S]*?if \(decision !== 'allow' \|\| !loginPermitAccepted \|\| !activeSessionDeadlineAccepted\)[\s\S]*?if \(!beforeDeadline\(\)\)[\s\S]*?await abortForExpiredDeadline\(\);[\s\S]*?await route\.continue\(\)/u,
+  'KemerBet credentials must remain local until one exact lane-serialized login permit and an immediate active-session dual-clock check succeed',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /const consumeLoginPermit = \(\): boolean => \{[\s\S]*?loginPermitConsumed[\s\S]*?step !== 'complete'[\s\S]*?!beforeDeadline\(\)[\s\S]*?poison\(\);[\s\S]*?loginPermitConsumed = true;[\s\S]*?consumeKemerBetLoginPermit: \(\) => enqueue\(consumeLoginPermit\)[\s\S]*?return enqueue\(\(\) => handle\(candidate\)\)/u,
+  'the one-use login permit and all ceremony requests must share one replay-proof lane',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /ceremonyStarted = true;[\s\S]*?observeMainFrameCommit: \(pageUrl: string\) => \{[\s\S]*?!ceremonyStarted &&[\s\S]*?step === 'api'[\s\S]*?pageState === 'login' \|\| pageState === 'agents'[\s\S]*?step === 'complete' && pageState === 'agents'[\s\S]*?retired = true;[\s\S]*?poison\(\);/u,
+  'a ceremony may start on one initial document only and must retire after its sole completed agents transition',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /poisoned \|\|[\s\S]*?retired \|\|[\s\S]*?retireForReauthentication: \(\) => \{[\s\S]*?poisoned \|\|[\s\S]*?!ceremonyStarted && step === 'api' && siteKey === undefined[\s\S]*?step === 'complete' && loginPermitConsumed[\s\S]*?poison\(\);[\s\S]*?return false;[\s\S]*?retired = true;[\s\S]*?return true;/u,
+  'reauthentication may retire only an unused or consumed ceremony, and every retired ceremony must reject later routing',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /!recaptchaAuthority && !kemerBetLogin[\s\S]*?Promise\.resolve\('not_recaptcha' as const\)/u,
+  'unrelated KemerBet requests must bypass the large-asset ceremony lane while the exact login POST remains ordered behind its final beacon',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /candidate\.kind === 'text'[\s\S]*?exactObject\(value, \[[\s\S]*?'frameSequence'[\s\S]*?'kind'[\s\S]*?'platformAgentAccountId'[\s\S]*?'requestId'[\s\S]*?'sessionGeneration'[\s\S]*?'text'[\s\S]*?\^\[\\u0020-\\u007e\]\{1,64\}\$[\s\S]*?!text\.includes\('`'\)/u,
+  'batched preview text must use the exact body shape and a bounded printable non-backtick alphabet',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /candidate\.frameSequence !== frameSequence[\s\S]*?frameImage = undefined;[\s\S]*?requireUnexpiredInputLease\(\);[\s\S]*?candidate\.kind === 'key'[\s\S]*?candidate\.kind === 'key'[\s\S]*?keyboard\.insertText\(candidate\.text\)/u,
+  'one text batch must consume one displayed frame and pass the same dual-deadline gate as pointer and key input',
+);
+assert.doesNotMatch(
+  privateSessionRecaptchaSource,
+  /request\.postData\(\)|JSON\.parse\(request|route\.continue\(\{[\s\S]*?postData/u,
+  'the reCAPTCHA boundary may count opaque bodies but must never inspect or rewrite them',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /https:\/\/agt-cdn\.cdn-digi\.com\/prd\/system\/translations\/backoffice_en\.json/u,
+  'the exact pinned-v84 default translation fetch must remain available',
+);
+assert.doesNotMatch(
+  privateSessionProvisionServerSource,
+  /['"]\/Project\/Balance['"]/u,
+  'an endpoint with no pinned-v84 landing call site must not enter the authenticated allowlist',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const exactGlobalRefreshHeaders =[\s\S]*?headers\.grant_type === undefined && headers\.authorization === undefined;[\s\S]*?const exactNewServiceRefreshHeaders =[\s\S]*?headers\.grant_type === 'refresh_token'[\s\S]*?exactGlobalRefreshHeaders \|\| exactNewServiceRefreshHeaders/u,
+  'only the two statically reachable pinned-v84 refresh header variants may pass',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /phase = 'authenticating';[\s\S]*?authenticatedIdentityVerifier\.verify\(observedPage\)[\s\S]*?acceptAuthenticatedIdentityProof/u,
+  'an agents URL must expose a non-authenticated verification phase until exact identity proof succeeds',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /nextPage\.on\('framenavigated'[\s\S]*?phase !== 'stopping'[\s\S]*?phase !== 'faulted'[\s\S]*?recaptchaCeremony\.observeMainFrameCommit\(observedPage\.url\(\)\);[\s\S]*?identityVerificationEpoch \+= 1;[\s\S]*?if \(phase === 'authenticated'\) phase = 'authenticating';/u,
+  'every committed main-frame document must invalidate identity proofs and bind one-use reCAPTCHA to one document epoch',
+);
+const privateSessionFrameNavigationStart = privateSessionProvisionServerSource.indexOf(
+  "nextPage.on('framenavigated'",
+);
+const privateSessionFrameNavigationEnd = privateSessionProvisionServerSource.indexOf(
+  "nextPage.on('crash'",
+  privateSessionFrameNavigationStart,
+);
+assert.ok(
+  privateSessionFrameNavigationStart >= 0 &&
+    privateSessionFrameNavigationEnd > privateSessionFrameNavigationStart,
+);
+const privateSessionFrameNavigationSource = privateSessionProvisionServerSource.slice(
+  privateSessionFrameNavigationStart,
+  privateSessionFrameNavigationEnd,
+);
+assertOrderedFragments(
+  privateSessionFrameNavigationSource,
+  [
+    "const returningToLogin = committedState === 'login' && phase === 'authenticated';",
+    'if (returningToLogin) {',
+    'const wallTimestamp = now().getTime();',
+    'const monotonicTimestamp = readMonotonicNow();',
+    'wallTimestamp >= expiresAt.getTime()',
+    'wallTimestamp >= authenticatedDeadline.getTime()',
+    'wallTimestamp >= generationDeadline.getTime()',
+    'monotonicTimestamp >= expiresAtMonotonicMs',
+    'monotonicTimestamp >= authenticatedDeadlineMonotonicMs',
+    'monotonicTimestamp >= generationDeadlineMonotonicMs',
+    'const reauthenticationDeadlineWallClockMs = Math.min(',
+    'wallTimestamp + LOGIN_LIFETIME_MS,',
+    'expiresAt.getTime(),',
+    'authenticatedDeadline.getTime(),',
+    'generationDeadline.getTime(),',
+    'const reauthenticationDeadlineMonotonicMs = Math.min(',
+    'monotonicTimestamp + LOGIN_LIFETIME_MS,',
+    'expiresAtMonotonicMs,',
+    'authenticatedDeadlineMonotonicMs,',
+    'generationDeadlineMonotonicMs,',
+    'replacement = newRecaptchaCeremony(',
+    'reauthenticationDeadlineWallClockMs,',
+    'reauthenticationDeadlineMonotonicMs,',
+    'if (recaptchaCeremony.retireForReauthentication()) {',
+    'recaptchaCeremony = replacement;',
+    '} else {',
+    'recaptchaCeremony.observeMainFrameCommit(observedPage.url());',
+    'identityVerificationEpoch += 1;',
+    "if (phase === 'authenticated') phase = 'authenticating';",
+  ],
+  'authenticated-to-login reauthentication must synchronously swap a fresh one-document ceremony under both clocks without extending the original lease',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const beforeActiveSessionDeadline = \(\): boolean => \{[\s\S]*?wallTimestamp < expiresAt\.getTime\(\)[\s\S]*?monotonicTimestamp < expiresAtMonotonicMs[\s\S]*?wallTimestamp < generationDeadline\.getTime\(\)[\s\S]*?monotonicTimestamp < generationDeadlineMonotonicMs[\s\S]*?wallTimestamp < authenticatedDeadline\.getTime\(\)[\s\S]*?monotonicTimestamp < authenticatedDeadlineMonotonicMs[\s\S]*?const newRecaptchaCeremony =[\s\S]*?deadlineWallClockMs: number,[\s\S]*?deadlineMonotonicMs: number,[\s\S]*?deadlineMonotonicMs,[\s\S]*?deadlineWallClockMs,[\s\S]*?let recaptchaCeremony = newRecaptchaCeremony\(expiresAt\.getTime\(\), expiresAtMonotonicMs\);[\s\S]*?observedContext\.route\('\*\*\/\*', \(route\) =>[\s\S]*?guardedRoute\([\s\S]*?recaptchaCeremony,[\s\S]*?beforeActiveSessionDeadline,[\s\S]*?observeActiveSessionDeadlineExceeded,/u,
+  'the route closure must dereference the synchronously replaceable ceremony for every request',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const start = \(input: StartInput\)[\s\S]*?phase = 'starting';[\s\S]*?const task = initialize\(input, input\.requestId\);[\s\S]*?return snapshot\(\);[\s\S]*?sendJson\(response, 202, start\(candidate\)\)/u,
+  'Start must return a bounded starting snapshot immediately while initialization continues asynchronously',
+);
+assert.match(
+  privateSessionProvisionServerSource,
   /environment\.KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED !== 'true'/,
 );
 assert.match(privateSessionProvisionServerSource, /\/v1\/readiness\/seal/);
@@ -2164,8 +2514,8 @@ assert.match(privateSessionProvisionServerSource, /transferDisabled: true/);
 assert.match(privateSessionProvisionServerSource, /moneyMoved: false/);
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /checkpointedForRecheck\s*=\s*true/g),
-  2,
-  'only the checkpoint and readiness-seal terminal close paths may install the irreversible latch',
+  6,
+  'only hard-deadline, unexpected-close, forced-close, checkpoint, and readiness-seal boundaries may install the irreversible latch',
 );
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /checkpointedForRecheck\s*=\s*false/g),
@@ -2189,6 +2539,52 @@ const checkpointForRecheckSource = privateSessionProvisionServerSource.slice(
   checkpointForRecheckStart,
   checkpointForRecheckEnd,
 );
+const clearRuntimeStateStart = privateSessionProvisionServerSource.indexOf(
+  "const clearRuntimeState = (nextPhase: 'checkpointed' | 'idle'): void => {",
+);
+const clearRuntimeStateEnd = privateSessionProvisionServerSource.indexOf(
+  'const snapshot = (): KemerBetProvisionSessionStatus => {',
+  clearRuntimeStateStart,
+);
+assert.ok(clearRuntimeStateStart >= 0 && clearRuntimeStateEnd > clearRuntimeStateStart);
+const clearRuntimeStateSource = privateSessionProvisionServerSource.slice(
+  clearRuntimeStateStart,
+  clearRuntimeStateEnd,
+);
+assertOrderedFragments(
+  clearRuntimeStateSource,
+  [
+    'cancelExpiry();',
+    'cancelHardDeadline();',
+    'context = undefined;',
+    'page = undefined;',
+    'profilePath = undefined;',
+    'accountId = undefined;',
+    'expiresAt = undefined;',
+    'signedInLogged = false;',
+    'authenticatedDeadline = undefined;',
+    'authenticatedDeadlineMonotonicMs = undefined;',
+    'generationDeadline = undefined;',
+    'generationDeadlineMonotonicMs = undefined;',
+    'expiresAtMonotonicMs = undefined;',
+    'sessionGeneration = undefined;',
+    'frameSequence = 0;',
+    'frameImage = undefined;',
+    'frameCapturedAtMs = undefined;',
+    'pendingContext = undefined;',
+    'pendingPage = undefined;',
+    'pendingProfilePath = undefined;',
+    'profileGenerationLease = undefined;',
+    'pendingProfileGenerationLease = undefined;',
+    'authenticatedIdentityVerifier = undefined;',
+    'identityVerificationPromise = undefined;',
+    'identityVerificationEpoch += 1;',
+    'contextUnexpectedlyClosed = false;',
+    'faultCleanupGeneration = undefined;',
+    'phase = nextPhase;',
+  ],
+  'central session cleanup must clear every live, pending, preview, generation, and deadline reference',
+);
 assertOrderedFragments(
   checkpointForRecheckSource,
   [
@@ -2197,12 +2593,9 @@ assertOrderedFragments(
     'checkpointedForRecheck = true;',
     'await closePersistentBrowserForCheckpoint(',
     'profilePath: retainedProfilePath,',
+    'await retainedProfileGenerationLease.releaseAfterCleanCheckpoint();',
     'blockedRequestCounter !== blockedRequestBaseline',
-    'context = undefined;',
-    'page = undefined;',
-    'profilePath = undefined;',
-    'accountId = undefined;',
-    'expiresAt = undefined;',
+    "clearRuntimeState('checkpointed');",
     'checkpointed: true,',
   ],
   'one-use checkpoint validation and immutable latch must precede clean browser shutdown and state clear',
@@ -2214,8 +2607,21 @@ assert.doesNotMatch(
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /const status = async[\s\S]*?if \(\s*checkpointedForRecheck \|\|[\s\S]*?const start = async/,
-  'a terminal checkpoint latch must suppress status screenshots from a possibly still-live failed close',
+  /const status = async[\s\S]*?if \(checkpointedForRecheck && phase !== 'checkpointed'\) return unavailable\(\);[\s\S]*?return snapshot\(\);[\s\S]*?const initialize = async/,
+  'a terminal checkpoint latch must suppress metadata that could make a possibly still-live failed close look reusable',
+);
+assert.doesNotMatch(
+  privateSessionProvisionServerSource.slice(
+    privateSessionProvisionServerSource.indexOf('const status = async'),
+    privateSessionProvisionServerSource.indexOf('const initialize = async'),
+  ),
+  /screenshot/u,
+  'metadata status must never capture or return a browser frame',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /request\.url\?\.startsWith\('\/v1\/session\/frame\?'\)[\s\S]*?if \(!query\)[\s\S]*?checkpointedForRecheck \|\|[\s\S]*?phase === 'checkpointed'/u,
+  'the separate frame endpoint must reject every terminal checkpoint latch before returning preview bytes',
 );
 assert.match(
   privateSessionProvisionServerSource,
@@ -2239,12 +2645,7 @@ assertOrderedFragments(
     'checkpointedForRecheck = true;',
     'await closePersistentBrowserForCheckpoint(',
     'profilePath: retainedProfilePath,',
-    'context = undefined;',
-    'page = undefined;',
-    'profilePath = undefined;',
-    'accountId = undefined;',
-    'expiresAt = undefined;',
-    'signedInLogged = false;',
+    "clearRuntimeState('checkpointed');",
     'retainedContextClosed = true;',
   ],
   'the supervised same-UID Chromium context must close successfully before the enrollment lane clears and binding write can proceed',
@@ -2273,9 +2674,68 @@ assert.match(
   privateSessionProvisionServerSource,
   /const AUTHENTICATED_SESSION_LIFETIME_MS = 12 \* 60 \* 60 \* 1_000/,
 );
+const acceptIdentityProofSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const acceptAuthenticatedIdentityProof = ('),
+  privateSessionProvisionServerSource.indexOf('const beginAuthenticatedIdentityVerification = ('),
+);
+assertOrderedFragments(
+  acceptIdentityProofSource,
+  [
+    'timestamp >= expiresAt.getTime()',
+    'monotonicTimestamp >= expiresAtMonotonicMs',
+    'timestamp >= generationDeadline.getTime()',
+    'monotonicTimestamp >= generationDeadlineMonotonicMs',
+    "phase = 'authenticated';",
+    'authenticatedDeadline ??= new Date(',
+    'Math.min(timestamp + AUTHENTICATED_SESSION_LIFETIME_MS, generationDeadline.getTime()),',
+    'armExpiryAt(authenticatedDeadline, authenticatedDeadlineMonotonicMs, generation);',
+    'if (!signedInLogged) {',
+    "log('signed_in');",
+  ],
+  'only an unexpired exact identity proof may install one hard-capped immutable twelve-hour deadline',
+);
 assert.match(
-  privateSessionProvisionServerSource,
-  /if \(signedIn && !signedInLogged\) \{[\s\S]*?armExpiry\(AUTHENTICATED_SESSION_LIFETIME_MS\)/,
+  privateSessionProfileGenerationLeaseSource,
+  /const MARKER_NAME = '\.fetanagent-unclean-session-generation-v1'/u,
+);
+assert.match(
+  privateSessionProfileGenerationLeaseSource,
+  /constants\.O_CREAT \|[\s\S]*?constants\.O_EXCL \|[\s\S]*?constants\.O_WRONLY \|[\s\S]*?constants\.O_NOFOLLOW/u,
+  'a profile generation must acquire one atomic no-follow crash marker',
+);
+assertOrderedFragments(
+  privateSessionProfileGenerationLeaseSource.slice(
+    privateSessionProfileGenerationLeaseSource.indexOf('async releaseAfterCleanCheckpoint'),
+  ),
+  [
+    'await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);',
+    'const beforeUnlink = await fileSystem.lstat(markerPath);',
+    'await fileSystem.unlink(markerPath);',
+    'await syncProfileDirectory(fileSystem, profilePath);',
+  ],
+  'only the captured exact generation may release its marker after a clean checkpoint',
+);
+const updatePagePhaseSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const updatePagePhase = ('),
+  privateSessionProvisionServerSource.indexOf('const captureLoginFrame = async'),
+);
+assertOrderedFragments(
+  updatePagePhaseSource,
+  [
+    "if (state === 'agents' && phase !== 'authenticated') {",
+    'beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);',
+    "} else if (state === 'login' && phase !== 'login_required') {",
+    'const currentDeadline = expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;',
+    'Math.min(now().getTime() + LOGIN_LIFETIME_MS, currentDeadline),',
+    'armExpiryAt(',
+    'authenticatedDeadline && authenticatedDeadline.getTime() < loginDeadline.getTime()',
+  ],
+  'candidate URL must start identity proof, while later login transitions may only retain or shorten the current deadline',
+);
+assert.equal(
+  countMatches(privateSessionProvisionServerSource, /authenticatedDeadline \?\?= new Date/g),
+  1,
+  'the authenticated deadline must be initialized at exactly one transition and never reset by polling',
 );
 assert.match(
   executorConfigSource,

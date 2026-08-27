@@ -5,30 +5,70 @@ const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
+export type OwnerKemerbetSessionPhase =
+  | 'authenticated'
+  | 'authenticating'
+  | 'checkpointed'
+  | 'faulted'
+  | 'idle'
+  | 'login_required'
+  | 'starting'
+  | 'stopping';
+
 export interface OwnerKemerbetSessionStatus {
   readonly active: boolean;
   readonly expiresAt?: string;
-  readonly imageBase64?: string;
-  readonly imageContentType?: 'image/jpeg';
+  readonly frameSequence?: number;
+  readonly generation?: string;
   readonly loginRequired: boolean;
+  readonly phase: OwnerKemerbetSessionPhase;
   readonly signedIn: boolean;
   readonly transferDisabled: true;
 }
 
+export interface OwnerKemerbetSessionFrame {
+  readonly generation: string;
+  readonly image: Buffer;
+  readonly sequence: number;
+}
+
 export type OwnerKemerbetSessionInput =
-  | { readonly kind: 'key'; readonly key: string; readonly requestId: string }
   | {
+      readonly frameSequence: number;
+      readonly kind: 'key';
+      readonly key: string;
+      readonly requestId: string;
+      readonly sessionGeneration: string;
+    }
+  | {
+      readonly frameSequence: number;
+      readonly kind: 'text';
+      readonly requestId: string;
+      readonly sessionGeneration: string;
+      readonly text: string;
+    }
+  | {
+      readonly frameSequence: number;
       readonly kind: 'pointer';
       readonly requestId: string;
+      readonly sessionGeneration: string;
       readonly x: number;
       readonly y: number;
     };
 
 export interface OwnerKemerbetSessionControl {
-  input(value: OwnerKemerbetSessionInput): Promise<OwnerKemerbetSessionStatus>;
+  frame(
+    platformAgentAccountId: string,
+    generation: string,
+    after: number,
+  ): Promise<OwnerKemerbetSessionFrame | undefined>;
+  input(
+    platformAgentAccountId: string,
+    value: OwnerKemerbetSessionInput,
+  ): Promise<OwnerKemerbetSessionStatus>;
   start(platformAgentAccountId: string, requestId: string): Promise<OwnerKemerbetSessionStatus>;
-  status(): Promise<OwnerKemerbetSessionStatus>;
-  stop(requestId: string): Promise<OwnerKemerbetSessionStatus>;
+  status(platformAgentAccountId: string): Promise<OwnerKemerbetSessionStatus>;
+  stop(platformAgentAccountId: string, requestId: string): Promise<OwnerKemerbetSessionStatus>;
 }
 
 export class OwnerKemerbetSessionRejectedError extends Error {
@@ -54,29 +94,42 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     ? [
         'active',
         'expiresAt',
-        'imageBase64',
-        'imageContentType',
+        'frameSequence',
+        'generation',
         'loginRequired',
+        'phase',
         'signedIn',
         'transferDisabled',
       ]
-    : ['active', 'loginRequired', 'signedIn', 'transferDisabled'];
+    : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
+  const activePhases = new Set([
+    'authenticated',
+    'authenticating',
+    'faulted',
+    'login_required',
+    'starting',
+    'stopping',
+  ]);
+  const inactivePhases = new Set(['checkpointed', 'idle']);
   if (
     Object.keys(object).sort().join('\0') !== exactKeys.sort().join('\0') ||
     typeof object.active !== 'boolean' ||
     typeof object.loginRequired !== 'boolean' ||
+    typeof object.phase !== 'string' ||
     typeof object.signedIn !== 'boolean' ||
     object.transferDisabled !== true ||
     (object.active &&
       (typeof object.expiresAt !== 'string' ||
         !Number.isFinite(Date.parse(object.expiresAt)) ||
-        object.imageContentType !== 'image/jpeg' ||
-        typeof object.imageBase64 !== 'string' ||
-        object.imageBase64.length < 4 ||
-        object.imageBase64.length > 1_900_000 ||
-        !/^[A-Za-z0-9+/]+={0,2}$/u.test(object.imageBase64))) ||
+        typeof object.generation !== 'string' ||
+        !REQUEST_ID_PATTERN.test(object.generation) ||
+        !Number.isSafeInteger(object.frameSequence) ||
+        Number(object.frameSequence) < 0 ||
+        !activePhases.has(object.phase))) ||
+    (!object.active && !inactivePhases.has(object.phase)) ||
     (!object.active && (object.loginRequired || object.signedIn)) ||
-    (object.signedIn && object.loginRequired)
+    (object.signedIn && (object.loginRequired || object.phase !== 'authenticated')) ||
+    (object.loginRequired && object.phase !== 'login_required')
   ) {
     throw new OwnerKemerbetSessionUnavailableError();
   }
@@ -115,7 +168,11 @@ async function callControl(
           else chunks.push(chunk);
         });
         response.once('end', () => {
-          if (response.statusCode !== 200 && response.statusCode !== 201) {
+          if (
+            response.statusCode !== 200 &&
+            response.statusCode !== 201 &&
+            response.statusCode !== 202
+          ) {
             rejectPromise(new OwnerKemerbetSessionUnavailableError());
             return;
           }
@@ -138,9 +195,109 @@ async function callControl(
   });
 }
 
+async function callFrame(
+  platformAgentAccountId: string,
+  generation: string,
+  after: number,
+): Promise<OwnerKemerbetSessionFrame | undefined> {
+  return new Promise<OwnerKemerbetSessionFrame | undefined>((resolvePromise, rejectPromise) => {
+    const candidate = request(
+      {
+        method: 'GET',
+        path:
+          `/v1/session/frame?platformAgentAccountId=${encodeURIComponent(platformAgentAccountId)}` +
+          `&generation=${encodeURIComponent(generation)}&after=${String(after)}`,
+        socketPath: CONTROL_SOCKET,
+        timeout: 7_000,
+      },
+      (response) => {
+        const responseGeneration = response.headers['x-fetanagent-session-generation'];
+        const responseSequence = response.headers['x-fetanagent-frame-sequence'];
+        const sequence =
+          typeof responseSequence === 'string' && /^(?:0|[1-9][0-9]{0,9})$/u.test(responseSequence)
+            ? Number(responseSequence)
+            : undefined;
+        if (
+          responseGeneration !== generation ||
+          sequence === undefined ||
+          !Number.isSafeInteger(sequence)
+        ) {
+          response.resume();
+          rejectPromise(new OwnerKemerbetSessionUnavailableError());
+          return;
+        }
+        if (response.statusCode === 204) {
+          response.resume();
+          resolvePromise(undefined);
+          return;
+        }
+        if (
+          response.statusCode !== 200 ||
+          response.headers['content-type'] !== 'image/jpeg' ||
+          sequence <= after
+        ) {
+          response.resume();
+          rejectPromise(new OwnerKemerbetSessionUnavailableError());
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        response.on('data', (chunkValue: Buffer | string) => {
+          const chunk = Buffer.isBuffer(chunkValue) ? chunkValue : Buffer.from(chunkValue);
+          size += chunk.byteLength;
+          if (size > MAX_RESPONSE_BYTES) response.destroy();
+          else chunks.push(chunk);
+        });
+        response.once('end', () => {
+          const image = Buffer.concat(chunks);
+          if (
+            image.byteLength < 4 ||
+            image[0] !== 0xff ||
+            image[1] !== 0xd8 ||
+            image.at(-2) !== 0xff ||
+            image.at(-1) !== 0xd9
+          ) {
+            rejectPromise(new OwnerKemerbetSessionUnavailableError());
+            return;
+          }
+          resolvePromise(Object.freeze({ generation, image, sequence }));
+        });
+        response.once('aborted', () => rejectPromise(new OwnerKemerbetSessionUnavailableError()));
+        response.once('error', () => rejectPromise(new OwnerKemerbetSessionUnavailableError()));
+      },
+    );
+    candidate.once('timeout', () => candidate.destroy());
+    candidate.once('error', () => rejectPromise(new OwnerKemerbetSessionUnavailableError()));
+    candidate.end();
+  });
+}
+
 export class UnixOwnerKemerbetSessionControl implements OwnerKemerbetSessionControl {
-  async status(): Promise<OwnerKemerbetSessionStatus> {
-    return callControl('GET', '/v1/session');
+  async frame(
+    platformAgentAccountId: string,
+    generation: string,
+    after: number,
+  ): Promise<OwnerKemerbetSessionFrame | undefined> {
+    if (
+      !UUID_PATTERN.test(platformAgentAccountId) ||
+      !REQUEST_ID_PATTERN.test(generation) ||
+      !Number.isSafeInteger(after) ||
+      after < 0 ||
+      after > 9_999_999_999
+    ) {
+      throw new OwnerKemerbetSessionRejectedError();
+    }
+    return callFrame(platformAgentAccountId, generation, after);
+  }
+
+  async status(platformAgentAccountId: string): Promise<OwnerKemerbetSessionStatus> {
+    if (!UUID_PATTERN.test(platformAgentAccountId)) {
+      throw new OwnerKemerbetSessionRejectedError();
+    }
+    return callControl(
+      'GET',
+      `/v1/session?platformAgentAccountId=${encodeURIComponent(platformAgentAccountId)}`,
+    );
   }
 
   async start(
@@ -150,16 +307,32 @@ export class UnixOwnerKemerbetSessionControl implements OwnerKemerbetSessionCont
     if (!UUID_PATTERN.test(platformAgentAccountId) || !REQUEST_ID_PATTERN.test(requestId)) {
       throw new OwnerKemerbetSessionRejectedError();
     }
-    return callControl('POST', '/v1/session/start', { platformAgentAccountId, requestId }, 35_000);
+    return callControl('POST', '/v1/session/start', { platformAgentAccountId, requestId });
   }
 
-  async input(value: OwnerKemerbetSessionInput): Promise<OwnerKemerbetSessionStatus> {
-    if (!REQUEST_ID_PATTERN.test(value.requestId)) throw new OwnerKemerbetSessionRejectedError();
-    return callControl('POST', '/v1/session/input', value);
+  async input(
+    platformAgentAccountId: string,
+    value: OwnerKemerbetSessionInput,
+  ): Promise<OwnerKemerbetSessionStatus> {
+    if (
+      !UUID_PATTERN.test(platformAgentAccountId) ||
+      !REQUEST_ID_PATTERN.test(value.requestId) ||
+      !REQUEST_ID_PATTERN.test(value.sessionGeneration) ||
+      !Number.isSafeInteger(value.frameSequence) ||
+      value.frameSequence < 1
+    ) {
+      throw new OwnerKemerbetSessionRejectedError();
+    }
+    return callControl('POST', '/v1/session/input', { ...value, platformAgentAccountId });
   }
 
-  async stop(requestId: string): Promise<OwnerKemerbetSessionStatus> {
-    if (!REQUEST_ID_PATTERN.test(requestId)) throw new OwnerKemerbetSessionRejectedError();
-    return callControl('POST', '/v1/session/stop', { requestId });
+  async stop(
+    platformAgentAccountId: string,
+    requestId: string,
+  ): Promise<OwnerKemerbetSessionStatus> {
+    if (!UUID_PATTERN.test(platformAgentAccountId) || !REQUEST_ID_PATTERN.test(requestId)) {
+      throw new OwnerKemerbetSessionRejectedError();
+    }
+    return callControl('POST', '/v1/session/stop', { platformAgentAccountId, requestId });
   }
 }

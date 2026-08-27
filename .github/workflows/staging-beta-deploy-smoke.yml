@@ -618,7 +618,7 @@ jobs:
           echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
           echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the exact KemerBet successor gate before stopping staging
+      - name: Verify the immutable KemerBet overlay and runtime bridge before stopping staging
         shell: bash
         env:
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
@@ -627,7 +627,20 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-v3-successor-ready '$GITHUB_SHA' '${{ steps.protected.outputs.helper_sha }}'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-v3-runtime-bridge-ready '${{ steps.protected.outputs.helper_sha }}'"
+
+      - name: Verify enough Docker storage before any staging downtime
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-staging-images.tar")"
+          [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper docker-storage-ready '$bundle_bytes'"
 
       - name: Stop any prior staging project and disable old logins
         shell: bash

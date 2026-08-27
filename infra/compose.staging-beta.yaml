@@ -124,6 +124,8 @@ services:
     command: ['node', 'apps/executor/dist/kemerbet-session-provision-server.js']
     init: true
     user: '10001:10001'
+    # H11 does not attest an automatic Docker retry budget. Keep unexpected exits fail-closed;
+    # only the reviewed operator/deployment path may re-establish this coordinator.
     restart: 'no'
     read_only: true
     tmpfs:
@@ -164,8 +166,8 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: /etc/fetanagent/executor-secrets/kemerbet_no_transfer_readiness_player_ids
-        target: /run/secrets/kemerbet_no_transfer_readiness_player_ids
+        source: /etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings
+        target: /run/secrets/kemerbet_agent_identity_bindings
         read_only: true
         bind:
           create_host_path: false

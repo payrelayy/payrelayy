@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+
 import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
 import Fastify, { LogController } from 'fastify';
 
@@ -140,6 +143,13 @@ const OWNER_RECEIVER_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
 const OWNER_RECEIVER_HOLDER_PATTERN =
   /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]{0,158}[^\s\u0000-\u001f\u007f])?$/u;
 const OWNER_RECEIVER_REFERENCE_PATTERN = /^[0-9]{9,24}$/u;
+const INTERACTIVE_SESSION_CACHE_TTL_MS = 5_000;
+const INTERACTIVE_SESSION_CACHE_MAX_ENTRIES = 8;
+
+interface InteractiveSessionCacheEntry<T> {
+  readonly expiresAtMs: number;
+  readonly value: Promise<T>;
+}
 
 function exactRawHeader(rawHeaders: readonly string[], name: string): string | undefined {
   const values: string[] = [];
@@ -215,6 +225,49 @@ export function buildOwnerControlApp(
       },
     },
   });
+  const interactiveOwnerSubjects = new Map<string, InteractiveSessionCacheEntry<string>>();
+  const interactiveKemerbetProfiles = new Map<string, InteractiveSessionCacheEntry<string>>();
+  let kemerbetProfileLifecycleLane = Promise.resolve();
+
+  function serializeKemerbetProfileLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const result = kemerbetProfileLifecycleLane.then(operation, operation);
+    kemerbetProfileLifecycleLane = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  function interactiveCacheNowMs(): number {
+    return dependencies.now ? dependencies.now().getTime() : performance.now();
+  }
+
+  function cachedInteractiveValue<T>(
+    cache: Map<string, InteractiveSessionCacheEntry<T>>,
+    key: string,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    const timestamp = interactiveCacheNowMs();
+    for (const [candidateKey, entry] of cache) {
+      if (entry.expiresAtMs <= timestamp) cache.delete(candidateKey);
+    }
+    const cached = cache.get(key);
+    if (cached && cached.expiresAtMs > timestamp) return cached.value;
+
+    const value = load();
+    const entry = { expiresAtMs: timestamp + INTERACTIVE_SESSION_CACHE_TTL_MS, value };
+    cache.set(key, entry);
+    while (cache.size > INTERACTIVE_SESSION_CACHE_MAX_ENTRIES) {
+      const oldestKey = cache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      cache.delete(oldestKey);
+    }
+    void value.catch(() => {
+      if (cache.get(key) === entry) cache.delete(key);
+    });
+    return value;
+  }
+
   app.addHook('onSend', async (_request, reply, payload) => {
     reply.header('cache-control', 'no-store, max-age=0').header('pragma', 'no-cache');
     return payload;
@@ -267,6 +320,23 @@ export function buildOwnerControlApp(
       dependencies.fetch,
     );
     return verified.authUserId;
+  }
+
+  async function interactiveOwnerSubject(rawHeaders: readonly string[]): Promise<string> {
+    const token = bearerTokenFromRawHeaders(rawHeaders);
+    if (!token) throw new OwnerAuthenticationRejectedError();
+    const tokenDigest = createHash('sha256').update(token, 'utf8').digest('hex');
+    return cachedInteractiveValue(interactiveOwnerSubjects, tokenDigest, async () => {
+      const verified = await verifyOwnerBearerToken(
+        token,
+        {
+          publishableKey: runtimeConfig.publishableKey,
+          supabaseUrl: runtimeConfig.supabaseUrl,
+        },
+        dependencies.fetch,
+      );
+      return verified.authUserId;
+    });
   }
 
   function validPrivatePilotMutationHeaders(
@@ -347,6 +417,12 @@ export function buildOwnerControlApp(
     const active = profiles.filter((profile) => profile.profileStatus === 'active');
     if (active.length !== 1) throw new OwnerKemerbetSessionRejectedError();
     return active[0]!.platformAgentAccountId;
+  }
+
+  async function interactiveKemerbetAgentProfileId(authUserId: string): Promise<string> {
+    return cachedInteractiveValue(interactiveKemerbetProfiles, authUserId, () =>
+      activeKemerbetAgentProfileId(authUserId),
+    );
   }
 
   app.post('/v1/owner/telegram-beta-invites', async (request, reply) => {
@@ -930,11 +1006,31 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const profile = await dependencies.runtime.kemerbetAgentProfiles.prepare(authUserId, {
-        configurationReason: configurationReason as OwnerKemerbetAgentProfileReason,
-        requestId: body.requestId as string,
+      const prepared = await serializeKemerbetProfileLifecycle(async () => {
+        const currentProfiles = await dependencies.runtime.kemerbetAgentProfiles.list(authUserId);
+        const currentActiveProfiles = currentProfiles.filter(
+          (candidate) => candidate.profileStatus === 'active',
+        );
+        if (currentActiveProfiles.length > 1) {
+          throw new OwnerKemerbetAgentProfileUnavailableError();
+        }
+        const currentActiveProfile = currentActiveProfiles[0];
+        if (currentActiveProfile) {
+          const currentSession = await kemerbetSessionControl.status(
+            currentActiveProfile.platformAgentAccountId,
+          );
+          if (currentSession.active) return undefined;
+        }
+        const profile = await dependencies.runtime.kemerbetAgentProfiles.prepare(authUserId, {
+          configurationReason: configurationReason as OwnerKemerbetAgentProfileReason,
+          requestId: body.requestId as string,
+        });
+        interactiveKemerbetProfiles.delete(authUserId);
+        return profile;
       });
-      return reply.code(201).send({ profile });
+      return prepared === undefined
+        ? reply.code(409).send({ error: 'kemerbet_session_must_stop' })
+        : reply.code(201).send({ profile: prepared });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -956,9 +1052,9 @@ export function buildOwnerControlApp(
       ) {
         return reply.code(400).send({ error: 'invalid_request' });
       }
-      const authUserId = await ownerSubject(request.raw.rawHeaders);
-      await activeKemerbetAgentProfileId(authUserId);
-      return reply.code(200).send({ session: await kemerbetSessionControl.status() });
+      const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+      return reply.code(200).send({ session: await kemerbetSessionControl.status(accountId) });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -972,6 +1068,45 @@ export function buildOwnerControlApp(
     }
   });
 
+  app.get('/v1/owner/kemerbet-session/frame', async (request, reply) => {
+    try {
+      const query = exactObject(request.query, ['after', 'generation']);
+      const generation = query?.generation;
+      const afterValue = query?.after;
+      if (
+        typeof generation !== 'string' ||
+        !UUID_V4_PATTERN.test(generation) ||
+        typeof afterValue !== 'string' ||
+        !/^(?:0|[1-9][0-9]{0,9})$/u.test(afterValue)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const after = Number(afterValue);
+      if (!Number.isSafeInteger(after)) return reply.code(400).send({ error: 'invalid_request' });
+      const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+      const frame = await kemerbetSessionControl.frame(accountId, generation, after);
+      if (!frame) return reply.code(204).send();
+      return reply
+        .header('cache-control', 'no-store, max-age=0')
+        .header('x-fetanagent-frame-sequence', String(frame.sequence))
+        .header('x-fetanagent-session-generation', frame.generation)
+        .type('image/jpeg')
+        .code(200)
+        .send(frame.image);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerKemerbetAgentProfileRejectedError ||
+        error instanceof OwnerKemerbetSessionRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner KemerBet session frame is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
   app.post('/v1/owner/kemerbet-session/start', async (request, reply) => {
     try {
       const body = exactObject(request.body, ['confirmation', 'requestId']);
@@ -981,10 +1116,12 @@ export function buildOwnerControlApp(
       ) {
         return reply.code(400).send({ error: 'invalid_request' });
       }
-      const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const accountId = await activeKemerbetAgentProfileId(authUserId);
-      const session = await kemerbetSessionControl.start(accountId, body.requestId as string);
-      return reply.code(201).send({ session });
+      const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      const session = await serializeKemerbetProfileLifecycle(async () => {
+        const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+        return kemerbetSessionControl.start(accountId, body.requestId as string);
+      });
+      return reply.code(202).send({ session });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1003,10 +1140,31 @@ export function buildOwnerControlApp(
       const candidate = request.body as Record<string, unknown> | undefined;
       const body =
         candidate?.kind === 'pointer'
-          ? exactObject(candidate, ['kind', 'requestId', 'x', 'y'])
+          ? exactObject(candidate, [
+              'frameSequence',
+              'kind',
+              'requestId',
+              'sessionGeneration',
+              'x',
+              'y',
+            ])
           : candidate?.kind === 'key'
-            ? exactObject(candidate, ['key', 'kind', 'requestId'])
-            : undefined;
+            ? exactObject(candidate, [
+                'frameSequence',
+                'key',
+                'kind',
+                'requestId',
+                'sessionGeneration',
+              ])
+            : candidate?.kind === 'text'
+              ? exactObject(candidate, [
+                  'frameSequence',
+                  'kind',
+                  'requestId',
+                  'sessionGeneration',
+                  'text',
+                ])
+              : undefined;
       const pointerValid =
         body?.kind === 'pointer' &&
         Number.isInteger(body.x) &&
@@ -1020,15 +1178,25 @@ export function buildOwnerControlApp(
         typeof body.key === 'string' &&
         (['Backspace', 'Delete', 'Enter', 'Escape', 'Tab'].includes(body.key) ||
           (/^[\u0020-\u007e]$/u.test(body.key) && body.key !== '`'));
+      const textValid =
+        body?.kind === 'text' &&
+        typeof body.text === 'string' &&
+        /^[\u0020-\u007e]{1,64}$/u.test(body.text) &&
+        !body.text.includes('`');
       if (
-        (!pointerValid && !keyValid) ||
+        (!pointerValid && !keyValid && !textValid) ||
+        typeof body?.sessionGeneration !== 'string' ||
+        !UUID_V4_PATTERN.test(body.sessionGeneration) ||
+        !Number.isSafeInteger(body.frameSequence) ||
+        Number(body.frameSequence) < 1 ||
         !validKemerbetSessionMutationHeaders(request.raw.rawHeaders, body?.requestId)
       ) {
         return reply.code(400).send({ error: 'invalid_request' });
       }
-      const authUserId = await ownerSubject(request.raw.rawHeaders);
-      await activeKemerbetAgentProfileId(authUserId);
+      const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
       const session = await kemerbetSessionControl.input(
+        accountId,
         body as unknown as OwnerKemerbetSessionInput,
       );
       return reply.code(200).send({ session });
@@ -1054,11 +1222,11 @@ export function buildOwnerControlApp(
       ) {
         return reply.code(400).send({ error: 'invalid_request' });
       }
-      const authUserId = await ownerSubject(request.raw.rawHeaders);
-      await activeKemerbetAgentProfileId(authUserId);
-      return reply
-        .code(200)
-        .send({ session: await kemerbetSessionControl.stop(body.requestId as string) });
+      const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+      return reply.code(202).send({
+        session: await kemerbetSessionControl.stop(accountId, body.requestId as string),
+      });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||

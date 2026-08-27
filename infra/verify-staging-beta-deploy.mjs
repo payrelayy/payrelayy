@@ -89,6 +89,10 @@ const v3SuccessorHelperRotationV10 = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v10.sh'),
   'utf8',
 );
+const v3RuntimeBridgeHelperPromotionV11 = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-kemerbet-v3-runtime-bridge-helper-promotion-v11.sh'),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -147,6 +151,8 @@ const reviewedV3HelperRotationV9SuccessorSha =
   'd3284d1c268fdba227ff5628f2ac28f9e30375a8a85517e06258a97dfab5e4e1';
 const reviewedV3HelperRotationV10SuccessorSha =
   '73eabc728bc25462ab96d17dc8faa5775526571caae9d2ab0265f523b84a387e';
+const reviewedV3RuntimeBridgeHelperV11Sha =
+  '8696fd6d606b7c3440ab180e9d409bb113da2ba14434752b47fca07e34a09728';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -3831,6 +3837,172 @@ for (const rotationV10RunbookContract of [
   assert.match(stagingRunbook, rotationV10RunbookContract);
 }
 
+const v3RuntimeBridgeV11Confirmation =
+  'I-UNDERSTAND-THIS-INSTALLS-ONE-FUTURE-RELEASE-NEUTRAL-V3-RUNTIME-BRIDGE-WITH-TRANSFER-DISABLED';
+for (const fixedRuntimeBridgeV11Contract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly TARGET='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'$/mu,
+  /^readonly PROJECT_NAME='fetanagent-staging-beta'$/mu,
+  /^readonly HISTORICAL_OVERLAY_RELEASE='c061f9dc05e60d641d306f16b5d826e6e1b2c6c4'$/mu,
+  new RegExp(
+    `^readonly PREDECESSOR_HELPER_SHA256='${reviewedV3HelperRotationV10SuccessorSha}'$`,
+    'mu',
+  ),
+  new RegExp(
+    `^readonly PREDECESSOR_ARCHIVE_SHA256='${reviewedV3HelperRotationV9SuccessorSha}'$`,
+    'mu',
+  ),
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3RuntimeBridgeHelperV11Sha}'$`,
+    'mu',
+  ),
+  /^readonly ROTATION_V10_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v10'$/mu,
+  /^readonly ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v11'$/mu,
+  /^readonly EXPECTED_DROPLET_ID='593344964'$/mu,
+  /^readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'$/mu,
+  /\[\[ \$# -eq 3 \]\]/u,
+  /^readonly BRIDGE_RELEASE="\$1"$/mu,
+  /^readonly SUCCESSOR_HELPER_SHA256="\$2"$/mu,
+  /^readonly PROVIDED_CONFIRMATION="\$3"$/mu,
+  /"\$BRIDGE_RELEASE" != "\$HISTORICAL_OVERLAY_RELEASE"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" != "\$PREDECESSOR_HELPER_SHA256"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" == "\$REVIEWED_SUCCESSOR_HELPER_SHA256"/u,
+  /"\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION"/u,
+  /"\$METADATA\/id"/u,
+  /"\$METADATA\/interfaces\/public\/0\/ipv4\/address"/u,
+]) {
+  assert.match(v3RuntimeBridgeHelperPromotionV11, fixedRuntimeBridgeV11Contract);
+}
+assert.equal(
+  v3RuntimeBridgeHelperPromotionV11.split(
+    `readonly CONFIRMATION='${v3RuntimeBridgeV11Confirmation}'`,
+  ).length - 1,
+  1,
+  'the H11 runtime-bridge promotion must expose one distinct exact root confirmation',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeHelperPromotionV11,
+  /kemerbet-readiness-v3-helper-rotation-v1[2-9]|kemerbet-readiness-v3-helper-rotation-v[2-9][0-9]/u,
+  'the one authorized H11 bridge must not create or imply an H12/H13-style release rotation',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeHelperPromotionV11,
+  /run_helper_direct\s+(?:recheck-kemerbet-readiness|prepare-kemerbet-readiness|seal-kemerbet-readiness)|GeneralInfoByExternalId|PlayerEPOSDeposit|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true/iu,
+  'the H11 promotion must not authorize a lookup, recheck, Transfer, executor, or money movement',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeHelperPromotionV11,
+  /docker_local_read_only\s+(?:container|volume|image|network)\s+(?:rm|prune)|docker[^\r\n]*(?:system|container|volume|image|network)\s+prune/iu,
+  'the H11 promotion may inspect Docker and call the predecessor stop boundary, but cannot perform direct Docker cleanup',
+);
+
+const runtimeBridgeV11H10Evidence = extractShellFunction(
+  v3RuntimeBridgeHelperPromotionV11,
+  'load_exact_h10_evidence',
+  'require_stopped_historical_overlay',
+);
+for (const h10EvidenceContract of [
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v10/u,
+  /"\$HISTORICAL_OVERLAY_RELEASE"/u,
+  /successor_helper_sha256=\$PREDECESSOR_HELPER_SHA256/u,
+  /"\$PREDECESSOR_ARCHIVE_SHA256" 400/u,
+  /"\$\{#intent_lines\[@\]\}" -eq 18/u,
+  /"\$\{#completion_lines\[@\]\}" -eq 19/u,
+  /state=successor-installed/u,
+  /rotation_intent_sha256=\$H10_INTENT_SHA256/u,
+  /BASE_BINDING_V3_SHA256=/u,
+  /COMPOSE5_DURABLE_VOLUME_DIGEST=/u,
+  /COMPOSE5_PROFILE_CONFIG_HASH=/u,
+  /COMPOSE5_SESSION_CONTROL_CONFIG_HASH=/u,
+  /COMPOSE5_VOLUME_VERSION=/u,
+]) {
+  assert.match(runtimeBridgeV11H10Evidence, h10EvidenceContract);
+}
+
+const runtimeBridgeV11Intent = extractShellFunction(
+  v3RuntimeBridgeHelperPromotionV11,
+  'expected_intent',
+  'expected_completion',
+);
+for (const exactBridgeEvidence of [
+  'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v11',
+  'state=authorized',
+  'overlay_release=$HISTORICAL_OVERLAY_RELEASE',
+  'bridge_release=$BRIDGE_RELEASE',
+  'predecessor_helper_sha256=$PREDECESSOR_HELPER_SHA256',
+  'successor_helper_sha256=$SUCCESSOR_HELPER_SHA256',
+  'predecessor_rotation_intent_sha256=$H10_INTENT_SHA256',
+  'predecessor_rotation_completion_sha256=$H10_COMPLETION_SHA256',
+  'predecessor_rotation_helper_archive_sha256=$H10_ARCHIVE_SHA256',
+  'base_binding_v3_sha256=$BASE_BINDING_V3_SHA256',
+  'transition=historical-overlay-current-runtime-separated-v1',
+  'financial_actions_mode=dry_run',
+  'kemerbet_executor_enabled=false',
+  'kemerbet_final_action_enabled=false',
+  'transfer_enabled=false',
+  'lookup_authorized=false',
+  'recheck_authorized=false',
+]) {
+  assert.equal(
+    (
+      runtimeBridgeV11Intent.match(new RegExp(exactBridgeEvidence.replaceAll('$', '\\$'), 'gu')) ??
+      []
+    ).length,
+    1,
+    `the H11 intent must contain exactly one ${exactBridgeEvidence} field`,
+  );
+}
+for (const inheritedComposeEvidence of [
+  'COMPOSE5_DURABLE_VOLUME_DIGEST',
+  'COMPOSE5_PROFILE_CONFIG_HASH',
+  'COMPOSE5_SESSION_CONTROL_CONFIG_HASH',
+  'COMPOSE5_VOLUME_VERSION',
+]) {
+  assert.equal(
+    (runtimeBridgeV11Intent.match(new RegExp(inheritedComposeEvidence, 'gu')) ?? []).length,
+    1,
+  );
+}
+
+const runtimeBridgeV11Main = v3RuntimeBridgeHelperPromotionV11.slice(
+  v3RuntimeBridgeHelperPromotionV11.indexOf('require_exact_sudoers_file "$SUDOERS" || die'),
+);
+assertInOrder(
+  runtimeBridgeV11Main,
+  [
+    'run_helper_direct verify "$PREDECESSOR_HELPER_SHA256"',
+    'run_helper_direct kemerbet-v3-successor-ready',
+    '"$HISTORICAL_OVERLAY_RELEASE" "$PREDECESSOR_HELPER_SHA256"',
+    'run_helper_direct stop',
+    'require_stopped_historical_overlay',
+    'flock --exclusive --nonblock 9',
+    'disable_sudoers',
+    'publish_record "$ROTATION_INSTALLING" intent-v1 0600 expected_intent',
+    'install -o root -g root -m 0400 "$TARGET" "$ROTATION_INSTALLING/predecessor-helper"',
+    'install -o root -g root -m 0755 "$STAGED_HELPER" "$INSTALLING_HELPER"',
+    'mv -- "$INSTALLING_HELPER" "$TARGET"',
+    'publish_record "$ROTATION_INSTALLING" completed-v1 0600 expected_completion',
+    'mv -- "$ROTATION_INSTALLING" "$ROTATION_ROOT"',
+    'flock --unlock 9',
+    'run_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_helper_direct kemerbet-v3-runtime-bridge-ready "$SUCCESSOR_HELPER_SHA256"',
+    'flock --exclusive --nonblock 9',
+    'restore_sudoers',
+  ],
+  'H11 must attest H10, stop safely, append immutable bridge evidence, install the reviewed helper, self-attest, and only then restore the deployment grant',
+);
+assert.equal(
+  (runtimeBridgeV11Main.match(/run_helper_direct stop/g) ?? []).length,
+  1,
+  'H11 must invoke the predecessor stop boundary exactly once',
+);
+assert.equal(
+  (runtimeBridgeV11Main.match(/restore_sudoers/g) ?? []).length,
+  1,
+  'H11 must restore the narrow deployment grant exactly once on the new-install path',
+);
+
 for (const artifact of [
   workflow,
   botWorkflow,
@@ -3848,6 +4020,7 @@ for (const artifact of [
   v3SuccessorHelperRotationV8,
   v3SuccessorHelperRotationV9,
   v3SuccessorHelperRotationV10,
+  v3RuntimeBridgeHelperPromotionV11,
   stagingRunbook,
 ]) {
   assert.doesNotMatch(
@@ -4206,7 +4379,46 @@ assertInOrder(
     "fetanagent-staging-deploy-helper fresh-start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'",
     "fetanagent-staging-deploy-helper bot-disabled-ready '$GITHUB_SHA'",
   ],
-  'the deployment must install the stopped successor, arm its exact expiry guard, and only then start and attest the private runtime',
+  'the deployment must install the stopped successor, arm its exact expiry guard, and only then start and attest the private bot-disabled runtime',
+);
+
+assertInOrder(
+  workflow,
+  [
+    '- name: Verify the immutable KemerBet overlay and runtime bridge before stopping staging',
+    '- name: Verify enough Docker storage before any staging downtime',
+    '- name: Stop any prior staging project and disable old logins',
+  ],
+  'the deployment must reject insufficient Docker storage before it stops a working staging release',
+);
+const preDowntimeStorage =
+  /- name: Verify enough Docker storage before any staging downtime([\s\S]*?)\n\s+- name: Stop any prior staging project and disable old logins/u.exec(
+    workflow,
+  )?.[1];
+assert.ok(preDowntimeStorage, 'the deployment must contain the bounded pre-downtime disk check');
+assert.match(
+  preDowntimeStorage,
+  /stat --format='%s' "\$RUNNER_TEMP\/release\/fetanagent-staging-images\.tar"/,
+);
+assertInOrder(
+  preDowntimeStorage,
+  [
+    'fetanagent-staging-deploy-helper verify',
+    'fetanagent-staging-deploy-helper docker-storage-ready',
+    "'$bundle_bytes'",
+  ],
+  'the unprivileged workflow must pass only the local bundle size to the narrow root-owned storage attestation',
+);
+assert.equal((preDowntimeStorage.match(/^\s*ssh\s/gm) ?? []).length, 1);
+assert.equal(
+  (preDowntimeStorage.match(/sudo -n \/usr\/local\/sbin\/fetanagent-staging-deploy-helper/g) ?? [])
+    .length,
+  2,
+);
+assert.doesNotMatch(
+  preDowntimeStorage,
+  /\bdf\b|\/var\/lib\/docker|bundle_bytes \* 2|available_bytes|docker_(?:local|root)|docker\s+(?:image|container|volume|system|compose)|rm\b|prune|database/iu,
+  'the workflow must not inspect the protected Docker data root or perform a storage mutation itself',
 );
 assert.match(workflow, /sha256sum infra\/operations\/fetanagent-staging-deploy-helper\.sh/g);
 assert.match(workflow, /persist-credentials: false/g);
@@ -5402,7 +5614,7 @@ if (process.platform === 'linux') {
   assert.equal(
     inspectorCompile.status,
     0,
-    `the complete ten-link successor inspector Python must compile: ${inspectorCompile.stderr}`,
+    `the complete historical-overlay plus runtime-bridge inspector Python must compile: ${inspectorCompile.stderr}`,
   );
 }
 assert.match(
@@ -5450,6 +5662,11 @@ assert.match(
   /^readonly KEMERBET_V3_HELPER_ROTATION_V10_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v10'$/mu,
   'the tenth helper rotation must use one distinct fixed append-only evidence namespace',
 );
+assert.match(
+  helper,
+  /^readonly KEMERBET_V3_HELPER_ROTATION_V11_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v11'$/mu,
+  'the one-time runtime bridge must use a distinct append-only H11 evidence namespace',
+);
 for (const successorGateContract of [
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'/,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='invalid'/,
@@ -5491,9 +5708,13 @@ for (const successorGateContract of [
   /for consumed_or_transient in \([\s\S]*?binding,[\s\S]*?readiness_player_ids,[\s\S]*?candidate_root,[\s\S]*?promotion_root,[\s\S]*?rpc_root,[\s\S]*?\)/u,
   /gate_state = 'successor-recheck-recoverable'/u,
   /gate_state = 'successor-completed'/u,
-  /sys\.stdout\.write\(effective_release \+ '\\n' \+ effective_helper_sha \+ '\\n' \+ gate_state \+ '\\n'\)/u,
+  /sys\.stdout\.write\([\s\S]*?effective_release \+ '\\n' \+ effective_helper_sha \+ '\\n' \+ gate_state \+ '\\n' \+[\s\S]*?runtime_bridge_state \+ '\\n' \+ runtime_bridge_release \+ '\\n'[\s\S]*?\)/u,
   /\^\(successor-installed\|successor-recheck-recoverable\|successor-completed\)\$/u,
+  /"\$\{#inspection_lines\[@\]\}" -eq 5/u,
+  /"\$\{inspection_lines\[3\]\}" == 'active'/u,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="\$\{inspection_lines\[2\]\}"/u,
+  /KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="\$\{inspection_lines\[3\]\}"/u,
+  /KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="\$\{inspection_lines\[4\]\}"/u,
 ]) {
   assert.match(inspectV2V3SuccessorGate, successorGateContract);
 }
@@ -5999,6 +6220,72 @@ assertInOrder(
   ],
   'the tenth rotation must causally bind the exact ninth link before changing the effective identity',
 );
+const runtimeBridgeChain = successorRotationChain.slice(
+  successorRotationChain.indexOf("runtime_bridge_state = 'absent'"),
+  successorRotationChain.indexOf(
+    'exact_directory(retirement',
+    successorRotationChain.indexOf("runtime_bridge_state = 'absent'"),
+  ),
+);
+assert.ok(
+  runtimeBridgeChain.length > 0,
+  'the successor inspector must expose a bounded H11 runtime-bridge parser',
+);
+for (const runtimeBridgeContract of [
+  /if os\.path\.lexists\(rotation_v11_parent\):/u,
+  /rotation_v10_intent_data is None/u,
+  /rotation_v10_completion_data is None/u,
+  /archived_rotation_v10_predecessor_helper is None/u,
+  /overlay_release = effective_release/u,
+  /predecessor_helper_sha = effective_helper_sha/u,
+  /exact_directory\(rotation_v11_parent, 0o700, \[rotation_v11_release\]\)/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v11/u,
+  /len\(rotation_v11_intent\) != 21/u,
+  /len\(rotation_v11_completion\) != 22/u,
+  /rotation_v11_intent\[2\] != f'overlay_release=\{overlay_release\}'/u,
+  /rotation_v11_intent\[3\] != f'bridge_release=\{rotation_v11_release\}'/u,
+  /predecessor_rotation_intent_sha256=/u,
+  /predecessor_rotation_completion_sha256=/u,
+  /predecessor_rotation_helper_archive_sha256=/u,
+  /base_binding_v3_sha256=/u,
+  /transition=historical-overlay-current-runtime-separated-v1/u,
+  /financial_actions_mode=dry_run/u,
+  /kemerbet_executor_enabled=false/u,
+  /kemerbet_final_action_enabled=false/u,
+  /transfer_enabled=false/u,
+  /lookup_authorized=false/u,
+  /recheck_authorized=false/u,
+  /rotation_v11_completion\[1\] != 'state=runtime-bridge-installed'/u,
+  /rotation_v11_completion\[2:21\] != rotation_v11_intent\[2:21\]/u,
+  /hashlib\.sha256\(archived_rotation_v11_predecessor_helper\)\.hexdigest\(\) != predecessor_helper_sha/u,
+  /effective_helper_sha = rotation_v11_intent\[5\]\.split\('=', 1\)\[1\]/u,
+  /runtime_bridge_state = 'active'/u,
+  /runtime_bridge_release = rotation_v11_release/u,
+]) {
+  assert.match(runtimeBridgeChain, runtimeBridgeContract);
+}
+assert.doesNotMatch(
+  runtimeBridgeChain,
+  /effective_release = rotation_v11_release/u,
+  'H11 must update only the installed helper/runtime bridge and must preserve the historical overlay release',
+);
+assertInOrder(
+  runtimeBridgeChain,
+  [
+    'overlay_release = effective_release',
+    'predecessor_helper_sha = effective_helper_sha',
+    'exact_directory(rotation_v11_parent, 0o700, [rotation_v11_release])',
+    "'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v11'",
+    "'transition=historical-overlay-current-runtime-separated-v1'",
+    "'lookup_authorized=false'",
+    "'recheck_authorized=false'",
+    'archived_rotation_v11_predecessor_helper = exact_file(',
+    "effective_helper_sha = rotation_v11_intent[5].split('=', 1)[1]",
+    "runtime_bridge_state = 'active'",
+    'runtime_bridge_release = rotation_v11_release',
+  ],
+  'H11 must causally attest H10, retain the historical overlay identity, and activate only a no-finance runtime bridge',
+);
 assert.doesNotMatch(
   successorRotationChain,
   /os\.(?:rename|replace|unlink|mkdir|makedirs)|open\([^\n]*O_(?:WRONLY|RDWR|CREAT)/u,
@@ -6182,7 +6469,7 @@ const enforceV2V3SuccessorGate = extractShellFunction(
   'consume_exact_one_use_kemerbet_file',
 );
 for (const successorGateEnforcementContract of [
-  /if \[\[ "\$command" == 'verify' \]\]; then\s+return 0\s+fi/u,
+  /if \[\[ "\$command" =~ \^\(verify\|kemerbet-v3-runtime-bridge-ready\|docker-storage-ready\)\$ \]\]; then\s+return 0\s+fi/u,
   /inspect_kemerbet_v2_v3_successor_gate/,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'/u,
   /retire-kemerbet-readiness-binding-v1-for-v2-reseal\|reinstall-kemerbet-v1-retirement-secrets\|seal-kemerbet-readiness\|kemerbet-v1-retirement-recovery-ready/u,
@@ -6197,7 +6484,12 @@ for (const successorGateEnforcementContract of [
   /stop-bot\|stop-kemerbet-session-provision/u,
   /the KemerBet v3 successor stop command belongs to another reviewed release/u,
   /network-ready\)\s+return 0/u,
-  /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision\|recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u,
+  /recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u,
+  /the KemerBet v3 lookup\/recheck boundary is bound to another reviewed release/u,
+  /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision/u,
+  /KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == 'active'/u,
+  /"\$release" =~ \^\[0-9a-f\]\{40\}\$/u,
+  /the reviewed current runtime release is invalid/u,
   /"\$release" == "\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
   /permits only no-transfer deployment, private sign-in, and readiness recheck/u,
 ]) {
@@ -6226,16 +6518,17 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     'set -euo pipefail',
     `CURRENT_RELEASE='${currentRelease}'`,
     'die() { return 1; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$BRIDGE_STATE"; }',
     enforceV2V3SuccessorGate,
     'enforce_kemerbet_v2_v3_successor_gate "$COMPONENT_COMMAND" "$CURRENT_RELEASE"',
   ].join('\n');
-  for (const [name, command, overlayState, overlayRelease, expectedStatus] of [
+  for (const [name, command, overlayState, overlayRelease, bridgeState, expectedStatus] of [
     [
       'completed historical-overlay bot stop dispatch',
       'stop-bot',
       'successor-completed',
       '1'.repeat(40),
+      'active',
       0,
     ],
     [
@@ -6243,20 +6536,47 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       'stop-kemerbet-session-provision',
       'successor-completed',
       '1'.repeat(40),
+      'active',
       0,
     ],
     [
-      'installed current-release bot stop dispatch',
-      'stop-bot',
-      'successor-installed',
-      currentRelease,
-      0,
-    ],
-    [
-      'installed wrong-release bot stop dispatch',
+      'installed historical-overlay bot stop dispatch through active bridge',
       'stop-bot',
       'successor-installed',
       '1'.repeat(40),
+      'active',
+      0,
+    ],
+    [
+      'installed legacy same-release bot stop dispatch without bridge',
+      'stop-bot',
+      'successor-installed',
+      currentRelease,
+      'absent',
+      0,
+    ],
+    [
+      'installed wrong-release bot stop remains blocked without bridge',
+      'stop-bot',
+      'successor-installed',
+      '1'.repeat(40),
+      'absent',
+      1,
+    ],
+    [
+      'future ordinary release is accepted through active bridge',
+      'fresh-host-ready',
+      'successor-installed',
+      '1'.repeat(40),
+      'active',
+      0,
+    ],
+    [
+      'foreign lookup/recheck remains blocked through active bridge',
+      'recheck-kemerbet-readiness',
+      'successor-installed',
+      '1'.repeat(40),
+      'active',
       1,
     ],
   ]) {
@@ -6268,6 +6588,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         COMPONENT_COMMAND: command,
         OVERLAY_STATE: overlayState,
         OVERLAY_RELEASE: overlayRelease,
+        BRIDGE_STATE: bridgeState,
       },
     });
     assert.equal(
@@ -6278,7 +6599,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
   }
 }
 const successorInstalledCommandAllowlist =
-  /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision\|recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u.exec(
+  /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision/u.exec(
     enforceV2V3SuccessorGate,
   )?.[0];
 assert.ok(
@@ -6326,6 +6647,67 @@ assert.doesNotMatch(
   /docker|compose|GeneralInfoByExternalId|PlayerEPOSDeposit|curl|FINANCIAL_ACTIONS_MODE=live/iu,
   'the v3 overlay readiness command must only re-attest the completed local overlay',
 );
+const v3RuntimeBridgeReadyCase =
+  /\n  kemerbet-v3-runtime-bridge-ready\)([\s\S]*?)\n    ;;\n\n  docker-storage-ready\)/u.exec(
+    helper,
+  )?.[1];
+assert.ok(
+  v3RuntimeBridgeReadyCase,
+  'the helper must expose one read-only future-release-neutral runtime-bridge attestation',
+);
+for (const runtimeBridgeReadyContract of [
+  /\[\[ \$# -eq 2 && "\$2" =~ \^\[0-9a-f\]\{64\}\$ \]\]/u,
+  /require_kemerbet_v3_runtime_bridge/u,
+  /KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "\$2"/u,
+  /historical overlay \$KEMERBET_V2_V3_SUCCESSOR_RELEASE; current releases remain Transfer-disabled/u,
+]) {
+  assert.match(v3RuntimeBridgeReadyCase, runtimeBridgeReadyContract);
+}
+assert.doesNotMatch(
+  v3RuntimeBridgeReadyCase,
+  /docker|compose|GeneralInfoByExternalId|PlayerEPOSDeposit|curl|recheck-kemerbet-readiness|FINANCIAL_ACTIONS_MODE=live/iu,
+  'runtime-bridge readiness must only re-attest local immutable evidence and the exact installed helper',
+);
+const dockerStorageReadyCase =
+  /\n  docker-storage-ready\)([\s\S]*?)\n    ;;\n\n  kemerbet-v3-successor-ready\)/u.exec(
+    helper,
+  )?.[1];
+assert.ok(
+  dockerStorageReadyCase,
+  'the helper must expose one narrow read-only Docker-data-root storage attestation',
+);
+for (const dockerStorageContract of [
+  /\[\[ \$# -eq 2 && "\$2" =~ \^\[1-9\]\[0-9\]\{0,11\}\$ \]\]/u,
+  /bundle_bytes <= 64 \* 1024 \* 1024 \* 1024/u,
+  /! -L "\$DOCKER_DATA_ROOT"/u,
+  /realpath -- "\$DOCKER_DATA_ROOT"/u,
+  /df --output=avail -B1 -- "\$DOCKER_DATA_ROOT"/u,
+  /NR != 2 \|\| value == ""/u,
+  /required_bytes=\$\(\(bundle_bytes \* 2 \+ 4 \* 1024 \* 1024 \* 1024\)\)/u,
+  /available_bytes >= required_bytes/u,
+]) {
+  assert.match(dockerStorageReadyCase, dockerStorageContract);
+}
+assert.doesNotMatch(
+  dockerStorageReadyCase,
+  /docker\s+(?:image|container|volume|system|compose)|\brm\b|prune|install|mv|truncate|fallocate/iu,
+  'storage readiness may read filesystem capacity only; it must not mutate Docker or host storage',
+);
+const requireV3RuntimeBridge = extractShellFunction(
+  helper,
+  'require_kemerbet_v3_runtime_bridge',
+  'consume_exact_one_use_kemerbet_file',
+);
+for (const runtimeBridgeRequirement of [
+  /inspect_kemerbet_v2_v3_successor_gate/u,
+  /KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == 'active'/u,
+  /KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" =~ \^\[0-9a-f\]\{40\}\$/u,
+  /KEMERBET_V2_V3_SUCCESSOR_RELEASE" =~ \^\[0-9a-f\]\{40\}\$/u,
+  /KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" =~ \^\[0-9a-f\]\{64\}\$/u,
+  /successor-installed\|successor-completed/u,
+]) {
+  assert.match(requireV3RuntimeBridge, runtimeBridgeRequirement);
+}
 const v3SuccessorStoppedDurableBoundary = extractShellFunction(
   helper,
   'require_kemerbet_v3_successor_stopped_durable_boundary',
@@ -6379,6 +6761,8 @@ for (const installBoundaryContract of [
   /successor_release="\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
   /successor-installed\)/u,
   /successor-completed\)/u,
+  /KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == 'active'/u,
+  /require_kemerbet_v3_runtime_bridge/u,
   /successor_release" == "\$commit_sha"/u,
   /require_kemerbet_v1_retirement_expiry_guard_disarmed/u,
   /! -e "\$BOT_STARTUP_RECEIPT" && ! -L "\$BOT_STARTUP_RECEIPT"/u,
@@ -6426,20 +6810,30 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     "INSPECTION_COUNT='0'",
     "TRACE=''",
     'die() { return 1; }',
+    'require_kemerbet_v3_runtime_bridge() { TRACE="${TRACE}B"; [[ "$BRIDGE_STATE" == active ]]; }',
     'require_kemerbet_v1_retirement_expiry_guard_disarmed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
     'require_kemerbet_v3_successor_stopped_durable_boundary() { TRACE="${TRACE}D"; [[ "$DURABLE_STATE" == exact ]]; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; INSPECTION_COUNT="$((INSPECTION_COUNT + 1))"; if [[ "$INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; INSPECTION_COUNT="$((INSPECTION_COUNT + 1))"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$BRIDGE_STATE"; if [[ "$INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
     v3SuccessorInstallBoundary,
     'require_kemerbet_v3_successor_install_boundary "$EXPECTED_RELEASE"',
-    '[[ "$TRACE" == OGDO ]]',
+    '[[ "$TRACE" == OBGDO ]]',
   ].join('\n');
-  for (const [name, initialState, initialRelease, finalState, finalRelease, expectedStatus] of [
+  for (const [
+    name,
+    initialState,
+    initialRelease,
+    finalState,
+    finalRelease,
+    bridgeState,
+    expectedStatus,
+  ] of [
     [
       'exact installed install boundary',
       'successor-installed',
       release,
       'successor-installed',
       release,
+      'active',
       0,
     ],
     [
@@ -6448,15 +6842,17 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'successor-completed',
       '1'.repeat(40),
+      'active',
       0,
     ],
     [
-      'wrong installed install release',
+      'future release through installed historical overlay',
       'successor-installed',
       '0'.repeat(40),
       'successor-installed',
       '0'.repeat(40),
-      1,
+      'active',
+      0,
     ],
     [
       'changed completed install release',
@@ -6464,9 +6860,19 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'successor-completed',
       '2'.repeat(40),
+      'active',
       1,
     ],
-    ['invalid install overlay state', 'invalid', release, 'invalid', release, 1],
+    ['invalid install overlay state', 'invalid', release, 'invalid', release, 'active', 1],
+    [
+      'missing runtime bridge',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      'absent',
+      1,
+    ],
   ]) {
     const result = spawnSync(bashExecutable, ['-s'], {
       encoding: 'utf8',
@@ -6479,6 +6885,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         INITIAL_OVERLAY_RELEASE: initialRelease,
         FINAL_OVERLAY_STATE: finalState,
         FINAL_OVERLAY_RELEASE: finalRelease,
+        BRIDGE_STATE: bridgeState,
       },
     });
     assert.equal(
@@ -6502,6 +6909,8 @@ assertInOrder(
     'successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
     'case "$successor_state" in',
     'successor-installed)',
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE\" == 'active'",
+    'require_kemerbet_v3_runtime_bridge',
     '[[ "$successor_release" == "$commit_sha" ]]',
     'successor-completed)',
     'require_kemerbet_v1_retirement_expiry_guard_armed',
@@ -6534,13 +6943,14 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     "INSPECTION_COUNT='0'",
     "TRACE=''",
     'die() { return 1; }',
+    'require_kemerbet_v3_runtime_bridge() { TRACE="${TRACE}B"; [[ "$BRIDGE_STATE" == active ]]; }',
     'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
     'require_fresh_host_start_ready() { TRACE="${TRACE}S"; [[ "$STOPPED_STATE" == exact ]]; }',
     'require_kemerbet_v3_successor_stopped_durable_boundary() { TRACE="${TRACE}D"; [[ "$DURABLE_STATE" == exact ]]; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; INSPECTION_COUNT="$((INSPECTION_COUNT + 1))"; if [[ "$INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; INSPECTION_COUNT="$((INSPECTION_COUNT + 1))"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$BRIDGE_STATE"; if [[ "$INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
     v3SuccessorArmedStoppedBoundary,
     'require_kemerbet_v3_successor_armed_stopped_boundary "$EXPECTED_RELEASE"',
-    '[[ "$TRACE" == OGSDO ]]',
+    '[[ "$TRACE" == OBGSDO ]]',
   ].join('\n');
   for (const [
     name,
@@ -6631,7 +7041,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       1,
     ],
     [
-      'wrong installed release',
+      'future release through armed installed historical overlay',
       'exact',
       'exact',
       'exact',
@@ -6639,7 +7049,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '0'.repeat(40),
       'successor-installed',
       '0'.repeat(40),
-      1,
+      0,
     ],
     [
       'changed successor overlay state',
@@ -6676,6 +7086,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         INITIAL_OVERLAY_RELEASE: initialOverlayRelease,
         FINAL_OVERLAY_STATE: finalOverlayState,
         FINAL_OVERLAY_RELEASE: finalOverlayRelease,
+        BRIDGE_STATE: 'active',
       },
     });
     assert.equal(
@@ -6718,19 +7129,21 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     `set -- arm-expiry-stop "$EXPECTED_RELEASE" '2026-08-27 00:00:00 UTC'`,
     'KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$ARM_OVERLAY_STATE"',
     'KEMERBET_V2_V3_SUCCESSOR_RELEASE="$ARM_OVERLAY_RELEASE"',
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='active'",
     'BOT_STARTUP_RECEIPT="/tmp/fetanagent-expiry-arm-fixture-$BASHPID/receipt"',
     'BOT_STARTUP_RECEIPT_ROOT="/tmp/fetanagent-expiry-arm-fixture-$BASHPID"',
     "TRACE=''",
     'die() { return 1; }',
     'arm_expiry_stop() { TRACE="${TRACE}A"; }',
+    'require_kemerbet_v3_runtime_bridge() { TRACE="${TRACE}B"; return 0; }',
     'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; return 0; }',
     'require_fresh_host_start_ready() { TRACE="${TRACE}S"; return 0; }',
     'require_kemerbet_v3_successor_stopped_durable_boundary() { TRACE="${TRACE}D"; return 0; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$ARM_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$ARM_OVERLAY_RELEASE"; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$ARM_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$ARM_OVERLAY_RELEASE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="active"; }',
     'require_exact_fresh_private_runtime() { TRACE="${TRACE}X"; return 1; }',
     v3SuccessorArmedStoppedBoundary,
     helperArmExpiryStopCase,
-    '[[ "$TRACE" == AOGSDO ]]',
+    '[[ "$TRACE" == AOBGSDO ]]',
   ].join('\n');
   for (const [name, overlayState, overlayRelease] of [
     ['installed successor', 'successor-installed', release],
@@ -6892,8 +7305,11 @@ assert.match(
   'The operator runbook must preserve the installed-predecessor cleanup mode as a no-start, no-transfer boundary.',
 );
 assert.ok(
-  workflow.indexOf('Verify the exact KemerBet successor gate before stopping staging') <
-    workflow.indexOf('Stop any prior staging project and disable old logins') &&
+  workflow.indexOf(
+    'Verify the immutable KemerBet overlay and runtime bridge before stopping staging',
+  ) < workflow.indexOf('Verify enough Docker storage before any staging downtime') &&
+    workflow.indexOf('Verify enough Docker storage before any staging downtime') <
+      workflow.indexOf('Stop any prior staging project and disable old logins') &&
     workflow.indexOf('Stop any prior staging project and disable old logins') <
       workflow.indexOf('Verify the fresh-host deployment boundary is empty') &&
     workflow.indexOf('Verify the fresh-host deployment boundary is empty') <
@@ -6915,19 +7331,21 @@ assert.ok(
   'The exact successor gate must pass before downtime; then old runtimes stop, IPv6 and the exact ban list pass, and real role expiries arm the host-local guard before startup.',
 );
 const preStopSuccessorGate =
-  /- name: Verify the exact KemerBet successor gate before stopping staging([\s\S]*?)\n\s+- name: Stop any prior staging project and disable old logins/u.exec(
+  /- name: Verify the immutable KemerBet overlay and runtime bridge before stopping staging([\s\S]*?)\n\s+- name: Verify enough Docker storage before any staging downtime/u.exec(
     workflow,
   )?.[1];
-assert.ok(preStopSuccessorGate, 'Deployment must prove the exact successor gate before downtime.');
+assert.ok(
+  preStopSuccessorGate,
+  'Deployment must prove the immutable overlay and runtime bridge before downtime.',
+);
 assertInOrder(
   preStopSuccessorGate,
   [
     'fetanagent-staging-deploy-helper verify',
-    'fetanagent-staging-deploy-helper kemerbet-v3-successor-ready',
-    "'$GITHUB_SHA'",
+    'fetanagent-staging-deploy-helper kemerbet-v3-runtime-bridge-ready',
     "'${{ steps.protected.outputs.helper_sha }}'",
   ],
-  'the read-only pre-stop SSH check must verify the installed helper and its exact release gate',
+  'the read-only pre-stop SSH check must verify the installed helper and its future-release-neutral runtime bridge',
 );
 assert.equal(
   (preStopSuccessorGate.match(/^\s*ssh\s/gm) ?? []).length,
@@ -6940,7 +7358,7 @@ assert.equal(
     []
   ).length,
   2,
-  'the pre-stop gate may invoke only helper verify and successor-ready through sudo',
+  'the pre-stop gate may invoke only helper verify and runtime-bridge-ready through sudo',
 );
 assert.doesNotMatch(
   preStopSuccessorGate,
@@ -7766,7 +8184,7 @@ assert.doesNotMatch(
 );
 
 const protectedDeployInputs =
-  /- name: Validate protected deploy inputs([\s\S]*?)\n\s+- name: Verify the exact KemerBet successor gate before stopping staging/u.exec(
+  /- name: Validate protected deploy inputs([\s\S]*?)\n\s+- name: Verify the immutable KemerBet overlay and runtime bridge before stopping staging/u.exec(
     workflow,
   )?.[1];
 assert.ok(protectedDeployInputs, 'The protected deployment input step must exist.');
@@ -8336,6 +8754,8 @@ assertInOrder(
     'validate_commit_and_tag "$commit_sha" "$image_tag"',
     'successor_install_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
     'successor_install_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    'successor_install_helper_sha="$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256"',
+    'successor_install_bridge_release="$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE"',
     `if [[ "$successor_install_state" != 'absent' ]]; then`,
     'require_kemerbet_v3_successor_install_boundary "$commit_sha"',
     'expected_files=',
@@ -8345,6 +8765,9 @@ assertInOrder(
     'inspect_kemerbet_v2_v3_successor_gate',
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_install_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_install_release"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$successor_install_helper_sha"',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == \'active\'',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$successor_install_bridge_release"',
   ],
   'successor installation must prove the stopped preflight before examining or replacing release bytes',
 );
@@ -8366,6 +8789,8 @@ assertInOrder(
     'validate_commit_and_tag "$commit_sha" "$image_tag"',
     'successor_start_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
     'successor_start_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
+    'successor_start_helper_sha="$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256"',
+    'successor_start_bridge_release="$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE"',
     `if [[ "$command" == 'fresh-start' ]]`,
     'require_kemerbet_v1_retirement_expiry_guard_armed',
     `if [[ "$successor_start_state" != 'absent' ]]`,
@@ -8379,6 +8804,9 @@ assertInOrder(
     'inspect_kemerbet_v2_v3_successor_gate',
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_start_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_start_release"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$successor_start_helper_sha"',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == \'active\'',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$successor_start_bridge_release"',
   ],
   'fresh-start must validate the exact armed stopped successor before activation and attest its private runtime afterward',
 );
@@ -8450,6 +8878,9 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     "command='fresh-start'",
     'KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$PRE_OVERLAY_STATE"',
     'KEMERBET_V2_V3_SUCCESSOR_RELEASE="$PRE_OVERLAY_RELEASE"',
+    `KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256='${'2'.repeat(64)}'`,
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='active'",
+    `KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE='${'3'.repeat(40)}'`,
     "TRACE=''",
     'die() { return 1; }',
     'validate_commit_and_tag() { TRACE="${TRACE}V"; [[ "$1" == "$EXPECTED_RELEASE" && "$2" == "$EXPECTED_TAG" ]]; }',
@@ -8497,14 +8928,19 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     `commit_sha='${release}'`,
     'successor_start_state="$INITIAL_OVERLAY_STATE"',
     'successor_start_release="$INITIAL_OVERLAY_RELEASE"',
+    `successor_start_helper_sha='${'2'.repeat(64)}'`,
+    `successor_start_bridge_release='${'3'.repeat(40)}'`,
     'KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$successor_start_state"',
     'KEMERBET_V2_V3_SUCCESSOR_RELEASE="$successor_start_release"',
+    'KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$successor_start_helper_sha"',
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='active'",
+    'KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$successor_start_bridge_release"',
     "TRACE=''",
     'die() { return 1; }',
     'require_owner_kemerbet_receipt_service_access() { TRACE="${TRACE}A"; }',
     'require_kemerbet_v1_retirement_expiry_guard_armed() { TRACE="${TRACE}G"; [[ "$GUARD_STATE" == exact ]]; }',
     'require_exact_fresh_private_runtime() { TRACE="${TRACE}R"; [[ "$RUNTIME_STATE" == exact ]]; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$FINAL_HELPER_SHA"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$FINAL_BRIDGE_STATE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$FINAL_BRIDGE_RELEASE"; }',
     postStartSuccessorBoundary,
     '[[ "$TRACE" == AGRO ]]',
   ].join('\n');
@@ -8600,6 +9036,9 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         RUNTIME_STATE: runtimeState,
         OVERLAY_STATE: finalOverlayState,
         OVERLAY_RELEASE: finalOverlayRelease,
+        FINAL_HELPER_SHA: '2'.repeat(64),
+        FINAL_BRIDGE_STATE: 'active',
+        FINAL_BRIDGE_RELEASE: '3'.repeat(40),
       },
     });
     assert.equal(
@@ -8622,12 +9061,12 @@ for (const [label, controlSlice] of [
   );
 }
 
-function assertSuccessorInstalledPostcondition(
+function assertRuntimeBridgePostcondition(
   commandCase,
   mutationFragment,
   preGateContract,
   insideGateContract,
-  releaseReference,
+  evidencePrefix,
   label,
 ) {
   assertInOrder(
@@ -8635,30 +9074,33 @@ function assertSuccessorInstalledPostcondition(
     [
       mutationFragment,
       ...preGateContract,
-      `if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]]; then`,
+      `if [[ "$${evidencePrefix}_successor_state" != 'absent' ]]; then`,
       ...insideGateContract,
       'inspect_kemerbet_v2_v3_successor_gate',
-      `[[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&`,
-      `"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "${releaseReference}" ]]`,
+      `[[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$${evidencePrefix}_successor_state" &&`,
+      `"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$${evidencePrefix}_successor_release" &&`,
+      `"$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$${evidencePrefix}_successor_helper_sha" &&`,
+      `"$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == 'active' &&`,
+      `"$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$${evidencePrefix}_bridge_release" ]]`,
     ],
-    `${label} must re-attest the same-release installed successor after its mutation`,
+    `${label} must re-attest the unchanged historical overlay, installed helper, and runtime bridge after its mutation`,
   );
 }
 
-assertSuccessorInstalledPostcondition(
+assertRuntimeBridgePostcondition(
   installBotToken,
   'rm -f -- "$incoming"',
   ['require_service_file "$SECRET_ROOT/bot-token"'],
   [],
-  '$commit_sha',
+  'bot_token',
   'Telegram token installation',
 );
-assertSuccessorInstalledPostcondition(
+assertRuntimeBridgePostcondition(
   startBot,
   'up -d --no-build --no-deps bot',
   [],
   ['require_exact_fresh_bot_runtime "$commit_sha" immediate-startup'],
-  '$commit_sha',
+  'bot_start',
   'Telegram startup',
 );
 
@@ -8839,9 +9281,8 @@ assertInOrder(
     'inspect_kemerbet_v1_retirement_gate',
     'else',
     'case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in',
-    'successor-installed)',
-    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
-    'successor-completed)',
+    'successor-installed|successor-completed)',
+    'require_kemerbet_v3_runtime_bridge',
     "successor_component_stop='true'",
     '"$session_container" kemerbet-session-provision "$commit_sha"',
     'container stop --time 70 "$session_container"',
@@ -8854,6 +9295,9 @@ assertInOrder(
     'inspect_kemerbet_v2_v3_successor_gate',
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$successor_component_stop_helper_sha"',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == \'active\'',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$successor_component_stop_bridge_release"',
   ],
   'bot stop must preserve the historical completed overlay while proving every removed component belongs to the current release',
 );
@@ -8882,6 +9326,9 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     "KEMERBET_TEARDOWN_RECOVERY_FAILED='false'",
     "KEMERBET_V2_V3_SUCCESSOR_GATE_STATE=''",
     "KEMERBET_V2_V3_SUCCESSOR_RELEASE=''",
+    "KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256=''",
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE=''",
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE=''",
     "OVERLAY_INSPECTION_COUNT='0'",
     "BOT_PRESENT='true'",
     "TRACE=''",
@@ -8889,8 +9336,9 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     'die() { return 1; }',
     'recover_kemerbet_recheck_before_teardown() { TRACE="${TRACE}R"; }',
     'require_kemerbet_teardown_recovery_success() { TRACE="${TRACE}Q"; }',
+    'require_kemerbet_v3_runtime_bridge() { TRACE="${TRACE}B"; [[ "$BRIDGE_STATE" == active ]]; }',
     'inspect_kemerbet_v1_retirement_gate() { return 95; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; OVERLAY_INSPECTION_COUNT="$((OVERLAY_INSPECTION_COUNT + 1))"; if [[ "$OVERLAY_INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; OVERLAY_INSPECTION_COUNT="$((OVERLAY_INSPECTION_COUNT + 1))"; KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$HELPER_SHA"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$BRIDGE_STATE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$BRIDGE_RELEASE"; if [[ "$OVERLAY_INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
     'docker_local() {',
     '  if [[ "$1" == container && "$2" == ls ]]; then',
     '    case "$*" in',
@@ -8918,6 +9366,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     finalRelease,
     targetState,
     runtimeState,
+    bridgeState,
     expectedStatus,
     mutationExpected,
   ] of [
@@ -8929,6 +9378,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       release,
       'exact',
       'exact',
+      'active',
       0,
       true,
     ],
@@ -8940,19 +9390,21 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'exact',
       'exact',
+      'active',
       0,
       true,
     ],
     [
-      'wrong installed bot-stop release',
+      'future current release bot stop with historical installed overlay',
       'successor-installed',
       '1'.repeat(40),
       'successor-installed',
       '1'.repeat(40),
       'exact',
       'exact',
-      1,
-      false,
+      'active',
+      0,
+      true,
     ],
     [
       'invalid bot-stop successor state',
@@ -8962,6 +9414,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       release,
       'exact',
       'exact',
+      'active',
       1,
       false,
     ],
@@ -8973,6 +9426,7 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'invalid',
       'exact',
+      'active',
       1,
       false,
     ],
@@ -8984,8 +9438,21 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '2'.repeat(40),
       'exact',
       'exact',
+      'active',
       1,
       true,
+    ],
+    [
+      'missing bot-stop runtime bridge',
+      'successor-installed',
+      release,
+      'successor-installed',
+      release,
+      'exact',
+      'exact',
+      'absent',
+      1,
+      false,
     ],
   ]) {
     const result = spawnSync(bashExecutable, ['-s'], {
@@ -8999,6 +9466,9 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         FINAL_OVERLAY_RELEASE: finalRelease,
         TARGET_STATE: targetState,
         RUNTIME_STATE: runtimeState,
+        BRIDGE_STATE: bridgeState,
+        BRIDGE_RELEASE: '3'.repeat(40),
+        HELPER_SHA: '2'.repeat(64),
       },
     });
     assert.equal(
@@ -9034,10 +9504,27 @@ assert.match(
   startKemerbetSession,
   /require_kemerbet_identity_key_file "\$KEMERBET_AGENT_IDENTITY_HMAC_KEY"/,
 );
-assert.match(startKemerbetSession, /prepare_retryable_kemerbet_session_player_ids/);
-assert.match(startKemerbetSession, /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/);
+assert.match(
+  startKemerbetSession,
+  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+);
+assert.match(
+  startKemerbetSession,
+  /require_kemerbet_v3_binding_content "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+);
+assert.doesNotMatch(startKemerbetSession, /prepare_retryable_kemerbet_session_player_ids/);
+assert.doesNotMatch(startKemerbetSession, /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/);
 assert.match(startKemerbetSession, /require_immutable_config_file "\$KEMERBET_SELECTOR_CONTRACT"/);
 assert.match(startKemerbetSession, /require_kemerbet_readiness_output_directory/);
+assert.match(startKemerbetSession, /require_kemerbet_v3_runtime_bridge/);
+assert.match(
+  startKemerbetSession,
+  /successor_session_release="\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/,
+);
+assert.match(
+  startKemerbetSession,
+  /successor_session_bridge_release="\$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE"/,
+);
 assert.match(startKemerbetSession, /--profile kemerbet-session-provision/);
 assert.match(
   startKemerbetSession,
@@ -9049,12 +9536,15 @@ assertInOrder(
   startKemerbetSession,
   [
     'require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"',
-    'prepare_retryable_kemerbet_session_player_ids',
-    'require_service_file "$KEMERBET_READINESS_PLAYER_IDS"',
+    'require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+    'require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
     'require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"',
+    'require_kemerbet_v3_runtime_bridge',
     'up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision',
+    'require_kemerbet_session_provision_runtime "$commit_sha"',
+    'inspect_kemerbet_v2_v3_successor_gate',
   ],
-  'private sign-in must rebuild only an exact retry service copy before the existing no-transfer runtime starts',
+  'private sign-in must start only the no-transfer coordinator and re-attest the unchanged historical overlay/runtime bridge',
 );
 
 const kemerbetSessionRuntime =
@@ -9079,17 +9569,21 @@ for (const contract of [
   /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/,
   /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/,
   /grep -c '\^'/,
+  /== '6'/,
   /volume\|\/run\/fetanagent-kemerbet-session-control\|true/,
   /volume\|\/var\/lib\/fetanagent\/kemerbet-sessions\|true/,
   /bind\|\/run\/secrets\/kemerbet_agent_identity_hmac_key\|false/,
-  /bind\|\/run\/secrets\/kemerbet_no_transfer_readiness_player_ids\|false/,
+  /bind\|\/run\/secrets\/kemerbet_agent_identity_bindings\|false/,
   /bind\|\/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json\|false/,
   /bind\|\/run\/fetanagent-kemerbet-readiness-seal-output\|true/,
   /KEMERBET_AGENT_IDENTITY_HMAC_KEY/,
-  /KEMERBET_READINESS_PLAYER_IDS/,
+  /KEMERBET_AGENT_IDENTITY_BINDINGS/,
   /KEMERBET_SELECTOR_CONTRACT/,
   /KEMERBET_READINESS_OUTPUT_ROOT/,
   /profile_volume_source="\$\(docker_local container inspect "\$container_id"/,
+  /binding_source="\$\(docker_local container inspect "\$container_id"/,
+  /\.Destination "\/run\/secrets\/kemerbet_agent_identity_bindings"/,
+  /"\$binding_source" == "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
   /\.Destination "\/var\/lib\/fetanagent\/kemerbet-sessions"/,
   /\{\{\.Name\}\}/,
   /"\$profile_volume_source" == "\$KEMERBET_PROFILE_VOLUME"/,
@@ -9100,6 +9594,22 @@ for (const contract of [
 ]) {
   assert.match(kemerbetSessionRuntime, contract);
 }
+assertInOrder(
+  kemerbetSessionRuntime,
+  [
+    'require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+    'require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+    "grep -Fxq 'bind|/run/secrets/kemerbet_agent_identity_bindings|false'",
+    'binding_source="$(docker_local container inspect "$container_id"',
+    '"$binding_source" == "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+  ],
+  'the private sign-in runtime must validate the immutable v3 binding before proving its exact read-only host-to-container mount',
+);
+assert.doesNotMatch(
+  kemerbetSessionRuntime,
+  /KEMERBET_READINESS_PLAYER_IDS|kemerbet_no_transfer_readiness_player_ids/u,
+  'the long-lived sign-in coordinator must not depend on or receive the separately authorized one-use lookup cohort',
+);
 assert.doesNotMatch(kemerbetSessionRuntime, /container logs|\bcat\b|password=|token=/iu);
 
 const sealKemerbetReadiness = /\n  seal-kemerbet-readiness\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
@@ -9418,8 +9928,8 @@ assert.doesNotMatch(
 );
 assert.equal(
   (helper.match(/\bprepare_retryable_kemerbet_session_player_ids\b/g) ?? []).length,
-  2,
-  'the retry-only service-copy helper must be defined once and invoked only by private sign-in start',
+  1,
+  'the legacy retry-copy primitive may remain defined for exact recovery review but ordinary private sign-in must not invoke it',
 );
 
 const promoteOwnerStagedKemerbetPlayerIds =
@@ -11897,8 +12407,8 @@ for (const v3BindingContract of [
 }
 assert.equal(
   (helper.match(/require_kemerbet_v3_binding_content/g) ?? []).length,
-  8,
-  'the stable v3 binding attestor must be defined once and used by all seven operational binding boundaries',
+  10,
+  'the stable v3 binding attestor must be defined once and used by all nine operational binding boundaries',
 );
 const v1RetirementRuntimeStart = helper.indexOf('publish_kemerbet_v1_retirement_artifact() {');
 const v1RetirementRuntimeEnd = helper.indexOf('\nconsume_exact_one_use_kemerbet_file() {');
@@ -13022,11 +13532,12 @@ assertInOrder(
     'recover_kemerbet_recheck_before_teardown',
     'inspect_kemerbet_v2_v3_successor_gate',
     'case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in',
-    'successor-installed)',
-    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
-    'successor-completed)',
+    'successor-installed|successor-completed)',
+    'require_kemerbet_v3_runtime_bridge',
     'session_stop_successor_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
     'session_stop_successor_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'session_stop_successor_helper_sha="$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256"',
+    'session_stop_bridge_release="$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE"',
     '"$session_container" kemerbet-session-provision "$commit_sha"',
     'container stop --time 70',
     'require_exact_fresh_bot_runtime "$commit_sha" published-steady-state',
@@ -13034,8 +13545,11 @@ assertInOrder(
     'inspect_kemerbet_v2_v3_successor_gate',
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$session_stop_successor_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$session_stop_successor_release"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$session_stop_successor_helper_sha"',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == \'active\'',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$session_stop_bridge_release"',
   ],
-  'session stop must preserve the historical completed overlay while proving the removed session belongs to the current release',
+  'session stop must preserve the historical overlay and active runtime bridge while proving the removed session belongs to the current application release',
 );
 assert.equal(
   (stopKemerbetSession.match(/require_exact_current_component_container/g) ?? []).length,
@@ -13057,13 +13571,17 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     "KEMERBET_TEARDOWN_RECOVERY_FAILED='false'",
     "KEMERBET_V2_V3_SUCCESSOR_GATE_STATE=''",
     "KEMERBET_V2_V3_SUCCESSOR_RELEASE=''",
+    "KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256=''",
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE=''",
+    "KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE=''",
     "OVERLAY_INSPECTION_COUNT='0'",
     "TRACE=''",
     'trap \'printf "__TRACE__%s" "$TRACE"\' EXIT',
     'die() { return 1; }',
     'recover_kemerbet_recheck_before_teardown() { TRACE="${TRACE}R"; }',
     'require_kemerbet_teardown_recovery_success() { TRACE="${TRACE}Q"; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; OVERLAY_INSPECTION_COUNT="$((OVERLAY_INSPECTION_COUNT + 1))"; if [[ "$OVERLAY_INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; fi; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { TRACE="${TRACE}O"; OVERLAY_INSPECTION_COUNT="$((OVERLAY_INSPECTION_COUNT + 1))"; if [[ "$OVERLAY_INSPECTION_COUNT" == 1 ]]; then KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$INITIAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$INITIAL_OVERLAY_RELEASE"; KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$INITIAL_HELPER_SHA"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$INITIAL_BRIDGE_STATE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$INITIAL_BRIDGE_RELEASE"; else KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$FINAL_OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$FINAL_OVERLAY_RELEASE"; KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$FINAL_HELPER_SHA"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$FINAL_BRIDGE_STATE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$FINAL_BRIDGE_RELEASE"; fi; }',
+    'require_kemerbet_v3_runtime_bridge() { TRACE="${TRACE}B"; [[ "$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == active ]]; }',
     'docker_local() {',
     '  if [[ "$1" == container && "$2" == ls ]]; then',
     '    printf "%s" "aaaaaaaaaaaa"',
@@ -13085,6 +13603,12 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     initialRelease,
     finalState,
     finalRelease,
+    initialHelperSha,
+    finalHelperSha,
+    initialBridgeState,
+    finalBridgeState,
+    initialBridgeRelease,
+    finalBridgeRelease,
     targetState,
     runtimeState,
     expectedStatus,
@@ -13093,9 +13617,15 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     [
       'installed current-release session stop',
       'successor-installed',
-      release,
+      '1'.repeat(40),
       'successor-installed',
-      release,
+      '1'.repeat(40),
+      '2'.repeat(64),
+      '2'.repeat(64),
+      'active',
+      'active',
+      '3'.repeat(40),
+      '3'.repeat(40),
       'exact',
       'exact',
       0,
@@ -13107,17 +13637,46 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'successor-completed',
       '1'.repeat(40),
+      '2'.repeat(64),
+      '2'.repeat(64),
+      'active',
+      'active',
+      '3'.repeat(40),
+      '3'.repeat(40),
       'exact',
       'exact',
       0,
       true,
     ],
     [
-      'wrong installed session-stop release',
+      'future application release remains independent from historical overlay',
       'successor-installed',
       '1'.repeat(40),
       'successor-installed',
       '1'.repeat(40),
+      '2'.repeat(64),
+      '2'.repeat(64),
+      'active',
+      'active',
+      '3'.repeat(40),
+      '3'.repeat(40),
+      'exact',
+      'exact',
+      0,
+      true,
+    ],
+    [
+      'missing runtime bridge',
+      'successor-installed',
+      '1'.repeat(40),
+      'successor-installed',
+      '1'.repeat(40),
+      '2'.repeat(64),
+      '2'.repeat(64),
+      'absent',
+      'absent',
+      '',
+      '',
       'exact',
       'exact',
       1,
@@ -13129,6 +13688,12 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'successor-completed',
       '1'.repeat(40),
+      '2'.repeat(64),
+      '2'.repeat(64),
+      'active',
+      'active',
+      '3'.repeat(40),
+      '3'.repeat(40),
       'invalid',
       'exact',
       1,
@@ -13140,6 +13705,12 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '1'.repeat(40),
       'successor-completed',
       '2'.repeat(40),
+      '2'.repeat(64),
+      '2'.repeat(64),
+      'active',
+      'active',
+      '3'.repeat(40),
+      '3'.repeat(40),
       'exact',
       'exact',
       1,
@@ -13155,6 +13726,12 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         INITIAL_OVERLAY_RELEASE: initialRelease,
         FINAL_OVERLAY_STATE: finalState,
         FINAL_OVERLAY_RELEASE: finalRelease,
+        INITIAL_HELPER_SHA: initialHelperSha,
+        FINAL_HELPER_SHA: finalHelperSha,
+        INITIAL_BRIDGE_STATE: initialBridgeState,
+        FINAL_BRIDGE_STATE: finalBridgeState,
+        INITIAL_BRIDGE_RELEASE: initialBridgeRelease,
+        FINAL_BRIDGE_RELEASE: finalBridgeRelease,
         TARGET_STATE: targetState,
         RUNTIME_STATE: runtimeState,
       },
@@ -13184,12 +13761,12 @@ const startPublicEdge =
     helper,
   )?.[1];
 assert.ok(startPublicEdge, 'The helper must define the public-edge startup boundary.');
-assertSuccessorInstalledPostcondition(
+assertRuntimeBridgePostcondition(
   startPublicEdge,
   'up -d --no-build --wait --wait-timeout 90 gateway',
   [],
   ['require_exact_fresh_bot_runtime "$commit_sha" published-steady-state'],
-  '$commit_sha',
+  'public_edge',
   'fresh public-edge startup',
 );
 
@@ -13226,16 +13803,23 @@ assertInOrder(
     'if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == \'absent\' ]]; then',
     'inspect_kemerbet_v1_retirement_gate',
     'else',
+    '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$',
+    'require_kemerbet_v3_runtime_bridge',
     "successor_component_stop='true'",
     'successor_component_stop_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"',
     'successor_component_stop_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"',
+    'successor_component_stop_helper_sha="$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256"',
+    'successor_component_stop_bridge_release="$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE"',
     'container rm --force',
     'if [[ "$successor_component_stop" == \'true\' ]]; then',
     'inspect_kemerbet_v2_v3_successor_gate',
     '"$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_component_stop_state"',
     '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_component_stop_release"',
+    '"$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$successor_component_stop_helper_sha"',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == \'active\'',
+    '"$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$successor_component_stop_bridge_release"',
   ],
-  'public-edge stop must use successor-native control flow and preserve the exact durable overlay',
+  'public-edge stop must use successor-native control flow and preserve the exact historical overlay and active runtime bridge',
 );
 assert.equal(
   (stopPublicEdge.match(/inspect_kemerbet_v1_retirement_gate/g) ?? []).length,
@@ -13256,12 +13840,12 @@ assert.ok(
 assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" immediate-startup/);
 assert.match(botReady, /record_fresh_bot_startup_receipt "\$2"/);
 assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" steady-state/);
-assertSuccessorInstalledPostcondition(
+assertRuntimeBridgePostcondition(
   botReady,
   'record_fresh_bot_startup_receipt "$2"',
   ['require_exact_fresh_bot_runtime "$2" steady-state'],
   [],
-  '$2',
+  'bot_ready',
   'Telegram readiness',
 );
 const botRuntimeCalls = [
@@ -13290,13 +13874,13 @@ assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container 
 
 assert.equal(
   actualReviewedHelperSuccessorSha,
-  reviewedV3HelperRotationV10SuccessorSha,
-  'the reviewed helper LF bytes must remain frozen at the exact tenth-rotation successor pin',
+  reviewedV3RuntimeBridgeHelperV11Sha,
+  'the reviewed helper LF bytes must remain frozen at the exact H11 runtime-bridge successor pin',
 );
 assert.notEqual(
+  reviewedV3RuntimeBridgeHelperV11Sha,
   reviewedV3HelperRotationV10SuccessorSha,
-  reviewedV3HelperRotationV9SuccessorSha,
-  'the v10 parser cannot be represented by the predecessor v9 helper bytes',
+  'the H11 bridge parser cannot be represented by the historical H10 helper bytes',
 );
 assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 

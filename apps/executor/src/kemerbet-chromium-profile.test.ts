@@ -14,12 +14,17 @@ import {
 type Entry = { readonly kind: 'directory' | 'file' | 'symlink'; readonly nlink?: number };
 
 function memoryFileSystem(profile: string, initial: Readonly<Record<string, Entry>>) {
-  const entries = new Map<string, Entry>(
-    Object.entries(initial).map(([relative, entry]) => [resolve(profile, relative), entry]),
-  );
+  const entries = new Map<string, Entry>([
+    [profile, { kind: 'directory' } as const],
+    ...Object.entries(initial).map(
+      ([relative, entry]) => [resolve(profile, relative), entry] as const,
+    ),
+  ]);
   const missing = () => Object.assign(new Error('missing'), { code: 'ENOENT' });
   const stat = (entry: Entry) => ({
+    dev: 1,
     gid: 10001,
+    ino: 1,
     mode: entry.kind === 'directory' ? 0o40700 : 0o100600,
     nlink: entry.nlink ?? 1,
     uid: 10001,
@@ -89,6 +94,16 @@ describe('KemerBet Chromium Service Worker purge', () => {
     ).toBe(false);
   });
 
+  it('accepts a new exact owned profile before Chromium creates Default', async () => {
+    const profile = resolve('C:/profile');
+    const test = memoryFileSystem(profile, {});
+
+    await expect(
+      purgeKemerBetPersistedServiceWorkerState(profile, 10001, test.fileSystem),
+    ).resolves.toBeUndefined();
+    expect([...test.entries.keys()]).toEqual([profile]);
+  });
+
   it('resumes removal from the exact fixed tombstone after a crash', async () => {
     const profile = resolve('C:/profile');
     const test = memoryFileSystem(profile, {
@@ -99,7 +114,8 @@ describe('KemerBet Chromium Service Worker purge', () => {
 
     await purgeKemerBetPersistedServiceWorkerState(profile, 10001, test.fileSystem);
 
-    expect(test.entries.size).toBe(1);
+    expect(test.entries.size).toBe(2);
+    expect(test.entries.has(profile)).toBe(true);
     expect(test.entries.has(resolve(profile, 'Default'))).toBe(true);
   });
 

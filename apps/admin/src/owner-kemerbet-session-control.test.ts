@@ -11,12 +11,14 @@ describe('Owner private KemerBet session control', () => {
       parseOwnerKemerbetSessionStatus({
         active: false,
         loginRequired: false,
+        phase: 'idle',
         signedIn: false,
         transferDisabled: true,
       }),
     ).toEqual({
       active: false,
       loginRequired: false,
+      phase: 'idle',
       signedIn: false,
       transferDisabled: true,
     });
@@ -24,33 +26,60 @@ describe('Owner private KemerBet session control', () => {
       parseOwnerKemerbetSessionStatus({
         active: true,
         expiresAt: '2026-08-23T12:10:00.000Z',
-        imageBase64: 'YWJjZA==',
-        imageContentType: 'image/jpeg',
+        frameSequence: 1,
+        generation: '11111111-1111-4111-8111-111111111111',
         loginRequired: true,
+        phase: 'login_required',
         signedIn: false,
         transferDisabled: true,
       }),
     ).toMatchObject({ active: true, loginRequired: true, transferDisabled: true });
+    expect(
+      parseOwnerKemerbetSessionStatus({
+        active: true,
+        expiresAt: '2026-08-23T12:10:00.000Z',
+        frameSequence: 1,
+        generation: '11111111-1111-4111-8111-111111111111',
+        loginRequired: false,
+        phase: 'authenticating',
+        signedIn: false,
+        transferDisabled: true,
+      }),
+    ).toMatchObject({
+      active: true,
+      loginRequired: false,
+      phase: 'authenticating',
+      signedIn: false,
+      transferDisabled: true,
+    });
   });
 
   it.each([
-    { active: false, loginRequired: false, signedIn: false, transferDisabled: false },
-    { active: false, loginRequired: true, signedIn: false, transferDisabled: true },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      signedIn: false,
+      transferDisabled: false,
+    },
+    { active: false, loginRequired: true, phase: 'idle', signedIn: false, transferDisabled: true },
     {
       active: true,
       expiresAt: 'invalid',
-      imageBase64: 'YWJjZA==',
-      imageContentType: 'image/jpeg',
+      frameSequence: 1,
+      generation: '11111111-1111-4111-8111-111111111111',
       loginRequired: true,
+      phase: 'login_required',
       signedIn: false,
       transferDisabled: true,
     },
     {
       active: true,
       expiresAt: '2026-08-23T12:10:00.000Z',
-      imageBase64: 'YWJjZA==',
-      imageContentType: 'image/jpeg',
+      frameSequence: 1,
+      generation: '11111111-1111-4111-8111-111111111111',
       loginRequired: true,
+      phase: 'login_required',
       signedIn: false,
       transferDisabled: true,
       password: 'forbidden',

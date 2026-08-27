@@ -130,6 +130,9 @@ importers:
 
   apps/executor:
     dependencies:
+      '@fetanagent/agent-platform-kemerbet':
+        specifier: workspace:*
+        version: link:../../packages/agent-platform-kemerbet
       '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -180,6 +183,14 @@ importers:
       '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+
+  packages/agent-platform-contracts: {}
+
+  packages/agent-platform-kemerbet:
+    dependencies:
+      '@fetanagent/agent-platform-contracts':
+        specifier: workspace:*
+        version: link:../agent-platform-contracts
 
   packages/cbe-birr-authoritative-fixtures:
     dependencies:

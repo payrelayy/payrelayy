@@ -41,6 +41,7 @@ function dependencies(
     loadAccountId: async () => ACCOUNT_ID,
     loadCapability: async () => Buffer.alloc(32, 0x5a),
     loadSelectorContract: async () => ({ version: 2 }) as never,
+    reportStage: () => undefined,
     ...overrides,
   };
 }
@@ -69,8 +70,11 @@ describe('KemerBet readiness browser driver', () => {
     const probeClose = vi.fn(async () => undefined);
     const probeFinalize = vi.fn(async () => undefined);
     const serverClose = vi.fn(async () => undefined);
+    const stages: string[] = [];
     const openProbe = vi.fn(async (options) => {
+      options.reportStage('agent_identity');
       const fingerprint = options.fingerprintAgentIdentity(ACCOUNT_ID, 'raw-agent-identity');
+      options.reportStage('page_adoption');
       return {
         observedAgentIdentityFingerprint: fingerprint,
         providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
@@ -106,6 +110,7 @@ describe('KemerBet readiness browser driver', () => {
           createNetworkRevalidator: async () => revalidateNetwork,
           createControlIpv4Revalidator: async () => revalidateControl,
           openProbe,
+          reportStage: (stage) => stages.push(stage),
           startServer,
         }),
       ),
@@ -119,6 +124,103 @@ describe('KemerBet readiness browser driver', () => {
     expect(probeFinalize).toHaveBeenCalledOnce();
     expect(probeClose).toHaveBeenCalledOnce();
     expect(serverClose).toHaveBeenCalledOnce();
+    expect(stages).toEqual([
+      'browser_bootstrap',
+      'browser_rpc_listen',
+      'browser_open',
+      'browser_identity',
+      'browser_probe_ready',
+      'browser_lookup_1',
+      'browser_finalize',
+      'browser_cleanup',
+      'browser_complete',
+    ]);
+  });
+
+  it('fails closed and never reports complete when the RPC server cannot close', async () => {
+    const stages: string[] = [];
+    await expect(
+      runKemerBetReadinessBrowserDriver(
+        dependencies({
+          reportStage: (stage) => stages.push(stage),
+          openProbe: async (options) => {
+            options.reportStage('agent_identity');
+            const fingerprint = options.fingerprintAgentIdentity(ACCOUNT_ID, 'raw-agent-identity');
+            options.reportStage('page_adoption');
+            return {
+              observedAgentIdentityFingerprint: fingerprint,
+              providerAuthorizationDigest: () =>
+                `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
+              probePlayerLookup: async () => ({
+                exactPlayerMatch: true as const,
+                exactCurrencyMatch: true as const,
+                transferDisabled: true as const,
+              }),
+              finalizeReadOnlyProof: async () => undefined,
+              close: async () => undefined,
+            } satisfies KemerBetNoTransferReadinessSealProbe;
+          },
+          startServer: async (options) => {
+            const session = await options.openSession();
+            await session.lookup('PLAYER-1', AUTHORIZATION);
+            await session.finalize();
+            await session.close();
+            return {
+              completed: Promise.resolve('succeeded' as const),
+              origin: 'http://172.31.254.3:4587',
+              close: async () => {
+                throw new Error('close failed');
+              },
+            };
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(KemerBetReadinessBrowserDriverUnavailableError);
+    expect(stages).toContain('browser_cleanup');
+    expect(stages).not.toContain('browser_complete');
+  });
+
+  it('maps only fixed restored-navigation and refresh-admission probe stages', async () => {
+    const stages: string[] = [];
+    await runKemerBetReadinessBrowserDriver(
+      dependencies({
+        reportStage: (stage) => stages.push(stage),
+        openProbe: async (options) => {
+          options.reportStage('restored_navigation');
+          options.reportStage('refresh_admitted');
+          options.reportStage('agent_identity');
+          const fingerprint = options.fingerprintAgentIdentity(ACCOUNT_ID, 'raw-agent-identity');
+          options.reportStage('page_adoption');
+          return {
+            observedAgentIdentityFingerprint: fingerprint,
+            providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
+            probePlayerLookup: async () => ({
+              exactPlayerMatch: true as const,
+              exactCurrencyMatch: true as const,
+              transferDisabled: true as const,
+            }),
+            finalizeReadOnlyProof: async () => undefined,
+            close: async () => undefined,
+          } satisfies KemerBetNoTransferReadinessSealProbe;
+        },
+        startServer: async (options) => {
+          const session = await options.openSession();
+          await session.lookup('PLAYER-1', AUTHORIZATION);
+          await session.finalize();
+          await session.close();
+          return {
+            completed: Promise.resolve('succeeded' as const),
+            origin: 'http://172.31.254.3:4587',
+            close: async () => undefined,
+          };
+        },
+      }),
+    );
+    expect(stages).toContain('browser_restored_navigation');
+    expect(stages).toContain('browser_refresh_admitted');
+    expect(stages.indexOf('browser_identity')).toBeLessThan(stages.indexOf('browser_probe_ready'));
+    expect(stages.indexOf('browser_probe_ready')).toBeLessThan(stages.indexOf('browser_lookup_1'));
+    expect(JSON.stringify(stages)).not.toMatch(/PLAYER|raw-agent|RefreshToken|https?:/u);
   });
 
   it('rejects the wrong UID before loading any account, capability, or profile', async () => {

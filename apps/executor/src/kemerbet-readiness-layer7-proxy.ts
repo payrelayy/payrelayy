@@ -14,6 +14,7 @@ import {
 import type { AddressInfo } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { createSecureContext, type TLSSocket } from 'node:tls';
+import { TextDecoder } from 'node:util';
 
 import {
   createKemerBetReadinessLayer7AuthorizationVerifier,
@@ -36,6 +37,10 @@ import {
   captureProductionKemerBetReadinessNetworkTopology,
   type KemerBetReadinessNetworkTopology,
 } from './kemerbet-readiness-network-gate.js';
+import {
+  recordKemerBetReadinessProxyStage,
+  type KemerBetReadinessProxyStage,
+} from './kemerbet-readiness-fixed-stage.js';
 import { validateKemerBetReadinessPlayerLookupResponse } from './kemerbet-readiness-player-lookup-response.js';
 import {
   KEMERBET_READINESS_AGENT_PROFILE_PATH,
@@ -85,6 +90,11 @@ const MAX_CONCURRENT_UPSTREAM_REQUESTS = 16;
 const HEADERS_TIMEOUT_MS = 5_000;
 const KEEP_ALIVE_TIMEOUT_MS = 1_000;
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const SESSION_REFRESH_UPSTREAM_TIMEOUT_MS = 5_000;
+const MAX_SESSION_REFRESH_BODY_BYTES = 8_192;
+const MAX_SESSION_REFRESH_RESPONSE_BYTES = 64 * 1_024;
+const MIN_SESSION_REFRESH_TOKEN_CHARACTERS = 16;
+const MAX_SESSION_REFRESH_TOKEN_CHARACTERS = 4_096;
 const MAX_SERIAL_UPSTREAM_OPERATIONS_PER_REQUEST = 2;
 const DOWNSTREAM_TIMEOUT_MARGIN_MS = 5_000;
 const DOWNSTREAM_REQUEST_TIMEOUT_MS =
@@ -92,12 +102,29 @@ const DOWNSTREAM_REQUEST_TIMEOUT_MS =
 const DOWNSTREAM_SOCKET_TIMEOUT_MS = DOWNSTREAM_REQUEST_TIMEOUT_MS;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const PROVIDER_AUTHORIZATION_PATTERN = /^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
+const PROVIDER_TOKEN_PATTERN = /^[A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 const AGENT_WEB_HOSTNAME = new URL(KEMERBET_AGENT_DEPOSIT_URL).hostname;
 const AGENT_WEB_PATH = new URL(KEMERBET_AGENT_DEPOSIT_URL).pathname;
 const AGENT_API_HOSTNAME = new URL(KEMERBET_AGENT_API_ORIGIN).hostname;
 const BOOTSTRAP_HOSTNAME = 'agt-client-akm.agent-digi.com';
 const AGENT_WEB_ORIGIN = new URL(KEMERBET_AGENT_DEPOSIT_URL).origin;
+const SESSION_REFRESH_PATH = '/Account/RefreshToken';
+
+export const KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT = Object.freeze({
+  contentType: 'application/json',
+  grantType: 'refresh_token',
+  hostname: AGENT_API_HOSTNAME,
+  maximumBodyBytes: MAX_SESSION_REFRESH_BODY_BYTES,
+  maximumResponseBytes: MAX_SESSION_REFRESH_RESPONSE_BYTES,
+  maximumTokenCharacters: MAX_SESSION_REFRESH_TOKEN_CHARACTERS,
+  method: 'POST',
+  minimumTokenCharacters: MIN_SESSION_REFRESH_TOKEN_CHARACTERS,
+  origin: AGENT_WEB_ORIGIN,
+  path: SESSION_REFRESH_PATH,
+  referer: KEMERBET_AGENT_DEPOSIT_URL,
+  upstreamOperationTimeoutMs: SESSION_REFRESH_UPSTREAM_TIMEOUT_MS,
+} as const);
 
 export const KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT = Object.freeze({
   downstreamRequestTimeoutMs: DOWNSTREAM_REQUEST_TIMEOUT_MS,
@@ -162,6 +189,12 @@ const READINESS_BODY = Buffer.from(
   'ascii',
 );
 
+const SESSION_REFRESH_REQUIRED_VALUE_FIELDS = Object.freeze([
+  'token',
+  'wsToken',
+  'refreshToken',
+] as const);
+
 export type KemerBetReadinessLayer7HeaderBag = Readonly<
   Record<string, string | readonly string[] | undefined>
 >;
@@ -173,13 +206,15 @@ export type KemerBetReadinessLayer7Classification =
       readonly hostname: string;
       readonly method: 'OPTIONS';
       readonly path: string;
+      readonly route: 'player_lookup' | 'session_refresh';
     }
   | {
       readonly decision: 'proxy';
       readonly hostname: string;
-      readonly method: 'GET';
+      readonly method: 'GET' | 'POST';
       readonly path: string;
-      readonly route: 'agent_web' | 'bootstrap_asset' | 'player_lookup';
+      readonly route: 'agent_web' | 'bootstrap_asset' | 'player_lookup' | 'session_refresh';
+      readonly bodyLength?: number;
     };
 
 export interface KemerBetReadinessLayer7ClassifierInput {
@@ -192,9 +227,11 @@ export interface KemerBetReadinessLayer7ClassifierInput {
 }
 
 export interface KemerBetReadinessLayer7UpstreamRequest {
+  readonly body?: Buffer;
   readonly headers: Readonly<Record<string, string | readonly string[]>>;
   readonly hostname: string;
-  readonly method: 'GET';
+  readonly method: 'GET' | 'POST';
+  readonly operationTimeoutMs?: number;
   readonly path: string;
   readonly signal: AbortSignal;
 }
@@ -249,6 +286,7 @@ export interface KemerBetReadinessLayer7ProxyOptions {
   readonly port?: number;
   readonly readinessSignal?: KemerBetReadinessLayer7ReadinessSignal;
   readonly sameAgentIdentityVerifier: KemerBetReadinessSameAgentIdentityVerifier;
+  readonly stageReporter?: (stage: KemerBetReadinessProxyStage) => void;
   readonly upstream?: KemerBetReadinessLayer7Upstream;
 }
 
@@ -283,6 +321,23 @@ function exactHeaderValue(headers: KemerBetReadinessLayer7HeaderBag, name: strin
   return value !== undefined && !/[\r\n\0]/u.test(value) ? value : null;
 }
 
+function hasJsonBaseMediaType(headers: KemerBetReadinessLayer7HeaderBag): boolean {
+  const contentType = exactHeaderValue(headers, 'content-type');
+  return (
+    contentType !== null &&
+    contentType.split(';', 1)[0]?.trim().toLowerCase() ===
+      KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.contentType
+  );
+}
+
+function hasCanonicalJsonResponseContentType(headers: KemerBetReadinessLayer7HeaderBag): boolean {
+  const contentType = exactHeaderValue(headers, 'content-type');
+  return (
+    contentType !== null &&
+    /^application\/json(?:;[ \t]*charset=utf-8)?$/iu.test(contentType.trim())
+  );
+}
+
 function observedHeaderCount(headers: KemerBetReadinessLayer7HeaderBag): number {
   return Object.values(headers).reduce(
     (count, value) => count + (Array.isArray(value) ? value.length : value === undefined ? 0 : 1),
@@ -307,7 +362,24 @@ function requestsUpgrade(headers: KemerBetReadinessLayer7HeaderBag): boolean {
   );
 }
 
-function exactPreflight(headers: KemerBetReadinessLayer7HeaderBag): boolean {
+function exactRequestedHeaders(
+  headers: KemerBetReadinessLayer7HeaderBag,
+  expectedHeaders: ReadonlySet<string>,
+): boolean {
+  const requestedHeaderLine = exactHeaderValue(headers, 'access-control-request-headers');
+  if (requestedHeaderLine === null) return false;
+  const requestedHeaders = requestedHeaderLine
+    .split(',')
+    .map((name) => name.trim().toLowerCase())
+    .filter((name) => name !== '');
+  return (
+    requestedHeaders.length === expectedHeaders.size &&
+    new Set(requestedHeaders).size === requestedHeaders.length &&
+    requestedHeaders.every((name) => expectedHeaders.has(name))
+  );
+}
+
+function exactLookupPreflight(headers: KemerBetReadinessLayer7HeaderBag): boolean {
   if (
     exactHeaderValue(headers, 'origin') !== AGENT_WEB_ORIGIN ||
     exactHeaderValue(headers, 'access-control-request-method') !== 'GET'
@@ -327,6 +399,30 @@ function exactPreflight(headers: KemerBetReadinessLayer7HeaderBag): boolean {
   );
 }
 
+function exactSessionRefreshPreflight(headers: KemerBetReadinessLayer7HeaderBag): boolean {
+  return (
+    exactHeaderValue(headers, 'origin') === AGENT_WEB_ORIGIN &&
+    exactHeaderValue(headers, 'access-control-request-method') === 'POST' &&
+    exactRequestedHeaders(headers, new Set(['content-type', 'grant_type']))
+  );
+}
+
+function exactPositiveContentLength(
+  headers: KemerBetReadinessLayer7HeaderBag,
+  maximumBytes: number,
+): number | null {
+  if (
+    headerValues(headers, 'transfer-encoding').length !== 0 ||
+    headerValues(headers, 'expect').length !== 0
+  ) {
+    return null;
+  }
+  const value = exactHeaderValue(headers, 'content-length');
+  if (value === null || !/^[1-9][0-9]{0,3}$/u.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= maximumBytes ? parsed : null;
+}
+
 /** Classify an inbound request without performing DNS, network, file, or logging operations. */
 export function classifyKemerBetReadinessLayer7Request(
   input: KemerBetReadinessLayer7ClassifierInput,
@@ -342,19 +438,43 @@ export function classifyKemerBetReadinessLayer7Request(
     input.rawTarget.length > 256 ||
     !input.rawTarget.startsWith('/') ||
     /[\r\n\0#]/u.test(input.rawTarget) ||
-    !hasNoRequestBody(input.headers) ||
     input.isUpgrade === true ||
     requestsUpgrade(input.headers)
   ) {
     return reject;
   }
   const hostname = exactHeaderValue(input.headers, 'host');
-  if (
-    hostname === null ||
-    !TLS_HOSTS.has(hostname) ||
-    input.sniServername !== hostname ||
-    (input.method !== 'GET' && input.method !== 'OPTIONS')
-  ) {
+  if (hostname === null || !TLS_HOSTS.has(hostname) || input.sniServername !== hostname) {
+    return reject;
+  }
+  if (input.method === 'POST') {
+    const bodyLength = exactPositiveContentLength(
+      input.headers,
+      KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumBodyBytes,
+    );
+    return hostname === AGENT_API_HOSTNAME &&
+      input.rawTarget === KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.path &&
+      bodyLength !== null &&
+      hasJsonBaseMediaType(input.headers) &&
+      exactHeaderValue(input.headers, 'grant_type') ===
+        KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.grantType &&
+      exactHeaderValue(input.headers, 'origin') ===
+        KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.origin &&
+      exactHeaderValue(input.headers, 'referer') ===
+        KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.referer &&
+      headerValues(input.headers, 'authorization').length === 0 &&
+      headerValues(input.headers, KEMERBET_READINESS_LAYER7_AUTHORIZATION_HEADER).length === 0
+      ? Object.freeze({
+          bodyLength,
+          decision: 'proxy' as const,
+          hostname,
+          method: input.method,
+          path: input.rawTarget,
+          route: 'session_refresh' as const,
+        })
+      : reject;
+  }
+  if ((input.method !== 'GET' && input.method !== 'OPTIONS') || !hasNoRequestBody(input.headers)) {
     return reject;
   }
   if (hostname === AGENT_WEB_HOSTNAME) {
@@ -384,6 +504,17 @@ export function classifyKemerBetReadinessLayer7Request(
       : reject;
   }
   if (hostname !== AGENT_API_HOSTNAME) return reject;
+  if (input.rawTarget === KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.path) {
+    return input.method === 'OPTIONS' && exactSessionRefreshPreflight(input.headers)
+      ? Object.freeze({
+          decision: 'local_preflight' as const,
+          hostname,
+          method: input.method,
+          path: input.rawTarget,
+          route: 'session_refresh' as const,
+        })
+      : reject;
+  }
   const lookupPrefix = `${KEMERBET_AGENT_PLAYER_LOOKUP_PATH}?externalId=`;
   if (!input.rawTarget.startsWith(lookupPrefix)) return reject;
   const playerId = input.rawTarget.slice(lookupPrefix.length);
@@ -395,12 +526,13 @@ export function classifyKemerBetReadinessLayer7Request(
     return reject;
   }
   if (input.method === 'OPTIONS') {
-    return internalAuthorization === null && exactPreflight(input.headers)
+    return internalAuthorization === null && exactLookupPreflight(input.headers)
       ? Object.freeze({
           decision: 'local_preflight' as const,
           hostname,
           method: input.method,
           path: input.rawTarget,
+          route: 'player_lookup' as const,
         })
       : reject;
   }
@@ -486,6 +618,31 @@ export function sanitizeKemerBetReadinessLayer7RequestHeaders(
       'sec-fetch-dest': classification.path.endsWith('.css') ? 'style' : 'script',
       'sec-fetch-mode': 'no-cors',
       'sec-fetch-site': 'same-site',
+      'user-agent': FIXED_USER_AGENT,
+    });
+  }
+  if (classification.route === 'session_refresh') {
+    if (
+      classification.method !== 'POST' ||
+      classification.bodyLength === undefined ||
+      !Number.isSafeInteger(classification.bodyLength) ||
+      classification.bodyLength < 1 ||
+      classification.bodyLength >
+        KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumBodyBytes
+    ) {
+      return unavailable();
+    }
+    return Object.freeze({
+      accept: 'application/json',
+      'accept-encoding': 'identity',
+      'content-length': String(classification.bodyLength),
+      'content-type': KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.contentType,
+      grant_type: KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.grantType,
+      origin: KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.origin,
+      referer: KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.referer,
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'cross-site',
       'user-agent': FIXED_USER_AGENT,
     });
   }
@@ -760,16 +917,370 @@ function sameTopologyAttestation(
   );
 }
 
+const EXACT_SESSION_REFRESH_JSON_PATTERN =
+  /^[ \t\r\n]*\{[ \t\r\n]*"refreshToken"[ \t\r\n]*:[ \t\r\n]*("(?:\\["\\/bfnrt]|\\u[0-9A-Fa-f]{4}|[^"\\\u0000-\u001f])*")[ \t\r\n]*\}[ \t\r\n]*$/u;
+
+function canonicalizeKemerBetReadinessSessionRefreshBody(body: Buffer): Buffer | null {
+  if (
+    !Buffer.isBuffer(body) ||
+    body.length < 1 ||
+    body.length > KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumBodyBytes
+  ) {
+    return null;
+  }
+  let text = '';
+  let refreshToken = '';
+  let utf8RoundTrip: Buffer | null = null;
+  try {
+    text = body.toString('utf8');
+    utf8RoundTrip = Buffer.from(text, 'utf8');
+    if (!utf8RoundTrip.equals(body)) return null;
+    const match = EXACT_SESSION_REFRESH_JSON_PATTERN.exec(text);
+    const encodedRefreshToken = match?.[1];
+    if (encodedRefreshToken === undefined) return null;
+    const parsedRefreshToken = JSON.parse(encodedRefreshToken) as unknown;
+    if (typeof parsedRefreshToken !== 'string') return null;
+    refreshToken = parsedRefreshToken;
+    if (
+      refreshToken.length <
+        KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.minimumTokenCharacters ||
+      refreshToken.length >
+        KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumTokenCharacters ||
+      /[\u0000-\u001f\u007f]/u.test(refreshToken)
+    ) {
+      return null;
+    }
+    const canonical = Buffer.from(JSON.stringify({ refreshToken }), 'utf8');
+    if (canonical.length > KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumBodyBytes) {
+      canonical.fill(0);
+      return null;
+    }
+    return canonical;
+  } catch {
+    return null;
+  } finally {
+    utf8RoundTrip?.fill(0);
+    refreshToken = '';
+    text = '';
+  }
+}
+
+/** Validate the exact one-property JSON shape without retaining its canonical token buffer. */
+export function isExactKemerBetReadinessSessionRefreshBody(body: Buffer): boolean {
+  const canonical = canonicalizeKemerBetReadinessSessionRefreshBody(body);
+  if (canonical === null) return false;
+  canonical.fill(0);
+  return true;
+}
+
+function isPlainJsonRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasBoundedSessionRefreshJsonShape(value: unknown): boolean {
+  let keyCount = 0;
+  const inspect = (candidate: unknown, depth: number): boolean => {
+    if (depth > 8) return false;
+    if (candidate === null || typeof candidate === 'boolean') return true;
+    if (typeof candidate === 'number') return Number.isFinite(candidate);
+    if (typeof candidate === 'string') {
+      return candidate.length <= 4_096 && !/[\u0000-\u001f\u007f]/u.test(candidate);
+    }
+    if (Array.isArray(candidate)) {
+      return candidate.length <= 64 && candidate.every((entry) => inspect(entry, depth + 1));
+    }
+    if (!isPlainJsonRecord(candidate)) return false;
+    const entries = Object.entries(candidate);
+    keyCount += entries.length;
+    return (
+      entries.length <= 64 &&
+      keyCount <= 256 &&
+      entries.every(
+        ([key, entry]) =>
+          key.length >= 1 &&
+          key.length <= 64 &&
+          !/[\u0000-\u001f\u007f]/u.test(key) &&
+          inspect(entry, depth + 1),
+      )
+    );
+  };
+  return inspect(value, 0);
+}
+
+function hasOnlyUniqueSessionRefreshJsonObjectKeys(serialized: string): boolean {
+  let index = 0;
+  const skipWhitespace = (): void => {
+    while (/^[\t\n\r ]$/u.test(serialized[index] ?? '')) index += 1;
+  };
+  const parseString = (decode: boolean): { readonly ok: boolean; readonly value: string } => {
+    if (serialized[index] !== '"') return { ok: false, value: '' };
+    const start = index;
+    index += 1;
+    while (index < serialized.length) {
+      const character = serialized[index] ?? '';
+      if (character === '"') {
+        index += 1;
+        if (!decode) return { ok: true, value: '' };
+        try {
+          const value = JSON.parse(serialized.slice(start, index)) as unknown;
+          return typeof value === 'string' ? { ok: true, value } : { ok: false, value: '' };
+        } catch {
+          return { ok: false, value: '' };
+        }
+      }
+      if (character === '\\') {
+        index += 1;
+        const escape = serialized[index] ?? '';
+        if (escape === 'u') {
+          if (!/^[0-9A-Fa-f]{4}$/u.test(serialized.slice(index + 1, index + 5))) {
+            return { ok: false, value: '' };
+          }
+          index += 5;
+          continue;
+        }
+        if (!/["\\/bfnrt]/u.test(escape)) return { ok: false, value: '' };
+        index += 1;
+        continue;
+      }
+      if (character.charCodeAt(0) < 0x20) return { ok: false, value: '' };
+      index += 1;
+    }
+    return { ok: false, value: '' };
+  };
+  const parseValue = (depth: number): boolean => {
+    if (depth > 8) return false;
+    skipWhitespace();
+    const character = serialized[index];
+    if (character === '"') return parseString(false).ok;
+    if (character === '{') {
+      index += 1;
+      skipWhitespace();
+      const keys = new Set<string>();
+      if (serialized[index] === '}') {
+        index += 1;
+        return true;
+      }
+      while (index < serialized.length) {
+        skipWhitespace();
+        const key = parseString(true);
+        if (!key.ok || keys.has(key.value)) return false;
+        keys.add(key.value);
+        skipWhitespace();
+        if (serialized[index] !== ':') return false;
+        index += 1;
+        if (!parseValue(depth + 1)) return false;
+        skipWhitespace();
+        if (serialized[index] === '}') {
+          index += 1;
+          return true;
+        }
+        if (serialized[index] !== ',') return false;
+        index += 1;
+      }
+      return false;
+    }
+    if (character === '[') {
+      index += 1;
+      skipWhitespace();
+      if (serialized[index] === ']') {
+        index += 1;
+        return true;
+      }
+      while (index < serialized.length) {
+        if (!parseValue(depth + 1)) return false;
+        skipWhitespace();
+        if (serialized[index] === ']') {
+          index += 1;
+          return true;
+        }
+        if (serialized[index] !== ',') return false;
+        index += 1;
+      }
+      return false;
+    }
+    for (const literal of ['true', 'false', 'null']) {
+      if (serialized.startsWith(literal, index)) {
+        index += literal.length;
+        return true;
+      }
+    }
+    const number = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/u.exec(
+      serialized.slice(index),
+    )?.[0];
+    if (number === undefined) return false;
+    index += number.length;
+    return true;
+  };
+  try {
+    if (!parseValue(0)) return false;
+    skipWhitespace();
+    return index === serialized.length;
+  } catch {
+    return false;
+  }
+}
+
+/** Validate only the observed successful provider envelope; return no token-derived value. */
+export function validateKemerBetReadinessSessionRefreshResponse(input: {
+  readonly body: Buffer;
+  readonly headers: KemerBetReadinessLayer7HeaderBag;
+  readonly statusCode: number;
+}): boolean {
+  const contentEncodings = headerValues(input.headers, 'content-encoding');
+  if (
+    input.statusCode !== 200 ||
+    !Number.isSafeInteger(input.statusCode) ||
+    !Buffer.isBuffer(input.body) ||
+    input.body.length < 2 ||
+    input.body.length > KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumResponseBytes ||
+    !hasCanonicalJsonResponseContentType(input.headers) ||
+    contentEncodings.length > 1 ||
+    (contentEncodings.length === 1 && contentEncodings[0] !== 'identity') ||
+    headerValues(input.headers, 'set-cookie').length !== 0 ||
+    headerValues(input.headers, 'location').length !== 0 ||
+    headerValues(input.headers, 'content-disposition').length !== 0 ||
+    input.body.includes(0) ||
+    (input.body.length >= 3 &&
+      input.body[0] === 0xef &&
+      input.body[1] === 0xbb &&
+      input.body[2] === 0xbf)
+  ) {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    const serialized = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(
+      input.body,
+    );
+    if (!hasOnlyUniqueSessionRefreshJsonObjectKeys(serialized)) return false;
+    parsed = JSON.parse(serialized) as unknown;
+  } catch {
+    return false;
+  }
+  if (
+    !isPlainJsonRecord(parsed) ||
+    !hasBoundedSessionRefreshJsonShape(parsed) ||
+    parsed.resultCode !== 0 ||
+    !isPlainJsonRecord(parsed.value)
+  ) {
+    return false;
+  }
+  const value = parsed.value;
+  if (
+    !SESSION_REFRESH_REQUIRED_VALUE_FIELDS.every(
+      (field) => typeof value[field] === 'string' && PROVIDER_TOKEN_PATTERN.test(value[field]),
+    ) ||
+    (value.tokenType !== 0 && value.hasPrevious !== true)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function readExactKemerBetReadinessSessionRefreshBody(
+  request: IncomingMessage,
+  expectedLength: number,
+): Promise<Buffer> {
+  if (
+    !Number.isSafeInteger(expectedLength) ||
+    expectedLength < 1 ||
+    expectedLength > KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumBodyBytes
+  ) {
+    return unavailable();
+  }
+  const chunks: Buffer[] = [];
+  let byteCount = 0;
+  try {
+    for await (const chunkValue of request) {
+      const chunk = Buffer.isBuffer(chunkValue) ? chunkValue : Buffer.from(chunkValue);
+      byteCount += chunk.length;
+      if (
+        byteCount > expectedLength ||
+        byteCount > KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumBodyBytes
+      ) {
+        return unavailable();
+      }
+      chunks.push(chunk);
+    }
+    if (byteCount !== expectedLength) return unavailable();
+    const body = Buffer.concat(chunks, byteCount);
+    const canonical = canonicalizeKemerBetReadinessSessionRefreshBody(body);
+    body.fill(0);
+    return canonical ?? unavailable();
+  } catch {
+    return unavailable();
+  } finally {
+    for (const chunk of chunks) chunk.fill(0);
+  }
+}
+
+function isExactProductionSessionRefreshUpstreamInput(
+  input: KemerBetReadinessLayer7UpstreamRequest,
+  operationTimeoutMs: number,
+): boolean {
+  if (
+    input.method !== 'POST' ||
+    input.hostname !== KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.hostname ||
+    input.path !== KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.path ||
+    operationTimeoutMs !==
+      KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.upstreamOperationTimeoutMs ||
+    !Buffer.isBuffer(input.body)
+  ) {
+    return false;
+  }
+  const canonical = canonicalizeKemerBetReadinessSessionRefreshBody(input.body);
+  if (canonical === null) return false;
+  const bodyIsCanonical = canonical.length === input.body.length && canonical.equals(input.body);
+  canonical.fill(0);
+  if (!bodyIsCanonical) return false;
+  const expectedHeaders = sanitizeKemerBetReadinessLayer7RequestHeaders(
+    {},
+    Object.freeze({
+      bodyLength: input.body.length,
+      decision: 'proxy' as const,
+      hostname: KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.hostname,
+      method: 'POST' as const,
+      path: KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.path,
+      route: 'session_refresh' as const,
+    }),
+  );
+  const actualNames = Object.keys(input.headers).sort();
+  const expectedNames = Object.keys(expectedHeaders).sort();
+  return (
+    actualNames.length === expectedNames.length &&
+    actualNames.every((name, index) => name === expectedNames[index]) &&
+    expectedNames.every((name) => input.headers[name] === expectedHeaders[name])
+  );
+}
+
 export async function productionKemerBetReadinessLayer7Upstream(
   input: KemerBetReadinessLayer7UpstreamRequest,
 ): Promise<KemerBetReadinessLayer7UpstreamResponse> {
-  if (input.signal.aborted) return unavailable();
+  const operationTimeoutMs = input.operationTimeoutMs ?? UPSTREAM_TIMEOUT_MS;
+  if (
+    input.signal.aborted ||
+    (input.method !== 'GET' && input.method !== 'POST') ||
+    (input.method === 'GET' &&
+      (input.body !== undefined || operationTimeoutMs !== UPSTREAM_TIMEOUT_MS)) ||
+    (input.method === 'POST' &&
+      !isExactProductionSessionRefreshUpstreamInput(input, operationTimeoutMs))
+  ) {
+    return unavailable();
+  }
   return new Promise((resolvePromise, rejectPromise) => {
     let settled = false;
     let responseMessage: IncomingMessage | null = null;
+    const responseChunks: Buffer[] = [];
+    const clearResponseChunks = () => {
+      for (const chunk of responseChunks) chunk.fill(0);
+      responseChunks.length = 0;
+    };
     const fail = () => {
       if (settled) return;
       settled = true;
+      clearResponseChunks();
       responseMessage?.destroy();
       upstreamRequest.destroy();
       rejectPromise(new KemerBetReadinessLayer7UnavailableError());
@@ -790,7 +1301,7 @@ export async function productionKemerBetReadinessLayer7Upstream(
       rejectUnauthorized: true,
       servername: input.hostname,
       signal: input.signal,
-      timeout: KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT.upstreamOperationTimeoutMs,
+      timeout: operationTimeoutMs,
     });
     const abort = () => fail();
     input.signal.addEventListener('abort', abort, { once: true });
@@ -815,7 +1326,6 @@ export async function productionKemerBetReadinessLayer7Upstream(
         fail();
         return;
       }
-      const chunks: Buffer[] = [];
       let byteCount = 0;
       response.on('data', (chunk: Buffer | string) => {
         if (settled) return;
@@ -825,7 +1335,7 @@ export async function productionKemerBetReadinessLayer7Upstream(
           fail();
           return;
         }
-        chunks.push(buffer);
+        responseChunks.push(buffer);
       });
       response.once('aborted', fail);
       response.once('error', fail);
@@ -843,16 +1353,12 @@ export async function productionKemerBetReadinessLayer7Upstream(
         }
         settled = true;
         input.signal.removeEventListener('abort', abort);
-        resolvePromise(
-          Object.freeze({
-            body: Buffer.concat(chunks, byteCount),
-            headers: response.headersDistinct,
-            statusCode,
-          }),
-        );
+        const body = Buffer.concat(responseChunks, byteCount);
+        clearResponseChunks();
+        resolvePromise(Object.freeze({ body, headers: response.headersDistinct, statusCode }));
       });
     });
-    upstreamRequest.end();
+    upstreamRequest.end(input.body);
   });
 }
 
@@ -883,6 +1389,67 @@ function fixedLookupPreflight(response: ServerResponse): void {
     vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
   });
   response.end();
+}
+
+function fixedSessionRefreshPreflight(response: ServerResponse): void {
+  if (response.headersSent || response.destroyed) {
+    response.destroy();
+    return;
+  }
+  response.writeHead(204, {
+    'access-control-allow-headers': 'content-type, grant_type',
+    'access-control-allow-methods': 'POST',
+    'access-control-allow-origin': AGENT_WEB_ORIGIN,
+    'cache-control': 'no-store',
+    'content-length': '0',
+    vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+  });
+  response.end();
+}
+
+async function writeFixedSessionRefreshResponse(
+  response: ServerResponse,
+  body: Buffer,
+): Promise<void> {
+  if (
+    response.headersSent ||
+    response.destroyed ||
+    !Buffer.isBuffer(body) ||
+    body.length < 1 ||
+    body.length > KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.maximumResponseBytes
+  ) {
+    return unavailable();
+  }
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const cleanup = () => {
+      response.off('finish', onFinish);
+      response.off('error', onFailure);
+      response.off('close', onClose);
+    };
+    const onFinish = () => {
+      cleanup();
+      resolvePromise();
+    };
+    const onFailure = () => {
+      cleanup();
+      rejectPromise(new KemerBetReadinessLayer7UnavailableError());
+    };
+    const onClose = () => {
+      if (!response.writableFinished) onFailure();
+    };
+    response.once('finish', onFinish);
+    response.once('error', onFailure);
+    response.once('close', onClose);
+    response.writeHead(200, {
+      'access-control-allow-origin': AGENT_WEB_ORIGIN,
+      'cache-control': 'no-store',
+      'content-length': String(body.length),
+      'content-type': 'application/json; charset=utf-8',
+      vary: 'Origin',
+      'x-content-type-options': 'nosniff',
+    });
+    response.end(body);
+  });
 }
 
 function effectiveUserId(explicitUserId: number | undefined): number {
@@ -931,6 +1498,9 @@ export function createKemerBetReadinessLayer7Proxy(
       : createProductionKemerBetReadinessLayer7ReadinessSignal());
   const userId = effectiveUserId(options.effectiveUserId);
   const groupId = effectiveGroupId(options.effectiveGroupId);
+  const reportStage =
+    options.stageReporter ??
+    (options.allowEphemeralTestPort === true ? () => undefined : recordKemerBetReadinessProxyStage);
   if (
     userId !== EXECUTOR_USER_ID ||
     groupId !== EXECUTOR_GROUP_ID ||
@@ -941,6 +1511,7 @@ export function createKemerBetReadinessLayer7Proxy(
     typeof options.sameAgentIdentityVerifier.verify !== 'function' ||
     typeof options.sameAgentIdentityVerifier.fail !== 'function' ||
     typeof options.sameAgentIdentityVerifier.destroy !== 'function' ||
+    typeof reportStage !== 'function' ||
     typeof readinessSignal.clear !== 'function' ||
     typeof readinessSignal.publish !== 'function' ||
     !hasCoherentKemerBetReadinessLayer7TimeoutBudget()
@@ -956,9 +1527,18 @@ export function createKemerBetReadinessLayer7Proxy(
   });
   let activeUpstreamRequests = 0;
   let activeLookupController: AbortController | null = null;
+  let activeSessionRefreshController: AbortController | null = null;
   let bootstrapCache = new Map<string, KemerBetReadinessLayer7BootstrapCacheEntry>();
+  let lookupPhaseStarted = false;
+  let sessionRefreshState: 'available' | 'in_flight' | 'succeeded' | 'failed' = 'available';
   let startupController: AbortController | null = null;
   let status: KemerBetReadinessLayer7ProxyHealth['status'] = 'created';
+  const poisonSessionRefreshBoundary = () => {
+    sessionRefreshState = 'failed';
+    options.sameAgentIdentityVerifier.fail();
+    activeSessionRefreshController?.abort();
+    activeLookupController?.abort();
+  };
   const server = createHttpsServer(
     {
       cert: KEMERBET_READINESS_LAYER7_TLS_CERTIFICATE_PEM,
@@ -989,8 +1569,91 @@ export function createKemerBetReadinessLayer7Proxy(
           return;
         }
         if (classification.decision === 'local_preflight') {
-          fixedLookupPreflight(response);
+          if (classification.route === 'session_refresh') fixedSessionRefreshPreflight(response);
+          else fixedLookupPreflight(response);
           request.resume();
+          return;
+        }
+        if (classification.route === 'session_refresh') {
+          if (
+            status !== 'ready' ||
+            lookupPhaseStarted ||
+            sessionRefreshState !== 'available' ||
+            activeUpstreamRequests >= MAX_CONCURRENT_UPSTREAM_REQUESTS
+          ) {
+            poisonSessionRefreshBoundary();
+            fixedResponse(response, 404, FIXED_REJECTED_BODY);
+            request.resume();
+            return;
+          }
+
+          // Reserve the only refresh before any await so a concurrent POST or first lookup loses.
+          sessionRefreshState = 'in_flight';
+          const controller = new AbortController();
+          activeSessionRefreshController = controller;
+          activeUpstreamRequests += 1;
+          let requestBody: Buffer | null = null;
+          let upstreamResponseBody: Buffer | null = null;
+          let refreshSucceeded = false;
+          const deadline = setTimeout(() => {
+            controller.abort();
+            request.destroy();
+          }, KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.upstreamOperationTimeoutMs);
+          deadline.unref();
+          const abort = () => controller.abort();
+          const closeBeforeFinish = () => {
+            if (!response.writableFinished) controller.abort();
+          };
+          request.once('aborted', abort);
+          response.once('close', closeBeforeFinish);
+          try {
+            requestBody = await readExactKemerBetReadinessSessionRefreshBody(
+              request,
+              classification.bodyLength ?? 0,
+            );
+            if (controller.signal.aborted) return unavailable();
+            const sanitizedHeaders = sanitizeKemerBetReadinessLayer7RequestHeaders(
+              request.headersDistinct,
+              Object.freeze({ ...classification, bodyLength: requestBody.length }),
+            );
+            reportStage('browser_refresh_forwarded');
+            const upstreamResponse = await upstream({
+              body: requestBody,
+              headers: sanitizedHeaders,
+              hostname: classification.hostname,
+              method: classification.method,
+              operationTimeoutMs:
+                KEMERBET_READINESS_LAYER7_SESSION_REFRESH_CONTRACT.upstreamOperationTimeoutMs,
+              path: classification.path,
+              signal: controller.signal,
+            });
+            upstreamResponseBody = upstreamResponse.body;
+            if (
+              controller.signal.aborted ||
+              !validateKemerBetReadinessSessionRefreshResponse({
+                body: upstreamResponseBody,
+                headers: upstreamResponse.headers,
+                statusCode: upstreamResponse.statusCode,
+              })
+            ) {
+              return unavailable();
+            }
+            reportStage('browser_refresh_response_complete');
+            await writeFixedSessionRefreshResponse(response, upstreamResponseBody);
+            refreshSucceeded = true;
+            sessionRefreshState = 'succeeded';
+          } finally {
+            clearTimeout(deadline);
+            requestBody?.fill(0);
+            upstreamResponseBody?.fill(0);
+            if (!refreshSucceeded) poisonSessionRefreshBoundary();
+            activeUpstreamRequests -= 1;
+            if (activeSessionRefreshController === controller) {
+              activeSessionRefreshController = null;
+            }
+            request.off('aborted', abort);
+            response.off('close', closeBeforeFinish);
+          }
           return;
         }
         if (classification.route !== 'player_lookup') {
@@ -1014,6 +1677,15 @@ export function createKemerBetReadinessLayer7Proxy(
           response.end(cached.body);
           return;
         }
+        // Zero refresh is valid. A started-but-incomplete refresh is terminal, and this assignment
+        // permanently closes refresh admission before authorization reservation or any await.
+        if (sessionRefreshState === 'in_flight' || sessionRefreshState === 'failed') {
+          poisonSessionRefreshBoundary();
+          fixedResponse(response, 404, FIXED_REJECTED_BODY);
+          request.resume();
+          return;
+        }
+        lookupPhaseStarted = true;
         let lookupReservation: KemerBetReadinessLayer7AuthorizationReservation | null = null;
         const authorization = exactHeaderValue(
           request.headersDistinct,
@@ -1218,6 +1890,8 @@ export function createKemerBetReadinessLayer7Proxy(
     close: async () => {
       status = 'stopped';
       startupController?.abort();
+      activeSessionRefreshController?.abort();
+      activeLookupController?.abort();
       try {
         await clearReadinessAndCloseServer();
       } finally {
@@ -1231,6 +1905,7 @@ export function createKemerBetReadinessLayer7Proxy(
       if (status !== 'created') return unavailable();
       status = 'starting';
       try {
+        reportStage('proxy_bootstrap');
         await readinessSignal.clear();
         const before = attestKemerBetReadinessLayer7NetworkTopology(await captureNetworkTopology());
         startupController = new AbortController();
@@ -1257,6 +1932,7 @@ export function createKemerBetReadinessLayer7Proxy(
         }
         status = 'ready';
         await readinessSignal.publish();
+        reportStage('proxy_ready');
       } catch {
         status = 'failed';
         startupController?.abort();

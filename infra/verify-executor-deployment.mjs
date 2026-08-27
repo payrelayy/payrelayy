@@ -1331,7 +1331,11 @@ assert.match(readinessLayer7ProxySource, /!hasNoRequestBody\(input\.headers\)/);
 assert.match(readinessLayer7ProxySource, /requestsUpgrade\(input\.headers\)/);
 assert.match(readinessLayer7ProxySource, /rejectUnauthorized: true/);
 assert.match(readinessLayer7ProxySource, /servername: input\.hostname/);
-assert.match(readinessLayer7ProxySource, /if \(input\.signal\.aborted\) return unavailable\(\)/);
+assert.match(
+  readinessLayer7ProxySource,
+  /const operationTimeoutMs = input\.operationTimeoutMs \?\? UPSTREAM_TIMEOUT_MS;\s*if \(\s*input\.signal\.aborted \|\|\s*\(input\.method !== 'GET' && input\.method !== 'POST'\) \|\|\s*\(input\.method === 'GET' &&\s*\(input\.body !== undefined \|\| operationTimeoutMs !== UPSTREAM_TIMEOUT_MS\)\) \|\|\s*\(input\.method === 'POST' &&\s*!isExactProductionSessionRefreshUpstreamInput\(input, operationTimeoutMs\)\)\s*\) \{\s*return unavailable\(\);\s*\}/,
+  'the production HTTPS transport must reject pre-abort, unknown methods, GET bodies/timeouts, and every non-exact refresh POST before socket construction',
+);
 assert.match(readinessLayer7ProxySource, /signal: input\.signal/);
 assert.match(
   readinessLayer7ProxySource,
@@ -1886,7 +1890,7 @@ const guardedProbeStart = noTransferReadinessSealSource.indexOf(
   'async function createKemerBetNoTransferReadinessGuardedProbeFromPage',
 );
 const guardedProbeEnd = noTransferReadinessSealSource.indexOf(
-  '\n/**\n * Build the five-lookup proof',
+  'export async function createKemerBetNoTransferReadinessSealProbeFromPage',
   guardedProbeStart,
 );
 assert.ok(guardedProbeStart >= 0 && guardedProbeEnd > guardedProbeStart);
@@ -1911,7 +1915,7 @@ const persistentProbeStart = noTransferReadinessSealSource.indexOf(
   'export async function openKemerBetNoTransferReadinessPersistentProfileProbe',
 );
 const persistentProbeEnd = noTransferReadinessSealSource.indexOf(
-  '\nasync function productionOpenProbe',
+  'async function productionOpenProbe',
   persistentProbeStart,
 );
 assert.ok(persistentProbeStart >= 0 && persistentProbeEnd > persistentProbeStart);

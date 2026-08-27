@@ -115,6 +115,14 @@ const KEMERBET_OPTIONAL_SIGNALR_WEBSOCKET_HOSTNAMES = new Set([
 const KEMERBET_OPTIONAL_SIGNALR_ACCESS_TOKEN_PATTERN = /^[A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
 const RECAPTCHA_HOSTNAMES = new Set(['www.google.com', 'www.recaptcha.net']);
 const KEMERBET_AGENT_REFRESH_TOKEN_PATH = '/Account/RefreshToken';
+const MAX_PROVIDER_REFRESH_BODY_BYTES = 8_192;
+export const KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT = Object.freeze({
+  hostname: KEMERBET_AGENT_API_HOSTNAME,
+  maxBodyBytes: MAX_PROVIDER_REFRESH_BODY_BYTES,
+  method: 'POST',
+  path: KEMERBET_AGENT_REFRESH_TOKEN_PATH,
+  route: 'session_refresh',
+} as const);
 const SENTRY_ENVELOPE_HOSTNAME = 'send.sentry.report';
 const SENTRY_ENVELOPE_PATH = '/api/306/envelope/';
 const HOTJAR_TELEMETRY_HOSTNAMES = new Set([
@@ -137,6 +145,10 @@ export type KemerBetNoTransferReadinessSealStage =
   | 'readiness_inputs'
   | 'signed_in_page'
   | 'route_guard'
+  | 'restored_navigation'
+  | 'refresh_admitted'
+  | 'refresh_forwarded'
+  | 'refresh_response_complete'
   | 'agent_identity'
   | 'agent_session_guard'
   | 'agent_identity_marker'
@@ -194,6 +206,13 @@ export interface KemerBetReadinessSealForbiddenRequestDiagnostic {
 
 export type KemerBetReadinessSealRequestClassification =
   | { readonly decision: 'allow' }
+  | {
+      readonly decision: 'allow_startup_refresh';
+      readonly hostname: typeof KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.hostname;
+      readonly method: typeof KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.method;
+      readonly path: typeof KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.path;
+      readonly route: typeof KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.route;
+    }
   | {
       readonly decision: 'abort_optional';
       readonly target: 'first_party_read' | 'known_telemetry' | 'optional_static' | 'recaptcha';
@@ -551,6 +570,92 @@ function optionalRequestClassification(
   return Object.freeze({ decision: 'abort_optional', target });
 }
 
+function startupRefreshRequestClassification(): KemerBetReadinessSealRequestClassification {
+  return Object.freeze({
+    decision: 'allow_startup_refresh',
+    hostname: KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.hostname,
+    method: KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.method,
+    path: KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.path,
+    route: KEMERBET_READINESS_STARTUP_REFRESH_ROUTE_CONTRACT.route,
+  });
+}
+
+/**
+ * Recognize only KemerBet's reviewed authenticated-session refresh shape. The refresh token is
+ * parsed only long enough to validate its bounded opaque shape; it is never returned, retained, or
+ * included in a diagnostic. Admission remains a separate one-use restored-startup state decision.
+ */
+export function isExactKemerBetReadinessStartupRefreshRequest(input: {
+  readonly headers?: Readonly<Record<string, string>> | undefined;
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly postData?: string | null | undefined;
+  readonly redirectedFrom?: boolean | undefined;
+  readonly requestUrl: string;
+  readonly resourceType?: string | undefined;
+}): boolean {
+  if (
+    !input.isMainFrame ||
+    input.isNavigationRequest ||
+    input.method !== 'POST' ||
+    (input.resourceType !== 'fetch' && input.resourceType !== 'xhr') ||
+    input.redirectedFrom !== false ||
+    input.requestUrl !== `${KEMERBET_AGENT_API_ORIGIN}${KEMERBET_AGENT_REFRESH_TOKEN_PATH}` ||
+    typeof input.postData !== 'string' ||
+    Buffer.byteLength(input.postData, 'utf8') > MAX_PROVIDER_REFRESH_BODY_BYTES
+  ) {
+    return false;
+  }
+  let url: URL;
+  try {
+    url = new URL(input.requestUrl);
+  } catch {
+    return false;
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.origin !== KEMERBET_AGENT_API_ORIGIN ||
+    url.pathname !== KEMERBET_AGENT_REFRESH_TOKEN_PATH ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.port !== ''
+  ) {
+    return false;
+  }
+  const headerEntries = Object.entries(input.headers ?? {});
+  const exactHeader = (expectedName: string): string | null => {
+    const values = headerEntries
+      .filter(([name]) => name.toLowerCase() === expectedName)
+      .map(([, value]) => value);
+    return values.length === 1 && values[0] !== undefined ? values[0] : null;
+  };
+  const contentType = exactHeader('content-type');
+  if (
+    contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json' ||
+    exactHeader('grant_type') !== 'refresh_token'
+  ) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(input.postData) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+    const object = parsed as Record<string, unknown>;
+    const refreshToken = object.refreshToken;
+    return (
+      Object.keys(object).length === 1 &&
+      typeof refreshToken === 'string' &&
+      refreshToken.length >= 16 &&
+      refreshToken.length <= 4_096 &&
+      !/[\u0000-\u001f\u007f]/u.test(refreshToken)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function exactPlayerLookupTransportRequest(input: {
   readonly headers?: Readonly<Record<string, string>> | undefined;
   readonly method: string;
@@ -662,6 +767,8 @@ export function classifyKemerBetReadinessSealRequest(input: {
   readonly isMainFrame: boolean;
   readonly isNavigationRequest: boolean;
   readonly method: string;
+  readonly postData?: string | null | undefined;
+  readonly redirectedFrom?: boolean | undefined;
   readonly requestUrl: string;
   readonly resourceType?: string | undefined;
 }): KemerBetReadinessSealRequestClassification {
@@ -702,6 +809,20 @@ export function classifyKemerBetReadinessSealRequest(input: {
     url.origin === KEMERBET_AGENT_API_ORIGIN &&
     url.pathname === KEMERBET_AGENT_REFRESH_TOKEN_PATH
   ) {
+    if (
+      isExactKemerBetReadinessStartupRefreshRequest({
+        headers: input.headers,
+        isMainFrame: input.isMainFrame,
+        isNavigationRequest: input.isNavigationRequest,
+        method: input.method,
+        postData: input.postData,
+        redirectedFrom: input.redirectedFrom,
+        requestUrl: input.requestUrl,
+        resourceType: input.resourceType,
+      })
+    ) {
+      return startupRefreshRequestClassification();
+    }
     return forbiddenRequestClassification('exact_auth_session_endpoint', target, method, kind);
   }
   if (
@@ -760,6 +881,8 @@ export function isAllowedKemerBetReadinessSealRequest(input: {
   readonly isMainFrame: boolean;
   readonly isNavigationRequest: boolean;
   readonly method: string;
+  readonly postData?: string | null | undefined;
+  readonly redirectedFrom?: boolean | undefined;
   readonly requestUrl: string;
   readonly resourceType?: string | undefined;
 }): boolean {
@@ -803,8 +926,16 @@ export interface KemerBetReadinessSealRequestPort {
   headersArray?(): Promise<readonly KemerBetReadinessTransportHeader[]>;
   isNavigationRequest(): boolean;
   method(): string;
+  postData?(): string | null;
+  redirectedFrom?(): unknown | null;
   resourceType?(): string;
+  response?(): Promise<KemerBetReadinessSealResponsePort | null>;
   url(): string;
+}
+
+export interface KemerBetReadinessSealResponsePort {
+  finished(): Promise<Error | null>;
+  status(): number;
 }
 
 export interface KemerBetReadinessSealRoutePort {
@@ -831,6 +962,8 @@ export async function guardKemerBetReadinessSealRoute(
       isMainFrame: request.frame() === page.mainFrame(),
       isNavigationRequest: request.isNavigationRequest(),
       method: request.method(),
+      postData: request.postData?.(),
+      redirectedFrom: request.redirectedFrom?.() !== null,
       requestUrl: request.url(),
       resourceType: request.resourceType?.(),
     });
@@ -841,6 +974,7 @@ export async function guardKemerBetReadinessSealRoute(
       reportStage,
       expectedPlayerId,
       null,
+      false,
     );
   } catch {
     await route.abort('blockedbyclient').catch(() => undefined);
@@ -855,7 +989,35 @@ async function applyKemerBetReadinessSealRouteDecision(
   reportStage: (stage: KemerBetNoTransferReadinessSealStage) => void,
   expectedPlayerId: string | null,
   expectedLayer7Authorization: string | null,
+  startupRefreshAuthorized: boolean,
 ): Promise<void> {
+  if (classification.decision === 'allow_startup_refresh') {
+    if (!startupRefreshAuthorized || typeof request.response !== 'function') {
+      await route.abort('blockedbyclient');
+      return;
+    }
+    await route.continue();
+    try {
+      reportStage('refresh_forwarded');
+    } catch {
+      // A fixed diagnostic callback cannot invalidate a safely forwarded exact refresh.
+    }
+    const response = await request.response();
+    if (
+      response === null ||
+      response.status() < 200 ||
+      response.status() > 299 ||
+      (await response.finished()) !== null
+    ) {
+      return unavailable();
+    }
+    try {
+      reportStage('refresh_response_complete');
+    } catch {
+      // A fixed diagnostic callback cannot invalidate an already completed exact refresh.
+    }
+    return;
+  }
   if (classification.decision !== 'allow') {
     await route.abort('blockedbyclient');
     return;
@@ -897,6 +1059,7 @@ async function applyKemerBetReadinessSealRouteDecision(
 
 export interface KemerBetNoTransferReadinessRequestBoundary {
   readonly armCanonicalMainNavigation: () => void;
+  readonly armRestoredStartupRefresh: () => void;
   readonly beginTerminalClose: () => void;
   readonly canonicalMainNavigationConsumed: () => boolean;
   readonly detachAfterOwnerClose: () => void;
@@ -928,6 +1091,9 @@ export function createKemerBetNoTransferReadinessRequestBoundary(options: {
   let activeExpectedLookupConsumed = false;
   let canonicalMainNavigationArmed = false;
   let canonicalMainNavigationWasConsumed = false;
+  let restoredStartupRefreshEnabled = false;
+  let restoredStartupRefreshOpen = false;
+  let restoredStartupRefreshConsumed = false;
   let forbiddenRequestObserved = false;
   let firstForbiddenRequest: KemerBetReadinessSealForbiddenRequestDiagnostic | undefined;
   let routeHandlerFailureObserved = false;
@@ -976,6 +1142,8 @@ export function createKemerBetNoTransferReadinessRequestBoundary(options: {
           isMainFrame,
           isNavigationRequest,
           method: request.method(),
+          postData: request.postData?.(),
+          redirectedFrom: request.redirectedFrom?.() !== null,
           requestUrl: request.url(),
           resourceType: request.resourceType(),
         });
@@ -990,6 +1158,37 @@ export function createKemerBetNoTransferReadinessRequestBoundary(options: {
           } else {
             canonicalMainNavigationArmed = false;
             canonicalMainNavigationWasConsumed = true;
+            try {
+              options.reportStage('restored_navigation');
+            } catch {
+              // Fixed startup diagnostics cannot weaken the canonical route boundary.
+            }
+          }
+        }
+        let startupRefreshAuthorized = false;
+        if (classification.decision === 'allow_startup_refresh') {
+          if (
+            !restoredStartupRefreshOpen ||
+            restoredStartupRefreshConsumed ||
+            !canonicalMainNavigationWasConsumed ||
+            activeExpectedPlayerId !== null
+          ) {
+            classification = forbiddenRequestClassification(
+              'exact_auth_session_endpoint',
+              'agent_auth_session',
+              'POST',
+              'subresource',
+            );
+          } else {
+            // Reserve synchronously before any await. A concurrent second refresh cannot cross the
+            // one-use boundary while the first request is being continued or its response finishes.
+            restoredStartupRefreshConsumed = true;
+            startupRefreshAuthorized = true;
+            try {
+              options.reportStage('refresh_admitted');
+            } catch {
+              // Fixed startup diagnostics cannot weaken the one-use refresh reservation.
+            }
           }
         }
         if (classification.decision === 'forbid') {
@@ -1032,6 +1231,7 @@ export function createKemerBetNoTransferReadinessRequestBoundary(options: {
           options.reportStage,
           expectedPlayerId,
           expectedLayer7Authorization,
+          startupRefreshAuthorized,
         );
       } catch {
         routeHandlerFailureObserved = true;
@@ -1061,6 +1261,20 @@ export function createKemerBetNoTransferReadinessRequestBoundary(options: {
         return unavailable();
       }
       canonicalMainNavigationArmed = true;
+    },
+    armRestoredStartupRefresh() {
+      if (
+        !installed ||
+        restoredStartupRefreshEnabled ||
+        canonicalMainNavigationWasConsumed ||
+        activeExpectedPlayerId !== null ||
+        terminalCloseStarted ||
+        invalid()
+      ) {
+        return unavailable();
+      }
+      restoredStartupRefreshEnabled = true;
+      restoredStartupRefreshOpen = true;
     },
     beginTerminalClose() {
       if (!installed || terminalCloseStarted || activeExpectedPlayerId !== null || invalid()) {
@@ -1097,6 +1311,13 @@ export function createKemerBetNoTransferReadinessRequestBoundary(options: {
       while (operations.size > 0) await Promise.allSettled([...operations]);
     },
     async withExpectedPlayerLookup(playerId, layer7Authorization, action) {
+      if (restoredStartupRefreshEnabled) {
+        // The first Player lookup closes refresh admission synchronously, then waits for a
+        // previously admitted optional refresh to receive and finish a successful 2xx response.
+        // A refresh routed during this drain is late, sticky-forbidden, and prevents the lookup.
+        restoredStartupRefreshOpen = false;
+        while (operations.size > 0) await Promise.allSettled([...operations]);
+      }
       if (
         terminalCloseStarted ||
         !PLAYER_ID_PATTERN.test(playerId) ||
@@ -1200,6 +1421,7 @@ async function createKemerBetNoTransferReadinessGuardedProbeFromPage(
       // the complete context-wide boundaries first, then navigate that same page after bringing it
       // online. Same-page navigation preserves KemerBet's page-scoped sessionStorage; a fresh page
       // would silently discard the manually authenticated session.
+      requestBoundary.armRestoredStartupRefresh();
       requestBoundary.armCanonicalMainNavigation();
       options.startup.armCanonicalNavigation();
       await options.startup.setOnline();

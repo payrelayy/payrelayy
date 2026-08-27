@@ -15,6 +15,7 @@ import {
   createKemerBetNoTransferReadinessSealProbeFromPage,
   guardKemerBetReadinessSealRoute,
   isAllowedKemerBetReadinessSealRequest,
+  isExactKemerBetReadinessStartupRefreshRequest,
   isExactKemerBetReadinessSealPlayerLookupRequest,
   isKnownOptionalKemerBetSignalRWebSocket,
   KemerBetNoTransferReadinessSealUnavailableError,
@@ -39,6 +40,7 @@ const AGENT_PROFILE_PIN = `hmac-sha256-agent-profile-pin-v3:${'1'.repeat(64)}`;
 const LAYER7_AUTHORIZATION = `v1.${'a'.repeat(32)}.1.${'b'.repeat(64)}`;
 const PROVIDER_AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
 const SIGNALR_ACCESS_TOKEN = 'abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
+const PROVIDER_REFRESH_TOKEN = 'reviewed-refresh-token-value';
 const PROVIDER_AUTHORIZATION_DIGEST = `sha256-provider-authorization-v1:${createHash('sha256')
   .update(PROVIDER_AUTHORIZATION, 'utf8')
   .digest('hex')}`;
@@ -76,9 +78,18 @@ function guardedRouteFixture(input: {
   >;
   readonly isMainFrame?: boolean;
   readonly isNavigationRequest?: boolean;
+  readonly mainFrame?: unknown;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
   readonly resourceType?: string;
+  readonly responseFinishedError?: Error | null;
+  readonly responsePromise?: Promise<{
+    readonly finished: () => Promise<Error | null>;
+    readonly status: () => number;
+  } | null>;
+  readonly responseStatus?: number;
 }) {
-  const mainFrame = {};
+  const mainFrame = input.mainFrame ?? {};
   const subframe = {};
   const abort = vi.fn(async (_errorCode: 'blockedbyclient'): Promise<void> => undefined);
   const continueRequest = vi.fn(async (): Promise<void> => undefined);
@@ -97,7 +108,14 @@ function guardedRouteFixture(input: {
       headersArray: async () => input.completeHeadersPromise ?? completeHeaders,
       isNavigationRequest: () => input.isNavigationRequest === true,
       method: () => input.method,
+      postData: () => input.postData ?? null,
+      redirectedFrom: () => (input.redirectedFrom === true ? {} : null),
       resourceType: () => input.resourceType ?? 'xhr',
+      response: async () =>
+        input.responsePromise ?? {
+          finished: async () => input.responseFinishedError ?? null,
+          status: () => input.responseStatus ?? 200,
+        },
       url: () => input.requestUrl,
     }),
     abort,
@@ -521,6 +539,9 @@ describe('KemerBet no-transfer readiness seal', () => {
       "options.startup.mode === 'offline_restored_canonical_navigation'",
     );
     expect(guardedBody).toContain('const expectedStartupUrl = KEMERBET_AGENT_DEPOSIT_URL');
+    expect(guardedBody.indexOf('requestBoundary.armRestoredStartupRefresh()')).toBeLessThan(
+      guardedBody.indexOf('requestBoundary.armCanonicalMainNavigation()'),
+    );
     expect(guardedBody.indexOf('requestBoundary.armCanonicalMainNavigation()')).toBeLessThan(
       guardedBody.indexOf('await options.startup.setOnline()'),
     );
@@ -883,6 +904,283 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(boundary.internalViolation()).toBe(false);
     boundary.observeFrameNavigation({ isMainFrame: true, url: KEMERBET_AGENT_DEPOSIT_URL });
     expect(boundary.internalViolation()).toBe(true);
+  });
+
+  it('admits exactly one successful refresh after restored navigation begins and reports fixed stages', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const stages: string[] = [];
+    const forbidden: KemerBetReadinessSealForbiddenRequestDiagnostic[] = [];
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportForbiddenRequest: (diagnostic) => forbidden.push(diagnostic),
+      reportStage: (stage) => stages.push(stage),
+    });
+    await boundary.install();
+    boundary.armRestoredStartupRefresh();
+    boundary.armCanonicalMainNavigation();
+
+    const navigation = guardedRouteFixture({
+      isMainFrame: true,
+      isNavigationRequest: true,
+      mainFrame,
+      method: 'GET',
+      requestUrl: KEMERBET_AGENT_DEPOSIT_URL,
+      resourceType: 'document',
+    });
+    await handler!(navigation.route as unknown as Route);
+    expect(navigation.continueRequest).toHaveBeenCalledOnce();
+
+    const exactRefreshInput = {
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      mainFrame,
+      method: 'POST',
+      postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN }),
+      redirectedFrom: false,
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+      resourceType: 'fetch',
+    } as const;
+    const first = guardedRouteFixture(exactRefreshInput);
+    await handler!(first.route as unknown as Route);
+
+    expect(first.continueRequest).toHaveBeenCalledOnce();
+    expect(first.abort).not.toHaveBeenCalled();
+    expect(stages).toEqual([
+      'restored_navigation',
+      'refresh_admitted',
+      'refresh_forwarded',
+      'refresh_response_complete',
+    ]);
+    expect(forbidden).toEqual([]);
+    expect(JSON.stringify(stages)).not.toContain(PROVIDER_REFRESH_TOKEN);
+
+    const second = guardedRouteFixture(exactRefreshInput);
+    await handler!(second.route as unknown as Route);
+
+    expect(second.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(second.continueRequest).not.toHaveBeenCalled();
+    expect(forbidden).toEqual([
+      {
+        reason: 'exact_auth_session_endpoint',
+        target: 'agent_auth_session',
+        method: 'POST',
+        kind: 'subresource',
+      },
+    ]);
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it('makes an exact refresh before the canonical restored navigation begins sticky-forbidden', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const stages: string[] = [];
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: (stage) => stages.push(stage),
+    });
+    await boundary.install();
+    boundary.armRestoredStartupRefresh();
+    const premature = guardedRouteFixture({
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      mainFrame,
+      method: 'POST',
+      postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN }),
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+      resourceType: 'fetch',
+    });
+
+    await handler!(premature.route as unknown as Route);
+
+    expect(premature.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(premature.continueRequest).not.toHaveBeenCalled();
+    expect(stages).toContain('forbidden_request');
+    expect(stages).not.toContain('refresh_admitted');
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it('keeps startup refresh optional and makes the first Player lookup close admission', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: () => undefined,
+    });
+    await boundary.install();
+    boundary.armRestoredStartupRefresh();
+    boundary.armCanonicalMainNavigation();
+    const navigation = guardedRouteFixture({
+      isMainFrame: true,
+      isNavigationRequest: true,
+      mainFrame,
+      method: 'GET',
+      requestUrl: KEMERBET_AGENT_DEPOSIT_URL,
+      resourceType: 'document',
+    });
+    await handler!(navigation.route as unknown as Route);
+
+    const lookup = guardedRouteFixture({
+      isMainFrame: true,
+      mainFrame,
+      method: 'GET',
+      requestUrl:
+        'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=PLAYER-1',
+    });
+    await expect(
+      boundary.withExpectedPlayerLookup('PLAYER-1', null, async () => {
+        await handler!(lookup.route as unknown as Route);
+      }),
+    ).resolves.toBeUndefined();
+    expect(lookup.continueRequest).toHaveBeenCalledOnce();
+    expect(boundary.invalid()).toBe(false);
+
+    const lateRefresh = guardedRouteFixture({
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      mainFrame,
+      method: 'POST',
+      postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN }),
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+      resourceType: 'xhr',
+    });
+    await handler!(lateRefresh.route as unknown as Route);
+    expect(lateRefresh.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(lateRefresh.continueRequest).not.toHaveBeenCalled();
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it.each([
+    ['non-2xx response', 401, null],
+    ['failed response completion', 200, new Error('provider connection failed')],
+  ] as const)('makes an admitted refresh with %s sticky-fatal', async (_label, status, failure) => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const stages: string[] = [];
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: (stage) => stages.push(stage),
+    });
+    await boundary.install();
+    boundary.armRestoredStartupRefresh();
+    boundary.armCanonicalMainNavigation();
+    await handler!(
+      guardedRouteFixture({
+        isMainFrame: true,
+        isNavigationRequest: true,
+        mainFrame,
+        method: 'GET',
+        requestUrl: KEMERBET_AGENT_DEPOSIT_URL,
+        resourceType: 'document',
+      }).route as unknown as Route,
+    );
+    const refresh = guardedRouteFixture({
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      mainFrame,
+      method: 'POST',
+      postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN }),
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+      resourceType: 'fetch',
+      responseFinishedError: failure,
+      responseStatus: status,
+    });
+
+    await handler!(refresh.route as unknown as Route);
+
+    expect(refresh.continueRequest).toHaveBeenCalledOnce();
+    expect(boundary.invalid()).toBe(true);
+    expect(stages).toContain('refresh_admitted');
+    expect(stages).toContain('refresh_forwarded');
+    expect(stages).not.toContain('refresh_response_complete');
+  });
+
+  it('reserves the sole refresh before awaiting its response so a concurrent second cannot pass', async () => {
+    const mainFrame = {};
+    let handler: ((route: Route) => Promise<void>) | null = null;
+    const boundary = createKemerBetNoTransferReadinessRequestBoundary({
+      installRoute: async (candidate) => {
+        handler = candidate;
+      },
+      page: () => ({ mainFrame: () => mainFrame }) as Page,
+      removeRoute: async () => undefined,
+      reportStage: () => undefined,
+    });
+    await boundary.install();
+    boundary.armRestoredStartupRefresh();
+    boundary.armCanonicalMainNavigation();
+    await handler!(
+      guardedRouteFixture({
+        isMainFrame: true,
+        isNavigationRequest: true,
+        mainFrame,
+        method: 'GET',
+        requestUrl: KEMERBET_AGENT_DEPOSIT_URL,
+        resourceType: 'document',
+      }).route as unknown as Route,
+    );
+    let finishResponse!: (value: {
+      readonly finished: () => Promise<Error | null>;
+      readonly status: () => number;
+    }) => void;
+    const responsePromise = new Promise<{
+      readonly finished: () => Promise<Error | null>;
+      readonly status: () => number;
+    }>((resolvePromise) => {
+      finishResponse = resolvePromise;
+    });
+    const refreshInput = {
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      mainFrame,
+      method: 'POST',
+      postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN }),
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+      resourceType: 'fetch',
+    } as const;
+    const first = guardedRouteFixture({ ...refreshInput, responsePromise });
+    const second = guardedRouteFixture(refreshInput);
+
+    const firstOperation = handler!(first.route as unknown as Route);
+    await vi.waitFor(() => expect(first.continueRequest).toHaveBeenCalledOnce());
+    await handler!(second.route as unknown as Route);
+    finishResponse({ finished: async () => null, status: () => 200 });
+    await firstOperation;
+
+    expect(second.abort).toHaveBeenCalledWith('blockedbyclient');
+    expect(second.continueRequest).not.toHaveBeenCalled();
+    expect(boundary.invalid()).toBe(true);
   });
 
   it('reserves a one-use Layer-7 token before continuing and aborts a concurrent duplicate', async () => {
@@ -1622,6 +1920,95 @@ describe('KemerBet no-transfer readiness seal', () => {
 
     expect(classifyKemerBetReadinessSealRequest(lookup)).toEqual({ decision: 'allow' });
     expect(isAllowedKemerBetReadinessSealRequest(lookup)).toBe(true);
+  });
+
+  it('classifies only the exact bounded startup refresh shape as a distinct non-general route', () => {
+    const exactRefresh = {
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      isNavigationRequest: false,
+      method: 'POST',
+      postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN }),
+      redirectedFrom: false,
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+      resourceType: 'fetch',
+    } as const;
+
+    expect(isExactKemerBetReadinessStartupRefreshRequest(exactRefresh)).toBe(true);
+    expect(
+      isExactKemerBetReadinessStartupRefreshRequest({
+        ...exactRefresh,
+        headers: { ...exactRefresh.headers, 'content-type': 'application/json; charset=utf-8' },
+        resourceType: 'xhr',
+      }),
+    ).toBe(true);
+    expect(classifyKemerBetReadinessSealRequest(exactRefresh)).toEqual({
+      decision: 'allow_startup_refresh',
+      hostname: 'admin-api.agt-digi.com',
+      method: 'POST',
+      path: '/Account/RefreshToken',
+      route: 'session_refresh',
+    });
+    // A startup refresh is never part of the classifier's generally allowed read-only set.
+    expect(isAllowedKemerBetReadinessSealRequest(exactRefresh)).toBe(false);
+
+    for (const candidate of [
+      { ...exactRefresh, isMainFrame: false },
+      { ...exactRefresh, isNavigationRequest: true },
+      { ...exactRefresh, method: 'GET' },
+      { ...exactRefresh, resourceType: 'document' },
+      { ...exactRefresh, redirectedFrom: true },
+      {
+        ...exactRefresh,
+        headers: { ...exactRefresh.headers, grant_type: 'password' },
+      },
+      {
+        ...exactRefresh,
+        headers: { ...exactRefresh.headers, 'content-type': 'text/plain' },
+      },
+      {
+        ...exactRefresh,
+        headers: {
+          ...exactRefresh.headers,
+          'Content-Type': 'application/json',
+        },
+      },
+      { ...exactRefresh, postData: JSON.stringify({ refreshToken: 'too-short' }) },
+      {
+        ...exactRefresh,
+        postData: JSON.stringify({ refreshToken: PROVIDER_REFRESH_TOKEN, extra: true }),
+      },
+      { ...exactRefresh, postData: '{not-json' },
+      { ...exactRefresh, postData: JSON.stringify({ refreshToken: `valid-length\nsecret` }) },
+      { ...exactRefresh, postData: JSON.stringify({ refreshToken: 'x'.repeat(4_097) }) },
+      { ...exactRefresh, postData: ' '.repeat(8_193) },
+      { ...exactRefresh, requestUrl: `${exactRefresh.requestUrl}?unexpected=1` },
+      { ...exactRefresh, requestUrl: `${exactRefresh.requestUrl}#unexpected` },
+      {
+        ...exactRefresh,
+        requestUrl: 'https://admin-api.agt-digi.com:443/Account/RefreshToken',
+      },
+      {
+        ...exactRefresh,
+        requestUrl: 'https://user@admin-api.agt-digi.com/Account/RefreshToken',
+      },
+      {
+        ...exactRefresh,
+        requestUrl: 'https://admin-api.agt-digi.com/account/RefreshToken',
+      },
+      {
+        ...exactRefresh,
+        requestUrl: 'https://evil.invalid/Account/RefreshToken',
+      },
+    ]) {
+      expect(isExactKemerBetReadinessStartupRefreshRequest(candidate)).toBe(false);
+      const classification = classifyKemerBetReadinessSealRequest(candidate);
+      expect(classification.decision).toBe('forbid');
+      expect(JSON.stringify(classification)).not.toContain(PROVIDER_REFRESH_TOKEN);
+    }
   });
 
   it('distinguishes exact known telemetry and auth-session targets from lookalikes', () => {

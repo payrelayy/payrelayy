@@ -54,6 +54,7 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessDependencies> = {
     loadPlayerIds: async () => ({ playerIds: PLAYER_IDS }),
     loadSelectorContract: async () => ({ version: 2 }) as KemerBetAgentPageSelectorContractV2,
     createAgentIdentityFingerprinter: async () => fingerprinter(),
+    reportStage: () => undefined,
     openProbe: async () => ({
       observedAgentIdentityFingerprint: FINGERPRINT,
       providerAuthorizationDigest: () => `sha256-provider-authorization-v1:${'3'.repeat(64)}`,
@@ -109,6 +110,85 @@ describe('KemerBet server no-transfer readiness', () => {
     expect(openProbe).not.toHaveBeenCalled();
     expect(loadSelectorContract).not.toHaveBeenCalled();
     expect(assertBrowserExecutable).not.toHaveBeenCalled();
+  });
+
+  it('records only the fixed controller stage sequence and the first lookup before lookup failure', async () => {
+    const successfulStages: string[] = [];
+    const successful = fixture({
+      environment: { ...environment(), KEMERBET_READINESS_BROWSER_RPC_ENABLED: 'true' },
+      createNetworkRevalidator: async () => async () => undefined,
+      loadLayer7Authorizations: async () => ({ authorizations: AUTHORIZATIONS }),
+      openRpcClient: async () => ({
+        open: async () => 'raw-agent-identity',
+        lookup: async () => undefined,
+        finalize: async () => undefined,
+        close: async () => undefined,
+      }),
+      reportStage: (stage) => successfulStages.push(stage),
+    });
+    await runKemerBetNoTransferReadiness(successful.dependencies);
+    expect(successfulStages).toEqual([
+      'controller_bootstrap',
+      'controller_rpc_open',
+      'controller_identity',
+      'controller_authorization',
+      'controller_lookup_1',
+      'controller_lookup_2',
+      'controller_lookup_3',
+      'controller_lookup_4',
+      'controller_lookup_5',
+      'controller_finalize',
+      'controller_cleanup',
+      'controller_complete',
+    ]);
+
+    const failedStages: string[] = [];
+    const failed = fixture({
+      environment: { ...environment(), KEMERBET_READINESS_BROWSER_RPC_ENABLED: 'true' },
+      createNetworkRevalidator: async () => async () => undefined,
+      loadLayer7Authorizations: async () => ({ authorizations: AUTHORIZATIONS }),
+      openRpcClient: async () => ({
+        open: async () => 'raw-agent-identity',
+        lookup: async () => {
+          throw new Error('fixed test failure');
+        },
+        finalize: async () => undefined,
+        close: async () => undefined,
+      }),
+      reportStage: (stage) => failedStages.push(stage),
+    });
+    await expect(runKemerBetNoTransferReadiness(failed.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessUnavailableError,
+    );
+    expect(failedStages.at(-1)).toBe('controller_lookup_1');
+    expect(JSON.stringify(failedStages)).not.toMatch(/PLAYER|raw-agent|v1\./u);
+  });
+
+  it('fails closed before controller completion when the successful RPC session cannot close', async () => {
+    const stages: string[] = [];
+    const close = vi.fn(async () => {
+      throw new Error('fixed close failure');
+    });
+    const test = fixture({
+      environment: { ...environment(), KEMERBET_READINESS_BROWSER_RPC_ENABLED: 'true' },
+      createNetworkRevalidator: async () => async () => undefined,
+      loadLayer7Authorizations: async () => ({ authorizations: AUTHORIZATIONS }),
+      openRpcClient: async () => ({
+        open: async () => 'raw-agent-identity',
+        lookup: async () => undefined,
+        finalize: async () => undefined,
+        close,
+      }),
+      reportStage: (stage) => stages.push(stage),
+    });
+
+    await expect(runKemerBetNoTransferReadiness(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessUnavailableError,
+    );
+    expect(close).toHaveBeenCalledOnce();
+    expect(stages.at(-1)).toBe('controller_cleanup');
+    expect(stages).not.toContain('controller_complete');
+    expect(test.logSuccess).not.toHaveBeenCalled();
   });
 
   it('checks one bound account and exactly five Players sequentially with aggregate output only', async () => {

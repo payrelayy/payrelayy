@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import type { Page, Route } from 'playwright-core';
+import type { BrowserContext, Page, Route } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identity-fingerprint.js';
@@ -24,6 +24,7 @@ import {
   runKemerBetNoTransferReadinessSealMain,
   serializeKemerBetNoTransferReadinessAgentIdentityBinding,
   selectSoleCanonicalKemerBetAgentRestoredPage,
+  waitForSoleCanonicalKemerBetAgentRestoredPage,
   type KemerBetNoTransferReadinessSealDependencies,
   type KemerBetReadinessPersistentLifecycleBoundary,
   type KemerBetReadinessSealForbiddenRequestDiagnostic,
@@ -61,6 +62,36 @@ function environment(): NodeJS.ProcessEnv {
     KEMERBET_FINAL_ACTION_ENABLED: 'false',
     KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false',
     INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false',
+  };
+}
+
+function restoredPageContextHarness(initialPages: readonly Page[]) {
+  let pages = [...initialPages];
+  const pageListeners = new Set<(page: Page) => void>();
+  const on = vi.fn((event: string, listener: (page: Page) => void) => {
+    if (event === 'page') pageListeners.add(listener);
+  });
+  const off = vi.fn((event: string, listener: (page: Page) => void) => {
+    if (event === 'page') pageListeners.delete(listener);
+  });
+  const context = {
+    off,
+    on,
+    pages: () => [...pages],
+  } as unknown as BrowserContext;
+
+  return {
+    context,
+    emitSolePage(page: Page): void {
+      pages = [page];
+      for (const listener of pageListeners) listener(page);
+    },
+    off,
+    on,
+    replaceWithPage(page: Page): void {
+      pages = [page];
+      for (const listener of pageListeners) listener(page);
+    },
   };
 }
 
@@ -449,10 +480,12 @@ describe('KemerBet no-transfer readiness seal', () => {
     const resolveProfile = body.indexOf('resolveSafeProfile(');
     const removeSingletons = body.indexOf('removeStaleChromiumSingletonArtifacts(');
     const revalidateProfile = body.indexOf('assertSafeDirectory(profile');
+    const attestCleanProfile = body.indexOf('assertKemerBetChromiumProfileCleanlyClosed(');
     const launchPersistentContext = body.indexOf('chromium.launchPersistentContext(');
 
     expect(resolveProfile).toBeGreaterThanOrEqual(0);
-    expect(removeSingletons).toBeGreaterThan(resolveProfile);
+    expect(attestCleanProfile).toBeGreaterThan(resolveProfile);
+    expect(removeSingletons).toBeGreaterThan(attestCleanProfile);
     expect(revalidateProfile).toBeGreaterThan(removeSingletons);
     expect(launchPersistentContext).toBeGreaterThan(revalidateProfile);
 
@@ -484,7 +517,7 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(body).toContain('retainedContext.serviceWorkers().length === 0');
 
     const restoredPageSelection = body.indexOf(
-      'const restoredPage = selectSoleCanonicalKemerBetAgentRestoredPage',
+      'const restoredPage = await waitForSoleCanonicalKemerBetAgentRestoredPage',
     );
     const retainedPageCloseObserver = body.indexOf("restoredPage.on('close'");
     const contextPageObserver = body.indexOf("retainedContext.on('page'");
@@ -574,6 +607,150 @@ describe('KemerBet no-transfer readiness seal', () => {
       restoredPage,
     );
     expect(restoredPage.opaqueSessionState).toBe('present');
+  });
+
+  it('accepts an immediately restored sole canonical page within the bounded wait', async () => {
+    const waitForURL = vi.fn(async () => undefined);
+    const restoredPage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+      waitForURL,
+    } as unknown as Page;
+    const harness = restoredPageContextHarness([restoredPage]);
+
+    await expect(waitForSoleCanonicalKemerBetAgentRestoredPage(harness.context, 100)).resolves.toBe(
+      restoredPage,
+    );
+    expect(harness.on).toHaveBeenCalledOnce();
+    expect(harness.off).toHaveBeenCalledOnce();
+    expect(waitForURL).toHaveBeenCalledExactlyOnceWith(KEMERBET_AGENT_DEPOSIT_URL, {
+      timeout: expect.any(Number),
+      waitUntil: 'commit',
+    });
+  });
+
+  it('waits for one asynchronously exposed restored page without creating or navigating a page', async () => {
+    let currentUrl = '';
+    const waitForURL = vi.fn(async () => {
+      currentUrl = KEMERBET_AGENT_DEPOSIT_URL;
+    });
+    const restoredPage = {
+      isClosed: () => false,
+      url: () => currentUrl,
+      waitForURL,
+    } as unknown as Page;
+    const harness = restoredPageContextHarness([]);
+    queueMicrotask(() => harness.emitSolePage(restoredPage));
+
+    await expect(waitForSoleCanonicalKemerBetAgentRestoredPage(harness.context, 100)).resolves.toBe(
+      restoredPage,
+    );
+    expect(harness.on).toHaveBeenCalledOnce();
+    expect(harness.off).toHaveBeenCalledOnce();
+    expect(waitForURL).toHaveBeenCalledExactlyOnceWith(KEMERBET_AGENT_DEPOSIT_URL, {
+      timeout: expect.any(Number),
+      waitUntil: 'commit',
+    });
+    expect(harness.context).not.toHaveProperty('newPage');
+  });
+
+  it('allows only an about:blank restored tab to transition to the exact canonical page', async () => {
+    let currentUrl = 'about:blank';
+    const waitForURL = vi.fn(async () => {
+      currentUrl = KEMERBET_AGENT_DEPOSIT_URL;
+    });
+    const restoredPage = {
+      isClosed: () => false,
+      url: () => currentUrl,
+      waitForURL,
+    } as unknown as Page;
+    const harness = restoredPageContextHarness([restoredPage]);
+
+    await expect(waitForSoleCanonicalKemerBetAgentRestoredPage(harness.context, 100)).resolves.toBe(
+      restoredPage,
+    );
+    expect(waitForURL).toHaveBeenCalledExactlyOnceWith(KEMERBET_AGENT_DEPOSIT_URL, {
+      timeout: expect.any(Number),
+      waitUntil: 'commit',
+    });
+    expect(restoredPage).not.toHaveProperty('goto');
+  });
+
+  it('fails the bounded restored-page wait closed for duplicate or noncanonical initial pages', async () => {
+    const canonicalPage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+      waitForURL: vi.fn(async () => undefined),
+    } as unknown as Page;
+    const duplicatePage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+      waitForURL: vi.fn(async () => undefined),
+    } as unknown as Page;
+    const noncanonicalWait = vi.fn(async () => undefined);
+    const noncanonicalPage = {
+      isClosed: () => false,
+      url: () => 'https://example.invalid/agents',
+      waitForURL: noncanonicalWait,
+    } as unknown as Page;
+
+    await expect(
+      waitForSoleCanonicalKemerBetAgentRestoredPage(
+        restoredPageContextHarness([canonicalPage, duplicatePage]).context,
+        100,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      waitForSoleCanonicalKemerBetAgentRestoredPage(
+        restoredPageContextHarness([noncanonicalPage]).context,
+        100,
+      ),
+    ).resolves.toBeNull();
+    expect(canonicalPage.waitForURL).not.toHaveBeenCalled();
+    expect(duplicatePage.waitForURL).not.toHaveBeenCalled();
+    expect(noncanonicalWait).not.toHaveBeenCalled();
+  });
+
+  it('fails the bounded restored-page wait closed on timeout or page replacement', async () => {
+    const missingPageHarness = restoredPageContextHarness([]);
+    await expect(
+      waitForSoleCanonicalKemerBetAgentRestoredPage(missingPageHarness.context, 1),
+    ).resolves.toBeNull();
+    expect(missingPageHarness.on).toHaveBeenCalledOnce();
+    expect(missingPageHarness.off).toHaveBeenCalledOnce();
+
+    const timedOutPage = {
+      isClosed: () => false,
+      url: () => 'about:blank',
+      waitForURL: vi.fn(async () => {
+        throw new Error('bounded wait expired');
+      }),
+    } as unknown as Page;
+    await expect(
+      waitForSoleCanonicalKemerBetAgentRestoredPage(
+        restoredPageContextHarness([timedOutPage]).context,
+        5,
+      ),
+    ).resolves.toBeNull();
+
+    const replacementPage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+      waitForURL: vi.fn(async () => undefined),
+    } as unknown as Page;
+    const replacementHarness = restoredPageContextHarness([]);
+    const retainedPage = {
+      isClosed: () => false,
+      url: () => KEMERBET_AGENT_DEPOSIT_URL,
+      waitForURL: vi.fn(async () => {
+        replacementHarness.replaceWithPage(replacementPage);
+      }),
+    } as unknown as Page;
+    replacementHarness.emitSolePage(retainedPage);
+
+    await expect(
+      waitForSoleCanonicalKemerBetAgentRestoredPage(replacementHarness.context, 100),
+    ).resolves.toBeNull();
   });
 
   it.each([

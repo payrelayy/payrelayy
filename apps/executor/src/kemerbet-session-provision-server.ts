@@ -22,6 +22,7 @@ import {
   type KemerBetSingletonArtifactFileSystem,
   removeStaleChromiumSingletonArtifacts as removeStaleChromiumSingletonArtifactsFromProfile,
 } from './kemerbet-chromium-profile.js';
+import { closeKemerBetPersistentBrowserForRestorableCheckpoint } from './kemerbet-persistent-browser-checkpoint.js';
 import {
   createKemerBetNoTransferReadinessSealProbeFromPage,
   runKemerBetNoTransferReadinessSeal,
@@ -131,6 +132,7 @@ export interface KemerBetProvisionServerDependencies {
   readonly runReadinessSeal?: typeof runKemerBetNoTransferReadinessSeal;
   readonly setTimer?: typeof setTimeout;
   readonly clearTimer?: typeof clearTimeout;
+  readonly closePersistentBrowserForCheckpoint?: typeof closeKemerBetPersistentBrowserForRestorableCheckpoint;
   readonly log?: (event: 'started' | 'signed_in' | 'stopped') => void;
   readonly logReadinessSealFailure?: (event: KemerBetReadinessSealFailureEvent) => void;
 }
@@ -736,6 +738,9 @@ export function createKemerBetSessionProvisionServer(
   const now = dependencies.now ?? (() => new Date());
   const setTimer = dependencies.setTimer ?? setTimeout;
   const clearTimer = dependencies.clearTimer ?? clearTimeout;
+  const closePersistentBrowserForCheckpoint =
+    dependencies.closePersistentBrowserForCheckpoint ??
+    closeKemerBetPersistentBrowserForRestorableCheckpoint;
   const createReadinessProbeFromPage =
     dependencies.createReadinessProbeFromPage ?? createKemerBetNoTransferReadinessSealProbeFromPage;
   const runReadinessSeal = dependencies.runReadinessSeal ?? runKemerBetNoTransferReadinessSeal;
@@ -752,6 +757,7 @@ export function createKemerBetSessionProvisionServer(
     ((event: KemerBetReadinessSealFailureEvent) => console.error(JSON.stringify(event)));
   let context: BrowserContext | undefined;
   let page: Page | undefined;
+  let profilePath: string | undefined;
   let accountId: string | undefined;
   let expiresAt: Date | undefined;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -779,6 +785,7 @@ export function createKemerBetSessionProvisionServer(
     const activeContext = context;
     context = undefined;
     page = undefined;
+    profilePath = undefined;
     accountId = undefined;
     expiresAt = undefined;
     signedInLogged = false;
@@ -795,7 +802,7 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const status = async (): Promise<KemerBetProvisionSessionStatus> => {
-    if (!context || !page || !accountId || !expiresAt) {
+    if (checkpointedForRecheck || !context || !page || !profilePath || !accountId || !expiresAt) {
       return { active: false, loginRequired: false, signedIn: false, transferDisabled: true };
     }
     if (now().getTime() >= expiresAt.getTime()) {
@@ -826,7 +833,9 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const start = async (input: StartInput): Promise<KemerBetProvisionSessionStatus> => {
-    if (checkpointedForRecheck || context || page || accountId || expiresAt) return unavailable();
+    if (checkpointedForRecheck || context || page || profilePath || accountId || expiresAt) {
+      return unavailable();
+    }
     await (
       dependencies.assertBrowserExecutable ??
       (() => assertKemerBetBrowserExecutable({ executablePath: CHROMIUM_PATH }))
@@ -880,6 +889,7 @@ export function createKemerBetSessionProvisionServer(
     if (!nextContext || !nextPage) return unavailable();
     context = nextContext;
     page = nextPage;
+    profilePath = profile;
     accountId = input.platformAgentAccountId;
     checkpointBlockedForRecheck = false;
     armExpiry(LOGIN_LIFETIME_MS);
@@ -895,6 +905,7 @@ export function createKemerBetSessionProvisionServer(
       !currentStatus.signedIn ||
       !context ||
       !page ||
+      !profilePath ||
       !accountId ||
       !expiresAt ||
       !signedInLogged ||
@@ -905,6 +916,7 @@ export function createKemerBetSessionProvisionServer(
     }
     const retainedContext = context;
     const retainedPage = page;
+    const retainedProfilePath = profilePath;
     const retainedAccountId = accountId;
     const retainedExpiresAt = expiresAt;
     const blockedRequestBaseline = blockedRequestCounter;
@@ -918,6 +930,7 @@ export function createKemerBetSessionProvisionServer(
       if (
         context !== retainedContext ||
         page !== retainedPage ||
+        profilePath !== retainedProfilePath ||
         accountId !== retainedAccountId ||
         expiresAt !== retainedExpiresAt ||
         blockedRequestCounter !== blockedRequestBaseline ||
@@ -935,10 +948,19 @@ export function createKemerBetSessionProvisionServer(
       // Install the irreversible in-process latch before awaiting Chromium shutdown. A failed
       // close cannot reopen input or let a different session race the helper's profile copy.
       checkpointedForRecheck = true;
-      await retainedContext.close();
+      await closePersistentBrowserForCheckpoint(
+        {
+          context: retainedContext,
+          effectiveUserId,
+          page: retainedPage,
+          profilePath: retainedProfilePath,
+        },
+        { clearTimer, setTimer },
+      );
       if (
         context !== retainedContext ||
         page !== retainedPage ||
+        profilePath !== retainedProfilePath ||
         accountId !== retainedAccountId ||
         expiresAt !== retainedExpiresAt ||
         blockedRequestCounter !== blockedRequestBaseline ||
@@ -950,6 +972,7 @@ export function createKemerBetSessionProvisionServer(
       expiryTimer = undefined;
       context = undefined;
       page = undefined;
+      profilePath = undefined;
       accountId = undefined;
       expiresAt = undefined;
       signedInLogged = false;
@@ -967,7 +990,15 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const input = async (candidate: SessionInput): Promise<KemerBetProvisionSessionStatus> => {
-    if (!context || !page || !accountId || !expiresAt || validPageUrl(page.url()) !== 'login') {
+    if (
+      checkpointedForRecheck ||
+      !context ||
+      !page ||
+      !profilePath ||
+      !accountId ||
+      !expiresAt ||
+      validPageUrl(page.url()) !== 'login'
+    ) {
       return unavailable();
     }
     if (candidate.kind === 'pointer') {
@@ -992,10 +1023,12 @@ export function createKemerBetSessionProvisionServer(
     readinessFailure.begin();
     const currentStatus = await status();
     if (
+      checkpointedForRecheck ||
       !currentStatus.signedIn ||
       !signedInLogged ||
       !context ||
       !page ||
+      !profilePath ||
       !accountId ||
       !expiresAt ||
       validPageUrl(page.url()) !== 'agents'
@@ -1004,6 +1037,7 @@ export function createKemerBetSessionProvisionServer(
     }
     const retainedContext = context;
     const retainedPage = page;
+    const retainedProfilePath = profilePath;
     const retainedAccountId = accountId;
     const retainedExpiresAt = expiresAt;
     let retainedContextClosed = false;
@@ -1013,9 +1047,11 @@ export function createKemerBetSessionProvisionServer(
     // context is terminally closed and the retained enrollment state below is cleared.
     const closeRetainedContextForSeal = async (): Promise<void> => {
       if (retainedContextClosed) return;
+      if (checkpointedForRecheck) return unavailable();
       if (
         context !== retainedContext ||
         page !== retainedPage ||
+        profilePath !== retainedProfilePath ||
         accountId !== retainedAccountId ||
         expiresAt !== retainedExpiresAt
       ) {
@@ -1024,10 +1060,20 @@ export function createKemerBetSessionProvisionServer(
       // Keep the terminal request latch installed through the awaited Chromium shutdown. Only a
       // confirmed close may make the same-UID provision lane inactive before the seal file is
       // installed; a close failure propagates and therefore emits no binding.
-      await retainedContext.close();
+      checkpointedForRecheck = true;
+      await closePersistentBrowserForCheckpoint(
+        {
+          context: retainedContext,
+          effectiveUserId,
+          page: retainedPage,
+          profilePath: retainedProfilePath,
+        },
+        { clearTimer, setTimer },
+      );
       if (
         context !== retainedContext ||
         page !== retainedPage ||
+        profilePath !== retainedProfilePath ||
         accountId !== retainedAccountId ||
         expiresAt !== retainedExpiresAt
       ) {
@@ -1037,6 +1083,7 @@ export function createKemerBetSessionProvisionServer(
       expiryTimer = undefined;
       context = undefined;
       page = undefined;
+      profilePath = undefined;
       accountId = undefined;
       expiresAt = undefined;
       signedInLogged = false;
@@ -1063,6 +1110,7 @@ export function createKemerBetSessionProvisionServer(
           options.accountId !== retainedAccountId ||
           context !== retainedContext ||
           page !== retainedPage ||
+          profilePath !== retainedProfilePath ||
           accountId !== retainedAccountId ||
           expiresAt !== retainedExpiresAt ||
           validPageUrl(retainedPage.url()) !== 'agents'
@@ -1084,6 +1132,7 @@ export function createKemerBetSessionProvisionServer(
       !retainedContextClosed ||
       context !== undefined ||
       page !== undefined ||
+      profilePath !== undefined ||
       accountId !== undefined ||
       expiresAt !== undefined ||
       expiryTimer !== undefined ||

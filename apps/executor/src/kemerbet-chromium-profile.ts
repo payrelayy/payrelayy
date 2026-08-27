@@ -23,6 +23,33 @@ interface ServiceWorkerStat {
   isSymbolicLink(): boolean;
 }
 
+interface CleanExitStat {
+  readonly ctimeMs: number;
+  readonly dev: number;
+  readonly gid: number;
+  readonly ino: number;
+  readonly mode: number;
+  readonly mtimeMs: number;
+  readonly nlink: number;
+  readonly size: number;
+  readonly uid: number;
+  isDirectory(): boolean;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+}
+
+export interface KemerBetCleanExitFileHandle {
+  close(): Promise<void>;
+  readFile(): Promise<Buffer>;
+  stat(): Promise<CleanExitStat>;
+}
+
+export interface KemerBetCleanExitFileSystem {
+  lstat(path: string): Promise<CleanExitStat>;
+  open(path: string, flags: number): Promise<KemerBetCleanExitFileHandle>;
+  realpath(path: string): Promise<string>;
+}
+
 export interface KemerBetServiceWorkerPurgeFileSystem {
   lstat(path: string): Promise<ServiceWorkerStat>;
   open(path: string, flags: number): Promise<Awaited<ReturnType<typeof open>>>;
@@ -77,6 +104,8 @@ export async function removeStaleChromiumSingletonArtifacts(
 
 const SERVICE_WORKER_DIRECTORY = 'Service Worker';
 const SERVICE_WORKER_TOMBSTONE = '.Service Worker.fetanagent-purge-v1';
+const CHROMIUM_PREFERENCES_FILE = 'Preferences';
+const CHROMIUM_PREFERENCES_MAX_BYTES = 4 * 1_024 * 1_024;
 
 const productionServiceWorkerFileSystem: KemerBetServiceWorkerPurgeFileSystem = {
   lstat: async (path) => (await lstat(path)) as ServiceWorkerStat,
@@ -86,6 +115,12 @@ const productionServiceWorkerFileSystem: KemerBetServiceWorkerPurgeFileSystem = 
   rename,
   rmdir,
   unlink,
+};
+
+const productionCleanExitFileSystem: KemerBetCleanExitFileSystem = {
+  lstat: async (path) => (await lstat(path)) as CleanExitStat,
+  open: async (path, flags) => (await open(path, flags)) as KemerBetCleanExitFileHandle,
+  realpath,
 };
 
 async function pathState(
@@ -105,6 +140,141 @@ function exactChild(parent: string, name: string): string {
   const child = resolve(parent, name);
   if (relative(parent, child) !== name || name === '.' || name === '..') unavailable();
   return child;
+}
+
+function exactStableStat(before: CleanExitStat, after: CleanExitStat): boolean {
+  return (
+    before.ctimeMs === after.ctimeMs &&
+    before.dev === after.dev &&
+    before.ino === after.ino &&
+    before.uid === after.uid &&
+    before.gid === after.gid &&
+    before.mode === after.mode &&
+    before.mtimeMs === after.mtimeMs &&
+    before.nlink === after.nlink &&
+    before.size === after.size &&
+    before.isDirectory() === after.isDirectory() &&
+    before.isFile() === after.isFile() &&
+    before.isSymbolicLink() === after.isSymbolicLink()
+  );
+}
+
+async function requireStableOwnedDirectory(
+  fileSystem: KemerBetCleanExitFileSystem,
+  path: string,
+  effectiveUserId: number,
+): Promise<void> {
+  const before = await fileSystem.lstat(path);
+  if (
+    !before.isDirectory() ||
+    before.isFile() ||
+    before.isSymbolicLink() ||
+    before.uid !== effectiveUserId ||
+    before.gid !== effectiveUserId ||
+    (before.mode & 0o7777) !== 0o700 ||
+    (await fileSystem.realpath(path)) !== path
+  ) {
+    unavailable();
+  }
+  const after = await fileSystem.lstat(path);
+  if (!exactStableStat(before, after)) unavailable();
+}
+
+/**
+ * Prove that Chromium completed an orderly profile shutdown without reading any provider session
+ * material. Playwright can resolve a persistent-context close after its own graceful-close timeout
+ * force-kills Chromium, so process disconnection alone is not a sufficient checkpoint. This
+ * attestor is deliberately read-only and accepts only Chromium's own `Normal` exit marker.
+ */
+export async function assertKemerBetChromiumProfileCleanlyClosed(
+  profilePath: string,
+  effectiveUserId: number,
+  fileSystem: KemerBetCleanExitFileSystem = productionCleanExitFileSystem,
+): Promise<void> {
+  if (!Number.isSafeInteger(effectiveUserId) || effectiveUserId <= 0) unavailable();
+  try {
+    await requireStableOwnedDirectory(fileSystem, profilePath, effectiveUserId);
+    const defaultRoot = exactChild(profilePath, 'Default');
+    await requireStableOwnedDirectory(fileSystem, defaultRoot, effectiveUserId);
+
+    for (const singleton of CHROMIUM_SINGLETON_ARTIFACTS) {
+      const singletonPath = exactChild(profilePath, singleton);
+      try {
+        await fileSystem.lstat(singletonPath);
+        unavailable();
+      } catch (error) {
+        if (!hasErrorCode(error, 'ENOENT')) unavailable();
+      }
+    }
+
+    const preferencesPath = exactChild(defaultRoot, CHROMIUM_PREFERENCES_FILE);
+    const pathBefore = await fileSystem.lstat(preferencesPath);
+    if (
+      !pathBefore.isFile() ||
+      pathBefore.isDirectory() ||
+      pathBefore.isSymbolicLink() ||
+      pathBefore.uid !== effectiveUserId ||
+      pathBefore.gid !== effectiveUserId ||
+      pathBefore.nlink !== 1 ||
+      (pathBefore.mode & 0o7777) !== 0o600 ||
+      pathBefore.size < 2 ||
+      pathBefore.size > CHROMIUM_PREFERENCES_MAX_BYTES ||
+      (await fileSystem.realpath(preferencesPath)) !== preferencesPath
+    ) {
+      unavailable();
+    }
+
+    let handle: KemerBetCleanExitFileHandle | null = null;
+    let contents: Buffer | null = null;
+    let openedAfterRead: CleanExitStat | null = null;
+    try {
+      handle = await fileSystem.open(
+        preferencesPath,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+      );
+      const opened = await handle.stat();
+      if (!exactStableStat(pathBefore, opened)) unavailable();
+      contents = await handle.readFile();
+      openedAfterRead = await handle.stat();
+      const pathAfterRead = await fileSystem.lstat(preferencesPath);
+      if (
+        !exactStableStat(opened, openedAfterRead) ||
+        !exactStableStat(openedAfterRead, pathAfterRead) ||
+        contents.byteLength !== openedAfterRead.size
+      ) {
+        unavailable();
+      }
+
+      const parsed = JSON.parse(contents.toString('utf8')) as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) unavailable();
+      const profile = (parsed as Record<string, unknown>).profile;
+      if (typeof profile !== 'object' || profile === null || Array.isArray(profile)) unavailable();
+      const profileObject = profile as Record<string, unknown>;
+      if (
+        profileObject.exit_type !== 'Normal' ||
+        (profileObject.exited_cleanly !== undefined && profileObject.exited_cleanly !== true)
+      ) {
+        unavailable();
+      }
+    } finally {
+      contents?.fill(0);
+      await handle?.close();
+    }
+
+    if (openedAfterRead === null) unavailable();
+    const pathAfterClose = await fileSystem.lstat(preferencesPath);
+    if (
+      !exactStableStat(openedAfterRead, pathAfterClose) ||
+      (await fileSystem.realpath(preferencesPath)) !== preferencesPath
+    ) {
+      unavailable();
+    }
+
+    await requireStableOwnedDirectory(fileSystem, defaultRoot, effectiveUserId);
+    await requireStableOwnedDirectory(fileSystem, profilePath, effectiveUserId);
+  } catch {
+    return unavailable();
+  }
 }
 
 async function syncDirectory(

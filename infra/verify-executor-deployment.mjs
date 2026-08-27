@@ -19,6 +19,14 @@ const privateSessionProvisionServerSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-session-provision-server.ts`,
   'utf8',
 );
+const persistentBrowserCheckpointSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-persistent-browser-checkpoint.ts`,
+  'utf8',
+);
+const persistentBrowserCheckpointSmokeSource = await readFile(
+  `${repositoryRoot}apps/executor/src/kemerbet-persistent-browser-checkpoint-smoke.ts`,
+  'utf8',
+);
 const noTransferReadinessSource = await readFile(
   `${repositoryRoot}apps/executor/src/kemerbet-no-transfer-readiness.ts`,
   'utf8',
@@ -1886,6 +1894,47 @@ assertOrderedFragments(
   'service-worker removal must be exact, crash-resumable, and directory-synced',
 );
 
+const cleanProfileAttestorStart = chromiumProfileSource.indexOf(
+  'export async function assertKemerBetChromiumProfileCleanlyClosed',
+);
+const cleanProfileAttestorEnd = chromiumProfileSource.indexOf(
+  'async function syncDirectory',
+  cleanProfileAttestorStart,
+);
+assert.ok(cleanProfileAttestorStart >= 0 && cleanProfileAttestorEnd > cleanProfileAttestorStart);
+const cleanProfileAttestorSource = chromiumProfileSource.slice(
+  cleanProfileAttestorStart,
+  cleanProfileAttestorEnd,
+);
+assertOrderedFragments(
+  cleanProfileAttestorSource,
+  [
+    'await requireStableOwnedDirectory(fileSystem, profilePath, effectiveUserId);',
+    "const defaultRoot = exactChild(profilePath, 'Default');",
+    'for (const singleton of CHROMIUM_SINGLETON_ARTIFACTS)',
+    'constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)',
+    'contents = await handle.readFile();',
+    "profileObject.exit_type !== 'Normal'",
+    'contents?.fill(0);',
+    'await handle?.close();',
+    'const pathAfterClose = await fileSystem.lstat(preferencesPath);',
+    '!exactStableStat(openedAfterRead, pathAfterClose)',
+    '(await fileSystem.realpath(preferencesPath)) !== preferencesPath',
+    'await requireStableOwnedDirectory(fileSystem, profilePath, effectiveUserId);',
+  ],
+  'clean profile attestation must be read-only, stable, redacted, and require Chromium Normal exit',
+);
+assert.doesNotMatch(
+  cleanProfileAttestorSource,
+  /\.(?:write|writeFile|rename|chmod|truncate|unlink|rm)\s*\(|exit_type\s*=(?!=)/u,
+  'clean profile attestation must never repair or mutate Chromium Preferences',
+);
+assert.doesNotMatch(
+  cleanProfileAttestorSource,
+  /console\.|JSON\.stringify|sessionStorage|localStorage|Cookies?/iu,
+  'clean profile attestation must never log or inspect provider session material',
+);
+
 const guardedProbeStart = noTransferReadinessSealSource.indexOf(
   'async function createKemerBetNoTransferReadinessGuardedProbeFromPage',
 );
@@ -1954,6 +2003,10 @@ assert.match(
 );
 assert.match(
   persistentProbeSource,
+  /await assertKemerBetChromiumProfileCleanlyClosed\(profile, options\.effectiveUserId\)/,
+);
+assert.match(
+  persistentProbeSource,
   /await purgeKemerBetPersistedServiceWorkerState\(profile, options\.effectiveUserId\)/,
 );
 assert.doesNotMatch(
@@ -1964,10 +2017,13 @@ assert.doesNotMatch(
 assertOrderedFragments(
   persistentProbeSource,
   [
+    'await assertKemerBetChromiumProfileCleanlyClosed(profile, options.effectiveUserId);',
+    'await removeStaleChromiumSingletonArtifacts(profile);',
+    'await purgeKemerBetPersistedServiceWorkerState(profile, options.effectiveUserId);',
     'await isolatedBoundary.revalidateNetworkTopology().catch(() => unavailable());',
     'context = await chromium.launchPersistentContext(profile, {',
     'await isolatedBoundary.revalidateNetworkTopology().catch(() => unavailable());',
-    'const restoredPage = selectSoleCanonicalKemerBetAgentRestoredPage(retainedContext.pages());',
+    'const restoredPage = await waitForSoleCanonicalKemerBetAgentRestoredPage(retainedContext);',
     "retainedContext.on('serviceworker'",
     'await requestBoundary.install();',
     "await retainedContext.routeWebSocket('**/*'",
@@ -1976,6 +2032,93 @@ assertOrderedFragments(
     'const probe = await createKemerBetNoTransferReadinessGuardedProbeFromPage({',
   ],
   'static zero-default-route attestations and service-worker/WebSocket guards must surround browser startup before online use',
+);
+
+const restoredPageWaitStart = noTransferReadinessSealSource.indexOf(
+  'export async function waitForSoleCanonicalKemerBetAgentRestoredPage',
+);
+const restoredPageWaitEnd = noTransferReadinessSealSource.indexOf(
+  'export interface KemerBetReadinessPersistentLifecycleBoundary',
+  restoredPageWaitStart,
+);
+assert.ok(restoredPageWaitStart >= 0 && restoredPageWaitEnd > restoredPageWaitStart);
+const restoredPageWaitSource = noTransferReadinessSealSource.slice(
+  restoredPageWaitStart,
+  restoredPageWaitEnd,
+);
+assertOrderedFragments(
+  restoredPageWaitSource,
+  [
+    "context.on('page', onPage);",
+    'let pages = context.pages();',
+    'if (pages.length > 1) return null;',
+    "initialUrl !== 'about:blank'",
+    'await page.waitForURL(KEMERBET_AGENT_DEPOSIT_URL, {',
+    'if (topologyViolated) return null;',
+    'return selectSoleCanonicalKemerBetAgentRestoredPage(pages, page);',
+    "context.off('page', onPage);",
+  ],
+  'restored-page admission must wait only for one existing canonical tab and fail sticky on replacement',
+);
+assert.doesNotMatch(
+  restoredPageWaitSource,
+  /\.newPage\(|\.goto\(|\.reload\(|sessionStorage|localStorage/u,
+  'restored-page waiting must never create, navigate, reload, or export the authenticated tab',
+);
+
+assert.match(persistentBrowserCheckpointSource, /input\.effectiveUserId !== 10_001/);
+assertOrderedFragments(
+  persistentBrowserCheckpointSource.slice(
+    persistentBrowserCheckpointSource.indexOf('async function waitForBrowserDisconnect'),
+    persistentBrowserCheckpointSource.indexOf('async function waitForCleanProfile'),
+  ),
+  ["closeSession.send('Browser.close')", 'await disconnected;'],
+  'the graceful browser command must be followed by an independently observed disconnection',
+);
+assertOrderedFragments(
+  persistentBrowserCheckpointSource,
+  [
+    'if (browser === null || !exactLiveTopology(browser, input.context, input.page)) unavailable();',
+    'closeSession = await browser.newBrowserCDPSession();',
+    'await waitForBrowserDisconnect({',
+    'if (!exactClosedTopology(browser, input.context, input.page)) unavailable();',
+    'await waitForCleanProfile({',
+    'assertProfileCleanlyClosed:',
+    'if (!exactClosedTopology(browser, input.context, input.page)) unavailable();',
+  ],
+  'checkpoint close must use direct graceful CDP shutdown, prove disconnection, then attest a clean profile',
+);
+assert.doesNotMatch(
+  persistentBrowserCheckpointSource,
+  /\b(?:input\.)?context\.close\(|\bbrowser\.close\(|Preferences|exit_type\s*=(?!=)|console\./u,
+  'checkpoint close must not invoke Playwright force-kill fallbacks, mutate Preferences, or log session data',
+);
+assert.doesNotMatch(
+  `${persistentBrowserCheckpointSource}\n${persistentBrowserCheckpointSmokeSource}`,
+  /Amount|Notes|Transfer|Player(?:\s*ID)?|moneyMoved|FINANCIAL_ACTIONS_MODE\s*:\s*'live'/u,
+  'checkpoint proof must contain no financial or Player-lookup operation',
+);
+assertOrderedFragments(
+  persistentBrowserCheckpointSmokeSource,
+  [
+    "const CHROMIUM_PATH = '/usr/bin/chromium';",
+    'const EFFECTIVE_USER_ID = 10_001;',
+    'const profilePath = await mkdtemp(',
+    'page.goto(expectedUrl,',
+    'await closeKemerBetPersistentBrowserForRestorableCheckpoint({',
+    "args: ['--restore-last-session', ...CHROMIUM_NETWORK_REDUCTION_ARGUMENTS],",
+    "ignoreDefaultArgs: ['about:blank'],",
+    'offline: true,',
+    'page = await waitForRestoredSmokePage(restoredContext, expectedUrl);',
+    'if (retained !== true) unavailable();',
+    'await closeKemerBetPersistentBrowserForRestorableCheckpoint({',
+  ],
+  'the disposable image smoke must prove clean close and tab-scoped restoration with the pinned Chromium runtime',
+);
+assert.doesNotMatch(
+  persistentBrowserCheckpointSmokeSource,
+  /agentsystem\.admindigi\.com|kemerbet\.co|console\.(?:log|error)\([^\n]*(?:SENTINEL|profilePath|expectedUrl)/u,
+  'the image smoke must use only a harmless local page and must not print its profile or sentinel',
 );
 assert.doesNotMatch(
   `${readinessNetworkGateSource}\n${readinessBrowserRpcSource}\n${readinessBrowserDriverSource}\n${readinessLayer7ProxySource}`,
@@ -2019,10 +2162,70 @@ assert.match(privateSessionProvisionServerSource, /FINANCIAL_ACTIONS_MODE: 'dry_
 assert.match(privateSessionProvisionServerSource, /playersChecked: 5/);
 assert.match(privateSessionProvisionServerSource, /transferDisabled: true/);
 assert.match(privateSessionProvisionServerSource, /moneyMoved: false/);
+assert.equal(
+  countMatches(privateSessionProvisionServerSource, /checkpointedForRecheck\s*=\s*true/g),
+  2,
+  'only the checkpoint and readiness-seal terminal close paths may install the irreversible latch',
+);
+assert.equal(
+  countMatches(privateSessionProvisionServerSource, /checkpointedForRecheck\s*=\s*false/g),
+  1,
+  'the irreversible in-process checkpoint latch must never reset',
+);
 assert.match(
   privateSessionProvisionServerSource,
   /explicitly trusted supervised enrollment[\s\S]*?not a compromised-renderer confidentiality boundary[\s\S]*?Containment begins only after this exact[\s\S]*?context is terminally closed/u,
   'source must not overclaim containment for the same-UID manual enrollment renderer',
+);
+const checkpointForRecheckStart = privateSessionProvisionServerSource.indexOf(
+  'const checkpointForRecheck = async',
+);
+const checkpointForRecheckEnd = privateSessionProvisionServerSource.indexOf(
+  'const input = async',
+  checkpointForRecheckStart,
+);
+assert.ok(checkpointForRecheckStart >= 0 && checkpointForRecheckEnd > checkpointForRecheckStart);
+const checkpointForRecheckSource = privateSessionProvisionServerSource.slice(
+  checkpointForRecheckStart,
+  checkpointForRecheckEnd,
+);
+assertOrderedFragments(
+  checkpointForRecheckSource,
+  [
+    'await checkpointSignedInPage({',
+    'requireExactCheckpointTopology({',
+    'checkpointedForRecheck = true;',
+    'await closePersistentBrowserForCheckpoint(',
+    'profilePath: retainedProfilePath,',
+    'blockedRequestCounter !== blockedRequestBaseline',
+    'context = undefined;',
+    'page = undefined;',
+    'profilePath = undefined;',
+    'accountId = undefined;',
+    'expiresAt = undefined;',
+    'checkpointed: true,',
+  ],
+  'one-use checkpoint validation and immutable latch must precede clean browser shutdown and state clear',
+);
+assert.doesNotMatch(
+  checkpointForRecheckSource,
+  /retainedContext\.close\(|\.catch\([^\n]*closePersistentBrowserForCheckpoint|checkpointedForRecheck\s*=\s*false/u,
+  'checkpoint shutdown failure must propagate without a Playwright force-kill fallback or latch reset',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const status = async[\s\S]*?if \(\s*checkpointedForRecheck \|\|[\s\S]*?const start = async/,
+  'a terminal checkpoint latch must suppress status screenshots from a possibly still-live failed close',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const input = async[\s\S]*?if \(\s*checkpointedForRecheck \|\|[\s\S]*?const sealReadiness = async/,
+  'a terminal checkpoint latch must permanently close the credential-input lane',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const sealReadiness = async[\s\S]*?if \(\s*checkpointedForRecheck \|\|[\s\S]*?const closeRetainedContextForSeal/,
+  'a terminal checkpoint latch must prevent a failed close from entering another seal attempt',
 );
 assertOrderedFragments(
   privateSessionProvisionServerSource.slice(
@@ -2032,9 +2235,13 @@ assertOrderedFragments(
     privateSessionProvisionServerSource.indexOf('await runReadinessSeal({'),
   ),
   [
-    'await retainedContext.close();',
+    'if (checkpointedForRecheck) return unavailable();',
+    'checkpointedForRecheck = true;',
+    'await closePersistentBrowserForCheckpoint(',
+    'profilePath: retainedProfilePath,',
     'context = undefined;',
     'page = undefined;',
+    'profilePath = undefined;',
     'accountId = undefined;',
     'expiresAt = undefined;',
     'signedInLogged = false;',
@@ -2054,12 +2261,12 @@ assert.doesNotMatch(
     ),
     privateSessionProvisionServerSource.indexOf('await runReadinessSeal({'),
   ),
-  /retainedContext\.close\(\)\.catch|try\s*\{[\s\S]*?await retainedContext\.close\(\)[\s\S]*?\}\s*catch/,
+  /retainedContext\.close\(\)|closePersistentBrowserForCheckpoint\([^)]*\)\.catch|try\s*\{[\s\S]*?await closePersistentBrowserForCheckpoint[\s\S]*?\}\s*catch/,
   'a retained-context close failure must propagate and prevent the binding write',
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /!retainedContextClosed \|\|\s*context !== undefined \|\|\s*page !== undefined \|\|\s*accountId !== undefined \|\|\s*expiresAt !== undefined \|\|\s*expiryTimer !== undefined \|\|\s*signedInLogged/,
+  /!retainedContextClosed \|\|\s*context !== undefined \|\|\s*page !== undefined \|\|\s*profilePath !== undefined \|\|\s*accountId !== undefined \|\|\s*expiresAt !== undefined \|\|\s*expiryTimer !== undefined \|\|\s*signedInLogged/,
   'seal success must require an exact inactive and cleared supervised enrollment session',
 );
 assert.match(

@@ -8,6 +8,7 @@ import type { KemerBetAgentIdentityFingerprinter } from './kemerbet-agent-identi
 import {
   buildKemerBetReadinessIsolatedChromiumHostResolverRules,
   classifyKemerBetReadinessSealRequest,
+  closeKemerBetReadinessGuardedWebSocket,
   createKemerBetNoTransferReadinessRequestBoundary,
   createKemerBetReadinessProviderAuthorizationDigestTracker,
   createKemerBetReadinessPersistentLifecycleBoundary,
@@ -15,6 +16,7 @@ import {
   guardKemerBetReadinessSealRoute,
   isAllowedKemerBetReadinessSealRequest,
   isExactKemerBetReadinessSealPlayerLookupRequest,
+  isKnownOptionalKemerBetSignalRWebSocket,
   KemerBetNoTransferReadinessSealUnavailableError,
   prepareKemerBetIsolatedBrowserDriverOfflineContext,
   runKemerBetNoTransferReadinessSeal,
@@ -36,6 +38,7 @@ const FINGERPRINT = `hmac-sha256-agent-identity-v1:${'1'.repeat(64)}`;
 const AGENT_PROFILE_PIN = `hmac-sha256-agent-profile-pin-v3:${'1'.repeat(64)}`;
 const LAYER7_AUTHORIZATION = `v1.${'a'.repeat(32)}.1.${'b'.repeat(64)}`;
 const PROVIDER_AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
+const SIGNALR_ACCESS_TOKEN = 'abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
 const PROVIDER_AUTHORIZATION_DIGEST = `sha256-provider-authorization-v1:${createHash('sha256')
   .update(PROVIDER_AUTHORIZATION, 'utf8')
   .digest('hex')}`;
@@ -660,6 +663,149 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(boundary.invalid()).toBe(true);
     boundary.observePage({ isRetainedPage: true });
     expect(boundary.invalid()).toBe(true);
+  });
+
+  it.each(['admin-api.agt-digi.com', 'job.agt-digi.com', 'widget-api.agt-digi.com'])(
+    'recognizes the exact reviewed optional SignalR socket on %s',
+    (hostname) => {
+      expect(
+        isKnownOptionalKemerBetSignalRWebSocket(
+          `wss://${hostname}/ws?accessToken=${SIGNALR_ACCESS_TOKEN}&apiType=admin`,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it('rejects every SignalR socket variation outside the exact reviewed shape', () => {
+    const exact = `wss://admin-api.agt-digi.com/ws?accessToken=${SIGNALR_ACCESS_TOKEN}&apiType=admin`;
+    const rejected = [
+      '',
+      'not-a-url',
+      exact.replace('wss:', 'ws:'),
+      exact.replace('admin-api.agt-digi.com', 'unknown.agt-digi.com'),
+      exact.replace('admin-api.agt-digi.com', 'admin-api.agt-digi.com.evil.invalid'),
+      exact.replace('admin-api.agt-digi.com', 'sub.admin-api.agt-digi.com'),
+      exact.replace('admin-api.agt-digi.com', 'admin-api.agt-digi.com.'),
+      exact.replace('admin-api.agt-digi.com', 'admin-api.agt-digi.com:443'),
+      exact.replace('wss://', 'wss://user:password@'),
+      exact.replace('/ws?', '/ws/?'),
+      exact.replace('/ws?', '/WS?'),
+      `${exact}#fragment`,
+      exact.replace(`accessToken=${SIGNALR_ACCESS_TOKEN}`, 'accessToken=short'),
+      exact.replace(`accessToken=${SIGNALR_ACCESS_TOKEN}&`, ''),
+      exact.replace('apiType=admin', 'apiType=user'),
+      exact.replace(
+        `accessToken=${SIGNALR_ACCESS_TOKEN}&apiType=admin`,
+        `apiType=admin&accessToken=${SIGNALR_ACCESS_TOKEN}`,
+      ),
+      `${exact}&extra=value`,
+      `${exact}&accessToken=${SIGNALR_ACCESS_TOKEN}`,
+      `${exact}&apiType=admin`,
+      exact.replace('accessToken=', '%61ccessToken='),
+      exact.replace('apiType=admin', 'apiType=%61dmin'),
+      exact.replace(SIGNALR_ACCESS_TOKEN, `${SIGNALR_ACCESS_TOKEN}%2F`),
+      exact.replace(SIGNALR_ACCESS_TOKEN, `${SIGNALR_ACCESS_TOKEN}&ignored=value`),
+      `wss://admin-api.agt-digi.com/ws?accessToken=${'a'.repeat(4_097)}&apiType=admin`,
+    ];
+
+    for (const rawUrl of rejected) {
+      expect(isKnownOptionalKemerBetSignalRWebSocket(rawUrl), rawUrl).toBe(false);
+    }
+  });
+
+  it('locally closes an exact optional SignalR socket without connecting or poisoning lifecycle', async () => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => true,
+      noServiceWorkers: () => true,
+    });
+    const close = vi.fn(async () => undefined);
+    const connectToServer = vi.fn();
+    const reportUnexpected = vi.fn();
+    const webSocket = {
+      close,
+      connectToServer,
+      url: () => `wss://job.agt-digi.com/ws?accessToken=${SIGNALR_ACCESS_TOKEN}&apiType=admin`,
+    } as unknown as Parameters<typeof closeKemerBetReadinessGuardedWebSocket>[0]['webSocket'];
+
+    await boundary.track(
+      closeKemerBetReadinessGuardedWebSocket({
+        lifecycleBoundary: boundary,
+        reportUnexpected,
+        webSocket,
+      }),
+    );
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledWith({ code: 1008, reason: 'blocked' });
+    expect(connectToServer).not.toHaveBeenCalled();
+    expect(reportUnexpected).not.toHaveBeenCalled();
+    expect(boundary.invalid()).toBe(false);
+  });
+
+  it('locally closes and permanently poisons every unknown WebSocket with a diagnostic', async () => {
+    const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+      exactRestoredPageTopology: () => true,
+      noServiceWorkers: () => true,
+    });
+    const close = vi.fn(async () => undefined);
+    const connectToServer = vi.fn();
+    const reportUnexpected = vi.fn();
+    const webSocket = {
+      close,
+      connectToServer,
+      url: () =>
+        `wss://admin-api.agt-digi.com/ws?accessToken=${SIGNALR_ACCESS_TOKEN}&apiType=customer`,
+    } as unknown as Parameters<typeof closeKemerBetReadinessGuardedWebSocket>[0]['webSocket'];
+
+    await boundary.track(
+      closeKemerBetReadinessGuardedWebSocket({
+        lifecycleBoundary: boundary,
+        reportUnexpected,
+        webSocket,
+      }),
+    );
+
+    expect(close).toHaveBeenCalledWith({ code: 1008, reason: 'blocked' });
+    expect(connectToServer).not.toHaveBeenCalled();
+    expect(reportUnexpected).toHaveBeenCalledOnce();
+    expect(boundary.invalid()).toBe(true);
+    boundary.observePage({ isRetainedPage: true });
+    expect(boundary.invalid()).toBe(true);
+  });
+
+  it('keeps an unreadable socket or local-close failure sticky-fatal', async () => {
+    for (const webSocket of [
+      {
+        close: vi.fn(async () => undefined),
+        url: (): string => {
+          throw new Error('opaque socket URL');
+        },
+      },
+      {
+        close: vi.fn(async (): Promise<void> => {
+          throw new Error('local close failed');
+        }),
+        url: () =>
+          `wss://widget-api.agt-digi.com/ws?accessToken=${SIGNALR_ACCESS_TOKEN}&apiType=admin`,
+      },
+    ]) {
+      const boundary = createKemerBetReadinessPersistentLifecycleBoundary({
+        exactRestoredPageTopology: () => true,
+        noServiceWorkers: () => true,
+      });
+      await boundary.track(
+        closeKemerBetReadinessGuardedWebSocket({
+          lifecycleBoundary: boundary,
+          reportUnexpected: () => {
+            throw new Error('diagnostic failed');
+          },
+          webSocket: webSocket as unknown as Parameters<
+            typeof closeKemerBetReadinessGuardedWebSocket
+          >[0]['webSocket'],
+        }),
+      );
+      expect(boundary.invalid()).toBe(true);
+    }
   });
 
   it.each([

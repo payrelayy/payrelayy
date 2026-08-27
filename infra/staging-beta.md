@@ -736,6 +736,71 @@ Any v7 failure after the grant is disabled must resume through the exact same v7
 Any later recheck failure remains governed by the same-release recovery; it never authorizes a
 second lookup or any financial action.
 
+#### One-use eighth installed-v3 helper/release rotation
+
+The authenticated-session continuity repair adds a fail-closed pre-recheck checkpoint, retains only
+the exact provider refresh contract needed to preserve the signed-in KemerBet session, and keeps
+known optional realtime sockets local to the isolated browser. It also gives the two serial
+read-only controller requests a coherent bounded deadline. These changes do not expand the
+FIND-only contract: Amount and Notes remain forbidden, Transfer stays disabled, and neither the
+executor nor final action is enabled.
+
+The installed helper cannot rewrite the completed v7 record. Apply the reviewed helper once with
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v8.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v8.sh).
+The v8 script hard-pins the completed v7 release and helper as its direct predecessor and
+validates the immutable base plus the exact first, second, third, fourth, fifth, sixth, and seventh
+links in order.
+
+After merge, derive `SUCCESSOR_RELEASE` from that exact `main` commit and stage only the LF
+Git-blob script plus final LF helper bytes under
+`/root/fetanagent-v3-helper-rotation-v8-<successor-release>/`. The directory and script are
+`root:root` mode `0700`; `fetanagent-staging-deploy-helper.next` is `root:root` mode `0600`.
+Run from the DigitalOcean root console with the reviewed successor helper digest:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v8-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v8.sh" \
+  "$SUCCESSOR_RELEASE" \
+  "$SUCCESSOR_HELPER_SHA256" \
+  I-UNDERSTAND-THIS-APPENDS-EIGHTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+A fresh invocation verifies the exact completed-v7 helper and release, invokes only its guarded
+stop, and proves the stopped boundary before evidence or helper mutation. It then disables and
+synchronizes the exact sudo deployment grant under the root mutation lock. The sole new evidence
+namespace is
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v8/<successor-release>/`, with exact
+`intent-v1`, `completed-v1`, and archived `predecessor-helper` files. The new records bind the
+v7 intent, completion, helper archive, all immutable base digests, both effective identities, and
+the unchanged Compose durable contract. The successor helper must directly verify its own digest
+and parse the complete eight-link chain before the script restores the exact sudo grant.
+
+The existing root-certified candidate recovery and retryable exact-five recheck
+failure/source/stage evidence are outside v8 and must remain byte-for-byte unchanged. Do not
+perform broad cleanup, manually restore sudo, rename a rotation prefix, or remove transaction
+residue. Resume an interrupted transaction only with the same v8 release, digest, confirmation,
+and staged bytes. A successful v8 rotation leaves the runtime stopped, both durable volumes
+holder-free, Transfer and the executor disabled, and makes no KemerBet request, Telegram request,
+provider request, or money movement.
+
+#### Current authenticated-session continuity repair order: rotate, deploy, sign in, then recheck
+
+1. Merge the reviewed checkpoint/session-continuity helper repair, optional eighth-link parser, v8
+   rotation script, verifier, and this runbook. Freeze the final LF helper digest in the script and
+   verifier.
+2. Stage the exact Git-blob v8 script and helper on the root console, verify owner, mode, digest,
+   and LF bytes, then complete the one-use eighth rotation while the runtime remains stopped.
+3. Deploy and smoke the exact merged release, then activate and smoke the Telegram bot for that
+   same release.
+4. Sign in to KemerBet only through the isolated Owner preview. Confirm that the preview locks after
+   authentication and that Transfer remains disabled.
+5. Only then retry the same exact-five FIND-only no-transfer recheck. The helper must checkpoint the
+   exact retained authenticated session before it promotes or consumes the one-use cohort. Never
+   enter Amount or Notes, click Transfer, credit an account, enable the executor, or move money.
+
+Any v8 failure after the grant is disabled must resume through the exact same v8 command and bytes.
+Any later recheck failure remains governed by the same-release recovery; it never authorizes a
+second lookup or any financial action.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only

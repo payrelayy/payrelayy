@@ -24,6 +24,7 @@ import {
   KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS,
   KEMERBET_READINESS_LAYER7_BOOTSTRAP_PREFETCH_CONTRACT,
   KEMERBET_READINESS_LAYER7_RUNTIME_CONTRACT,
+  KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT,
   KemerBetReadinessLayer7UnavailableError,
   productionKemerBetReadinessLayer7Upstream,
   sanitizeKemerBetReadinessLayer7RequestHeaders,
@@ -562,6 +563,45 @@ describe('KemerBet readiness production upstream abort handoff', () => {
     });
     controller.abort();
     await expect(pending).rejects.toBeInstanceOf(KemerBetReadinessLayer7UnavailableError);
+  });
+});
+
+describe('KemerBet readiness Layer-7 timeout budget', () => {
+  it('keeps both downstream deadlines above the two-operation upstream budget plus margin', async () => {
+    const contract = KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT;
+    const serialUpstreamBudgetMs =
+      contract.maximumSerialUpstreamOperationsPerRequest * contract.upstreamOperationTimeoutMs;
+
+    expect(Object.isFrozen(contract)).toBe(true);
+    expect(contract).toEqual({
+      downstreamRequestTimeoutMs: 25_000,
+      downstreamSocketTimeoutMs: 25_000,
+      downstreamTimeoutMarginMs: 5_000,
+      maximumSerialUpstreamOperationsPerRequest: 2,
+      upstreamOperationTimeoutMs: 10_000,
+    });
+    expect(contract.downstreamRequestTimeoutMs).toBeGreaterThan(serialUpstreamBudgetMs);
+    expect(contract.downstreamRequestTimeoutMs - serialUpstreamBudgetMs).toBeGreaterThanOrEqual(
+      contract.downstreamTimeoutMarginMs,
+    );
+    expect(contract.downstreamSocketTimeoutMs).toBeGreaterThanOrEqual(
+      contract.downstreamRequestTimeoutMs,
+    );
+
+    const control = createKemerBetReadinessLayer7Proxy({
+      allowEphemeralTestPort: true,
+      authorizationVerifier: authorizationVerifier(),
+      sameAgentIdentityVerifier: sameAgentIdentityVerifier(),
+      effectiveGroupId: 10003,
+      effectiveUserId: 10003,
+      port: 0,
+    });
+    try {
+      expect(control.server.requestTimeout).toBe(contract.downstreamRequestTimeoutMs);
+      expect(control.server.timeout).toBe(contract.downstreamSocketTimeoutMs);
+    } finally {
+      await control.close();
+    }
   });
 });
 

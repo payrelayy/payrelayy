@@ -5,7 +5,19 @@ import { pathToFileURL } from 'node:url';
 
 import { chromium, type BrowserContext, type Page, type Route } from 'playwright-core';
 
-import { assertKemerBetBrowserExecutable } from './executor-runtime-isolation.js';
+import {
+  KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
+  KEMERBET_SELECTOR_CONTRACT_FILE,
+} from '@fetanagent/config/executor';
+
+import {
+  assertKemerBetBrowserExecutable,
+  loadKemerBetSelectorContract,
+} from './executor-runtime-isolation.js';
+import {
+  createKemerBetAgentIdentityFingerprinter,
+  type KemerBetAgentIdentityFingerprinter,
+} from './kemerbet-agent-identity-fingerprint.js';
 import {
   type KemerBetSingletonArtifactFileSystem,
   removeStaleChromiumSingletonArtifacts as removeStaleChromiumSingletonArtifactsFromProfile,
@@ -20,6 +32,13 @@ import {
   type KemerBetReadinessSealForbiddenRequestReason,
   type KemerBetReadinessSealForbiddenRequestTarget,
 } from './kemerbet-no-transfer-readiness-seal.js';
+import {
+  assertKemerBetAgentPageSelectorContractV2,
+  createPlaywrightKemerBetAgentPage,
+  observeKemerBetAgentIdentityFingerprint,
+  type KemerBetAgentPageSelectorContractV2,
+  type KemerBetAgentWorkflowControl,
+} from './playwright-kemerbet-agent-page.js';
 
 const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';
 const CONTROL_SOCKET = `${CONTROL_ROOT}/session.sock`;
@@ -29,10 +48,12 @@ const LOGIN_URL = 'https://agentsystem.admindigi.com/login';
 const WEB_ORIGIN = 'https://agentsystem.admindigi.com';
 const API_ORIGIN = 'https://admin-api.agt-digi.com';
 const DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
+const REFRESH_TOKEN_PATH = '/Account/RefreshToken';
 const RECAPTCHA_ORIGINS = new Set(['https://www.google.com', 'https://www.recaptcha.net']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_BODY_BYTES = 1_024;
+const MAX_PROVIDER_REFRESH_BODY_BYTES = 8_192;
 const LOGIN_LIFETIME_MS = 10 * 60 * 1_000;
 const AUTHENTICATED_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const VIEWPORT = Object.freeze({ width: 1280, height: 720 });
@@ -52,6 +73,26 @@ interface StartInput {
 
 interface ReadinessSealInput {
   readonly requestId: string;
+}
+
+interface KemerBetSessionCheckpointInput {
+  readonly accountId: string;
+  readonly context: BrowserContext;
+  readonly page: Page;
+}
+
+export interface KemerBetProvisionCheckpointResult {
+  readonly checkpointed: true;
+  readonly identifiersRedacted: true;
+  readonly moneyMoved: false;
+  readonly providerSessionFresh: true;
+  readonly transferDisabled: true;
+}
+
+export interface KemerBetProvisionCheckpointDependencies {
+  readonly verifyAuthenticatedPage?: (
+    input: KemerBetSessionCheckpointInput & { readonly effectiveUserId: number },
+  ) => Promise<void>;
 }
 
 interface PointerInput {
@@ -81,6 +122,7 @@ export interface KemerBetProvisionSessionStatus {
 
 export interface KemerBetProvisionServerDependencies {
   readonly assertBrowserExecutable?: () => Promise<void>;
+  readonly checkpointSignedInPage?: (input: KemerBetSessionCheckpointInput) => Promise<void>;
   readonly createReadinessProbeFromPage?: typeof createKemerBetNoTransferReadinessSealProbeFromPage;
   readonly effectiveUserId?: number;
   readonly environment?: NodeJS.ProcessEnv;
@@ -384,11 +426,118 @@ function validPageUrl(value: string): 'agents' | 'login' | undefined {
   return undefined;
 }
 
+function validateCheckpointSelectorContract(value: unknown): KemerBetAgentPageSelectorContractV2 {
+  assertKemerBetAgentPageSelectorContractV2(value);
+  return value;
+}
+
+function checkpointWorkflowControlLocator(page: Page, control: KemerBetAgentWorkflowControl) {
+  if (control.by === 'css') return page.locator(control.selector);
+  if (control.by === 'label') return page.getByLabel(control.label, { exact: true });
+  if (control.by === 'role') {
+    return page.getByRole(control.role, { exact: true, includeHidden: true, name: control.name });
+  }
+  return page.getByText(control.text, { exact: true });
+}
+
+async function requireNoActionableCheckpointTransfer(
+  page: Page,
+  selectorContract: KemerBetAgentPageSelectorContractV2,
+): Promise<void> {
+  const transfer = checkpointWorkflowControlLocator(
+    page,
+    selectorContract.depositWorkflow.transferButton,
+  );
+  const count = await transfer.count();
+  if (count > 20) return unavailable();
+  for (let index = 0; index < count; index += 1) {
+    const candidate = transfer.nth(index);
+    if ((await candidate.isVisible()) && (await candidate.isEnabled())) return unavailable();
+  }
+}
+
+function requireExactCheckpointTopology(input: KemerBetSessionCheckpointInput): void {
+  const pages = input.context.pages();
+  if (
+    input.page.context() !== input.context ||
+    input.page.isClosed() ||
+    pages.length !== 1 ||
+    pages[0] !== input.page ||
+    input.context.serviceWorkers().length !== 0 ||
+    validPageUrl(input.page.url()) !== 'agents'
+  ) {
+    unavailable();
+  }
+}
+
+/**
+ * Revalidate the retained provider session immediately before it can be snapshotted. The raw
+ * identity and refresh material never leave this function; success is represented only by the
+ * fixed aggregate checkpoint response emitted after the same context has been terminally closed.
+ */
+async function verifyKemerBetProvisionCheckpointAuthenticatedPage(
+  input: KemerBetSessionCheckpointInput & { readonly effectiveUserId: number },
+): Promise<void> {
+  const [selectorContract, fingerprintAgentIdentity] = await Promise.all([
+    loadKemerBetSelectorContract({
+      filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
+      validate: validateCheckpointSelectorContract,
+    }),
+    createKemerBetAgentIdentityFingerprinter({
+      effectiveUserId: input.effectiveUserId,
+      secretFilePath: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
+    }),
+  ]);
+  const observedFingerprint = await observeKemerBetAgentIdentityFingerprint({
+    page: input.page,
+    platformAgentAccountId: input.accountId,
+    selectorContract,
+    fingerprintAgentIdentity,
+    timeoutMs: 30_000,
+  });
+  const agentPage = createPlaywrightKemerBetAgentPage({
+    expectedAgentIdentityFingerprint: observedFingerprint,
+    fingerprintAgentIdentity,
+    page: input.page,
+    platformAgentAccountId: input.accountId,
+    selectorContract,
+    sessionKey: `kemerbet-checkpoint-v1:${input.accountId}`,
+    timeoutMs: 30_000,
+  });
+  await agentPage.adoptCurrentDepositPageWithoutNavigation();
+  await requireNoActionableCheckpointTransfer(input.page, selectorContract);
+}
+
+export async function checkpointKemerBetProvisionSignedInPage(
+  input: KemerBetSessionCheckpointInput & { readonly effectiveUserId: number },
+  dependencies: KemerBetProvisionCheckpointDependencies = {},
+): Promise<void> {
+  if (
+    !UUID_PATTERN.test(input.accountId) ||
+    input.accountId === '00000000-0000-0000-0000-000000000000' ||
+    input.effectiveUserId !== 10_001
+  ) {
+    unavailable();
+  }
+  requireExactCheckpointTopology(input);
+  await input.page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await input.page.waitForTimeout(250);
+  requireExactCheckpointTopology(input);
+  await (
+    dependencies.verifyAuthenticatedPage ?? verifyKemerBetProvisionCheckpointAuthenticatedPage
+  )(input);
+  requireExactCheckpointTopology(input);
+}
+
 export function isAllowedKemerBetSessionRequest(input: {
+  readonly headers?: Readonly<Record<string, string>>;
   readonly isMainFrame: boolean;
   readonly isNavigationRequest: boolean;
   readonly method: string;
   readonly pageUrl: string;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
   readonly requestUrl: string;
 }): boolean {
   let url: URL;
@@ -399,8 +548,53 @@ export function isAllowedKemerBetSessionRequest(input: {
   }
   const pageState = validPageUrl(input.pageUrl);
   const exactDeposit = url.origin === API_ORIGIN && url.pathname === DEPOSIT_PATH;
+  const refreshTokenEndpoint = url.origin === API_ORIGIN && url.pathname === REFRESH_TOKEN_PATH;
+  const normalizedHeaders = Object.fromEntries(
+    Object.entries(input.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  const exactRefreshToken = (() => {
+    if (
+      pageState !== 'agents' ||
+      !input.isMainFrame ||
+      input.isNavigationRequest ||
+      input.method !== 'POST' ||
+      (input.resourceType !== 'fetch' && input.resourceType !== 'xhr') ||
+      input.redirectedFrom === true ||
+      url.origin !== API_ORIGIN ||
+      url.pathname !== REFRESH_TOKEN_PATH ||
+      input.requestUrl !== `${API_ORIGIN}${REFRESH_TOKEN_PATH}` ||
+      url.search !== '' ||
+      url.hash !== '' ||
+      url.username !== '' ||
+      url.password !== '' ||
+      url.port !== '' ||
+      normalizedHeaders['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !==
+        'application/json' ||
+      normalizedHeaders.grant_type !== 'refresh_token' ||
+      typeof input.postData !== 'string' ||
+      Buffer.byteLength(input.postData, 'utf8') > MAX_PROVIDER_REFRESH_BODY_BYTES
+    ) {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(input.postData) as unknown;
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+      const object = parsed as Record<string, unknown>;
+      const refreshToken = object.refreshToken;
+      return (
+        Object.keys(object).length === 1 &&
+        typeof refreshToken === 'string' &&
+        refreshToken.length >= 16 &&
+        refreshToken.length <= 4_096 &&
+        !/[\u0000-\u001f\u007f]/u.test(refreshToken)
+      );
+    } catch {
+      return false;
+    }
+  })();
   const mutatingAfterLogin =
     pageState === 'agents' &&
+    !exactRefreshToken &&
     input.method !== 'GET' &&
     input.method !== 'HEAD' &&
     input.method !== 'OPTIONS';
@@ -410,20 +604,34 @@ export function isAllowedKemerBetSessionRequest(input: {
     url.pathname.startsWith('/recaptcha/');
   const navigationAllowed =
     !input.isNavigationRequest || validPageUrl(url.toString()) !== undefined || exactRecaptchaFrame;
-  return !exactDeposit && !mutatingAfterLogin && navigationAllowed;
+  return (
+    !exactDeposit &&
+    (!refreshTokenEndpoint || exactRefreshToken) &&
+    !mutatingAfterLogin &&
+    navigationAllowed
+  );
 }
 
-async function guardedRoute(route: Route, page: Page): Promise<void> {
+async function guardedRoute(route: Route, page: Page, onBlockedRequest: () => void): Promise<void> {
   const request = route.request();
   if (
     !isAllowedKemerBetSessionRequest({
       isMainFrame: request.frame() === page.mainFrame(),
       isNavigationRequest: request.isNavigationRequest(),
+      headers: request.headers(),
       method: request.method(),
       pageUrl: page.url(),
+      postData: request.postData(),
+      redirectedFrom: request.redirectedFrom() !== null,
+      resourceType: request.resourceType(),
       requestUrl: request.url(),
     })
   ) {
+    try {
+      onBlockedRequest();
+    } catch {
+      // Privacy-safe attempt telemetry cannot weaken the existing local abort boundary.
+    }
     await route.abort('blockedbyclient');
     return;
   }
@@ -527,6 +735,10 @@ export function createKemerBetSessionProvisionServer(
   const createReadinessProbeFromPage =
     dependencies.createReadinessProbeFromPage ?? createKemerBetNoTransferReadinessSealProbeFromPage;
   const runReadinessSeal = dependencies.runReadinessSeal ?? runKemerBetNoTransferReadinessSeal;
+  const checkpointSignedInPage =
+    dependencies.checkpointSignedInPage ??
+    ((input: KemerBetSessionCheckpointInput) =>
+      checkpointKemerBetProvisionSignedInPage({ ...input, effectiveUserId }));
   const log =
     dependencies.log ??
     ((event: 'started' | 'signed_in' | 'stopped') =>
@@ -540,6 +752,10 @@ export function createKemerBetSessionProvisionServer(
   let expiresAt: Date | undefined;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let signedInLogged = false;
+  let checkpointedForRecheck = false;
+  let blockedRequestCounter = 0n;
+  let checkpointValidationActive = false;
+  let checkpointBlockedForRecheck = false;
   const readinessFailure = createKemerBetReadinessSealFailureTracker();
   let lane = Promise.resolve();
   const startupProfilesCleaned = new Set<string>();
@@ -606,7 +822,7 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const start = async (input: StartInput): Promise<KemerBetProvisionSessionStatus> => {
-    if (context || page || accountId || expiresAt) return unavailable();
+    if (checkpointedForRecheck || context || page || accountId || expiresAt) return unavailable();
     await (
       dependencies.assertBrowserExecutable ??
       (() => assertKemerBetBrowserExecutable({ executablePath: CHROMIUM_PATH }))
@@ -645,7 +861,12 @@ export function createKemerBetSessionProvisionServer(
             ? await nextContext.newPage()
             : undefined;
       if (!nextPage) return unavailable();
-      await nextPage.route('**/*', (route) => guardedRoute(route, nextPage as Page));
+      await nextPage.route('**/*', (route) =>
+        guardedRoute(route, nextPage as Page, () => {
+          blockedRequestCounter += 1n;
+          if (checkpointValidationActive) checkpointBlockedForRecheck = true;
+        }),
+      );
       await nextPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       if (validPageUrl(nextPage.url()) === undefined) return unavailable();
     } catch {
@@ -656,9 +877,89 @@ export function createKemerBetSessionProvisionServer(
     context = nextContext;
     page = nextPage;
     accountId = input.platformAgentAccountId;
+    checkpointBlockedForRecheck = false;
     armExpiry(LOGIN_LIFETIME_MS);
     log('started');
     return status();
+  };
+
+  const checkpointForRecheck = async (): Promise<KemerBetProvisionCheckpointResult> => {
+    const currentStatus = await status();
+    if (
+      checkpointedForRecheck ||
+      checkpointBlockedForRecheck ||
+      !currentStatus.signedIn ||
+      !context ||
+      !page ||
+      !accountId ||
+      !expiresAt ||
+      !signedInLogged ||
+      now().getTime() >= expiresAt.getTime() ||
+      validPageUrl(page.url()) !== 'agents'
+    ) {
+      return unavailable();
+    }
+    const retainedContext = context;
+    const retainedPage = page;
+    const retainedAccountId = accountId;
+    const retainedExpiresAt = expiresAt;
+    const blockedRequestBaseline = blockedRequestCounter;
+    checkpointValidationActive = true;
+    try {
+      await checkpointSignedInPage({
+        accountId: retainedAccountId,
+        context: retainedContext,
+        page: retainedPage,
+      });
+      if (
+        context !== retainedContext ||
+        page !== retainedPage ||
+        accountId !== retainedAccountId ||
+        expiresAt !== retainedExpiresAt ||
+        blockedRequestCounter !== blockedRequestBaseline ||
+        checkpointBlockedForRecheck ||
+        validPageUrl(retainedPage.url()) !== 'agents'
+      ) {
+        return unavailable();
+      }
+      requireExactCheckpointTopology({
+        accountId: retainedAccountId,
+        context: retainedContext,
+        page: retainedPage,
+      });
+
+      // Install the irreversible in-process latch before awaiting Chromium shutdown. A failed
+      // close cannot reopen input or let a different session race the helper's profile copy.
+      checkpointedForRecheck = true;
+      await retainedContext.close();
+      if (
+        context !== retainedContext ||
+        page !== retainedPage ||
+        accountId !== retainedAccountId ||
+        expiresAt !== retainedExpiresAt ||
+        blockedRequestCounter !== blockedRequestBaseline ||
+        checkpointBlockedForRecheck
+      ) {
+        return unavailable();
+      }
+      if (expiryTimer !== undefined) clearTimer(expiryTimer);
+      expiryTimer = undefined;
+      context = undefined;
+      page = undefined;
+      accountId = undefined;
+      expiresAt = undefined;
+      signedInLogged = false;
+      log('stopped');
+      return {
+        checkpointed: true,
+        providerSessionFresh: true,
+        transferDisabled: true,
+        moneyMoved: false,
+        identifiersRedacted: true,
+      };
+    } finally {
+      checkpointValidationActive = false;
+    }
   };
 
   const input = async (candidate: SessionInput): Promise<KemerBetProvisionSessionStatus> => {
@@ -818,6 +1119,12 @@ export function createKemerBetSessionProvisionServer(
           const candidate = validSessionInput(await readJson(request));
           if (!candidate) return unavailable();
           sendJson(response, 200, await input(candidate));
+          return;
+        }
+        if (request.url === '/v1/session/checkpoint' && request.method === 'POST') {
+          const candidate = validReadinessSealInput(await readJson(request));
+          if (!candidate) return unavailable();
+          sendJson(response, 201, await checkpointForRecheck());
           return;
         }
         if (request.url === '/v1/readiness/seal' && request.method === 'POST') {

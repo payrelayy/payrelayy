@@ -83,9 +83,13 @@ const MAX_UPSTREAM_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_BOOTSTRAP_CACHE_BYTES = 32 * 1024 * 1024;
 const MAX_CONCURRENT_UPSTREAM_REQUESTS = 16;
 const HEADERS_TIMEOUT_MS = 5_000;
-const REQUEST_TIMEOUT_MS = 15_000;
 const KEEP_ALIVE_TIMEOUT_MS = 1_000;
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const MAX_SERIAL_UPSTREAM_OPERATIONS_PER_REQUEST = 2;
+const DOWNSTREAM_TIMEOUT_MARGIN_MS = 5_000;
+const DOWNSTREAM_REQUEST_TIMEOUT_MS =
+  MAX_SERIAL_UPSTREAM_OPERATIONS_PER_REQUEST * UPSTREAM_TIMEOUT_MS + DOWNSTREAM_TIMEOUT_MARGIN_MS;
+const DOWNSTREAM_SOCKET_TIMEOUT_MS = DOWNSTREAM_REQUEST_TIMEOUT_MS;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const PROVIDER_AUTHORIZATION_PATTERN = /^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
@@ -94,6 +98,14 @@ const AGENT_WEB_PATH = new URL(KEMERBET_AGENT_DEPOSIT_URL).pathname;
 const AGENT_API_HOSTNAME = new URL(KEMERBET_AGENT_API_ORIGIN).hostname;
 const BOOTSTRAP_HOSTNAME = 'agt-client-akm.agent-digi.com';
 const AGENT_WEB_ORIGIN = new URL(KEMERBET_AGENT_DEPOSIT_URL).origin;
+
+export const KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT = Object.freeze({
+  downstreamRequestTimeoutMs: DOWNSTREAM_REQUEST_TIMEOUT_MS,
+  downstreamSocketTimeoutMs: DOWNSTREAM_SOCKET_TIMEOUT_MS,
+  downstreamTimeoutMarginMs: DOWNSTREAM_TIMEOUT_MARGIN_MS,
+  maximumSerialUpstreamOperationsPerRequest: MAX_SERIAL_UPSTREAM_OPERATIONS_PER_REQUEST,
+  upstreamOperationTimeoutMs: UPSTREAM_TIMEOUT_MS,
+} as const);
 
 export const KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS = Object.freeze([
   '/prd/agt-admin-client/v84/index-BUEO7OSf.js',
@@ -778,7 +790,7 @@ export async function productionKemerBetReadinessLayer7Upstream(
       rejectUnauthorized: true,
       servername: input.hostname,
       signal: input.signal,
-      timeout: UPSTREAM_TIMEOUT_MS,
+      timeout: KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT.upstreamOperationTimeoutMs,
     });
     const abort = () => fail();
     input.signal.addEventListener('abort', abort, { once: true });
@@ -883,6 +895,25 @@ function effectiveGroupId(explicitGroupId: number | undefined): number {
   return process.getegid?.() ?? -1;
 }
 
+function hasCoherentKemerBetReadinessLayer7TimeoutBudget(): boolean {
+  const contract = KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT;
+  const serialUpstreamBudgetMs =
+    contract.maximumSerialUpstreamOperationsPerRequest * contract.upstreamOperationTimeoutMs;
+  return (
+    Number.isSafeInteger(contract.maximumSerialUpstreamOperationsPerRequest) &&
+    contract.maximumSerialUpstreamOperationsPerRequest === 2 &&
+    Number.isSafeInteger(contract.upstreamOperationTimeoutMs) &&
+    contract.upstreamOperationTimeoutMs > 0 &&
+    Number.isSafeInteger(contract.downstreamTimeoutMarginMs) &&
+    contract.downstreamTimeoutMarginMs > 0 &&
+    Number.isSafeInteger(contract.downstreamRequestTimeoutMs) &&
+    contract.downstreamRequestTimeoutMs >=
+      serialUpstreamBudgetMs + contract.downstreamTimeoutMarginMs &&
+    Number.isSafeInteger(contract.downstreamSocketTimeoutMs) &&
+    contract.downstreamSocketTimeoutMs >= contract.downstreamRequestTimeoutMs
+  );
+}
+
 export function createKemerBetReadinessLayer7Proxy(
   options: KemerBetReadinessLayer7ProxyOptions,
 ): KemerBetReadinessLayer7ProxyControl {
@@ -911,7 +942,8 @@ export function createKemerBetReadinessLayer7Proxy(
     typeof options.sameAgentIdentityVerifier.fail !== 'function' ||
     typeof options.sameAgentIdentityVerifier.destroy !== 'function' ||
     typeof readinessSignal.clear !== 'function' ||
-    typeof readinessSignal.publish !== 'function'
+    typeof readinessSignal.publish !== 'function' ||
+    !hasCoherentKemerBetReadinessLayer7TimeoutBudget()
   ) {
     options.authorizationVerifier.destroy();
     options.sameAgentIdentityVerifier.destroy();
@@ -935,7 +967,7 @@ export function createKemerBetReadinessLayer7Proxy(
       key: KEMERBET_READINESS_LAYER7_TLS_PRIVATE_KEY_PEM,
       keepAliveTimeout: KEEP_ALIVE_TIMEOUT_MS,
       maxHeaderSize: MAX_HEADER_BYTES,
-      requestTimeout: REQUEST_TIMEOUT_MS,
+      requestTimeout: KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT.downstreamRequestTimeoutMs,
       SNICallback: (servername, callback) => {
         if (TLS_HOSTS.has(servername)) callback(null, secureContext);
         else callback(new KemerBetReadinessLayer7UnavailableError());
@@ -1158,7 +1190,10 @@ export function createKemerBetReadinessLayer7Proxy(
   );
   server.maxHeadersCount = MAX_HEADER_COUNT;
   server.maxRequestsPerSocket = 32;
-  server.setTimeout(REQUEST_TIMEOUT_MS, (socket) => socket.destroy());
+  server.setTimeout(
+    KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT.downstreamSocketTimeoutMs,
+    (socket) => socket.destroy(),
+  );
   server.on('upgrade', (_request, socket) => socket.destroy());
   server.on('clientError', (_error, socket) => socket.destroy());
   server.on('tlsClientError', () => undefined);

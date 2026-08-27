@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import {
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
@@ -116,6 +117,7 @@ function kemerbetReadinessCohortMutationHeaders(requestId = pilotRequestId) {
 const inactiveKemerbetSession: OwnerKemerbetSessionStatus = {
   active: false,
   loginRequired: false,
+  phase: 'idle',
   signedIn: false,
   transferDisabled: true,
 };
@@ -123,9 +125,10 @@ const inactiveKemerbetSession: OwnerKemerbetSessionStatus = {
 const activeKemerbetSession: OwnerKemerbetSessionStatus = {
   active: true,
   expiresAt: '2026-08-23T12:10:00.000Z',
-  imageBase64: 'YWJjZA==',
-  imageContentType: 'image/jpeg',
+  frameSequence: 1,
+  generation: pilotRequestId,
   loginRequired: true,
+  phase: 'login_required',
   signedIn: false,
   transferDisabled: true,
 };
@@ -297,6 +300,20 @@ function verifiedAuthFetch(): typeof fetch {
     })) as typeof fetch;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+async function nextEventLoopTurn(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 describe('Owner-control HTTP boundary', () => {
   it('serves a no-store, loopback-only Owner page with strict browser policy', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
@@ -399,10 +416,18 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('owner_confirmed_kemerbet_agent_profile');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1'");
     expect(response.body).toContain('/v1/owner/kemerbet-session/start');
+    expect(response.body).toContain('/v1/owner/kemerbet-session/frame?generation=');
     expect(response.body).toContain('/v1/owner/kemerbet-session/input');
     expect(response.body).toContain('/v1/owner/kemerbet-session/stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-session-v1'");
     expect(response.body).toContain('owner_confirmed_private_kemerbet_sign_in');
+    expect(response.body).toContain('response.status !== 202');
+    expect(response.body).toContain('kemerbetSessionReconnectNeeded = true');
+    expect(response.body).toContain('displayedKemerbetFrameSequence');
+    expect(response.body).toContain('KEMERBET_TEXT_BATCH_DELAY_MS = 180');
+    expect(response.body).toContain("queueKemerbetSessionInput({ kind: 'text', text })");
+    expect(response.body).toContain('flushKemerbetPendingText();');
+    expect(response.body).not.toContain('imageBase64');
     expect(response.body).toContain('!kemerbetSessionConfirmation.checked');
     expect(response.body).toContain('kemerbetSessionStatus.textContent = startingMessage');
     expect(response.body).toContain('kemerbetSessionStatus.textContent = failureMessage');
@@ -1447,6 +1472,16 @@ describe('Owner-control HTTP boundary', () => {
     };
     const app = buildOwnerControlApp(config(), {
       fetch: verifiedAuthFetch(),
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => inactiveKemerbetSession,
+        start: async () => inactiveKemerbetSession,
+        status: async (accountId) => {
+          expect(accountId).toBe(profile.platformAgentAccountId);
+          return inactiveKemerbetSession;
+        },
+        stop: async () => inactiveKemerbetSession,
+      },
       runtime: runtime({
         kemerbetAgentProfiles: {
           list: async (actor) => {
@@ -1487,6 +1522,390 @@ describe('Owner-control HTTP boundary', () => {
       requestId: pilotRequestId,
     });
     expect(prepared.body).not.toMatch(/password|cookie|otp|credential/iu);
+    await app.close();
+  });
+
+  it('requires the current profile session to be inactive before retiring that profile', async () => {
+    let prepareCalls = 0;
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => activeKemerbetSession,
+        start: async () => activeKemerbetSession,
+        status: async (accountId) => {
+          expect(accountId).toBe(profile.platformAgentAccountId);
+          return activeKemerbetSession;
+        },
+        stop: async () => activeKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => [profile],
+          prepare: async () => {
+            prepareCalls += 1;
+            return profile;
+          },
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(),
+      payload: {
+        configurationReason: 'security_recovery',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'kemerbet_session_must_stop' });
+    expect(prepareCalls).toBe(0);
+    await app.close();
+  });
+
+  it('serializes profile retirement behind Start and rejects it after the session becomes active', async () => {
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const startEntered = deferred<void>();
+    const releaseStart = deferred<void>();
+    const secondAuthenticationStarted = deferred<void>();
+    let authenticationCalls = 0;
+    let databasePrepareCalls = 0;
+    let profileListCalls = 0;
+    let profileReadWhileStartPending = false;
+    let sessionActive = false;
+    let startPending = false;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        if (authenticationCalls === 2) secondAuthenticationStarted.resolve();
+        return new Response(JSON.stringify({ id: authUserId }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch,
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => activeKemerbetSession,
+        start: async (accountId) => {
+          expect(accountId).toBe(profile.platformAgentAccountId);
+          sessionActive = true;
+          startPending = true;
+          startEntered.resolve();
+          await releaseStart.promise;
+          startPending = false;
+          return activeKemerbetSession;
+        },
+        status: async (accountId) => {
+          expect(accountId).toBe(profile.platformAgentAccountId);
+          return sessionActive ? activeKemerbetSession : inactiveKemerbetSession;
+        },
+        stop: async () => inactiveKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async (actor) => {
+            expect(actor).toBe(authUserId);
+            profileListCalls += 1;
+            if (startPending) profileReadWhileStartPending = true;
+            return [profile];
+          },
+          prepare: async () => {
+            databasePrepareCalls += 1;
+            return profile;
+          },
+        },
+      }),
+    });
+
+    const startResponse = app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-session/start',
+      headers: kemerbetSessionMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+        requestId: pilotRequestId,
+      },
+    });
+    await startEntered.promise;
+
+    let prepareSettled = false;
+    const prepareResponse = app
+      .inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-agent-profiles/prepare',
+        headers: kemerbetAgentProfileMutationHeaders(),
+        payload: {
+          configurationReason: 'security_recovery',
+          confirmation: 'owner_confirmed_kemerbet_agent_profile',
+          requestId: pilotRequestId,
+        },
+      })
+      .then((response) => {
+        prepareSettled = true;
+        return response;
+      });
+    await secondAuthenticationStarted.promise;
+    await nextEventLoopTurn();
+
+    expect(prepareSettled).toBe(false);
+    expect(profileListCalls).toBe(1);
+    expect(databasePrepareCalls).toBe(0);
+    expect(profileReadWhileStartPending).toBe(false);
+
+    releaseStart.resolve();
+    const [started, prepared] = await Promise.all([startResponse, prepareResponse]);
+    expect(started.statusCode).toBe(202);
+    expect(started.json()).toEqual({ session: activeKemerbetSession });
+    expect(prepared.statusCode).toBe(409);
+    expect(prepared.json()).toEqual({ error: 'kemerbet_session_must_stop' });
+    expect(profileListCalls).toBe(2);
+    expect(databasePrepareCalls).toBe(0);
+    expect(profileReadWhileStartPending).toBe(false);
+    expect(authenticationCalls).toBe(2);
+    await app.close();
+  });
+
+  it('serializes Start behind profile retirement and binds it to the newly active profile', async () => {
+    const oldProfile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const newProfile = {
+      ...oldProfile,
+      configuredAt: '2026-08-27T12:00:00.000Z',
+      configurationReason: 'security_recovery' as const,
+      platformAgentAccountId: '88888888-8888-4888-8888-888888888888',
+      profileLabel: 'Primary KemerBet agent revision 2',
+      profileRevision: 2,
+    };
+    const rotationRequestId = '66666666-6666-4666-8666-666666666666';
+    const prepareEntered = deferred<void>();
+    const releasePrepare = deferred<void>();
+    const secondAuthenticationStarted = deferred<void>();
+    const events: string[] = [];
+    const startedAccountIds: string[] = [];
+    let authenticationCalls = 0;
+    let databasePrepareCalls = 0;
+    let preparePending = false;
+    let profileListCalls = 0;
+    let profileReadWhilePreparePending = false;
+    let rotated = false;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        if (authenticationCalls === 2) secondAuthenticationStarted.resolve();
+        return new Response(JSON.stringify({ id: authUserId }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch,
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => activeKemerbetSession,
+        start: async (accountId) => {
+          events.push(`start:${accountId}`);
+          startedAccountIds.push(accountId);
+          return activeKemerbetSession;
+        },
+        status: async (accountId) => {
+          events.push(`status:${accountId}`);
+          expect(accountId).toBe(oldProfile.platformAgentAccountId);
+          return inactiveKemerbetSession;
+        },
+        stop: async () => inactiveKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async (actor) => {
+            expect(actor).toBe(authUserId);
+            profileListCalls += 1;
+            if (preparePending) profileReadWhilePreparePending = true;
+            const profile = rotated ? newProfile : oldProfile;
+            events.push(`list:${profile.platformAgentAccountId}`);
+            return [profile];
+          },
+          prepare: async (actor, request) => {
+            expect(actor).toBe(authUserId);
+            expect(request).toEqual({
+              configurationReason: 'security_recovery',
+              requestId: rotationRequestId,
+            });
+            databasePrepareCalls += 1;
+            preparePending = true;
+            events.push('prepare:entered');
+            prepareEntered.resolve();
+            await releasePrepare.promise;
+            rotated = true;
+            preparePending = false;
+            events.push('prepare:completed');
+            return newProfile;
+          },
+        },
+      }),
+    });
+
+    const prepareResponse = app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(rotationRequestId),
+      payload: {
+        configurationReason: 'security_recovery',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: rotationRequestId,
+      },
+    });
+    await prepareEntered.promise;
+
+    let startSettled = false;
+    const startResponse = app
+      .inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/start',
+        headers: kemerbetSessionMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+          requestId: pilotRequestId,
+        },
+      })
+      .then((response) => {
+        startSettled = true;
+        return response;
+      });
+    await secondAuthenticationStarted.promise;
+    await nextEventLoopTurn();
+
+    expect(startSettled).toBe(false);
+    expect(profileListCalls).toBe(1);
+    expect(databasePrepareCalls).toBe(1);
+    expect(startedAccountIds).toEqual([]);
+    expect(profileReadWhilePreparePending).toBe(false);
+
+    releasePrepare.resolve();
+    const [prepared, started] = await Promise.all([prepareResponse, startResponse]);
+    expect(prepared.statusCode).toBe(201);
+    expect(prepared.json()).toEqual({ profile: newProfile });
+    expect(started.statusCode).toBe(202);
+    expect(started.json()).toEqual({ session: activeKemerbetSession });
+    expect(startedAccountIds).toEqual([newProfile.platformAgentAccountId]);
+    expect(profileListCalls).toBe(2);
+    expect(databasePrepareCalls).toBe(1);
+    expect(profileReadWhilePreparePending).toBe(false);
+    expect(authenticationCalls).toBe(2);
+    expect(events).toEqual([
+      `list:${oldProfile.platformAgentAccountId}`,
+      `status:${oldProfile.platformAgentAccountId}`,
+      'prepare:entered',
+      'prepare:completed',
+      `list:${newProfile.platformAgentAccountId}`,
+      `start:${newProfile.platformAgentAccountId}`,
+    ]);
+    await app.close();
+  });
+
+  it('invalidates the interactive active-profile cache after a safe profile rotation', async () => {
+    const oldProfile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const newProfile = {
+      ...oldProfile,
+      configuredAt: '2026-08-22T19:35:00.000Z',
+      configurationReason: 'security_recovery' as const,
+      platformAgentAccountId: '88888888-8888-4888-8888-888888888888',
+      profileLabel: 'Primary KemerBet agent revision 2',
+      profileRevision: 2,
+    };
+    let rotated = false;
+    const observedStatusAccounts: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => inactiveKemerbetSession,
+        start: async () => inactiveKemerbetSession,
+        status: async (accountId) => {
+          observedStatusAccounts.push(accountId);
+          return inactiveKemerbetSession;
+        },
+        stop: async () => inactiveKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => [rotated ? newProfile : oldProfile],
+          prepare: async () => {
+            rotated = true;
+            return newProfile;
+          },
+        },
+      }),
+    });
+
+    for (const expectedAccountId of [oldProfile.platformAgentAccountId]) {
+      const status = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/kemerbet-session',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(status.statusCode).toBe(200);
+      expect(observedStatusAccounts.at(-1)).toBe(expectedAccountId);
+    }
+    const prepared = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(),
+      payload: {
+        configurationReason: 'security_recovery',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+
+    const afterRotation = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(afterRotation.statusCode).toBe(200);
+    expect(observedStatusAccounts).toEqual([
+      oldProfile.platformAgentAccountId,
+      oldProfile.platformAgentAccountId,
+      newProfile.platformAgentAccountId,
+    ]);
     await app.close();
   });
 
@@ -1533,6 +1952,40 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('rejects malformed private-preview text batches before authentication', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const base = {
+      frameSequence: 1,
+      kind: 'text',
+      requestId: pilotRequestId,
+      sessionGeneration: pilotRequestId,
+    };
+    for (const payload of [
+      { ...base, text: '' },
+      { ...base, text: 'A'.repeat(65) },
+      { ...base, text: 'contains`backtick' },
+      { ...base, text: 'contains\nnewline' },
+      { ...base, text: 'valid', password: 'forbidden' },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/input',
+        headers: kemerbetSessionMutationHeaders(),
+        payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
   it('controls only the active profile through the exact private no-transfer session boundary', async () => {
     const profile = {
       configuredAt: '2026-08-22T19:30:00.000Z',
@@ -1546,17 +1999,28 @@ describe('Owner-control HTTP boundary', () => {
     };
     const observed: unknown[] = [];
     const control: OwnerKemerbetSessionControl = {
-      status: async () => activeKemerbetSession,
+      frame: async (accountId, generation, after) => {
+        observed.push(['frame', accountId, generation, after]);
+        return {
+          generation,
+          image: Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+          sequence: 1,
+        };
+      },
+      status: async (accountId) => {
+        observed.push(['status', accountId]);
+        return activeKemerbetSession;
+      },
       start: async (accountId, requestId) => {
         observed.push(['start', accountId, requestId]);
         return activeKemerbetSession;
       },
-      input: async (value) => {
-        observed.push(['input', value]);
+      input: async (accountId, value) => {
+        observed.push(['input', accountId, value]);
         return activeKemerbetSession;
       },
-      stop: async (requestId) => {
-        observed.push(['stop', requestId]);
+      stop: async (accountId, requestId) => {
+        observed.push(['stop', accountId, requestId]);
         return inactiveKemerbetSession;
       },
     };
@@ -1591,11 +2055,40 @@ describe('Owner-control HTTP boundary', () => {
         requestId: pilotRequestId,
       },
     });
-    expect(started.statusCode).toBe(201);
+    expect(started.statusCode).toBe(202);
+
+    const frame = await app.inject({
+      method: 'GET',
+      url: `/v1/owner/kemerbet-session/frame?generation=${pilotRequestId}&after=0`,
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(frame.statusCode).toBe(200);
+    expect(frame.headers['content-type']).toBe('image/jpeg');
+    expect(frame.headers['x-fetanagent-frame-sequence']).toBe('1');
 
     for (const payload of [
-      { kind: 'pointer', requestId: pilotRequestId, x: 123, y: 456 },
-      { key: 'A', kind: 'key', requestId: pilotRequestId },
+      {
+        frameSequence: 1,
+        kind: 'pointer',
+        requestId: pilotRequestId,
+        sessionGeneration: pilotRequestId,
+        x: 123,
+        y: 456,
+      },
+      {
+        frameSequence: 1,
+        key: 'A',
+        kind: 'key',
+        requestId: pilotRequestId,
+        sessionGeneration: pilotRequestId,
+      },
+      {
+        frameSequence: 1,
+        kind: 'text',
+        requestId: pilotRequestId,
+        sessionGeneration: pilotRequestId,
+        text: 'owner-login',
+      },
     ]) {
       const input = await app.inject({
         method: 'POST',
@@ -1616,15 +2109,122 @@ describe('Owner-control HTTP boundary', () => {
         requestId: pilotRequestId,
       },
     });
-    expect(stopped.statusCode).toBe(200);
+    expect(stopped.statusCode).toBe(202);
     expect(stopped.json()).toEqual({ session: inactiveKemerbetSession });
     expect(observed).toEqual([
+      ['status', profile.platformAgentAccountId],
       ['start', profile.platformAgentAccountId, pilotRequestId],
-      ['input', { kind: 'pointer', requestId: pilotRequestId, x: 123, y: 456 }],
-      ['input', { key: 'A', kind: 'key', requestId: pilotRequestId }],
-      ['stop', pilotRequestId],
+      ['frame', profile.platformAgentAccountId, pilotRequestId, 0],
+      [
+        'input',
+        profile.platformAgentAccountId,
+        {
+          frameSequence: 1,
+          kind: 'pointer',
+          requestId: pilotRequestId,
+          sessionGeneration: pilotRequestId,
+          x: 123,
+          y: 456,
+        },
+      ],
+      [
+        'input',
+        profile.platformAgentAccountId,
+        {
+          frameSequence: 1,
+          key: 'A',
+          kind: 'key',
+          requestId: pilotRequestId,
+          sessionGeneration: pilotRequestId,
+        },
+      ],
+      [
+        'input',
+        profile.platformAgentAccountId,
+        {
+          frameSequence: 1,
+          kind: 'text',
+          requestId: pilotRequestId,
+          sessionGeneration: pilotRequestId,
+          text: 'owner-login',
+        },
+      ],
+      ['stop', profile.platformAgentAccountId, pilotRequestId],
     ]);
     expect(JSON.stringify(observed)).not.toMatch(/password|otp|cookie|amount|transfer/iu);
+    await app.close();
+  });
+
+  it('coalesces and caches interactive Owner and profile checks for at most five seconds', async () => {
+    let nowMs = Date.parse('2026-08-27T12:00:00.000Z');
+    let authenticationCalls = 0;
+    let profileCalls = 0;
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const control: OwnerKemerbetSessionControl = {
+      frame: async () => undefined,
+      input: async () => activeKemerbetSession,
+      start: async () => activeKemerbetSession,
+      status: async () => activeKemerbetSession,
+      stop: async () => inactiveKemerbetSession,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        return new Response(JSON.stringify({ id: authUserId }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch,
+      kemerbetSessionControl: control,
+      now: () => new Date(nowMs),
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async (actor) => {
+            expect(actor).toBe(authUserId);
+            profileCalls += 1;
+            return [profile];
+          },
+          prepare: async () => profile,
+        },
+      }),
+    });
+    const ownerHeaders = { authorization: `Bearer ${bearer}` };
+    const statusRequest = () =>
+      app.inject({ method: 'GET', url: '/v1/owner/kemerbet-session', headers: ownerHeaders });
+    const frameRequest = () =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/owner/kemerbet-session/frame?generation=${pilotRequestId}&after=1`,
+        headers: ownerHeaders,
+      });
+
+    const [status, frame] = await Promise.all([statusRequest(), frameRequest()]);
+    expect(status.statusCode).toBe(200);
+    expect(frame.statusCode).toBe(204);
+    expect(authenticationCalls).toBe(1);
+    expect(profileCalls).toBe(1);
+
+    expect((await statusRequest()).statusCode).toBe(200);
+    expect(authenticationCalls).toBe(1);
+    expect(profileCalls).toBe(1);
+
+    nowMs += 5_001;
+    expect((await frameRequest()).statusCode).toBe(204);
+    expect(authenticationCalls).toBe(2);
+    expect(profileCalls).toBe(2);
+
+    const source = readFileSync(new URL('./app.ts', import.meta.url), 'utf8');
+    expect(source).toContain("createHash('sha256').update(token, 'utf8').digest('hex')");
+    expect(source).toContain('const INTERACTIVE_SESSION_CACHE_MAX_ENTRIES = 8');
     await app.close();
   });
 
@@ -1637,6 +2237,7 @@ describe('Owner-control HTTP boundary', () => {
         throw new Error('authentication must not run');
       }) as typeof fetch,
       kemerbetSessionControl: {
+        frame: async () => undefined,
         status: async () => {
           controlCalls.push('status');
           return inactiveKemerbetSession;

@@ -244,13 +244,24 @@ assert.match(kemerbetSessionService, /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLE
 assert.match(kemerbetSessionService, /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED: 'false'/);
 assert.match(kemerbetSessionService, /source: kemerbet_session_control/);
 assert.match(kemerbetSessionService, /source: kemerbet_sessions/);
+const kemerbetSessionVolumes = servicePropertyBlock(kemerbetSessionService, 'volumes');
+assert.equal(
+  countMatches(kemerbetSessionVolumes, /^\s+- type: /gm),
+  6,
+  'the long-lived sign-in coordinator must have exactly six non-lookup mounts',
+);
 assert.match(
   kemerbetSessionService,
   /source: \/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_hmac_key[\s\S]*?target: \/run\/secrets\/kemerbet_agent_identity_hmac_key[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
 );
 assert.match(
   kemerbetSessionService,
-  /source: \/etc\/fetanagent\/executor-secrets\/kemerbet_no_transfer_readiness_player_ids[\s\S]*?target: \/run\/secrets\/kemerbet_no_transfer_readiness_player_ids[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+  /source: \/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings[\s\S]*?target: \/run\/secrets\/kemerbet_agent_identity_bindings[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+);
+assert.doesNotMatch(
+  kemerbetSessionVolumes,
+  /kemerbet_no_transfer_readiness_player_ids/u,
+  'ordinary private sign-in must not mount the separately authorized exact-five lookup cohort',
 );
 assert.match(
   kemerbetSessionService,

@@ -1,17 +1,31 @@
+import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, realpath, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { chromium, type BrowserContext, type Page, type Route } from 'playwright-core';
+import {
+  chromium,
+  type BrowserContext,
+  type Frame,
+  type Page,
+  type Route,
+  type WebSocketRoute,
+} from 'playwright-core';
 
 import {
+  KEMERBET_AGENT_LOGIN_RETRY_URL,
+  kemerBetEnrollmentAdapter,
+} from '@fetanagent/agent-platform-kemerbet';
+import {
+  KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,
   KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
   KEMERBET_SELECTOR_CONTRACT_FILE,
 } from '@fetanagent/config/executor';
 
 import {
   assertKemerBetBrowserExecutable,
+  loadKemerBetAgentIdentityBindings,
   loadKemerBetSelectorContract,
 } from './executor-runtime-isolation.js';
 import {
@@ -20,10 +34,16 @@ import {
 } from './kemerbet-agent-identity-fingerprint.js';
 import {
   type KemerBetSingletonArtifactFileSystem,
+  purgeKemerBetPersistedServiceWorkerState,
   removeStaleChromiumSingletonArtifacts as removeStaleChromiumSingletonArtifactsFromProfile,
 } from './kemerbet-chromium-profile.js';
 import { closeKemerBetPersistentBrowserForRestorableCheckpoint } from './kemerbet-persistent-browser-checkpoint.js';
 import {
+  acquireKemerBetSessionProfileGenerationLease,
+  type KemerBetSessionProfileGenerationLease,
+} from './kemerbet-session-profile-generation-lease.js';
+import {
+  closeKemerBetReadinessGuardedWebSocket,
   createKemerBetNoTransferReadinessSealProbeFromPage,
   runKemerBetNoTransferReadinessSeal,
   type KemerBetNoTransferReadinessSealStage,
@@ -45,18 +65,134 @@ const CONTROL_ROOT = '/run/fetanagent-kemerbet-session-control';
 const CONTROL_SOCKET = `${CONTROL_ROOT}/session.sock`;
 const PROFILE_ROOT = '/var/lib/fetanagent/kemerbet-sessions';
 const CHROMIUM_PATH = '/usr/bin/chromium';
-const LOGIN_URL = 'https://agentsystem.admindigi.com/login';
-const WEB_ORIGIN = 'https://agentsystem.admindigi.com';
 const API_ORIGIN = 'https://admin-api.agt-digi.com';
 const DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
+const LOGIN_PATH = '/Account/Login';
 const REFRESH_TOKEN_PATH = '/Account/RefreshToken';
-const RECAPTCHA_ORIGINS = new Set(['https://www.google.com', 'https://www.recaptcha.net']);
+// SHA-256 of the public reCAPTCHA site key embedded in the independently pinned KemerBet v84
+// bundle. Comparing its digest avoids duplicating the key in source or diagnostics while still
+// binding the complete one-use reCAPTCHA ceremony to the reviewed KemerBet integration.
+const KEMERBET_RECAPTCHA_SITE_KEY_SHA256 =
+  '644e0617ffba2393c164eef1f93e6810aae887984eee263e7834dcbf1b5a8863';
+const KEMERBET_RECAPTCHA_VERSION = 'GY0lZUzQQgeA0wDxVI-SQEZw';
+const KEMERBET_RECAPTCHA_ORIGIN_CO = 'aHR0cHM6Ly9hZ2VudHN5c3RlbS5hZG1pbmRpZ2kuY29tOjQ0Mw..';
+const KEMERBET_RECAPTCHA_RUNTIME_URL = `https://www.gstatic.com/recaptcha/releases/${KEMERBET_RECAPTCHA_VERSION}/recaptcha__en.js`;
+const KEMERBET_RECAPTCHA_STYLES_URL = `https://www.gstatic.com/recaptcha/releases/${KEMERBET_RECAPTCHA_VERSION}/styles__ltr.css`;
+const KEMERBET_RECAPTCHA_LOGO_URL = 'https://www.gstatic.com/recaptcha/api2/logo_48.png';
+const KEMERBET_RECAPTCHA_WEBWORKER_URL = `https://www.google.com/recaptcha/api2/webworker.js?hl=en&v=${KEMERBET_RECAPTCHA_VERSION}`;
+const KEMERBET_RECAPTCHA_ASSET_FETCH_TIMEOUT_MS = 10_000;
+const KEMERBET_RECAPTCHA_VERIFIED_CACHE_TTL_MS = 10 * 60 * 1_000;
+const KEMERBET_RECAPTCHA_VERIFIED_CACHE_MAX_ENTRIES = 5;
+const MAX_KEMERBET_CHROMIUM_USER_AGENT_BYTES = 192;
+const KEMERBET_CHROMIUM_USER_AGENT_PATTERN =
+  /^Mozilla\/5\.0 \((?:X11; Linux x86_64|Windows NT 10\.0; Win64; x64)\) AppleWebKit\/537\.36 \(KHTML, like Gecko\) HeadlessChrome\/[1-9][0-9]{1,2}\.[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6} Safari\/537\.36$/u;
+const MAX_RECAPTCHA_RELOAD_BODY_BYTES = 16_384;
+const MAX_RECAPTCHA_CLR_BODY_BYTES = 4_096;
+const MAX_RECAPTCHA_BCN_BODY_BYTES = 12_288;
+const MAX_RECAPTCHA_DYNAMIC_BODY_BYTES =
+  MAX_RECAPTCHA_RELOAD_BODY_BYTES + MAX_RECAPTCHA_CLR_BODY_BYTES + MAX_RECAPTCHA_BCN_BODY_BYTES;
+const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
+  api: Object.freeze({
+    accessControlAllowOrigin: undefined,
+    bytes: 1_582,
+    crossOriginEmbedderPolicy: undefined,
+    crossOriginResourcePolicy: 'cross-origin',
+    mime: 'text/javascript',
+    sha256: 'c5f10b63d9382d2cc53ebdc907cdcbcc22771368a48c0e55b7efa8d2d0db57b7',
+  }),
+  css: Object.freeze({
+    accessControlAllowOrigin: undefined,
+    bytes: 82_980,
+    crossOriginEmbedderPolicy: undefined,
+    crossOriginResourcePolicy: 'cross-origin',
+    mime: 'text/css',
+    sha256: '49d5532804885413cd5ea22576e15b9a0c155d6a85f3f7a3b2d00e5c33255a20',
+  }),
+  logo: Object.freeze({
+    accessControlAllowOrigin: undefined,
+    bytes: 2_228,
+    crossOriginEmbedderPolicy: undefined,
+    crossOriginResourcePolicy: 'cross-origin',
+    mime: 'image/png',
+    sha256: '1b9efb22c938500971aac2b2130a475fa23684dd69e43103894968df83145b8a',
+  }),
+  runtime: Object.freeze({
+    accessControlAllowOrigin: '*',
+    bytes: 801_607,
+    crossOriginEmbedderPolicy: undefined,
+    crossOriginResourcePolicy: 'cross-origin',
+    mime: 'text/javascript',
+    sha256: 'fe188a6a0bd9ff48c40f0f4f06065d21476e9027d0efa2f3af5137122eaebcaf',
+  }),
+  webworker: Object.freeze({
+    accessControlAllowOrigin: undefined,
+    bytes: 102,
+    crossOriginEmbedderPolicy: 'require-corp',
+    crossOriginResourcePolicy: 'same-site',
+    mime: 'text/javascript',
+    sha256: 'b22eb15171974449a10e031e6e763990e12969226e448524a1d561cf3882c063',
+  }),
+});
+const KEMERBET_AGENT_WEB_ORIGIN = 'https://agentsystem.admindigi.com';
+const KEMERBET_AGENT_BOOTSTRAP_ORIGIN = 'https://agt-client-akm.agent-digi.com';
+const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, string>([
+  ['/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'script'],
+  ['/prd/agt-admin-client/v84/index-BnOqIDsD.css', 'stylesheet'],
+  ['/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css', 'stylesheet'],
+  ['/prd/agt-admin-client/v84/ltr-v1RhStcA.js', 'script'],
+  ['/prd/agt-admin-client/v84/ltr-v3JyGz8d.js', 'script'],
+  ['/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js', 'script'],
+  ['/prd/agt-admin-client/v84/index-6dvVbeUF.js', 'script'],
+]);
+const KEMERBET_OPTIONAL_STATIC_ASSETS = new Map<string, string>([
+  [
+    'https://agt-cdn.cdn-digi.com/prd/companies/2093/projects/39803/logo_24e4a06149154c9a956062027baa2fed.png',
+    'image',
+  ],
+  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/auth-bg-Dn8uzDgY.svg', 'image'],
+  [
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-BzeA2iFa.ttf?squmb1',
+    'font',
+  ],
+  [
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CIUf9UuY.eot?squmb1',
+    'font',
+  ],
+  [
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CTmSmUzv.woff?squmb1',
+    'font',
+  ],
+  [
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-DYzGJZDb.svg?squmb1',
+    'image',
+  ],
+  ['https://agentsystem.admindigi.com/src/favicon.svg', 'image'],
+  ['https://agt-cdn.cdn-digi.com/prd/system/translations/backoffice_en.json', 'fetch'],
+]);
+const KEMERBET_AUTHENTICATED_READ_PATHS = new Set([
+  '/Account/Info',
+  '/Account/Currencies',
+  '/SystemLanguage/SystemAvailablePublished',
+  '/SystemLanguage/AvailablePublished',
+]);
+const KEMERBET_OPTIONAL_TELEMETRY_HOSTS = new Set([
+  't.cs.hotjar.io',
+  'insights.hotjar.com',
+  'metrics.hotjar.io',
+  'script.hotjar.com',
+  'static.hotjar.com',
+]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const MAX_BODY_BYTES = 1_024;
 const MAX_PROVIDER_REFRESH_BODY_BYTES = 8_192;
+const MAX_PROVIDER_LOGIN_BODY_BYTES = 16_384;
 const LOGIN_LIFETIME_MS = 10 * 60 * 1_000;
 const AUTHENTICATED_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+const MAX_GENERATION_LIFETIME_MS = LOGIN_LIFETIME_MS + AUTHENTICATED_SESSION_LIFETIME_MS;
+const FRAME_CAPTURE_TIMEOUT_MS = 4_000;
+const FRAME_REFRESH_INTERVAL_MS = 1_000;
+const FAULT_CLEANUP_RETRY_MS = 5_000;
 const VIEWPORT = Object.freeze({ width: 1280, height: 720 });
 const NAMED_KEYS = new Set(['Backspace', 'Delete', 'Enter', 'Escape', 'Tab']);
 
@@ -82,6 +218,11 @@ interface KemerBetSessionCheckpointInput {
   readonly page: Page;
 }
 
+export interface KemerBetProvisionAuthenticatedIdentityVerifier {
+  readonly accountId: string;
+  verify(page: Page): Promise<void>;
+}
+
 export interface KemerBetProvisionCheckpointResult {
   readonly checkpointed: true;
   readonly identifiersRedacted: true;
@@ -96,42 +237,134 @@ export interface KemerBetProvisionCheckpointDependencies {
   ) => Promise<void>;
 }
 
+export interface KemerBetRecaptchaAssetFetchInput {
+  readonly maxBytes: number;
+  readonly timeoutMs: number;
+  readonly url: string;
+  readonly userAgent: string;
+}
+
+export interface KemerBetRecaptchaAssetFetchResult {
+  readonly accessControlAllowOrigin: string | null;
+  readonly body: Uint8Array;
+  readonly contentType: string | null;
+  readonly crossOriginEmbedderPolicy: string | null;
+  readonly crossOriginResourcePolicy: string | null;
+  readonly finalUrl: string;
+  readonly status: number;
+}
+
+export type KemerBetRecaptchaAssetFetcher = (
+  input: KemerBetRecaptchaAssetFetchInput,
+) => Promise<KemerBetRecaptchaAssetFetchResult>;
+
+interface KemerBetRecaptchaAssetPin {
+  readonly accessControlAllowOrigin?: string | undefined;
+  readonly bytes: number;
+  readonly crossOriginEmbedderPolicy?: string | undefined;
+  readonly crossOriginResourcePolicy: string;
+  readonly mime: string;
+  readonly sha256: string;
+}
+
+interface KemerBetRecaptchaAssetPinSet {
+  readonly api: KemerBetRecaptchaAssetPin;
+  readonly css: KemerBetRecaptchaAssetPin;
+  readonly logo: KemerBetRecaptchaAssetPin;
+  readonly runtime: KemerBetRecaptchaAssetPin;
+  readonly webworker: KemerBetRecaptchaAssetPin;
+}
+
+interface KemerBetVerifiedRecaptchaAssetCacheEntry {
+  readonly body: Uint8Array;
+  readonly expiresAtMonotonicMs: number;
+}
+
+const kemerBetVerifiedRecaptchaAssetCache = new Map<
+  string,
+  KemerBetVerifiedRecaptchaAssetCacheEntry
+>();
+
 interface PointerInput {
+  readonly frameSequence: number;
   readonly kind: 'pointer';
+  readonly platformAgentAccountId: string;
   readonly requestId: string;
+  readonly sessionGeneration: string;
   readonly x: number;
   readonly y: number;
 }
 
 interface KeyInput {
+  readonly frameSequence: number;
   readonly key: string;
   readonly kind: 'key';
+  readonly platformAgentAccountId: string;
   readonly requestId: string;
+  readonly sessionGeneration: string;
 }
 
-type SessionInput = PointerInput | KeyInput;
+interface TextInput {
+  readonly frameSequence: number;
+  readonly kind: 'text';
+  readonly platformAgentAccountId: string;
+  readonly requestId: string;
+  readonly sessionGeneration: string;
+  readonly text: string;
+}
+
+type SessionInput = PointerInput | KeyInput | TextInput;
+
+export type KemerBetProvisionSessionPhase =
+  | 'authenticated'
+  | 'authenticating'
+  | 'checkpointed'
+  | 'faulted'
+  | 'idle'
+  | 'login_required'
+  | 'starting'
+  | 'stopping';
 
 export interface KemerBetProvisionSessionStatus {
   readonly active: boolean;
   readonly expiresAt?: string;
-  readonly imageBase64?: string;
-  readonly imageContentType?: 'image/jpeg';
+  readonly frameSequence?: number;
+  readonly generation?: string;
   readonly loginRequired: boolean;
+  readonly phase: KemerBetProvisionSessionPhase;
   readonly signedIn: boolean;
   readonly transferDisabled: true;
 }
 
 export interface KemerBetProvisionServerDependencies {
+  readonly acquireProfileGenerationLease?: (
+    profilePath: string,
+    effectiveUserId: number,
+  ) => Promise<KemerBetSessionProfileGenerationLease>;
   readonly assertBrowserExecutable?: () => Promise<void>;
   readonly checkpointSignedInPage?: (input: KemerBetSessionCheckpointInput) => Promise<void>;
   readonly createReadinessProbeFromPage?: typeof createKemerBetNoTransferReadinessSealProbeFromPage;
   readonly effectiveUserId?: number;
   readonly environment?: NodeJS.ProcessEnv;
   readonly launchPersistentContext?: typeof chromium.launchPersistentContext;
+  readonly monotonicNow?: () => number;
   readonly now?: () => Date;
+  readonly prepareSessionProfile?: (accountId: string, effectiveUserId: number) => Promise<string>;
+  readonly purgePersistedServiceWorkerState?: (
+    profilePath: string,
+    effectiveUserId: number,
+  ) => Promise<void>;
+  readonly prepareAuthenticatedIdentityVerifier?: (
+    accountId: string,
+    effectiveUserId: number,
+  ) => Promise<KemerBetProvisionAuthenticatedIdentityVerifier>;
   readonly runReadinessSeal?: typeof runKemerBetNoTransferReadinessSeal;
+  readonly validateSessionProfile?: (profilePath: string, effectiveUserId: number) => Promise<void>;
   readonly setTimer?: typeof setTimeout;
   readonly clearTimer?: typeof clearTimeout;
+  readonly forceQuarantine?: (exitCode: 1) => void;
+  readonly createRecaptchaCeremony?: typeof createKemerBetRecaptchaCeremony;
+  readonly fetchRecaptchaAsset?: KemerBetRecaptchaAssetFetcher;
   readonly closePersistentBrowserForCheckpoint?: typeof closeKemerBetPersistentBrowserForRestorableCheckpoint;
   readonly log?: (event: 'started' | 'signed_in' | 'stopped') => void;
   readonly logReadinessSealFailure?: (event: KemerBetReadinessSealFailureEvent) => void;
@@ -420,15 +653,9 @@ async function prepareProfile(accountId: string, effectiveUserId: number): Promi
 }
 
 function validPageUrl(value: string): 'agents' | 'login' | undefined {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return undefined;
-  }
-  if (url.origin !== WEB_ORIGIN || url.username || url.password || url.hash) return undefined;
-  if (url.pathname === '/agents' && url.search === '') return 'agents';
-  if (url.pathname === '/login' && (url.search === '' || url.search === '?et=1')) return 'login';
+  const classification = kemerBetEnrollmentAdapter.classifyPage(value);
+  if (classification.kind === 'authenticated_candidate') return 'agents';
+  if (classification.kind === 'login') return 'login';
   return undefined;
 }
 
@@ -484,7 +711,11 @@ function requireExactCheckpointTopology(input: KemerBetSessionCheckpointInput): 
 async function verifyKemerBetProvisionCheckpointAuthenticatedPage(
   input: KemerBetSessionCheckpointInput & { readonly effectiveUserId: number },
 ): Promise<void> {
-  const [selectorContract, fingerprintAgentIdentity] = await Promise.all([
+  const [bindings, selectorContract, fingerprintAgentIdentity] = await Promise.all([
+    loadKemerBetAgentIdentityBindings({
+      effectiveUserId: input.effectiveUserId,
+      filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,
+    }),
     loadKemerBetSelectorContract({
       filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
       validate: validateCheckpointSelectorContract,
@@ -494,6 +725,15 @@ async function verifyKemerBetProvisionCheckpointAuthenticatedPage(
       secretFilePath: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
     }),
   ]);
+  if (
+    bindings.platformAgentAccountIds.length !== 1 ||
+    bindings.platformAgentAccountIds[0] !== input.accountId ||
+    bindings.expectedAgentIdentityBindings.size !== 1
+  ) {
+    return unavailable();
+  }
+  const expectedFingerprint = bindings.expectedAgentIdentityBindings.get(input.accountId);
+  if (!expectedFingerprint) return unavailable();
   const observedFingerprint = await observeKemerBetAgentIdentityFingerprint({
     page: input.page,
     platformAgentAccountId: input.accountId,
@@ -501,8 +741,9 @@ async function verifyKemerBetProvisionCheckpointAuthenticatedPage(
     fingerprintAgentIdentity,
     timeoutMs: 30_000,
   });
+  if (observedFingerprint !== expectedFingerprint) return unavailable();
   const agentPage = createPlaywrightKemerBetAgentPage({
-    expectedAgentIdentityFingerprint: observedFingerprint,
+    expectedAgentIdentityFingerprint: expectedFingerprint,
     fingerprintAgentIdentity,
     page: input.page,
     platformAgentAccountId: input.accountId,
@@ -535,6 +776,1203 @@ export async function checkpointKemerBetProvisionSignedInPage(
   requireExactCheckpointTopology(input);
 }
 
+/**
+ * Load the one immutable external identity binding before the provider browser is allowed online.
+ * The raw KemerBet identity never leaves the side-effect-free DOM observer; only its keyed digest
+ * is compared with the already sealed binding for the exact active platform-account UUID.
+ */
+export async function prepareKemerBetProvisionAuthenticatedIdentityVerifier(
+  accountId: string,
+  effectiveUserId: number,
+): Promise<KemerBetProvisionAuthenticatedIdentityVerifier> {
+  if (
+    !UUID_PATTERN.test(accountId) ||
+    accountId === '00000000-0000-0000-0000-000000000000' ||
+    effectiveUserId !== 10_001
+  ) {
+    return unavailable();
+  }
+  const [bindings, selectorContract, fingerprintAgentIdentity] = await Promise.all([
+    loadKemerBetAgentIdentityBindings({
+      effectiveUserId,
+      filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,
+    }),
+    loadKemerBetSelectorContract({
+      effectiveUserId,
+      filePath: KEMERBET_SELECTOR_CONTRACT_FILE,
+      validate: validateCheckpointSelectorContract,
+    }),
+    createKemerBetAgentIdentityFingerprinter({
+      effectiveUserId,
+      secretFilePath: KEMERBET_AGENT_IDENTITY_HMAC_KEY_FILE,
+    }),
+  ]);
+  if (
+    bindings.platformAgentAccountIds.length !== 1 ||
+    bindings.platformAgentAccountIds[0] !== accountId ||
+    bindings.expectedAgentIdentityBindings.size !== 1
+  ) {
+    return unavailable();
+  }
+  const expectedFingerprint = bindings.expectedAgentIdentityBindings.get(accountId);
+  if (!expectedFingerprint) return unavailable();
+
+  return Object.freeze({
+    accountId,
+    async verify(page: Page): Promise<void> {
+      const observedFingerprint = await observeKemerBetAgentIdentityFingerprint({
+        fingerprintAgentIdentity,
+        page,
+        platformAgentAccountId: accountId,
+        selectorContract,
+      });
+      if (observedFingerprint !== expectedFingerprint) return unavailable();
+    },
+  });
+}
+
+export type KemerBetSessionRequestDecision = 'abort_optional' | 'allow' | 'forbid';
+
+function normalizedRequestHeaders(
+  headers: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(headers ?? {}).map(([name, value]) => [name.toLowerCase(), value.trim()]),
+  );
+}
+
+function exactProviderUrl(url: URL, origin: string, path: string): boolean {
+  return (
+    url.protocol === 'https:' &&
+    url.origin === origin &&
+    url.pathname === path &&
+    url.search === '' &&
+    url.hash === '' &&
+    url.username === '' &&
+    url.password === '' &&
+    url.port === ''
+  );
+}
+
+function exactLoginRequest(input: {
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
+  readonly url: URL;
+}): boolean {
+  const headers = normalizedRequestHeaders(input.headers);
+  if (
+    !input.isMainFrame ||
+    input.isNavigationRequest ||
+    input.method !== 'POST' ||
+    input.resourceType !== 'xhr' ||
+    input.redirectedFrom === true ||
+    !exactProviderUrl(input.url, API_ORIGIN, LOGIN_PATH) ||
+    headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json' ||
+    headers.et !== '1' ||
+    typeof input.postData !== 'string' ||
+    Buffer.byteLength(input.postData, 'utf8') > MAX_PROVIDER_LOGIN_BODY_BYTES
+  ) {
+    return false;
+  }
+  try {
+    const decoded = JSON.parse(input.postData) as unknown;
+    if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) return false;
+    const object = exactObject(decoded, ['password', 'token', 'userName']);
+    if (!object) return false;
+    const userName = object.userName;
+    const password = object.password;
+    const token = object.token;
+    return (
+      typeof userName === 'string' &&
+      userName.length >= 1 &&
+      userName.length <= 30 &&
+      !/[\u0000-\u001f\u007f]/u.test(userName) &&
+      typeof password === 'string' &&
+      password.length >= 8 &&
+      password.length <= 24 &&
+      !/[\u0000-\u001f\u007f]/u.test(password) &&
+      typeof token === 'string' &&
+      token.length >= 16 &&
+      token.length <= 8_192 &&
+      !/[\u0000-\u001f\u007f]/u.test(token)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function exactRefreshRequest(input: {
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
+  readonly url: URL;
+}): boolean {
+  const headers = normalizedRequestHeaders(input.headers);
+  if (
+    !input.isMainFrame ||
+    input.isNavigationRequest ||
+    input.method !== 'POST' ||
+    input.resourceType !== 'xhr' ||
+    input.redirectedFrom === true ||
+    !exactProviderUrl(input.url, API_ORIGIN, REFRESH_TOKEN_PATH) ||
+    headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json' ||
+    headers.et !== '1' ||
+    typeof input.postData !== 'string' ||
+    Buffer.byteLength(input.postData, 'utf8') > MAX_PROVIDER_REFRESH_BODY_BYTES
+  ) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(input.postData) as unknown;
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+    const object = parsed as Record<string, unknown>;
+    const refreshToken = object.refreshToken;
+    const exactGlobalRefreshHeaders =
+      headers.grant_type === undefined && headers.authorization === undefined;
+    const exactNewServiceRefreshHeaders =
+      headers.grant_type === 'refresh_token' &&
+      /^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u.test(headers.authorization ?? '');
+    return (
+      Object.keys(object).length === 1 &&
+      typeof refreshToken === 'string' &&
+      refreshToken.length >= 16 &&
+      refreshToken.length <= 4_096 &&
+      !/[\u0000-\u001f\u007f]/u.test(refreshToken) &&
+      (exactGlobalRefreshHeaders || exactNewServiceRefreshHeaders)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function exactCorsPreflight(input: {
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly pageState: 'agents' | 'login' | undefined;
+  readonly url: URL;
+}): boolean {
+  const headers = normalizedRequestHeaders(input.headers);
+  if (headers.origin !== KEMERBET_AGENT_WEB_ORIGIN) return false;
+  const requestedMethod = headers['access-control-request-method'];
+  const requestedHeaders = (headers['access-control-request-headers'] ?? '')
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value !== '');
+  const exactRequestedHeaders = (...expected: string[]): boolean =>
+    requestedHeaders.length === expected.length &&
+    new Set(requestedHeaders).size === requestedHeaders.length &&
+    [...requestedHeaders].sort().every((name, index) => name === [...expected].sort()[index]);
+  if (exactProviderUrl(input.url, API_ORIGIN, LOGIN_PATH)) {
+    return (
+      input.pageState === 'login' &&
+      requestedMethod === 'POST' &&
+      exactRequestedHeaders('content-type', 'et')
+    );
+  }
+  if (exactProviderUrl(input.url, API_ORIGIN, REFRESH_TOKEN_PATH)) {
+    return (
+      input.pageState === 'agents' &&
+      requestedMethod === 'POST' &&
+      (exactRequestedHeaders('content-type', 'et') ||
+        exactRequestedHeaders('authorization', 'content-type', 'et', 'grant_type'))
+    );
+  }
+  return (
+    requestedMethod === 'GET' &&
+    exactAuthenticatedReadUrl(input) &&
+    (input.url.pathname === '/SystemLanguage/SystemAvailablePublished'
+      ? exactRequestedHeaders('et')
+      : exactRequestedHeaders('authorization', 'content-type'))
+  );
+}
+
+function exactAuthenticatedReadUrl(input: {
+  readonly pageState: 'agents' | 'login' | undefined;
+  readonly url: URL;
+}): boolean {
+  if (!KEMERBET_AUTHENTICATED_READ_PATHS.has(input.url.pathname)) return false;
+  if (input.url.pathname === '/SystemLanguage/SystemAvailablePublished') {
+    return (
+      input.pageState === 'login' && exactProviderUrl(input.url, API_ORIGIN, input.url.pathname)
+    );
+  }
+  if (input.url.pathname === '/SystemLanguage/AvailablePublished') {
+    return (
+      input.pageState === 'agents' && exactProviderUrl(input.url, API_ORIGIN, input.url.pathname)
+    );
+  }
+  if (input.pageState !== 'agents') return false;
+  const query = [...input.url.searchParams.entries()];
+  const exactInfoQuery =
+    input.url.pathname === '/Account/Info' &&
+    query.length === 1 &&
+    query[0]?.[0] === 'languageCode' &&
+    /^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$/u.test(query[0]?.[1] ?? '');
+  if (input.url.pathname === '/Account/Info') {
+    return (
+      exactInfoQuery &&
+      input.url.protocol === 'https:' &&
+      input.url.origin === API_ORIGIN &&
+      input.url.hash === '' &&
+      input.url.username === '' &&
+      input.url.password === '' &&
+      input.url.port === ''
+    );
+  }
+  return exactProviderUrl(input.url, API_ORIGIN, input.url.pathname);
+}
+
+function exactAuthenticatedRead(input: {
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly isMainFrame: boolean;
+  readonly pageState: 'agents' | 'login' | undefined;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
+  readonly url: URL;
+}): boolean {
+  const headers = normalizedRequestHeaders(input.headers);
+  if (
+    !input.isMainFrame ||
+    input.redirectedFrom === true ||
+    input.resourceType !== 'xhr' ||
+    !exactAuthenticatedReadUrl(input)
+  ) {
+    return false;
+  }
+  if (input.url.pathname === '/SystemLanguage/SystemAvailablePublished') {
+    return (
+      headers.et === '1' &&
+      headers.authorization === undefined &&
+      headers['content-type'] === undefined
+    );
+  }
+  const bearer = /^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u.test(headers.authorization ?? '');
+  if (!bearer || headers.et !== undefined) return false;
+  return (
+    headers['content-type']?.replace(/\s/gu, '').toLowerCase() === 'application/json;charset=utf-8'
+  );
+}
+
+function exactKemerBetChromiumUserAgent(value: string | undefined): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 96 &&
+    value.length <= MAX_KEMERBET_CHROMIUM_USER_AGENT_BYTES &&
+    Buffer.byteLength(value, 'utf8') === value.length &&
+    KEMERBET_CHROMIUM_USER_AGENT_PATTERN.test(value)
+  );
+}
+
+function requestKemerBetChromiumUserAgent(
+  headers: Readonly<Record<string, string>>,
+): string | undefined {
+  const candidates = Object.entries(headers).filter(
+    ([name]) => name.toLowerCase() === 'user-agent',
+  );
+  if (candidates.length !== 1) return undefined;
+  const value = candidates[0]?.[1];
+  return exactKemerBetChromiumUserAgent(value) ? value : undefined;
+}
+
+async function fetchKemerBetRecaptchaAsset(
+  input: KemerBetRecaptchaAssetFetchInput,
+): Promise<KemerBetRecaptchaAssetFetchResult> {
+  if (!exactKemerBetChromiumUserAgent(input.userAgent)) return unavailable();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetch(input.url, {
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { 'user-agent': input.userAgent },
+      method: 'GET',
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    const reader = response.body?.getReader();
+    if (!reader) return unavailable();
+    const declaredLength = response.headers.get('content-length');
+    if (
+      declaredLength !== null &&
+      (!/^(?:0|[1-9][0-9]{0,9})$/u.test(declaredLength) || Number(declaredLength) > input.maxBytes)
+    ) {
+      controller.abort();
+      await reader.cancel().catch(() => undefined);
+      return unavailable();
+    }
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      bytes += result.value.byteLength;
+      if (bytes > input.maxBytes) {
+        controller.abort();
+        await reader.cancel().catch(() => undefined);
+        return unavailable();
+      }
+      chunks.push(result.value);
+    }
+    const body = Buffer.allocUnsafe(bytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return Object.freeze({
+      accessControlAllowOrigin: response.headers.get('access-control-allow-origin'),
+      body,
+      contentType: response.headers.get('content-type'),
+      crossOriginEmbedderPolicy: response.headers.get('cross-origin-embedder-policy'),
+      crossOriginResourcePolicy: response.headers.get('cross-origin-resource-policy'),
+      finalUrl: response.url,
+      status: response.status,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizedMime(value: string | null): string | undefined {
+  return value?.split(';', 1)[0]?.trim().toLowerCase() || undefined;
+}
+
+function verifiedRecaptchaAssetCacheKey(
+  url: string,
+  pin: KemerBetRecaptchaAssetPin,
+  userAgent: string,
+): string {
+  return [
+    url,
+    userAgent,
+    String(pin.bytes),
+    pin.mime,
+    pin.sha256,
+    pin.accessControlAllowOrigin ?? '',
+    pin.crossOriginEmbedderPolicy ?? '',
+    pin.crossOriginResourcePolicy,
+  ].join('\0');
+}
+
+function readVerifiedRecaptchaAssetCache(
+  key: string,
+  pin: KemerBetRecaptchaAssetPin,
+): Buffer | undefined {
+  const now = performance.now();
+  const cached = kemerBetVerifiedRecaptchaAssetCache.get(key);
+  if (!Number.isFinite(now) || !cached) return undefined;
+  if (now >= cached.expiresAtMonotonicMs) {
+    kemerBetVerifiedRecaptchaAssetCache.delete(key);
+    return undefined;
+  }
+  const body = Buffer.from(cached.body);
+  if (
+    body.byteLength !== pin.bytes ||
+    createHash('sha256').update(body).digest('hex') !== pin.sha256
+  ) {
+    kemerBetVerifiedRecaptchaAssetCache.delete(key);
+    return undefined;
+  }
+  // Return a copy so neither Playwright nor a future caller can mutate the cached verified bytes.
+  return body;
+}
+
+function writeVerifiedRecaptchaAssetCache(key: string, body: Buffer): void {
+  const now = performance.now();
+  if (!Number.isFinite(now)) return;
+  for (const [candidateKey, entry] of kemerBetVerifiedRecaptchaAssetCache) {
+    if (now >= entry.expiresAtMonotonicMs) {
+      kemerBetVerifiedRecaptchaAssetCache.delete(candidateKey);
+    }
+  }
+  if (
+    !kemerBetVerifiedRecaptchaAssetCache.has(key) &&
+    kemerBetVerifiedRecaptchaAssetCache.size >= KEMERBET_RECAPTCHA_VERIFIED_CACHE_MAX_ENTRIES
+  ) {
+    const oldestKey = kemerBetVerifiedRecaptchaAssetCache.keys().next().value as string | undefined;
+    if (oldestKey !== undefined) kemerBetVerifiedRecaptchaAssetCache.delete(oldestKey);
+  }
+  kemerBetVerifiedRecaptchaAssetCache.set(
+    key,
+    Object.freeze({
+      body: Uint8Array.from(body),
+      expiresAtMonotonicMs: now + KEMERBET_RECAPTCHA_VERIFIED_CACHE_TTL_MS,
+    }),
+  );
+}
+
+function exactRecaptchaSiteKey(value: string, expectedSha256: string): boolean {
+  return (
+    /^[A-Za-z0-9_-]{40}$/u.test(value) &&
+    createHash('sha256').update(value, 'utf8').digest('hex') === expectedSha256
+  );
+}
+
+function exactRecaptchaUrl(url: URL, origin: string, pathname: string): boolean {
+  return (
+    url.protocol === 'https:' &&
+    url.origin === origin &&
+    url.pathname === pathname &&
+    url.username === '' &&
+    url.password === '' &&
+    url.port === '' &&
+    url.hash === ''
+  );
+}
+
+type KemerBetRecaptchaCeremonyStep =
+  | 'api'
+  | 'runtime_main'
+  | 'anchor'
+  | 'css'
+  | 'static_subresources'
+  | 'reload'
+  | 'clr'
+  | 'bcn'
+  | 'complete';
+
+export interface KemerBetRecaptchaCeremony {
+  readonly consumeKemerBetLoginPermit: () => Promise<boolean>;
+  readonly handleRoute: (input: {
+    readonly page: Page;
+    readonly requestFrame?: Frame;
+    readonly route: Route;
+  }) => Promise<'handled' | 'not_recaptcha'>;
+  readonly observeMainFrameCommit: (pageUrl: string) => void;
+  readonly retireForReauthentication: () => boolean;
+}
+
+export function createKemerBetRecaptchaCeremony(input: {
+  readonly assetPins?: KemerBetRecaptchaAssetPinSet;
+  readonly deadlineMonotonicMs: number;
+  readonly deadlineWallClockMs: number;
+  readonly expectedSiteKeySha256?: string;
+  readonly fetchAsset?: KemerBetRecaptchaAssetFetcher;
+  readonly monotonicNow: () => number;
+  readonly onForbiddenRequest: () => void;
+  readonly wallClockNow: () => number;
+}): KemerBetRecaptchaCeremony {
+  const assetPins = input.assetPins ?? KEMERBET_RECAPTCHA_ASSET_PINS;
+  const expectedSiteKeySha256 = input.expectedSiteKeySha256 ?? KEMERBET_RECAPTCHA_SITE_KEY_SHA256;
+  const fetchAsset = input.fetchAsset ?? fetchKemerBetRecaptchaAsset;
+  const useVerifiedProcessCache =
+    input.assetPins === undefined &&
+    (input.fetchAsset === undefined || input.fetchAsset === fetchKemerBetRecaptchaAsset);
+  if (
+    !Number.isFinite(input.deadlineMonotonicMs) ||
+    input.deadlineMonotonicMs < 0 ||
+    !Number.isFinite(input.deadlineWallClockMs) ||
+    input.deadlineWallClockMs < 0 ||
+    !/^[0-9a-f]{64}$/u.test(expectedSiteKeySha256)
+  ) {
+    return unavailable();
+  }
+  for (const pin of Object.values(assetPins)) {
+    if (
+      !Number.isSafeInteger(pin.bytes) ||
+      pin.bytes < 1 ||
+      (pin.accessControlAllowOrigin !== undefined && pin.accessControlAllowOrigin !== '*') ||
+      (pin.crossOriginEmbedderPolicy !== undefined &&
+        pin.crossOriginEmbedderPolicy !== 'require-corp') ||
+      !/^(?:cross-origin|same-site)$/u.test(pin.crossOriginResourcePolicy) ||
+      !/^[a-z]+\/[a-z0-9.+-]+$/u.test(pin.mime) ||
+      !/^[0-9a-f]{64}$/u.test(pin.sha256)
+    ) {
+      return unavailable();
+    }
+  }
+
+  let step: KemerBetRecaptchaCeremonyStep = 'api';
+  let siteKey: string | undefined;
+  let chromiumUserAgent: string | undefined;
+  let anchorFrame: Frame | undefined;
+  let logoLoaded = false;
+  let webworkerLoaded = false;
+  let workerRuntimeLoaded = false;
+  let dynamicBodyBytes = 0;
+  let ceremonyStarted = false;
+  let loginPermitConsumed = false;
+  let poisoned = false;
+  let retired = false;
+  let lane = Promise.resolve();
+  const verifiedAssetBodies = new Map<string, Buffer>();
+
+  const poison = (): void => {
+    if (!poisoned) {
+      poisoned = true;
+      try {
+        input.onForbiddenRequest();
+      } catch {
+        // A redacted attempt counter cannot weaken the local abort boundary.
+      }
+    }
+  };
+
+  const forbidden = async (route: Route): Promise<'handled'> => {
+    poison();
+    try {
+      await route.abort('blockedbyclient');
+    } catch {
+      // The immutable generation is already poisoned even if Chromium closed the request first.
+    }
+    return 'handled';
+  };
+
+  const beforeDeadline = (): boolean => {
+    const monotonicTimestamp = input.monotonicNow();
+    const wallTimestamp = input.wallClockNow();
+    return (
+      Number.isFinite(monotonicTimestamp) &&
+      monotonicTimestamp >= 0 &&
+      monotonicTimestamp < input.deadlineMonotonicMs &&
+      Number.isFinite(wallTimestamp) &&
+      wallTimestamp >= 0 &&
+      wallTimestamp < input.deadlineWallClockMs
+    );
+  };
+
+  const fulfillPinnedAsset = async (
+    route: Route,
+    url: string,
+    pin: KemerBetRecaptchaAssetPin,
+    userAgent: string,
+  ): Promise<boolean> => {
+    const processCacheKey = useVerifiedProcessCache
+      ? verifiedRecaptchaAssetCacheKey(url, pin, userAgent)
+      : undefined;
+    const generationCachedBody = verifiedAssetBodies.get(url);
+    let body: Buffer | undefined = generationCachedBody
+      ? Buffer.from(generationCachedBody)
+      : undefined;
+    if (!body && processCacheKey) body = readVerifiedRecaptchaAssetCache(processCacheKey, pin);
+    if (!body) {
+      const fetched = await fetchAsset({
+        maxBytes: pin.bytes,
+        timeoutMs: KEMERBET_RECAPTCHA_ASSET_FETCH_TIMEOUT_MS,
+        url,
+        userAgent,
+      });
+      body = Buffer.from(fetched.body);
+      if (
+        poisoned ||
+        fetched.finalUrl !== url ||
+        fetched.status !== 200 ||
+        normalizedMime(fetched.contentType) !== pin.mime ||
+        fetched.accessControlAllowOrigin !== (pin.accessControlAllowOrigin ?? null) ||
+        fetched.crossOriginEmbedderPolicy !== (pin.crossOriginEmbedderPolicy ?? null) ||
+        fetched.crossOriginResourcePolicy !== pin.crossOriginResourcePolicy ||
+        body.byteLength !== pin.bytes ||
+        createHash('sha256').update(body).digest('hex') !== pin.sha256 ||
+        !beforeDeadline()
+      ) {
+        return false;
+      }
+      if (processCacheKey) writeVerifiedRecaptchaAssetCache(processCacheKey, body);
+    }
+    if (poisoned || !beforeDeadline()) return false;
+    verifiedAssetBodies.set(url, Buffer.from(body));
+    if (poisoned || !beforeDeadline()) return false;
+    await route.fulfill({
+      body: Buffer.from(body),
+      headers: {
+        ...(pin.accessControlAllowOrigin === undefined
+          ? {}
+          : { 'access-control-allow-origin': pin.accessControlAllowOrigin }),
+        'cache-control': 'private, no-store, max-age=0',
+        'content-length': String(pin.bytes),
+        'content-type': pin.mime,
+        ...(pin.crossOriginEmbedderPolicy === undefined
+          ? {}
+          : { 'cross-origin-embedder-policy': pin.crossOriginEmbedderPolicy }),
+        'cross-origin-resource-policy': pin.crossOriginResourcePolicy,
+        'x-content-type-options': 'nosniff',
+      },
+      status: 200,
+    });
+    return !poisoned && beforeDeadline();
+  };
+
+  const exactMainFrame = (candidate: Frame | undefined, page: Page): boolean =>
+    candidate !== undefined && candidate === page.mainFrame() && candidate.page() === page;
+
+  const exactAnchorFrame = (candidate: Frame | undefined, page: Page): boolean => {
+    if (
+      candidate === undefined ||
+      candidate === page.mainFrame() ||
+      candidate.page() !== page ||
+      candidate.parentFrame() !== page.mainFrame()
+    ) {
+      return false;
+    }
+    return anchorFrame === undefined || anchorFrame === candidate;
+  };
+
+  const exactStaticGet = (candidate: {
+    readonly expectedResourceType: string;
+    readonly expectedUrl: string;
+    readonly method: string;
+    readonly navigation: boolean;
+    readonly redirected: boolean;
+    readonly resourceType: string;
+    readonly url: URL;
+  }): boolean =>
+    candidate.method === 'GET' &&
+    !candidate.navigation &&
+    !candidate.redirected &&
+    candidate.resourceType === candidate.expectedResourceType &&
+    candidate.url.href === candidate.expectedUrl;
+
+  const exactDynamicPost = (
+    request: ReturnType<Route['request']>,
+    url: URL,
+    page: Page,
+    requestFrame: Frame | undefined,
+    expectedPath: string,
+    expectedResourceType: 'fetch' | 'xhr',
+    expectedContentType: string | undefined,
+    maxBodyBytes: number,
+  ): number | undefined => {
+    const headers = normalizedRequestHeaders(request.headers());
+    const query = [...url.searchParams.entries()];
+    const body = request.postDataBuffer();
+    if (
+      step === 'complete' ||
+      !siteKey ||
+      !exactAnchorFrame(requestFrame, page) ||
+      request.method() !== 'POST' ||
+      request.isNavigationRequest() ||
+      request.redirectedFrom() !== null ||
+      request.resourceType() !== expectedResourceType ||
+      !exactRecaptchaUrl(url, 'https://www.google.com', expectedPath) ||
+      query.length !== 1 ||
+      query[0]?.[0] !== 'k' ||
+      query[0]?.[1] !== siteKey ||
+      url.search !== `?${new URLSearchParams([['k', siteKey]]).toString()}` ||
+      (expectedContentType === undefined
+        ? headers['content-type'] !== undefined
+        : headers['content-type']?.toLowerCase() !== expectedContentType) ||
+      !body ||
+      body.byteLength < 1 ||
+      body.byteLength > maxBodyBytes ||
+      dynamicBodyBytes + body.byteLength > MAX_RECAPTCHA_DYNAMIC_BODY_BYTES
+    ) {
+      return undefined;
+    }
+    return body.byteLength;
+  };
+
+  const handle = async (candidate: {
+    readonly page: Page;
+    readonly requestFrame?: Frame;
+    readonly route: Route;
+  }): Promise<'handled' | 'not_recaptcha'> => {
+    const request = candidate.route.request();
+    let url: URL;
+    try {
+      url = new URL(request.url());
+    } catch {
+      return 'not_recaptcha';
+    }
+    const recaptchaAuthority =
+      url.origin === 'https://www.google.com' || url.origin === 'https://www.gstatic.com';
+    if (!recaptchaAuthority) return 'not_recaptcha';
+    if (
+      poisoned ||
+      retired ||
+      !beforeDeadline() ||
+      validPageUrl(candidate.page.url()) !== 'login' ||
+      request.url() !== url.href ||
+      url.username !== '' ||
+      url.password !== '' ||
+      url.port !== '' ||
+      url.hash !== ''
+    ) {
+      return forbidden(candidate.route);
+    }
+    const requestUserAgent = requestKemerBetChromiumUserAgent(request.headers());
+    if (
+      requestUserAgent === undefined ||
+      (chromiumUserAgent !== undefined && requestUserAgent !== chromiumUserAgent)
+    ) {
+      return forbidden(candidate.route);
+    }
+
+    const method = request.method();
+    const navigation = request.isNavigationRequest();
+    const redirected = request.redirectedFrom() !== null;
+    const resourceType = request.resourceType();
+    try {
+      if (step === 'api') {
+        const query = [...url.searchParams.entries()];
+        const nextSiteKey = query.length === 1 && query[0]?.[0] === 'render' ? query[0][1] : '';
+        if (
+          !exactMainFrame(candidate.requestFrame, candidate.page) ||
+          !exactRecaptchaUrl(url, 'https://www.google.com', '/recaptcha/api.js') ||
+          !exactStaticGet({
+            expectedResourceType: 'script',
+            expectedUrl: `https://www.google.com/recaptcha/api.js?render=${nextSiteKey}`,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          }) ||
+          !exactRecaptchaSiteKey(nextSiteKey, expectedSiteKeySha256)
+        ) {
+          return forbidden(candidate.route);
+        }
+        chromiumUserAgent = requestUserAgent;
+        ceremonyStarted = true;
+        if (
+          !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.api, requestUserAgent))
+        ) {
+          return forbidden(candidate.route);
+        }
+        siteKey = nextSiteKey;
+        step = 'runtime_main';
+        return 'handled';
+      }
+
+      if (step === 'runtime_main') {
+        if (
+          !exactMainFrame(candidate.requestFrame, candidate.page) ||
+          !exactStaticGet({
+            expectedResourceType: 'script',
+            expectedUrl: KEMERBET_RECAPTCHA_RUNTIME_URL,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          })
+        ) {
+          return forbidden(candidate.route);
+        }
+        if (
+          !(await fulfillPinnedAsset(
+            candidate.route,
+            url.href,
+            assetPins.runtime,
+            requestUserAgent,
+          ))
+        ) {
+          return forbidden(candidate.route);
+        }
+        step = 'anchor';
+        return 'handled';
+      }
+
+      if (step === 'anchor') {
+        const query = [...url.searchParams.entries()];
+        const expectedKeys = ['ar', 'k', 'co', 'hl', 'v', 'size', 'anchor-ms', 'execute-ms', 'cb'];
+        const exactTiming = (value: string | undefined): boolean =>
+          typeof value === 'string' && /^[0-9]{5}$/u.test(value);
+        if (
+          !siteKey ||
+          !exactAnchorFrame(candidate.requestFrame, candidate.page) ||
+          method !== 'GET' ||
+          !navigation ||
+          redirected ||
+          resourceType !== 'document' ||
+          !exactRecaptchaUrl(url, 'https://www.google.com', '/recaptcha/api2/anchor') ||
+          query.length !== expectedKeys.length ||
+          query.some(([key], index) => key !== expectedKeys[index]) ||
+          url.search !== `?${new URLSearchParams(query).toString()}` ||
+          url.searchParams.get('ar') !== '1' ||
+          url.searchParams.get('k') !== siteKey ||
+          url.searchParams.get('co') !== KEMERBET_RECAPTCHA_ORIGIN_CO ||
+          url.searchParams.get('hl') !== 'en' ||
+          url.searchParams.get('v') !== KEMERBET_RECAPTCHA_VERSION ||
+          url.searchParams.get('size') !== 'invisible' ||
+          !exactTiming(url.searchParams.get('anchor-ms') ?? undefined) ||
+          !exactTiming(url.searchParams.get('execute-ms') ?? undefined) ||
+          !/^[a-z0-9]{12}$/u.test(url.searchParams.get('cb') ?? '')
+        ) {
+          return forbidden(candidate.route);
+        }
+        anchorFrame = candidate.requestFrame;
+        if (!beforeDeadline()) return forbidden(candidate.route);
+        await candidate.route.continue();
+        if (poisoned || !beforeDeadline()) {
+          poison();
+          return 'handled';
+        }
+        step = 'css';
+        return 'handled';
+      }
+
+      if (step === 'css') {
+        if (
+          candidate.requestFrame !== anchorFrame ||
+          !exactStaticGet({
+            expectedResourceType: 'stylesheet',
+            expectedUrl: KEMERBET_RECAPTCHA_STYLES_URL,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          })
+        ) {
+          return forbidden(candidate.route);
+        }
+        if (
+          !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.css, requestUserAgent))
+        ) {
+          return forbidden(candidate.route);
+        }
+        step = 'static_subresources';
+        return 'handled';
+      }
+
+      if (step === 'static_subresources') {
+        const exactWebworker =
+          candidate.requestFrame === undefined &&
+          exactStaticGet({
+            expectedResourceType: 'script',
+            expectedUrl: KEMERBET_RECAPTCHA_WEBWORKER_URL,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          });
+        const exactLogo =
+          candidate.requestFrame === anchorFrame &&
+          exactStaticGet({
+            expectedResourceType: 'image',
+            expectedUrl: KEMERBET_RECAPTCHA_LOGO_URL,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          });
+        const exactWorkerRuntime =
+          candidate.requestFrame === undefined &&
+          exactStaticGet({
+            expectedResourceType: 'other',
+            expectedUrl: KEMERBET_RECAPTCHA_RUNTIME_URL,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          });
+        if (exactWebworker && !webworkerLoaded) {
+          if (
+            !(await fulfillPinnedAsset(
+              candidate.route,
+              url.href,
+              assetPins.webworker,
+              requestUserAgent,
+            ))
+          ) {
+            return forbidden(candidate.route);
+          }
+          webworkerLoaded = true;
+        } else if (exactLogo && !logoLoaded) {
+          if (
+            !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.logo, requestUserAgent))
+          ) {
+            return forbidden(candidate.route);
+          }
+          logoLoaded = true;
+        } else if (exactWorkerRuntime && webworkerLoaded && !workerRuntimeLoaded) {
+          if (
+            !(await fulfillPinnedAsset(
+              candidate.route,
+              url.href,
+              assetPins.runtime,
+              requestUserAgent,
+            ))
+          ) {
+            return forbidden(candidate.route);
+          }
+          workerRuntimeLoaded = true;
+        } else {
+          return forbidden(candidate.route);
+        }
+        if (webworkerLoaded && logoLoaded && workerRuntimeLoaded) step = 'reload';
+        return 'handled';
+      }
+
+      if (step === 'reload') {
+        const bytes = exactDynamicPost(
+          request,
+          url,
+          candidate.page,
+          candidate.requestFrame,
+          '/recaptcha/api2/reload',
+          'xhr',
+          'application/x-protobuffer',
+          MAX_RECAPTCHA_RELOAD_BODY_BYTES,
+        );
+        if (bytes === undefined) return forbidden(candidate.route);
+        if (!beforeDeadline()) return forbidden(candidate.route);
+        await candidate.route.continue();
+        if (poisoned || !beforeDeadline()) {
+          poison();
+          return 'handled';
+        }
+        dynamicBodyBytes += bytes;
+        step = 'clr';
+        return 'handled';
+      }
+
+      if (step === 'clr') {
+        const bytes = exactDynamicPost(
+          request,
+          url,
+          candidate.page,
+          candidate.requestFrame,
+          '/recaptcha/api2/clr',
+          'fetch',
+          undefined,
+          MAX_RECAPTCHA_CLR_BODY_BYTES,
+        );
+        if (bytes === undefined) return forbidden(candidate.route);
+        if (!beforeDeadline()) return forbidden(candidate.route);
+        await candidate.route.continue();
+        if (poisoned || !beforeDeadline()) {
+          poison();
+          return 'handled';
+        }
+        dynamicBodyBytes += bytes;
+        step = 'bcn';
+        return 'handled';
+      }
+
+      if (step === 'bcn') {
+        const bytes = exactDynamicPost(
+          request,
+          url,
+          candidate.page,
+          candidate.requestFrame,
+          '/recaptcha/api2/bcn',
+          'xhr',
+          'application/x-protobuf',
+          MAX_RECAPTCHA_BCN_BODY_BYTES,
+        );
+        if (bytes === undefined) return forbidden(candidate.route);
+        if (!beforeDeadline()) return forbidden(candidate.route);
+        await candidate.route.continue();
+        if (poisoned || !beforeDeadline()) {
+          poison();
+          return 'handled';
+        }
+        dynamicBodyBytes += bytes;
+        step = 'complete';
+        return 'handled';
+      }
+      return forbidden(candidate.route);
+    } catch {
+      return forbidden(candidate.route);
+    }
+  };
+
+  const consumeLoginPermit = (): boolean => {
+    if (
+      poisoned ||
+      retired ||
+      loginPermitConsumed ||
+      step !== 'complete' ||
+      !beforeDeadline() ||
+      dynamicBodyBytes < 1
+    ) {
+      poison();
+      return false;
+    }
+    loginPermitConsumed = true;
+    return true;
+  };
+
+  const enqueue = <T>(operation: () => Promise<T> | T): Promise<T> => {
+    const result = lane.then(operation, operation);
+    lane = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+
+  return Object.freeze({
+    consumeKemerBetLoginPermit: () => enqueue(consumeLoginPermit),
+    handleRoute: (candidate: {
+      readonly page: Page;
+      readonly requestFrame?: Frame;
+      readonly route: Route;
+    }) => {
+      // Do not place unrelated KemerBet application/static traffic behind a large pinned asset
+      // download. The exact KemerBet login POST still joins this lane so it cannot overtake the
+      // final CAPTCHA beacon that makes the one-use ceremony complete.
+      try {
+        const request = candidate.route.request();
+        const url = new URL(request.url());
+        const recaptchaAuthority =
+          url.origin === 'https://www.google.com' || url.origin === 'https://www.gstatic.com';
+        const kemerBetLogin =
+          request.method() === 'POST' && exactProviderUrl(url, API_ORIGIN, LOGIN_PATH);
+        if (!recaptchaAuthority && !kemerBetLogin) return Promise.resolve('not_recaptcha' as const);
+      } catch {
+        return Promise.resolve('not_recaptcha' as const);
+      }
+      return enqueue(() => handle(candidate));
+    },
+    observeMainFrameCommit: (pageUrl: string) => {
+      const pageState = validPageUrl(pageUrl);
+      if (!ceremonyStarted && step === 'api' && siteKey === undefined && !poisoned) {
+        if (pageState === 'login' || pageState === 'agents') return;
+      }
+      if (step === 'complete' && pageState === 'agents' && !poisoned) {
+        retired = true;
+        return;
+      }
+      poison();
+    },
+    retireForReauthentication: () => {
+      // Reauthentication may replace only a ceremony that never started (a persisted session
+      // opened directly on /agents) or whose sole login permit was already consumed. Never
+      // discard an in-flight or reusable proof while swapping the document-bound generation.
+      if (
+        poisoned ||
+        !(
+          (!ceremonyStarted && step === 'api' && siteKey === undefined) ||
+          (step === 'complete' && loginPermitConsumed)
+        )
+      ) {
+        poison();
+        return false;
+      }
+      retired = true;
+      return true;
+    },
+  });
+}
+
+function exactRecaptchaRequest(input: {
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly resourceType?: string;
+  readonly url: URL;
+}): boolean {
+  if (input.url.username !== '' || input.url.password !== '' || input.url.port !== '') return false;
+  if (input.url.hash !== '') return false;
+  if (input.url.origin === 'https://www.google.com' && input.url.pathname === '/recaptcha/api.js') {
+    const query = [...input.url.searchParams.entries()];
+    const siteKey = query.length === 1 && query[0]?.[0] === 'render' ? query[0][1] : undefined;
+    return (
+      !input.isNavigationRequest &&
+      input.method === 'GET' &&
+      input.resourceType === 'script' &&
+      typeof siteKey === 'string' &&
+      exactRecaptchaSiteKey(siteKey, KEMERBET_RECAPTCHA_SITE_KEY_SHA256) &&
+      input.url.href === `https://www.google.com/recaptcha/api.js?render=${siteKey}`
+    );
+  }
+  // Only the stateful per-generation ceremony above may admit the separately pinned runtime and
+  // exact api2 sequence. This stateless classifier deliberately grants no dynamic Google path.
+  return false;
+}
+
+export function classifyKemerBetSessionRequest(input: {
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly pageUrl: string;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
+  readonly requestUrl: string;
+}): KemerBetSessionRequestDecision {
+  let url: URL;
+  try {
+    url = new URL(input.requestUrl);
+  } catch {
+    return 'forbid';
+  }
+  const pageState = validPageUrl(input.pageUrl);
+  if (
+    url.protocol !== 'https:' ||
+    input.requestUrl !== url.href ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.port !== '' ||
+    url.hash !== '' ||
+    url.pathname === DEPOSIT_PATH ||
+    url.pathname.startsWith('/Wallet/') ||
+    url.pathname.startsWith('/Transaction/')
+  ) {
+    return 'forbid';
+  }
+  if (
+    (url.hostname === 'send.sentry.report' && url.pathname === '/api/306/envelope/') ||
+    KEMERBET_OPTIONAL_TELEMETRY_HOSTS.has(url.hostname)
+  ) {
+    return 'abort_optional';
+  }
+  if (
+    input.isNavigationRequest &&
+    input.isMainFrame &&
+    input.method === 'GET' &&
+    validPageUrl(url.toString()) !== undefined
+  ) {
+    return 'allow';
+  }
+  if (pageState === 'login' && exactRecaptchaRequest({ ...input, url })) return 'allow';
+  if (input.isNavigationRequest) return 'forbid';
+  if (
+    input.method === 'GET' &&
+    url.origin === KEMERBET_AGENT_BOOTSTRAP_ORIGIN &&
+    url.search === '' &&
+    KEMERBET_AGENT_BOOTSTRAP_ASSETS.get(url.pathname) === input.resourceType
+  ) {
+    return 'allow';
+  }
+  if (
+    input.method === 'GET' &&
+    KEMERBET_OPTIONAL_STATIC_ASSETS.get(url.href) === input.resourceType
+  ) {
+    return 'allow';
+  }
+  if (pageState === 'login' && exactLoginRequest({ ...input, url })) return 'allow';
+  if (pageState === 'agents' && exactRefreshRequest({ ...input, url })) return 'allow';
+  if (
+    input.method === 'OPTIONS' &&
+    exactCorsPreflight({
+      ...(input.headers === undefined ? {} : { headers: input.headers }),
+      pageState,
+      url,
+    })
+  ) {
+    return 'allow';
+  }
+  if (
+    input.method === 'GET' &&
+    exactAuthenticatedRead({
+      ...(input.headers === undefined ? {} : { headers: input.headers }),
+      isMainFrame: input.isMainFrame,
+      pageState,
+      ...(input.redirectedFrom === undefined ? {} : { redirectedFrom: input.redirectedFrom }),
+      ...(input.resourceType === undefined ? {} : { resourceType: input.resourceType }),
+      url,
+    })
+  ) {
+    return 'allow';
+  }
+  return 'forbid';
+}
+
 export function isAllowedKemerBetSessionRequest(input: {
   readonly headers?: Readonly<Record<string, string>>;
   readonly isMainFrame: boolean;
@@ -546,99 +1984,96 @@ export function isAllowedKemerBetSessionRequest(input: {
   readonly resourceType?: string;
   readonly requestUrl: string;
 }): boolean {
-  let url: URL;
-  try {
-    url = new URL(input.requestUrl);
-  } catch {
-    return false;
-  }
-  const pageState = validPageUrl(input.pageUrl);
-  const exactDeposit = url.origin === API_ORIGIN && url.pathname === DEPOSIT_PATH;
-  const refreshTokenEndpoint = url.origin === API_ORIGIN && url.pathname === REFRESH_TOKEN_PATH;
-  const normalizedHeaders = Object.fromEntries(
-    Object.entries(input.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]),
-  );
-  const exactRefreshToken = (() => {
-    if (
-      pageState !== 'agents' ||
-      !input.isMainFrame ||
-      input.isNavigationRequest ||
-      input.method !== 'POST' ||
-      (input.resourceType !== 'fetch' && input.resourceType !== 'xhr') ||
-      input.redirectedFrom === true ||
-      url.origin !== API_ORIGIN ||
-      url.pathname !== REFRESH_TOKEN_PATH ||
-      input.requestUrl !== `${API_ORIGIN}${REFRESH_TOKEN_PATH}` ||
-      url.search !== '' ||
-      url.hash !== '' ||
-      url.username !== '' ||
-      url.password !== '' ||
-      url.port !== '' ||
-      normalizedHeaders['content-type']?.split(';', 1)[0]?.trim().toLowerCase() !==
-        'application/json' ||
-      normalizedHeaders.grant_type !== 'refresh_token' ||
-      typeof input.postData !== 'string' ||
-      Buffer.byteLength(input.postData, 'utf8') > MAX_PROVIDER_REFRESH_BODY_BYTES
-    ) {
-      return false;
-    }
-    try {
-      const parsed = JSON.parse(input.postData) as unknown;
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
-      const object = parsed as Record<string, unknown>;
-      const refreshToken = object.refreshToken;
-      return (
-        Object.keys(object).length === 1 &&
-        typeof refreshToken === 'string' &&
-        refreshToken.length >= 16 &&
-        refreshToken.length <= 4_096 &&
-        !/[\u0000-\u001f\u007f]/u.test(refreshToken)
-      );
-    } catch {
-      return false;
-    }
-  })();
-  const mutatingAfterLogin =
-    pageState === 'agents' &&
-    !exactRefreshToken &&
-    input.method !== 'GET' &&
-    input.method !== 'HEAD' &&
-    input.method !== 'OPTIONS';
-  const exactRecaptchaFrame =
-    !input.isMainFrame &&
-    RECAPTCHA_ORIGINS.has(url.origin) &&
-    url.pathname.startsWith('/recaptcha/');
-  const navigationAllowed =
-    !input.isNavigationRequest || validPageUrl(url.toString()) !== undefined || exactRecaptchaFrame;
-  return (
-    !exactDeposit &&
-    (!refreshTokenEndpoint || exactRefreshToken) &&
-    !mutatingAfterLogin &&
-    navigationAllowed
-  );
+  return classifyKemerBetSessionRequest(input) === 'allow';
 }
 
-async function guardedRoute(route: Route, page: Page, onBlockedRequest: () => void): Promise<void> {
-  const request = route.request();
-  if (
-    !isAllowedKemerBetSessionRequest({
-      isMainFrame: request.frame() === page.mainFrame(),
-      isNavigationRequest: request.isNavigationRequest(),
-      headers: request.headers(),
-      method: request.method(),
-      pageUrl: page.url(),
-      postData: request.postData(),
-      redirectedFrom: request.redirectedFrom() !== null,
-      resourceType: request.resourceType(),
-      requestUrl: request.url(),
-    })
-  ) {
+async function guardedRoute(
+  route: Route,
+  page: Page,
+  recaptchaCeremony: KemerBetRecaptchaCeremony,
+  beforeActiveSessionDeadline: () => boolean,
+  onActiveSessionDeadlineExceeded: () => void,
+  onForbiddenRequest: () => void,
+): Promise<void> {
+  const beforeDeadline = (): boolean => {
     try {
-      onBlockedRequest();
+      return beforeActiveSessionDeadline();
     } catch {
-      // Privacy-safe attempt telemetry cannot weaken the existing local abort boundary.
+      return false;
+    }
+  };
+  const abortForExpiredDeadline = async (): Promise<void> => {
+    try {
+      onActiveSessionDeadlineExceeded();
+    } catch {
+      // Deadline enforcement does not depend on the best-effort cleanup scheduler.
     }
     await route.abort('blockedbyclient');
+  };
+  if (!beforeDeadline()) {
+    await abortForExpiredDeadline();
+    return;
+  }
+  const request = route.request();
+  let requestBelongsToRetainedPage = false;
+  let isMainFrame = false;
+  let requestFrame: Frame | undefined;
+  try {
+    requestFrame = request.frame();
+    requestBelongsToRetainedPage = requestFrame.page() === page;
+    isMainFrame = requestFrame === page.mainFrame();
+  } catch {
+    requestBelongsToRetainedPage = false;
+  }
+  const recaptchaDecision = await recaptchaCeremony.handleRoute({
+    page,
+    ...(requestFrame === undefined ? {} : { requestFrame }),
+    route,
+  });
+  if (recaptchaDecision === 'handled') return;
+  const decision = requestBelongsToRetainedPage
+    ? classifyKemerBetSessionRequest({
+        isMainFrame,
+        isNavigationRequest: request.isNavigationRequest(),
+        headers: request.headers(),
+        method: request.method(),
+        pageUrl: page.url(),
+        postData: request.postData(),
+        redirectedFrom: request.redirectedFrom() !== null,
+        resourceType: request.resourceType(),
+        requestUrl: request.url(),
+      })
+    : 'forbid';
+  let loginRequest = false;
+  try {
+    const requestUrl = new URL(request.url());
+    loginRequest =
+      request.method() === 'POST' && exactProviderUrl(requestUrl, API_ORIGIN, LOGIN_PATH);
+  } catch {
+    loginRequest = false;
+  }
+  const loginPermitAccepted =
+    decision !== 'allow' || !loginRequest
+      ? true
+      : await recaptchaCeremony.consumeKemerBetLoginPermit();
+  const activeSessionDeadlineAccepted = beforeDeadline();
+  if (decision !== 'allow' || !loginPermitAccepted || !activeSessionDeadlineAccepted) {
+    if (!activeSessionDeadlineAccepted) {
+      await abortForExpiredDeadline();
+      return;
+    }
+    if (decision === 'forbid') {
+      try {
+        onForbiddenRequest();
+      } catch {
+        // Privacy-safe attempt telemetry cannot weaken the existing local abort boundary.
+      }
+    }
+    await route.abort('blockedbyclient');
+    return;
+  }
+  if (!beforeDeadline()) {
+    await abortForExpiredDeadline();
     return;
   }
   await route.continue();
@@ -695,10 +2130,24 @@ function validSessionInput(value: unknown): SessionInput | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
   if (candidate.kind === 'pointer') {
-    const object = exactObject(value, ['kind', 'requestId', 'x', 'y']);
+    const object = exactObject(value, [
+      'frameSequence',
+      'kind',
+      'platformAgentAccountId',
+      'requestId',
+      'sessionGeneration',
+      'x',
+      'y',
+    ]);
     return object &&
       typeof object.requestId === 'string' &&
       REQUEST_ID_PATTERN.test(object.requestId) &&
+      typeof object.platformAgentAccountId === 'string' &&
+      UUID_PATTERN.test(object.platformAgentAccountId) &&
+      typeof object.sessionGeneration === 'string' &&
+      REQUEST_ID_PATTERN.test(object.sessionGeneration) &&
+      Number.isSafeInteger(object.frameSequence) &&
+      Number(object.frameSequence) >= 1 &&
       Number.isInteger(object.x) &&
       Number(object.x) >= 0 &&
       Number(object.x) < VIEWPORT.width &&
@@ -709,17 +2158,127 @@ function validSessionInput(value: unknown): SessionInput | undefined {
       : undefined;
   }
   if (candidate.kind === 'key') {
-    const object = exactObject(value, ['key', 'kind', 'requestId']);
+    const object = exactObject(value, [
+      'frameSequence',
+      'key',
+      'kind',
+      'platformAgentAccountId',
+      'requestId',
+      'sessionGeneration',
+    ]);
     const key = object?.key;
     return object &&
       typeof object.requestId === 'string' &&
       REQUEST_ID_PATTERN.test(object.requestId) &&
+      typeof object.platformAgentAccountId === 'string' &&
+      UUID_PATTERN.test(object.platformAgentAccountId) &&
+      typeof object.sessionGeneration === 'string' &&
+      REQUEST_ID_PATTERN.test(object.sessionGeneration) &&
+      Number.isSafeInteger(object.frameSequence) &&
+      Number(object.frameSequence) >= 1 &&
       typeof key === 'string' &&
       (NAMED_KEYS.has(key) || (/^[\u0020-\u007e]$/u.test(key) && key !== '`'))
       ? (object as unknown as KeyInput)
       : undefined;
   }
+  if (candidate.kind === 'text') {
+    const object = exactObject(value, [
+      'frameSequence',
+      'kind',
+      'platformAgentAccountId',
+      'requestId',
+      'sessionGeneration',
+      'text',
+    ]);
+    const text = object?.text;
+    return object &&
+      typeof object.requestId === 'string' &&
+      REQUEST_ID_PATTERN.test(object.requestId) &&
+      typeof object.platformAgentAccountId === 'string' &&
+      UUID_PATTERN.test(object.platformAgentAccountId) &&
+      typeof object.sessionGeneration === 'string' &&
+      REQUEST_ID_PATTERN.test(object.sessionGeneration) &&
+      Number.isSafeInteger(object.frameSequence) &&
+      Number(object.frameSequence) >= 1 &&
+      typeof text === 'string' &&
+      /^[\u0020-\u007e]{1,64}$/u.test(text) &&
+      !text.includes('`')
+      ? (object as unknown as TextInput)
+      : undefined;
+  }
   return undefined;
+}
+
+function validFrameQuery(value: string | undefined):
+  | {
+      readonly after: number;
+      readonly generation: string;
+      readonly platformAgentAccountId: string;
+    }
+  | undefined {
+  if (value === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value, 'http://session.invalid');
+  } catch {
+    return undefined;
+  }
+  if (url.pathname !== '/v1/session/frame' || url.hash !== '') return undefined;
+  const keys = [...url.searchParams.keys()].sort();
+  if (keys.join('\0') !== ['after', 'generation', 'platformAgentAccountId'].join('\0')) {
+    return undefined;
+  }
+  const generation = url.searchParams.get('generation');
+  const afterValue = url.searchParams.get('after');
+  const platformAgentAccountId = url.searchParams.get('platformAgentAccountId');
+  if (
+    generation === null ||
+    !REQUEST_ID_PATTERN.test(generation) ||
+    afterValue === null ||
+    !/^(?:0|[1-9][0-9]{0,9})$/u.test(afterValue) ||
+    platformAgentAccountId === null ||
+    !UUID_PATTERN.test(platformAgentAccountId)
+  ) {
+    return undefined;
+  }
+  const after = Number(afterValue);
+  return Number.isSafeInteger(after) ? { after, generation, platformAgentAccountId } : undefined;
+}
+
+function validStatusQuery(
+  value: string | undefined,
+): { readonly platformAgentAccountId: string } | undefined {
+  if (value === undefined) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value, 'http://session.invalid');
+  } catch {
+    return undefined;
+  }
+  if (url.pathname !== '/v1/session' || url.hash !== '') return undefined;
+  const keys = [...url.searchParams.keys()];
+  if (keys.length !== 1 || keys[0] !== 'platformAgentAccountId') return undefined;
+  const platformAgentAccountId = url.searchParams.get('platformAgentAccountId');
+  return platformAgentAccountId !== null && UUID_PATTERN.test(platformAgentAccountId)
+    ? { platformAgentAccountId }
+    : undefined;
+}
+
+function sendJpeg(
+  response: ServerResponse,
+  generation: string,
+  sequence: number,
+  image: Buffer,
+): void {
+  response.writeHead(200, {
+    'cache-control': 'no-store, max-age=0',
+    'content-length': image.byteLength,
+    'content-type': 'image/jpeg',
+    pragma: 'no-cache',
+    'x-fetanagent-frame-sequence': String(sequence),
+    'x-fetanagent-session-generation': generation,
+  });
+  response.end(image);
 }
 
 export function createKemerBetSessionProvisionServer(
@@ -735,7 +2294,15 @@ export function createKemerBetSessionProvisionServer(
   assertEnvironment(dependencies.environment ?? process.env, effectiveUserId);
   const launch =
     dependencies.launchPersistentContext ?? chromium.launchPersistentContext.bind(chromium);
+  const acquireProfileGenerationLease =
+    dependencies.acquireProfileGenerationLease ?? acquireKemerBetSessionProfileGenerationLease;
   const now = dependencies.now ?? (() => new Date());
+  const monotonicNow = dependencies.monotonicNow ?? (() => performance.now());
+  const readMonotonicNow = (): number => {
+    const timestamp = monotonicNow();
+    if (!Number.isFinite(timestamp) || timestamp < 0) return unavailable();
+    return timestamp;
+  };
   const setTimer = dependencies.setTimer ?? setTimeout;
   const clearTimer = dependencies.clearTimer ?? clearTimeout;
   const closePersistentBrowserForCheckpoint =
@@ -748,6 +2315,21 @@ export function createKemerBetSessionProvisionServer(
     dependencies.checkpointSignedInPage ??
     ((input: KemerBetSessionCheckpointInput) =>
       checkpointKemerBetProvisionSignedInPage({ ...input, effectiveUserId }));
+  const prepareAuthenticatedIdentityVerifier =
+    dependencies.prepareAuthenticatedIdentityVerifier ??
+    prepareKemerBetProvisionAuthenticatedIdentityVerifier;
+  const purgePersistedServiceWorkerState =
+    dependencies.purgePersistedServiceWorkerState ?? purgeKemerBetPersistedServiceWorkerState;
+  const forceQuarantine = dependencies.forceQuarantine ?? ((exitCode: 1) => process.exit(exitCode));
+  const buildRecaptchaCeremony =
+    dependencies.createRecaptchaCeremony ?? createKemerBetRecaptchaCeremony;
+  const fetchRecaptchaAsset = dependencies.fetchRecaptchaAsset ?? fetchKemerBetRecaptchaAsset;
+  const validateSessionProfile =
+    dependencies.validateSessionProfile ??
+    (async (candidateProfilePath: string, candidateEffectiveUserId: number) => {
+      await assertSafeDirectory(candidateProfilePath, candidateEffectiveUserId);
+      await assertSafeDirectory(PROFILE_ROOT, candidateEffectiveUserId);
+    });
   const log =
     dependencies.log ??
     ((event: 'started' | 'signed_in' | 'stopped') =>
@@ -761,14 +2343,41 @@ export function createKemerBetSessionProvisionServer(
   let accountId: string | undefined;
   let expiresAt: Date | undefined;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  let expiryEpoch = 0;
+  let hardDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let hardDeadlineEpoch = 0;
   let signedInLogged = false;
+  let authenticatedDeadline: Date | undefined;
+  let authenticatedDeadlineMonotonicMs: number | undefined;
+  let generationDeadline: Date | undefined;
+  let generationDeadlineMonotonicMs: number | undefined;
+  let expiresAtMonotonicMs: number | undefined;
+  let phase: KemerBetProvisionSessionPhase = 'idle';
+  let sessionGeneration: string | undefined;
+  let frameSequence = 0;
+  let frameImage: Buffer | undefined;
+  let frameCapturedAtMs: number | undefined;
+  let initializationPromise: Promise<void> | undefined;
+  let pendingContext: BrowserContext | undefined;
+  let pendingPage: Page | undefined;
+  let pendingProfilePath: string | undefined;
+  let profileGenerationLease: KemerBetSessionProfileGenerationLease | undefined;
+  let pendingProfileGenerationLease: KemerBetSessionProfileGenerationLease | undefined;
+  let authenticatedIdentityVerifier: KemerBetProvisionAuthenticatedIdentityVerifier | undefined;
+  let identityVerificationPromise: Promise<void> | undefined;
+  let identityVerificationEpoch = 0;
+  let contextUnexpectedlyClosed = false;
+  const expectedContextClosures = new WeakSet<BrowserContext>();
   let checkpointedForRecheck = false;
   let blockedRequestCounter = 0n;
   let checkpointValidationActive = false;
   let checkpointBlockedForRecheck = false;
+  let faultCleanupGeneration: string | undefined;
+  let stopCleanupGeneration: string | undefined;
+  let stopCleanupPromise: Promise<void> | undefined;
   const readinessFailure = createKemerBetReadinessSealFailureTracker();
   let lane = Promise.resolve();
-  const startupProfilesCleaned = new Set<string>();
+  let cleanupLane = Promise.resolve();
 
   const serialized = async <T>(operation: () => Promise<T>): Promise<T> => {
     const result = lane.then(operation, operation);
@@ -779,77 +2388,605 @@ export function createKemerBetSessionProvisionServer(
     return result;
   };
 
-  const stop = async (): Promise<void> => {
+  const serializedCleanup = async (operation: () => Promise<void>): Promise<void> => {
+    const result = cleanupLane.then(operation, operation);
+    cleanupLane = result.catch(() => undefined);
+    return result;
+  };
+
+  const cancelExpiry = (): void => {
     if (expiryTimer !== undefined) clearTimer(expiryTimer);
     expiryTimer = undefined;
-    const activeContext = context;
+    expiryEpoch += 1;
+  };
+
+  const cancelHardDeadline = (): void => {
+    if (hardDeadlineTimer !== undefined) clearTimer(hardDeadlineTimer);
+    hardDeadlineTimer = undefined;
+    hardDeadlineEpoch += 1;
+  };
+
+  const forceQuarantineAtHardDeadline = (generation: string): void => {
+    if (
+      sessionGeneration !== generation ||
+      phase === 'idle' ||
+      phase === 'checkpointed' ||
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined ||
+      (now().getTime() < generationDeadline.getTime() &&
+        readMonotonicNow() < generationDeadlineMonotonicMs)
+    ) {
+      return;
+    }
+    cancelExpiry();
+    cancelHardDeadline();
+    checkpointedForRecheck = true;
+    phase = 'faulted';
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    identityVerificationEpoch += 1;
+    // A context that cannot be proved closed is never reusable. Production exits the dedicated
+    // fail-closed coordinator so the outer operator boundary must explicitly re-establish it.
+    forceQuarantine(1);
+  };
+
+  const armHardDeadline = (generation: string): void => {
+    if (
+      sessionGeneration !== generation ||
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined
+    ) {
+      return unavailable();
+    }
+    cancelHardDeadline();
+    const timerEpoch = hardDeadlineEpoch;
+    const hardDeadlineMonotonicMs = generationDeadlineMonotonicMs;
+    const hardDeadlineWallMs = generationDeadline.getTime();
+    const delayMs = Math.max(
+      1,
+      Math.min(hardDeadlineWallMs - now().getTime(), hardDeadlineMonotonicMs - readMonotonicNow()),
+    );
+    hardDeadlineTimer = setTimer(() => {
+      if (
+        sessionGeneration !== generation ||
+        hardDeadlineEpoch !== timerEpoch ||
+        phase === 'idle' ||
+        phase === 'checkpointed'
+      ) {
+        return;
+      }
+      if (now().getTime() < hardDeadlineWallMs && readMonotonicNow() < hardDeadlineMonotonicMs) {
+        armHardDeadline(generation);
+        return;
+      }
+      forceQuarantineAtHardDeadline(generation);
+    }, delayMs);
+  };
+
+  const clearRuntimeState = (nextPhase: 'checkpointed' | 'idle'): void => {
+    cancelExpiry();
+    cancelHardDeadline();
     context = undefined;
     page = undefined;
     profilePath = undefined;
     accountId = undefined;
     expiresAt = undefined;
     signedInLogged = false;
-    if (activeContext) {
-      await activeContext.close().catch(() => undefined);
-      log('stopped');
-    }
+    authenticatedDeadline = undefined;
+    authenticatedDeadlineMonotonicMs = undefined;
+    generationDeadline = undefined;
+    generationDeadlineMonotonicMs = undefined;
+    expiresAtMonotonicMs = undefined;
+    sessionGeneration = undefined;
+    frameSequence = 0;
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    pendingContext = undefined;
+    pendingPage = undefined;
+    pendingProfilePath = undefined;
+    profileGenerationLease = undefined;
+    pendingProfileGenerationLease = undefined;
+    authenticatedIdentityVerifier = undefined;
+    identityVerificationPromise = undefined;
+    identityVerificationEpoch += 1;
+    contextUnexpectedlyClosed = false;
+    faultCleanupGeneration = undefined;
+    phase = nextPhase;
   };
 
-  const armExpiry = (lifetimeMs: number): void => {
-    if (expiryTimer !== undefined) clearTimer(expiryTimer);
-    expiresAt = new Date(now().getTime() + lifetimeMs);
-    expiryTimer = setTimer(() => void serialized(stop), lifetimeMs);
-  };
-
-  const status = async (): Promise<KemerBetProvisionSessionStatus> => {
-    if (checkpointedForRecheck || !context || !page || !profilePath || !accountId || !expiresAt) {
-      return { active: false, loginRequired: false, signedIn: false, transferDisabled: true };
+  const snapshot = (): KemerBetProvisionSessionStatus => {
+    if (phase === 'idle' || phase === 'checkpointed') {
+      return {
+        active: false,
+        loginRequired: false,
+        phase,
+        signedIn: false,
+        transferDisabled: true,
+      };
     }
-    if (now().getTime() >= expiresAt.getTime()) {
-      await stop();
-      return { active: false, loginRequired: false, signedIn: false, transferDisabled: true };
-    }
-    const state = validPageUrl(page.url());
-    if (!state) return unavailable();
-    const signedIn = state === 'agents';
-    if (signedIn && !signedInLogged) {
-      // The ten-minute deadline protects credential entry only. Once KemerBet confirms
-      // authentication, keep this exact locked browser context alive so an Owner-page
-      // re-authentication does not discard KemerBet's in-memory authenticated state.
-      armExpiry(AUTHENTICATED_SESSION_LIFETIME_MS);
-      signedInLogged = true;
-      log('signed_in');
-    }
-    const image = await page.screenshot({ animations: 'disabled', quality: 70, type: 'jpeg' });
+    if (!sessionGeneration || !expiresAt) return unavailable();
     return {
       active: true,
       expiresAt: expiresAt.toISOString(),
-      imageBase64: image.toString('base64'),
-      imageContentType: 'image/jpeg',
-      loginRequired: state === 'login',
-      signedIn,
+      frameSequence,
+      generation: sessionGeneration,
+      loginRequired: phase === 'login_required',
+      phase,
+      signedIn: phase === 'authenticated',
       transferDisabled: true,
     };
   };
 
-  const start = async (input: StartInput): Promise<KemerBetProvisionSessionStatus> => {
-    if (checkpointedForRecheck || context || page || profilePath || accountId || expiresAt) {
+  const requireExpectedAccountId = (expectedAccountId: string): void => {
+    if (!UUID_PATTERN.test(expectedAccountId)) return unavailable();
+    if (
+      phase !== 'idle' &&
+      phase !== 'checkpointed' &&
+      (!accountId || accountId !== expectedAccountId)
+    ) {
       return unavailable();
     }
-    await (
-      dependencies.assertBrowserExecutable ??
-      (() => assertKemerBetBrowserExecutable({ executablePath: CHROMIUM_PATH }))
-    )();
-    const profile = await prepareProfile(input.platformAgentAccountId, effectiveUserId);
-    if (!startupProfilesCleaned.has(profile)) {
-      await removeStaleChromiumSingletonArtifacts(profile);
-      await assertSafeDirectory(profile, effectiveUserId);
-      await assertSafeDirectory(PROFILE_ROOT, effectiveUserId);
-      startupProfilesCleaned.add(profile);
+  };
+
+  const armExpiryAt = (deadline: Date, monotonicDeadlineMs: number, generation: string): void => {
+    if (
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined ||
+      generation !== sessionGeneration
+    ) {
+      return unavailable();
     }
+    const deadlineMs = Math.min(deadline.getTime(), generationDeadline.getTime());
+    const boundedMonotonicDeadlineMs = Math.min(monotonicDeadlineMs, generationDeadlineMonotonicMs);
+    if (!Number.isFinite(deadlineMs) || !Number.isFinite(boundedMonotonicDeadlineMs)) {
+      return unavailable();
+    }
+    cancelExpiry();
+    const timerEpoch = expiryEpoch;
+    expiresAt = new Date(deadlineMs);
+    expiresAtMonotonicMs = boundedMonotonicDeadlineMs;
+    const delayMs = Math.max(
+      1,
+      Math.min(deadlineMs - now().getTime(), boundedMonotonicDeadlineMs - readMonotonicNow()),
+    );
+    expiryTimer = setTimer(() => {
+      void serialized(async () => {
+        if (
+          sessionGeneration !== generation ||
+          expiryEpoch !== timerEpoch ||
+          expiresAt?.getTime() !== deadlineMs ||
+          expiresAtMonotonicMs !== boundedMonotonicDeadlineMs ||
+          phase === 'idle' ||
+          phase === 'checkpointed'
+        ) {
+          return;
+        }
+        if (now().getTime() < deadlineMs && readMonotonicNow() < boundedMonotonicDeadlineMs) {
+          armExpiryAt(new Date(deadlineMs), boundedMonotonicDeadlineMs, generation);
+          return;
+        }
+        beginStop();
+      });
+    }, delayMs);
+  };
+
+  const armExpiry = (lifetimeMs: number, generation: string): void => {
+    armExpiryAt(
+      new Date(now().getTime() + lifetimeMs),
+      readMonotonicNow() + lifetimeMs,
+      generation,
+    );
+  };
+
+  const scheduleFaultCleanupRetry = (generation: string): void => {
+    const hardDeadlineMonotonicMs = generationDeadlineMonotonicMs;
+    const hardDeadlineWallMs = generationDeadline?.getTime();
+    if (
+      hardDeadlineWallMs === undefined ||
+      hardDeadlineMonotonicMs === undefined ||
+      now().getTime() >= hardDeadlineWallMs ||
+      readMonotonicNow() >= hardDeadlineMonotonicMs
+    ) {
+      forceQuarantineAtHardDeadline(generation);
+      return;
+    }
+    cancelExpiry();
+    const timerEpoch = expiryEpoch;
+    const retryAtWallMs = Math.min(now().getTime() + FAULT_CLEANUP_RETRY_MS, hardDeadlineWallMs);
+    const retryAtMonotonicMs = Math.min(
+      readMonotonicNow() + FAULT_CLEANUP_RETRY_MS,
+      hardDeadlineMonotonicMs,
+    );
+    expiryTimer = setTimer(
+      () => {
+        if (sessionGeneration !== generation || expiryEpoch !== timerEpoch || phase !== 'faulted') {
+          return;
+        }
+        if (
+          now().getTime() >= hardDeadlineWallMs ||
+          readMonotonicNow() >= hardDeadlineMonotonicMs
+        ) {
+          forceQuarantineAtHardDeadline(generation);
+          return;
+        }
+        void serialized(async () => {
+          if (sessionGeneration === generation && phase === 'faulted') beginStop();
+        });
+      },
+      Math.max(
+        1,
+        Math.min(retryAtWallMs - now().getTime(), retryAtMonotonicMs - readMonotonicNow()),
+      ),
+    );
+  };
+
+  const closeBrowserCleanly = async (
+    retainedContext: BrowserContext,
+    retainedPage: Page,
+    retainedProfilePath: string,
+  ): Promise<void> => {
+    expectedContextClosures.add(retainedContext);
+    try {
+      await closePersistentBrowserForCheckpoint(
+        {
+          context: retainedContext,
+          effectiveUserId,
+          page: retainedPage,
+          profilePath: retainedProfilePath,
+        },
+        { clearTimer, setTimer },
+      );
+    } catch (error) {
+      expectedContextClosures.delete(retainedContext);
+      throw error;
+    }
+  };
+
+  const finishStop = async (generation: string): Promise<void> => {
+    if (sessionGeneration !== generation || phase !== 'stopping') return;
+    const inFlight = initializationPromise;
+    if (inFlight !== undefined) await inFlight;
+    const retainedContext = context ?? pendingContext;
+    const retainedPage = page ?? pendingPage;
+    const retainedProfilePath = profilePath ?? pendingProfilePath;
+    const retainedProfileGenerationLease = profileGenerationLease ?? pendingProfileGenerationLease;
+    const retainedContextAlreadyClosed = contextUnexpectedlyClosed;
+    let forcedContextClose = false;
+    try {
+      if (retainedContext && retainedPage?.isClosed() === true && !retainedContextAlreadyClosed) {
+        // A closed Page is not evidence that its BrowserContext, workers, or sibling targets are
+        // gone. Terminate the whole context and irreversibly quarantine this in-process profile
+        // generation because it can no longer produce a restorable clean checkpoint.
+        await retainedContext.close();
+        forcedContextClose = true;
+      } else if (
+        retainedContext &&
+        retainedPage &&
+        retainedProfilePath &&
+        !retainedContextAlreadyClosed
+      ) {
+        await closeBrowserCleanly(retainedContext, retainedPage, retainedProfilePath);
+        if (!retainedProfileGenerationLease) return unavailable();
+        await retainedProfileGenerationLease.releaseAfterCleanCheckpoint();
+      } else if (retainedContext && !retainedContextAlreadyClosed) {
+        await retainedContext.close();
+        forcedContextClose = true;
+      } else if (retainedProfileGenerationLease) {
+        // A process may have failed during launch before exposing a context. Without an exact
+        // Chromium clean-exit attestation, retain the durable marker and quarantine the revision.
+        forcedContextClose = true;
+      }
+    } catch {
+      phase = 'faulted';
+      frameImage = undefined;
+      frameCapturedAtMs = undefined;
+      // Keep retrying cleanup at a bounded cadence without extending or replacing the immutable
+      // session deadline. A failed Chromium close must never strand the provision lane forever.
+      scheduleFaultCleanupRetry(generation);
+      return;
+    }
+    if (forcedContextClose) checkpointedForRecheck = true;
+    clearRuntimeState('idle');
+    if (retainedContext) log('stopped');
+  };
+
+  const queueStopCleanup = (generation: string): void => {
+    if (stopCleanupGeneration === generation && stopCleanupPromise !== undefined) return;
+    stopCleanupGeneration = generation;
+    const operation = serializedCleanup(async () => finishStop(generation)).catch(() => undefined);
+    stopCleanupPromise = operation;
+    void operation.then(() => {
+      if (stopCleanupPromise === operation) {
+        stopCleanupPromise = undefined;
+        stopCleanupGeneration = undefined;
+      }
+    });
+  };
+
+  const beginStop = (): void => {
+    if (phase === 'idle' || phase === 'checkpointed') return;
+    const generation = sessionGeneration;
+    if (!generation) return unavailable();
+    if (phase !== 'stopping') {
+      phase = 'stopping';
+      frameImage = undefined;
+      frameCapturedAtMs = undefined;
+      cancelExpiry();
+    }
+    queueStopCleanup(generation);
+  };
+
+  const queueFaultCleanup = (generation: string): void => {
+    if (faultCleanupGeneration === generation) return;
+    faultCleanupGeneration = generation;
+    void serialized(async () => {
+      if (faultCleanupGeneration === generation) faultCleanupGeneration = undefined;
+      if (sessionGeneration === generation && phase === 'faulted') beginStop();
+    }).catch(() => undefined);
+  };
+
+  const markFaulted = (generation: string): void => {
+    if (
+      sessionGeneration !== generation ||
+      phase === 'idle' ||
+      phase === 'checkpointed' ||
+      phase === 'stopping'
+    ) {
+      return;
+    }
+    phase = 'faulted';
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    // Preserve the already-armed immutable deadline. Cleanup is attempted immediately, and a
+    // failed clean close remains bounded by that original deadline rather than extending it.
+    queueFaultCleanup(generation);
+  };
+
+  const acceptAuthenticatedIdentityProof = (
+    generation: string,
+    observedContext: BrowserContext,
+    observedPage: Page,
+    verificationEpoch: number,
+  ): void => {
+    if (
+      generation !== sessionGeneration ||
+      context !== observedContext ||
+      page !== observedPage ||
+      verificationEpoch !== identityVerificationEpoch ||
+      validPageUrl(observedPage.url()) !== 'agents' ||
+      phase === 'stopping' ||
+      phase === 'faulted' ||
+      checkpointedForRecheck
+    ) {
+      return;
+    }
+    const timestamp = now().getTime();
+    const monotonicTimestamp = readMonotonicNow();
+    if (
+      !expiresAt ||
+      expiresAtMonotonicMs === undefined ||
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined ||
+      timestamp >= expiresAt.getTime() ||
+      monotonicTimestamp >= expiresAtMonotonicMs ||
+      timestamp >= generationDeadline.getTime() ||
+      monotonicTimestamp >= generationDeadlineMonotonicMs
+    ) {
+      beginStop();
+      return;
+    }
+    // This is the sole transition that accepts authentication. A candidate URL by itself never
+    // sets signedIn; the exact sealed account binding has already been re-observed twice in the
+    // immutable selector contract before this synchronous deadline check.
+    phase = 'authenticated';
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    authenticatedDeadline ??= new Date(
+      Math.min(timestamp + AUTHENTICATED_SESSION_LIFETIME_MS, generationDeadline.getTime()),
+    );
+    authenticatedDeadlineMonotonicMs ??= Math.min(
+      monotonicTimestamp + AUTHENTICATED_SESSION_LIFETIME_MS,
+      generationDeadlineMonotonicMs,
+    );
+    armExpiryAt(authenticatedDeadline, authenticatedDeadlineMonotonicMs, generation);
+    if (!signedInLogged) {
+      signedInLogged = true;
+      log('signed_in');
+    }
+  };
+
+  const beginAuthenticatedIdentityVerification = (
+    generation: string,
+    observedContext: BrowserContext,
+    observedPage: Page,
+  ): void => {
+    if (
+      identityVerificationPromise !== undefined ||
+      !authenticatedIdentityVerifier ||
+      authenticatedIdentityVerifier.accountId !== accountId
+    ) {
+      if (!authenticatedIdentityVerifier) markFaulted(generation);
+      return;
+    }
+    phase = 'authenticating';
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    const verificationEpoch = ++identityVerificationEpoch;
+    let task: Promise<void>;
+    try {
+      task = authenticatedIdentityVerifier.verify(observedPage);
+    } catch {
+      markFaulted(generation);
+      return;
+    }
+    identityVerificationPromise = task;
+    void task
+      .then(
+        () =>
+          serialized(async () => {
+            acceptAuthenticatedIdentityProof(
+              generation,
+              observedContext,
+              observedPage,
+              verificationEpoch,
+            );
+          }),
+        () =>
+          serialized(async () => {
+            if (
+              generation === sessionGeneration &&
+              context === observedContext &&
+              page === observedPage &&
+              verificationEpoch === identityVerificationEpoch &&
+              validPageUrl(observedPage.url()) === 'agents'
+            ) {
+              markFaulted(generation);
+            }
+          }),
+      )
+      .catch(() => undefined)
+      .finally(() => {
+        if (identityVerificationPromise !== task) return;
+        identityVerificationPromise = undefined;
+        // A stale proof may finish after the page briefly returned to login and then reached the
+        // candidate route again. Re-run the exact immutable identity check for the current epoch;
+        // never let a stale in-flight promise strand a live candidate without proof.
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            (page === observedPage || pendingPage === observedPage) &&
+            phase !== 'authenticated' &&
+            phase !== 'stopping' &&
+            phase !== 'faulted' &&
+            !checkpointedForRecheck &&
+            validPageUrl(observedPage.url()) === 'agents'
+          ) {
+            beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);
+          }
+        }).catch(() => undefined);
+      });
+  };
+
+  const updatePagePhase = (
+    generation: string,
+    observedContext: BrowserContext,
+    observedPage: Page,
+  ): 'agents' | 'login' | undefined => {
+    if (
+      generation !== sessionGeneration ||
+      context !== observedContext ||
+      page !== observedPage ||
+      phase === 'stopping' ||
+      phase === 'faulted' ||
+      checkpointedForRecheck
+    ) {
+      return undefined;
+    }
+    const state = validPageUrl(observedPage.url());
+    if (!state) {
+      markFaulted(generation);
+      return undefined;
+    }
+    if (state === 'agents' && phase !== 'authenticated') {
+      beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);
+    } else if (state === 'login' && phase !== 'login_required') {
+      identityVerificationEpoch += 1;
+      phase = 'login_required';
+      const currentDeadline = expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      const currentMonotonicDeadline = expiresAtMonotonicMs ?? Number.POSITIVE_INFINITY;
+      const loginDeadline = new Date(
+        Math.min(now().getTime() + LOGIN_LIFETIME_MS, currentDeadline),
+      );
+      const loginDeadlineMonotonicMs = Math.min(
+        readMonotonicNow() + LOGIN_LIFETIME_MS,
+        currentMonotonicDeadline,
+      );
+      armExpiryAt(
+        authenticatedDeadline && authenticatedDeadline.getTime() < loginDeadline.getTime()
+          ? authenticatedDeadline
+          : loginDeadline,
+        authenticatedDeadlineMonotonicMs !== undefined &&
+          authenticatedDeadlineMonotonicMs < loginDeadlineMonotonicMs
+          ? authenticatedDeadlineMonotonicMs
+          : loginDeadlineMonotonicMs,
+        generation,
+      );
+    }
+    return state;
+  };
+
+  const captureLoginFrame = async (generation: string, observedPage: Page): Promise<void> => {
+    if (
+      generation !== sessionGeneration ||
+      page !== observedPage ||
+      phase !== 'login_required' ||
+      validPageUrl(observedPage.url()) !== 'login'
+    ) {
+      return;
+    }
+    const image = await observedPage.screenshot({
+      animations: 'disabled',
+      quality: 70,
+      timeout: FRAME_CAPTURE_TIMEOUT_MS,
+      type: 'jpeg',
+    });
+    if (
+      generation === sessionGeneration &&
+      page === observedPage &&
+      phase === 'login_required' &&
+      validPageUrl(observedPage.url()) === 'login'
+    ) {
+      frameImage = image;
+      frameCapturedAtMs = now().getTime();
+      frameSequence += 1;
+    }
+  };
+
+  const status = async (): Promise<KemerBetProvisionSessionStatus> => {
+    // Once a checkpoint/seal request installs the irreversible terminal latch, a failed
+    // Chromium close must not make the still-live context look usable again.
+    if (checkpointedForRecheck && phase !== 'checkpointed') return unavailable();
+    if (
+      expiresAt &&
+      expiresAtMonotonicMs !== undefined &&
+      (now().getTime() >= expiresAt.getTime() || readMonotonicNow() >= expiresAtMonotonicMs)
+    ) {
+      beginStop();
+    }
+    return snapshot();
+  };
+
+  const initialize = async (input: StartInput, generation: string): Promise<void> => {
     let nextContext: BrowserContext | undefined;
     let nextPage: Page | undefined;
+    let profile: string | undefined;
+    let generationLease: KemerBetSessionProfileGenerationLease | undefined;
+    let identityVerifier: KemerBetProvisionAuthenticatedIdentityVerifier | undefined;
     try {
+      const [, preparedIdentityVerifier] = await Promise.all([
+        (
+          dependencies.assertBrowserExecutable ??
+          (() => assertKemerBetBrowserExecutable({ executablePath: CHROMIUM_PATH }))
+        )(),
+        prepareAuthenticatedIdentityVerifier(input.platformAgentAccountId, effectiveUserId),
+      ]);
+      identityVerifier = preparedIdentityVerifier;
+      if (identityVerifier.accountId !== input.platformAgentAccountId) return unavailable();
+      profile = await (dependencies.prepareSessionProfile ?? prepareProfile)(
+        input.platformAgentAccountId,
+        effectiveUserId,
+      );
+      await validateSessionProfile(profile, effectiveUserId);
+      // Install the durable crash marker before mutating any reusable profile state. A marker
+      // left by another process blocks this exact immutable revision before singleton cleanup.
+      generationLease = await acquireProfileGenerationLease(profile, effectiveUserId);
+      pendingProfilePath = profile;
+      pendingProfileGenerationLease = generationLease;
+      await removeStaleChromiumSingletonArtifacts(profile);
+      // A persistent worker can bypass Playwright HTTP routing. Remove only Chromium's exact
+      // service-worker subtree while the profile is offline and before any browser process exists.
+      await purgePersistedServiceWorkerState(profile, effectiveUserId);
       nextContext = await launch(profile, {
         acceptDownloads: false,
         bypassCSP: false,
@@ -863,7 +3000,9 @@ export function createKemerBetSessionProvisionServer(
         executablePath: CHROMIUM_PATH,
         headless: true,
         ignoreHTTPSErrors: false,
+        offline: true,
         serviceWorkers: 'block',
+        timeout: 30_000,
         viewport: VIEWPORT,
       });
       const pages = nextContext.pages();
@@ -874,27 +3013,392 @@ export function createKemerBetSessionProvisionServer(
             ? await nextContext.newPage()
             : undefined;
       if (!nextPage) return unavailable();
-      await nextPage.route('**/*', (route) =>
-        guardedRoute(route, nextPage as Page, () => {
-          blockedRequestCounter += 1n;
-          if (checkpointValidationActive) checkpointBlockedForRecheck = true;
-        }),
+      pendingContext = nextContext;
+      pendingPage = nextPage;
+      const observedContext = nextContext;
+      const observedPage = nextPage;
+      let startupBoundaryViolated = false;
+      const observeForbiddenNetworkAttempt = (): void => {
+        startupBoundaryViolated = true;
+        blockedRequestCounter += 1n;
+        if (checkpointValidationActive) checkpointBlockedForRecheck = true;
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            phase !== 'stopping' &&
+            !checkpointedForRecheck
+          ) {
+            markFaulted(generation);
+          }
+        });
+      };
+      const beforeActiveSessionDeadline = (): boolean => {
+        const wallTimestamp = now().getTime();
+        const monotonicTimestamp = readMonotonicNow();
+        return (
+          sessionGeneration === generation &&
+          phase !== 'stopping' &&
+          phase !== 'faulted' &&
+          !checkpointedForRecheck &&
+          Number.isFinite(wallTimestamp) &&
+          expiresAt !== undefined &&
+          expiresAtMonotonicMs !== undefined &&
+          generationDeadline !== undefined &&
+          generationDeadlineMonotonicMs !== undefined &&
+          wallTimestamp < expiresAt.getTime() &&
+          monotonicTimestamp < expiresAtMonotonicMs &&
+          wallTimestamp < generationDeadline.getTime() &&
+          monotonicTimestamp < generationDeadlineMonotonicMs &&
+          (authenticatedDeadline === undefined ||
+            wallTimestamp < authenticatedDeadline.getTime()) &&
+          (authenticatedDeadlineMonotonicMs === undefined ||
+            monotonicTimestamp < authenticatedDeadlineMonotonicMs)
+        );
+      };
+      const observeActiveSessionDeadlineExceeded = (): void => {
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            phase !== 'stopping' &&
+            !checkpointedForRecheck
+          ) {
+            beginStop();
+          }
+        });
+      };
+      if (expiresAt === undefined || expiresAtMonotonicMs === undefined) return unavailable();
+      const newRecaptchaCeremony = (
+        deadlineWallClockMs: number,
+        deadlineMonotonicMs: number,
+      ): KemerBetRecaptchaCeremony =>
+        buildRecaptchaCeremony({
+          deadlineMonotonicMs,
+          deadlineWallClockMs,
+          fetchAsset: fetchRecaptchaAsset,
+          monotonicNow: readMonotonicNow,
+          onForbiddenRequest: observeForbiddenNetworkAttempt,
+          wallClockNow: () => now().getTime(),
+        });
+      let recaptchaCeremony = newRecaptchaCeremony(expiresAt.getTime(), expiresAtMonotonicMs);
+      observedContext.on('page', (candidatePage) => {
+        if (candidatePage === observedPage) return;
+        startupBoundaryViolated = true;
+        blockedRequestCounter += 1n;
+        if (checkpointValidationActive) checkpointBlockedForRecheck = true;
+        void candidatePage.close().catch(() => undefined);
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            phase !== 'stopping' &&
+            !checkpointedForRecheck
+          ) {
+            markFaulted(generation);
+          }
+        });
+      });
+      observedContext.on('serviceworker', () => {
+        observeForbiddenNetworkAttempt();
+      });
+      await observedContext.route('**/*', (route) =>
+        guardedRoute(
+          route,
+          observedPage,
+          recaptchaCeremony,
+          beforeActiveSessionDeadline,
+          observeActiveSessionDeadlineExceeded,
+          observeForbiddenNetworkAttempt,
+        ),
       );
-      await nextPage.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await observedContext.routeWebSocket('**/*', async (webSocket: WebSocketRoute) => {
+        try {
+          await closeKemerBetReadinessGuardedWebSocket({
+            lifecycleBoundary: { observeWebSocket: observeForbiddenNetworkAttempt },
+            reportUnexpected: () => undefined,
+            webSocket,
+          });
+        } catch {
+          // Failing to close even an exact optional notification socket leaves its transport
+          // state uncertain, so poison the whole immutable generation.
+          observeForbiddenNetworkAttempt();
+        }
+      });
+      nextPage.on('framenavigated', (frame) => {
+        if (frame === observedPage.mainFrame()) {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            (page === observedPage || pendingPage === observedPage) &&
+            phase !== 'stopping' &&
+            phase !== 'faulted' &&
+            !checkpointedForRecheck
+          ) {
+            const committedState = validPageUrl(observedPage.url());
+            const returningToLogin = committedState === 'login' && phase === 'authenticated';
+            if (returningToLogin) {
+              // A provider-side session expiry may return an otherwise retained authenticated
+              // browser to login. Swap the one-document ceremony synchronously at the commit,
+              // before subresources can enter the route handler. Its deadline may only shorten
+              // the immutable authenticated/generation lease; it never starts another 12 hours.
+              let replacement: KemerBetRecaptchaCeremony | undefined;
+              try {
+                const wallTimestamp = now().getTime();
+                const monotonicTimestamp = readMonotonicNow();
+                if (
+                  !Number.isFinite(wallTimestamp) ||
+                  expiresAt === undefined ||
+                  expiresAtMonotonicMs === undefined ||
+                  authenticatedDeadline === undefined ||
+                  authenticatedDeadlineMonotonicMs === undefined ||
+                  generationDeadline === undefined ||
+                  generationDeadlineMonotonicMs === undefined
+                ) {
+                  throw new Error('missing immutable reauthentication deadline');
+                }
+                if (
+                  wallTimestamp >= expiresAt.getTime() ||
+                  wallTimestamp >= authenticatedDeadline.getTime() ||
+                  wallTimestamp >= generationDeadline.getTime() ||
+                  monotonicTimestamp >= expiresAtMonotonicMs ||
+                  monotonicTimestamp >= authenticatedDeadlineMonotonicMs ||
+                  monotonicTimestamp >= generationDeadlineMonotonicMs
+                ) {
+                  throw new Error('expired immutable reauthentication deadline');
+                }
+                const reauthenticationDeadlineWallClockMs = Math.min(
+                  wallTimestamp + LOGIN_LIFETIME_MS,
+                  expiresAt.getTime(),
+                  authenticatedDeadline.getTime(),
+                  generationDeadline.getTime(),
+                );
+                const reauthenticationDeadlineMonotonicMs = Math.min(
+                  monotonicTimestamp + LOGIN_LIFETIME_MS,
+                  expiresAtMonotonicMs,
+                  authenticatedDeadlineMonotonicMs,
+                  generationDeadlineMonotonicMs,
+                );
+                replacement = newRecaptchaCeremony(
+                  reauthenticationDeadlineWallClockMs,
+                  reauthenticationDeadlineMonotonicMs,
+                );
+              } catch {
+                observeForbiddenNetworkAttempt();
+              }
+              if (replacement !== undefined) {
+                if (recaptchaCeremony.retireForReauthentication()) {
+                  recaptchaCeremony = replacement;
+                }
+              }
+            } else {
+              // The one-use reCAPTCHA proof belongs to exactly one committed login document. A
+              // same-URL reload is still a different document and therefore poisons an in-flight
+              // ceremony; the sole post-ceremony transition is the expected /agents commit.
+              recaptchaCeremony.observeMainFrameCommit(observedPage.url());
+            }
+            // An identity proof (including one still in flight) is bound to one committed
+            // main-frame document. Revoke its epoch synchronously at every commit, even when both
+            // old and new documents use /agents, so document A can never authenticate document B.
+            identityVerificationEpoch += 1;
+            if (phase === 'authenticated') phase = 'authenticating';
+            frameImage = undefined;
+            frameCapturedAtMs = undefined;
+          }
+          void serialized(async () => {
+            updatePagePhase(generation, observedContext, observedPage);
+          });
+        }
+      });
+      nextPage.on('crash', () => {
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            (page === observedPage || pendingPage === observedPage) &&
+            phase !== 'stopping'
+          ) {
+            markFaulted(generation);
+          }
+        });
+      });
+      nextPage.on('close', () => {
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            (page === observedPage || pendingPage === observedPage) &&
+            phase !== 'stopping' &&
+            !checkpointedForRecheck &&
+            !expectedContextClosures.has(observedContext)
+          ) {
+            markFaulted(generation);
+          }
+        });
+      });
+      nextContext.on('close', () => {
+        if (
+          sessionGeneration === generation &&
+          (context === observedContext || pendingContext === observedContext) &&
+          phase !== 'stopping' &&
+          !checkpointedForRecheck &&
+          !expectedContextClosures.has(observedContext)
+        ) {
+          // An unexpected process/context close is not a restorable profile checkpoint. Keep the
+          // profile permanently unavailable in this process even after cleanup bookkeeping ends.
+          contextUnexpectedlyClosed = true;
+          checkpointedForRecheck = true;
+          identityVerificationEpoch += 1;
+          frameImage = undefined;
+          frameCapturedAtMs = undefined;
+        }
+        void serialized(async () => {
+          if (
+            sessionGeneration === generation &&
+            (context === observedContext || pendingContext === observedContext) &&
+            phase !== 'stopping' &&
+            !expectedContextClosures.has(observedContext)
+          ) {
+            markFaulted(generation);
+          }
+        });
+      });
+      // The persistent context starts offline. Only after context-wide HTTP, WebSocket, popup,
+      // crash, and close latches are installed may the exact reviewed login transport go online.
+      const guardedPages = observedContext.pages();
+      if (
+        guardedPages.length !== 1 ||
+        guardedPages[0] !== observedPage ||
+        observedContext.serviceWorkers().length !== 0 ||
+        startupBoundaryViolated
+      ) {
+        return unavailable();
+      }
+      await observedContext.setOffline(false);
+      await nextPage.goto(KEMERBET_AGENT_LOGIN_RETRY_URL, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000,
+      });
       if (validPageUrl(nextPage.url()) === undefined) return unavailable();
     } catch {
-      await nextContext?.close().catch(() => undefined);
-      return unavailable();
+      let closed = true;
+      let forcedContextClose = false;
+      try {
+        const contextAlreadyClosed = contextUnexpectedlyClosed;
+        if (nextContext && nextPage?.isClosed() === true && !contextAlreadyClosed) {
+          await nextContext.close();
+          forcedContextClose = true;
+        } else if (nextContext && nextPage && profile && !contextAlreadyClosed) {
+          await closeBrowserCleanly(nextContext, nextPage, profile);
+          if (!generationLease) return unavailable();
+          await generationLease.releaseAfterCleanCheckpoint();
+        } else if (nextContext && !contextAlreadyClosed) {
+          await nextContext.close();
+          forcedContextClose = true;
+        } else if (generationLease) {
+          forcedContextClose = true;
+        }
+      } catch {
+        closed = false;
+      }
+      if (sessionGeneration === generation) {
+        if (closed && phase === 'starting') {
+          if (forcedContextClose) checkpointedForRecheck = true;
+          clearRuntimeState('idle');
+        } else {
+          context = nextContext;
+          page = nextPage;
+          profilePath = profile;
+          profileGenerationLease = generationLease;
+          authenticatedIdentityVerifier = identityVerifier;
+          markFaulted(generation);
+        }
+      }
+      return;
     }
-    if (!nextContext || !nextPage) return unavailable();
+    if (!nextContext || !nextPage || !profile) return;
+    if (sessionGeneration !== generation || phase !== 'starting') {
+      try {
+        await closeBrowserCleanly(nextContext, nextPage, profile);
+        if (!generationLease) return unavailable();
+        await generationLease.releaseAfterCleanCheckpoint();
+        pendingContext = undefined;
+        pendingPage = undefined;
+        pendingProfilePath = undefined;
+        pendingProfileGenerationLease = undefined;
+      } catch {
+        if (sessionGeneration === generation) {
+          context = nextContext;
+          page = nextPage;
+          profilePath = profile;
+          profileGenerationLease = generationLease;
+          authenticatedIdentityVerifier = identityVerifier;
+          markFaulted(generation);
+        }
+      }
+      return;
+    }
     context = nextContext;
     page = nextPage;
     profilePath = profile;
-    accountId = input.platformAgentAccountId;
+    profileGenerationLease = generationLease;
+    authenticatedIdentityVerifier = identityVerifier;
+    pendingContext = undefined;
+    pendingPage = undefined;
+    pendingProfilePath = undefined;
+    pendingProfileGenerationLease = undefined;
     checkpointBlockedForRecheck = false;
-    armExpiry(LOGIN_LIFETIME_MS);
+    const currentState = updatePagePhase(generation, nextContext, nextPage);
     log('started');
-    return status();
+    if (currentState === 'login') {
+      // Keep every screenshot in the same serialized lane as input. This prevents an eager
+      // startup capture from committing an older image after a newer input-bound frame.
+      void serialized(async () => {
+        try {
+          if (frameImage === undefined) await captureLoginFrame(generation, nextPage as Page);
+        } catch {
+          // A missing preview frame is recoverable; the next bounded frame poll retries it.
+        }
+      });
+    }
+  };
+
+  const start = (input: StartInput): KemerBetProvisionSessionStatus => {
+    if (checkpointedForRecheck) return unavailable();
+    if (sessionGeneration !== undefined) {
+      if (sessionGeneration === input.requestId && accountId === input.platformAgentAccountId) {
+        return snapshot();
+      }
+      return unavailable();
+    }
+    if (
+      phase !== 'idle' ||
+      context ||
+      page ||
+      profilePath ||
+      profileGenerationLease ||
+      pendingProfileGenerationLease ||
+      accountId ||
+      expiresAt
+    ) {
+      return unavailable();
+    }
+    phase = 'starting';
+    sessionGeneration = input.requestId;
+    accountId = input.platformAgentAccountId;
+    generationDeadline = new Date(now().getTime() + MAX_GENERATION_LIFETIME_MS);
+    generationDeadlineMonotonicMs = readMonotonicNow() + MAX_GENERATION_LIFETIME_MS;
+    frameSequence = 0;
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    armHardDeadline(input.requestId);
+    armExpiry(LOGIN_LIFETIME_MS, input.requestId);
+    const task = initialize(input, input.requestId);
+    initializationPromise = task;
+    void task.finally(() => {
+      if (initializationPromise === task) initializationPromise = undefined;
+    });
+    return snapshot();
   };
 
   const checkpointForRecheck = async (): Promise<KemerBetProvisionCheckpointResult> => {
@@ -906,10 +3410,17 @@ export function createKemerBetSessionProvisionServer(
       !context ||
       !page ||
       !profilePath ||
+      !profileGenerationLease ||
       !accountId ||
       !expiresAt ||
+      expiresAtMonotonicMs === undefined ||
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined ||
       !signedInLogged ||
       now().getTime() >= expiresAt.getTime() ||
+      readMonotonicNow() >= expiresAtMonotonicMs ||
+      now().getTime() >= generationDeadline.getTime() ||
+      readMonotonicNow() >= generationDeadlineMonotonicMs ||
       validPageUrl(page.url()) !== 'agents'
     ) {
       return unavailable();
@@ -917,8 +3428,12 @@ export function createKemerBetSessionProvisionServer(
     const retainedContext = context;
     const retainedPage = page;
     const retainedProfilePath = profilePath;
+    const retainedProfileGenerationLease = profileGenerationLease;
     const retainedAccountId = accountId;
     const retainedExpiresAt = expiresAt;
+    const retainedExpiresAtMonotonicMs = expiresAtMonotonicMs;
+    const retainedGenerationDeadline = generationDeadline;
+    const retainedGenerationDeadlineMonotonicMs = generationDeadlineMonotonicMs;
     const blockedRequestBaseline = blockedRequestCounter;
     checkpointValidationActive = true;
     try {
@@ -931,11 +3446,19 @@ export function createKemerBetSessionProvisionServer(
         context !== retainedContext ||
         page !== retainedPage ||
         profilePath !== retainedProfilePath ||
+        profileGenerationLease !== retainedProfileGenerationLease ||
         accountId !== retainedAccountId ||
         expiresAt !== retainedExpiresAt ||
+        expiresAtMonotonicMs !== retainedExpiresAtMonotonicMs ||
+        generationDeadline !== retainedGenerationDeadline ||
+        generationDeadlineMonotonicMs !== retainedGenerationDeadlineMonotonicMs ||
         blockedRequestCounter !== blockedRequestBaseline ||
         checkpointBlockedForRecheck ||
-        validPageUrl(retainedPage.url()) !== 'agents'
+        validPageUrl(retainedPage.url()) !== 'agents' ||
+        now().getTime() >= retainedExpiresAt.getTime() ||
+        readMonotonicNow() >= retainedExpiresAtMonotonicMs ||
+        now().getTime() >= retainedGenerationDeadline.getTime() ||
+        readMonotonicNow() >= retainedGenerationDeadlineMonotonicMs
       ) {
         return unavailable();
       }
@@ -957,25 +3480,27 @@ export function createKemerBetSessionProvisionServer(
         },
         { clearTimer, setTimer },
       );
+      await retainedProfileGenerationLease.releaseAfterCleanCheckpoint();
       if (
         context !== retainedContext ||
         page !== retainedPage ||
         profilePath !== retainedProfilePath ||
+        profileGenerationLease !== retainedProfileGenerationLease ||
         accountId !== retainedAccountId ||
         expiresAt !== retainedExpiresAt ||
+        expiresAtMonotonicMs !== retainedExpiresAtMonotonicMs ||
+        generationDeadline !== retainedGenerationDeadline ||
+        generationDeadlineMonotonicMs !== retainedGenerationDeadlineMonotonicMs ||
         blockedRequestCounter !== blockedRequestBaseline ||
-        checkpointBlockedForRecheck
+        checkpointBlockedForRecheck ||
+        now().getTime() >= retainedExpiresAt.getTime() ||
+        readMonotonicNow() >= retainedExpiresAtMonotonicMs ||
+        now().getTime() >= retainedGenerationDeadline.getTime() ||
+        readMonotonicNow() >= retainedGenerationDeadlineMonotonicMs
       ) {
         return unavailable();
       }
-      if (expiryTimer !== undefined) clearTimer(expiryTimer);
-      expiryTimer = undefined;
-      context = undefined;
-      page = undefined;
-      profilePath = undefined;
-      accountId = undefined;
-      expiresAt = undefined;
-      signedInLogged = false;
+      clearRuntimeState('checkpointed');
       log('stopped');
       return {
         checkpointed: true,
@@ -990,26 +3515,64 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const input = async (candidate: SessionInput): Promise<KemerBetProvisionSessionStatus> => {
+    const requireUnexpiredInputLease = (): void => {
+      const timestamp = now().getTime();
+      const monotonicTimestamp = readMonotonicNow();
+      if (
+        !expiresAt ||
+        expiresAtMonotonicMs === undefined ||
+        !generationDeadline ||
+        generationDeadlineMonotonicMs === undefined ||
+        timestamp >= expiresAt.getTime() ||
+        monotonicTimestamp >= expiresAtMonotonicMs ||
+        timestamp >= generationDeadline.getTime() ||
+        monotonicTimestamp >= generationDeadlineMonotonicMs
+      ) {
+        if (sessionGeneration !== undefined) beginStop();
+        return unavailable();
+      }
+    };
+    requireUnexpiredInputLease();
     if (
       checkpointedForRecheck ||
+      phase !== 'login_required' ||
+      candidate.platformAgentAccountId !== accountId ||
+      candidate.sessionGeneration !== sessionGeneration ||
+      candidate.frameSequence !== frameSequence ||
+      frameImage === undefined ||
       !context ||
       !page ||
       !profilePath ||
+      !profileGenerationLease ||
       !accountId ||
       !expiresAt ||
       validPageUrl(page.url()) !== 'login'
     ) {
       return unavailable();
     }
+    const retainedGeneration = sessionGeneration;
+    const retainedContext = context;
+    const retainedPage = page;
+    // Consume the displayed frame before dispatching input. If Playwright reports an error after
+    // partially dispatching an event, the same frame can never be replayed.
+    frameImage = undefined;
+    frameCapturedAtMs = undefined;
+    // Re-read the non-sliding lease immediately before the only browser-input dispatch. A clock
+    // reaching the exact deadline between validation and dispatch rejects and closes the session.
+    requireUnexpiredInputLease();
     if (candidate.kind === 'pointer') {
-      await page.mouse.click(candidate.x, candidate.y);
-    } else if (NAMED_KEYS.has(candidate.key)) {
-      await page.keyboard.press(candidate.key);
+      await retainedPage.mouse.click(candidate.x, candidate.y);
+    } else if (candidate.kind === 'key' && NAMED_KEYS.has(candidate.key)) {
+      await retainedPage.keyboard.press(candidate.key);
+    } else if (candidate.kind === 'key') {
+      await retainedPage.keyboard.insertText(candidate.key);
     } else {
-      await page.keyboard.insertText(candidate.key);
+      await retainedPage.keyboard.insertText(candidate.text);
     }
-    await page.waitForTimeout(120);
-    return status();
+    await retainedPage.waitForTimeout(120);
+    updatePagePhase(retainedGeneration, retainedContext, retainedPage);
+    if (phase === 'login_required') await captureLoginFrame(retainedGeneration, retainedPage);
+    return snapshot();
   };
 
   const sealReadiness = async (): Promise<{
@@ -1029,8 +3592,16 @@ export function createKemerBetSessionProvisionServer(
       !context ||
       !page ||
       !profilePath ||
+      !profileGenerationLease ||
       !accountId ||
       !expiresAt ||
+      expiresAtMonotonicMs === undefined ||
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined ||
+      now().getTime() >= expiresAt.getTime() ||
+      readMonotonicNow() >= expiresAtMonotonicMs ||
+      now().getTime() >= generationDeadline.getTime() ||
+      readMonotonicNow() >= generationDeadlineMonotonicMs ||
       validPageUrl(page.url()) !== 'agents'
     ) {
       return unavailable();
@@ -1038,8 +3609,22 @@ export function createKemerBetSessionProvisionServer(
     const retainedContext = context;
     const retainedPage = page;
     const retainedProfilePath = profilePath;
+    const retainedProfileGenerationLease = profileGenerationLease;
     const retainedAccountId = accountId;
     const retainedExpiresAt = expiresAt;
+    const retainedExpiresAtMonotonicMs = expiresAtMonotonicMs;
+    const retainedGenerationDeadline = generationDeadline;
+    const retainedGenerationDeadlineMonotonicMs = generationDeadlineMonotonicMs;
+    const requireRetainedLeaseUnexpired = (): void => {
+      if (
+        now().getTime() >= retainedExpiresAt.getTime() ||
+        readMonotonicNow() >= retainedExpiresAtMonotonicMs ||
+        now().getTime() >= retainedGenerationDeadline.getTime() ||
+        readMonotonicNow() >= retainedGenerationDeadlineMonotonicMs
+      ) {
+        return unavailable();
+      }
+    };
     let retainedContextClosed = false;
     // This private manual sign-in/seal lane is an explicitly trusted supervised enrollment
     // ceremony, not a compromised-renderer confidentiality boundary: Chromium and trusted Node
@@ -1052,11 +3637,16 @@ export function createKemerBetSessionProvisionServer(
         context !== retainedContext ||
         page !== retainedPage ||
         profilePath !== retainedProfilePath ||
+        profileGenerationLease !== retainedProfileGenerationLease ||
         accountId !== retainedAccountId ||
-        expiresAt !== retainedExpiresAt
+        expiresAt !== retainedExpiresAt ||
+        expiresAtMonotonicMs !== retainedExpiresAtMonotonicMs ||
+        generationDeadline !== retainedGenerationDeadline ||
+        generationDeadlineMonotonicMs !== retainedGenerationDeadlineMonotonicMs
       ) {
         return unavailable();
       }
+      requireRetainedLeaseUnexpired();
       // Keep the terminal request latch installed through the awaited Chromium shutdown. Only a
       // confirmed close may make the same-UID provision lane inactive before the seal file is
       // installed; a close failure propagates and therefore emits no binding.
@@ -1070,23 +3660,22 @@ export function createKemerBetSessionProvisionServer(
         },
         { clearTimer, setTimer },
       );
+      await retainedProfileGenerationLease.releaseAfterCleanCheckpoint();
       if (
         context !== retainedContext ||
         page !== retainedPage ||
         profilePath !== retainedProfilePath ||
+        profileGenerationLease !== retainedProfileGenerationLease ||
         accountId !== retainedAccountId ||
-        expiresAt !== retainedExpiresAt
+        expiresAt !== retainedExpiresAt ||
+        expiresAtMonotonicMs !== retainedExpiresAtMonotonicMs ||
+        generationDeadline !== retainedGenerationDeadline ||
+        generationDeadlineMonotonicMs !== retainedGenerationDeadlineMonotonicMs
       ) {
         return unavailable();
       }
-      if (expiryTimer !== undefined) clearTimer(expiryTimer);
-      expiryTimer = undefined;
-      context = undefined;
-      page = undefined;
-      profilePath = undefined;
-      accountId = undefined;
-      expiresAt = undefined;
-      signedInLogged = false;
+      requireRetainedLeaseUnexpired();
+      clearRuntimeState('checkpointed');
       retainedContextClosed = true;
       log('stopped');
     };
@@ -1111,12 +3700,17 @@ export function createKemerBetSessionProvisionServer(
           context !== retainedContext ||
           page !== retainedPage ||
           profilePath !== retainedProfilePath ||
+          profileGenerationLease !== retainedProfileGenerationLease ||
           accountId !== retainedAccountId ||
           expiresAt !== retainedExpiresAt ||
+          expiresAtMonotonicMs !== retainedExpiresAtMonotonicMs ||
+          generationDeadline !== retainedGenerationDeadline ||
+          generationDeadlineMonotonicMs !== retainedGenerationDeadlineMonotonicMs ||
           validPageUrl(retainedPage.url()) !== 'agents'
         ) {
           return unavailable();
         }
+        requireRetainedLeaseUnexpired();
         return createReadinessProbeFromPage({
           accountId: retainedAccountId,
           close: closeRetainedContextForSeal,
@@ -1140,6 +3734,7 @@ export function createKemerBetSessionProvisionServer(
     ) {
       return unavailable();
     }
+    requireRetainedLeaseUnexpired();
     readinessFailure.clear();
     return {
       sealed: true,
@@ -1152,25 +3747,85 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const server = createServer((request, response) => {
+    if (request.url === '/healthz' && request.method === 'GET') {
+      sendJson(response, 200, { status: 'ok', service: 'kemerbet-session-provision' });
+      return;
+    }
+    if (request.url?.startsWith('/v1/session/frame?') && request.method === 'GET') {
+      void serialized(async () => {
+        try {
+          const query = validFrameQuery(request.url);
+          if (!query) {
+            sendJson(response, 503, { error: 'session_unavailable' });
+            return;
+          }
+          requireExpectedAccountId(query.platformAgentAccountId);
+          if (
+            checkpointedForRecheck ||
+            query.generation !== sessionGeneration ||
+            phase === 'idle' ||
+            phase === 'checkpointed' ||
+            phase === 'faulted'
+          ) {
+            sendJson(response, 503, { error: 'session_unavailable' });
+            return;
+          }
+          const capturedAt = frameCapturedAtMs;
+          const timestamp = now().getTime();
+          const refreshDue =
+            frameImage === undefined ||
+            capturedAt === undefined ||
+            timestamp < capturedAt ||
+            timestamp - capturedAt >= FRAME_REFRESH_INTERVAL_MS;
+          if (refreshDue && phase === 'login_required' && page) {
+            // Once the cached frame is old, invalidate it before recapture. A failed screenshot
+            // therefore locks input instead of accepting coordinates against a stale image.
+            frameImage = undefined;
+            frameCapturedAtMs = undefined;
+            try {
+              await captureLoginFrame(query.generation, page);
+            } catch {
+              // Preview capture is bounded and retryable. No input can be accepted without a
+              // successfully captured generation-bound frame.
+            }
+          }
+          if (frameImage === undefined || frameSequence <= query.after) {
+            response.writeHead(204, {
+              'cache-control': 'no-store, max-age=0',
+              pragma: 'no-cache',
+              'x-fetanagent-frame-sequence': String(frameSequence),
+              'x-fetanagent-session-generation': query.generation,
+            });
+            response.end();
+            return;
+          }
+          sendJpeg(response, query.generation, frameSequence, frameImage);
+        } catch {
+          if (!response.headersSent) sendJson(response, 503, { error: 'session_unavailable' });
+          else response.destroy();
+        }
+      });
+      return;
+    }
     void serialized(async () => {
       try {
-        if (request.url === '/healthz' && request.method === 'GET') {
-          sendJson(response, 200, { status: 'ok', service: 'kemerbet-session-provision' });
-          return;
-        }
-        if (request.url === '/v1/session' && request.method === 'GET') {
+        if (request.url?.startsWith('/v1/session?') && request.method === 'GET') {
+          const query = validStatusQuery(request.url);
+          if (!query) return unavailable();
+          requireExpectedAccountId(query.platformAgentAccountId);
           sendJson(response, 200, await status());
           return;
         }
         if (request.url === '/v1/session/start' && request.method === 'POST') {
           const candidate = validStartInput(await readJson(request));
           if (!candidate) return unavailable();
-          sendJson(response, 201, await start(candidate));
+          sendJson(response, 202, start(candidate));
           return;
         }
         if (request.url === '/v1/session/input' && request.method === 'POST') {
           const candidate = validSessionInput(await readJson(request));
           if (!candidate) return unavailable();
+          requireExpectedAccountId(candidate.platformAgentAccountId);
           sendJson(response, 200, await input(candidate));
           return;
         }
@@ -1187,12 +3842,21 @@ export function createKemerBetSessionProvisionServer(
           return;
         }
         if (request.url === '/v1/session/stop' && request.method === 'POST') {
-          const object = exactObject(await readJson(request), ['requestId']);
-          if (typeof object?.requestId !== 'string' || !REQUEST_ID_PATTERN.test(object.requestId)) {
+          const object = exactObject(await readJson(request), [
+            'platformAgentAccountId',
+            'requestId',
+          ]);
+          if (
+            typeof object?.requestId !== 'string' ||
+            !REQUEST_ID_PATTERN.test(object.requestId) ||
+            typeof object.platformAgentAccountId !== 'string' ||
+            !UUID_PATTERN.test(object.platformAgentAccountId)
+          ) {
             return unavailable();
           }
-          await stop();
-          sendJson(response, 200, await status());
+          requireExpectedAccountId(object.platformAgentAccountId);
+          beginStop();
+          sendJson(response, 202, snapshot());
           return;
         }
         sendJson(response, 404, { error: 'not_found' });
@@ -1250,7 +3914,11 @@ export function createKemerBetSessionProvisionServer(
       }
     },
     close: async () => {
-      await serialized(stop);
+      await serialized(async () => {
+        beginStop();
+      });
+      const cleanup = stopCleanupPromise;
+      if (cleanup) await cleanup;
       await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
       await rm(CONTROL_SOCKET, { force: true });
     },

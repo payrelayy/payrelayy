@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/agent-platform-kemerbet": "workspace:*",
     "@fetanagent/config": "workspace:*",
     "@fetanagent/domain": "workspace:*",
     "pg": "8.22.0",

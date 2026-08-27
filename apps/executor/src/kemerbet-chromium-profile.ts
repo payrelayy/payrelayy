@@ -14,7 +14,9 @@ export interface KemerBetSingletonArtifactFileSystem {
 }
 
 interface ServiceWorkerStat {
+  readonly dev: number | bigint;
   readonly gid: number;
+  readonly ino: number | bigint;
   readonly mode: number;
   readonly nlink: number;
   readonly uid: number;
@@ -346,6 +348,37 @@ export async function purgeKemerBetPersistedServiceWorkerState(
   const live = exactChild(defaultRoot, SERVICE_WORKER_DIRECTORY);
   const tombstone = exactChild(defaultRoot, SERVICE_WORKER_TOMBSTONE);
   try {
+    const profileStat = await fileSystem.lstat(profilePath);
+    if (
+      !profileStat.isDirectory() ||
+      profileStat.isSymbolicLink() ||
+      profileStat.uid !== effectiveUserId ||
+      profileStat.gid !== effectiveUserId ||
+      (profileStat.mode & 0o7777) !== 0o700 ||
+      (await fileSystem.realpath(profilePath)) !== profilePath
+    ) {
+      unavailable();
+    }
+    const defaultState = await pathState(fileSystem, defaultRoot);
+    if (defaultState === 'absent') {
+      // A newly prepared immutable profile has no Chromium Default directory yet. Treat that as
+      // clean only while the exact owned parent remains the same directory; every ambiguous or
+      // pre-existing child still follows the strict purge path below.
+      const stableProfileStat = await fileSystem.lstat(profilePath);
+      if (
+        stableProfileStat.dev !== profileStat.dev ||
+        stableProfileStat.ino !== profileStat.ino ||
+        stableProfileStat.uid !== profileStat.uid ||
+        stableProfileStat.gid !== profileStat.gid ||
+        stableProfileStat.mode !== profileStat.mode ||
+        !stableProfileStat.isDirectory() ||
+        stableProfileStat.isSymbolicLink() ||
+        (await fileSystem.realpath(profilePath)) !== profilePath
+      ) {
+        unavailable();
+      }
+      return;
+    }
     const defaultStat = await fileSystem.lstat(defaultRoot);
     if (
       !defaultStat.isDirectory() ||

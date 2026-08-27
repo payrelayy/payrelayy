@@ -93,6 +93,13 @@ const v3RuntimeBridgeHelperPromotionV11 = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v3-runtime-bridge-helper-promotion-v11.sh'),
   'utf8',
 );
+const v3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecovery = readFileSync(
+  resolve(
+    root,
+    'infra/operations/fetanagent-kemerbet-v3-runtime-bridge-helper-promotion-v11-empty-checkpoint-recovery.sh',
+  ),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -153,8 +160,15 @@ const reviewedV3HelperRotationV10SuccessorSha =
   '73eabc728bc25462ab96d17dc8faa5775526571caae9d2ab0265f523b84a387e';
 const reviewedV3RuntimeBridgeHelperV11Sha =
   '8696fd6d606b7c3440ab180e9d409bb113da2ba14434752b47fca07e34a09728';
+const reviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha =
+  'a20f6f5b813a3032477b7e7fcaaf5aac94b8083ac0ddfdaab4b673c56fccc3e7';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
+  .digest('hex');
+const actualReviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha = createHash(
+  'sha256',
+)
+  .update(v3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecovery.replaceAll('\r\n', '\n'))
   .digest('hex');
 const stagingDropletIpv6 = '2a03:b0c0:1:e0:0:1:a8b4:2001';
 const staleStagingBannedIpv6 = '2a05:d018:135e:1602:5210:739d:5667:fee4';
@@ -4003,6 +4017,340 @@ assert.equal(
   'H11 must restore the narrow deployment grant exactly once on the new-install path',
 );
 
+const runtimeBridgeV11EmptyCheckpointRecovery =
+  v3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecovery;
+for (const fixedRecoveryContract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly TARGET='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'$/mu,
+  /^readonly PROJECT_NAME='fetanagent-staging-beta'$/mu,
+  /^readonly HISTORICAL_OVERLAY_RELEASE='c061f9dc05e60d641d306f16b5d826e6e1b2c6c4'$/mu,
+  /^readonly REVIEWED_BRIDGE_RELEASE='21ef5f0d987d9dc21efc1a81916316a3f6d7f864'$/mu,
+  new RegExp(
+    `^readonly PREDECESSOR_HELPER_SHA256='${reviewedV3HelperRotationV10SuccessorSha}'$`,
+    'mu',
+  ),
+  new RegExp(
+    `^readonly PREDECESSOR_ARCHIVE_SHA256='${reviewedV3HelperRotationV9SuccessorSha}'$`,
+    'mu',
+  ),
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3RuntimeBridgeHelperV11Sha}'$`,
+    'mu',
+  ),
+  /^readonly ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v11'$/mu,
+  /^readonly EXPECTED_DROPLET_ID='593344964'$/mu,
+  /^readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'$/mu,
+  /\[\[ \$# -eq 3 \]\]/u,
+  /"\$BRIDGE_RELEASE" == "\$REVIEWED_BRIDGE_RELEASE"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" == "\$REVIEWED_SUCCESSOR_HELPER_SHA256"/u,
+  /"\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION"/u,
+  /require_exact_droplet \|\| die/u,
+]) {
+  assert.match(runtimeBridgeV11EmptyCheckpointRecovery, fixedRecoveryContract);
+}
+assert.equal(
+  runtimeBridgeV11EmptyCheckpointRecovery.split(
+    `readonly CONFIRMATION='${v3RuntimeBridgeV11Confirmation}'`,
+  ).length - 1,
+  1,
+  'the empty-checkpoint recovery must require the original exact H11 authorization',
+);
+assert.doesNotMatch(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  /\b(?:rm|rmdir)\b|run_helper_direct\s+stop/u,
+  'the recovery must neither erase state nor invoke the predecessor stop boundary again',
+);
+assert.doesNotMatch(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  /run_helper_direct\s+(?:recheck-kemerbet-readiness|prepare-kemerbet-readiness|seal-kemerbet-readiness)|GeneralInfoByExternalId|PlayerEPOSDeposit|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true/iu,
+  'the recovery must not authorize a lookup, recheck, Transfer, executor, or money movement',
+);
+assert.doesNotMatch(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  /docker_local_read_only\s+(?:container|volume|image|network)\s+(?:rm|prune)|docker[^\r\n]*(?:system|container|volume|image|network)\s+prune/iu,
+  'the recovery may only inspect the stopped Docker boundary',
+);
+
+const runtimeBridgeV11RecoveryProcessGate = runtimeBridgeV11EmptyCheckpointRecovery.slice(
+  runtimeBridgeV11EmptyCheckpointRecovery.indexOf('require_no_other_mutator_processes() {'),
+  runtimeBridgeV11EmptyCheckpointRecovery.indexOf("\n\nH10_INTENT_SHA256=''"),
+);
+for (const processGateContract of [
+  /\/proc\/\[0-9\]\*\/cmdline/u,
+  /"\$pid" == "\$\$"/u,
+  /"\$TARGET"\|"\$INSTALLING_HELPER"\|"\$INSTALLING_HELPER_PARTIAL"\|"\$STAGED_HELPER"/u,
+  /"\$ORIGINAL_PROMOTION_BASENAME"\|"\$RECOVERY_BASENAME"/u,
+]) {
+  assert.match(runtimeBridgeV11RecoveryProcessGate, processGateContract);
+}
+
+const runtimeBridgeV11EmptyCheckpoint = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'require_exact_empty_checkpoint',
+  'require_exact_completed_namespace',
+);
+assertInOrder(
+  runtimeBridgeV11EmptyCheckpoint,
+  [
+    '"$(find -P "$ROTATION_PARENT" -mindepth 1 -maxdepth 1 -printf \'%f\\n\')" ==',
+    '".installing-$BRIDGE_RELEASE"',
+    '-z "$(find -P "$ROTATION_INSTALLING" -mindepth 1 -maxdepth 1',
+    '! -e "$ROTATION_ROOT"',
+    '! -e "$INSTALLING_HELPER"',
+    'require_disabled_grant_only',
+    'require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755',
+  ],
+  'recovery admission must be the one empty pre-intent directory with disabled grant and exact H10 helper',
+);
+
+const runtimeBridgeV11CompletedNamespace = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'require_exact_completed_namespace',
+  'restore_sudoers',
+);
+assertInOrder(
+  runtimeBridgeV11CompletedNamespace,
+  [
+    '"$(find -P "$ROTATION_PARENT" -mindepth 1 -maxdepth 1 -printf \'%f\\n\')" ==',
+    '"$BRIDGE_RELEASE"',
+    '! -e "$ROTATION_INSTALLING"',
+    '! -e "$INSTALLING_HELPER"',
+    'require_exact_rotation_record "$ROTATION_ROOT"',
+    'require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755',
+  ],
+  'already-complete admission must contain only the exact final record and reviewed H11 helper',
+);
+
+const runtimeBridgeV11RecoveryIntent = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'expected_intent',
+  'expected_completion',
+);
+assert.equal(
+  runtimeBridgeV11RecoveryIntent,
+  runtimeBridgeV11Intent,
+  'recovery must publish byte-identical H11 intent evidence, including every false finance flag',
+);
+
+const runtimeBridgeV11RecoveryLock = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'open_lock',
+  'close_lock',
+);
+assertInOrder(
+  runtimeBridgeV11RecoveryLock,
+  [
+    '[[ ! -L /run && -d /run',
+    'root:root:755',
+    '(umask 077 && mkdir --mode=0700 -- "$LOCK_ROOT")',
+    'root:root:700',
+    '(set -o noclobber; umask 077; : >"$LOCK")',
+    'root:root:600:1',
+    'exec 9<>"$LOCK"',
+    'stat --format=\'%u:%g:%a:%h:%d:%i\' "$LOCK"',
+    "stat -L --format='%u:%g:%a:%h:%d:%i' /proc/self/fd/9",
+    '"$fd_identity" == "$path_identity"',
+    'flock --exclusive --nonblock 9',
+    '"$(stat --format=\'%u:%g:%a:%h:%d:%i\' "$LOCK")" == "$fd_identity"',
+  ],
+  'the recovery lock must validate /run, create no-following exact objects, bind fd to path identity, and recheck after flock',
+);
+
+const runtimeBridgeV11RecoverySudoRestore = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'restore_sudoers',
+  'open_lock',
+);
+assertInOrder(
+  runtimeBridgeV11RecoverySudoRestore,
+  [
+    'require_disabled_grant_only',
+    'visudo -cf "$SUDOERS_DISABLED"',
+    'visudo -cf /etc/sudoers',
+    'mv -- "$SUDOERS_DISABLED" "$SUDOERS"',
+    'sync -f /etc/sudoers.d',
+    'require_exact_sudoers_file "$SUDOERS"',
+    'visudo -cf /etc/sudoers',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    'require_disabled_grant_only',
+  ],
+  'grant restoration must validate first and atomically return to disabled state if post-move validation fails',
+);
+
+const runtimeBridgeV11RecoveryClassifier = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'classify_rotation',
+  'require_rotation_prefix',
+);
+assert.match(runtimeBridgeV11RecoveryClassifier, /print\('interrupted'\)/u);
+assert.match(runtimeBridgeV11RecoveryClassifier, /print\('completed'\)/u);
+assert.doesNotMatch(runtimeBridgeV11RecoveryClassifier, /print\('absent'|'empty-parent'\)/u);
+
+const runtimeBridgeV11RecoveryPrefix = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'require_rotation_prefix',
+  'require_record_prefix',
+);
+for (const resumablePrefixContract of [
+  /'\.intent-v1\.installing': \(0o600, 4096\)/u,
+  /'\.predecessor-helper\.installing': \(0o400, 2 \* 1024 \* 1024\)/u,
+  /'\.completed-v1\.installing': \(0o600, 4096\)/u,
+  /if final in entries and f'\.\{final\}\.installing' in entries/u,
+  /item\.st_nlink\) !=\s+\(0, 0, mode, 1\)/u,
+]) {
+  assert.match(runtimeBridgeV11RecoveryPrefix, resumablePrefixContract);
+}
+
+const runtimeBridgeV11RecoveryPublisher = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'publish_record',
+  'copy_root_file_atomically',
+);
+for (const resumablePublisherContract of [
+  /os\.O_DIRECTORY \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /expected\.startswith\(existing\)/u,
+  /os\.O_EXCL \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /os\.fsync\(descriptor\)/u,
+  /os\.rename\(temporary, target, src_dir_fd=directory, dst_dir_fd=directory\)/u,
+  /os\.fsync\(directory\)/u,
+]) {
+  assert.match(runtimeBridgeV11RecoveryPublisher, resumablePublisherContract);
+}
+
+const runtimeBridgeV11RecoveryCopy = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'copy_root_file_atomically',
+  'classify_rotation',
+);
+for (const resumableCopyContract of [
+  /os\.O_RDONLY \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /hashlib\.sha256\(data\)\.hexdigest\(\) != expected_digest/u,
+  /bytes\(data\)\.startswith\(existing\)/u,
+  /os\.O_EXCL \| os\.O_NOFOLLOW \| os\.O_CLOEXEC/u,
+  /os\.rename\(temporary, target\)/u,
+  /os\.fsync\(directory\)/u,
+]) {
+  assert.match(runtimeBridgeV11RecoveryCopy, resumableCopyContract);
+}
+
+const runtimeBridgeV11RecoveryConsistency = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'require_interrupted_prefix_consistency',
+  'require_exact_rotation_record',
+);
+for (const monotonicRecoveryContract of [
+  /require_rotation_prefix/u,
+  /require_disabled_grant_only/u,
+  /require_record_prefix "\$ROTATION_INSTALLING\/intent-v1"/u,
+  /require_record_prefix "\$ROTATION_INSTALLING\/completed-v1"/u,
+  /target_state='predecessor'/u,
+  /target_state='successor'/u,
+  /require_copy_prefix "\$ROTATION_INSTALLING\/\.predecessor-helper\.installing"/u,
+  /require_helper_file "\$ROTATION_INSTALLING\/predecessor-helper"/u,
+  /require_copy_prefix "\$INSTALLING_HELPER_PARTIAL" "\$STAGED_HELPER"/u,
+]) {
+  assert.match(runtimeBridgeV11RecoveryConsistency, monotonicRecoveryContract);
+}
+
+const runtimeBridgeV11RecoveryComposeBoundary = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'require_compose5_durable_volume_compatibility',
+  'require_expiry_guard_disarmed',
+);
+for (const exactComposeBoundaryContract of [
+  /volume ls --quiet/u,
+  /"\$PROFILE_VOLUME" "\$SESSION_CONTROL_VOLUME"/u,
+  /\{\{\.Name\}\}\|\{\{\.Driver\}\}\|\{\{\.Scope\}\}\|\{\{json \.Options\}\}\|\{\{len \.Labels\}\}/u,
+  /"\$scope" == 'local'/u,
+  /"\$options" == 'null'/u,
+  /"\$label_count" == '4'/u,
+  /"\$volume_label" == "\$expected_volume_label"/u,
+  /"\$mountpoint" == "\/var\/lib\/docker\/volumes\/\$volume\/_data"/u,
+  /"\$\(stat --format='%u:%g:%a' "\$mountpoint"\)" == '10001:10001:700'/u,
+  /"\$\(stat --format='%u:%g:%a:%h' "\$mountpoint"\)" == '10001:10001:700:2'/u,
+  /OBSERVED_COMPOSE5_DURABLE_VOLUME_DIGEST=/u,
+]) {
+  assert.match(runtimeBridgeV11RecoveryComposeBoundary, exactComposeBoundaryContract);
+}
+
+const runtimeBridgeV11RecoveryStoppedBoundary = extractShellFunction(
+  runtimeBridgeV11EmptyCheckpointRecovery,
+  'require_stopped_durable_boundary',
+  'require_stopped_historical_overlay',
+);
+assertInOrder(
+  runtimeBridgeV11RecoveryStoppedBoundary,
+  [
+    'container ls --all --quiet',
+    'network ls --quiet',
+    'require_expiry_guard_disarmed',
+    'require_no_recheck_transients',
+    '! -e "$BOT_STARTUP_RECEIPT_ROOT"',
+    'require_compose5_durable_volume_compatibility',
+    '"compose5_durable_volume_digest=$OBSERVED_COMPOSE5_DURABLE_VOLUME_DIGEST" ==',
+    '"compose5_profile_config_hash=$OBSERVED_COMPOSE5_PROFILE_CONFIG_HASH" ==',
+    '"compose5_session_control_config_hash=$OBSERVED_COMPOSE5_SESSION_CONTROL_CONFIG_HASH" ==',
+    '"compose5_volume_version=$OBSERVED_COMPOSE5_VOLUME_VERSION" ==',
+    '"$(sha256sum -- "$SOURCE_BINDING"',
+  ],
+  'post-attestation recovery must match the complete inherited Compose 5 contract, disarmed runtime, and v3 binding',
+);
+
+const runtimeBridgeV11RecoveryMain = runtimeBridgeV11EmptyCheckpointRecovery.slice(
+  runtimeBridgeV11EmptyCheckpointRecovery.indexOf("grant_disabled='false'"),
+);
+assertInOrder(
+  runtimeBridgeV11RecoveryMain,
+  [
+    'rotation_state="$(classify_rotation)"',
+    'require_interrupted_prefix_consistency',
+    "grant_disabled='true'",
+    'trap cleanup EXIT',
+    'open_lock',
+    'require_no_other_mutator_processes',
+    'require_exact_droplet',
+    'load_exact_h10_evidence',
+    '"$(classify_rotation)" == "$rotation_state"',
+    'require_interrupted_prefix_consistency',
+    'require_stopped_historical_overlay',
+    'require_stopped_durable_boundary',
+    'require_interrupted_prefix_consistency',
+    'publish_record "$ROTATION_INSTALLING" intent-v1 0600 expected_intent',
+    'copy_root_file_atomically "$TARGET"',
+    'require_interrupted_prefix_consistency',
+    'copy_root_file_atomically "$STAGED_HELPER" "$INSTALLING_HELPER_PARTIAL"',
+    'mv -- "$INSTALLING_HELPER" "$TARGET"',
+    'require_interrupted_prefix_consistency',
+    'publish_record "$ROTATION_INSTALLING" completed-v1 0600 expected_completion',
+    'mv -- "$ROTATION_INSTALLING" "$ROTATION_ROOT"',
+    'require_exact_completed_namespace',
+    'close_lock',
+    'run_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_helper_direct kemerbet-v3-runtime-bridge-ready "$SUCCESSOR_HELPER_SHA256"',
+    'require_stopped_durable_boundary',
+    'open_lock',
+    'require_exact_completed_namespace',
+    'require_disabled_grant_only',
+    'require_stopped_durable_boundary',
+    'restore_sudoers',
+    "grant_disabled='false'",
+    'close_lock',
+    'trap - EXIT',
+  ],
+  'H11 recovery must resume exact prefixes, self-attest, recheck the stopped binding boundary, and restore sudo last',
+);
+assert.equal(
+  (runtimeBridgeV11RecoveryMain.match(/run_helper_direct stop/gu) ?? []).length,
+  0,
+  'H11 recovery must never repeat the already-completed predecessor stop',
+);
+assert.equal(
+  (runtimeBridgeV11RecoveryMain.match(/visudo -cf \/etc\/sudoers/gu) ?? []).length,
+  2,
+  'both active-grant admission and final active-grant validation must check the complete sudoers configuration',
+);
+
 for (const artifact of [
   workflow,
   botWorkflow,
@@ -4021,6 +4369,7 @@ for (const artifact of [
   v3SuccessorHelperRotationV9,
   v3SuccessorHelperRotationV10,
   v3RuntimeBridgeHelperPromotionV11,
+  v3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecovery,
   stagingRunbook,
 ]) {
   assert.doesNotMatch(
@@ -13876,6 +14225,11 @@ assert.equal(
   actualReviewedHelperSuccessorSha,
   reviewedV3RuntimeBridgeHelperV11Sha,
   'the reviewed helper LF bytes must remain frozen at the exact H11 runtime-bridge successor pin',
+);
+assert.equal(
+  actualReviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha,
+  reviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha,
+  'the reviewed H11 empty-checkpoint recovery LF bytes must remain frozen at its exact pin',
 );
 assert.notEqual(
   reviewedV3RuntimeBridgeHelperV11Sha,

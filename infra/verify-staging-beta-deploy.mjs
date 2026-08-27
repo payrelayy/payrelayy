@@ -65,6 +65,10 @@ const v3SuccessorHelperRotationV4 = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v4.sh'),
   'utf8',
 );
+const v3SuccessorHelperRotationV5 = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v5.sh'),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -111,6 +115,8 @@ const reviewedV3HelperRotationV3SuccessorSha =
   '020b2b2d7eca153dffd72d7811d58c1a93e41edc24d1217cb459f5828e549b7b';
 const reviewedV3HelperRotationV4SuccessorSha =
   '8ae567bb50581288600ef8058553fb411d6b04d1177a275b4e59bed936bb1db6';
+const reviewedV3HelperRotationV5SuccessorSha =
+  '2fe840e137c435becc6179ba85cf00e86c1100b906da880b8f8e191a26cacd20';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -2496,6 +2502,207 @@ for (const rotationV4RunbookContract of [
   assert.match(stagingRunbook, rotationV4RunbookContract);
 }
 
+const v3HelperRotationV5Confirmation =
+  'I-UNDERSTAND-THIS-APPENDS-FIFTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED';
+for (const fixedRotationV5Contract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly FIRST_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation'$/mu,
+  /^readonly SECOND_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v2'$/mu,
+  /^readonly THIRD_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v3'$/mu,
+  /^readonly PREDECESSOR_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v4'$/mu,
+  /^readonly ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v5'$/mu,
+  /^readonly SUDOERS_DISABLED='\/etc\/sudoers\.d\/\.fetanagent-staging-deploy-helper\.v3-rotation-v5-disabled'$/mu,
+  /^readonly FIRST_ROTATION_RELEASE='8fe693b51b5426c3f358bba67519459161a0ebf9'$/mu,
+  new RegExp(`^readonly FIRST_ROTATION_HELPER_SHA256='${reviewedV3HelperSuccessorSha}'$`, 'mu'),
+  /^readonly SECOND_ROTATION_RELEASE='4bb491943fb88c50b86166184b929bdbe2698dc4'$/mu,
+  new RegExp(
+    `^readonly SECOND_ROTATION_HELPER_SHA256='${reviewedV3HelperRotationV2SuccessorSha}'$`,
+    'mu',
+  ),
+  /^readonly THIRD_ROTATION_RELEASE='9c83821b4959f5ac52b0d642e476063ca7f3590e'$/mu,
+  new RegExp(
+    `^readonly THIRD_ROTATION_HELPER_SHA256='${reviewedV3HelperRotationV3SuccessorSha}'$`,
+    'mu',
+  ),
+  /^readonly PREDECESSOR_RELEASE='874b8380a7e9f90806ebb1ad5c2958c1b245977f'$/mu,
+  new RegExp(
+    `^readonly PREDECESSOR_HELPER_SHA256='${reviewedV3HelperRotationV4SuccessorSha}'$`,
+    'mu',
+  ),
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3HelperRotationV5SuccessorSha}'$`,
+    'mu',
+  ),
+  /"\$SUCCESSOR_RELEASE" != "\$THIRD_ROTATION_RELEASE"/u,
+  /"\$SUCCESSOR_RELEASE" != "\$PREDECESSOR_RELEASE"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" != "\$THIRD_ROTATION_HELPER_SHA256"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" != "\$PREDECESSOR_HELPER_SHA256"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" == "\$REVIEWED_SUCCESSOR_HELPER_SHA256"/u,
+  /"\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION"/u,
+]) {
+  assert.match(v3SuccessorHelperRotationV5, fixedRotationV5Contract);
+}
+assert.equal(
+  v3SuccessorHelperRotationV5.split(`readonly CONFIRMATION='${v3HelperRotationV5Confirmation}'`)
+    .length - 1,
+  1,
+  'the fifth installed-v3 rotation must expose one distinct exact root confirmation',
+);
+assert.doesNotMatch(
+  v3SuccessorHelperRotationV5,
+  /(?:^|[;\s])(?:rm|unlink|shred|truncate)\b|os\.(?:unlink|remove)\s*\(|shutil\.rmtree\s*\(|find[^\r\n]*-delete|docker[^\r\n]*(?:container|volume|image|network)\s+rm\b/imu,
+  'the fifth helper rotation must remain append-only and use no destructive cleanup primitive',
+);
+assert.doesNotMatch(
+  v3SuccessorHelperRotationV5,
+  /GeneralInfoByExternalId|PlayerEPOSDeposit|Transfer\/|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true/iu,
+  'the fifth helper rotation must never issue a lookup, enable Transfer, or enable money movement',
+);
+
+const rotationV5PredecessorEvidence = extractShellFunction(
+  v3SuccessorHelperRotationV5,
+  'load_exact_predecessor_rotation_evidence',
+  'require_current_boundary_matches_predecessor_rotation',
+);
+for (const predecessorRotationV5Contract of [
+  /"\$FIRST_ROTATION_PARENT" "\$SECOND_ROTATION_PARENT" "\$THIRD_ROTATION_PARENT"/u,
+  /"\$PREDECESSOR_ROTATION_PARENT"/u,
+  /"\$SECOND_ROTATION_RELEASE" "\$THIRD_ROTATION_RELEASE" "\$PREDECESSOR_RELEASE"/u,
+  /"\$SECOND_ROTATION_HELPER_SHA256" "\$THIRD_ROTATION_HELPER_SHA256"/u,
+  /"\$PREDECESSOR_HELPER_SHA256"/u,
+  /len\(\{base_release, first_release, second_release, third_release, predecessor_release\}\) != 5/u,
+  /len\(\{base_helper, first_helper, second_helper, third_helper, predecessor_helper\}\) != 5/u,
+  /exact_directory\(first_parent, \[first_release\]\)/u,
+  /exact_directory\(second_parent, \[second_release\]\)/u,
+  /exact_directory\(third_parent, \[third_release\]\)/u,
+  /exact_directory\(predecessor_parent, \[predecessor_release\]\)/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v1/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v2/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v3/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v4/u,
+  /hashlib\.sha256\(first_archive\)\.hexdigest\(\) != base_helper/u,
+  /hashlib\.sha256\(second_archive\)\.hexdigest\(\) != first_helper/u,
+  /hashlib\.sha256\(third_archive\)\.hexdigest\(\) != second_helper/u,
+  /hashlib\.sha256\(archived_helper\)\.hexdigest\(\) != third_helper/u,
+  /third_intent\[11\] !=\s+f'predecessor_rotation_intent_sha256=\{hashlib\.sha256\(second_intent_data\)\.hexdigest\(\)\}'/u,
+  /intent\[11\] !=\s+f'predecessor_rotation_intent_sha256=\{hashlib\.sha256\(third_intent_data\)\.hexdigest\(\)\}'/u,
+  /intent\[12\] !=\s+f'predecessor_rotation_completion_sha256=\{hashlib\.sha256\(third_completion_data\)\.hexdigest\(\)\}'/u,
+  /intent\[13\] !=\s+f'predecessor_rotation_helper_archive_sha256=\{hashlib\.sha256\(third_archive\)\.hexdigest\(\)\}'/u,
+]) {
+  assert.match(rotationV5PredecessorEvidence, predecessorRotationV5Contract);
+}
+assert.doesNotMatch(
+  rotationV5PredecessorEvidence,
+  /print\(\s*(?:first|second|third)?_?(?:intent_data|completion_data|archive|archived_helper)\s*\)/u,
+  'the four-link predecessor parser may expose only digests and frozen non-secret Compose metadata',
+);
+const rotationV5BoundaryMatcher = extractShellFunction(
+  v3SuccessorHelperRotationV5,
+  'require_current_boundary_matches_predecessor_rotation',
+  'expected_intent',
+);
+assert.equal(
+  rotationV5BoundaryMatcher,
+  rotationV4BoundaryMatcher,
+  'the fifth rotation must preserve the exact fourth-link durable-boundary matcher',
+);
+const rotationV5Classifier = extractShellFunction(
+  v3SuccessorHelperRotationV5,
+  'classify_rotation',
+  'require_rotation_prefix',
+);
+assert.equal(rotationV5Classifier, rotationV4Classifier);
+const rotationV5Prefix = extractShellFunction(
+  v3SuccessorHelperRotationV5,
+  'require_rotation_prefix',
+  'publish_record',
+);
+assert.equal(rotationV5Prefix, rotationV4Prefix);
+const rotationV5IntentStart = v3SuccessorHelperRotationV5.indexOf('expected_intent() {');
+const rotationV5IntentEnd = v3SuccessorHelperRotationV5.indexOf(
+  "\n}\n\nROTATION_INTENT_SHA256=''",
+  rotationV5IntentStart,
+);
+assert.ok(rotationV5IntentStart >= 0 && rotationV5IntentEnd > rotationV5IntentStart);
+const rotationV5Intent = v3SuccessorHelperRotationV5.slice(
+  rotationV5IntentStart,
+  rotationV5IntentEnd + 2,
+);
+assert.match(rotationV5Intent, /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v5/u);
+for (const evidenceField of [
+  'base_successor_intent_sha256',
+  'base_successor_completion_sha256',
+  'base_binding_v2_sha256',
+  'base_predecessor_helper_sha256',
+  'base_binding_v3_sha256',
+  'predecessor_rotation_intent_sha256',
+  'predecessor_rotation_completion_sha256',
+  'predecessor_rotation_helper_archive_sha256',
+  'compose5_durable_volume_digest',
+  'compose5_profile_config_hash',
+  'compose5_session_control_config_hash',
+  'compose5_volume_version',
+]) {
+  assert.equal((rotationV5Intent.match(new RegExp(`${evidenceField}=`, 'gu')) ?? []).length, 1);
+}
+const rotationV5PredecessorResidue = extractShellFunction(
+  v3SuccessorHelperRotationV5,
+  'require_predecessor_rotation_global_residue_absent',
+  'require_rollback_residue_absent',
+);
+for (const generation of ['FIRST_ROTATION', 'SECOND_ROTATION', 'THIRD_ROTATION', 'PREDECESSOR']) {
+  for (const suffix of [
+    'SUDOERS_DISABLED',
+    'INSTALLING_HELPER',
+    'INSTALLING_HELPER_PARTIAL',
+    'ROLLBACK_HELPER',
+    'ROLLBACK_HELPER_PARTIAL',
+  ]) {
+    assert.ok(rotationV5PredecessorResidue.includes(`$${generation}_${suffix}`));
+  }
+}
+const rotationV5Main = v3SuccessorHelperRotationV5.slice(
+  v3SuccessorHelperRotationV5.indexOf('rotation_state="$(classify_rotation)"'),
+);
+assertInOrder(
+  rotationV5Main,
+  [
+    'run_predecessor_helper verify "$PREDECESSOR_HELPER_SHA256"',
+    'run_predecessor_helper kemerbet-v3-successor-ready',
+    'run_predecessor_helper stop',
+    'require_stopped_no_transfer_boundary',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    'publish_record "$ROTATION_INSTALLING" intent',
+    'copy_root_file_atomically "$STAGED_HELPER"',
+    'publish_record "$ROTATION_INSTALLING" completion',
+    'run_successor_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_successor_helper_direct kemerbet-v3-successor-ready',
+    'restore_sudoers',
+  ],
+  'the fifth rotation must stop before mutation, append one link, self-attest, and restore sudo once',
+);
+assert.equal((rotationV5Main.match(/restore_sudoers/g) ?? []).length, 1);
+for (const rotationV5RunbookContract of [
+  /One-use fifth installed-v3 helper\/release rotation/u,
+  /Docker Engine 29 renders an unset typed `netip\.Prefix` as the literal `invalid Prefix`/u,
+  /reads one bounded `\{\{json \.IPAM\.Config\}\}` value/u,
+  /every nonempty value, including the Go-template `invalid Prefix`\s+sentinel, fails closed/u,
+  /fetanagent-kemerbet-v3-successor-helper-rotation-v5\.sh/u,
+  /\/root\/fetanagent-v3-helper-rotation-v5-<successor-release>\//u,
+  /\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v5\/<successor-release>\//u,
+  new RegExp(v3HelperRotationV5Confirmation, 'u'),
+  /hard-pins the completed v4 release and helper as its\s+direct predecessor/u,
+  /validates the immutable base plus the exact first, second, third, and fourth links in order/u,
+  /existing completed root-certified candidate recovery and retryable exact-five recheck\s+failure\/source\/stage evidence are outside v5 and must remain byte-for-byte unchanged/u,
+  /Do not perform broad cleanup/u,
+  /leaves the runtime stopped,[\s\S]*?Transfer and the executor disabled,[\s\S]*?makes no KemerBet request/u,
+  /Current Docker 29 repair order: rotate, deploy, publish, then recheck/u,
+  /Only then retry the same exact-five FIND-only no-transfer recheck/u,
+]) {
+  assert.match(stagingRunbook, rotationV5RunbookContract);
+}
+
 for (const artifact of [
   workflow,
   botWorkflow,
@@ -2507,6 +2714,7 @@ for (const artifact of [
   v3SuccessorHelperRotationV2,
   v3SuccessorHelperRotationV3,
   v3SuccessorHelperRotationV4,
+  v3SuccessorHelperRotationV5,
   stagingRunbook,
 ]) {
   assert.doesNotMatch(
@@ -4044,7 +4252,7 @@ if (process.platform === 'linux') {
   assert.equal(
     inspectorCompile.status,
     0,
-    `the complete four-link successor inspector Python must compile: ${inspectorCompile.stderr}`,
+    `the complete five-link successor inspector Python must compile: ${inspectorCompile.stderr}`,
   );
 }
 assert.match(
@@ -4061,6 +4269,11 @@ assert.match(
   helper,
   /^readonly KEMERBET_V3_HELPER_ROTATION_V4_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v4'$/mu,
   'the fourth helper rotation must use one distinct fixed append-only evidence namespace',
+);
+assert.match(
+  helper,
+  /^readonly KEMERBET_V3_HELPER_ROTATION_V5_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v5'$/mu,
+  'the fifth helper rotation must use one distinct fixed append-only evidence namespace',
 );
 for (const successorGateContract of [
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'/,
@@ -4317,6 +4530,50 @@ assertInOrder(
     "effective_helper_sha = rotation_v4_intent[5].split('=', 1)[1]",
   ],
   'the fourth rotation must causally bind the exact third link before changing the effective identity',
+);
+for (const rotationV5ChainContract of [
+  /if os\.path\.lexists\(rotation_v5_parent\):/u,
+  /rotation_v4_intent_data is None/u,
+  /rotation_v4_completion_data is None/u,
+  /archived_rotation_v4_predecessor_helper is None/u,
+  /exact_directory\(rotation_v5_parent, 0o700, \[rotation_v5_release\]\)/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v5/u,
+  /len\(rotation_v5_intent\) != 18/u,
+  /len\(rotation_v5_completion\) != 19/u,
+  /rotation_v5_intent\[2\] != f'predecessor_release=\{effective_release\}'/u,
+  /rotation_v5_intent\[3\] != f'successor_release=\{rotation_v5_release\}'/u,
+  /rotation_v5_release in \{\s+successor,\s+rotation_release,\s+rotation_v2_release,\s+rotation_v3_release,\s+effective_release,/u,
+  /rotation_v5_intent\[4\] !=\s+f'predecessor_helper_sha256=\{effective_helper_sha\}'/u,
+  /rotation_v5_intent\[5\]\.split\('=', 1\)\[1\] in \{\s+successor_helper_sha,\s+rotation_intent\[5\]\.split\('=', 1\)\[1\],\s+rotation_v2_intent\[5\]\.split\('=', 1\)\[1\],\s+rotation_v3_intent\[5\]\.split\('=', 1\)\[1\],\s+effective_helper_sha,/u,
+  /rotation_v5_intent\[11\] !=\s+f'predecessor_rotation_intent_sha256=\{hashlib\.sha256\(rotation_v4_intent_data\)\.hexdigest\(\)\}'/u,
+  /rotation_v5_intent\[12\] !=\s+f'predecessor_rotation_completion_sha256=\{hashlib\.sha256\(rotation_v4_completion_data\)\.hexdigest\(\)\}'/u,
+  /rotation_v5_intent\[13\] !=\s+f'predecessor_rotation_helper_archive_sha256=\{hashlib\.sha256\(archived_rotation_v4_predecessor_helper\)\.hexdigest\(\)\}'/u,
+  /rotation_v5_intent\[14\] != rotation_v4_intent\[14\]/u,
+  /rotation_v5_intent\[15\] != rotation_v4_intent\[15\]/u,
+  /rotation_v5_intent\[16\] != rotation_v4_intent\[16\]/u,
+  /rotation_v5_intent\[17\] != rotation_v4_intent\[17\]/u,
+  /rotation_v5_completion\[2:18\] != rotation_v5_intent\[2:18\]/u,
+  /rotation_v5_completion\[18\] !=/u,
+  /hashlib\.sha256\(archived_rotation_v5_predecessor_helper\)\.hexdigest\(\) != effective_helper_sha/u,
+  /effective_release = rotation_v5_release/u,
+  /effective_helper_sha = rotation_v5_intent\[5\]\.split\('=', 1\)\[1\]/u,
+]) {
+  assert.match(successorRotationChain, rotationV5ChainContract);
+}
+assertInOrder(
+  successorRotationChain,
+  [
+    'effective_release = rotation_v4_release',
+    "effective_helper_sha = rotation_v4_intent[5].split('=', 1)[1]",
+    'if os.path.lexists(rotation_v5_parent):',
+    'rotation_v4_intent_data is None',
+    'exact_directory(rotation_v5_parent, 0o700, [rotation_v5_release])',
+    "'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v5'",
+    'archived_rotation_v5_predecessor_helper = exact_file(',
+    'effective_release = rotation_v5_release',
+    "effective_helper_sha = rotation_v5_intent[5].split('=', 1)[1]",
+  ],
+  'the fifth rotation must causally bind the exact fourth link before changing the effective identity',
 );
 assert.doesNotMatch(
   successorRotationChain,
@@ -8838,6 +9095,99 @@ assert.doesNotMatch(
   'network cleanup must never prune or select networks through broad labels',
 );
 
+const requireKemerBetRecheckNetworkIpamContract = extractShellFunction(
+  helper,
+  'require_kemerbet_recheck_network_ipam_contract',
+  'create_kemerbet_recheck_network',
+);
+assertInOrder(
+  requireKemerBetRecheckNetworkIpamContract,
+  [
+    "--format '{{json .IPAM.Config}}'",
+    '${#observed_ipam_json} -le 4096',
+    'env -i PATH="$SAFE_PATH" python3 -I -',
+    'object_pairs_hook=unique_object',
+    "allowed_keys = {'AuxiliaryAddresses', 'Gateway', 'IPRange', 'Subnet'}",
+    "required_keys = {'Gateway', 'Subnet'}",
+    "if ip_range is not None and (type(ip_range) is not str or ip_range != ''):",
+    'if auxiliary is not None and (type(auxiliary) is not dict or auxiliary):',
+    'if len(expected_pairs) != 2 or set(observed_pairs) != expected_pairs:',
+  ],
+  'network IPAM attestation must parse one bounded exact JSON contract and compare its pairs order-independently',
+);
+assert.doesNotMatch(
+  requireKemerBetRecheckNetworkIpamContract,
+  /range \.IPAM\.Config|printf [^\r\n]*\.IPRange/u,
+  'network IPAM attestation must not stringify Docker 29 typed prefixes through Go templates',
+);
+
+if (process.platform === 'linux') {
+  const ipamPython = extractSingleQuotedPythonHeredoc(
+    requireKemerBetRecheckNetworkIpamContract,
+    'require_kemerbet_recheck_network_ipam_contract',
+  );
+  const expectedIpam = ['172.31.254.0/29', '172.31.254.1', 'fd5e:7a9e:1::/64', 'fd5e:7a9e:1::1'];
+  const exactIpv4 = { Subnet: expectedIpam[0], Gateway: expectedIpam[1] };
+  const exactIpv6 = { Subnet: expectedIpam[2], Gateway: expectedIpam[3] };
+  const runIpamFixture = (raw) =>
+    spawnSync('/usr/bin/python3', ['-I', '-', raw, ...expectedIpam], {
+      encoding: 'utf8',
+      input: ipamPython,
+    });
+
+  for (const [name, raw] of [
+    ['missing IPRange in reverse Docker config order', JSON.stringify([exactIpv6, exactIpv4])],
+    [
+      'empty Docker 29 JSON-canonicalized unset typed IPRange',
+      JSON.stringify([
+        { ...exactIpv4, IPRange: '', AuxiliaryAddresses: null },
+        { ...exactIpv6, IPRange: '', AuxiliaryAddresses: {} },
+      ]),
+    ],
+    [
+      'null IPRange',
+      JSON.stringify([
+        { ...exactIpv4, IPRange: null },
+        { ...exactIpv6, IPRange: null },
+      ]),
+    ],
+  ]) {
+    const result = runIpamFixture(raw);
+    assert.equal(result.status, 0, `${name} IPAM fixture failed: ${result.stderr}`);
+    assert.equal(result.stdout, '', `${name} IPAM fixture must expose no output`);
+  }
+
+  for (const [name, raw] of [
+    [
+      'Docker 29 Go-template invalid Prefix sentinel',
+      JSON.stringify([{ ...exactIpv4, IPRange: 'invalid Prefix' }, exactIpv6]),
+    ],
+    ['nonempty IPRange', JSON.stringify([{ ...exactIpv4, IPRange: '172.31.254.0/30' }, exactIpv6])],
+    ['unexpected field', JSON.stringify([{ ...exactIpv4, Foreign: '' }, exactIpv6])],
+    [
+      'nonempty auxiliary addresses',
+      JSON.stringify([
+        { ...exactIpv4, AuxiliaryAddresses: { reserved: '172.31.254.2' } },
+        exactIpv6,
+      ]),
+    ],
+    [
+      'duplicate JSON key',
+      `[{"Subnet":"${expectedIpam[0]}","Subnet":"${expectedIpam[0]}","Gateway":"${expectedIpam[1]}"},{"Subnet":"${expectedIpam[2]}","Gateway":"${expectedIpam[3]}"}]`,
+    ],
+    ['duplicate config', JSON.stringify([exactIpv4, exactIpv4])],
+    ['extra config', JSON.stringify([exactIpv4, exactIpv6, exactIpv6])],
+    ['wrong subnet', JSON.stringify([{ ...exactIpv4, Subnet: '172.31.254.8/29' }, exactIpv6])],
+    ['missing subnet', JSON.stringify([{ Gateway: expectedIpam[1] }, exactIpv6])],
+    ['wrong gateway', JSON.stringify([{ ...exactIpv4, Gateway: '172.31.254.2' }, exactIpv6])],
+    ['missing gateway', JSON.stringify([{ Subnet: expectedIpam[0] }, exactIpv6])],
+    ['malformed JSON', '[{"Subnet":'],
+  ]) {
+    const result = runIpamFixture(raw);
+    assert.notEqual(result.status, 0, `${name} IPAM fixture was accepted`);
+  }
+}
+
 const createKemerBetRecheckNetwork = extractShellFunction(
   helper,
   'create_kemerbet_recheck_network',
@@ -8862,6 +9212,7 @@ assertInOrder(
     '--internal',
     'gateway_mode_ipv4=isolated',
     'gateway_mode_ipv6=isolated',
+    'require_kemerbet_recheck_network_ipam_contract',
   ],
   'network creation must define the exact two static-IP isolated planes and the otherwise empty egress plane',
 );
@@ -8879,10 +9230,6 @@ for (const [name, formatter] of [
   [
     'network options',
     /--format '\{\{range \$key, \$value := \.Options\}\}\{\{printf "%s=%s\\n" \$key \$value\}\}\{\{end\}\}' \| \\\n\s+LC_ALL=C sed '\/\^\$\/d' \| \\\n\s+LC_ALL=C sort/u,
-  ],
-  [
-    'network IPAM',
-    /--format '\{\{range \.IPAM\.Config\}\}\{\{printf "%s\|%s\|%s\\n" \.Subnet \.IPRange \.Gateway\}\}\{\{end\}\}' \| \\\n\s+LC_ALL=C sed '\/\^\$\/d' \| \\\n\s+LC_ALL=C sort/u,
   ],
 ]) {
   assert.match(
@@ -10286,7 +10633,6 @@ if (process.platform === 'linux' || process.platform === 'win32') {
       '}',
       "assert_formatter_contract \"$(printf '%s\\n' 'com.docker.compose.project=fetanagent-staging-beta' 'com.docker.compose.volume=kemerbet_readiness_profile_snapshot' 'com.fetanagent.kemerbet-readiness.snapshot=profile-snapshot-v1' | LC_ALL=C sort)\" 'com.docker.compose.volume=kemerbet_readiness_profile_snapshot' 'com.fetanagent.kemerbet-readiness.snapshot=profile-snapshot-v1' 'com.docker.compose.project=fetanagent-staging-beta'",
       "assert_formatter_contract \"$(printf '%s\\n' 'com.docker.network.bridge.gateway_mode_ipv4=isolated' 'com.docker.network.bridge.gateway_mode_ipv6=isolated' | LC_ALL=C sort)\" 'com.docker.network.bridge.gateway_mode_ipv6=isolated' 'com.docker.network.bridge.gateway_mode_ipv4=isolated'",
-      "assert_formatter_contract \"$(printf '%s\\n' '10.0.0.0/29||10.0.0.1' 'fd00::/125||fd00::1' | LC_ALL=C sort)\" 'fd00::/125||fd00::1' '10.0.0.0/29||10.0.0.1'",
       "assert_formatter_contract \"$(printf '%s\\n' 'bind||/run/output|true|/run/source-output' 'bind||/run/secrets/input|false|/run/source-input' | LC_ALL=C sort)\" 'bind||/run/secrets/input|false|/run/source-input' 'bind||/run/output|true|/run/source-output'",
       "assert_formatter_contract \"$(printf '%s\\n' 'fetanagent-staging-beta_kemerbet-readiness-control' 'fetanagent-staging-beta_kemerbet-readiness-proxy' | LC_ALL=C sort)\" 'fetanagent-staging-beta_kemerbet-readiness-proxy' 'fetanagent-staging-beta_kemerbet-readiness-control'",
       "assert_formatter_contract \"$(printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' | LC_ALL=C sort)\" 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
@@ -10315,15 +10661,15 @@ for (let index = 0; index < helperLines.length; index += 1) {
 }
 assert.equal(
   multilineDockerFormatterSortPipelines.length,
-  10,
+  9,
   'every multiline Docker formatter that is sorted must remain in the audited inventory',
 );
 assert.equal(
   multilineDockerFormatterSortPipelines.filter((pipeline) =>
     pipeline.includes("LC_ALL=C sed '/^$/d' |"),
   ).length,
-  9,
-  'all nine exact Docker inventories must remove only byte-empty formatter records before sorting',
+  8,
+  'all eight exact Docker inventories must remove only byte-empty formatter records before sorting',
 );
 assert.equal(
   multilineDockerFormatterSortPipelines.filter((pipeline) =>
@@ -11338,8 +11684,8 @@ assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container 
 
 assert.equal(
   actualReviewedHelperSuccessorSha,
-  reviewedV3HelperRotationV4SuccessorSha,
-  'the reviewed helper LF bytes must remain frozen at the exact fourth-rotation successor pin',
+  reviewedV3HelperRotationV5SuccessorSha,
+  'the reviewed helper LF bytes must remain frozen at the exact fifth-rotation successor pin',
 );
 assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 

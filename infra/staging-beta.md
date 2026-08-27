@@ -869,6 +869,64 @@ Any v9 failure after the grant is disabled must resume through the exact same v9
 Any later recheck failure remains governed by the same-release recovery and its fixed redacted
 stage; it never authorizes a second lookup, an automatic retry, or any financial action.
 
+#### One-use tenth installed-v3 helper/release rotation
+
+The clean Chromium checkpoint release cannot be rebound by reusing the installed v9 helper bytes.
+That helper's immutable successor parser ends at the v9 namespace, so it continues to report
+release `31812cfc5403effdafa1d68fb641058bf14a8850`; it also deliberately rejects a rotation whose
+successor helper digest equals the effective predecessor digest. Rewriting the completed v9 record
+would destroy historical evidence and is forbidden. The only approved fail-closed path is one new
+helper whose read-only parser recognizes one exact v10 link, followed by one append-only v10
+rotation.
+
+[`infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v10.sh`](operations/fetanagent-kemerbet-v3-successor-helper-rotation-v10.sh)
+hard-pins the completed v9 release `31812cfc5403effdafa1d68fb641058bf14a8850`, its helper
+SHA-256 `d3284d1c268fdba227ff5628f2ac28f9e30375a8a85517e06258a97dfab5e4e1`, and the
+reviewed successor helper SHA-256
+`73eabc728bc25462ab96d17dc8faa5775526571caae9d2ab0265f523b84a387e`. Resolve
+`SUCCESSOR_RELEASE` only after merge as the exact protected-`main` commit containing this helper,
+rotation operation, workflow gate, verifier, and runbook; the pre-merge base commit is not the
+successor release.
+It validates the immutable base plus all nine completed predecessor links in order. The v10 parser
+still requires a distinct release and helper digest, exact root ownership and modes, a single
+canonical child in every generation, stable read-only file identities, exact predecessor record
+digests, and an unchanged Compose 5 durable-volume contract.
+
+Stage only the LF Git-blob v10 script and final LF helper bytes under
+`/root/fetanagent-v3-helper-rotation-v10-<successor-release>/`.
+The directory and script are `root:root` mode `0700`; the staged
+`fetanagent-staging-deploy-helper.next` is `root:root` mode `0600`. Then run exactly once from the
+DigitalOcean root console while staging remains stopped:
+
+```bash
+bash "/root/fetanagent-v3-helper-rotation-v10-$SUCCESSOR_RELEASE/fetanagent-kemerbet-v3-successor-helper-rotation-v10.sh" \
+  "$SUCCESSOR_RELEASE" \
+  73eabc728bc25462ab96d17dc8faa5775526571caae9d2ab0265f523b84a387e \
+  I-UNDERSTAND-THIS-APPENDS-TENTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED
+```
+
+A fresh invocation first asks the exact d3284 predecessor helper to verify itself, attest release
+31812, stop the project, and prove the holder-free, disarmed, no-transient boundary. Under the root
+mutation lock it then disables the one exact sudo grant, appends only
+`/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v10/<successor-release>/`,
+archives the exact d3284 predecessor helper, installs the reviewed successor helper atomically, and
+restores the grant only after the successor helper parses and attests the complete ten-link chain.
+Interrupted execution must resume with the identical v10 release, digest, confirmation, and staged
+bytes; never restore sudo or alter a rotation namespace manually.
+
+The deploy workflow performs a read-only `verify` plus `kemerbet-v3-successor-ready` SSH preflight
+for the exact workflow commit and helper digest before it stops staging or disables database
+logins. A release mismatch therefore fails before downtime. The existing post-stop
+`fresh-host-ready` gate remains mandatory.
+
+This rotation performs no KemerBet request, Player lookup, Telegram request, Amount or Notes input,
+Transfer, provider credit, executor action, broad cleanup, or money movement. It preserves the
+candidate, cohort, profile, recheck, receipt, and all historical rotation evidence byte-for-byte;
+staging remains stopped and all financial gates remain disabled. After the exact release is
+deployed, sign in only through the isolated v10 Owner preview and obtain a fresh explicit exact-five
+no-transfer recheck authorization. Never reuse the consumed v9 authorization and never retry a
+failed recheck automatically.
+
 #### Historical audit record: v1-to-v2 retirement and recovery
 
 The following v1 retirement, v2 reseal, expiry recovery, and provider-token rules are preserved only

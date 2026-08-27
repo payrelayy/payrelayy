@@ -61,6 +61,10 @@ const v3SuccessorHelperRotationV3 = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v3.sh'),
   'utf8',
 );
+const v3SuccessorHelperRotationV4 = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-kemerbet-v3-successor-helper-rotation-v4.sh'),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -105,6 +109,8 @@ const reviewedV3HelperRotationV2SuccessorSha =
   '05b0f2c8eb68716d20ad4878f1fff96c2f6a22e532e0b9c52a664e153b49e6fe';
 const reviewedV3HelperRotationV3SuccessorSha =
   '020b2b2d7eca153dffd72d7811d58c1a93e41edc24d1217cb459f5828e549b7b';
+const reviewedV3HelperRotationV4SuccessorSha =
+  '8ae567bb50581288600ef8058553fb411d6b04d1177a275b4e59bed936bb1db6';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
   .update(helper.replaceAll('\r\n', '\n'))
   .digest('hex');
@@ -2316,6 +2322,180 @@ for (const rotationV3RunbookContract of [
   assert.match(stagingRunbook, rotationV3RunbookContract);
 }
 
+const v3HelperRotationV4Confirmation =
+  'I-UNDERSTAND-THIS-APPENDS-FOURTH-V3-HELPER-ROTATION-WITH-TRANSFER-DISABLED';
+for (const fixedRotationV4Contract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly FIRST_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation'$/mu,
+  /^readonly SECOND_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v2'$/mu,
+  /^readonly PREDECESSOR_ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v3'$/mu,
+  /^readonly ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v4'$/mu,
+  /^readonly SUDOERS_DISABLED='\/etc\/sudoers\.d\/\.fetanagent-staging-deploy-helper\.v3-rotation-v4-disabled'$/mu,
+  /^readonly SECOND_ROTATION_RELEASE='4bb491943fb88c50b86166184b929bdbe2698dc4'$/mu,
+  /^readonly SECOND_ROTATION_HELPER_SHA256='05b0f2c8eb68716d20ad4878f1fff96c2f6a22e532e0b9c52a664e153b49e6fe'$/mu,
+  /^readonly PREDECESSOR_RELEASE='9c83821b4959f5ac52b0d642e476063ca7f3590e'$/mu,
+  /^readonly PREDECESSOR_HELPER_SHA256='020b2b2d7eca153dffd72d7811d58c1a93e41edc24d1217cb459f5828e549b7b'$/mu,
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3HelperRotationV4SuccessorSha}'$`,
+    'mu',
+  ),
+  /"\$SUCCESSOR_RELEASE" != "\$SECOND_ROTATION_RELEASE"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" != "\$SECOND_ROTATION_HELPER_SHA256"/u,
+  /"\$SUCCESSOR_HELPER_SHA256" == "\$REVIEWED_SUCCESSOR_HELPER_SHA256"/u,
+  /"\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION"/u,
+]) {
+  assert.match(v3SuccessorHelperRotationV4, fixedRotationV4Contract);
+}
+assert.equal(
+  v3SuccessorHelperRotationV4.split(`readonly CONFIRMATION='${v3HelperRotationV4Confirmation}'`)
+    .length - 1,
+  1,
+  'the fourth installed-v3 rotation must expose one distinct exact root confirmation',
+);
+assert.doesNotMatch(
+  v3SuccessorHelperRotationV4,
+  /(?:^|[;\s])(?:rm|unlink|shred|truncate)\b|os\.(?:unlink|remove)\s*\(|shutil\.rmtree\s*\(|find[^\r\n]*-delete|docker[^\r\n]*(?:container|volume|image|network)\s+rm\b/imu,
+  'the fourth helper rotation must remain append-only and use no destructive cleanup primitive',
+);
+assert.doesNotMatch(
+  v3SuccessorHelperRotationV4,
+  /GeneralInfoByExternalId|PlayerEPOSDeposit|Transfer\/|FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION)_ENABLED=true|INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true/iu,
+  'the fourth helper rotation must never issue a lookup, enable Transfer, or enable money movement',
+);
+
+const rotationV4PredecessorEvidence = extractShellFunction(
+  v3SuccessorHelperRotationV4,
+  'load_exact_predecessor_rotation_evidence',
+  'require_current_boundary_matches_predecessor_rotation',
+);
+for (const predecessorRotationV4Contract of [
+  /"\$FIRST_ROTATION_PARENT" "\$SECOND_ROTATION_PARENT" "\$PREDECESSOR_ROTATION_PARENT"/u,
+  /"\$SECOND_ROTATION_RELEASE" "\$PREDECESSOR_RELEASE"/u,
+  /"\$SECOND_ROTATION_HELPER_SHA256" "\$PREDECESSOR_HELPER_SHA256"/u,
+  /exact_directory\(first_parent, \[first_release\]\)/u,
+  /exact_directory\(second_parent, \[second_release\]\)/u,
+  /exact_directory\(predecessor_parent, \[predecessor_release\]\)/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v1/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v2/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v3/u,
+  /hashlib\.sha256\(first_archive\)\.hexdigest\(\) != base_helper/u,
+  /hashlib\.sha256\(second_archive\)\.hexdigest\(\) != first_helper/u,
+  /hashlib\.sha256\(archived_helper\)\.hexdigest\(\) != second_helper/u,
+  /intent\[11\] !=\s+f'predecessor_rotation_intent_sha256=\{hashlib\.sha256\(second_intent_data\)\.hexdigest\(\)\}'/u,
+  /intent\[12\] !=\s+f'predecessor_rotation_completion_sha256=\{hashlib\.sha256\(second_completion_data\)\.hexdigest\(\)\}'/u,
+  /intent\[13\] !=\s+f'predecessor_rotation_helper_archive_sha256=\{hashlib\.sha256\(second_archive\)\.hexdigest\(\)\}'/u,
+]) {
+  assert.match(rotationV4PredecessorEvidence, predecessorRotationV4Contract);
+}
+assert.doesNotMatch(
+  rotationV4PredecessorEvidence,
+  /print\(\s*(?:first|second)?_?(?:intent_data|completion_data|archive|archived_helper)\s*\)/u,
+  'the three-link predecessor parser may expose only digests and frozen non-secret Compose metadata',
+);
+const rotationV4BoundaryMatcher = extractShellFunction(
+  v3SuccessorHelperRotationV4,
+  'require_current_boundary_matches_predecessor_rotation',
+  'expected_intent',
+);
+assert.equal(
+  rotationV4BoundaryMatcher,
+  rotationV3BoundaryMatcher,
+  'the fourth rotation must preserve the exact third-link durable-boundary matcher',
+);
+const rotationV4Classifier = extractShellFunction(
+  v3SuccessorHelperRotationV4,
+  'classify_rotation',
+  'require_rotation_prefix',
+);
+assert.equal(rotationV4Classifier, rotationV3Classifier);
+const rotationV4Prefix = extractShellFunction(
+  v3SuccessorHelperRotationV4,
+  'require_rotation_prefix',
+  'publish_record',
+);
+assert.equal(rotationV4Prefix, rotationV3Prefix);
+const rotationV4IntentStart = v3SuccessorHelperRotationV4.indexOf('expected_intent() {');
+const rotationV4IntentEnd = v3SuccessorHelperRotationV4.indexOf(
+  "\n}\n\nROTATION_INTENT_SHA256=''",
+  rotationV4IntentStart,
+);
+assert.ok(rotationV4IntentStart >= 0 && rotationV4IntentEnd > rotationV4IntentStart);
+const rotationV4Intent = v3SuccessorHelperRotationV4.slice(
+  rotationV4IntentStart,
+  rotationV4IntentEnd + 2,
+);
+assert.match(rotationV4Intent, /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v4/u);
+for (const evidenceField of [
+  'base_successor_intent_sha256',
+  'base_successor_completion_sha256',
+  'base_binding_v2_sha256',
+  'base_predecessor_helper_sha256',
+  'base_binding_v3_sha256',
+  'predecessor_rotation_intent_sha256',
+  'predecessor_rotation_completion_sha256',
+  'predecessor_rotation_helper_archive_sha256',
+  'compose5_durable_volume_digest',
+  'compose5_profile_config_hash',
+  'compose5_session_control_config_hash',
+  'compose5_volume_version',
+]) {
+  assert.equal((rotationV4Intent.match(new RegExp(`${evidenceField}=`, 'gu')) ?? []).length, 1);
+}
+const rotationV4PredecessorResidue = extractShellFunction(
+  v3SuccessorHelperRotationV4,
+  'require_predecessor_rotation_global_residue_absent',
+  'require_rollback_residue_absent',
+);
+for (const generation of ['FIRST_ROTATION', 'SECOND_ROTATION', 'PREDECESSOR']) {
+  for (const suffix of [
+    'SUDOERS_DISABLED',
+    'INSTALLING_HELPER',
+    'INSTALLING_HELPER_PARTIAL',
+    'ROLLBACK_HELPER',
+    'ROLLBACK_HELPER_PARTIAL',
+  ]) {
+    assert.ok(rotationV4PredecessorResidue.includes(`$${generation}_${suffix}`));
+  }
+}
+const rotationV4Main = v3SuccessorHelperRotationV4.slice(
+  v3SuccessorHelperRotationV4.indexOf('rotation_state="$(classify_rotation)"'),
+);
+assertInOrder(
+  rotationV4Main,
+  [
+    'run_predecessor_helper verify "$PREDECESSOR_HELPER_SHA256"',
+    'run_predecessor_helper kemerbet-v3-successor-ready',
+    'run_predecessor_helper stop',
+    'require_stopped_no_transfer_boundary',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+    'publish_record "$ROTATION_INSTALLING" intent',
+    'copy_root_file_atomically "$STAGED_HELPER"',
+    'publish_record "$ROTATION_INSTALLING" completion',
+    'run_successor_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_successor_helper_direct kemerbet-v3-successor-ready',
+    'restore_sudoers',
+  ],
+  'the fourth rotation must stop before mutation, append one link, self-attest, and restore sudo once',
+);
+assert.equal((rotationV4Main.match(/restore_sudoers/g) ?? []).length, 1);
+for (const rotationV4RunbookContract of [
+  /One-use fourth installed-v3 helper\/release rotation/u,
+  /Docker 28 reports inspected capability names with the canonical `CAP_` prefix/u,
+  /fetanagent-kemerbet-v3-successor-helper-rotation-v4\.sh/u,
+  /\/root\/fetanagent-v3-helper-rotation-v4-<successor-release>\//u,
+  /\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v4\/<successor-release>\//u,
+  new RegExp(v3HelperRotationV4Confirmation, 'u'),
+  /validates the immutable base and exact first, second, and third links in order/u,
+  /invokes its\s+guarded stop, and proves the stopped boundary/u,
+  /existing completed root-certified candidate recovery and the current retryable exact-five\s+recheck failure\/source\/stage evidence are outside this namespace and must remain unchanged/u,
+  /leaves the runtime stopped,[\s\S]*?Transfer and the executor disabled,[\s\S]*?makes no KemerBet request/u,
+  /Current Docker 28 repair order: rotate, deploy, publish, then recheck/u,
+  /Only then retry the same exact-five FIND-only no-transfer recheck/u,
+]) {
+  assert.match(stagingRunbook, rotationV4RunbookContract);
+}
+
 for (const artifact of [
   workflow,
   botWorkflow,
@@ -2326,6 +2506,7 @@ for (const artifact of [
   v3SuccessorHelperRotation,
   v3SuccessorHelperRotationV2,
   v3SuccessorHelperRotationV3,
+  v3SuccessorHelperRotationV4,
   stagingRunbook,
 ]) {
   assert.doesNotMatch(
@@ -3863,7 +4044,7 @@ if (process.platform === 'linux') {
   assert.equal(
     inspectorCompile.status,
     0,
-    `the complete three-link successor inspector Python must compile: ${inspectorCompile.stderr}`,
+    `the complete four-link successor inspector Python must compile: ${inspectorCompile.stderr}`,
   );
 }
 assert.match(
@@ -3875,6 +4056,11 @@ assert.match(
   helper,
   /^readonly KEMERBET_V3_HELPER_ROTATION_V3_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v3'$/mu,
   'the third helper rotation must use one distinct fixed append-only evidence namespace',
+);
+assert.match(
+  helper,
+  /^readonly KEMERBET_V3_HELPER_ROTATION_V4_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v4'$/mu,
+  'the fourth helper rotation must use one distinct fixed append-only evidence namespace',
 );
 for (const successorGateContract of [
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'/,
@@ -4089,6 +4275,48 @@ assertInOrder(
     "effective_helper_sha = rotation_v3_intent[5].split('=', 1)[1]",
   ],
   'the third rotation must causally bind the exact second link before changing the effective identity',
+);
+for (const rotationV4ChainContract of [
+  /if os\.path\.lexists\(rotation_v4_parent\):/u,
+  /rotation_v3_intent_data is None/u,
+  /rotation_v3_completion_data is None/u,
+  /archived_rotation_v3_predecessor_helper is None/u,
+  /exact_directory\(rotation_v4_parent, 0o700, \[rotation_v4_release\]\)/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v4/u,
+  /len\(rotation_v4_intent\) != 18/u,
+  /len\(rotation_v4_completion\) != 19/u,
+  /rotation_v4_intent\[2\] != f'predecessor_release=\{effective_release\}'/u,
+  /rotation_v4_intent\[3\] != f'successor_release=\{rotation_v4_release\}'/u,
+  /rotation_v4_release in \{\s+successor,\s+rotation_release,\s+rotation_v2_release,\s+effective_release,/u,
+  /rotation_v4_intent\[4\] !=\s+f'predecessor_helper_sha256=\{effective_helper_sha\}'/u,
+  /rotation_v4_intent\[11\] !=\s+f'predecessor_rotation_intent_sha256=\{hashlib\.sha256\(rotation_v3_intent_data\)\.hexdigest\(\)\}'/u,
+  /rotation_v4_intent\[12\] !=\s+f'predecessor_rotation_completion_sha256=\{hashlib\.sha256\(rotation_v3_completion_data\)\.hexdigest\(\)\}'/u,
+  /rotation_v4_intent\[13\] !=\s+f'predecessor_rotation_helper_archive_sha256=\{hashlib\.sha256\(archived_rotation_v3_predecessor_helper\)\.hexdigest\(\)\}'/u,
+  /rotation_v4_intent\[14\] != rotation_v3_intent\[14\]/u,
+  /rotation_v4_intent\[15\] != rotation_v3_intent\[15\]/u,
+  /rotation_v4_intent\[16\] != rotation_v3_intent\[16\]/u,
+  /rotation_v4_intent\[17\] != rotation_v3_intent\[17\]/u,
+  /rotation_v4_completion\[2:18\] != rotation_v4_intent\[2:18\]/u,
+  /hashlib\.sha256\(archived_rotation_v4_predecessor_helper\)\.hexdigest\(\) != effective_helper_sha/u,
+  /effective_release = rotation_v4_release/u,
+  /effective_helper_sha = rotation_v4_intent\[5\]\.split\('=', 1\)\[1\]/u,
+]) {
+  assert.match(successorRotationChain, rotationV4ChainContract);
+}
+assertInOrder(
+  successorRotationChain,
+  [
+    'effective_release = rotation_v3_release',
+    "effective_helper_sha = rotation_v3_intent[5].split('=', 1)[1]",
+    'if os.path.lexists(rotation_v4_parent):',
+    'rotation_v3_intent_data is None',
+    'exact_directory(rotation_v4_parent, 0o700, [rotation_v4_release])',
+    "'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v4'",
+    'archived_rotation_v4_predecessor_helper = exact_file(',
+    'effective_release = rotation_v4_release',
+    "effective_helper_sha = rotation_v4_intent[5].split('=', 1)[1]",
+  ],
+  'the fourth rotation must causally bind the exact third link before changing the effective identity',
 );
 assert.doesNotMatch(
   successorRotationChain,
@@ -11110,8 +11338,8 @@ assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container 
 
 assert.equal(
   actualReviewedHelperSuccessorSha,
-  reviewedV3HelperRotationV3SuccessorSha,
-  'the reviewed helper LF bytes must remain frozen at the exact third-rotation successor pin',
+  reviewedV3HelperRotationV4SuccessorSha,
+  'the reviewed helper LF bytes must remain frozen at the exact fourth-rotation successor pin',
 );
 assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 

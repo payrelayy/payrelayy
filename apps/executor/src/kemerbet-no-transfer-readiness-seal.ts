@@ -107,6 +107,12 @@ const KEMERBET_OPTIONAL_BOOTSTRAP_ASSETS = new Map<string, 'font' | 'image'>([
     'image',
   ],
 ]);
+const KEMERBET_OPTIONAL_SIGNALR_WEBSOCKET_HOSTNAMES = new Set([
+  'admin-api.agt-digi.com',
+  'job.agt-digi.com',
+  'widget-api.agt-digi.com',
+]);
+const KEMERBET_OPTIONAL_SIGNALR_ACCESS_TOKEN_PATTERN = /^[A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u;
 const RECAPTCHA_HOSTNAMES = new Set(['www.google.com', 'www.recaptcha.net']);
 const KEMERBET_AGENT_REFRESH_TOKEN_PATH = '/Account/RefreshToken';
 const SENTRY_ENVELOPE_HOSTNAME = 'send.sentry.report';
@@ -615,6 +621,38 @@ function isKemerBetFirstPartyOrigin(url: URL): boolean {
     url.origin === KEMERBET_AGENT_API_ORIGIN ||
     url.origin === new URL(KEMERBET_AGENT_DEPOSIT_URL).origin ||
     url.origin === KEMERBET_AGENT_BOOTSTRAP_ORIGIN
+  );
+}
+
+/**
+ * Recognize only the reviewed SignalR notification socket shape. The raw query is deliberately
+ * canonical: encoded, reordered, duplicate, and additional keys are not treated as optional.
+ */
+export function isKnownOptionalKemerBetSignalRWebSocket(rawUrl: string): boolean {
+  if (rawUrl.length < 1 || rawUrl.length > 4_384 || /[\r\n\0]/u.test(rawUrl)) return false;
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (
+    url.protocol !== 'wss:' ||
+    !KEMERBET_OPTIONAL_SIGNALR_WEBSOCKET_HOSTNAMES.has(url.hostname) ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.port !== '' ||
+    url.pathname !== '/ws' ||
+    url.hash !== ''
+  ) {
+    return false;
+  }
+  if (rawUrl !== `wss://${url.hostname}/ws${url.search}`) return false;
+  const match = /^\?accessToken=([^&]+)&apiType=admin$/u.exec(url.search);
+  return (
+    match !== null &&
+    match[1] !== undefined &&
+    KEMERBET_OPTIONAL_SIGNALR_ACCESS_TOKEN_PATTERN.test(match[1])
   );
 }
 
@@ -1410,6 +1448,39 @@ export interface KemerBetReadinessPersistentLifecycleBoundary {
 }
 
 /**
+ * Close every routed socket locally. Only the exact reviewed SignalR notification socket is
+ * non-poisoning; every other socket attempt remains a sticky lifecycle violation.
+ */
+export async function closeKemerBetReadinessGuardedWebSocket(options: {
+  readonly lifecycleBoundary: Pick<
+    KemerBetReadinessPersistentLifecycleBoundary,
+    'observeWebSocket'
+  >;
+  readonly reportUnexpected: () => void;
+  readonly webSocket: Pick<WebSocketRoute, 'close' | 'url'>;
+}): Promise<void> {
+  let knownOptional = false;
+  try {
+    knownOptional = isKnownOptionalKemerBetSignalRWebSocket(options.webSocket.url());
+  } catch {
+    knownOptional = false;
+  }
+  try {
+    if (!knownOptional) {
+      options.lifecycleBoundary.observeWebSocket();
+      try {
+        options.reportUnexpected();
+      } catch {
+        // A fixed diagnostic callback cannot weaken the already-sticky WebSocket boundary.
+      }
+    }
+  } finally {
+    // No routed socket is ever connected to its server, including reviewed optional sockets.
+    await options.webSocket.close({ code: 1008, reason: 'blocked' });
+  }
+}
+
+/**
  * Keep every persistent-context lifecycle violation sticky and independently testable. Dynamic
  * page/service-worker inventories are re-read on every boundary check; event observations can only
  * move the controller from valid to invalid.
@@ -1675,9 +1746,10 @@ export async function openKemerBetNoTransferReadinessPersistentProfileProbe(
     await requestBoundary.install();
     await retainedContext.routeWebSocket('**/*', async (webSocket: WebSocketRoute) => {
       await lifecycleBoundary.track(
-        (async () => {
-          lifecycleBoundary.observeWebSocket();
-          if (!firstWebSocketReported) {
+        closeKemerBetReadinessGuardedWebSocket({
+          lifecycleBoundary,
+          reportUnexpected: () => {
+            if (firstWebSocketReported) return;
             firstWebSocketReported = true;
             try {
               options.reportForbiddenRequest({
@@ -1694,9 +1766,9 @@ export async function openKemerBetNoTransferReadinessPersistentProfileProbe(
             } catch {
               // A diagnostic callback cannot connect or forward the routed WebSocket.
             }
-          }
-          await webSocket.close({ code: 1008, reason: 'blocked' });
-        })(),
+          },
+          webSocket,
+        }),
       );
     });
     if (externalBoundaryInvalid() || requestBoundary.invalid()) return unavailable();

@@ -4,9 +4,11 @@ import type { AddressInfo } from 'node:net';
 import { basename, resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
+import type { BrowserContext, Page } from 'playwright-core';
 
 import {
   KemerBetProvisionServerUnavailableError,
+  checkpointKemerBetProvisionSignedInPage,
   createKemerBetReadinessSealFailureEvent,
   createKemerBetReadinessSealFailureTracker,
   createKemerBetSessionProvisionServer,
@@ -50,6 +52,14 @@ async function closeServer(server: Server): Promise<void> {
 
 async function postReadinessSeal(origin: string, body: string): Promise<Response> {
   return fetch(`${origin}/v1/readiness/seal`, {
+    method: 'POST',
+    headers: { connection: 'close', 'content-type': 'application/json' },
+    body,
+  });
+}
+
+async function postSessionCheckpoint(origin: string, body: string): Promise<Response> {
+  return fetch(`${origin}/v1/session/checkpoint`, {
     method: 'POST',
     headers: { connection: 'close', 'content-type': 'application/json' },
     body,
@@ -120,6 +130,147 @@ describe('private KemerBet session provision server', () => {
       /if \(signedIn && !signedInLogged\) \{[\s\S]*?armExpiry\(AUTHENTICATED_SESSION_LIFETIME_MS\)/u,
     );
     expect(source).not.toMatch(/const SESSION_LIFETIME_MS/u);
+  });
+
+  it('reloads and revalidates the same sole guarded page before accepting a checkpoint', async () => {
+    let currentUrl = AGENTS_PAGE;
+    let page: Page;
+    const context = {
+      pages: () => [page],
+      serviceWorkers: () => [],
+    } as unknown as BrowserContext;
+    const reload = vi.fn(async () => undefined);
+    const waitForTimeout = vi.fn(async () => undefined);
+    page = {
+      context: () => context,
+      isClosed: () => false,
+      reload,
+      url: () => currentUrl,
+      waitForTimeout,
+    } as unknown as Page;
+    const verifyAuthenticatedPage = vi.fn(async () => undefined);
+
+    await checkpointKemerBetProvisionSignedInPage(
+      {
+        accountId: '11111111-1111-4111-8111-111111111111',
+        context,
+        effectiveUserId: 10_001,
+        page,
+      },
+      { verifyAuthenticatedPage },
+    );
+
+    expect(reload).toHaveBeenCalledExactlyOnceWith({
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    });
+    expect(waitForTimeout).toHaveBeenCalledExactlyOnceWith(250);
+    expect(verifyAuthenticatedPage).toHaveBeenCalledExactlyOnceWith({
+      accountId: '11111111-1111-4111-8111-111111111111',
+      context,
+      effectiveUserId: 10_001,
+      page,
+    });
+
+    currentUrl = LOGIN_PAGE;
+    await expect(
+      checkpointKemerBetProvisionSignedInPage(
+        {
+          accountId: '11111111-1111-4111-8111-111111111111',
+          context,
+          effectiveUserId: 10_001,
+          page,
+        },
+        { verifyAuthenticatedPage },
+      ),
+    ).rejects.toBeInstanceOf(KemerBetProvisionServerUnavailableError);
+  });
+
+  it('requires checkpoint success before closing and permanently latches the provision lane', () => {
+    const source = readFileSync(
+      new URL('./kemerbet-session-provision-server.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain("request.url === '/v1/session/checkpoint'");
+    const start = source.indexOf('const checkpointForRecheck');
+    const end = source.indexOf('const input =', start);
+    const checkpoint = source.slice(start, end);
+    expect(checkpoint.indexOf('await checkpointSignedInPage')).toBeLessThan(
+      checkpoint.indexOf('checkpointedForRecheck = true'),
+    );
+    expect(checkpoint.indexOf('const blockedRequestBaseline')).toBeLessThan(
+      checkpoint.indexOf('await checkpointSignedInPage'),
+    );
+    expect(checkpoint).toMatch(
+      /await checkpointSignedInPage[\s\S]*?blockedRequestCounter !== blockedRequestBaseline[\s\S]*?checkpointedForRecheck = true[\s\S]*?await retainedContext\.close\(\)[\s\S]*?blockedRequestCounter !== blockedRequestBaseline/u,
+    );
+    expect(source).toContain('blockedRequestCounter += 1n');
+    expect(source).toContain('if (checkpointValidationActive) checkpointBlockedForRecheck = true');
+    expect(checkpoint).toContain('checkpointValidationActive = true');
+    expect(checkpoint).toContain('checkpointBlockedForRecheck ||');
+    expect(checkpoint).toMatch(/finally \{\s+checkpointValidationActive = false/u);
+    expect(checkpoint.indexOf('checkpointedForRecheck = true')).toBeLessThan(
+      checkpoint.indexOf('await retainedContext.close()'),
+    );
+    expect(checkpoint.indexOf('await retainedContext.close()')).toBeLessThan(
+      checkpoint.indexOf('context = undefined'),
+    );
+    expect(source).toContain(
+      'if (checkpointedForRecheck || context || page || accountId || expiresAt)',
+    );
+    for (const fixedField of [
+      'checkpointed: true',
+      'providerSessionFresh: true',
+      'transferDisabled: true',
+      'moneyMoved: false',
+      'identifiersRedacted: true',
+    ]) {
+      expect(checkpoint).toContain(fixedField);
+    }
+  });
+
+  it('fails the private checkpoint closed when no exact signed-in session exists', async () => {
+    const provision = createKemerBetSessionProvisionServer({
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      const response = await postSessionCheckpoint(
+        origin,
+        JSON.stringify({ requestId: REQUEST_ID }),
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: 'session_unavailable' });
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('requires the private checkpoint before any exact-five recheck state advances', () => {
+    const helper = readFileSync(
+      new URL('../../../infra/operations/fetanagent-staging-deploy-helper.sh', import.meta.url),
+      'utf8',
+    );
+    expect(helper).toContain('path: "/v1/session/checkpoint"');
+    expect(helper).toContain('response.statusCode !== 201');
+    expect(helper).toContain('request.setTimeout(125000, () => request.destroy())');
+    expect(helper).toContain(
+      'keys !== "checkpointed,identifiersRedacted,moneyMoved,providerSessionFresh,transferDisabled"',
+    );
+    const checkpoint = helper.indexOf(
+      'checkpoint_kemerbet_session_for_recheck "$session_container"',
+    );
+    const journal = helper.indexOf('record_kemerbet_recheck_promotion_journal', checkpoint);
+    const retireFailure = helper.indexOf('owner_kemerbet_cohort_marker remove-failed', checkpoint);
+    const promote = helper.indexOf('promote_owner_staged_kemerbet_player_ids', checkpoint);
+    expect(checkpoint).toBeGreaterThan(-1);
+    expect(journal).toBeGreaterThan(checkpoint);
+    expect(retireFailure).toBeGreaterThan(journal);
+    expect(promote).toBeGreaterThan(retireFailure);
+    expect(helper.slice(checkpoint, journal)).toContain(
+      "die 'a freshly authenticated private KemerBet session is required before recheck'",
+    );
   });
 
   it('exposes only an aggregate one-time readiness seal on the current signed-in page', () => {
@@ -438,7 +589,7 @@ describe('private KemerBet session provision server', () => {
     }
   });
 
-  it('always blocks the exact deposit endpoint and every post-login mutation', () => {
+  it('always blocks the exact deposit endpoint and every unreviewed post-login mutation', () => {
     expect(
       isAllowedKemerBetSessionRequest({
         isMainFrame: true,
@@ -462,6 +613,65 @@ describe('private KemerBet session provision server', () => {
           requestUrl,
         }),
       ).toBe(false);
+    }
+  });
+
+  it("allows only KemerBet's exact refresh-token request during authenticated retention", () => {
+    const exactRefresh = {
+      headers: {
+        'content-type': 'application/json',
+        grant_type: 'refresh_token',
+      },
+      isMainFrame: true,
+      isNavigationRequest: false,
+      method: 'POST',
+      pageUrl: AGENTS_PAGE,
+      postData: JSON.stringify({ refreshToken: 'reviewed-refresh-token-value' }),
+      redirectedFrom: false,
+      resourceType: 'fetch',
+      requestUrl: 'https://admin-api.agt-digi.com/Account/RefreshToken',
+    } as const;
+
+    expect(isAllowedKemerBetSessionRequest(exactRefresh)).toBe(true);
+    expect(
+      isAllowedKemerBetSessionRequest({
+        ...exactRefresh,
+        headers: { ...exactRefresh.headers, 'content-type': 'application/json; charset=utf-8' },
+      }),
+    ).toBe(true);
+
+    for (const candidate of [
+      { ...exactRefresh, pageUrl: LOGIN_PAGE },
+      { ...exactRefresh, isMainFrame: false },
+      { ...exactRefresh, isNavigationRequest: true },
+      { ...exactRefresh, method: 'PUT' },
+      { ...exactRefresh, redirectedFrom: true },
+      { ...exactRefresh, resourceType: 'document' },
+      {
+        ...exactRefresh,
+        headers: { ...exactRefresh.headers, grant_type: 'password' },
+      },
+      {
+        ...exactRefresh,
+        headers: { ...exactRefresh.headers, 'content-type': 'text/plain' },
+      },
+      { ...exactRefresh, postData: JSON.stringify({ refreshToken: 'too-short' }) },
+      {
+        ...exactRefresh,
+        postData: JSON.stringify({ refreshToken: 'reviewed-refresh-token-value', extra: true }),
+      },
+      { ...exactRefresh, postData: '{not-json' },
+      { ...exactRefresh, requestUrl: `${exactRefresh.requestUrl}?unexpected=1` },
+      { ...exactRefresh, requestUrl: 'https://admin-api.agt-digi.com:443/Account/RefreshToken' },
+      {
+        ...exactRefresh,
+        requestUrl: 'https://user@admin-api.agt-digi.com/Account/RefreshToken',
+      },
+      { ...exactRefresh, requestUrl: 'https://admin-api.agt-digi.com/account/RefreshToken' },
+      { ...exactRefresh, requestUrl: 'https://admin-api.agt-digi.com/Account/Profile' },
+      { ...exactRefresh, requestUrl: 'https://evil.example/Account/RefreshToken' },
+    ]) {
+      expect(isAllowedKemerBetSessionRequest(candidate)).toBe(false);
     }
   });
 

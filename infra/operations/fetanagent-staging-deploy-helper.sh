@@ -48,6 +48,7 @@ readonly KEMERBET_V3_HELPER_ROTATION_V4_PARENT='/var/lib/fetanagent/kemerbet-rea
 readonly KEMERBET_V3_HELPER_ROTATION_V5_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v5'
 readonly KEMERBET_V3_HELPER_ROTATION_V6_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v6'
 readonly KEMERBET_V3_HELPER_ROTATION_V7_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v7'
+readonly KEMERBET_V3_HELPER_ROTATION_V8_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v8'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3828,7 +3829,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_V3_HELPER_ROTATION_V4_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V5_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V6_PARENT" \
-    "$KEMERBET_V3_HELPER_ROTATION_V7_PARENT" <<'PY'
+    "$KEMERBET_V3_HELPER_ROTATION_V7_PARENT" \
+    "$KEMERBET_V3_HELPER_ROTATION_V8_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3856,6 +3858,7 @@ import sys
     rotation_v5_parent,
     rotation_v6_parent,
     rotation_v7_parent,
+    rotation_v8_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
@@ -4645,6 +4648,9 @@ if os.path.lexists(rotation_v6_parent):
     effective_release = rotation_v6_release
     effective_helper_sha = rotation_v6_intent[5].split('=', 1)[1]
 
+rotation_v7_intent_data = None
+rotation_v7_completion_data = None
+archived_rotation_v7_predecessor_helper = None
 if os.path.lexists(rotation_v7_parent):
     if (
         rotation_v6_intent_data is None
@@ -4762,6 +4768,129 @@ if os.path.lexists(rotation_v7_parent):
         reject()
     effective_release = rotation_v7_release
     effective_helper_sha = rotation_v7_intent[5].split('=', 1)[1]
+
+rotation_v8_intent_data = None
+rotation_v8_completion_data = None
+archived_rotation_v8_predecessor_helper = None
+if os.path.lexists(rotation_v8_parent):
+    if (
+        rotation_v7_intent_data is None
+        or rotation_v7_completion_data is None
+        or archived_rotation_v7_predecessor_helper is None
+    ):
+        reject()
+    rotation_v8_parent_value = os.lstat(rotation_v8_parent)
+    if (
+        not stat.S_ISDIR(rotation_v8_parent_value.st_mode)
+        or (rotation_v8_parent_value.st_uid, rotation_v8_parent_value.st_gid,
+            stat.S_IMODE(rotation_v8_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_v8_parent) != rotation_v8_parent
+    ):
+        reject()
+    rotation_v8_children = os.listdir(rotation_v8_parent)
+    if len(rotation_v8_children) != 1 or release.fullmatch(rotation_v8_children[0]) is None:
+        reject()
+    rotation_v8_release = rotation_v8_children[0]
+    rotation_v8_root = f'{rotation_v8_parent}/{rotation_v8_release}'
+    exact_directory(rotation_v8_parent, 0o700, [rotation_v8_release])
+    exact_directory(
+        rotation_v8_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_v8_intent_data = exact_file(
+        f'{rotation_v8_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v8_completion_data = exact_file(
+        f'{rotation_v8_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v8_intent = rotation_v8_intent_data.decode('ascii').splitlines()
+    rotation_v8_completion = rotation_v8_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_v8_intent) != 18
+        or len(rotation_v8_completion) != 19
+        or rotation_v8_intent[0] !=
+           'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v8'
+        or rotation_v8_intent[1] != 'state=authorized'
+        or rotation_v8_intent[2] != f'predecessor_release={effective_release}'
+        or rotation_v8_intent[3] != f'successor_release={rotation_v8_release}'
+        or rotation_v8_release in {
+            successor,
+            rotation_release,
+            rotation_v2_release,
+            rotation_v3_release,
+            rotation_v4_release,
+            rotation_v5_release,
+            rotation_v6_release,
+            effective_release,
+        }
+        or rotation_v8_intent[4] !=
+           f'predecessor_helper_sha256={effective_helper_sha}'
+        or not rotation_v8_intent[5].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_v8_intent[5].split('=', 1)[1]) is None
+        or rotation_v8_intent[5].split('=', 1)[1] in {
+            successor_helper_sha,
+            rotation_intent[5].split('=', 1)[1],
+            rotation_v2_intent[5].split('=', 1)[1],
+            rotation_v3_intent[5].split('=', 1)[1],
+            rotation_v4_intent[5].split('=', 1)[1],
+            rotation_v5_intent[5].split('=', 1)[1],
+            rotation_v6_intent[5].split('=', 1)[1],
+            effective_helper_sha,
+        }
+        or rotation_v8_intent[6] !=
+           f'base_successor_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or rotation_v8_intent[7] !=
+           f'base_successor_completion_sha256={hashlib.sha256(completion_data).hexdigest()}'
+        or rotation_v8_intent[8] != f'base_binding_v2_sha256={v2_sha}'
+        or rotation_v8_intent[9] !=
+           f'base_predecessor_helper_sha256={hashlib.sha256(old_helper_data).hexdigest()}'
+        or rotation_v8_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or rotation_v8_intent[11] !=
+           f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v7_intent_data).hexdigest()}'
+        or rotation_v8_intent[12] !=
+           f'predecessor_rotation_completion_sha256={hashlib.sha256(rotation_v7_completion_data).hexdigest()}'
+        or rotation_v8_intent[13] !=
+           f'predecessor_rotation_helper_archive_sha256={hashlib.sha256(archived_rotation_v7_predecessor_helper).hexdigest()}'
+        or rotation_v8_intent[14] != rotation_v7_intent[14]
+        or rotation_v8_intent[15] != rotation_v7_intent[15]
+        or rotation_v8_intent[16] != rotation_v7_intent[16]
+        or rotation_v8_intent[17] != rotation_v7_intent[17]
+        or not rotation_v8_intent[14].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_v8_intent[14].split('=', 1)[1]) is None
+        or not rotation_v8_intent[15].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_v8_intent[15].split('=', 1)[1]) is None
+        or not rotation_v8_intent[16].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_v8_intent[16].split('=', 1)[1]) is None
+        or not rotation_v8_intent[17].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_v8_intent[17].split('=', 1)[1]) is None
+        or rotation_v8_completion[:1] != rotation_v8_intent[:1]
+        or rotation_v8_completion[1] != 'state=successor-installed'
+        or rotation_v8_completion[2:18] != rotation_v8_intent[2:18]
+        or rotation_v8_completion[18] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_v8_intent_data).hexdigest()}'
+        or rotation_v8_intent_data !=
+           ('\n'.join(rotation_v8_intent) + '\n').encode('ascii')
+        or rotation_v8_completion_data !=
+           ('\n'.join(rotation_v8_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_rotation_v8_predecessor_helper = exact_file(
+        f'{rotation_v8_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if hashlib.sha256(archived_rotation_v8_predecessor_helper).hexdigest() != effective_helper_sha:
+        reject()
+    effective_release = rotation_v8_release
+    effective_helper_sha = rotation_v8_intent[5].split('=', 1)[1]
 
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
@@ -13411,6 +13540,67 @@ require_kemerbet_session_provision_runtime() {
   ' || die 'Owner cannot reach the exact private KemerBet session socket'
 }
 
+checkpoint_kemerbet_session_for_recheck() {
+  local container_id="$1"
+
+  [[ "$container_id" =~ ^[0-9a-f]{12,64}$ ]] ||
+    die 'the private KemerBet session checkpoint container is invalid'
+  docker_local container exec "$container_id" node --input-type=module --eval '
+    import { randomUUID } from "node:crypto";
+    import http from "node:http";
+
+    const body = JSON.stringify({ requestId: randomUUID() });
+    const request = http.request({
+      headers: {
+        "content-length": Buffer.byteLength(body),
+        "content-type": "application/json",
+      },
+      method: "POST",
+      path: "/v1/session/checkpoint",
+      socketPath: "/run/fetanagent-kemerbet-session-control/session.sock",
+    }, (response) => {
+      const chunks = [];
+      let bytes = 0;
+      response.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > 512) {
+          request.destroy();
+          process.exitCode = 31;
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("end", () => {
+        if (process.exitCode !== undefined || response.statusCode !== 201) {
+          process.exitCode = process.exitCode ?? 32;
+          return;
+        }
+        try {
+          const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          const keys = Object.keys(result).sort().join(",");
+          if (
+            keys !== "checkpointed,identifiersRedacted,moneyMoved,providerSessionFresh,transferDisabled" ||
+            result.checkpointed !== true ||
+            result.providerSessionFresh !== true ||
+            result.transferDisabled !== true ||
+            result.moneyMoved !== false ||
+            result.identifiersRedacted !== true
+          ) {
+            process.exitCode = 33;
+          }
+        } catch {
+          process.exitCode = 34;
+        }
+      });
+    });
+    request.on("error", () => {
+      process.exitCode = 35;
+    });
+    request.setTimeout(125000, () => request.destroy());
+    request.end(body);
+  ' || die 'the private KemerBet provider-session checkpoint failed closed before cohort promotion'
+}
+
 require_fresh_bot_disabled_ready() {
   local commit_sha="$1"
 
@@ -15003,12 +15193,14 @@ case "$command" in
         die 'the private KemerBet session inventory is ambiguous before recheck'
       require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
       require_kemerbet_session_provision_runtime "$commit_sha"
+      checkpoint_kemerbet_session_for_recheck "$session_container"
       journal_session_container="$session_container"
     else
-      require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
-      require_kemerbet_profile_volume_holders ''
+      die 'a freshly authenticated private KemerBet session is required before recheck'
     fi
 
+    # The provider-authenticated checkpoint terminally closes and latches the exact retained
+    # browser before any retry marker, promotion journal, or exact-five cohort state can advance.
     record_kemerbet_recheck_promotion_journal \
       "$commit_sha" "$source_dev_ino" \
       "$source_digest" "$identity_key_digest" "$selector_digest" "$image_id" \

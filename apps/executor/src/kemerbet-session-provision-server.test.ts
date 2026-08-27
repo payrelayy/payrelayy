@@ -201,23 +201,42 @@ describe('private KemerBet session provision server', () => {
     expect(checkpoint.indexOf('const blockedRequestBaseline')).toBeLessThan(
       checkpoint.indexOf('await checkpointSignedInPage'),
     );
-    expect(checkpoint).toMatch(
-      /await checkpointSignedInPage[\s\S]*?blockedRequestCounter !== blockedRequestBaseline[\s\S]*?checkpointedForRecheck = true[\s\S]*?await retainedContext\.close\(\)[\s\S]*?blockedRequestCounter !== blockedRequestBaseline/u,
+    const validation = checkpoint.indexOf('await checkpointSignedInPage');
+    const exactTopology = checkpoint.indexOf('requireExactCheckpointTopology');
+    const irreversibleLatch = checkpoint.indexOf('checkpointedForRecheck = true');
+    const cleanProfileClose = checkpoint.indexOf('await closePersistentBrowserForCheckpoint');
+    const postCloseValidation = checkpoint.lastIndexOf(
+      'blockedRequestCounter !== blockedRequestBaseline',
     );
+    const stateClear = checkpoint.indexOf('context = undefined');
+    expect(validation).toBeGreaterThanOrEqual(0);
+    expect(exactTopology).toBeGreaterThan(validation);
+    expect(irreversibleLatch).toBeGreaterThan(exactTopology);
+    expect(cleanProfileClose).toBeGreaterThan(irreversibleLatch);
+    expect(postCloseValidation).toBeGreaterThan(cleanProfileClose);
+    expect(stateClear).toBeGreaterThan(postCloseValidation);
+    expect(checkpoint).toContain('profilePath !== retainedProfilePath');
+    expect(checkpoint).toContain('profilePath: retainedProfilePath');
+    expect(checkpoint.indexOf('profilePath = undefined')).toBeGreaterThan(stateClear);
+    expect(checkpoint).not.toContain('await retainedContext.close()');
     expect(source).toContain('blockedRequestCounter += 1n');
     expect(source).toContain('if (checkpointValidationActive) checkpointBlockedForRecheck = true');
     expect(checkpoint).toContain('checkpointValidationActive = true');
     expect(checkpoint).toContain('checkpointBlockedForRecheck ||');
     expect(checkpoint).toMatch(/finally \{\s+checkpointValidationActive = false/u);
-    expect(checkpoint.indexOf('checkpointedForRecheck = true')).toBeLessThan(
-      checkpoint.indexOf('await retainedContext.close()'),
-    );
-    expect(checkpoint.indexOf('await retainedContext.close()')).toBeLessThan(
-      checkpoint.indexOf('context = undefined'),
-    );
+    expect(irreversibleLatch).toBeLessThan(cleanProfileClose);
+    expect(cleanProfileClose).toBeLessThan(stateClear);
     expect(source).toContain(
-      'if (checkpointedForRecheck || context || page || accountId || expiresAt)',
+      'if (checkpointedForRecheck || context || page || profilePath || accountId || expiresAt)',
     );
+    expect(source).toMatch(
+      /if \(\s*checkpointedForRecheck \|\|\s*!context \|\|\s*!page \|\|\s*!profilePath \|\|\s*!accountId \|\|\s*!expiresAt\s*\)/u,
+    );
+    const inputBody = source.slice(
+      source.indexOf('const input = async'),
+      source.indexOf('const sealReadiness = async'),
+    );
+    expect(inputBody).toContain('checkpointedForRecheck ||');
     for (const fixedField of [
       'checkpointed: true',
       'providerSessionFresh: true',
@@ -301,14 +320,25 @@ describe('private KemerBet session provision server', () => {
     const closeStart = source.indexOf('const closeRetainedContextForSeal');
     const closeEnd = source.indexOf('await runReadinessSeal', closeStart);
     const closeBody = source.slice(closeStart, closeEnd);
-    expect(closeBody).toContain('await retainedContext.close()');
-    expect(closeBody).not.toContain('retainedContext.close().catch');
-    expect(closeBody.indexOf('await retainedContext.close()')).toBeLessThan(
+    const terminalLatch = closeBody.indexOf('checkpointedForRecheck = true');
+    const cleanProfileClose = closeBody.indexOf('await closePersistentBrowserForCheckpoint');
+    expect(closeBody).toContain('if (checkpointedForRecheck) return unavailable()');
+    expect(terminalLatch).toBeGreaterThanOrEqual(0);
+    expect(cleanProfileClose).toBeGreaterThan(terminalLatch);
+    expect(closeBody).toContain('await closePersistentBrowserForCheckpoint');
+    expect(closeBody).toContain('profilePath: retainedProfilePath');
+    expect(closeBody).not.toContain('await retainedContext.close()');
+    expect(closeBody.indexOf('await closePersistentBrowserForCheckpoint')).toBeLessThan(
       closeBody.indexOf('context = undefined'),
     );
-    expect(source).toMatch(
-      /!retainedContextClosed \|\|\s+context !== undefined \|\|\s+page !== undefined \|\|\s+accountId !== undefined/u,
+    expect(closeBody.indexOf('context = undefined')).toBeLessThan(
+      closeBody.indexOf('profilePath = undefined'),
     );
+    expect(source).toMatch(
+      /!retainedContextClosed \|\|\s+context !== undefined \|\|\s+page !== undefined \|\|\s+profilePath !== undefined \|\|\s+accountId !== undefined/u,
+    );
+    const sealAdmission = source.slice(source.indexOf('const sealReadiness = async'), closeStart);
+    expect(sealAdmission).toContain('checkpointedForRecheck ||');
   });
 
   it('creates only the fixed redacted failure schema for every readiness stage', () => {

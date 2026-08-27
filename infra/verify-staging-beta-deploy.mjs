@@ -4396,6 +4396,23 @@ assert.match(
   workflow,
   /docker image inspect "fetanagent-deposit-executor:\$tag"[\s\S]*?org\.opencontainers\.image\.chromium-package-version[\s\S]*?"\$CHROMIUM_PACKAGE_VERSION"/,
 );
+assert.match(workflow, /name: Prove persistent Chromium closes and restores cleanly/);
+assert.match(
+  workflow,
+  /timeout 150s docker run --rm[\s\S]*?--network none[\s\S]*?--read-only[\s\S]*?--user 10001:10001[\s\S]*?--cap-drop ALL[\s\S]*?--security-opt no-new-privileges:true[\s\S]*?--pids-limit 256[\s\S]*?--memory 768m[\s\S]*?--cpus 2[\s\S]*?--shm-size 256m[\s\S]*?--tmpfs \/tmp:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=268435456[\s\S]*?--entrypoint node[\s\S]*?"fetanagent-deposit-executor:\$tag"[\s\S]*?apps\/executor\/dist\/kemerbet-persistent-browser-checkpoint-smoke\.js[\s\S]*?2>\/dev\/null/,
+  'the exact executor image must prove a clean persistent-browser checkpoint in an isolated disposable container',
+);
+assert.match(
+  workflow,
+  /test "\$checkpoint_smoke_output" = 'KEMERBET_PERSISTENT_BROWSER_CHECKPOINT_SMOKE_OK'/,
+);
+assert.ok(
+  workflow.indexOf('Prove persistent Chromium closes and restores cleanly') >
+    workflow.indexOf('Build commit-labelled images without runtime secrets') &&
+    workflow.indexOf('Prove persistent Chromium closes and restores cleanly') <
+      workflow.indexOf('Save sealed images for the deployment job'),
+  'the clean-checkpoint smoke must pass before the executor image can enter the deployment bundle',
+);
 assert.match(
   workflow,
   /docker save --output "\$RUNNER_TEMP\/fetanagent-staging-images\.tar"[\s\S]*?"fetanagent-gateway:\$tag"[\s\S]*?"fetanagent-deposit-executor:\$tag"/,

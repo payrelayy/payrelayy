@@ -185,6 +185,30 @@ jobs:
             --format '{{ index .Config.Labels "org.opencontainers.image.chromium-package-version" }}')" = \
             "$CHROMIUM_PACKAGE_VERSION"
 
+      - name: Prove persistent Chromium closes and restores cleanly
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          checkpoint_smoke_output="$(
+            timeout 150s docker run --rm \
+              --network none \
+              --read-only \
+              --user 10001:10001 \
+              --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --pids-limit 256 \
+              --memory 768m \
+              --cpus 2 \
+              --shm-size 256m \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=268435456 \
+              --entrypoint node \
+              "fetanagent-deposit-executor:$tag" \
+              apps/executor/dist/kemerbet-persistent-browser-checkpoint-smoke.js \
+              2>/dev/null
+          )"
+          test "$checkpoint_smoke_output" = 'KEMERBET_PERSISTENT_BROWSER_CHECKPOINT_SMOKE_OK'
+
       - name: Save sealed images for the deployment job
         if: inputs.mode == 'deploy-and-smoke'
         shell: bash

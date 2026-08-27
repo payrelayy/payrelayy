@@ -32,6 +32,7 @@ import {
   type KemerBetAgentIdentityFingerprinter,
 } from './kemerbet-agent-identity-fingerprint.js';
 import {
+  assertKemerBetChromiumProfileCleanlyClosed,
   purgeKemerBetPersistedServiceWorkerState,
   removeStaleChromiumSingletonArtifacts,
 } from './kemerbet-chromium-profile.js';
@@ -75,6 +76,7 @@ const KEMERBET_SERVICE_WORKER_ORIGINS = Object.freeze([
   KEMERBET_AGENT_BOOTSTRAP_ORIGIN,
 ] as const);
 const CHROMIUM_SPKI_SHA256_PATTERN = /^[A-Za-z0-9+/]{43}=$/u;
+const KEMERBET_RESTORED_PAGE_TIMEOUT_MS = 10_000;
 const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, 'script' | 'stylesheet'>([
   ['/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'script'],
   ['/prd/agt-admin-client/v84/index-BnOqIDsD.css', 'stylesheet'],
@@ -1651,6 +1653,84 @@ export function selectSoleCanonicalKemerBetAgentRestoredPage<T extends KemerBetR
   }
 }
 
+/**
+ * Chromium can expose a restored persistent tab shortly after Playwright resolves the context
+ * launch. Wait only for that one existing offline tab; never create a page, navigate, or accept a
+ * noncanonical browsing context as a substitute for the page-scoped authenticated session.
+ */
+export async function waitForSoleCanonicalKemerBetAgentRestoredPage(
+  context: BrowserContext,
+  timeoutMs = KEMERBET_RESTORED_PAGE_TIMEOUT_MS,
+): Promise<Page | null> {
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > KEMERBET_RESTORED_PAGE_TIMEOUT_MS
+  ) {
+    return null;
+  }
+  const startedAt = Date.now();
+  let selectedPage: Page | null = null;
+  let topologyViolated = false;
+  let firstPageTimer: ReturnType<typeof setTimeout> | undefined;
+  let resolveFirstPage = (_page: Page): void => undefined;
+  const firstPage = new Promise<Page>((resolvePromise) => {
+    resolveFirstPage = resolvePromise;
+  });
+  const onPage = (candidate: Page): void => {
+    if (selectedPage === null) {
+      selectedPage = candidate;
+      resolveFirstPage(candidate);
+      return;
+    }
+    if (candidate !== selectedPage) topologyViolated = true;
+  };
+  context.on('page', onPage);
+  try {
+    let pages = context.pages();
+    if (pages.length > 1) return null;
+    const existingPage = pages[0];
+    if (existingPage !== undefined) {
+      if (selectedPage !== null && selectedPage !== existingPage) return null;
+      selectedPage = existingPage;
+    }
+    if (selectedPage === null) {
+      selectedPage = await Promise.race([
+        firstPage,
+        new Promise<never>((_resolvePromise, rejectPromise) => {
+          firstPageTimer = setTimeout(
+            () => rejectPromise(new Error('restored_page_timeout')),
+            timeoutMs,
+          );
+        }),
+      ]);
+    }
+    const page = selectedPage;
+    if (topologyViolated) return null;
+    const initialUrl = page.url();
+    if (
+      initialUrl !== '' &&
+      initialUrl !== 'about:blank' &&
+      initialUrl !== KEMERBET_AGENT_DEPOSIT_URL
+    ) {
+      return null;
+    }
+    const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+    await page.waitForURL(KEMERBET_AGENT_DEPOSIT_URL, {
+      timeout: remainingMs,
+      waitUntil: 'commit',
+    });
+    pages = context.pages();
+    if (topologyViolated) return null;
+    return selectSoleCanonicalKemerBetAgentRestoredPage(pages, page);
+  } catch {
+    return null;
+  } finally {
+    if (firstPageTimer !== undefined) clearTimeout(firstPageTimer);
+    context.off('page', onPage);
+  }
+}
+
 export interface KemerBetReadinessPersistentLifecycleBoundary {
   armCanonicalNavigation(): void;
   beginTerminalClose(): void;
@@ -1848,6 +1928,7 @@ export async function openKemerBetNoTransferReadinessPersistentProfileProbe(
   options: KemerBetNoTransferReadinessPersistentProfileProbeOptions,
 ): Promise<KemerBetNoTransferReadinessSealProbe> {
   const profile = await resolveSafeProfile(options.accountId, options.effectiveUserId);
+  await assertKemerBetChromiumProfileCleanlyClosed(profile, options.effectiveUserId);
   await removeStaleChromiumSingletonArtifacts(profile);
   await assertSafeDirectory(profile, options.effectiveUserId, 0o700);
   const isolatedBoundary = options.isolatedBrowserDriverBoundary;
@@ -1901,7 +1982,7 @@ export async function openKemerBetNoTransferReadinessPersistentProfileProbe(
     });
     await isolatedBoundary.revalidateNetworkTopology().catch(() => unavailable());
     const retainedContext = context;
-    const restoredPage = selectSoleCanonicalKemerBetAgentRestoredPage(retainedContext.pages());
+    const restoredPage = await waitForSoleCanonicalKemerBetAgentRestoredPage(retainedContext);
     if (restoredPage === null) return unavailable();
     let page: Page | null = restoredPage;
     let firstWebSocketReported = false;

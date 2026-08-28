@@ -519,7 +519,12 @@ assert.match(
 );
 assert.match(runbook, /derived under the fresh UUID from that same transient raw observation/);
 assert.match(runbook, /Amount and\s+Transfer remain disabled/);
-assert.match(runbook, /raw\.githubusercontent\.com\/payrelayy\/payrelayy\/\$release/);
+assert.match(runbook, /repository_owner='pay''relayy'/);
+assert.match(runbook, /repository_name="\$repository_owner"/);
+assert.match(
+  runbook,
+  /raw\.githubusercontent\.com\/\$repository_owner\/\$repository_name\/\$release/,
+);
 assert.match(runbook, /\[\[ "\$release" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
 assert.match(runbook, /\[\[ ! -e "\$staging_root" && ! -L "\$staging_root" \]\]/);
 assert.match(

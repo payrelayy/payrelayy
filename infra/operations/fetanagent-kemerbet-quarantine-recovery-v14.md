@@ -100,16 +100,18 @@ download:
 ```bash
 release='<full-reviewed-main-commit-sha>'
 [[ "$release" =~ ^[0-9a-f]{40}$ ]]
+repository_owner='pay''relayy'
+repository_name="$repository_owner"
 staging_root="/root/fetanagent-kemerbet-quarantine-recovery-v14-$release"
 [[ ! -e "$staging_root" && ! -L "$staging_root" ]]
 umask 077
 install -d -o root -g root -m 0700 "$staging_root"
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
   --output "$staging_root/fetanagent-kemerbet-quarantine-recovery-v14.sh" \
-  "https://raw.githubusercontent.com/payrelayy/payrelayy/$release/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14.sh"
+  "https://raw.githubusercontent.com/$repository_owner/$repository_name/$release/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14.sh"
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
   --output "$staging_root/fetanagent-staging-deploy-helper.next" \
-  "https://raw.githubusercontent.com/payrelayy/payrelayy/$release/infra/operations/fetanagent-staging-deploy-helper.sh"
+  "https://raw.githubusercontent.com/$repository_owner/$repository_name/$release/infra/operations/fetanagent-staging-deploy-helper.sh"
 chown root:root "$staging_root/fetanagent-kemerbet-quarantine-recovery-v14.sh" \
   "$staging_root/fetanagent-staging-deploy-helper.next"
 chmod 0600 "$staging_root/fetanagent-kemerbet-quarantine-recovery-v14.sh" \

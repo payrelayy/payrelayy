@@ -53,6 +53,7 @@ readonly KEMERBET_V3_HELPER_ROTATION_V8_PARENT='/var/lib/fetanagent/kemerbet-rea
 readonly KEMERBET_V3_HELPER_ROTATION_V9_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v9'
 readonly KEMERBET_V3_HELPER_ROTATION_V10_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v10'
 readonly KEMERBET_V3_HELPER_ROTATION_V11_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v11'
+readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v12'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3847,7 +3848,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_V3_HELPER_ROTATION_V8_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V9_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V10_PARENT" \
-    "$KEMERBET_V3_HELPER_ROTATION_V11_PARENT" <<'PY'
+    "$KEMERBET_V3_HELPER_ROTATION_V11_PARENT" \
+    "$KEMERBET_V3_HELPER_ROTATION_V12_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3879,6 +3881,7 @@ import sys
     rotation_v9_parent,
     rotation_v10_parent,
     rotation_v11_parent,
+    rotation_v12_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
@@ -5174,7 +5177,7 @@ if os.path.lexists(rotation_v11_parent):
     ):
         reject()
     overlay_release = effective_release
-    predecessor_helper_sha = effective_helper_sha
+    runtime_bridge_predecessor_helper_sha = effective_helper_sha
     rotation_v11_parent_value = os.lstat(rotation_v11_parent)
     if (
         not stat.S_ISDIR(rotation_v11_parent_value.st_mode)
@@ -5219,10 +5222,10 @@ if os.path.lexists(rotation_v11_parent):
         or rotation_v11_intent[2] != f'overlay_release={overlay_release}'
         or rotation_v11_intent[3] != f'bridge_release={rotation_v11_release}'
         or rotation_v11_intent[4] !=
-           f'predecessor_helper_sha256={predecessor_helper_sha}'
+           f'predecessor_helper_sha256={runtime_bridge_predecessor_helper_sha}'
         or not rotation_v11_intent[5].startswith('successor_helper_sha256=')
         or sha.fullmatch(rotation_v11_intent[5].split('=', 1)[1]) is None
-        or rotation_v11_intent[5].split('=', 1)[1] == predecessor_helper_sha
+        or rotation_v11_intent[5].split('=', 1)[1] == runtime_bridge_predecessor_helper_sha
         or rotation_v11_intent[6] !=
            f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v10_intent_data).hexdigest()}'
         or rotation_v11_intent[7] !=
@@ -5267,11 +5270,114 @@ if os.path.lexists(rotation_v11_parent):
         0o400,
         2 * 1024 * 1024,
     )
-    if hashlib.sha256(archived_rotation_v11_predecessor_helper).hexdigest() != predecessor_helper_sha:
+    if (hashlib.sha256(archived_rotation_v11_predecessor_helper).hexdigest() !=
+            runtime_bridge_predecessor_helper_sha):
         reject()
     effective_helper_sha = rotation_v11_intent[5].split('=', 1)[1]
     runtime_bridge_state = 'active'
     runtime_bridge_release = rotation_v11_release
+
+if os.path.lexists(rotation_v12_parent):
+    if runtime_bridge_state != 'active':
+        reject()
+    rotation_v12_predecessor_helper_sha = effective_helper_sha
+    rotation_v12_parent_value = os.lstat(rotation_v12_parent)
+    if (
+        not stat.S_ISDIR(rotation_v12_parent_value.st_mode)
+        or (rotation_v12_parent_value.st_uid, rotation_v12_parent_value.st_gid,
+            stat.S_IMODE(rotation_v12_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(rotation_v12_parent) != rotation_v12_parent
+    ):
+        reject()
+    rotation_v12_children = os.listdir(rotation_v12_parent)
+    if len(rotation_v12_children) != 1 or release.fullmatch(rotation_v12_children[0]) is None:
+        reject()
+    rotation_v12_release = rotation_v12_children[0]
+    if rotation_v12_release in (rotation_v11_release, overlay_release):
+        reject()
+    rotation_v12_root = f'{rotation_v12_parent}/{rotation_v12_release}'
+    exact_directory(rotation_v12_parent, 0o700, [rotation_v12_release])
+    exact_directory(
+        rotation_v12_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    rotation_v12_intent_data = exact_file(
+        f'{rotation_v12_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v12_completion_data = exact_file(
+        f'{rotation_v12_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    rotation_v12_intent = rotation_v12_intent_data.decode('ascii').splitlines()
+    rotation_v12_completion = rotation_v12_completion_data.decode('ascii').splitlines()
+    if (
+        len(rotation_v12_intent) != 22
+        or len(rotation_v12_completion) != 23
+        or rotation_v12_intent[0] !=
+           'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v12'
+        or rotation_v12_intent[1] != 'state=authorized'
+        or rotation_v12_intent[2] != f'overlay_release={overlay_release}'
+        or rotation_v12_intent[3] != f'runtime_bridge_release={rotation_v11_release}'
+        or rotation_v12_intent[4] != f'repair_release={rotation_v12_release}'
+        or rotation_v12_intent[5] !=
+           f'predecessor_helper_sha256={rotation_v12_predecessor_helper_sha}'
+        or not rotation_v12_intent[6].startswith('successor_helper_sha256=')
+        or sha.fullmatch(rotation_v12_intent[6].split('=', 1)[1]) is None
+        or rotation_v12_intent[6].split('=', 1)[1] == rotation_v12_predecessor_helper_sha
+        or rotation_v12_intent[7] !=
+           f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v11_intent_data).hexdigest()}'
+        or rotation_v12_intent[8] !=
+           f'predecessor_rotation_completion_sha256={hashlib.sha256(rotation_v11_completion_data).hexdigest()}'
+        or rotation_v12_intent[9] !=
+           f'predecessor_rotation_helper_archive_sha256={hashlib.sha256(archived_rotation_v11_predecessor_helper).hexdigest()}'
+        or rotation_v12_intent[10] != f'base_binding_v3_sha256={v3_sha}'
+        or rotation_v12_intent[11] != rotation_v11_intent[10]
+        or rotation_v12_intent[12] != rotation_v11_intent[11]
+        or rotation_v12_intent[13] != rotation_v11_intent[12]
+        or rotation_v12_intent[14] != rotation_v11_intent[13]
+        or rotation_v12_intent[15] !=
+           'transition=runtime-bridge-parser-scope-repair-v1'
+        or rotation_v12_intent[16] != 'financial_actions_mode=dry_run'
+        or rotation_v12_intent[17] != 'kemerbet_executor_enabled=false'
+        or rotation_v12_intent[18] != 'kemerbet_final_action_enabled=false'
+        or rotation_v12_intent[19] != 'transfer_enabled=false'
+        or rotation_v12_intent[20] != 'lookup_authorized=false'
+        or rotation_v12_intent[21] != 'recheck_authorized=false'
+        or not rotation_v12_intent[11].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(rotation_v12_intent[11].split('=', 1)[1]) is None
+        or not rotation_v12_intent[12].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(rotation_v12_intent[12].split('=', 1)[1]) is None
+        or not rotation_v12_intent[13].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(rotation_v12_intent[13].split('=', 1)[1]) is None
+        or not rotation_v12_intent[14].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(rotation_v12_intent[14].split('=', 1)[1]) is None
+        or rotation_v12_completion[:1] != rotation_v12_intent[:1]
+        or rotation_v12_completion[1] != 'state=parser-repair-installed'
+        or rotation_v12_completion[2:22] != rotation_v12_intent[2:22]
+        or rotation_v12_completion[22] !=
+           f'rotation_intent_sha256={hashlib.sha256(rotation_v12_intent_data).hexdigest()}'
+        or rotation_v12_intent_data !=
+           ('\n'.join(rotation_v12_intent) + '\n').encode('ascii')
+        or rotation_v12_completion_data !=
+           ('\n'.join(rotation_v12_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_rotation_v12_predecessor_helper = exact_file(
+        f'{rotation_v12_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if (hashlib.sha256(archived_rotation_v12_predecessor_helper).hexdigest() !=
+            rotation_v12_predecessor_helper_sha):
+        reject()
+    effective_helper_sha = rotation_v12_intent[6].split('=', 1)[1]
 
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)

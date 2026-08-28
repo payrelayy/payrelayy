@@ -12,7 +12,7 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run build",
     "test": "pnpm build && pnpm -r --filter=!@fetanagent/sql-integration-tests run test",
-    "test:infra": "node infra/verify-staging-beta.mjs && node infra/verify-staging-beta-runtime-preflight.mjs && node infra/verify-staging-beta-deploy.mjs && node infra/verify-kemerbet-candidate-bound-root-recovery.mjs && node infra/verify-supabase-staging-bootstrap.mjs && node infra/verify-fetanagent-vm-transition.mjs && node infra/verify-staging-first-owner-bootstrap.mjs && node infra/verify-staging-synthetic-receiver.mjs && node infra/verify-executor-deployment.mjs && node infra/verify-customer-web-image.mjs",
+    "test:infra": "node infra/verify-staging-beta.mjs && node infra/verify-staging-beta-runtime-preflight.mjs && node infra/verify-staging-beta-deploy.mjs && node infra/verify-kemerbet-quarantine-recovery-v14.mjs && node infra/verify-kemerbet-candidate-bound-root-recovery.mjs && node infra/verify-supabase-staging-bootstrap.mjs && node infra/verify-fetanagent-vm-transition.mjs && node infra/verify-staging-first-owner-bootstrap.mjs && node infra/verify-staging-synthetic-receiver.mjs && node infra/verify-executor-deployment.mjs && node infra/verify-customer-web-image.mjs",
     "test:sql": "node scripts/run-sql-integration.mjs",
     "verify:brand": "node scripts/verify-fetanagent-brand.mjs",
     "lint": "prettier --check --end-of-line auto .",

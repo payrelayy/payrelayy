@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   acquireKemerBetSessionProfileGenerationLease,
+  inspectKemerBetSessionProfileGenerationLease,
   KEMERBET_SESSION_PROFILE_GENERATION_LEASE_CONTRACT,
   KemerBetSessionProfileGenerationLeaseUnavailableError,
   type KemerBetSessionProfileGenerationLeaseFileSystem,
@@ -11,6 +12,7 @@ import {
 
 function fakeLeaseFileSystem(): {
   readonly fileSystem: KemerBetSessionProfileGenerationLeaseFileSystem;
+  readonly corruptMarker: () => void;
   readonly markerPresent: () => boolean;
   readonly replaceMarker: () => void;
   readonly writes: () => number;
@@ -19,6 +21,7 @@ function fakeLeaseFileSystem(): {
   const marker = resolve(profile, KEMERBET_SESSION_PROFILE_GENERATION_LEASE_CONTRACT.markerName);
   let markerExists = false;
   let markerInode = 2;
+  let markerContents = Buffer.alloc(0);
   let writeCount = 0;
   const directoryStat = () => ({
     dev: 1,
@@ -26,6 +29,7 @@ function fakeLeaseFileSystem(): {
     ino: 1,
     mode: 0o700,
     nlink: 1,
+    size: 0,
     uid: 10_001,
     isDirectory: () => true,
     isFile: () => false,
@@ -37,6 +41,7 @@ function fakeLeaseFileSystem(): {
     ino: markerInode,
     mode: 0o600,
     nlink: 1,
+    size: markerContents.byteLength,
     uid: 10_001,
     isDirectory: () => false,
     isFile: () => true,
@@ -53,6 +58,9 @@ function fakeLeaseFileSystem(): {
       if (path === profile) {
         return {
           close: async () => undefined,
+          readFile: async () => {
+            throw new Error('directory_read');
+          },
           stat: async () => directoryStat(),
           sync: async () => undefined,
           writeFile: async () => {
@@ -60,16 +68,29 @@ function fakeLeaseFileSystem(): {
           },
         };
       }
-      if (path !== marker || markerExists) {
+      if (path !== marker || (markerExists && markerContents.byteLength === 0)) {
         throw Object.assign(new Error('exists'), { code: 'EEXIST' });
+      }
+      if (markerExists) {
+        return {
+          close: async () => undefined,
+          readFile: async () => Buffer.from(markerContents),
+          stat: async () => markerStat(),
+          sync: async () => undefined,
+          writeFile: async () => {
+            throw new Error('existing_marker_write');
+          },
+        };
       }
       markerExists = true;
       return {
         close: async () => undefined,
+        readFile: async () => Buffer.from(markerContents),
         stat: async () => markerStat(),
         sync: async () => undefined,
-        writeFile: async () => {
+        writeFile: async (value) => {
           writeCount += 1;
+          markerContents = Buffer.from(value);
         },
       };
     },
@@ -80,9 +101,14 @@ function fakeLeaseFileSystem(): {
     unlink: async (path) => {
       if (path !== marker || !markerExists) throw missing();
       markerExists = false;
+      markerContents = Buffer.alloc(0);
     },
   };
   return {
+    corruptMarker: () => {
+      if (!markerExists) throw new Error('missing marker');
+      markerContents = Buffer.from('not-the-contract-marker\n', 'utf8');
+    },
     fileSystem,
     markerPresent: () => markerExists,
     replaceMarker: () => {
@@ -107,7 +133,14 @@ describe('KemerBet persistent-session profile generation lease', () => {
     expect(fake.writes()).toBe(1);
     await expect(
       acquireKemerBetSessionProfileGenerationLease(profile, 10_001, fake.fileSystem),
-    ).rejects.toBeInstanceOf(KemerBetSessionProfileGenerationLeaseUnavailableError);
+    ).rejects.toMatchObject({
+      name: 'KemerBetSessionProfileGenerationQuarantinedError',
+      reasonCode: 'unclean_session_generation',
+    });
+
+    await expect(
+      inspectKemerBetSessionProfileGenerationLease(profile, 10_001, fake.fileSystem),
+    ).resolves.toEqual({ reasonCode: 'unclean_session_generation', state: 'quarantined' });
 
     await lease.releaseAfterCleanCheckpoint();
     expect(fake.markerPresent()).toBe(false);
@@ -117,6 +150,27 @@ describe('KemerBet persistent-session profile generation lease', () => {
     await expect(
       acquireKemerBetSessionProfileGenerationLease(profile, 10_001, fake.fileSystem),
     ).resolves.toBeDefined();
+  });
+
+  it('reports only an exact immutable marker and rejects an ambiguous replacement', async () => {
+    const profile = resolve('kemerbet-profile');
+    const fake = fakeLeaseFileSystem();
+    const lease = await acquireKemerBetSessionProfileGenerationLease(
+      profile,
+      10_001,
+      fake.fileSystem,
+    );
+
+    await expect(
+      inspectKemerBetSessionProfileGenerationLease(profile, 10_001, fake.fileSystem),
+    ).resolves.toEqual({ reasonCode: 'unclean_session_generation', state: 'quarantined' });
+    fake.corruptMarker();
+    await expect(
+      inspectKemerBetSessionProfileGenerationLease(profile, 10_001, fake.fileSystem),
+    ).rejects.toBeInstanceOf(KemerBetSessionProfileGenerationLeaseUnavailableError);
+    await expect(lease.releaseAfterCleanCheckpoint()).rejects.toBeInstanceOf(
+      KemerBetSessionProfileGenerationLeaseUnavailableError,
+    );
   });
 
   it('never removes a replaced or ambiguous marker during clean release', async () => {

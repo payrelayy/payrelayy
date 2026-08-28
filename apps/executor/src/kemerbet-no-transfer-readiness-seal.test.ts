@@ -26,6 +26,8 @@ import {
   selectSoleCanonicalKemerBetAgentRestoredPage,
   waitForSoleCanonicalKemerBetAgentRestoredPage,
   type KemerBetNoTransferReadinessSealDependencies,
+  type KemerBetReadinessSealBindingFileSystem,
+  type KemerBetReadinessSealBindingStat,
   type KemerBetReadinessPersistentLifecycleBoundary,
   type KemerBetReadinessSealForbiddenRequestDiagnostic,
 } from './kemerbet-no-transfer-readiness-seal.js';
@@ -38,6 +40,8 @@ const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const PLAYER_IDS = ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'] as const;
 const FINGERPRINT = `hmac-sha256-agent-identity-v1:${'1'.repeat(64)}`;
 const AGENT_PROFILE_PIN = `hmac-sha256-agent-profile-pin-v3:${'1'.repeat(64)}`;
+const BINDING_OUTPUT_ROOT = '/run/fetanagent-kemerbet-readiness-seal-output';
+const BINDING_OUTPUT_FILE = `${BINDING_OUTPUT_ROOT}/kemerbet_agent_identity_bindings`;
 const LAYER7_AUTHORIZATION = `v1.${'a'.repeat(32)}.1.${'b'.repeat(64)}`;
 const PROVIDER_AUTHORIZATION = 'Bearer abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
 const SIGNALR_ACCESS_TOKEN = 'abcdefghijklmnop.qrstuvwxyz012345.ABCDEFGHIJKLMNOP';
@@ -51,6 +55,151 @@ const SELECTOR_CONTRACT = JSON.parse(
     'utf8',
   ),
 ) as KemerBetAgentPageSelectorContractV2;
+
+interface BindingFileNode {
+  readonly dev: number;
+  readonly ino: number;
+  readonly directory: boolean;
+  readonly mode: number;
+  readonly uid: number;
+  readonly gid: number;
+  content: Buffer;
+  nlink: number;
+}
+
+class BindingFileSystemHarness implements KemerBetReadinessSealBindingFileSystem {
+  readonly directoryOpenFlag = 0x1000_0000;
+  readonly noFollowOpenFlag = 0x2000_0000;
+  readonly unlinked: { readonly path: string; readonly inode: number }[] = [];
+  readonly #nodes = new Map<string, BindingFileNode>();
+  #nextInode = 101;
+  #foreignInode: number | null = null;
+
+  constructor() {
+    this.#nodes.set(BINDING_OUTPUT_ROOT, {
+      content: Buffer.alloc(0),
+      dev: 7,
+      directory: true,
+      gid: 10001,
+      ino: 100,
+      mode: 0o40_700,
+      nlink: 2,
+      uid: 10001,
+    });
+  }
+
+  #missing(path: string): Error & { readonly code: 'ENOENT' } {
+    return Object.assign(new Error(`missing ${path}`), { code: 'ENOENT' as const });
+  }
+
+  #stat(node: BindingFileNode): KemerBetReadinessSealBindingStat {
+    return {
+      dev: node.dev,
+      gid: node.gid,
+      ino: node.ino,
+      mode: node.mode,
+      nlink: node.nlink,
+      size: node.content.byteLength,
+      uid: node.uid,
+      isDirectory: () => node.directory,
+      isFile: () => !node.directory,
+      isSymbolicLink: () => false,
+    };
+  }
+
+  async lstat(path: string): Promise<KemerBetReadinessSealBindingStat> {
+    const node = this.#nodes.get(path);
+    if (node === undefined) throw this.#missing(path);
+    return this.#stat(node);
+  }
+
+  async realpath(path: string): Promise<string> {
+    if (!this.#nodes.has(path)) throw this.#missing(path);
+    return path;
+  }
+
+  async open(path: string, _flags: number, mode?: number) {
+    let node = this.#nodes.get(path);
+    if (mode !== undefined) {
+      if (node !== undefined) {
+        throw Object.assign(new Error(`exists ${path}`), { code: 'EEXIST' as const });
+      }
+      node = {
+        content: Buffer.alloc(0),
+        dev: 7,
+        directory: false,
+        gid: 10001,
+        ino: this.#nextInode,
+        mode: 0o100_000 | mode,
+        nlink: 1,
+        uid: 10001,
+      };
+      this.#nextInode += 1;
+      this.#nodes.set(path, node);
+    }
+    if (node === undefined) throw this.#missing(path);
+    const opened = node;
+    return {
+      close: async () => undefined,
+      readFile: async () => Buffer.from(opened.content),
+      stat: async () => this.#stat(opened),
+      sync: async () => undefined,
+      writeFile: async (value: string) => {
+        opened.content = Buffer.from(value, 'utf8');
+      },
+    };
+  }
+
+  async link(existingPath: string, newPath: string): Promise<void> {
+    const existing = this.#nodes.get(existingPath);
+    if (existing === undefined) throw this.#missing(existingPath);
+    if (this.#nodes.has(newPath)) {
+      throw Object.assign(new Error(`exists ${newPath}`), { code: 'EEXIST' as const });
+    }
+    existing.nlink += 1;
+    this.#nodes.set(newPath, existing);
+  }
+
+  async unlink(path: string): Promise<void> {
+    const node = this.#nodes.get(path);
+    if (node === undefined) throw this.#missing(path);
+    this.unlinked.push({ inode: node.ino, path });
+    this.#nodes.delete(path);
+    node.nlink -= 1;
+  }
+
+  swapInstalledBindingWithForeignExactContent(): void {
+    const installed = this.#nodes.get(BINDING_OUTPUT_FILE);
+    if (installed === undefined) throw new Error('binding was not installed');
+    this.#nodes.delete(BINDING_OUTPUT_FILE);
+    installed.nlink -= 1;
+    const foreign: BindingFileNode = {
+      content: Buffer.from(installed.content),
+      dev: installed.dev,
+      directory: false,
+      gid: installed.gid,
+      ino: this.#nextInode,
+      mode: installed.mode,
+      nlink: 1,
+      uid: installed.uid,
+    };
+    this.#nextInode += 1;
+    this.#foreignInode = foreign.ino;
+    this.#nodes.set(BINDING_OUTPUT_FILE, foreign);
+  }
+
+  installedBinding(): { readonly content: string; readonly inode: number } | null {
+    const installed = this.#nodes.get(BINDING_OUTPUT_FILE);
+    return installed === undefined
+      ? null
+      : { content: installed.content.toString('utf8'), inode: installed.ino };
+  }
+
+  foreignInode(): number {
+    if (this.#foreignInode === null) throw new Error('foreign binding was not installed');
+    return this.#foreignInode;
+  }
+}
 
 function environment(): NodeJS.ProcessEnv {
   return {
@@ -259,13 +408,14 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
   const close = vi.fn(async () => undefined);
   const finalizeReadOnlyProof = vi.fn(async () => undefined);
   const providerAuthorizationDigest = vi.fn(() => PROVIDER_AUTHORIZATION_DIGEST);
+  const reattestPlayerIds = vi.fn(async () => undefined);
   const writeBinding = vi.fn(async () => undefined);
   const logSuccess = vi.fn();
   const dependencies: KemerBetNoTransferReadinessSealDependencies = {
     environment: environment(),
     effectiveUserId: 10001,
     assertBrowserExecutable: async () => undefined,
-    loadPlayerIds: async () => ({ playerIds: PLAYER_IDS }),
+    loadPlayerIds: async () => ({ playerIds: PLAYER_IDS, reattest: reattestPlayerIds }),
     loadSelectorContract: async () => ({ version: 2 }) as KemerBetAgentPageSelectorContractV2,
     createAgentIdentityFingerprinter: async () => fingerprinter(),
     openProbe: async () => ({
@@ -292,6 +442,7 @@ function fixture(overrides: Partial<KemerBetNoTransferReadinessSealDependencies>
     close,
     finalizeReadOnlyProof,
     providerAuthorizationDigest,
+    reattestPlayerIds,
     writeBinding,
     logSuccess,
   };
@@ -1548,6 +1699,10 @@ describe('KemerBet no-transfer readiness seal', () => {
     expect(test.probes).toEqual(PLAYER_IDS);
     expect(test.finalizeReadOnlyProof).toHaveBeenCalledOnce();
     expect(test.finalizeReadOnlyProof.mock.invocationCallOrder[0]).toBeLessThan(
+      test.reattestPlayerIds.mock.invocationCallOrder[0]!,
+    );
+    expect(test.reattestPlayerIds).toHaveBeenCalledOnce();
+    expect(test.reattestPlayerIds.mock.invocationCallOrder[0]).toBeLessThan(
       test.writeBinding.mock.invocationCallOrder[0]!,
     );
     expect(test.writeBinding).toHaveBeenCalledWith(
@@ -1635,6 +1790,64 @@ describe('KemerBet no-transfer readiness seal', () => {
       KemerBetNoTransferReadinessSealUnavailableError,
     );
     expect(test.writeBinding).not.toHaveBeenCalled();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+  });
+
+  it('writes no binding when the exact imported cohort changes after lookup finalization', async () => {
+    const reattest = vi.fn(async () => {
+      throw new Error('stage replaced');
+    });
+    const test = fixture({
+      loadPlayerIds: async () => ({ playerIds: PLAYER_IDS, reattest }),
+    });
+
+    await expect(runKemerBetNoTransferReadinessSeal(test.dependencies)).rejects.toBeInstanceOf(
+      KemerBetNoTransferReadinessSealUnavailableError,
+    );
+
+    expect(test.finalizeReadOnlyProof).toHaveBeenCalledOnce();
+    expect(reattest).toHaveBeenCalledOnce();
+    expect(test.writeBinding).not.toHaveBeenCalled();
+    expect(test.logSuccess).not.toHaveBeenCalled();
+    expect(test.close).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a post-link output swap and never unlinks the foreign replacement', async () => {
+    const bindingFileSystem = new BindingFileSystemHarness();
+    let reattestations = 0;
+    const reattest = vi.fn(async () => {
+      reattestations += 1;
+      if (reattestations === 2) {
+        bindingFileSystem.swapInstalledBindingWithForeignExactContent();
+      }
+    });
+    const test = fixture({
+      loadPlayerIds: async () => ({ playerIds: PLAYER_IDS, reattest }),
+    });
+    const { writeBinding: _injectedWriter, ...productionWriterDependencies } = test.dependencies;
+
+    await expect(
+      runKemerBetNoTransferReadinessSeal({
+        ...productionWriterDependencies,
+        bindingFileSystem,
+        createBindingTemporaryId: () => '22222222-2222-4222-8222-222222222222',
+      }),
+    ).rejects.toBeInstanceOf(KemerBetNoTransferReadinessSealUnavailableError);
+
+    const foreignInode = bindingFileSystem.foreignInode();
+    expect(reattest).toHaveBeenCalledTimes(2);
+    expect(bindingFileSystem.installedBinding()).toEqual({
+      content: serializeKemerBetNoTransferReadinessAgentIdentityBinding(
+        ACCOUNT_ID,
+        FINGERPRINT,
+        AGENT_PROFILE_PIN,
+      ),
+      inode: foreignInode,
+    });
+    expect(bindingFileSystem.unlinked).not.toContainEqual({
+      inode: foreignInode,
+      path: BINDING_OUTPUT_FILE,
+    });
     expect(test.logSuccess).not.toHaveBeenCalled();
   });
 
@@ -1819,7 +2032,10 @@ describe('KemerBet no-transfer readiness seal', () => {
   it('rejects a non-exact or duplicate five-Player cohort before opening the profile', async () => {
     for (const playerIds of [PLAYER_IDS.slice(0, 4), [...PLAYER_IDS.slice(0, 4), PLAYER_IDS[0]]]) {
       const openProbe = vi.fn();
-      const test = fixture({ loadPlayerIds: async () => ({ playerIds }), openProbe });
+      const test = fixture({
+        loadPlayerIds: async () => ({ playerIds, reattest: async () => undefined }),
+        openProbe,
+      });
       await expect(runKemerBetNoTransferReadinessSeal(test.dependencies)).rejects.toBeInstanceOf(
         KemerBetNoTransferReadinessSealUnavailableError,
       );

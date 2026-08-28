@@ -55,6 +55,13 @@ readonly KEMERBET_V3_HELPER_ROTATION_V10_PARENT='/var/lib/fetanagent/kemerbet-re
 readonly KEMERBET_V3_HELPER_ROTATION_V11_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v11'
 readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v12'
 readonly KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-recheck-bridge-v13'
+readonly KEMERBET_QUARANTINE_RECOVERY_V14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
+readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
+readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
+readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_INSTALLING_NAME='.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing'
+readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-profile-finalized-v1'
+readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_INSTALLING_NAME='.kemerbet-readiness-cohort-security-recovery-profile-finalized-v1.installing'
+readonly KEMERBET_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256='6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -142,6 +149,8 @@ readonly KEMERBET_OWNER_COMPLETED_CLAIM_NAME='kemerbet-readiness-cohort-complete
 readonly KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME='.kemerbet-readiness-cohort-completed-v1.installing'
 readonly KEMERBET_OWNER_FAILED_CLAIM_NAME='kemerbet-readiness-cohort-failed-v1'
 readonly KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME='.kemerbet-readiness-cohort-failed-v1.installing'
+readonly KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_NAME='kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1'
+readonly KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_INSTALLING_NAME='.kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1.installing'
 readonly KEMERBET_RECOVERY_LATCH_NAME='kemerbet-readiness-recovery-in-progress-or-failed-v1'
 readonly KEMERBET_RECOVERY_LATCH_INSTALLING_NAME='.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing'
 readonly KEMERBET_RECOVERY_FALLBACK_NAME='recovery-in-progress-or-failed-v1'
@@ -685,6 +694,24 @@ try:
 except Exception:
     raise SystemExit(1)
 PY
+}
+
+require_kemerbet_h14_recovery_identity_authorization_content() {
+  local path="$1"
+  local -a lines=()
+  [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+    "$(stat --format='%s' "$path")" == '389' && "$(wc -l <"$path")" == '8' ]] || return 1
+  mapfile -t lines <"$path"
+  [[ "${#lines[@]}" -eq 8 &&
+    "${lines[0]}" == 'version=1' &&
+    "${lines[1]}" == 'contract=fetanagent-kemerbet-quarantine-recovery-identity-authorization-v1' &&
+    "${lines[2]}" =~ ^old_profile_id=[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
+    "${lines[3]}" =~ ^old_identity_fingerprint=hmac-sha256-agent-identity-v1:[0-9a-f]{64}$ &&
+    "${lines[4]}" =~ ^new_profile_id=[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
+    "${lines[2]#old_profile_id=}" != "${lines[4]#new_profile_id=}" &&
+    "${lines[5]}" == 'configuration_reason=security_recovery' &&
+    "${lines[6]}" == 'transfer_disabled=true' &&
+    "${lines[7]}" == 'money_moved=false' ]]
 }
 
 KEMERBET_V1_RETIREMENT_RELEASE=''
@@ -3821,6 +3848,848 @@ KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='absent'
 KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE=''
 KEMERBET_V3_RECHECK_BRIDGE_STATE='absent'
 KEMERBET_V3_RECHECK_BRIDGE_RELEASE=''
+KEMERBET_H14_RECOVERY_STATE='absent'
+KEMERBET_H14_RECOVERY_RELEASE=''
+KEMERBET_H14_RECOVERY_HELPER_SHA256=''
+KEMERBET_H14_RECOVERY_PROFILE_ID=''
+
+inspect_kemerbet_h14_recovery_gate() {
+  local control_mountpoint inspection profile_mountpoint
+  local -a inspection_lines=()
+  KEMERBET_H14_RECOVERY_STATE='absent'
+  KEMERBET_H14_RECOVERY_RELEASE=''
+  KEMERBET_H14_RECOVERY_HELPER_SHA256=''
+  KEMERBET_H14_RECOVERY_PROFILE_ID=''
+  if [[ ! -e "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT" &&
+    ! -L "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT" ]]; then
+    return 0
+  fi
+  KEMERBET_H14_RECOVERY_STATE='invalid'
+  profile_mountpoint="$(docker_local volume inspect --format '{{.Mountpoint}}' \
+    "$KEMERBET_PROFILE_VOLUME")" || return 0
+  control_mountpoint="$(docker_local volume inspect --format '{{.Mountpoint}}' \
+    "$KEMERBET_SESSION_CONTROL_VOLUME")" || return 0
+  inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT" "$HELPER_PATH" \
+    "$profile_mountpoint" "$control_mountpoint" "$KEMERBET_READINESS_BINDING" \
+    "$KEMERBET_AGENT_IDENTITY_BINDINGS" "$KEMERBET_RECHECK_RECEIPT" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT" "$KEMERBET_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" \
+    "$KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME" \
+    "$KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME" \
+    "$KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_NAME" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+(
+    parent,
+    helper,
+    profile_root,
+    control_root,
+    seal_binding,
+    final_binding,
+    recheck_receipt,
+    owner_receipt_root,
+    authorization_sha,
+    profile_ack_name,
+    terminal_marker_name,
+    profile_finalized_marker_name,
+) = sys.argv[1:]
+
+RELEASE = re.compile(r'[0-9a-f]{40}')
+SHA = re.compile(r'[0-9a-f]{64}')
+UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+PROFILE_UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+DEV_INO = re.compile(r'[0-9]+:[0-9]+')
+PLAYER_ID = re.compile(rb'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')
+V3 = re.compile(
+    rb'([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}) '
+    rb'(hmac-sha256-agent-identity-v1:([0-9a-f]{64})) '
+    rb'(hmac-sha256-agent-profile-pin-v3:\3)\n'
+)
+MARKER = b'fetanagent-kemerbet-session-active-v1\n'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_directory(path, owner, mode, entries=None):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (*owner, mode)
+        or os.path.realpath(path) != path
+    ):
+        reject()
+    if entries is not None and sorted(os.listdir(path)) != sorted(entries):
+        reject()
+    return value
+
+
+def exact_file(path, owner, mode, maximum, exact_size=None):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (*owner, mode, 1)
+            or before.st_size > maximum
+            or (exact_size is not None and before.st_size != exact_size)
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = os.pread(descriptor, maximum + 1, 0)
+        after = os.fstat(descriptor)
+        if len(data) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_uid,
+            before.st_gid,
+            before.st_nlink,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_uid,
+            after.st_gid,
+            after.st_nlink,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            reject()
+        return data, before
+    finally:
+        os.close(descriptor)
+
+
+def exact_stage_file(path, maximum, exact_size=None):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        ownership = (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode))
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or ownership not in {
+                (10001, 10001, 0o400),
+                (0, 0, 0o400),
+                (0, 0, 0o444),
+            }
+            or before.st_nlink != 1
+            or before.st_size > maximum
+            or (exact_size is not None and before.st_size != exact_size)
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = os.pread(descriptor, maximum + 1, 0)
+        after = os.fstat(descriptor)
+        if len(data) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_uid,
+            before.st_gid,
+            before.st_nlink,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_uid,
+            after.st_gid,
+            after.st_nlink,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            reject()
+        state = (
+            'frozen'
+            if ownership == (0, 0, 0o444)
+            else 'transitional'
+            if ownership == (0, 0, 0o400)
+            else 'raw'
+        )
+        return data, before, state
+    finally:
+        os.close(descriptor)
+
+
+def exact_profile_finalized_latch_state(final_path, installing_path, expected):
+    final_present = os.path.lexists(final_path)
+    installing_present = os.path.lexists(installing_path)
+    if final_present:
+        if installing_present:
+            reject()
+        final_data, _ = exact_file(final_path, (0, 10001), 0o440, len(expected), len(expected))
+        if final_data != expected:
+            reject()
+        return 'final'
+    if not installing_present:
+        return 'absent'
+    descriptor = os.open(installing_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        value = os.fstat(descriptor)
+        named = os.lstat(installing_path)
+        data = os.pread(descriptor, len(expected) + 1, 0)
+        if (
+            not stat.S_ISREG(value.st_mode)
+            or (value.st_dev, value.st_ino) != (named.st_dev, named.st_ino)
+            or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode), value.st_nlink)
+            not in {(0, 0, 0o600, 1), (0, 10001, 0o600, 1), (0, 10001, 0o440, 1)}
+            or value.st_size > len(expected)
+            or data != expected[: value.st_size]
+            or os.path.realpath(installing_path) != installing_path
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+    return 'installing'
+
+
+def exact_ascii_lines(path, owner, mode, count):
+    data, value = exact_file(path, owner, mode, 8192)
+    try:
+        text = data.decode('ascii')
+    except UnicodeDecodeError:
+        reject()
+    lines = text.splitlines()
+    if len(lines) != count or data != ('\n'.join(lines) + '\n').encode('ascii'):
+        reject()
+    return lines, data, value
+
+
+def require_v3(path, owner, mode):
+    data, value = exact_file(path, owner, mode, 230, 230)
+    matched = V3.fullmatch(data)
+    if matched is None:
+        reject()
+    return data, value, matched
+
+
+def require_recovery_identity_authorization(path):
+    lines, data, value = exact_ascii_lines(path, (0, 10001), 0o440, 8)
+    if (
+        len(data) != 389
+        or lines[0] != 'version=1'
+        or lines[1] != 'contract=fetanagent-kemerbet-quarantine-recovery-identity-authorization-v1'
+        or not lines[2].startswith('old_profile_id=')
+        or PROFILE_UUID.fullmatch(lines[2].split('=', 1)[1]) is None
+        or not lines[3].startswith('old_identity_fingerprint=hmac-sha256-agent-identity-v1:')
+        or SHA.fullmatch(lines[3].split(':', 1)[1]) is None
+        or not lines[4].startswith('new_profile_id=')
+        or PROFILE_UUID.fullmatch(lines[4].split('=', 1)[1]) is None
+        or lines[4].split('=', 1)[1] == lines[2].split('=', 1)[1]
+        or lines[5:] != [
+            'configuration_reason=security_recovery',
+            'transfer_disabled=true',
+            'money_moved=false',
+        ]
+    ):
+        reject()
+    return lines, data, value
+
+
+try:
+    exact_directory(parent, (0, 0), 0o700)
+    parent_entries = os.listdir(parent)
+    if len(parent_entries) != 1 or RELEASE.fullmatch(parent_entries[0]) is None:
+        reject()
+    release = parent_entries[0]
+    root = f'{parent}/{release}'
+    root_value = exact_directory(root, (0, 0), 0o700)
+    base = {
+        'claim-stage-consumption-v1',
+        'host-retired-v1',
+        'intent-v1',
+        'owner-runtime-restored-v1',
+        'player-stage-consumption-v1',
+        'predecessor-helper',
+        'quarantined-profile-v1',
+        'retired-binding-v3',
+        'retired-retryable-failure-v1',
+        'runtime-retired-v1',
+        'runtime-retirement-intent-v1',
+    }
+    runtime = base | {
+        'database-profile-prepared-v1',
+        'recovery-identity-authorization-v1',
+        'runtime-ready-v1',
+        'terminal-recovery-marker-v1',
+    }
+    cohort_runtime = runtime | {'profile-finalized-cohort-latch-v1'}
+    authorization_prefix = base | {'recovery-identity-authorization-v1'}
+    authorization_installing_prefix = base | {'.recovery-identity-authorization-v1.installing'}
+    terminal_installing_prefix = authorization_prefix | {'.terminal-recovery-marker-v1.installing'}
+    terminal_prefix = authorization_prefix | {'terminal-recovery-marker-v1'}
+    database_prefix = terminal_prefix | {'database-profile-prepared-v1'}
+    runtime_installing_prefix = database_prefix | {'.runtime-ready-v1.installing'}
+    cohort_installing_prefix = runtime | {'.cohort-prepared-v1.installing'}
+    reseal_installing_prefix = cohort_runtime | {
+        'cohort-prepared-v1',
+        '.resealed-v1.installing',
+    }
+    completion_installing_prefix = cohort_runtime | {
+        'cohort-prepared-v1',
+        'resealed-v1',
+        '.completed-v1.installing',
+    }
+    allowed = [
+        base,
+        authorization_installing_prefix,
+        authorization_prefix,
+        terminal_installing_prefix,
+        terminal_prefix,
+        database_prefix,
+        runtime_installing_prefix,
+        runtime,
+        cohort_installing_prefix,
+        runtime | {'cohort-prepared-v1'},
+        cohort_runtime | {'cohort-prepared-v1'},
+        reseal_installing_prefix,
+        cohort_runtime | {'cohort-prepared-v1', 'resealed-v1'},
+        completion_installing_prefix,
+        cohort_runtime | {'cohort-prepared-v1', 'resealed-v1', 'completed-v1'},
+    ]
+    entries = set(os.listdir(root))
+    if entries not in allowed:
+        reject()
+
+    intent, intent_data, _ = exact_ascii_lines(f'{root}/intent-v1', (0, 0), 0o600, 22)
+    if (
+        intent[0] != 'contract=fetanagent-kemerbet-quarantine-recovery-v14'
+        or intent[1] != 'state=authorized'
+        or intent[2] != f'recovery_release={release}'
+        or intent[3] != 'predecessor_release=306818ca812bd2abce8479396c4eea8383ea00f9'
+        or intent[4] != 'predecessor_helper_sha256=3b789c983c415326171c6b4224016d2a04769a0b8c37cb91fc463383f2d141aa'
+        or not intent[5].startswith('successor_helper_sha256=')
+        or SHA.fullmatch(intent[5].split('=', 1)[1]) is None
+        or intent[6] != f'authorization_sha256={authorization_sha}'
+        or not intent[7].startswith('old_claim_id=')
+        or UUID.fullmatch(intent[7].split('=', 1)[1]) is None
+        or not intent[8].startswith('old_profile_id=')
+        or PROFILE_UUID.fullmatch(intent[8].split('=', 1)[1]) is None
+        or not intent[9].startswith('old_binding_sha256=')
+        or SHA.fullmatch(intent[9].split('=', 1)[1]) is None
+        or not intent[10].startswith('old_player_ids_sha256=')
+        or SHA.fullmatch(intent[10].split('=', 1)[1]) is None
+        or any(not intent[index].split('=', 1)[1] or DEV_INO.fullmatch(intent[index].split('=', 1)[1]) is None for index in range(11, 15))
+        or intent[15:] != [
+            'financial_actions_mode=dry_run',
+            'kemerbet_executor_enabled=false',
+            'kemerbet_final_action_enabled=false',
+            'transfer_enabled=false',
+            'amount_entry_enabled=false',
+            'lookup_authorized=false',
+            'recheck_authorized=false',
+        ]
+    ):
+        reject()
+    predecessor_helper_sha = intent[4].split('=', 1)[1]
+    successor_helper_sha = intent[5].split('=', 1)[1]
+    old_claim = intent[7].split('=', 1)[1]
+    old_profile = intent[8].split('=', 1)[1]
+    old_binding_sha = intent[9].split('=', 1)[1]
+    old_player_sha = intent[10].split('=', 1)[1]
+    predecessor_runtime_release = intent[3].split('=', 1)[1]
+
+    runtime_intent, _, _ = exact_ascii_lines(
+        f'{root}/runtime-retirement-intent-v1', (0, 0), 0o600, 12
+    )
+    if (
+        runtime_intent[0] != 'version=1'
+        or runtime_intent[1] != f'recovery_release={release}'
+        or runtime_intent[2] != f'runtime_release={predecessor_runtime_release}'
+        or re.fullmatch(r'coordinator_container_id=(absent|[0-9a-f]{64})', runtime_intent[3]) is None
+        or re.fullmatch(r'coordinator_contract_sha256=(absent|[0-9a-f]{64})', runtime_intent[4]) is None
+        or re.fullmatch(r'owner_container_id=[0-9a-f]{64}', runtime_intent[5]) is None
+        or re.fullmatch(r'owner_contract_sha256=[0-9a-f]{64}', runtime_intent[6]) is None
+        or runtime_intent[7:] != [
+            'financial_actions_mode=dry_run',
+            'kemerbet_executor_enabled=false',
+            'kemerbet_final_action_enabled=false',
+            'transfer_enabled=false',
+            'money_moved=false',
+        ]
+        or (runtime_intent[3].endswith('=absent')) != (runtime_intent[4].endswith('=absent'))
+    ):
+        reject()
+    coordinator_id = runtime_intent[3].split('=', 1)[1]
+    owner_container_id = runtime_intent[5].split('=', 1)[1]
+    owner_contract_sha = runtime_intent[6].split('=', 1)[1]
+    runtime_retired, _, _ = exact_ascii_lines(f'{root}/runtime-retired-v1', (0, 0), 0o600, 13)
+    if runtime_retired != [
+        'version=1',
+        f'recovery_release={release}',
+        f'runtime_release={predecessor_runtime_release}',
+        f'coordinator_container_id={coordinator_id}',
+        f'owner_container_id={owner_container_id}',
+        'coordinator_removed=true',
+        'owner_stopped=true',
+        'profile_volume_holders=none',
+        f'control_volume_holder={owner_container_id}-stopped',
+        'chromium_processes=none',
+        'transfer_disabled=true',
+        'amount_entry_enabled=false',
+        'money_moved=false',
+    ]:
+        reject()
+    owner_restored, _, _ = exact_ascii_lines(
+        f'{root}/owner-runtime-restored-v1', (0, 0), 0o600, 11
+    )
+    if owner_restored != [
+        'version=1',
+        f'recovery_release={release}',
+        f'runtime_release={predecessor_runtime_release}',
+        f'owner_container_id={owner_container_id}',
+        f'owner_contract_sha256={owner_contract_sha}',
+        'owner_running=true',
+        'owner_healthy=true',
+        'coordinator_absent=true',
+        'transfer_disabled=true',
+        'amount_entry_enabled=false',
+        'money_moved=false',
+    ]:
+        reject()
+    player_consumed, _, _ = exact_ascii_lines(
+        f'{root}/player-stage-consumption-v1', (0, 0), 0o600, 5
+    )
+    if player_consumed != [
+        'version=1',
+        'stage=player-ids',
+        f'source_dev_ino={intent[12].split("=", 1)[1]}',
+        f'source_sha256={old_player_sha}',
+        'raw_player_ids_preserved=false',
+    ]:
+        reject()
+    claim_data = (old_claim + '\n').encode('ascii')
+    claim_consumed, _, _ = exact_ascii_lines(
+        f'{root}/claim-stage-consumption-v1', (0, 0), 0o600, 6
+    )
+    if claim_consumed != [
+        'version=1',
+        'stage=claim',
+        f'claim_id={old_claim}',
+        f'source_dev_ino={intent[13].split("=", 1)[1]}',
+        f'source_sha256={hashlib.sha256(claim_data).hexdigest()}',
+        'raw_stage_preserved=false',
+    ]:
+        reject()
+
+    helper_data, _ = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
+    predecessor_data, _ = exact_file(f'{root}/predecessor-helper', (0, 0), 0o400, 2 * 1024 * 1024)
+    if hashlib.sha256(helper_data).hexdigest() != successor_helper_sha or hashlib.sha256(predecessor_data).hexdigest() != predecessor_helper_sha:
+        reject()
+
+    old_binding, old_binding_value, old_match = require_v3(f'{root}/retired-binding-v3', (10001, 10001), 0o600)
+    retired_failed, _ = exact_file(f'{root}/retired-retryable-failure-v1', (0, 10001), 0o440, 37, 37)
+    if (
+        hashlib.sha256(old_binding).hexdigest() != old_binding_sha
+        or old_match.group(1).decode('ascii') != old_profile
+        or retired_failed != (old_claim + '\n').encode('ascii')
+        or f'{old_binding_value.st_dev}:{old_binding_value.st_ino}' != intent[11].split('=', 1)[1]
+    ):
+        reject()
+    quarantined = exact_directory(f'{root}/quarantined-profile-v1', (10001, 10001), 0o700)
+    if f'{quarantined.st_dev}:{quarantined.st_ino}' != intent[14].split('=', 1)[1]:
+        reject()
+    marker, _ = exact_file(
+        f'{root}/quarantined-profile-v1/.fetanagent-unclean-session-generation-v1',
+        (10001, 10001),
+        0o600,
+        len(MARKER),
+        len(MARKER),
+    )
+    if marker != MARKER:
+        reject()
+    host, _, _ = exact_ascii_lines(f'{root}/host-retired-v1', (0, 0), 0o600, 10)
+    if host != [
+        'version=1',
+        f'recovery_release={release}',
+        f'old_claim_id={old_claim}',
+        f'old_profile_id={old_profile}',
+        f'old_binding_sha256={old_binding_sha}',
+        f'old_player_ids_sha256={old_player_sha}',
+        f'intent_sha256={hashlib.sha256(intent_data).hexdigest()}',
+        'transfer_disabled=true',
+        'amount_entry_enabled=false',
+        'money_moved=false',
+    ]:
+        reject()
+    cohort_record_present = (
+        'cohort-prepared-v1' in entries or '.cohort-prepared-v1.installing' in entries
+    )
+    for consumed in [f'{owner_receipt_root}/kemerbet-readiness-cohort-failed-v1']:
+        if os.path.lexists(consumed):
+            reject()
+    if not cohort_record_present:
+        player_path = f'{control_root}/kemerbet-readiness-player-ids.stage-v1'
+        claim_path = f'{control_root}/kemerbet-readiness-cohort-claim.stage-v1'
+        player_present = os.path.lexists(player_path)
+        claim_present = os.path.lexists(claim_path)
+        if player_present != claim_present:
+            reject()
+        if player_present:
+            if not runtime.issubset(entries):
+                reject()
+            exact_directory(control_root, (10001, 10001), 0o700)
+            player_data, _ = exact_file(player_path, (10001, 10001), 0o400, 1024)
+            claim_data, _ = exact_file(claim_path, (10001, 10001), 0o400, 37, 37)
+            fresh_lines = player_data[:-1].split(b'\n') if player_data.endswith(b'\n') else []
+            if (
+                len(fresh_lines) != 5
+                or len(set(fresh_lines)) != 5
+                or any(PLAYER_ID.fullmatch(line) is None for line in fresh_lines)
+                or not claim_data.endswith(b'\n')
+                or UUID.fullmatch(claim_data[:-1].decode('ascii')) is None
+                or claim_data[:-1].decode('ascii') == old_claim
+            ):
+                reject()
+    if os.path.lexists(seal_binding):
+        seal_data, _, seal_match = require_v3(seal_binding, (10001, 10001), 0o600)
+    else:
+        seal_data = None
+        seal_match = None
+    if os.path.lexists(final_binding):
+        final_data, _, final_match = require_v3(final_binding, (0, 0), 0o444)
+    else:
+        final_data = None
+        final_match = None
+
+    marker_path = f'{owner_receipt_root}/{terminal_marker_name}'
+    marker_installing = f'{owner_receipt_root}/.{terminal_marker_name}.installing'
+    profile_finalized_path = f'{owner_receipt_root}/{profile_finalized_marker_name}'
+    profile_finalized_installing = f'{owner_receipt_root}/.{profile_finalized_marker_name}.installing'
+    profile_finalized_evidence = f'{root}/profile-finalized-cohort-latch-v1'
+    ack_path = f'{control_root}/{profile_ack_name}'
+    ack_installing = f'{control_root}/.{profile_ack_name}.installing'
+    marker_data = (old_claim + '\n').encode('ascii')
+    marker_present = os.path.lexists(marker_path)
+    if os.path.lexists(marker_installing) or os.path.lexists(ack_installing):
+        reject()
+    if marker_present:
+        terminal_source, _ = exact_file(marker_path, (0, 10001), 0o440, 37, 37)
+        if terminal_source != marker_data:
+            reject()
+    profile_finalized_state = exact_profile_finalized_latch_state(
+        profile_finalized_path,
+        profile_finalized_installing,
+        marker_data,
+    )
+    private_terminal_state = exact_profile_finalized_latch_state(
+        f'{root}/terminal-recovery-marker-v1',
+        f'{root}/.terminal-recovery-marker-v1.installing',
+        marker_data,
+    )
+    if entries in (base, authorization_installing_prefix, authorization_prefix):
+        if (
+            not marker_present
+            or profile_finalized_state != 'absent'
+            or private_terminal_state != 'absent'
+        ):
+            reject()
+    elif entries == terminal_installing_prefix:
+        if (
+            not marker_present
+            or profile_finalized_state != 'absent'
+            or private_terminal_state != 'installing'
+        ):
+            reject()
+    elif entries == terminal_prefix:
+        if (
+            private_terminal_state != 'final'
+            or profile_finalized_state not in {'absent', 'final'}
+            or marker_present == (profile_finalized_state == 'final')
+        ):
+            reject()
+    elif runtime.issubset(entries):
+        if marker_present or private_terminal_state != 'final':
+            reject()
+    elif marker_present or profile_finalized_state != 'final' or private_terminal_state != 'final':
+        reject()
+
+    state = 'host-retired'
+    profile_id = ''
+    if runtime.issubset(entries):
+        profile_finalized_evidence_present = os.path.lexists(profile_finalized_evidence)
+        if profile_finalized_evidence_present:
+            evidence_data, _ = exact_file(
+                profile_finalized_evidence, (0, 10001), 0o440, 37, 37
+            )
+            if evidence_data != (old_claim + '\n').encode('ascii'):
+                reject()
+        ack, ack_data, _ = exact_ascii_lines(f'{root}/database-profile-prepared-v1', (10001, 10001), 0o400, 9)
+        if (
+            ack[0] != 'version=1'
+            or ack[1] != f'claim_id={old_claim}'
+            or not ack[2].startswith('receipt_id=')
+            or UUID.fullmatch(ack[2].split('=', 1)[1]) is None
+            or ack[3] != 'platform_code=kemerbet'
+            or not ack[4].startswith('platform_agent_account_id=')
+            or PROFILE_UUID.fullmatch(ack[4].split('=', 1)[1]) is None
+            or ack[4].split('=', 1)[1] == old_profile
+            or re.fullmatch(r'profile_revision=[1-9][0-9]*', ack[5]) is None
+            or ack[6:] != [
+                'configuration_reason=security_recovery',
+                'transfer_disabled=true',
+                'money_moved=false',
+            ]
+        ):
+            reject()
+        profile_id = ack[4].split('=', 1)[1]
+        authorization, authorization_data, _ = require_recovery_identity_authorization(
+            f'{root}/recovery-identity-authorization-v1'
+        )
+        if (
+            authorization[2] != f'old_profile_id={old_profile}'
+            or authorization[3] != f'old_identity_fingerprint={old_match.group(2).decode("ascii")}'
+            or authorization[4] != f'new_profile_id={profile_id}'
+        ):
+            reject()
+        terminal, _ = exact_file(f'{root}/terminal-recovery-marker-v1', (0, 10001), 0o440, 37, 37)
+        if terminal != (old_claim + '\n').encode('ascii'):
+            reject()
+        runtime_ready, _, _ = exact_ascii_lines(f'{root}/runtime-ready-v1', (0, 0), 0o600, 8)
+        if runtime_ready != [
+            'version=1',
+            f'recovery_release={release}',
+            f'old_claim_id={old_claim}',
+            f'new_profile_id={profile_id}',
+            f'recovery_identity_authorization_sha256={hashlib.sha256(authorization_data).hexdigest()}',
+            f'database_ack_sha256={hashlib.sha256(ack_data).hexdigest()}',
+            'transfer_disabled=true',
+            'money_moved=false',
+        ]:
+            reject()
+        if any(os.path.lexists(path) for path in (marker_path, marker_installing, ack_path, ack_installing)):
+            reject()
+        state = 'runtime-ready'
+        if not cohort_record_present:
+            if profile_finalized_evidence_present:
+                reject()
+            if profile_finalized_state != 'final':
+                state = 'profile-finalization-prefix'
+        elif '.cohort-prepared-v1.installing' in entries:
+            if profile_finalized_state != 'final' or profile_finalized_evidence_present:
+                reject()
+        elif profile_finalized_state == 'final' and not profile_finalized_evidence_present:
+            state = 'cohort-latch-retirement-prefix'
+        elif profile_finalized_state == 'absent' and profile_finalized_evidence_present:
+            pass
+        else:
+            reject()
+
+        profile_entries = sorted(os.listdir(profile_root))
+        if profile_entries not in ([], [profile_id]):
+            reject()
+        if profile_entries:
+            exact_directory(f'{profile_root}/{profile_id}', (10001, 10001), 0o700)
+
+        cohort_name = (
+            'cohort-prepared-v1'
+            if 'cohort-prepared-v1' in entries
+            else '.cohort-prepared-v1.installing'
+            if '.cohort-prepared-v1.installing' in entries
+            else None
+        )
+        if cohort_name is not None:
+            cohort, _, _ = exact_ascii_lines(f'{root}/{cohort_name}', (0, 0), 0o600, 9)
+            if (
+                cohort[0] != 'version=1'
+                or cohort[1] != f'recovery_release={release}'
+                or not cohort[2].startswith('claim_id=')
+                or UUID.fullmatch(cohort[2].split('=', 1)[1]) is None
+                or cohort[2].split('=', 1)[1] == old_claim
+                or not cohort[3].startswith('player_ids_dev_ino=')
+                or DEV_INO.fullmatch(cohort[3].split('=', 1)[1]) is None
+                or not cohort[4].startswith('player_ids_sha256=')
+                or SHA.fullmatch(cohort[4].split('=', 1)[1]) is None
+                or not cohort[5].startswith('claim_dev_ino=')
+                or DEV_INO.fullmatch(cohort[5].split('=', 1)[1]) is None
+                or cohort[6:] != ['player_count=5', 'transfer_disabled=true', 'money_moved=false']
+            ):
+                reject()
+            claim_id = cohort[2].split('=', 1)[1]
+            player_path = f'{control_root}/kemerbet-readiness-player-ids.stage-v1'
+            claim_path = f'{control_root}/kemerbet-readiness-cohort-claim.stage-v1'
+            stage_states = ()
+            if final_data is None:
+                exact_directory(control_root, (10001, 10001), 0o700)
+                player_data, player_value, player_state = exact_stage_file(player_path, 1024)
+                claim_data, claim_value, claim_state = exact_stage_file(claim_path, 37, 37)
+                stage_states = (player_state, claim_state)
+                fresh_lines = player_data[:-1].split(b'\n') if player_data.endswith(b'\n') else []
+                if (
+                    claim_data != (claim_id + '\n').encode('ascii')
+                    or len(fresh_lines) != 5
+                    or len(set(fresh_lines)) != 5
+                    or any(PLAYER_ID.fullmatch(line) is None for line in fresh_lines)
+                    or f'{player_value.st_dev}:{player_value.st_ino}' != cohort[3].split('=', 1)[1]
+                    or hashlib.sha256(player_data).hexdigest() != cohort[4].split('=', 1)[1]
+                    or f'{claim_value.st_dev}:{claim_value.st_ino}' != cohort[5].split('=', 1)[1]
+                ):
+                    reject()
+                if cohort_name.startswith('.') and stage_states != ('raw', 'raw'):
+                    reject()
+            else:
+                for consumed in (player_path, claim_path):
+                    if os.path.lexists(consumed):
+                        reject()
+            if state != 'cohort-latch-retirement-prefix':
+                state = (
+                    'cohort-publication-prefix'
+                    if cohort_name.startswith('.')
+                    else 'cohort-prepared'
+                    if stage_states == ('frozen', 'frozen')
+                    else 'cohort-freeze-prefix'
+                )
+            if seal_data is not None:
+                if (
+                    seal_match.group(1).decode('ascii') != profile_id
+                    or seal_match.group(2) == old_match.group(2)
+                    or stage_states != ('frozen', 'frozen')
+                ):
+                    reject()
+                state = 'reseal-prefix'
+            resealed_name = (
+                'resealed-v1'
+                if 'resealed-v1' in entries
+                else '.resealed-v1.installing'
+                if '.resealed-v1.installing' in entries
+                else None
+            )
+            if resealed_name is not None:
+                if seal_data is None or seal_match.group(1).decode('ascii') != profile_id:
+                    reject()
+                resealed, _, _ = exact_ascii_lines(f'{root}/{resealed_name}', (0, 0), 0o600, 7)
+                if resealed != [
+                    'version=1',
+                    f'recovery_release={release}',
+                    f'claim_id={claim_id}',
+                    f'profile_id={profile_id}',
+                    f'binding_sha256={hashlib.sha256(seal_data).hexdigest()}',
+                    'transfer_disabled=true',
+                    'money_moved=false',
+                ]:
+                    reject()
+                state = (
+                    'reseal-publication-prefix'
+                    if resealed_name.startswith('.')
+                    else 'resealed'
+                )
+            if final_data is not None:
+                if final_data != seal_data or final_match.group(1).decode('ascii') != profile_id:
+                    reject()
+                receipt_data, _ = exact_file(recheck_receipt, (0, 0), 0o600, 4096)
+                completion_path = f'{owner_receipt_root}/kemerbet-readiness-cohort-completed-v1'
+                completion, _ = exact_file(completion_path, (0, 10001), 0o440, 37, 37)
+                if completion != (claim_id + '\n').encode('ascii'):
+                    reject()
+                completed_name = (
+                    'completed-v1'
+                    if 'completed-v1' in entries
+                    else '.completed-v1.installing'
+                    if '.completed-v1.installing' in entries
+                    else None
+                )
+                state = 'completed-prefix'
+                if completed_name is not None:
+                    completed, _, _ = exact_ascii_lines(f'{root}/{completed_name}', (0, 0), 0o600, 8)
+                    if completed != [
+                        'version=1',
+                        f'recovery_release={release}',
+                        f'claim_id={claim_id}',
+                        f'profile_id={profile_id}',
+                        f'binding_sha256={hashlib.sha256(final_data).hexdigest()}',
+                        f'recheck_receipt_sha256={hashlib.sha256(receipt_data).hexdigest()}',
+                        'transfer_disabled=true',
+                        'money_moved=false',
+                    ]:
+                        reject()
+                    state = (
+                        'completion-publication-prefix'
+                        if completed_name.startswith('.')
+                        else 'completed'
+                    )
+    elif entries != base:
+        authorization_name = (
+            '.recovery-identity-authorization-v1.installing'
+            if '.recovery-identity-authorization-v1.installing' in entries
+            else 'recovery-identity-authorization-v1'
+        )
+        authorization, authorization_data, _ = require_recovery_identity_authorization(
+            f'{root}/{authorization_name}'
+        )
+        profile_id = authorization[4].split('=', 1)[1]
+        if (
+            profile_id == old_profile
+            or authorization[2] != f'old_profile_id={old_profile}'
+            or authorization[3] != f'old_identity_fingerprint={old_match.group(2).decode("ascii")}'
+        ):
+            reject()
+        if 'terminal-recovery-marker-v1' in entries:
+            terminal, _ = exact_file(f'{root}/terminal-recovery-marker-v1', (0, 10001), 0o440, 37, 37)
+            if terminal != (old_claim + '\n').encode('ascii'):
+                reject()
+        if 'database-profile-prepared-v1' in entries:
+            ack, ack_data, _ = exact_ascii_lines(f'{root}/database-profile-prepared-v1', (10001, 10001), 0o400, 9)
+            if (
+                ack[0] != 'version=1'
+                or ack[1] != f'claim_id={old_claim}'
+                or not ack[2].startswith('receipt_id=')
+                or UUID.fullmatch(ack[2].split('=', 1)[1]) is None
+                or ack[3] != 'platform_code=kemerbet'
+                or ack[4] != f'platform_agent_account_id={profile_id}'
+                or re.fullmatch(r'profile_revision=[1-9][0-9]*', ack[5]) is None
+                or ack[6:] != [
+                    'configuration_reason=security_recovery',
+                    'transfer_disabled=true',
+                    'money_moved=false',
+                ]
+            ):
+                reject()
+            if '.runtime-ready-v1.installing' in entries:
+                runtime_ready, _, _ = exact_ascii_lines(f'{root}/.runtime-ready-v1.installing', (0, 0), 0o600, 8)
+                if runtime_ready != [
+                    'version=1',
+                    f'recovery_release={release}',
+                    f'old_claim_id={old_claim}',
+                    f'new_profile_id={profile_id}',
+                    f'recovery_identity_authorization_sha256={hashlib.sha256(authorization_data).hexdigest()}',
+                    f'database_ack_sha256={hashlib.sha256(ack_data).hexdigest()}',
+                    'transfer_disabled=true',
+                    'money_moved=false',
+                ]:
+                    reject()
+        state = 'profile-finalization-prefix'
+
+    sys.stdout.write(f'{state}\n{release}\n{successor_helper_sha}\n{profile_id}\n')
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 0
+  mapfile -t inspection_lines <<<"$inspection"
+  [[ "${#inspection_lines[@]}" -eq 4 &&
+    "${inspection_lines[0]}" =~ ^(host-retired|profile-finalization-prefix|runtime-ready|cohort-publication-prefix|cohort-latch-retirement-prefix|cohort-freeze-prefix|cohort-prepared|reseal-prefix|reseal-publication-prefix|resealed|completed-prefix|completion-publication-prefix|completed)$ &&
+    "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
+    ( -z "${inspection_lines[3]}" || "${inspection_lines[3]}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ) ]] ||
+    return 0
+  KEMERBET_H14_RECOVERY_STATE="${inspection_lines[0]}"
+  KEMERBET_H14_RECOVERY_RELEASE="${inspection_lines[1]}"
+  KEMERBET_H14_RECOVERY_HELPER_SHA256="${inspection_lines[2]}"
+  KEMERBET_H14_RECOVERY_PROFILE_ID="${inspection_lines[3]}"
+}
 
 inspect_kemerbet_v2_v3_successor_gate() {
   local inspection
@@ -3832,6 +4701,25 @@ inspect_kemerbet_v2_v3_successor_gate() {
   KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE=''
   KEMERBET_V3_RECHECK_BRIDGE_STATE='absent'
   KEMERBET_V3_RECHECK_BRIDGE_RELEASE=''
+  inspect_kemerbet_h14_recovery_gate
+  if [[ "${KEMERBET_H14_RECOVERY_STATE:-absent}" != 'absent' ]]; then
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" == 'invalid' ]]; then
+      KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='invalid'
+      return 0
+    fi
+    KEMERBET_V2_V3_SUCCESSOR_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
+    KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H14_RECOVERY_HELPER_SHA256"
+    KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='active'
+    KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
+    KEMERBET_V3_RECHECK_BRIDGE_STATE='active'
+    KEMERBET_V3_RECHECK_BRIDGE_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" =~ ^(completed-prefix|completion-publication-prefix|completed)$ ]]; then
+      KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='successor-completed'
+    else
+      KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='successor-installed'
+    fi
+    return 0
+  fi
   if [[ ! -e "$parent" && ! -L "$parent" ]]; then
     return 0
   fi
@@ -5690,6 +6578,67 @@ enforce_kemerbet_v2_v3_successor_gate() {
   fi
   inspect_kemerbet_v2_v3_successor_gate
   [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]] || return 0
+  if [[ "${KEMERBET_H14_RECOVERY_STATE:-absent}" != 'absent' ]]; then
+    release="${2:-}"
+    case "$command:$KEMERBET_H14_RECOVERY_STATE" in
+      kemerbet-quarantine-recovery-ready:*)
+        [[ "$release" == "$KEMERBET_H14_RECOVERY_RELEASE" ]] ||
+          die 'the H14 recovery attestation belongs to another reviewed release'
+        return 0
+        ;;
+      finalize-kemerbet-quarantine-recovery-profile:host-retired|\
+      finalize-kemerbet-quarantine-recovery-profile:profile-finalization-prefix|\
+      finalize-kemerbet-quarantine-recovery-profile:runtime-ready)
+        [[ "$release" == "$KEMERBET_H14_RECOVERY_RELEASE" ]] ||
+          die 'the H14 profile finalization belongs to another reviewed release'
+        return 0
+        ;;
+      record-kemerbet-quarantine-recovery-cohort:runtime-ready|\
+      record-kemerbet-quarantine-recovery-cohort:cohort-publication-prefix|\
+      record-kemerbet-quarantine-recovery-cohort:cohort-latch-retirement-prefix|\
+      record-kemerbet-quarantine-recovery-cohort:cohort-freeze-prefix|\
+      record-kemerbet-quarantine-recovery-cohort:cohort-prepared)
+        [[ "$release" == "$KEMERBET_H14_RECOVERY_RELEASE" ]] ||
+          die 'the H14 cohort preparation belongs to another reviewed release'
+        return 0
+        ;;
+      record-kemerbet-quarantine-recovery-reseal:reseal-prefix|\
+      record-kemerbet-quarantine-recovery-reseal:reseal-publication-prefix|\
+      record-kemerbet-quarantine-recovery-reseal:resealed|\
+      record-kemerbet-quarantine-recovery-completion:completed-prefix|\
+      record-kemerbet-quarantine-recovery-completion:completion-publication-prefix|\
+      record-kemerbet-quarantine-recovery-completion:completed)
+        [[ "$release" == "$KEMERBET_H14_RECOVERY_RELEASE" ]] ||
+          die 'the H14 recovery receipt belongs to another reviewed release'
+        return 0
+        ;;
+      seal-kemerbet-readiness:cohort-prepared|\
+      seal-kemerbet-readiness:reseal-prefix|\
+      seal-kemerbet-readiness:reseal-publication-prefix|\
+      recheck-kemerbet-readiness:completion-publication-prefix)
+        [[ "$release" == "$KEMERBET_H14_RECOVERY_RELEASE" ]] ||
+          die 'the H14 publication recovery belongs to another reviewed release'
+        return 0
+        ;;
+      stop:host-retired|stop:profile-finalization-prefix|stop:runtime-ready|\
+      stop:cohort-publication-prefix|stop:reseal-publication-prefix|stop:completion-publication-prefix|\
+      expiry-stop:host-retired|expiry-stop:profile-finalization-prefix|expiry-stop:runtime-ready|\
+      expiry-stop:cohort-publication-prefix|expiry-stop:reseal-publication-prefix|expiry-stop:completion-publication-prefix|\
+      stop-public-edge:host-retired|stop-public-edge:profile-finalization-prefix|stop-public-edge:runtime-ready|\
+      stop-public-edge:cohort-publication-prefix|stop-public-edge:reseal-publication-prefix|stop-public-edge:completion-publication-prefix)
+        return 0
+        ;;
+      *:host-retired|*:profile-finalization-prefix)
+        die 'the quarantined H14 predecessor permits only exact profile-recovery finalization or shutdown'
+        ;;
+      *:runtime-ready)
+        die 'the H14 recovery permits no preview until one fresh exact-five cohort is recorded'
+        ;;
+      *:cohort-publication-prefix|*:reseal-publication-prefix|*:completion-publication-prefix)
+        die 'an exact H14 publication prefix permits only its matching recovery command or shutdown'
+        ;;
+    esac
+  fi
   expected_recheck_release="$(required_kemerbet_v3_recheck_release)"
   if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' ]]; then
     case "$command" in
@@ -5794,6 +6743,43 @@ select_kemerbet_session_binding_source() {
   [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
     die 'the private KemerBet session binding release is invalid'
   inspect_kemerbet_v2_v3_successor_gate
+  if [[ "$KEMERBET_H14_RECOVERY_STATE" != 'absent' ]]; then
+    [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$commit_sha" ]] ||
+      die 'the H14 recovery preview belongs to another reviewed release'
+    case "$KEMERBET_H14_RECOVERY_STATE" in
+      cohort-prepared)
+        printf '%s\n' \
+          "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT/$KEMERBET_H14_RECOVERY_RELEASE/recovery-identity-authorization-v1"
+        return 0
+        ;;
+      reseal-prefix|reseal-publication-prefix)
+        die 'the H14 private preview is blocked while the fresh identity binding publication is incomplete'
+        ;;
+      resealed)
+        require_kemerbet_readiness_output_directory
+        [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" &&
+          "$(realpath -- "$KEMERBET_READINESS_BINDING")" == "$KEMERBET_READINESS_BINDING" &&
+          "$(stat --format='%u:%g:%a:%h:%s' "$KEMERBET_READINESS_BINDING")" == \
+            '10001:10001:600:1:230' ]] ||
+          die 'the H14 fresh private-preview binding source is unsafe'
+        require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" ||
+          die 'the H14 fresh private-preview binding contract is invalid'
+        [[ "$(awk '{print $1}' "$KEMERBET_READINESS_BINDING")" == \
+          "$KEMERBET_H14_RECOVERY_PROFILE_ID" ]] ||
+          die 'the H14 fresh private-preview binding belongs to another Profile'
+        printf '%s\n' "$KEMERBET_READINESS_BINDING"
+        return 0
+        ;;
+      completed-prefix|completion-publication-prefix|completed)
+        require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+        require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
+          die 'the completed H14 KemerBet binding contract is invalid'
+        printf '%s\n' "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+        return 0
+        ;;
+      *) die 'the H14 private preview is blocked until the new profile and exact-five cohort are prepared' ;;
+    esac
+  fi
   case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in
     successor-installed)
       require_kemerbet_v3_recheck_bridge "$commit_sha"
@@ -5818,6 +6804,481 @@ select_kemerbet_session_binding_source() {
       ;;
     *) die 'the private KemerBet session is outside an exact installed or completed v3 boundary' ;;
   esac
+}
+
+kemerbet_h14_root() {
+  [[ "$KEMERBET_H14_RECOVERY_RELEASE" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the H14 recovery release is unavailable'
+  printf '%s\n' "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT/$KEMERBET_H14_RECOVERY_RELEASE"
+}
+
+finalize_kemerbet_h14_recovery_profile() {
+  local expected_release="$1" control_mountpoint root
+  [[ "$expected_release" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the H14 profile finalization release is invalid'
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" &&
+    "$KEMERBET_H14_RECOVERY_STATE" =~ ^(host-retired|profile-finalization-prefix|runtime-ready)$ ]] ||
+    die 'the H14 profile finalization boundary is unavailable or belongs to another release'
+  [[ "$KEMERBET_H14_RECOVERY_STATE" != 'runtime-ready' ]] || return 0
+  root="$(kemerbet_h14_root)"
+  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)"
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$root" "$control_mountpoint/$KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_NAME" \
+    "$expected_release" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+root, ack_source, marker_source, profile_finalized_marker, release = sys.argv[1:]
+UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+PROFILE_UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+V3 = re.compile(
+    rb'([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}) '
+    rb'(hmac-sha256-agent-identity-v1:([0-9a-f]{64})) '
+    rb'(hmac-sha256-agent-profile-pin-v3:\3)\n'
+)
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact(path, owner, mode, maximum, exact_size=None):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (*owner, mode, 1)
+            or before.st_size > maximum
+            or (exact_size is not None and before.st_size != exact_size)
+        ):
+            reject()
+        data = os.pread(descriptor, maximum + 1, 0)
+        after = os.fstat(descriptor)
+        if len(data) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_uid,
+            before.st_gid,
+            before.st_nlink,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_uid,
+            after.st_gid,
+            after.st_nlink,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            reject()
+        return data, before
+    finally:
+        os.close(descriptor)
+
+
+def exact_lines(path, owner, mode, count):
+    data, value = exact(path, owner, mode, 8192)
+    lines = data.decode('ascii').splitlines()
+    if len(lines) != count or data != ('\n'.join(lines) + '\n').encode('ascii'):
+        reject()
+    return lines, data, value
+
+
+def write_all(descriptor, data):
+    offset = 0
+    while offset < len(data):
+        written = os.write(descriptor, data[offset:])
+        if written <= 0:
+            reject()
+        offset += written
+
+
+def create_exact(path, data, uid, gid, mode):
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+        mode,
+    )
+    try:
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, mode)
+        write_all(descriptor, data)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def move_exact(source, target, expected, owner, mode):
+    if os.path.lexists(target):
+        if os.path.lexists(source):
+            reject()
+        data, _ = exact(target, owner, mode, len(expected), len(expected))
+        if data != expected:
+            reject()
+        return
+    data, source_value = exact(source, owner, mode, len(expected), len(expected))
+    if data != expected or source_value.st_dev != os.lstat(root).st_dev:
+        reject()
+    os.rename(source, target)
+    target_value = os.lstat(target)
+    if (target_value.st_dev, target_value.st_ino) != (source_value.st_dev, source_value.st_ino):
+        reject()
+    sync_directory(os.path.dirname(target))
+
+
+def publish_root_claim_marker(path, expected):
+    directory = os.path.dirname(path)
+    name = os.path.basename(path)
+    installing = os.path.join(directory, f'.{name}.installing')
+    if os.path.lexists(path):
+        if os.path.lexists(installing):
+            reject()
+        data, _ = exact(path, (0, 10001), 0o440, len(expected), len(expected))
+        if data != expected:
+            reject()
+        return
+    descriptor = None
+    try:
+        if os.path.lexists(installing):
+            descriptor = os.open(installing, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+            value = os.fstat(descriptor)
+            data = os.pread(descriptor, len(expected) + 1, 0)
+            if (
+                not stat.S_ISREG(value.st_mode)
+                or value.st_nlink != 1
+                or value.st_size > len(expected)
+                or data != expected[: value.st_size]
+                or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode))
+                not in {(0, 0, 0o600), (0, 10001, 0o600), (0, 10001, 0o440)}
+            ):
+                reject()
+        else:
+            descriptor = os.open(
+                installing,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+            )
+        os.ftruncate(descriptor, 0)
+        write_all(descriptor, expected)
+        os.fchown(descriptor, 0, 10001)
+        os.fchmod(descriptor, 0o440)
+        os.fsync(descriptor)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    pending, _ = exact(installing, (0, 10001), 0o440, len(expected), len(expected))
+    if pending != expected:
+        reject()
+    sync_directory(directory)
+    os.rename(installing, path)
+    sync_directory(directory)
+    final, _ = exact(path, (0, 10001), 0o440, len(expected), len(expected))
+    if final != expected or os.path.lexists(installing):
+        reject()
+
+
+def transition_profile_finalized_latch(source, target, expected):
+    directory = os.path.dirname(source)
+    if directory != os.path.dirname(target):
+        reject()
+    source_installing = os.path.join(directory, f'.{os.path.basename(source)}.installing')
+    target_installing = os.path.join(directory, f'.{os.path.basename(target)}.installing')
+    if os.path.lexists(source_installing) or os.path.lexists(target_installing):
+        reject()
+    if os.path.lexists(target):
+        if os.path.lexists(source):
+            reject()
+        target_data, _ = exact(target, (0, 10001), 0o440, len(expected), len(expected))
+        if target_data != expected:
+            reject()
+        return
+    source_data, source_value = exact(
+        source,
+        (0, 10001),
+        0o440,
+        len(expected),
+        len(expected),
+    )
+    if source_data != expected:
+        reject()
+    os.rename(source, target)
+    sync_directory(directory)
+    target_data, target_value = exact(
+        target,
+        (0, 10001),
+        0o440,
+        len(expected),
+        len(expected),
+    )
+    if (
+        target_data != expected
+        or os.path.lexists(source)
+        or (target_value.st_dev, target_value.st_ino)
+        != (source_value.st_dev, source_value.st_ino)
+    ):
+        reject()
+
+
+try:
+    if not re.fullmatch(r'[0-9a-f]{40}', release) or os.path.realpath(root) != root:
+        reject()
+    root_value = os.lstat(root)
+    if (
+        not stat.S_ISDIR(root_value.st_mode)
+        or (root_value.st_uid, root_value.st_gid, stat.S_IMODE(root_value.st_mode)) != (0, 0, 0o700)
+    ):
+        reject()
+    intent, _, _ = exact_lines(f'{root}/intent-v1', (0, 0), 0o600, 22)
+    old_claim = intent[7].split('=', 1)[1]
+    old_profile = intent[8].split('=', 1)[1]
+    if UUID.fullmatch(old_claim) is None or PROFILE_UUID.fullmatch(old_profile) is None:
+        reject()
+    old_binding, _ = exact(f'{root}/retired-binding-v3', (10001, 10001), 0o600, 230, 230)
+    old_match = V3.fullmatch(old_binding)
+    if old_match is None or old_match.group(1).decode('ascii') != old_profile:
+        reject()
+
+    ack_target = f'{root}/database-profile-prepared-v1'
+    ack_path = ack_target if os.path.lexists(ack_target) else ack_source
+    ack, ack_data, _ = exact_lines(ack_path, (10001, 10001), 0o400, 9)
+    if (
+        ack[0] != 'version=1'
+        or ack[1] != f'claim_id={old_claim}'
+        or not ack[2].startswith('receipt_id=')
+        or UUID.fullmatch(ack[2].split('=', 1)[1]) is None
+        or ack[3] != 'platform_code=kemerbet'
+        or not ack[4].startswith('platform_agent_account_id=')
+        or PROFILE_UUID.fullmatch(ack[4].split('=', 1)[1]) is None
+        or ack[4].split('=', 1)[1] == old_profile
+        or re.fullmatch(r'profile_revision=[1-9][0-9]*', ack[5]) is None
+        or ack[6:] != [
+            'configuration_reason=security_recovery',
+            'transfer_disabled=true',
+            'money_moved=false',
+        ]
+    ):
+        reject()
+    profile_id = ack[4].split('=', 1)[1]
+    authorization_data = ('\n'.join([
+        'version=1',
+        'contract=fetanagent-kemerbet-quarantine-recovery-identity-authorization-v1',
+        f'old_profile_id={old_profile}',
+        f'old_identity_fingerprint={old_match.group(2).decode("ascii")}',
+        f'new_profile_id={profile_id}',
+        'configuration_reason=security_recovery',
+        'transfer_disabled=true',
+        'money_moved=false',
+    ]) + '\n').encode('ascii')
+    if len(authorization_data) != 389:
+        reject()
+    authorization = f'{root}/recovery-identity-authorization-v1'
+    authorization_temporary = f'{root}/.recovery-identity-authorization-v1.installing'
+    if not os.path.lexists(authorization):
+        if not os.path.lexists(authorization_temporary):
+            create_exact(authorization_temporary, authorization_data, 0, 10001, 0o440)
+        temporary_data, _ = exact(
+            authorization_temporary, (0, 10001), 0o440, 389, 389
+        )
+        if temporary_data != authorization_data:
+            reject()
+        os.rename(authorization_temporary, authorization)
+        sync_directory(root)
+    else:
+        if os.path.lexists(authorization_temporary):
+            reject()
+        current, _ = exact(authorization, (0, 10001), 0o440, 389, 389)
+        if current != authorization_data:
+            reject()
+
+    marker_data = (old_claim + '\n').encode('ascii')
+    publish_root_claim_marker(f'{root}/terminal-recovery-marker-v1', marker_data)
+    transition_profile_finalized_latch(marker_source, profile_finalized_marker, marker_data)
+    move_exact(ack_source, ack_target, ack_data, (10001, 10001), 0o400)
+    runtime_data = ('\n'.join([
+        'version=1',
+        f'recovery_release={release}',
+        f'old_claim_id={old_claim}',
+        f'new_profile_id={profile_id}',
+        f'recovery_identity_authorization_sha256={hashlib.sha256(authorization_data).hexdigest()}',
+        f'database_ack_sha256={hashlib.sha256(ack_data).hexdigest()}',
+        'transfer_disabled=true',
+        'money_moved=false',
+    ]) + '\n').encode('ascii')
+    runtime = f'{root}/runtime-ready-v1'
+    runtime_temporary = f'{root}/.runtime-ready-v1.installing'
+    if not os.path.lexists(runtime):
+        if not os.path.lexists(runtime_temporary):
+            create_exact(runtime_temporary, runtime_data, 0, 0, 0o600)
+        temporary_data, _ = exact(runtime_temporary, (0, 0), 0o600, len(runtime_data), len(runtime_data))
+        if temporary_data != runtime_data:
+            reject()
+        os.rename(runtime_temporary, runtime)
+        sync_directory(root)
+    else:
+        if os.path.lexists(runtime_temporary):
+            reject()
+        current, _ = exact(runtime, (0, 0), 0o600, len(runtime_data), len(runtime_data))
+        if current != runtime_data:
+            reject()
+except Exception:
+    raise SystemExit(1)
+PY
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_STATE" == 'runtime-ready' &&
+    "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" ]] ||
+    die 'the H14 profile finalization did not reach the exact runtime-ready boundary'
+}
+
+publish_kemerbet_h14_record() {
+  local name="$1" mode="$2" producer="$3" root temporary
+  root="$(kemerbet_h14_root)"
+  temporary="$root/.$name.installing"
+  if [[ -e "$root/$name" || -L "$root/$name" ]]; then
+    [[ ! -e "$temporary" && ! -L "$temporary" &&
+      ! -L "$root/$name" && -f "$root/$name" &&
+      "$(stat --format='%U:%G:%a:%h' "$root/$name")" == "root:root:$mode:1" ]] || return 1
+    cmp -s -- "$root/$name" <("$producer")
+    return
+  fi
+  if [[ ! -e "$temporary" && ! -L "$temporary" ]]; then
+    (set -o noclobber; "$producer" >"$temporary") || return 1
+    chown root:root "$temporary" || return 1
+    chmod "$mode" "$temporary" || return 1
+    sync -f "$temporary" || return 1
+  fi
+  [[ ! -L "$temporary" && -f "$temporary" &&
+    "$(stat --format='%U:%G:%a:%h' "$temporary")" == "root:root:$mode:1" ]] || return 1
+  cmp -s -- "$temporary" <("$producer") || return 1
+  mv -- "$temporary" "$root/$name" || return 1
+  sync -f "$root" || return 1
+  cmp -s -- "$root/$name" <("$producer")
+}
+
+record_kemerbet_h14_recovery_cohort() {
+  local expected_release="$1" root old_claim
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" &&
+    "$KEMERBET_H14_RECOVERY_STATE" =~ ^(runtime-ready|cohort-publication-prefix|cohort-latch-retirement-prefix|cohort-freeze-prefix|cohort-prepared)$ ]] ||
+    die 'the H14 exact-five cohort boundary is unavailable or already consumed'
+  root="$(kemerbet_h14_root)"
+  if [[ "$KEMERBET_H14_RECOVERY_STATE" =~ ^(runtime-ready|cohort-publication-prefix)$ ]]; then
+    inspect_owner_staged_kemerbet_cohort
+    old_claim="$(awk -F= '$1 == "old_claim_id" { print $2 }' "$root/intent-v1")"
+    [[ "$old_claim" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+      die 'the retired H14 claim identity could not be read from redacted evidence'
+    [[ "$KEMERBET_RECHECK_OWNER_CLAIM_ID" != "$old_claim" ]] ||
+      die 'the new H14 cohort must not reuse the terminally failed claim'
+    [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME" &&
+      ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME" ]] ||
+      die 'a retryable failure marker must not authorize the fresh H14 cohort'
+    expected_h14_cohort_record() {
+      printf '%s\n' \
+        'version=1' \
+        "recovery_release=$expected_release" \
+        "claim_id=$KEMERBET_RECHECK_OWNER_CLAIM_ID" \
+        "player_ids_dev_ino=$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" \
+        "player_ids_sha256=$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" \
+        "claim_dev_ino=$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" \
+        'player_count=5' \
+        'transfer_disabled=true' \
+        'money_moved=false'
+    }
+    publish_kemerbet_h14_record cohort-prepared-v1 600 expected_h14_cohort_record ||
+      die 'the H14 exact-five cohort receipt could not be published'
+    inspect_kemerbet_h14_recovery_gate
+    [[ "$KEMERBET_H14_RECOVERY_STATE" =~ ^(cohort-latch-retirement-prefix|cohort-freeze-prefix|cohort-prepared)$ ]] ||
+      die 'the H14 exact-five cohort receipt did not reach a recoverable freeze boundary'
+  fi
+  load_kemerbet_h14_cohort_identity "$expected_release"
+  freeze_owner_staged_kemerbet_cohort_for_h14
+  load_kemerbet_h14_cohort_identity "$expected_release"
+  require_frozen_owner_staged_kemerbet_cohort_for_h14
+  retire_kemerbet_h14_profile_finalized_latch "$expected_release"
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' &&
+    "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" ]] ||
+    die 'the H14 exact-five cohort did not reach the prepared boundary'
+  load_kemerbet_h14_cohort_identity "$expected_release"
+  require_frozen_owner_staged_kemerbet_cohort_for_h14
+}
+
+record_kemerbet_h14_reseal() {
+  local expected_release="$1" binding_sha claim_id profile_id root
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" &&
+    "$KEMERBET_H14_RECOVERY_STATE" =~ ^(reseal-prefix|reseal-publication-prefix|resealed)$ ]] ||
+    die 'the H14 reseal output is absent, ambiguous, or belongs to another release'
+  [[ "$KEMERBET_H14_RECOVERY_STATE" != 'resealed' ]] || return 0
+  root="$(kemerbet_h14_root)"
+  claim_id="$(awk -F= '$1 == "claim_id" { print $2 }' "$root/cohort-prepared-v1")"
+  profile_id="$KEMERBET_H14_RECOVERY_PROFILE_ID"
+  binding_sha="$(sha256sum -- "$KEMERBET_READINESS_BINDING" | awk '{print $1}')"
+  expected_h14_reseal_record() {
+    printf '%s\n' \
+      'version=1' \
+      "recovery_release=$expected_release" \
+      "claim_id=$claim_id" \
+      "profile_id=$profile_id" \
+      "binding_sha256=$binding_sha" \
+      'transfer_disabled=true' \
+      'money_moved=false'
+  }
+  publish_kemerbet_h14_record resealed-v1 600 expected_h14_reseal_record ||
+    die 'the H14 reseal receipt could not be published'
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_STATE" == 'resealed' ]] ||
+    die 'the H14 reseal did not reach its exact durable boundary'
+}
+
+record_kemerbet_h14_completion() {
+  local binding_sha claim_id expected_release="$1" profile_id receipt_sha root
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" &&
+    "$KEMERBET_H14_RECOVERY_STATE" =~ ^(completed-prefix|completion-publication-prefix|completed)$ ]] ||
+    die 'the H14 find-only completion is absent, ambiguous, or belongs to another release'
+  [[ "$KEMERBET_H14_RECOVERY_STATE" != 'completed' ]] || return 0
+  root="$(kemerbet_h14_root)"
+  claim_id="$(awk -F= '$1 == "claim_id" { print $2 }' "$root/cohort-prepared-v1")"
+  profile_id="$KEMERBET_H14_RECOVERY_PROFILE_ID"
+  binding_sha="$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')"
+  receipt_sha="$(sha256sum -- "$KEMERBET_RECHECK_RECEIPT" | awk '{print $1}')"
+  expected_h14_completion_record() {
+    printf '%s\n' \
+      'version=1' \
+      "recovery_release=$expected_release" \
+      "claim_id=$claim_id" \
+      "profile_id=$profile_id" \
+      "binding_sha256=$binding_sha" \
+      "recheck_receipt_sha256=$receipt_sha" \
+      'transfer_disabled=true' \
+      'money_moved=false'
+  }
+  publish_kemerbet_h14_record completed-v1 600 expected_h14_completion_record ||
+    die 'the H14 find-only completion receipt could not be published'
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_STATE" == 'completed' ]] ||
+    die 'the H14 find-only recovery did not reach terminal completion'
 }
 
 consume_exact_one_use_kemerbet_file() {
@@ -7518,6 +8979,7 @@ KEMERBET_RECHECK_IDENTITY_KEY_DIGEST=''
 KEMERBET_RECHECK_COMMITTED='false'
 KEMERBET_RECHECK_DURABLE_SUCCESS='false'
 KEMERBET_RECHECK_RECOVERY_OUTCOME=''
+KEMERBET_RECHECK_EXECUTION_STATE='pre_start'
 KEMERBET_TEARDOWN_RECOVERY_FAILED='false'
 KEMERBET_EMERGENCY_TEARDOWN_FAILED='false'
 KEMERBET_RECOVERY_LATCH_DEV_INO=''
@@ -7702,51 +9164,56 @@ kemerbet_recheck_cleanup_trap() {
     fi
     kemerbet_profile_volume_holders_match '' || cleanup_status=1
     if [[ "$KEMERBET_RECHECK_DURABLE_SUCCESS" != 'true' && "$KEMERBET_RECHECK_COMMITTED" != 'true' ]]; then
-      if [[ "$KEMERBET_RECHECK_RECEIPT_OWNED" == 'true' ]]; then
-        remove_owned_kemerbet_recheck_receipt_root || cleanup_status=1
-      fi
-      rollback_kemerbet_recheck_final_binding || cleanup_status=1
-      if [[ "$KEMERBET_RECHECK_CANDIDATE_CREATED" == 'true' ]]; then
-        remove_kemerbet_recheck_candidate || cleanup_status=1
-      fi
-      if [[ -n "$KEMERBET_RECHECK_SOURCE_DEV_INO" && -n "$KEMERBET_RECHECK_SOURCE_DIGEST" ]]; then
-        require_retryable_kemerbet_binding_source \
-          "$KEMERBET_RECHECK_SOURCE_DEV_INO" "$KEMERBET_RECHECK_SOURCE_DIGEST" || cleanup_status=1
+      if [[ "$KEMERBET_RECHECK_EXECUTION_STATE" =~ ^(execution_started|spent)$ ]]; then
+        # Controller release is the irreversible authorization boundary. From this point forward
+        # the exact claim is consumed and terminalized even when the provider result is unknown.
+        # It must never be reconstructed as a retryable failed-v1 cohort.
+        terminalize_spent_kemerbet_recheck_authorization || cleanup_status=1
       else
-        cleanup_status=1
-      fi
-      if [[ -n "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" &&
-        -n "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" ]]; then
-        consume_exact_one_use_kemerbet_file \
-          "$KEMERBET_READINESS_PLAYER_IDS" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
-          "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" || cleanup_status=1
-      else
-        # Import may have failed after creating a target but before shell captured its inode.
-        # Keep the journal so locked recovery can bind/consume only the exact staged content.
-        cleanup_status=1
-      fi
-      repair_kemerbet_identity_key_readability || cleanup_status=1
-      if [[ -n "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" &&
-        -n "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" &&
-        -n "$KEMERBET_RECHECK_OWNER_CLAIM_ID" &&
-        -n "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" ]]; then
-        if [[ "$cleanup_status" -eq 0 ]]; then
-          # Publish retryable failure only after the sealed binding source remains exact, the
-          # internal copy is durably absent, and both digest-bound Owner stages are restored.
-          restore_retryable_owner_staged_kemerbet_cohort || cleanup_status=1
-        else
-          # Best-effort restoration is safe, but an incomplete rollback must retain its journal
-          # and must not expose failed-v1 as a directly retryable state.
-          restore_owner_staged_kemerbet_cohort || cleanup_status=1
+        if [[ "$KEMERBET_RECHECK_RECEIPT_OWNED" == 'true' ]]; then
+          remove_owned_kemerbet_recheck_receipt_root || cleanup_status=1
         fi
-      else
-        cleanup_status=1
-      fi
-      if [[ "$KEMERBET_RECHECK_PROMOTION_OWNED" == 'true' ]]; then
-        # The journal is the crash-recovery authority. Retire it only after every rollback,
-        # source-restoration, marker, and secret-repair step succeeded.
-        if [[ "$cleanup_status" -eq 0 ]]; then
-          remove_owned_kemerbet_recheck_promotion_root || cleanup_status=1
+        rollback_kemerbet_recheck_final_binding || cleanup_status=1
+        if [[ "$KEMERBET_RECHECK_CANDIDATE_CREATED" == 'true' ]]; then
+          remove_kemerbet_recheck_candidate || cleanup_status=1
+        fi
+        if [[ -n "$KEMERBET_RECHECK_SOURCE_DEV_INO" && -n "$KEMERBET_RECHECK_SOURCE_DIGEST" ]]; then
+          require_retryable_kemerbet_binding_source \
+            "$KEMERBET_RECHECK_SOURCE_DEV_INO" "$KEMERBET_RECHECK_SOURCE_DIGEST" || cleanup_status=1
+        else
+          cleanup_status=1
+        fi
+        if [[ -n "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" &&
+          -n "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" ]]; then
+          consume_exact_one_use_kemerbet_file \
+            "$KEMERBET_READINESS_PLAYER_IDS" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
+            "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" || cleanup_status=1
+        else
+          # Import may have failed after creating a target but before shell captured its inode.
+          # Keep the journal so locked recovery can bind/consume only the exact staged content.
+          cleanup_status=1
+        fi
+        repair_kemerbet_identity_key_readability || cleanup_status=1
+        if [[ -n "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" &&
+          -n "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" &&
+          -n "$KEMERBET_RECHECK_OWNER_CLAIM_ID" &&
+          -n "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" ]]; then
+          if [[ "$cleanup_status" -eq 0 ]]; then
+            # Publish retryable failure only before controller authorization has started and only
+            # after the exact binding source and both digest-bound Owner stages are restored.
+            restore_retryable_owner_staged_kemerbet_cohort || cleanup_status=1
+          else
+            restore_owner_staged_kemerbet_cohort || cleanup_status=1
+          fi
+        else
+          cleanup_status=1
+        fi
+        if [[ "$KEMERBET_RECHECK_PROMOTION_OWNED" == 'true' ]]; then
+          # The journal is the crash-recovery authority. Retire it only after every rollback,
+          # source-restoration, marker, and secret-repair step succeeded.
+          if [[ "$cleanup_status" -eq 0 ]]; then
+            remove_owned_kemerbet_recheck_promotion_root || cleanup_status=1
+          fi
         fi
       fi
     fi
@@ -8033,7 +9500,7 @@ advance_kemerbet_recheck_promotion_journal() {
   temporary="$(mktemp "$KEMERBET_RECHECK_PROMOTION_ROOT/.pending-v1.XXXXXX")" ||
     die 'the candidate-bound KemerBet promotion journal could not be prepared'
   if ! printf '%s\n' \
-    'version=1' \
+    'version=2' \
     'state=candidate_bound' \
     "release=$commit_sha" \
     "source_dev_ino=$source_dev_ino" \
@@ -8146,7 +9613,7 @@ require_kemerbet_recheck_promotion_journal() {
     die 'the KemerBet promotion journal is unsafe'
   expected_digest="$({
     printf '%s\n' \
-      'version=1' \
+      'version=2' \
       'state=candidate_bound' \
       "release=$commit_sha" \
       "source_dev_ino=$source_dev_ino" \
@@ -8167,6 +9634,437 @@ require_kemerbet_recheck_promotion_journal() {
   actual_digest="$(sha256sum -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL" | awk '{print $1}')"
   [[ "$actual_digest" == "$expected_digest" ]] ||
     die 'the KemerBet promotion journal content is not exact'
+}
+
+write_kemerbet_recheck_bound_promotion_journal_state() {
+  local journal_state="$1"
+  local commit_sha="$2" source_dev_ino="$3" binding_dev_ino="$4" binding_digest="$5"
+  local identity_key_digest="$6" selector_digest="$7" image_id="$8"
+  local profile_identity_digest="$9" session_container="${10}" player_ids_dev_ino="${11}"
+  local owner_player_ids_dev_ino="${12}" owner_claim_dev_ino="${13}"
+  local claim_id="${14}" player_ids_digest="${15}" temporary
+  [[ "$journal_state" =~ ^(execution_started|spent)$ ]] ||
+    die 'the KemerBet authorization journal state is invalid'
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ &&
+    "$source_dev_ino" =~ ^[0-9]+:[0-9]+$ && "$binding_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$binding_digest" =~ ^[0-9a-f]{64}$ && "$identity_key_digest" =~ ^[0-9a-f]{64}$ &&
+    "$selector_digest" =~ ^[0-9a-f]{64}$ && "$image_id" =~ ^sha256:[0-9a-f]{64}$ &&
+    "$profile_identity_digest" =~ ^[0-9a-f]{64}$ &&
+    "$session_container" =~ ^(none|[0-9a-f]{12,64})$ &&
+    "$player_ids_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$owner_player_ids_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$owner_claim_dev_ino" =~ ^[0-9]+:[0-9]+$ &&
+    "$claim_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
+    "$player_ids_digest" =~ ^[0-9a-f]{64}$ ]] ||
+    die 'the KemerBet authorization journal identity is invalid'
+  temporary="$(mktemp "$KEMERBET_RECHECK_PROMOTION_ROOT/.pending-v1.XXXXXX")" ||
+    die 'the KemerBet authorization journal could not be prepared'
+  if ! printf '%s\n' \
+    'version=2' \
+    "state=$journal_state" \
+    "release=$commit_sha" \
+    "source_dev_ino=$source_dev_ino" \
+    "binding_dev_ino=$binding_dev_ino" \
+    "binding_sha256=$binding_digest" \
+    "identity_hmac_key_sha256=$identity_key_digest" \
+    "selector_sha256=$selector_digest" \
+    "image_id=$image_id" \
+    "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+    "profile_identity_sha256=$profile_identity_digest" \
+    "session_container=$session_container" \
+    "player_ids_dev_ino=$player_ids_dev_ino" \
+    "owner_stage_player_ids_dev_ino=$owner_player_ids_dev_ino" \
+    "owner_stage_claim_dev_ino=$owner_claim_dev_ino" \
+    "claim_id=$claim_id" \
+    "player_ids_sha256=$player_ids_digest" >"$temporary"; then
+    rm -f -- "$temporary"
+    die 'the KemerBet authorization journal could not be written'
+  fi
+  chown root:root "$temporary"
+  chmod 0600 "$temporary"
+  sync -f "$temporary" || die 'the KemerBet authorization journal could not be synchronized'
+  mv -f -- "$temporary" "$KEMERBET_RECHECK_PROMOTION_JOURNAL"
+  sync -f "$KEMERBET_RECHECK_PROMOTION_ROOT" ||
+    die 'the KemerBet authorization journal directory could not be synchronized'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the KemerBet authorization journal is unsafe'
+}
+
+require_kemerbet_recheck_bound_promotion_journal_state() {
+  local journal_version="$1" journal_state="$2"
+  local commit_sha="$3" source_dev_ino="$4" binding_dev_ino="$5" binding_digest="$6"
+  local identity_key_digest="$7" selector_digest="$8" image_id="$9"
+  local profile_identity_digest="${10}" session_container="${11}" player_ids_dev_ino="${12}"
+  local owner_player_ids_dev_ino="${13}" owner_claim_dev_ino="${14}"
+  local claim_id="${15}" player_ids_digest="${16}"
+  local actual_digest entries expected_digest
+  [[ ( "$journal_version" == '1' && "$journal_state" == 'candidate_bound' ) ||
+    ( "$journal_version" == '2' && "$journal_state" =~ ^(execution_started|spent)$ ) ]] ||
+    die 'the required KemerBet authorization journal state is invalid'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" && -d "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_ROOT")" == "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    "$(stat --format='%U:%G:%a' "$KEMERBET_RECHECK_PROMOTION_ROOT")" == 'root:root:700' ]] ||
+    die 'the KemerBet authorization journal root is unsafe'
+  entries="$(find -P "$KEMERBET_RECHECK_PROMOTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+    die 'the KemerBet authorization journal root could not be inspected'
+  [[ "$entries" == 'pending-v1' ]] ||
+    die 'the KemerBet authorization journal root is not exact'
+  [[ ! -L "$KEMERBET_RECHECK_PROMOTION_JOURNAL" && -f "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(realpath -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == "$KEMERBET_RECHECK_PROMOTION_JOURNAL" &&
+    "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
+    die 'the KemerBet authorization journal is unsafe'
+  expected_digest="$({
+    printf '%s\n' \
+      "version=$journal_version" \
+      "state=$journal_state" \
+      "release=$commit_sha" \
+      "source_dev_ino=$source_dev_ino" \
+      "binding_dev_ino=$binding_dev_ino" \
+      "binding_sha256=$binding_digest" \
+      "identity_hmac_key_sha256=$identity_key_digest" \
+      "selector_sha256=$selector_digest" \
+      "image_id=$image_id" \
+      "profile_volume=$KEMERBET_PROFILE_VOLUME" \
+      "profile_identity_sha256=$profile_identity_digest" \
+      "session_container=$session_container" \
+      "player_ids_dev_ino=$player_ids_dev_ino" \
+      "owner_stage_player_ids_dev_ino=$owner_player_ids_dev_ino" \
+      "owner_stage_claim_dev_ino=$owner_claim_dev_ino" \
+      "claim_id=$claim_id" \
+      "player_ids_sha256=$player_ids_digest"
+  } | sha256sum | awk '{print $1}')"
+  actual_digest="$(sha256sum -- "$KEMERBET_RECHECK_PROMOTION_JOURNAL" | awk '{print $1}')"
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die 'the KemerBet authorization journal content is not exact'
+}
+
+require_kemerbet_recheck_execution_started_promotion_journal() {
+  require_kemerbet_recheck_bound_promotion_journal_state 2 execution_started "$@"
+}
+
+require_kemerbet_recheck_spent_promotion_journal() {
+  require_kemerbet_recheck_bound_promotion_journal_state 2 spent "$@"
+}
+
+require_kemerbet_recheck_legacy_candidate_promotion_journal() {
+  require_kemerbet_recheck_bound_promotion_journal_state 1 candidate_bound "$@"
+}
+
+advance_kemerbet_recheck_promotion_journal_to_execution_started() {
+  require_kemerbet_recheck_promotion_journal "$@"
+  write_kemerbet_recheck_bound_promotion_journal_state execution_started "$@"
+  require_kemerbet_recheck_execution_started_promotion_journal "$@"
+}
+
+advance_kemerbet_recheck_promotion_journal_to_spent() {
+  require_kemerbet_recheck_execution_started_promotion_journal "$@"
+  write_kemerbet_recheck_bound_promotion_journal_state spent "$@"
+  require_kemerbet_recheck_spent_promotion_journal "$@"
+}
+
+kemerbet_recheck_spent_failed_terminal_marker() {
+  local action="$1" claim_id="$2" marker_status=0
+  [[ "$action" =~ ^(publish|require)$ &&
+    "$claim_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+    return 1
+  require_kemerbet_recovery_latch_authority || return 1
+  require_owner_kemerbet_receipt_service_access || return 1
+  if env -i PATH="$SAFE_PATH" python3 -I - \
+    "$action" "$KEMERBET_OWNER_RECEIPT_ROOT" \
+    "$KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_INSTALLING_NAME" \
+    "$claim_id" "$KEMERBET_RECOVERY_LATCH_NAME" "$KEMERBET_RECOVERY_LATCH_DEV_INO" <<'PY'
+import os
+import re
+import stat
+import sys
+
+
+CLAIM = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+DEV_INO = re.compile(r'[0-9]+:[0-9]+')
+LATCH_CONTENT = b'fetanagent-kemerbet-readiness-recovery-in-progress-or-failed-v1\n'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def mode(value):
+    return stat.S_IMODE(value.st_mode)
+
+
+def optional(directory_fd, name):
+    try:
+        return os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def read_exact(directory_fd, name, expected, links=1):
+    named = optional(directory_fd, name)
+    if (
+        named is None
+        or not stat.S_ISREG(named.st_mode)
+        or (named.st_uid, named.st_gid, mode(named), named.st_nlink, named.st_size)
+        != (0, 10001, 0o440, links, len(expected))
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_fd,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        content = os.pread(descriptor, len(expected) + 1, 0)
+    finally:
+        os.close(descriptor)
+    if (
+        (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        or opened.st_mode != named.st_mode
+        or opened.st_uid != named.st_uid
+        or opened.st_gid != named.st_gid
+        or opened.st_nlink != named.st_nlink
+        or opened.st_size != named.st_size
+        or content != expected
+    ):
+        reject()
+    return named
+
+
+def require_latch(directory_fd, latch_name, latch_dev_ino):
+    latch = optional(directory_fd, latch_name)
+    if latch is None:
+        if latch_dev_ino:
+            reject()
+        return False
+    if (
+        DEV_INO.fullmatch(latch_dev_ino) is None
+        or not stat.S_ISREG(latch.st_mode)
+        or (latch.st_uid, latch.st_gid, mode(latch), latch.st_nlink, latch.st_size)
+        != (0, 0, 0o400, 1, len(LATCH_CONTENT))
+        or f'{latch.st_dev}:{latch.st_ino}' != latch_dev_ino
+    ):
+        reject()
+    descriptor = os.open(
+        latch_name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_fd,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        content = os.pread(descriptor, len(LATCH_CONTENT) + 1, 0)
+    finally:
+        os.close(descriptor)
+    if (
+        (opened.st_dev, opened.st_ino) != (latch.st_dev, latch.st_ino)
+        or opened.st_mode != latch.st_mode
+        or opened.st_uid != latch.st_uid
+        or opened.st_gid != latch.st_gid
+        or opened.st_nlink != 1
+        or opened.st_size != len(LATCH_CONTENT)
+        or content != LATCH_CONTENT
+    ):
+        reject()
+    return True
+
+
+def write_all(descriptor, content):
+    offset = 0
+    while offset < len(content):
+        written = os.write(descriptor, content[offset:])
+        if written <= 0:
+            reject()
+        offset += written
+
+
+def publish(directory_fd, marker_name, installing_name, content):
+    final = optional(directory_fd, marker_name)
+    installing = optional(directory_fd, installing_name)
+    if final is not None:
+        if installing is not None:
+            if (
+                (installing.st_dev, installing.st_ino) != (final.st_dev, final.st_ino)
+                or installing.st_nlink != 2
+                or final.st_nlink != 2
+            ):
+                reject()
+            read_exact(directory_fd, marker_name, content, 2)
+            read_exact(directory_fd, installing_name, content, 2)
+            os.unlink(installing_name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+        read_exact(directory_fd, marker_name, content)
+        return
+    if installing is not None:
+        if (
+            not stat.S_ISREG(installing.st_mode)
+            or installing.st_nlink != 1
+            or installing.st_size > len(content)
+            or (installing.st_uid, installing.st_gid, mode(installing))
+            not in {(0, 0, 0o600), (0, 10001, 0o440)}
+        ):
+            reject()
+        descriptor = os.open(
+            installing_name,
+            os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory_fd,
+        )
+        try:
+            opened = os.fstat(descriptor)
+            prefix = os.pread(descriptor, len(content) + 1, 0)
+            if (
+                (opened.st_dev, opened.st_ino) != (installing.st_dev, installing.st_ino)
+                or opened.st_mode != installing.st_mode
+                or opened.st_uid != installing.st_uid
+                or opened.st_gid != installing.st_gid
+                or opened.st_nlink != 1
+                or opened.st_size != installing.st_size
+                or prefix != content[: len(prefix)]
+            ):
+                reject()
+            os.ftruncate(descriptor, 0)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            write_all(descriptor, content)
+            os.fchown(descriptor, 0, 10001)
+            os.fchmod(descriptor, 0o440)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    else:
+        descriptor = os.open(
+            installing_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        try:
+            write_all(descriptor, content)
+            os.fchown(descriptor, 0, 10001)
+            os.fchmod(descriptor, 0o440)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    read_exact(directory_fd, installing_name, content)
+    os.link(
+        installing_name,
+        marker_name,
+        src_dir_fd=directory_fd,
+        dst_dir_fd=directory_fd,
+        follow_symlinks=False,
+    )
+    os.fsync(directory_fd)
+    read_exact(directory_fd, installing_name, content, 2)
+    read_exact(directory_fd, marker_name, content, 2)
+    os.unlink(installing_name, dir_fd=directory_fd)
+    os.fsync(directory_fd)
+    read_exact(directory_fd, marker_name, content)
+
+
+def main():
+    action, directory, marker_name, installing_name, claim_id, latch_name, latch_dev_ino = sys.argv[1:]
+    if (
+        action not in {'publish', 'require'}
+        or marker_name != 'kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1'
+        or installing_name != '.kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1.installing'
+        or CLAIM.fullmatch(claim_id) is None
+        or latch_name != 'kemerbet-readiness-recovery-in-progress-or-failed-v1'
+    ):
+        reject()
+    content = (claim_id + '\n').encode('ascii')
+    directory_fd = os.open(
+        directory,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    try:
+        opened = os.fstat(directory_fd)
+        named = os.lstat(directory)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or (opened.st_uid, opened.st_gid, mode(opened)) != (0, 0, 0o755)
+            or named.st_mode != opened.st_mode
+            or named.st_uid != opened.st_uid
+            or named.st_gid != opened.st_gid
+            or os.path.realpath(directory) != directory
+        ):
+            reject()
+        has_latch = require_latch(directory_fd, latch_name, latch_dev_ino)
+        namespace = {marker_name, installing_name}
+        if has_latch:
+            namespace.add(latch_name)
+        if any(entry not in namespace for entry in os.listdir(directory_fd)):
+            reject()
+        if action == 'publish':
+            publish(directory_fd, marker_name, installing_name, content)
+        else:
+            if optional(directory_fd, installing_name) is not None:
+                reject()
+            read_exact(directory_fd, marker_name, content)
+        require_latch(directory_fd, latch_name, latch_dev_ino)
+        if sorted(os.listdir(directory_fd)) != sorted(
+            {marker_name} | ({latch_name} if has_latch else set())
+        ):
+            reject()
+    finally:
+        os.close(directory_fd)
+
+
+try:
+    if len(sys.argv) != 8:
+        reject()
+    main()
+except BaseException:
+    raise SystemExit(1)
+PY
+  then
+    marker_status=0
+  else
+    marker_status=$?
+  fi
+  [[ "$marker_status" -eq 0 ]]
+}
+
+terminalize_spent_kemerbet_recheck_authorization() {
+  local terminal_marker="$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_NAME"
+  if [[ -e "$terminal_marker" || -L "$terminal_marker" ]]; then
+    # `publish` is also the exact crash repair for the durable hard-link prefix where both the
+    # final and installing names exist with link count two. `require` intentionally accepts only
+    # the single-link terminal state and would make that post-link/pre-unlink prefix unrecoverable.
+    kemerbet_recheck_spent_failed_terminal_marker publish "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
+  else
+    if [[ "$KEMERBET_RECHECK_RECEIPT_OWNED" == 'true' ||
+      -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
+      remove_owned_kemerbet_recheck_receipt_root || return 1
+      KEMERBET_RECHECK_RECEIPT_OWNED='false'
+    fi
+    rollback_kemerbet_recheck_final_binding || return 1
+    consume_exact_one_use_kemerbet_file \
+      "$KEMERBET_READINESS_PLAYER_IDS" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
+      "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" || return 1
+    remove_kemerbet_recheck_candidate || return 1
+    KEMERBET_RECHECK_CANDIDATE_CREATED='false'
+    consume_exact_kemerbet_binding_source \
+      "$KEMERBET_RECHECK_SOURCE_DEV_INO" "$KEMERBET_RECHECK_SOURCE_DIGEST" || return 1
+    repair_kemerbet_identity_key_readability || return 1
+    consume_owner_staged_kemerbet_cohort || return 1
+    owner_kemerbet_cohort_marker remove-imported "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
+    owner_kemerbet_cohort_marker remove-failed "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
+    [[ ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" &&
+      ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" &&
+      ! -e "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" &&
+      ! -L "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" ]] || return 1
+    kemerbet_recheck_spent_failed_terminal_marker publish "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
+  fi
+  remove_owned_kemerbet_recheck_promotion_root || return 1
+  KEMERBET_RECHECK_PROMOTION_OWNED='false'
+  [[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "$KEMERBET_RECHECK_PROMOTION_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+    ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+    ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+    ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" &&
+    ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] || return 1
+  kemerbet_recheck_spent_failed_terminal_marker require "$KEMERBET_RECHECK_OWNER_CLAIM_ID"
 }
 
 require_committed_kemerbet_recheck_boundary_shape() {
@@ -8527,6 +10425,12 @@ RECEIPT_MARKERS = {
     '.kemerbet-readiness-cohort-completed-v1.installing',
     'kemerbet-readiness-cohort-failed-v1',
     '.kemerbet-readiness-cohort-failed-v1.installing',
+    'kemerbet-readiness-cohort-security-recovery-failed-terminal-v1',
+    '.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing',
+    'kemerbet-readiness-cohort-security-recovery-profile-finalized-v1',
+    '.kemerbet-readiness-cohort-security-recovery-profile-finalized-v1.installing',
+    'kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1',
+    '.kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1.installing',
 }
 
 
@@ -8611,13 +10515,26 @@ def main():
             if (
                 journal_stat.st_size < 1
                 or len(journal_lines) < 2
-                or journal_lines[0] != b'version=1'
-                or journal_lines[1]
-                not in {
-                    b'state=import_prepared',
-                    b'state=prepared',
-                    b'state=candidate_bound',
-                }
+                or not (
+                    (
+                        journal_lines[0] == b'version=1'
+                        and journal_lines[1]
+                        in {
+                            b'state=import_prepared',
+                            b'state=prepared',
+                            b'state=candidate_bound',
+                        }
+                    )
+                    or (
+                        journal_lines[0] == b'version=2'
+                        and journal_lines[1]
+                        in {
+                            b'state=candidate_bound',
+                            b'state=execution_started',
+                            b'state=spent',
+                        }
+                    )
+                )
             ):
                 reject()
         residue_fd, residue_stat, residue_content = open_exact(
@@ -8706,8 +10623,10 @@ require_kemerbet_recovery_fallback_publish_boundary() {
     return 1
   journal_size="$(stat --format='%s' "$KEMERBET_RECHECK_PROMOTION_JOURNAL" 2>/dev/null)" || return 1
   [[ "$journal_size" =~ ^[0-9]+$ && "$journal_size" -ge 1 && "$journal_size" -le 4096 ]] || return 1
-  [[ "$(sed -n '1p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'version=1' &&
-    "$(sed -n '2p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" =~ ^state=(import_prepared|prepared|candidate_bound)$ ]] ||
+  [[ ( "$(sed -n '1p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'version=1' &&
+      "$(sed -n '2p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" =~ ^state=(import_prepared|prepared|candidate_bound)$ ) ||
+    ( "$(sed -n '1p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'version=2' &&
+      "$(sed -n '2p' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" =~ ^state=(candidate_bound|execution_started|spent)$ ) ]] ||
     return 1
 }
 
@@ -8766,9 +10685,18 @@ def main():
             or not 1 <= journal_stat.st_size <= 4096
             or len(journal_content) != journal_stat.st_size
             or len(journal_lines) < 2
-            or journal_lines[0] != b'version=1'
-            or journal_lines[1]
-            not in {b'state=import_prepared', b'state=prepared', b'state=candidate_bound'}
+            or not (
+                (
+                    journal_lines[0] == b'version=1'
+                    and journal_lines[1]
+                    in {b'state=import_prepared', b'state=prepared', b'state=candidate_bound'}
+                )
+                or (
+                    journal_lines[0] == b'version=2'
+                    and journal_lines[1]
+                    in {b'state=candidate_bound', b'state=execution_started', b'state=spent'}
+                )
+            )
         ):
             raise RuntimeError
         named_journal = os.stat(journal_name, dir_fd=root_fd, follow_symlinks=False)
@@ -9147,6 +11075,15 @@ require_retired_kemerbet_recovery_boundary() {
       require_committed_kemerbet_recheck_boundary_shape || return 1
       require_completed_owner_kemerbet_cohort_marker || return 1
       ;;
+    spent_failed_terminal)
+      [[ ! -e "$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "$KEMERBET_RECHECK_RECEIPT_ROOT" &&
+        ! -e "$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "$KEMERBET_RECHECK_CANDIDATE_ROOT" &&
+        ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" && ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+        ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" &&
+        ! -e "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
+        die 'the terminal spent KemerBet authorization retained a reusable artifact'
+      kemerbet_recheck_spent_failed_terminal_marker require "$KEMERBET_RECHECK_OWNER_CLAIM_ID" || return 1
+      ;;
     retryable) require_retryable_kemerbet_recovery_boundary || return 1 ;;
     prejournal_no_mutation) require_prejournal_kemerbet_recovery_boundary || return 1 ;;
     *) die 'the retired KemerBet recovery outcome is missing or invalid' ;;
@@ -9305,7 +11242,7 @@ recover_incomplete_kemerbet_recheck_promotion_guarded() {
 }
 
 recover_incomplete_kemerbet_recheck_promotion() {
-  local actual_entries candidate_dev_ino candidate_digest claim_id entry player_ids_dev_ino
+  local actual_entries authorization_state candidate_dev_ino candidate_digest claim_id entry player_ids_dev_ino
   local commit_sha receipt_entries receipt_present canonical_present session_container source_dev_ino state
   local owner_player_ids_dev_ino owner_claim_dev_ino player_ids_digest
   local -a journal_lines=()
@@ -9404,12 +11341,12 @@ recover_incomplete_kemerbet_recheck_promotion() {
   [[ "$(stat --format='%U:%G:%a:%h' "$KEMERBET_RECHECK_PROMOTION_JOURNAL")" == 'root:root:600:1' ]] ||
     die 'the interrupted KemerBet promotion journal ownership, mode, or link count is unsafe'
   mapfile -t journal_lines <"$KEMERBET_RECHECK_PROMOTION_JOURNAL"
-  [[ "${#journal_lines[@]}" -ge 2 && "${journal_lines[0]}" == 'version=1' ]] ||
+  [[ "${#journal_lines[@]}" -ge 2 && "${journal_lines[0]}" =~ ^version=(1|2)$ ]] ||
     die 'the interrupted KemerBet promotion journal header is invalid'
   state="${journal_lines[1]}"
 
   if [[ "$state" == 'state=import_prepared' ]]; then
-    [[ "${#journal_lines[@]}" -eq 14 &&
+    [[ "${journal_lines[0]}" == 'version=1' && "${#journal_lines[@]}" -eq 14 &&
       "${journal_lines[2]}" =~ ^release=[0-9a-f]{40}$ &&
       "${journal_lines[3]}" =~ ^source_dev_ino=[0-9]+:[0-9]+$ &&
       "${journal_lines[4]}" =~ ^binding_sha256=[0-9a-f]{64}$ &&
@@ -9483,7 +11420,7 @@ recover_incomplete_kemerbet_recheck_promotion() {
   fi
 
   if [[ "$state" == 'state=prepared' ]]; then
-    [[ "${#journal_lines[@]}" -eq 15 &&
+    [[ "${journal_lines[0]}" == 'version=1' && "${#journal_lines[@]}" -eq 15 &&
       "${journal_lines[2]}" =~ ^release=[0-9a-f]{40}$ &&
       "${journal_lines[3]}" =~ ^source_dev_ino=[0-9]+:[0-9]+$ &&
       "${journal_lines[4]}" =~ ^binding_sha256=[0-9a-f]{64}$ &&
@@ -9551,7 +11488,10 @@ recover_incomplete_kemerbet_recheck_promotion() {
     return 0
   fi
 
-  [[ "$state" == 'state=candidate_bound' && "${#journal_lines[@]}" -eq 17 &&
+  [[ ( ( "${journal_lines[0]}" == 'version=2' &&
+      "$state" =~ ^state=(candidate_bound|execution_started|spent)$ ) ||
+      ( "${journal_lines[0]}" == 'version=1' && "$state" == 'state=candidate_bound' ) ) &&
+    "${#journal_lines[@]}" -eq 17 &&
     "${journal_lines[2]}" =~ ^release=[0-9a-f]{40}$ &&
     "${journal_lines[3]}" =~ ^source_dev_ino=[0-9]+:[0-9]+$ &&
     "${journal_lines[4]}" =~ ^binding_dev_ino=[0-9]+:[0-9]+$ &&
@@ -9567,7 +11507,11 @@ recover_incomplete_kemerbet_recheck_promotion() {
     "${journal_lines[14]}" =~ ^owner_stage_claim_dev_ino=[0-9]+:[0-9]+$ &&
     "${journal_lines[15]}" =~ ^claim_id=[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
     "${journal_lines[16]}" =~ ^player_ids_sha256=[0-9a-f]{64}$ ]] ||
-    die 'the interrupted candidate-bound KemerBet promotion journal is invalid'
+    die 'the interrupted bound KemerBet promotion journal is invalid'
+  authorization_state="${state#state=}"
+  if [[ "${journal_lines[0]}" == 'version=1' ]]; then
+    authorization_state='legacy_candidate_unknown'
+  fi
   commit_sha="${journal_lines[2]#release=}"
   source_dev_ino="${journal_lines[3]#source_dev_ino=}"
   candidate_dev_ino="${journal_lines[4]#binding_dev_ino=}"
@@ -9607,7 +11551,8 @@ recover_incomplete_kemerbet_recheck_promotion() {
       die 'the interrupted partial KemerBet receipt could not be rolled back'
     receipt_present='false'
   fi
-  if [[ "$receipt_present" == 'true' && "$canonical_present" != 'true' ]]; then
+  if [[ "$receipt_present" == 'true' && "$canonical_present" != 'true' &&
+    "$authorization_state" == 'candidate_bound' ]]; then
     die 'an interrupted KemerBet recheck receipt lacks its committed binding'
   fi
   if [[ "$receipt_present" == 'true' && "$canonical_present" == 'true' ]]; then
@@ -9616,13 +11561,44 @@ recover_incomplete_kemerbet_recheck_promotion() {
       "${journal_lines[6]#identity_hmac_key_sha256=}" \
       "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
       "${journal_lines[10]#profile_identity_sha256=}"
-    require_kemerbet_recheck_promotion_journal \
-      "$commit_sha" "$source_dev_ino" "$candidate_dev_ino" "$candidate_digest" \
-      "${journal_lines[6]#identity_hmac_key_sha256=}" \
-      "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
-      "${journal_lines[10]#profile_identity_sha256=}" "$session_container" \
-      "$player_ids_dev_ino" "$owner_player_ids_dev_ino" "$owner_claim_dev_ino" \
-      "$claim_id" "$player_ids_digest"
+    case "$authorization_state" in
+      candidate_bound)
+        require_kemerbet_recheck_promotion_journal \
+          "$commit_sha" "$source_dev_ino" "$candidate_dev_ino" "$candidate_digest" \
+          "${journal_lines[6]#identity_hmac_key_sha256=}" \
+          "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
+          "${journal_lines[10]#profile_identity_sha256=}" "$session_container" \
+          "$player_ids_dev_ino" "$owner_player_ids_dev_ino" "$owner_claim_dev_ino" \
+          "$claim_id" "$player_ids_digest"
+        ;;
+      legacy_candidate_unknown)
+        require_kemerbet_recheck_legacy_candidate_promotion_journal \
+          "$commit_sha" "$source_dev_ino" "$candidate_dev_ino" "$candidate_digest" \
+          "${journal_lines[6]#identity_hmac_key_sha256=}" \
+          "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
+          "${journal_lines[10]#profile_identity_sha256=}" "$session_container" \
+          "$player_ids_dev_ino" "$owner_player_ids_dev_ino" "$owner_claim_dev_ino" \
+          "$claim_id" "$player_ids_digest"
+        ;;
+      execution_started)
+        require_kemerbet_recheck_execution_started_promotion_journal \
+          "$commit_sha" "$source_dev_ino" "$candidate_dev_ino" "$candidate_digest" \
+          "${journal_lines[6]#identity_hmac_key_sha256=}" \
+          "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
+          "${journal_lines[10]#profile_identity_sha256=}" "$session_container" \
+          "$player_ids_dev_ino" "$owner_player_ids_dev_ino" "$owner_claim_dev_ino" \
+          "$claim_id" "$player_ids_digest"
+        ;;
+      spent)
+        require_kemerbet_recheck_spent_promotion_journal \
+          "$commit_sha" "$source_dev_ino" "$candidate_dev_ino" "$candidate_digest" \
+          "${journal_lines[6]#identity_hmac_key_sha256=}" \
+          "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
+          "${journal_lines[10]#profile_identity_sha256=}" "$session_container" \
+          "$player_ids_dev_ino" "$owner_player_ids_dev_ino" "$owner_claim_dev_ino" \
+          "$claim_id" "$player_ids_digest"
+        ;;
+    esac
     # The exact current release/image/profile/runtime/no-holder/singleton/no-transient boundary is
     # re-proved before recovery is allowed to consume anything or publish completed-v1.
     require_current_kemerbet_success_runtime_boundary \
@@ -9663,6 +11639,26 @@ recover_incomplete_kemerbet_recheck_promotion() {
     remove_owned_kemerbet_recheck_promotion_root ||
       die 'the interrupted committed KemerBet promotion journal could not be retired'
     KEMERBET_RECHECK_RECOVERY_OUTCOME='committed'
+    KEMERBET_RECHECK_CANDIDATE_DEV_INO=''
+    KEMERBET_RECHECK_CANDIDATE_DIGEST=''
+    return 0
+  fi
+  if [[ "$authorization_state" =~ ^(execution_started|spent|legacy_candidate_unknown)$ ]]; then
+    KEMERBET_RECHECK_CANDIDATE_DEV_INO="$candidate_dev_ino"
+    KEMERBET_RECHECK_CANDIDATE_DIGEST="$candidate_digest"
+    KEMERBET_RECHECK_EXECUTION_STATE='spent'
+    if [[ "$authorization_state" == 'execution_started' ]]; then
+      advance_kemerbet_recheck_promotion_journal_to_spent \
+        "$commit_sha" "$source_dev_ino" "$candidate_dev_ino" "$candidate_digest" \
+        "${journal_lines[6]#identity_hmac_key_sha256=}" \
+        "${journal_lines[7]#selector_sha256=}" "${journal_lines[8]#image_id=}" \
+        "${journal_lines[10]#profile_identity_sha256=}" "$session_container" \
+        "$player_ids_dev_ino" "$owner_player_ids_dev_ino" "$owner_claim_dev_ino" \
+        "$claim_id" "$player_ids_digest"
+    fi
+    terminalize_spent_kemerbet_recheck_authorization ||
+      die 'the interrupted spent KemerBet authorization could not be terminalized'
+    KEMERBET_RECHECK_RECOVERY_OUTCOME='spent_failed_terminal'
     KEMERBET_RECHECK_CANDIDATE_DEV_INO=''
     KEMERBET_RECHECK_CANDIDATE_DIGEST=''
     return 0
@@ -10016,7 +12012,12 @@ require_owner_kemerbet_receipt_startup_state() {
     while IFS= read -r entry; do
       path="$KEMERBET_OWNER_RECEIPT_ROOT/$entry"
       case "$entry" in
-        "$KEMERBET_OWNER_IMPORTED_CLAIM_NAME"|"$KEMERBET_OWNER_COMPLETED_CLAIM_NAME"|"$KEMERBET_OWNER_FAILED_CLAIM_NAME")
+        "$KEMERBET_OWNER_IMPORTED_CLAIM_NAME"|\
+        "$KEMERBET_OWNER_COMPLETED_CLAIM_NAME"|\
+        "$KEMERBET_OWNER_FAILED_CLAIM_NAME"|\
+        "$KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME"|\
+        "$KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_NAME"|\
+        "$KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_NAME")
           [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
             "$(stat --format='%u:%g:%a:%h:%s' "$path")" == '0:10001:440:1:37' ]] ||
             die 'an Owner KemerBet receipt has unsafe metadata'
@@ -10027,7 +12028,12 @@ require_owner_kemerbet_receipt_startup_state() {
             die 'an Owner KemerBet receipt content is not exact'
           final_count=$((final_count + 1))
           ;;
-        "$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME"|"$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME"|"$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME")
+        "$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME"|\
+        "$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME"|\
+        "$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"|\
+        "$KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_INSTALLING_NAME"|\
+        "$KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_INSTALLING_NAME"|\
+        "$KEMERBET_OWNER_RECHECK_SPENT_FAILED_TERMINAL_CLAIM_INSTALLING_NAME")
           die 'an incomplete Owner KemerBet receipt installation blocks startup'
           ;;
         *) die 'the Owner KemerBet receipt root contains unexpected residue' ;;
@@ -10489,6 +12495,387 @@ PY
     "$(stat --format='%d:%i:%u:%g:%a:%h:%s' "$claim_path")" == \
     "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO:10001:10001:400:1:37" ]] ||
     die 'the Owner-staged KemerBet cohort changed during inspection'
+}
+
+load_kemerbet_h14_cohort_identity() {
+  local expected_release="$1" root
+  local -a cohort_lines=()
+  [[ "$expected_release" =~ ^[0-9a-f]{40}$ &&
+    "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" ]] ||
+    die 'the H14 cohort identity release is unavailable'
+  root="$(kemerbet_h14_root)"
+  [[ ! -L "$root/cohort-prepared-v1" && -f "$root/cohort-prepared-v1" &&
+    "$(realpath -- "$root/cohort-prepared-v1")" == "$root/cohort-prepared-v1" &&
+    "$(stat --format='%U:%G:%a:%h' "$root/cohort-prepared-v1")" == 'root:root:600:1' ]] ||
+    die 'the H14 cohort identity receipt is absent or unsafe'
+  mapfile -t cohort_lines <"$root/cohort-prepared-v1"
+  [[ "${#cohort_lines[@]}" -eq 9 &&
+    "${cohort_lines[0]}" == 'version=1' &&
+    "${cohort_lines[1]}" == "recovery_release=$expected_release" &&
+    "${cohort_lines[2]}" =~ ^claim_id=[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ &&
+    "${cohort_lines[3]}" =~ ^player_ids_dev_ino=[0-9]+:[0-9]+$ &&
+    "${cohort_lines[4]}" =~ ^player_ids_sha256=[0-9a-f]{64}$ &&
+    "${cohort_lines[5]}" =~ ^claim_dev_ino=[0-9]+:[0-9]+$ &&
+    "${cohort_lines[6]}" == 'player_count=5' &&
+    "${cohort_lines[7]}" == 'transfer_disabled=true' &&
+    "${cohort_lines[8]}" == 'money_moved=false' ]] ||
+    die 'the H14 cohort identity receipt content is invalid'
+  KEMERBET_RECHECK_OWNER_CLAIM_ID="${cohort_lines[2]#claim_id=}"
+  KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO="${cohort_lines[3]#player_ids_dev_ino=}"
+  KEMERBET_RECHECK_PLAYER_IDS_DIGEST="${cohort_lines[4]#player_ids_sha256=}"
+  KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO="${cohort_lines[5]#claim_dev_ino=}"
+}
+
+retire_kemerbet_h14_profile_finalized_latch() {
+  local expected_release="$1" root
+  [[ "$expected_release" =~ ^[0-9a-f]{40}$ &&
+    "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" ]] ||
+    die 'the H14 profile-finalized latch release is unavailable'
+  root="$(kemerbet_h14_root)"
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/.$KEMERBET_QUARANTINE_RECOVERY_PROFILE_FINALIZED_MARKER_NAME.installing" \
+    "$root/profile-finalized-cohort-latch-v1" "$root/intent-v1" <<'PY'
+import os
+import re
+import stat
+import sys
+
+source, installing, target, intent = sys.argv[1:]
+UUID = re.compile(rb'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact(path, owner, mode, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        opened = os.fstat(descriptor)
+        named = os.lstat(path)
+        data = os.pread(descriptor, maximum + 1, 0)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or (opened.st_uid, opened.st_gid, stat.S_IMODE(opened.st_mode), opened.st_nlink)
+            != (*owner, mode, 1)
+            or opened.st_size > maximum
+            or len(data) != opened.st_size
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        return data, opened
+    finally:
+        os.close(descriptor)
+
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+try:
+    if os.path.lexists(installing):
+        reject()
+    intent_data, _ = exact(intent, (0, 0), 0o600, 4096)
+    lines = intent_data.decode('ascii').splitlines()
+    if len(lines) != 22 or not lines[7].startswith('old_claim_id='):
+        reject()
+    old_claim = lines[7].split('=', 1)[1].encode('ascii')
+    expected = old_claim + b'\n'
+    if UUID.fullmatch(old_claim) is None or len(expected) != 37:
+        reject()
+    if os.path.lexists(target):
+        if os.path.lexists(source):
+            reject()
+        target_data, _ = exact(target, (0, 10001), 0o440, len(expected))
+        if target_data != expected:
+            reject()
+    else:
+        source_data, source_value = exact(source, (0, 10001), 0o440, len(expected))
+        if source_data != expected or source_value.st_dev != os.lstat(os.path.dirname(target)).st_dev:
+            reject()
+        os.rename(source, target)
+        sync_directory(os.path.dirname(source))
+        sync_directory(os.path.dirname(target))
+        target_data, target_value = exact(target, (0, 10001), 0o440, len(expected))
+        if (
+            target_data != expected
+            or (target_value.st_dev, target_value.st_ino)
+            != (source_value.st_dev, source_value.st_ino)
+        ):
+            reject()
+    if os.path.lexists(source) or os.path.lexists(installing):
+        reject()
+except Exception:
+    raise SystemExit(1)
+PY
+  inspect_kemerbet_h14_recovery_gate
+  [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$expected_release" &&
+    "$KEMERBET_H14_RECOVERY_STATE" =~ ^(cohort-freeze-prefix|cohort-prepared)$ ]] ||
+    die 'the H14 profile-finalized latch did not reach append-only evidence'
+}
+
+h14_owner_staged_kemerbet_cohort_transition() {
+  local action="$1" claim_source control_mountpoint digest_fd path python_status source
+  [[ "$action" == 'freeze' || "$action" == 'require-frozen' ]] ||
+    die 'the H14 Owner-staged cohort transition is invalid'
+  [[ "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" =~ ^[0-9]+:[0-9]+$ &&
+    "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" =~ ^[0-9]+:[0-9]+$ &&
+    "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" =~ ^[0-9a-f]{64}$ &&
+    "$KEMERBET_RECHECK_OWNER_CLAIM_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+    die 'the H14 Owner-staged cohort identity is incomplete'
+  require_single_owner_control_runtime_instance
+  control_mountpoint="$(resolve_kemerbet_session_control_volume_mountpoint)"
+  source="$control_mountpoint/$KEMERBET_OWNER_STAGED_PLAYER_IDS_NAME"
+  claim_source="$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_NAME"
+  for path in \
+    "$control_mountpoint/$KEMERBET_OWNER_STAGED_PLAYER_IDS_INSTALLING_NAME" \
+    "$control_mountpoint/$KEMERBET_OWNER_STAGED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_IMPORTED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_COMPLETED_CLAIM_INSTALLING_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_NAME" \
+    "$KEMERBET_OWNER_RECEIPT_ROOT/$KEMERBET_OWNER_FAILED_CLAIM_INSTALLING_NAME"; do
+    [[ ! -e "$path" && ! -L "$path" ]] ||
+      die 'the H14 Owner-staged cohort has a conflicting installer or receipt'
+  done
+  [[ ! -e "$KEMERBET_READINESS_PLAYER_IDS" && ! -L "$KEMERBET_READINESS_PLAYER_IDS" ]] ||
+    die 'the H14 standalone Player-ID copy appeared before the find-only recheck'
+  exec {digest_fd}<<<"$KEMERBET_RECHECK_PLAYER_IDS_DIGEST" ||
+    die 'the private H14 cohort digest channel could not be opened'
+  if env -i PATH="$SAFE_PATH" python3 -I - \
+    "$action" "$source" "$claim_source" \
+    "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" \
+    "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" \
+    "$KEMERBET_RECHECK_OWNER_CLAIM_ID" "$digest_fd" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+PLAYER_ID = re.compile(rb'[A-Za-z0-9][A-Za-z0-9._-]{0,63}')
+CLAIM_ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+DEV_INO = re.compile(r'([0-9]+):([0-9]+)')
+DIGEST = re.compile(r'[0-9a-f]{64}')
+
+
+def reject():
+    raise RuntimeError()
+
+
+def mode(value):
+    return stat.S_IMODE(value.st_mode)
+
+
+def read_digest(descriptor_text):
+    if not descriptor_text.isascii() or not descriptor_text.isdecimal():
+        reject()
+    descriptor = int(descriptor_text, 10)
+    try:
+        content = os.read(descriptor, 66)
+    finally:
+        os.close(descriptor)
+    if len(content) != 65 or not content.endswith(b'\n'):
+        reject()
+    value = content[:-1].decode('ascii')
+    if DIGEST.fullmatch(value) is None:
+        reject()
+    return value
+
+
+def require_directory(path, descriptor):
+    opened = os.fstat(descriptor)
+    named = os.lstat(path)
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+        or (opened.st_uid, opened.st_gid, mode(opened)) != (10001, 10001, 0o700)
+        or named.st_mode != opened.st_mode
+        or named.st_uid != opened.st_uid
+        or named.st_gid != opened.st_gid
+        or os.path.realpath(path) != path
+    ):
+        reject()
+
+
+def parse_identity(value):
+    matched = DEV_INO.fullmatch(value)
+    if matched is None:
+        reject()
+    return int(matched.group(1)), int(matched.group(2))
+
+
+def open_stage(directory_descriptor, path, identity, maximum, exact_size=None):
+    name = os.path.basename(path)
+    named = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+    absolute = os.lstat(path)
+    ownership = (named.st_uid, named.st_gid, mode(named))
+    if (
+        not stat.S_ISREG(named.st_mode)
+        or (named.st_dev, named.st_ino) != identity
+        or (named.st_dev, named.st_ino) != (absolute.st_dev, absolute.st_ino)
+        or named.st_mode != absolute.st_mode
+        or named.st_uid != absolute.st_uid
+        or named.st_gid != absolute.st_gid
+        or named.st_nlink != 1
+        or named.st_size < 1
+        or named.st_size > maximum
+        or (exact_size is not None and named.st_size != exact_size)
+        or ownership not in {
+            (10001, 10001, 0o400),
+            (0, 0, 0o400),
+            (0, 0, 0o444),
+        }
+        or os.path.realpath(path) != path
+    ):
+        reject()
+    descriptor = os.open(
+        name,
+        os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+        dir_fd=directory_descriptor,
+    )
+    opened = os.fstat(descriptor)
+    content = os.pread(descriptor, maximum + 1, 0)
+    if (
+        (opened.st_dev, opened.st_ino) != identity
+        or opened.st_mode != named.st_mode
+        or opened.st_uid != named.st_uid
+        or opened.st_gid != named.st_gid
+        or opened.st_nlink != 1
+        or opened.st_size != named.st_size
+        or len(content) != named.st_size
+    ):
+        os.close(descriptor)
+        reject()
+    return descriptor, content, ownership
+
+
+def require_frozen(directory_descriptor, path, descriptor, identity, content):
+    opened = os.fstat(descriptor)
+    named = os.stat(os.path.basename(path), dir_fd=directory_descriptor, follow_symlinks=False)
+    absolute = os.lstat(path)
+    if (
+        (opened.st_dev, opened.st_ino) != identity
+        or (named.st_dev, named.st_ino) != identity
+        or (absolute.st_dev, absolute.st_ino) != identity
+        or (opened.st_uid, opened.st_gid, mode(opened), opened.st_nlink)
+        != (0, 0, 0o444, 1)
+        or named.st_mode != opened.st_mode
+        or named.st_uid != opened.st_uid
+        or named.st_gid != opened.st_gid
+        or absolute.st_mode != opened.st_mode
+        or absolute.st_uid != opened.st_uid
+        or absolute.st_gid != opened.st_gid
+        or os.pread(descriptor, len(content) + 1, 0) != content
+    ):
+        reject()
+
+
+def transition(action, player_path, claim_path, player_identity_text, claim_identity_text, claim_id, digest):
+    if (
+        action not in {'freeze', 'require-frozen'}
+        or os.path.basename(player_path) != 'kemerbet-readiness-player-ids.stage-v1'
+        or os.path.basename(claim_path) != 'kemerbet-readiness-cohort-claim.stage-v1'
+        or os.path.dirname(player_path) != os.path.dirname(claim_path)
+        or CLAIM_ID.fullmatch(claim_id) is None
+    ):
+        reject()
+    player_identity = parse_identity(player_identity_text)
+    claim_identity = parse_identity(claim_identity_text)
+    directory = os.path.dirname(player_path)
+    directory_descriptor = os.open(
+        directory,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    player_descriptor = None
+    claim_descriptor = None
+    try:
+        require_directory(directory, directory_descriptor)
+        player_descriptor, player_content, player_ownership = open_stage(
+            directory_descriptor, player_path, player_identity, 1024
+        )
+        claim_descriptor, claim_content, claim_ownership = open_stage(
+            directory_descriptor, claim_path, claim_identity, 37, 37
+        )
+        player_lines = player_content[:-1].split(b'\n') if player_content.endswith(b'\n') else []
+        if (
+            b'\r' in player_content
+            or b'\0' in player_content
+            or len(player_lines) != 5
+            or len(set(player_lines)) != 5
+            or any(PLAYER_ID.fullmatch(line) is None for line in player_lines)
+            or hashlib.sha256(player_content).hexdigest() != digest
+            or claim_content != (claim_id + '\n').encode('ascii')
+        ):
+            reject()
+        if action == 'require-frozen' and (
+            player_ownership != (0, 0, 0o444) or claim_ownership != (0, 0, 0o444)
+        ):
+            reject()
+        if action == 'freeze':
+            for descriptor, ownership in (
+                (player_descriptor, player_ownership),
+                (claim_descriptor, claim_ownership),
+            ):
+                if ownership != (0, 0, 0o444):
+                    os.fchown(descriptor, 0, 0)
+                    os.fchmod(descriptor, 0o444)
+                os.fsync(descriptor)
+            os.fsync(directory_descriptor)
+        require_frozen(
+            directory_descriptor, player_path, player_descriptor, player_identity, player_content
+        )
+        require_frozen(
+            directory_descriptor, claim_path, claim_descriptor, claim_identity, claim_content
+        )
+        require_directory(directory, directory_descriptor)
+    finally:
+        if claim_descriptor is not None:
+            os.close(claim_descriptor)
+        if player_descriptor is not None:
+            os.close(player_descriptor)
+        os.close(directory_descriptor)
+
+
+try:
+    if len(sys.argv) != 8:
+        reject()
+    transition(
+        sys.argv[1],
+        sys.argv[2],
+        sys.argv[3],
+        sys.argv[4],
+        sys.argv[5],
+        sys.argv[6],
+        read_digest(sys.argv[7]),
+    )
+except Exception:
+    raise SystemExit(1)
+PY
+  then
+    python_status=0
+  else
+    python_status=$?
+  fi
+  exec {digest_fd}<&- ||
+    die 'the private H14 cohort digest channel could not be closed'
+  [[ "$python_status" -eq 0 ]] ||
+    die 'the exact H14 Owner-staged cohort could not reach its frozen boundary'
+}
+
+freeze_owner_staged_kemerbet_cohort_for_h14() {
+  h14_owner_staged_kemerbet_cohort_transition freeze
+}
+
+require_frozen_owner_staged_kemerbet_cohort_for_h14() {
+  h14_owner_staged_kemerbet_cohort_transition require-frozen
 }
 
 inspect_owner_staged_kemerbet_cohort_for_retirement_context() {
@@ -14340,10 +16727,24 @@ require_kemerbet_session_provision_runtime() {
     "$KEMERBET_AGENT_IDENTITY_BINDINGS")
       require_root_readable_immutable_file "$expected_binding_source"
       ;;
+    "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT/${KEMERBET_H14_RECOVERY_RELEASE:-invalid}/recovery-identity-authorization-v1")
+      [[ "${KEMERBET_H14_RECOVERY_STATE:-invalid}" == 'cohort-prepared' &&
+        ! -L "$expected_binding_source" && -f "$expected_binding_source" &&
+        "$(realpath -- "$expected_binding_source")" == "$expected_binding_source" &&
+        "$(stat --format='%u:%g:%a:%h:%s' "$expected_binding_source")" == \
+          '0:10001:440:1:389' ]] ||
+        die 'the H14 recovery identity authorization source is unavailable or unsafe'
+      ;;
     *) die 'the private KemerBet session binding source is outside the exact allowlist' ;;
   esac
-  require_kemerbet_v3_binding_content "$expected_binding_source" ||
-    die 'the private KemerBet session identity binding is not an exact v3 binding'
+  if [[ "$expected_binding_source" == \
+    "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT/${KEMERBET_H14_RECOVERY_RELEASE:-invalid}/recovery-identity-authorization-v1" ]]; then
+    require_kemerbet_h14_recovery_identity_authorization_content "$expected_binding_source" ||
+      die 'the private KemerBet session recovery identity authorization is invalid'
+  else
+    require_kemerbet_v3_binding_content "$expected_binding_source" ||
+      die 'the private KemerBet session identity binding is not an exact v3 binding'
+  fi
   require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
   require_kemerbet_readiness_output_directory
 
@@ -14980,6 +17381,11 @@ case "$command" in
     fi
     ;;
 esac
+case "$command" in
+  finalize-kemerbet-quarantine-recovery-profile|record-kemerbet-quarantine-recovery-cohort|record-kemerbet-quarantine-recovery-reseal|record-kemerbet-quarantine-recovery-completion)
+    acquire_staging_mutation_lock
+    ;;
+esac
 
 inspect_kemerbet_v2_v3_successor_gate
 if [[ "$command" == 'kemerbet-v1-retirement-recovery-ready' ]]; then
@@ -14997,6 +17403,44 @@ case "$command" in
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{64}$ ]] || die 'verify requires one SHA-256 digest'
     [[ "$(sha256sum "$HELPER_PATH" | awk '{print $1}')" == "$2" ]] ||
       die 'the installed helper does not match the reviewed repository helper'
+    ;;
+
+  kemerbet-quarantine-recovery-ready)
+    [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'kemerbet-quarantine-recovery-ready requires one exact reviewed release'
+    inspect_kemerbet_h14_recovery_gate
+    [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$2" &&
+      "$KEMERBET_H14_RECOVERY_STATE" =~ ^(host-retired|profile-finalization-prefix|runtime-ready|cohort-prepared|reseal-prefix|resealed|completed-prefix|completed)$ ]] ||
+      die 'the H14 quarantine-recovery record is unavailable or invalid'
+    printf '%s\n' "KemerBet H14 recovery state: $KEMERBET_H14_RECOVERY_STATE; Transfer and Amount disabled."
+    ;;
+
+  finalize-kemerbet-quarantine-recovery-profile)
+    [[ $# -eq 2 ]] ||
+      die 'finalize-kemerbet-quarantine-recovery-profile requires one reviewed release'
+    finalize_kemerbet_h14_recovery_profile "$2"
+    printf '%s\n' 'KemerBet H14 replacement profile prepared: Transfer and Amount disabled.'
+    ;;
+
+  record-kemerbet-quarantine-recovery-cohort)
+    [[ $# -eq 2 ]] ||
+      die 'record-kemerbet-quarantine-recovery-cohort requires one reviewed release'
+    record_kemerbet_h14_recovery_cohort "$2"
+    printf '%s\n' 'KemerBet H14 exact-five cohort recorded: no lookup and no money moved.'
+    ;;
+
+  record-kemerbet-quarantine-recovery-reseal)
+    [[ $# -eq 2 ]] ||
+      die 'record-kemerbet-quarantine-recovery-reseal requires one reviewed release'
+    record_kemerbet_h14_reseal "$2"
+    printf '%s\n' 'KemerBet H14 recovery binding resealed: Transfer disabled.'
+    ;;
+
+  record-kemerbet-quarantine-recovery-completion)
+    [[ $# -eq 2 ]] ||
+      die 'record-kemerbet-quarantine-recovery-completion requires one reviewed release'
+    record_kemerbet_h14_completion "$2"
+    printf '%s\n' 'KemerBet H14 find-only recheck completed once: no money moved.'
     ;;
 
   kemerbet-v3-runtime-bridge-ready)
@@ -16022,7 +18466,17 @@ case "$command" in
     commit_sha="$2"
     [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
       die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    inspect_kemerbet_h14_recovery_gate
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" =~ ^(reseal-prefix|reseal-publication-prefix)$ ]]; then
+      record_kemerbet_h14_reseal "$commit_sha"
+      printf '%s\n' 'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
+      exit 0
+    fi
     if [[ -e "$KEMERBET_READINESS_BINDING" || -L "$KEMERBET_READINESS_BINDING" ]]; then
+      if [[ "$KEMERBET_H14_RECOVERY_STATE" == 'resealed' ]]; then
+        printf '%s\n' 'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
+        exit 0
+      fi
       [[ -e "$KEMERBET_V1_RETIREMENT_ROOT" || -L "$KEMERBET_V1_RETIREMENT_ROOT" ]] ||
         die 'the one-time KemerBet readiness binding already exists'
       require_kemerbet_readiness_output_directory
@@ -16038,8 +18492,20 @@ case "$command" in
       printf '%s\n' 'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
       exit 0
     fi
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" != 'absent' ]]; then
+      [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$commit_sha" &&
+        "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' ]] ||
+        die 'the H14 readiness seal requires the exact terminal frozen cohort'
+      load_kemerbet_h14_cohort_identity "$commit_sha"
+      require_frozen_owner_staged_kemerbet_cohort_for_h14
+      inspect_kemerbet_h14_recovery_gate
+      [[ "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' &&
+        "$KEMERBET_H14_RECOVERY_RELEASE" == "$commit_sha" ]] ||
+        die 'the H14 frozen cohort changed before readiness sealing'
+    fi
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
-    require_kemerbet_session_provision_runtime "$commit_sha" "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"
+    require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"
     owner_container="$(docker_local container ls --all --quiet \
       --filter "label=com.docker.compose.project=$PROJECT_NAME" \
       --filter 'label=com.docker.compose.service=owner-control')"
@@ -16101,8 +18567,13 @@ case "$command" in
     require_kemerbet_readiness_output_directory
     [[ -f "$KEMERBET_READINESS_BINDING" && ! -L "$KEMERBET_READINESS_BINDING" ]] ||
       die 'the one-time KemerBet readiness binding was not created'
-    finalize_kemerbet_v1_retirement_after_v2_seal "$commit_sha" ||
-      die 'the explicit v1 retirement could not be completed against the fresh v2 binding'
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" == 'absent' ]]; then
+      finalize_kemerbet_v1_retirement_after_v2_seal "$commit_sha" ||
+        die 'the explicit v1 retirement could not be completed against the fresh v2 binding'
+    fi
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" != 'absent' ]]; then
+      record_kemerbet_h14_reseal "$commit_sha"
+    fi
     printf '%s\n' 'KemerBet readiness sealed: 5 of 5 Players, Transfer disabled.'
     ;;
 
@@ -16121,6 +18592,10 @@ case "$command" in
       require_kemerbet_v3_recheck_bridge "$commit_sha"
     fi
     if [[ -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
+      if [[ "$KEMERBET_H14_RECOVERY_STATE" =~ ^(completed-prefix|completion-publication-prefix)$ ]]; then
+        record_kemerbet_h14_completion "$commit_sha"
+        inspect_kemerbet_v2_v3_successor_gate
+      fi
       require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
       if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
         [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' &&
@@ -16137,7 +18612,19 @@ case "$command" in
       die 'the sealed Compose contract is absent or unsafe'
     [[ "$(realpath -- "$compose_file")" == "$compose_file" ]] ||
       die 'the sealed Compose contract is not canonical'
-    inspect_owner_staged_kemerbet_cohort
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" == 'absent' ]]; then
+      inspect_owner_staged_kemerbet_cohort
+    else
+      [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$commit_sha" &&
+        "$KEMERBET_H14_RECOVERY_STATE" == 'resealed' ]] ||
+        die 'the H14 find-only recheck requires the exact resealed frozen cohort'
+      load_kemerbet_h14_cohort_identity "$commit_sha"
+      require_frozen_owner_staged_kemerbet_cohort_for_h14
+      inspect_kemerbet_h14_recovery_gate
+      [[ "$KEMERBET_H14_RECOVERY_STATE" == 'resealed' &&
+        "$KEMERBET_H14_RECOVERY_RELEASE" == "$commit_sha" ]] ||
+        die 'the H14 frozen cohort changed before the find-only recheck'
+    fi
     require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
     [[ "$(stat --format='%h' "$KEMERBET_AGENT_IDENTITY_HMAC_KEY")" == '1' ]] ||
       die 'the KemerBet identity key has an unsafe hard-link count'
@@ -16501,8 +18988,24 @@ case "$command" in
       die 'the KemerBet readiness controller firewall is not exact'
     probe_kemerbet_recheck_denied_network "$recheck_full_container_id" ||
       die 'the KemerBet readiness controller escaped its denied-network probe'
+    KEMERBET_RECHECK_EXECUTION_STATE='execution_started'
+    advance_kemerbet_recheck_promotion_journal_to_execution_started \
+      "$commit_sha" "$source_dev_ino" "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
+      "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" \
+      "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" "$KEMERBET_RECHECK_OWNER_CLAIM_ID" \
+      "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST"
     publish_kemerbet_recheck_firewall_release controller ||
       die 'the KemerBet readiness controller firewall release could not be published'
+    KEMERBET_RECHECK_EXECUTION_STATE='spent'
+    advance_kemerbet_recheck_promotion_journal_to_spent \
+      "$commit_sha" "$source_dev_ino" "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
+      "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
+      "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
+      "$KEMERBET_RECHECK_OWNER_STAGE_PLAYER_IDS_DEV_INO" \
+      "$KEMERBET_RECHECK_OWNER_STAGE_CLAIM_DEV_INO" "$KEMERBET_RECHECK_OWNER_CLAIM_ID" \
+      "$KEMERBET_RECHECK_PLAYER_IDS_DIGEST"
     require_kemerbet_recheck_network_firewall "$recheck_full_container_id" controller ||
       die 'the KemerBet readiness controller firewall changed at release'
     close_pinned_kemerbet_recheck_network_namespace controller ||
@@ -16585,7 +19088,7 @@ case "$command" in
       "$KEMERBET_RECHECK_CANDIDATE_DEV_INO:2:230" &&
       "$(sha256sum -- "$KEMERBET_AGENT_IDENTITY_BINDINGS" | awk '{print $1}')" == "$source_digest" ]] ||
       die 'the fixed KemerBet identity binding is not an exact precommit hard link'
-    require_kemerbet_recheck_promotion_journal \
+    require_kemerbet_recheck_spent_promotion_journal \
       "$commit_sha" "$source_dev_ino" "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
       "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
       "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
@@ -16606,7 +19109,7 @@ case "$command" in
     require_kemerbet_recheck_receipt \
       "$commit_sha" "$source_digest" \
       "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest"
-    require_kemerbet_recheck_promotion_journal \
+    require_kemerbet_recheck_spent_promotion_journal \
       "$commit_sha" "$source_dev_ino" "$KEMERBET_RECHECK_CANDIDATE_DEV_INO" "$source_digest" \
       "$identity_key_digest" "$selector_digest" "$image_id" "$profile_identity_digest" \
       "$journal_session_container" "$KEMERBET_RECHECK_PLAYER_IDS_DEV_INO" \
@@ -16656,6 +19159,10 @@ case "$command" in
       die 'the committed KemerBet promotion journal could not be retired'
     KEMERBET_RECHECK_PROMOTION_OWNED='false'
     require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
+    inspect_kemerbet_h14_recovery_gate
+    if [[ "$KEMERBET_H14_RECOVERY_STATE" =~ ^(completed-prefix|completion-publication-prefix)$ ]]; then
+      record_kemerbet_h14_completion "$commit_sha"
+    fi
     inspect_kemerbet_v2_v3_successor_gate
     if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
       [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' &&
@@ -16931,6 +19438,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, kemerbet-v3-runtime-bridge-ready, kemerbet-v3-recheck-bridge-ready, docker-storage-ready, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, kemerbet-v1-retirement-recovery-ready, reinstall-kemerbet-v1-retirement-secrets, retire-kemerbet-readiness-binding-v1-for-v2-reseal, seal-kemerbet-readiness, recheck-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, kemerbet-quarantine-recovery-ready, finalize-kemerbet-quarantine-recovery-profile, record-kemerbet-quarantine-recovery-cohort, record-kemerbet-quarantine-recovery-reseal, record-kemerbet-quarantine-recovery-completion, kemerbet-v3-runtime-bridge-ready, kemerbet-v3-recheck-bridge-ready, docker-storage-ready, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, kemerbet-v1-retirement-recovery-ready, reinstall-kemerbet-v1-retirement-secrets, retire-kemerbet-readiness-binding-v1-for-v2-reseal, seal-kemerbet-readiness, recheck-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

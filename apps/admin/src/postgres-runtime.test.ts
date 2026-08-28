@@ -56,7 +56,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows exactly twenty-six reviewed Owner procedures including the atomic readiness claim and root receipt', () => {
+  it('allows exactly twenty-seven reviewed Owner procedures including claim-bound recovery, the atomic readiness claim, and root receipt', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -116,6 +116,12 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      "has_function_privilege(current_user, 'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)', 'execute') as kemerbet_agent_profile_recover_allowed",
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      "'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)'::regprocedure",
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
@@ -124,7 +130,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 26');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 27');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');

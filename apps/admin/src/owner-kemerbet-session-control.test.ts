@@ -52,6 +52,29 @@ describe('Owner private KemerBet session control', () => {
       signedIn: false,
       transferDisabled: true,
     });
+    expect(
+      parseOwnerKemerbetSessionStatus({
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'unclean_session_generation',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      }),
+    ).toEqual({
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      quarantine: {
+        reasonCode: 'unclean_session_generation',
+        recoveryRequired: true,
+      },
+      signedIn: false,
+      transferDisabled: true,
+    });
   });
 
   it.each([
@@ -83,6 +106,48 @@ describe('Owner private KemerBet session control', () => {
       signedIn: false,
       transferDisabled: true,
       password: 'forbidden',
+    },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      quarantine: { reasonCode: 'unknown_reason', recoveryRequired: true },
+      signedIn: false,
+      transferDisabled: true,
+    },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'checkpointed',
+      quarantine: {
+        reasonCode: 'unclean_session_generation',
+        recoveryRequired: true,
+      },
+      signedIn: false,
+      transferDisabled: true,
+    },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      quarantine: {
+        reasonCode: 'unclean_session_generation',
+        recoveryRequired: false,
+      },
+      signedIn: false,
+      transferDisabled: true,
+    },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      quarantine: {
+        detail: 'authority-bearing',
+        reasonCode: 'unclean_session_generation',
+        recoveryRequired: true,
+      },
+      signedIn: false,
+      transferDisabled: true,
     },
   ])('rejects malformed, authority-bearing, or non-no-transfer envelopes', (candidate) => {
     expect(() => parseOwnerKemerbetSessionStatus(candidate)).toThrow(

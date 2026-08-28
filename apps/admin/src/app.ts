@@ -35,6 +35,7 @@ import {
   OwnerKemerbetReadinessCohortRejectedError,
   OwnerKemerbetReadinessCohortUnavailableError,
   type OwnerKemerbetReadinessCohortControl,
+  type OwnerKemerbetReadinessLifecycleState,
 } from './owner-kemerbet-readiness-cohort.js';
 import { reconcileOwnerKemerbetReadinessRootReceipt } from './owner-kemerbet-readiness-reconciler.js';
 import {
@@ -133,6 +134,86 @@ const OWNER_KEMERBET_AGENT_PROFILE_REASONS = new Set<OwnerKemerbetAgentProfileRe
   'owner_correction',
   'security_recovery',
 ]);
+const OWNER_KEMERBET_SESSION_QUARANTINE_REASON_CODES = new Set([
+  'browser_cleanup_unverified',
+  'profile_integrity_unverified',
+  'recheck_authorization_spent_failed_terminal',
+  'security_recovery_cohort_required',
+  'security_recovery_in_progress',
+  'unclean_session_generation',
+]);
+const OWNER_KEMERBET_SECURITY_RECOVERY_SESSION = Object.freeze({
+  active: false,
+  loginRequired: false,
+  phase: 'idle' as const,
+  quarantine: Object.freeze({
+    reasonCode: 'profile_integrity_unverified' as const,
+    recoveryRequired: true as const,
+  }),
+  signedIn: false,
+  transferDisabled: true as const,
+});
+const OWNER_KEMERBET_RECHECK_SPENT_TERMINAL_SESSION = Object.freeze({
+  active: false,
+  loginRequired: false,
+  phase: 'idle' as const,
+  quarantine: Object.freeze({
+    reasonCode: 'recheck_authorization_spent_failed_terminal' as const,
+    recoveryRequired: true as const,
+  }),
+  signedIn: false,
+  transferDisabled: true as const,
+});
+const OWNER_KEMERBET_SECURITY_RECOVERY_COHORT_REQUIRED_SESSION = Object.freeze({
+  active: false,
+  loginRequired: false,
+  phase: 'idle' as const,
+  quarantine: Object.freeze({
+    reasonCode: 'security_recovery_cohort_required' as const,
+    recoveryRequired: true as const,
+  }),
+  signedIn: false,
+  transferDisabled: true as const,
+});
+const OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION = Object.freeze({
+  active: false,
+  loginRequired: false,
+  phase: 'idle' as const,
+  quarantine: Object.freeze({
+    reasonCode: 'security_recovery_in_progress' as const,
+    recoveryRequired: true as const,
+  }),
+  signedIn: false,
+  transferDisabled: true as const,
+});
+
+function exactOwnerKemerbetSessionQuarantine(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const session = value as Record<string, unknown>;
+  if (
+    Object.keys(session).sort().join('\0') !==
+      ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
+        .sort()
+        .join('\0') ||
+    session.active !== false ||
+    session.loginRequired !== false ||
+    session.phase !== 'idle' ||
+    session.signedIn !== false ||
+    session.transferDisabled !== true ||
+    typeof session.quarantine !== 'object' ||
+    session.quarantine === null ||
+    Array.isArray(session.quarantine)
+  ) {
+    return false;
+  }
+  const quarantine = session.quarantine as Record<string, unknown>;
+  return (
+    Object.keys(quarantine).sort().join('\0') ===
+      ['reasonCode', 'recoveryRequired'].sort().join('\0') &&
+    OWNER_KEMERBET_SESSION_QUARANTINE_REASON_CODES.has(String(quarantine.reasonCode)) &&
+    quarantine.recoveryRequired === true
+  );
+}
 const OWNER_RECEIVER_PROVIDERS = new Set<OwnerReceiverProvider>(['cbe_birr', 'telebirr']);
 const OWNER_RECEIVER_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
   'account_rotation',
@@ -425,6 +506,52 @@ export function buildOwnerControlApp(
     );
   }
 
+  async function kemerbetReadinessLifecycle(): Promise<OwnerKemerbetReadinessLifecycleState> {
+    if (typeof kemerbetReadinessCohortControl.lifecycle === 'function') {
+      return kemerbetReadinessCohortControl.lifecycle();
+    }
+    return (await kemerbetReadinessCohortControl.rootReceipt())?.event ?? 'empty';
+  }
+
+  async function kemerbetSecurityRecoveryPending(): Promise<boolean> {
+    const lifecycle = await kemerbetReadinessLifecycle();
+    return (
+      lifecycle === 'security_recovery_failed_terminal' ||
+      lifecycle === 'security_recovery_profile_finalized' ||
+      lifecycle === 'recheck_authorization_spent_failed_terminal' ||
+      lifecycle === 'security_recovery_cohort_staged' ||
+      lifecycle === 'imported' ||
+      lifecycle === 'retryable_failed'
+    );
+  }
+
+  type KemerbetStateMutationMode = 'ordinary' | 'readiness_cohort' | 'security_recovery';
+  type KemerbetStateMutationResult<T> =
+    { readonly state: 'blocked' } | { readonly state: 'completed'; readonly value: T };
+
+  async function runKemerbetStateMutation<T>(
+    mode: KemerbetStateMutationMode,
+    mutation: () => Promise<T>,
+  ): Promise<KemerbetStateMutationResult<T>> {
+    return serializeKemerbetProfileLifecycle(async () => {
+      const lifecycle = await kemerbetReadinessLifecycle();
+      if (
+        lifecycle === 'recheck_authorization_spent_failed_terminal' ||
+        lifecycle === 'security_recovery_cohort_staged' ||
+        lifecycle === 'imported' ||
+        lifecycle === 'retryable_failed' ||
+        (mode === 'ordinary' &&
+          (lifecycle === 'security_recovery_failed_terminal' ||
+            lifecycle === 'security_recovery_profile_finalized')) ||
+        (mode === 'readiness_cohort' && lifecycle === 'security_recovery_failed_terminal') ||
+        (mode === 'security_recovery' && lifecycle !== 'security_recovery_failed_terminal')
+      ) {
+        return { state: 'blocked' };
+      }
+      return { state: 'completed', value: await mutation() };
+    });
+  }
+
   app.post('/v1/owner/telegram-beta-invites', async (request, reply) => {
     try {
       const body = exactObject(request.body, ['expiresInSeconds']);
@@ -664,12 +791,16 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const receipt = await dependencies.runtime.playerRegistrations.review(
-          authUserId,
-          request.params.requestId,
-          decision as OwnerPlayerRegistrationDecision,
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          dependencies.runtime.playerRegistrations.review(
+            authUserId,
+            request.params.requestId,
+            decision as OwnerPlayerRegistrationDecision,
+          ),
         );
-        return reply.code(200).send(receipt);
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(200).send(mutation.value);
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||
@@ -726,11 +857,12 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const receipt = await dependencies.runtime.playerRegistrations.associate(
-          authUserId,
-          request.params.requestId,
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          dependencies.runtime.playerRegistrations.associate(authUserId, request.params.requestId),
         );
-        return reply.code(200).send(receipt);
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(200).send(mutation.value);
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||
@@ -784,44 +916,52 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const requestId = body.requestId as string;
-      // Reconcile any exact root-owned import/completion receipt before deciding whether the
-      // one-use input is still absent. This closes the crash window where root consumed the files
-      // before the Owner request could persist its exported transition.
-      await reconcileOwnerKemerbetReadinessRootReceipt(
-        kemerbetReadinessCohortControl,
-        dependencies.runtime.kemerbetReadinessCohorts,
-      );
-      const openPilot = await dependencies.runtime.privateLivePilot.current(authUserId);
-      if (openPilot?.pilotStatus === 'draft' || openPilot?.pilotStatus === 'armed') {
-        return reply.code(409).send({ error: 'readiness_cohort_open_pilot' });
-      }
-      const claim = await dependencies.runtime.kemerbetReadinessCohorts.claim(
-        authUserId,
-        requestId,
-      );
-      if (claim.state === 'failed_terminal') {
-        throw new OwnerKemerbetReadinessCohortRejectedError();
-      }
-      const prepared = projectKemerbetReadinessCohortReceipt(
-        claim.state === 'prepared'
-          ? await kemerbetReadinessCohortControl.prepare(claim.players, requestId, claim.claimId)
-          : {
-              alreadyPrepared: true,
-              identifiersRedacted: true,
-              moneyMoved: false,
-              playersPrepared: 5,
-              transferDisabled: true,
-            },
-      );
-      if (claim.state === 'prepared') {
-        await dependencies.runtime.kemerbetReadinessCohorts.markExported(
+      const mutation = await runKemerbetStateMutation('readiness_cohort', async () => {
+        const requestId = body.requestId as string;
+        // Reconcile any exact root-owned import/completion receipt before deciding whether the
+        // one-use input is still absent. This closes the crash window where root consumed the files
+        // before the Owner request could persist its exported transition.
+        const reconciliation = await reconcileOwnerKemerbetReadinessRootReceipt(
+          kemerbetReadinessCohortControl,
+          dependencies.runtime.kemerbetReadinessCohorts,
+        );
+        if (reconciliation === 'security_recovery_required') {
+          return undefined;
+        }
+        const openPilot = await dependencies.runtime.privateLivePilot.current(authUserId);
+        if (openPilot?.pilotStatus === 'draft' || openPilot?.pilotStatus === 'armed') {
+          return reply.code(409).send({ error: 'readiness_cohort_open_pilot' });
+        }
+        const claim = await dependencies.runtime.kemerbetReadinessCohorts.claim(
           authUserId,
           requestId,
-          claim.claimId,
         );
-      }
-      return reply.code(prepared.alreadyPrepared ? 200 : 201).send(prepared);
+        if (claim.state === 'failed_terminal') {
+          throw new OwnerKemerbetReadinessCohortRejectedError();
+        }
+        const prepared = projectKemerbetReadinessCohortReceipt(
+          claim.state === 'prepared'
+            ? await kemerbetReadinessCohortControl.prepare(claim.players, requestId, claim.claimId)
+            : {
+                alreadyPrepared: true,
+                identifiersRedacted: true,
+                moneyMoved: false,
+                playersPrepared: 5,
+                transferDisabled: true,
+              },
+        );
+        if (claim.state === 'prepared') {
+          await dependencies.runtime.kemerbetReadinessCohorts.markExported(
+            authUserId,
+            requestId,
+            claim.claimId,
+          );
+        }
+        return prepared;
+      });
+      return mutation.state === 'blocked' || mutation.value === undefined
+        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+        : reply.code(mutation.value.alreadyPrepared ? 200 : 201).send(mutation.value);
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -864,12 +1004,16 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const receipt = await dependencies.runtime.eligibility.decide(
-          authUserId,
-          request.params.playerAccountId,
-          decision as OwnerPlayerDepositEligibilityDecision,
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          dependencies.runtime.eligibility.decide(
+            authUserId,
+            request.params.playerAccountId,
+            decision as OwnerPlayerDepositEligibilityDecision,
+          ),
         );
-        return reply.code(200).send(receipt);
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(200).send(mutation.value);
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||
@@ -942,14 +1086,18 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const receiver = await dependencies.runtime.receivers.rotate(authUserId, {
-        accountHolderName: body.accountHolderName,
-        accountReference: body.accountReference,
-        providerCode: providerCode as OwnerReceiverProvider,
-        requestId: body.requestId as string,
-        rotationReason: rotationReason as OwnerReceiverRotationReason,
-      });
-      return reply.code(201).send({ receiver });
+      const mutation = await runKemerbetStateMutation('ordinary', () =>
+        dependencies.runtime.receivers.rotate(authUserId, {
+          accountHolderName: body.accountHolderName as string,
+          accountReference: body.accountReference as string,
+          providerCode: providerCode as OwnerReceiverProvider,
+          requestId: body.requestId as string,
+          rotationReason: rotationReason as OwnerReceiverRotationReason,
+        }),
+      );
+      return mutation.state === 'blocked'
+        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+        : reply.code(201).send({ receiver: mutation.value });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1006,7 +1154,9 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const prepared = await serializeKemerbetProfileLifecycle(async () => {
+      const mutationMode: KemerbetStateMutationMode =
+        configurationReason === 'security_recovery' ? 'security_recovery' : 'ordinary';
+      const mutation = await runKemerbetStateMutation(mutationMode, async () => {
         const currentProfiles = await dependencies.runtime.kemerbetAgentProfiles.list(authUserId);
         const currentActiveProfiles = currentProfiles.filter(
           (candidate) => candidate.profileStatus === 'active',
@@ -1015,11 +1165,53 @@ export function buildOwnerControlApp(
           throw new OwnerKemerbetAgentProfileUnavailableError();
         }
         const currentActiveProfile = currentActiveProfiles[0];
+        if (typeof kemerbetReadinessCohortControl.lifecycle !== 'function') {
+          throw new OwnerKemerbetAgentProfileUnavailableError();
+        }
+        const readinessLifecycle = await kemerbetReadinessCohortControl.lifecycle();
+        if (readinessLifecycle === 'security_recovery_failed_terminal') {
+          if (configurationReason !== 'security_recovery') {
+            throw new OwnerKemerbetAgentProfileRejectedError();
+          }
+          if (
+            !currentActiveProfile ||
+            typeof dependencies.runtime.kemerbetAgentProfiles.recover !== 'function' ||
+            typeof kemerbetReadinessCohortControl.acknowledgeSecurityRecovery !== 'function'
+          ) {
+            throw new OwnerKemerbetAgentProfileUnavailableError();
+          }
+          const rootReceipt = await kemerbetReadinessCohortControl.rootReceipt();
+          if (rootReceipt?.event !== 'security_recovery_failed_terminal') {
+            throw new OwnerKemerbetAgentProfileUnavailableError();
+          }
+          const recovery = await dependencies.runtime.kemerbetAgentProfiles.recover(authUserId, {
+            claimId: rootReceipt.claimId,
+            receiptId: body.requestId as string,
+          });
+          await kemerbetReadinessCohortControl.acknowledgeSecurityRecovery({
+            claimId: recovery.claimId,
+            platformAgentAccountId: recovery.profile.platformAgentAccountId,
+            profileRevision: recovery.profile.profileRevision,
+            receiptId: recovery.receiptId,
+          });
+          interactiveKemerbetProfiles.delete(authUserId);
+          return recovery.profile;
+        }
+        if (configurationReason === 'security_recovery') {
+          throw new OwnerKemerbetAgentProfileRejectedError();
+        }
+        if (readinessLifecycle !== 'empty' && readinessLifecycle !== 'completed') {
+          throw new OwnerKemerbetAgentProfileRejectedError();
+        }
         if (currentActiveProfile) {
           const currentSession = await kemerbetSessionControl.status(
             currentActiveProfile.platformAgentAccountId,
           );
           if (currentSession.active) return undefined;
+          const exactQuarantineObserved = exactOwnerKemerbetSessionQuarantine(currentSession);
+          if (exactQuarantineObserved) {
+            throw new OwnerKemerbetAgentProfileRejectedError();
+          }
         }
         const profile = await dependencies.runtime.kemerbetAgentProfiles.prepare(authUserId, {
           configurationReason: configurationReason as OwnerKemerbetAgentProfileReason,
@@ -1028,9 +1220,14 @@ export function buildOwnerControlApp(
         interactiveKemerbetProfiles.delete(authUserId);
         return profile;
       });
-      return prepared === undefined
+      if (mutation.state === 'blocked') {
+        return mutationMode === 'security_recovery'
+          ? reply.code(403).send({ error: 'forbidden' })
+          : reply.code(409).send({ error: 'kemerbet_security_recovery_required' });
+      }
+      return mutation.value === undefined
         ? reply.code(409).send({ error: 'kemerbet_session_must_stop' })
-        : reply.code(201).send({ profile: prepared });
+        : reply.code(201).send({ profile: mutation.value });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1053,6 +1250,27 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      const lifecycle = await kemerbetReadinessLifecycle();
+      if (lifecycle === 'recheck_authorization_spent_failed_terminal') {
+        return reply.code(200).send({ session: OWNER_KEMERBET_RECHECK_SPENT_TERMINAL_SESSION });
+      }
+      if (lifecycle === 'security_recovery_failed_terminal') {
+        return reply.code(200).send({ session: OWNER_KEMERBET_SECURITY_RECOVERY_SESSION });
+      }
+      if (lifecycle === 'security_recovery_profile_finalized') {
+        return reply
+          .code(200)
+          .send({ session: OWNER_KEMERBET_SECURITY_RECOVERY_COHORT_REQUIRED_SESSION });
+      }
+      if (
+        lifecycle === 'security_recovery_cohort_staged' ||
+        lifecycle === 'imported' ||
+        lifecycle === 'retryable_failed'
+      ) {
+        return reply
+          .code(200)
+          .send({ session: OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION });
+      }
       const accountId = await interactiveKemerbetAgentProfileId(authUserId);
       return reply.code(200).send({ session: await kemerbetSessionControl.status(accountId) });
     } catch (error) {
@@ -1084,6 +1302,9 @@ export function buildOwnerControlApp(
       const after = Number(afterValue);
       if (!Number.isSafeInteger(after)) return reply.code(400).send({ error: 'invalid_request' });
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
+      if (await kemerbetSecurityRecoveryPending()) {
+        return reply.code(409).send({ error: 'kemerbet_security_recovery_required' });
+      }
       const accountId = await interactiveKemerbetAgentProfileId(authUserId);
       const frame = await kemerbetSessionControl.frame(accountId, generation, after);
       if (!frame) return reply.code(204).send();
@@ -1117,11 +1338,13 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const session = await serializeKemerbetProfileLifecycle(async () => {
+      const mutation = await runKemerbetStateMutation('ordinary', async () => {
         const accountId = await interactiveKemerbetAgentProfileId(authUserId);
         return kemerbetSessionControl.start(accountId, body.requestId as string);
       });
-      return reply.code(202).send({ session });
+      return mutation.state === 'blocked'
+        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+        : reply.code(202).send({ session: mutation.value });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1194,12 +1417,16 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
-      const session = await kemerbetSessionControl.input(
-        accountId,
-        body as unknown as OwnerKemerbetSessionInput,
-      );
-      return reply.code(200).send({ session });
+      const mutation = await runKemerbetStateMutation('ordinary', async () => {
+        const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+        return kemerbetSessionControl.input(
+          accountId,
+          body as unknown as OwnerKemerbetSessionInput,
+        );
+      });
+      return mutation.state === 'blocked'
+        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+        : reply.code(200).send({ session: mutation.value });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1223,10 +1450,13 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
-      return reply.code(202).send({
-        session: await kemerbetSessionControl.stop(accountId, body.requestId as string),
+      const mutation = await runKemerbetStateMutation('ordinary', async () => {
+        const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+        return kemerbetSessionControl.stop(accountId, body.requestId as string);
       });
+      return mutation.state === 'blocked'
+        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+        : reply.code(202).send({ session: mutation.value });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1269,13 +1499,17 @@ export function buildOwnerControlApp(
       }
 
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const status = await dependencies.runtime.privateLivePilot.prepare(authUserId, {
-        activeFrom,
-        expiresAt,
-        playerIds: playerIds as unknown as PrepareApprovedPrivateLivePilotRequest['playerIds'],
-        requestId: body.requestId as string,
-      });
-      return reply.code(201).send({ pilot: status });
+      const mutation = await runKemerbetStateMutation('ordinary', () =>
+        dependencies.runtime.privateLivePilot.prepare(authUserId, {
+          activeFrom,
+          expiresAt,
+          playerIds: playerIds as unknown as PrepareApprovedPrivateLivePilotRequest['playerIds'],
+          requestId: body.requestId as string,
+        }),
+      );
+      return mutation.state === 'blocked'
+        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+        : reply.code(201).send({ pilot: mutation.value });
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1307,11 +1541,12 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const receipt = await dependencies.runtime.privateLivePilot.arm(
-          authUserId,
-          request.params.pilotRevisionId,
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          dependencies.runtime.privateLivePilot.arm(authUserId, request.params.pilotRevisionId),
         );
-        return reply.code(200).send(receipt);
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(200).send(mutation.value);
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||
@@ -1341,12 +1576,16 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const status = await dependencies.runtime.privateLivePilot.stop(
-          authUserId,
-          request.params.pilotRevisionId,
-          reasonCode as PrivateLivePilotStopReason,
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          dependencies.runtime.privateLivePilot.stop(
+            authUserId,
+            request.params.pilotRevisionId,
+            reasonCode as PrivateLivePilotStopReason,
+          ),
         );
-        return reply.code(200).send({ pilot: status });
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(200).send({ pilot: mutation.value });
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||

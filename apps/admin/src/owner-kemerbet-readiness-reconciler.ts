@@ -16,7 +16,13 @@ interface OwnerKemerbetReadinessRootReceiptRecorder {
 }
 
 export type OwnerKemerbetReadinessReconciliationResult =
-  'completed_recorded' | 'imported_recorded' | 'none' | 'retryable_failed';
+  | 'completed_recorded'
+  | 'imported_recorded'
+  | 'none'
+  | 'recheck_authorization_spent_failed_terminal'
+  | 'retryable_failed'
+  | 'security_recovery_cohort_required'
+  | 'security_recovery_required';
 
 /**
  * Reconcile only an exact root-owned filesystem receipt into the private DB ledger.
@@ -30,6 +36,15 @@ export async function reconcileOwnerKemerbetReadinessRootReceipt(
   const receipt: OwnerKemerbetReadinessRootReceipt | undefined = await control.rootReceipt();
   if (!receipt) return 'none';
   if (receipt.event === 'retryable_failed') return 'retryable_failed';
+  if (receipt.event === 'recheck_authorization_spent_failed_terminal') {
+    return 'recheck_authorization_spent_failed_terminal';
+  }
+  if (receipt.event === 'security_recovery_failed_terminal') {
+    return 'security_recovery_required';
+  }
+  if (receipt.event === 'security_recovery_profile_finalized') {
+    return 'security_recovery_cohort_required';
+  }
 
   await recorder.recordRootReceipt(receipt.claimId, createReceiptId(), receipt.event);
   return receipt.event === 'completed' ? 'completed_recorded' : 'imported_recorded';

@@ -16,7 +16,8 @@ export interface OwnerControlPostgresRuntime {
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
-  readonly kemerbetAgentProfiles: Pick<PostgresOwnerKemerbetAgentProfiles, 'list' | 'prepare'>;
+  readonly kemerbetAgentProfiles: Pick<PostgresOwnerKemerbetAgentProfiles, 'list' | 'prepare'> &
+    Partial<Pick<PostgresOwnerKemerbetAgentProfiles, 'recover'>>;
   readonly kemerbetReadinessCohorts: Pick<
     PostgresOwnerKemerbetReadinessCohortClaims,
     'claim' | 'markExported' | 'recordRootReceipt'
@@ -141,6 +142,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
     has_function_privilege(current_user, 'app.list_owner_kemerbet_agent_profiles(uuid)', 'execute') as kemerbet_agent_profile_list_allowed,
     has_function_privilege(current_user, 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)', 'execute') as kemerbet_agent_profile_prepare_allowed,
+    has_function_privilege(current_user, 'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)', 'execute') as kemerbet_agent_profile_recover_allowed,
     has_function_privilege(current_user, 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)', 'execute') as kemerbet_readiness_claim_prepare_allowed,
     has_function_privilege(current_user, 'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)', 'execute') as kemerbet_readiness_claim_advance_allowed,
     has_function_privilege(current_user, 'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)', 'execute') as kemerbet_readiness_root_receipt_allowed,
@@ -171,7 +173,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 26
+      select count(*) = 27
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -207,6 +209,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
           ,'app.list_owner_kemerbet_agent_profiles(uuid)'::regprocedure
           ,'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)'::regprocedure
+          ,'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)'::regprocedure
           ,'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)'::regprocedure
           ,'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)'::regprocedure
           ,'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)'::regprocedure

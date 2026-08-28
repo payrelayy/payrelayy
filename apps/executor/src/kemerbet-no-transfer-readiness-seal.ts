@@ -23,9 +23,9 @@ import {
 
 import {
   assertKemerBetBrowserExecutable,
-  loadKemerBetNoTransferReadinessPlayerIds,
+  loadExactKemerBetStandaloneReadinessPlayerIds,
   loadKemerBetSelectorContract,
-  type KemerBetNoTransferReadinessPlayers,
+  type KemerBetExactImportedReadinessPlayers,
 } from './executor-runtime-isolation.js';
 import {
   createKemerBetAgentIdentityFingerprinter,
@@ -224,7 +224,8 @@ export type KemerBetReadinessSealRequestClassification =
       readonly diagnostic: KemerBetReadinessSealForbiddenRequestDiagnostic;
     };
 
-interface SafeStat {
+export interface KemerBetReadinessSealBindingStat {
+  readonly gid: number;
   readonly mode: number;
   readonly uid: number;
   readonly nlink: number;
@@ -235,6 +236,37 @@ interface SafeStat {
   isFile(): boolean;
   isSymbolicLink(): boolean;
 }
+
+type SafeStat = KemerBetReadinessSealBindingStat;
+
+interface KemerBetReadinessSealBindingHandle {
+  close(): Promise<void>;
+  readFile(): Promise<Buffer>;
+  stat(): Promise<SafeStat>;
+  sync(): Promise<void>;
+  writeFile(value: string, options: { readonly encoding: 'utf8' }): Promise<void>;
+}
+
+export interface KemerBetReadinessSealBindingFileSystem {
+  readonly directoryOpenFlag?: number;
+  readonly noFollowOpenFlag?: number;
+  link(existingPath: string, newPath: string): Promise<void>;
+  lstat(path: string): Promise<KemerBetReadinessSealBindingStat>;
+  open(path: string, flags: number, mode?: number): Promise<KemerBetReadinessSealBindingHandle>;
+  realpath(path: string): Promise<string>;
+  unlink(path: string): Promise<void>;
+}
+
+const productionBindingFileSystem: KemerBetReadinessSealBindingFileSystem = {
+  directoryOpenFlag: constants.O_DIRECTORY,
+  noFollowOpenFlag: constants.O_NOFOLLOW,
+  link,
+  lstat: async (path) => (await lstat(path)) as SafeStat,
+  open: async (path, flags, mode) =>
+    (await open(path, flags, mode)) as unknown as KemerBetReadinessSealBindingHandle,
+  realpath,
+  unlink,
+};
 
 export interface KemerBetNoTransferReadinessSealProbe {
   readonly observedAgentIdentityFingerprint: string;
@@ -269,7 +301,7 @@ export interface KemerBetNoTransferReadinessSealDependencies {
   readonly environment?: NodeJS.ProcessEnv;
   readonly effectiveUserId?: number;
   readonly assertBrowserExecutable?: () => Promise<void>;
-  readonly loadPlayerIds?: () => Promise<KemerBetNoTransferReadinessPlayers>;
+  readonly loadPlayerIds?: () => Promise<KemerBetExactImportedReadinessPlayers>;
   readonly loadSelectorContract?: () => Promise<KemerBetAgentPageSelectorContractV2>;
   readonly createAgentIdentityFingerprinter?: () => Promise<KemerBetAgentIdentityFingerprinter>;
   readonly openProbe?: (options: {
@@ -288,6 +320,8 @@ export interface KemerBetNoTransferReadinessSealDependencies {
     agentProfilePin: string,
     effectiveUserId: number,
   ) => Promise<void>;
+  readonly bindingFileSystem?: KemerBetReadinessSealBindingFileSystem;
+  readonly createBindingTemporaryId?: () => string;
   readonly logSuccess?: (result: {
     readonly component: 'kemerbet_no_transfer_readiness_seal';
     readonly event: 'sealed';
@@ -476,7 +510,8 @@ function sameMetadata(left: SafeStat, right: SafeStat): boolean {
     left.dev === right.dev &&
     left.ino === right.ino &&
     left.mode === right.mode &&
-    left.uid === right.uid
+    left.uid === right.uid &&
+    left.gid === right.gid
   );
 }
 
@@ -484,18 +519,22 @@ async function assertSafeDirectory(
   path: string,
   effectiveUserId: number,
   exactMode?: number,
+  fileSystem: Pick<
+    KemerBetReadinessSealBindingFileSystem,
+    'lstat' | 'realpath'
+  > = productionBindingFileSystem,
 ): Promise<void> {
-  const before = (await lstat(path)) as SafeStat;
+  const before = await fileSystem.lstat(path);
   if (
     !before.isDirectory() ||
     before.isSymbolicLink() ||
     (before.uid !== 0 && before.uid !== effectiveUserId) ||
     (exactMode === undefined ? (before.mode & 0o022) !== 0 : (before.mode & 0o777) !== exactMode) ||
-    (await realpath(path)) !== path
+    (await fileSystem.realpath(path)) !== path
   ) {
     unavailable();
   }
-  const after = (await lstat(path)) as SafeStat;
+  const after = await fileSystem.lstat(path);
   if (!after.isDirectory() || after.isSymbolicLink() || !sameMetadata(before, after)) unavailable();
 }
 
@@ -2161,105 +2200,245 @@ export function serializeKemerBetNoTransferReadinessAgentIdentityBinding(
   return serializedBinding;
 }
 
+function sameBindingIdentity(left: SafeStat, right: SafeStat): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameBindingMetadata(left: SafeStat, right: SafeStat): boolean {
+  return (
+    sameBindingIdentity(left, right) &&
+    left.mode === right.mode &&
+    left.uid === right.uid &&
+    left.gid === right.gid &&
+    left.nlink === right.nlink &&
+    left.size === right.size
+  );
+}
+
+function isExactInstalledBinding(
+  candidate: SafeStat,
+  created: SafeStat,
+  effectiveUserId: number,
+): boolean {
+  return (
+    candidate.isFile() &&
+    !candidate.isDirectory() &&
+    !candidate.isSymbolicLink() &&
+    candidate.uid === effectiveUserId &&
+    candidate.gid === effectiveUserId &&
+    (candidate.mode & 0o7777) === 0o600 &&
+    candidate.nlink === 1 &&
+    candidate.size === EXACT_BINDING_FILE_BYTES &&
+    sameBindingIdentity(candidate, created)
+  );
+}
+
+async function revalidateInstalledBinding(
+  fileSystem: KemerBetReadinessSealBindingFileSystem,
+  outputFile: string,
+  serializedBinding: string,
+  created: SafeStat,
+  effectiveUserId: number,
+  noFollowOpenFlag: number,
+  markComplete?: () => void,
+): Promise<void> {
+  let handle: KemerBetReadinessSealBindingHandle | null = null;
+  let observed: Buffer | null = null;
+  const expected = Buffer.from(serializedBinding, 'utf8');
+  try {
+    const namedBefore = await fileSystem.lstat(outputFile);
+    if (
+      !isExactInstalledBinding(namedBefore, created, effectiveUserId) ||
+      (await fileSystem.realpath(outputFile)) !== outputFile
+    ) {
+      return unavailable();
+    }
+    handle = await fileSystem.open(outputFile, constants.O_RDONLY | noFollowOpenFlag);
+    const openedBefore = await handle.stat();
+    if (
+      !isExactInstalledBinding(openedBefore, created, effectiveUserId) ||
+      !sameBindingMetadata(namedBefore, openedBefore)
+    ) {
+      return unavailable();
+    }
+    observed = await handle.readFile();
+    const openedAfter = await handle.stat();
+    const resolvedAfterRead = await fileSystem.realpath(outputFile);
+    const namedAfter = await fileSystem.lstat(outputFile);
+    if (
+      resolvedAfterRead !== outputFile ||
+      !isExactInstalledBinding(openedAfter, created, effectiveUserId) ||
+      !isExactInstalledBinding(namedAfter, created, effectiveUserId) ||
+      !sameBindingMetadata(openedBefore, openedAfter) ||
+      !sameBindingMetadata(openedAfter, namedAfter) ||
+      observed.byteLength !== expected.byteLength ||
+      !timingSafeEqual(observed, expected)
+    ) {
+      return unavailable();
+    }
+    // Keep completion in this synchronous continuation so no promise boundary separates the final
+    // named-inode/content attestation from the successful installation state transition.
+    markComplete?.();
+  } finally {
+    observed?.fill(0);
+    expected.fill(0);
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function unlinkOnlyCreatedBindingInode(
+  fileSystem: KemerBetReadinessSealBindingFileSystem,
+  path: string,
+  created: SafeStat,
+): Promise<boolean> {
+  try {
+    const named = await fileSystem.lstat(path);
+    if (!sameBindingIdentity(named, created)) return false;
+    // unlink() is dispatched in the same continuation as the identity comparison. Never issue it
+    // when the name has already been replaced by a foreign inode.
+    await fileSystem.unlink(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function writeBindingAtomically(
   accountId: string,
   fingerprint: string,
   agentProfilePin: string,
   effectiveUserId: number,
+  reattestImportedStage: () => Promise<void>,
+  fileSystem: KemerBetReadinessSealBindingFileSystem = productionBindingFileSystem,
+  createTemporaryId: () => string = randomUUID,
 ): Promise<void> {
   const serializedBinding = serializeKemerBetNoTransferReadinessAgentIdentityBinding(
     accountId,
     fingerprint,
     agentProfilePin,
   );
-  await assertSafeDirectory(OUTPUT_ROOT, effectiveUserId, 0o700);
+  await assertSafeDirectory(OUTPUT_ROOT, effectiveUserId, 0o700, fileSystem);
   try {
-    await lstat(OUTPUT_FILE);
+    await fileSystem.lstat(OUTPUT_FILE);
     return unavailable();
   } catch (error) {
     if (!isMissing(error)) return unavailable();
   }
-  if (constants.O_DIRECTORY === undefined || constants.O_NOFOLLOW === undefined) unavailable();
-  const temporary = `${OUTPUT_ROOT}/.kemerbet_agent_identity_bindings.${randomUUID()}.tmp`;
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  let outputDirectoryHandle: Awaited<ReturnType<typeof open>> | null = null;
+  const directoryOpenFlag = fileSystem.directoryOpenFlag;
+  const noFollowOpenFlag = fileSystem.noFollowOpenFlag;
+  if (directoryOpenFlag === undefined || noFollowOpenFlag === undefined) unavailable();
+  const temporary = `${OUTPUT_ROOT}/.kemerbet_agent_identity_bindings.${createTemporaryId()}.tmp`;
+  let handle: KemerBetReadinessSealBindingHandle | null = null;
+  let outputDirectoryHandle: KemerBetReadinessSealBindingHandle | null = null;
+  let createdByThisRun: SafeStat | null = null;
   let installedByThisRun = false;
   let installationComplete = false;
   try {
-    outputDirectoryHandle = await open(
+    outputDirectoryHandle = await fileSystem.open(
       OUTPUT_ROOT,
-      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      constants.O_RDONLY | directoryOpenFlag | noFollowOpenFlag,
     );
-    const openedDirectory = (await outputDirectoryHandle.stat()) as SafeStat;
-    const namedDirectory = (await lstat(OUTPUT_ROOT)) as SafeStat;
+    const openedDirectory = await outputDirectoryHandle.stat();
+    const namedDirectory = await fileSystem.lstat(OUTPUT_ROOT);
     if (
       !openedDirectory.isDirectory() ||
       openedDirectory.isSymbolicLink() ||
-      (openedDirectory.uid !== 0 && openedDirectory.uid !== effectiveUserId) ||
+      openedDirectory.uid !== effectiveUserId ||
+      openedDirectory.gid !== effectiveUserId ||
       (openedDirectory.mode & 0o777) !== 0o700 ||
       !namedDirectory.isDirectory() ||
       namedDirectory.isSymbolicLink() ||
       !sameMetadata(openedDirectory, namedDirectory) ||
-      (await realpath(OUTPUT_ROOT)) !== OUTPUT_ROOT
+      (await fileSystem.realpath(OUTPUT_ROOT)) !== OUTPUT_ROOT
     ) {
       return unavailable();
     }
-    handle = await open(
+    handle = await fileSystem.open(
       temporary,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollowOpenFlag,
       0o600,
     );
-    await handle.writeFile(serializedBinding, { encoding: 'utf8' });
-    await handle.sync();
-    const written = (await handle.stat()) as SafeStat;
+    createdByThisRun = await handle.stat();
     if (
-      !written.isFile() ||
-      written.isSymbolicLink() ||
-      written.uid !== effectiveUserId ||
-      (written.mode & 0o777) !== 0o600 ||
-      written.nlink !== 1 ||
-      written.size !== EXACT_BINDING_FILE_BYTES
+      !createdByThisRun.isFile() ||
+      createdByThisRun.isDirectory() ||
+      createdByThisRun.isSymbolicLink() ||
+      createdByThisRun.uid !== effectiveUserId ||
+      createdByThisRun.gid !== effectiveUserId ||
+      (createdByThisRun.mode & 0o7777) !== 0o600 ||
+      createdByThisRun.nlink !== 1 ||
+      createdByThisRun.size !== 0
     ) {
       return unavailable();
     }
+    await handle.writeFile(serializedBinding, { encoding: 'utf8' });
+    await handle.sync();
+    const written = await handle.stat();
+    if (
+      !written.isFile() ||
+      written.isDirectory() ||
+      written.isSymbolicLink() ||
+      written.uid !== effectiveUserId ||
+      written.gid !== effectiveUserId ||
+      (written.mode & 0o7777) !== 0o600 ||
+      written.nlink !== 1 ||
+      written.size !== EXACT_BINDING_FILE_BYTES ||
+      !sameBindingIdentity(createdByThisRun, written)
+    ) {
+      return unavailable();
+    }
+    createdByThisRun = written;
     await handle.close();
     handle = null;
     await outputDirectoryHandle.sync();
-    await link(temporary, OUTPUT_FILE);
+    // Bracket the only durable namespace mutation with the same opaque imported-stage
+    // attestation. If the post-install check fails, the finally block removes only this run's
+    // newly linked binding and synchronizes the directory before reporting failure.
+    await reattestImportedStage();
+    await fileSystem.link(temporary, OUTPUT_FILE);
     installedByThisRun = true;
-    await unlink(temporary);
-    await outputDirectoryHandle.sync();
-    const installed = (await lstat(OUTPUT_FILE)) as SafeStat;
-    if (
-      !installed.isFile() ||
-      installed.isSymbolicLink() ||
-      installed.uid !== effectiveUserId ||
-      (installed.mode & 0o777) !== 0o600 ||
-      installed.nlink !== 1 ||
-      installed.size !== EXACT_BINDING_FILE_BYTES ||
-      installed.dev !== written.dev ||
-      installed.ino !== written.ino ||
-      (await realpath(OUTPUT_FILE)) !== OUTPUT_FILE
-    ) {
+    if (!(await unlinkOnlyCreatedBindingInode(fileSystem, temporary, createdByThisRun))) {
       return unavailable();
     }
-    installationComplete = true;
+    await outputDirectoryHandle.sync();
+    await revalidateInstalledBinding(
+      fileSystem,
+      OUTPUT_FILE,
+      serializedBinding,
+      createdByThisRun,
+      effectiveUserId,
+      noFollowOpenFlag,
+    );
+    await reattestImportedStage();
+    await revalidateInstalledBinding(
+      fileSystem,
+      OUTPUT_FILE,
+      serializedBinding,
+      createdByThisRun,
+      effectiveUserId,
+      noFollowOpenFlag,
+      () => {
+        installationComplete = true;
+      },
+    );
   } catch {
     return unavailable();
   } finally {
     await handle?.close().catch(() => undefined);
     let directoryChanged = false;
-    await unlink(temporary)
-      .then(() => {
-        directoryChanged = true;
-      })
-      .catch(() => undefined);
-    if (installedByThisRun && !installationComplete) {
-      await unlink(OUTPUT_FILE)
-        .then(() => {
-          directoryChanged = true;
-        })
-        .catch(() => undefined);
+    if (
+      createdByThisRun !== null &&
+      (await unlinkOnlyCreatedBindingInode(fileSystem, temporary, createdByThisRun))
+    ) {
+      directoryChanged = true;
+    }
+    if (
+      installedByThisRun &&
+      !installationComplete &&
+      createdByThisRun !== null &&
+      (await unlinkOnlyCreatedBindingInode(fileSystem, OUTPUT_FILE, createdByThisRun))
+    ) {
+      directoryChanged = true;
     }
     if (directoryChanged) await outputDirectoryHandle?.sync().catch(() => undefined);
     await outputDirectoryHandle?.close().catch(() => undefined);
@@ -2291,7 +2470,8 @@ export async function runKemerBetNoTransferReadinessSeal(
   reportStage('readiness_inputs');
   const [players, selectorContract, fingerprintAgentIdentity] = await Promise.all([
     dependencies.loadPlayerIds?.() ??
-      loadKemerBetNoTransferReadinessPlayerIds({
+      loadExactKemerBetStandaloneReadinessPlayerIds({
+        effectiveUserId,
         filePath: KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE,
       }),
     dependencies.loadSelectorContract?.() ??
@@ -2343,12 +2523,27 @@ export async function runKemerBetNoTransferReadinessSeal(
     )}`;
     if (!AGENT_PROFILE_PIN_PATTERN.test(agentProfilePin)) unavailable();
     reportStage('binding_write');
-    await (dependencies.writeBinding ?? writeBindingAtomically)(
-      accountId,
-      probe.observedAgentIdentityFingerprint,
-      agentProfilePin,
-      effectiveUserId,
-    );
+    if (dependencies.writeBinding) {
+      // Test-only/injected writers still receive an immediate pre-write attestation. Production
+      // brackets its atomic installation inside writeBindingAtomically below.
+      await players.reattest();
+      await dependencies.writeBinding(
+        accountId,
+        probe.observedAgentIdentityFingerprint,
+        agentProfilePin,
+        effectiveUserId,
+      );
+    } else {
+      await writeBindingAtomically(
+        accountId,
+        probe.observedAgentIdentityFingerprint,
+        agentProfilePin,
+        effectiveUserId,
+        players.reattest,
+        dependencies.bindingFileSystem,
+        dependencies.createBindingTemporaryId,
+      );
+    }
     (dependencies.logSuccess ?? defaultSuccessLog)({
       component: 'kemerbet_no_transfer_readiness_seal',
       event: 'sealed',

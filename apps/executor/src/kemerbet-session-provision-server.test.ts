@@ -15,6 +15,7 @@ import {
   createKemerBetReadinessSealFailureTracker,
   createKemerBetSessionProvisionServer as createRawKemerBetSessionProvisionServer,
   isAllowedKemerBetSessionRequest,
+  prepareKemerBetProvisionAuthenticatedIdentityVerifier,
   removeStaleChromiumSingletonArtifacts,
   type KemerBetReadinessSealFailureEvent,
   type KemerBetRecaptchaAssetFetcher,
@@ -57,6 +58,8 @@ function createKemerBetSessionProvisionServer(dependencies: ProvisionDependencie
     acquireProfileGenerationLease: async () => ({
       releaseAfterCleanCheckpoint: async () => undefined,
     }),
+    inspectProfileGenerationLease: async () => ({ state: 'clear' }),
+    inspectProfileGenerationStatus: async () => ({ state: 'clear' }),
     purgePersistedServiceWorkerState: async () => undefined,
     ...(wallClock !== undefined && dependencies.monotonicNow === undefined
       ? { monotonicNow: () => wallClock().getTime() }
@@ -65,12 +68,26 @@ function createKemerBetSessionProvisionServer(dependencies: ProvisionDependencie
   });
 }
 
+function createTestIdentityFingerprinter(): ((accountId: string, rawIdentity: string) => string) & {
+  readonly keyFingerprint: string;
+} {
+  return Object.assign(
+    (profileId: string, rawIdentity: string) =>
+      `hmac-sha256-agent-identity-v1:${createHash('sha256')
+        .update(`${profileId}\0${rawIdentity}`, 'utf8')
+        .digest('hex')}`,
+    { keyFingerprint: `sha256:${'f'.repeat(64)}` },
+  );
+}
+
 function prepareVerifiedIdentity(accountId: string): Promise<{
   readonly accountId: string;
+  readonly fingerprintAgentIdentity: ReturnType<typeof createTestIdentityFingerprinter>;
   verify(page: Page): Promise<void>;
 }> {
   return Promise.resolve({
     accountId,
+    fingerprintAgentIdentity: createTestIdentityFingerprinter(),
     verify: async () => undefined,
   });
 }
@@ -817,6 +834,7 @@ describe('private KemerBet session provision server', () => {
       launchPersistentContext,
       prepareAuthenticatedIdentityVerifier: async () => ({
         accountId: OTHER_ACCOUNT_ID,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
         verify: async () => undefined,
       }),
       setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
@@ -1596,6 +1614,7 @@ describe('private KemerBet session provision server', () => {
       launchPersistentContext: async () => browser.context,
       prepareAuthenticatedIdentityVerifier: async (accountId) => ({
         accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
         verify: verifyIdentity,
       }),
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
@@ -1669,6 +1688,7 @@ describe('private KemerBet session provision server', () => {
       launchPersistentContext: async () => browser.context,
       prepareAuthenticatedIdentityVerifier: async (accountId) => ({
         accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
         verify: verifyIdentity,
       }),
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
@@ -1749,6 +1769,7 @@ describe('private KemerBet session provision server', () => {
       launchPersistentContext: async () => browser.context,
       prepareAuthenticatedIdentityVerifier: async (accountId) => ({
         accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
         verify: verifyIdentity,
       }),
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
@@ -1820,6 +1841,7 @@ describe('private KemerBet session provision server', () => {
       now: () => new Date(timestamp),
       prepareAuthenticatedIdentityVerifier: async (accountId) => ({
         accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
         verify: () => identityProof.promise,
       }),
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
@@ -1940,8 +1962,17 @@ describe('private KemerBet session provision server', () => {
         providerAuthorizationDigest: () => `v1:${'b'.repeat(64)}`,
       }),
     );
+    const stagedPlayers = Object.freeze({
+      playerIds: Object.freeze(['player-1', 'player-2', 'player-3', 'player-4', 'player-5']),
+      reattest: vi.fn(async () => undefined),
+    });
+    const loadReadinessPlayerIds = vi.fn(async () => stagedPlayers);
     const runReadinessSeal = vi.fn(
       async (options: {
+        readonly loadPlayerIds: () => Promise<{
+          readonly playerIds: readonly string[];
+          readonly reattest: () => Promise<void>;
+        }>;
         readonly openProbe: (input: {
           readonly accountId: string;
           readonly effectiveUserId: number;
@@ -1951,6 +1982,7 @@ describe('private KemerBet session provision server', () => {
           readonly selectorContract: never;
         }) => Promise<{ readonly close: () => Promise<void> }>;
       }) => {
+        expect(await options.loadPlayerIds()).toBe(stagedPlayers);
         const probe = await options.openProbe({
           accountId: ACCOUNT_ID,
           effectiveUserId: 10_001,
@@ -1974,6 +2006,7 @@ describe('private KemerBet session provision server', () => {
       effectiveUserId: 10_001,
       environment: SAFE_ENVIRONMENT,
       launchPersistentContext: async () => browser.context,
+      loadReadinessPlayerIds,
       now: () => new Date(timestamp),
       prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
@@ -2019,6 +2052,7 @@ describe('private KemerBet session provision server', () => {
         stage: 'signed_in_page',
       });
       expect(runReadinessSeal).toHaveBeenCalledTimes(1);
+      expect(loadReadinessPlayerIds).toHaveBeenCalledTimes(1);
       expect(createReadinessProbeFromPage).toHaveBeenCalledTimes(1);
       expect(closePersistentBrowserForCheckpoint).toHaveBeenCalledTimes(1);
       expect(releaseAfterCleanCheckpoint).toHaveBeenCalledTimes(1);
@@ -2400,6 +2434,70 @@ describe('private KemerBet session provision server', () => {
       await stopSession(origin, REQUEST_ID);
       await waitForSessionPhase(origin, 'idle');
       expect(releaseAfterCleanCheckpoint).toHaveBeenCalledTimes(1);
+      await closeServer(provision.server);
+    }
+  });
+
+  it('reports an exact pre-existing generation marker as an inactive redacted quarantine', async () => {
+    const acquireProfileGenerationLease = vi.fn();
+    const launchPersistentContext = vi.fn();
+    const purgePersistedServiceWorkerState = vi.fn();
+    const events: string[] = [];
+    const provision = createKemerBetSessionProvisionServer({
+      acquireProfileGenerationLease,
+      assertBrowserExecutable: async () => undefined,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      inspectProfileGenerationLease: async () => ({
+        reasonCode: 'unclean_session_generation',
+        state: 'quarantined',
+      }),
+      inspectProfileGenerationStatus: async () => ({
+        reasonCode: 'unclean_session_generation',
+        state: 'quarantined',
+      }),
+      launchPersistentContext,
+      log: (event) => events.push(event),
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      purgePersistedServiceWorkerState,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      const status = await sessionStatus(origin);
+      expect(status).toEqual({
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'unclean_session_generation',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      });
+      expect(events).toEqual(['profile_quarantined']);
+      expect(acquireProfileGenerationLease).not.toHaveBeenCalled();
+      expect(purgePersistedServiceWorkerState).not.toHaveBeenCalled();
+      expect(launchPersistentContext).not.toHaveBeenCalled();
+
+      const wrongAccountStatus = await fetch(sessionStatusUrl(origin, OTHER_ACCOUNT_ID), {
+        headers: { connection: 'close' },
+      });
+      expect(wrongAccountStatus.status).toBe(503);
+      expect(await wrongAccountStatus.json()).toEqual({ error: 'session_unavailable' });
+
+      const repeated = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: SECOND_REQUEST_ID }),
+      );
+      expect(repeated.status).toBe(202);
+      expect(await repeated.json()).toEqual(status);
+      const frame = await fetch(sessionFrameUrl(origin, REQUEST_ID, 0));
+      expect(frame.status).toBe(503);
+      expect(await frame.json()).toEqual({ error: 'session_unavailable' });
+    } finally {
       await closeServer(provision.server);
     }
   });
@@ -2900,6 +2998,91 @@ describe('private KemerBet session provision server', () => {
         },
         { verifyAuthenticatedPage },
       ),
+    ).rejects.toBeInstanceOf(KemerBetProvisionServerUnavailableError);
+  });
+
+  it('authorizes a fresh recovery Profile only by observing the signed-in identity under the retired UUID', async () => {
+    const rawIdentity = 'private-test-agent-identity';
+    const baseFingerprinter = Object.assign(
+      vi.fn(
+        (profileId: string, identity: string) =>
+          `hmac-sha256-agent-identity-v1:${createHash('sha256')
+            .update(`${profileId}\0${identity}`, 'utf8')
+            .digest('hex')}`,
+      ),
+      { keyFingerprint: `sha256:${'e'.repeat(64)}` },
+    );
+    const expectedFingerprint = baseFingerprinter(OTHER_ACCOUNT_ID, rawIdentity);
+    const expectedFreshFingerprint = baseFingerprinter(ACCOUNT_ID, rawIdentity);
+    baseFingerprinter.mockClear();
+    const observed: string[] = [];
+    let observedRawIdentity = rawIdentity;
+    const observeIdentityFingerprint = vi.fn(
+      async (input: {
+        readonly fingerprintAgentIdentity: (profileId: string, identity: string) => string;
+        readonly platformAgentAccountId: string;
+      }) => {
+        const result = input.fingerprintAgentIdentity(
+          input.platformAgentAccountId,
+          observedRawIdentity,
+        );
+        observed.push(result);
+        return result;
+      },
+    );
+    const verifier = await prepareKemerBetProvisionAuthenticatedIdentityVerifier(
+      ACCOUNT_ID,
+      10_001,
+      {
+        createFingerprinter: async () => baseFingerprinter,
+        loadIdentityAuthorization: async () => ({
+          expectedAgentIdentityFingerprint: expectedFingerprint,
+          kind: 'security_recovery',
+          platformAgentAccountId: ACCOUNT_ID,
+          verificationPlatformAgentAccountId: OTHER_ACCOUNT_ID,
+        }),
+        loadSelectorContract: async () => undefined as never,
+        observeIdentityFingerprint,
+      },
+    );
+    const page = {} as Page;
+
+    await expect(verifier.verify(page)).resolves.toBeUndefined();
+    expect(verifier.accountId).toBe(ACCOUNT_ID);
+    expect(verifier.fingerprintAgentIdentity.keyFingerprint).toBe(baseFingerprinter.keyFingerprint);
+    expect(observed).toEqual([expectedFreshFingerprint]);
+    expect(baseFingerprinter.mock.calls).toEqual([
+      [OTHER_ACCOUNT_ID, rawIdentity],
+      [ACCOUNT_ID, rawIdentity],
+    ]);
+    expect(observeIdentityFingerprint).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        page,
+        platformAgentAccountId: ACCOUNT_ID,
+      }),
+    );
+
+    observedRawIdentity = 'another-agent-identity';
+    await expect(verifier.verify(page)).rejects.toBeInstanceOf(
+      KemerBetProvisionServerUnavailableError,
+    );
+  });
+
+  it('rejects a recovery authorization for any fresh Profile other than the requested one', async () => {
+    await expect(
+      prepareKemerBetProvisionAuthenticatedIdentityVerifier(ACCOUNT_ID, 10_001, {
+        createFingerprinter: async () =>
+          Object.assign(() => `hmac-sha256-agent-identity-v1:${'a'.repeat(64)}`, {
+            keyFingerprint: `sha256:${'f'.repeat(64)}`,
+          }),
+        loadIdentityAuthorization: async () => ({
+          expectedAgentIdentityFingerprint: `hmac-sha256-agent-identity-v1:${'a'.repeat(64)}`,
+          kind: 'security_recovery',
+          platformAgentAccountId: OTHER_ACCOUNT_ID,
+          verificationPlatformAgentAccountId: ACCOUNT_ID,
+        }),
+        loadSelectorContract: async () => undefined as never,
+      }),
     ).rejects.toBeInstanceOf(KemerBetProvisionServerUnavailableError);
   });
 

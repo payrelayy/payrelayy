@@ -719,5 +719,139 @@ export function registerOwnerKemerbetReadinessCohortSqlTests(
         await client.query('rollback');
       }
     });
+
+    it('creates one claim-bound recovery and replays same-claim request aliases', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          'select auth_user_id::text from app.admin_users where id = $1::uuid',
+          [getOwnerAdminId()],
+        );
+        const ownerAuthUserId = owner.rows[0]!.auth_user_id;
+        await createExactFive(client, ownerAuthUserId);
+        const quarantined = await client.query<{
+          readonly platform_agent_account_id: string;
+          readonly revision: number;
+        }>(`
+          select agent.id::text as platform_agent_account_id, profile.revision
+            from app.platform_agent_accounts agent
+            join app.platforms platform on platform.id = agent.platform_id
+            join app.private_owner_kemerbet_agent_profile_revisions profile
+              on profile.platform_agent_account_id = agent.id
+           where platform.code = 'kemerbet'
+             and agent.status = 'active'
+             and profile.retired_at is null
+        `);
+        expect(quarantined.rows).toHaveLength(1);
+
+        const prepared = await queryAsOwnerControl<{ readonly cohort_id: string }>(
+          client,
+          PREPARE_SQL,
+          [ownerAuthUserId, randomUUID()],
+        );
+        const claimId = prepared[0]!.cohort_id;
+        const canonicalRequestId = randomUUID();
+        const aliasRequestId = randomUUID();
+        const recoverySql = `
+          select *
+            from app.recover_owner_kemerbet_quarantined_agent_profile(
+              $1::uuid, $2::uuid, $3::uuid
+            )
+        `;
+        type RecoveryRow = {
+          readonly quarantined_platform_agent_account_id: string;
+          readonly quarantined_profile_revision: number;
+          readonly platform_agent_account_id: string;
+          readonly profile_revision: number;
+          readonly recovery_request_id: string;
+          readonly terminal_receipt_id: string;
+        };
+
+        const first = await queryAsExactOwnerRuntime<RecoveryRow>(client, recoverySql, [
+          ownerAuthUserId,
+          claimId,
+          canonicalRequestId,
+        ]);
+        expect(first).toHaveLength(1);
+        expect(first[0]).toMatchObject({
+          quarantined_platform_agent_account_id: quarantined.rows[0]!.platform_agent_account_id,
+          quarantined_profile_revision: quarantined.rows[0]!.revision,
+          recovery_request_id: canonicalRequestId,
+        });
+        expect(first[0]!.platform_agent_account_id).not.toBe(
+          quarantined.rows[0]!.platform_agent_account_id,
+        );
+        expect(first[0]!.profile_revision).toBeGreaterThan(quarantined.rows[0]!.revision);
+
+        // Force the deferred profile-to-ledger invariant now so this test proves the canonical
+        // recovery itself satisfies it rather than relying on the outer rollback.
+        await client.query('set constraints all immediate');
+
+        const sameRequestReplay = await queryAsExactOwnerRuntime<RecoveryRow>(client, recoverySql, [
+          ownerAuthUserId,
+          claimId,
+          canonicalRequestId,
+        ]);
+        const aliasReplay = await queryAsExactOwnerRuntime<RecoveryRow>(client, recoverySql, [
+          ownerAuthUserId,
+          claimId,
+          aliasRequestId,
+        ]);
+        expect(sameRequestReplay).toEqual(first);
+        expect(aliasReplay).toHaveLength(1);
+        expect(aliasReplay[0]).toMatchObject({
+          platform_agent_account_id: first[0]!.platform_agent_account_id,
+          profile_revision: first[0]!.profile_revision,
+          recovery_request_id: aliasRequestId,
+          terminal_receipt_id: first[0]!.terminal_receipt_id,
+        });
+
+        const ledger = await client.query<{
+          readonly alias_count: number;
+          readonly recovery_count: number;
+        }>(
+          `
+          select count(distinct recovery.recovery_request_id)::integer as recovery_count,
+                 count(distinct request.request_id)::integer as alias_count
+            from app.private_owner_kemerbet_quarantine_recoveries recovery
+            join app.private_owner_kemerbet_quarantine_recovery_requests request
+              on request.canonical_recovery_request_id = recovery.recovery_request_id
+           where recovery.claim_id = $1::uuid
+        `,
+          [claimId],
+        );
+        expect(ledger.rows).toEqual([{ alias_count: 2, recovery_count: 1 }]);
+
+        await expectFailure(
+          () =>
+            queryAsOwnerControl(
+              client,
+              `select * from app.prepare_owner_kemerbet_agent_profile(
+                 $1::uuid, $2::uuid, 'security_recovery'
+               )`,
+              [ownerAuthUserId, randomUUID()],
+            ),
+          /requires one exact claim-bound recovery/iu,
+        );
+        const activeAfterRejectedBypass = await client.query<{
+          readonly platform_agent_account_id: string;
+        }>(`
+          select agent.id::text as platform_agent_account_id
+            from app.platform_agent_accounts agent
+            join app.platforms platform on platform.id = agent.platform_id
+            join app.private_owner_kemerbet_agent_profile_revisions profile
+              on profile.platform_agent_account_id = agent.id
+           where platform.code = 'kemerbet'
+             and agent.status = 'active'
+             and profile.retired_at is null
+        `);
+        expect(activeAfterRejectedBypass.rows).toEqual([
+          { platform_agent_account_id: first[0]!.platform_agent_account_id },
+        ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
   });
 }

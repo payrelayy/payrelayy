@@ -18,6 +18,18 @@ export interface PrepareOwnerKemerbetAgentProfileRequest {
   readonly requestId: string;
 }
 
+export interface RecoverOwnerKemerbetAgentProfileRequest {
+  readonly claimId: string;
+  readonly receiptId: string;
+}
+
+export interface OwnerKemerbetAgentProfileRecovery {
+  readonly claimId: string;
+  readonly profile: OwnerKemerbetAgentProfile;
+  readonly receiptId: string;
+  readonly recordedAt: string;
+}
+
 export interface OwnerKemerbetAgentProfileDatabase {
   query(sql: string, values: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
@@ -45,6 +57,11 @@ const REASONS = new Set<OwnerKemerbetAgentProfileReason>([
   'owner_correction',
   'security_recovery',
 ]);
+const PREPARE_REASONS = new Set<OwnerKemerbetAgentProfileReason>([
+  'agent_rotation',
+  'initial_configuration',
+  'owner_correction',
+]);
 
 const LIST_SQL = `
   select platform_agent_account_id,
@@ -70,6 +87,29 @@ const PREPARE_SQL = `
          configuration_reason,
          profile_contract_version
     from app.prepare_owner_kemerbet_agent_profile($1::uuid, $2::uuid, $3::text)
+`;
+
+const RECOVER_SQL = `
+  select recovery_request_id,
+         recovered_claim_id,
+         terminal_receipt_id,
+         terminal_receipt_recorded_at,
+         quarantined_platform_agent_account_id,
+         quarantined_profile_revision,
+         platform_agent_account_id,
+         platform_code,
+         profile_label,
+         profile_revision,
+         profile_status,
+         configured_at,
+         retired_at,
+         configuration_reason,
+         profile_contract_version
+    from app.recover_owner_kemerbet_quarantined_agent_profile(
+      $1::uuid,
+      $2::uuid,
+      $3::uuid
+    )
 `;
 
 function rowObject(row: unknown): Record<string, unknown> {
@@ -150,7 +190,7 @@ export class PostgresOwnerKemerbetAgentProfiles {
     if (
       !UUID_PATTERN.test(authUserId) ||
       !UUID_V4_PATTERN.test(request.requestId) ||
-      !REASONS.has(request.configurationReason)
+      !PREPARE_REASONS.has(request.configurationReason)
     ) {
       throw new OwnerKemerbetAgentProfileRejectedError();
     }
@@ -166,6 +206,58 @@ export class PostgresOwnerKemerbetAgentProfiles {
         throw new OwnerKemerbetAgentProfileUnavailableError();
       }
       return Object.freeze(profile);
+    } catch (error) {
+      if (error instanceof OwnerKemerbetAgentProfileRejectedError) throw error;
+      throw new OwnerKemerbetAgentProfileUnavailableError();
+    }
+  }
+
+  async recover(
+    authUserId: string,
+    request: RecoverOwnerKemerbetAgentProfileRequest,
+  ): Promise<OwnerKemerbetAgentProfileRecovery> {
+    if (
+      !UUID_PATTERN.test(authUserId) ||
+      !UUID_V4_PATTERN.test(request.claimId) ||
+      !UUID_V4_PATTERN.test(request.receiptId)
+    ) {
+      throw new OwnerKemerbetAgentProfileRejectedError();
+    }
+    try {
+      const result = await this.database.query(RECOVER_SQL, [
+        authUserId,
+        request.claimId,
+        request.receiptId,
+      ]);
+      if (result.rows.length !== 1) throw new OwnerKemerbetAgentProfileUnavailableError();
+      const row = rowObject(result.rows[0]);
+      if (
+        row.recovery_request_id !== request.receiptId ||
+        row.recovered_claim_id !== request.claimId ||
+        typeof row.terminal_receipt_id !== 'string' ||
+        !UUID_V4_PATTERN.test(row.terminal_receipt_id) ||
+        typeof row.quarantined_platform_agent_account_id !== 'string' ||
+        !UUID_PATTERN.test(row.quarantined_platform_agent_account_id) ||
+        !Number.isSafeInteger(row.quarantined_profile_revision) ||
+        Number(row.quarantined_profile_revision) < 1
+      ) {
+        throw new OwnerKemerbetAgentProfileUnavailableError();
+      }
+      const profile = profileFromRow(row);
+      if (
+        profile.configurationReason !== 'security_recovery' ||
+        profile.profileStatus !== 'active' ||
+        profile.platformAgentAccountId === row.quarantined_platform_agent_account_id ||
+        profile.profileRevision <= Number(row.quarantined_profile_revision)
+      ) {
+        throw new OwnerKemerbetAgentProfileUnavailableError();
+      }
+      return Object.freeze({
+        claimId: request.claimId,
+        profile: Object.freeze(profile),
+        receiptId: row.terminal_receipt_id,
+        recordedAt: isoDate(row.terminal_receipt_recorded_at),
+      });
     } catch (error) {
       if (error instanceof OwnerKemerbetAgentProfileRejectedError) throw error;
       throw new OwnerKemerbetAgentProfileUnavailableError();

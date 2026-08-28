@@ -34,6 +34,63 @@ describe('Owner KemerBet readiness root-receipt reconciliation', () => {
     expect(result).toBe('retryable_failed');
   });
 
+  it('keeps a spent-recheck terminal marker out of every retry and DB outcome path', async () => {
+    const result = await reconcileOwnerKemerbetReadinessRootReceipt(
+      {
+        rootReceipt: async () => ({
+          claimId,
+          event: 'recheck_authorization_spent_failed_terminal',
+        }),
+      },
+      {
+        recordRootReceipt: async () => {
+          throw new Error('a spent authorization cannot be reconciled as a retryable outcome');
+        },
+      },
+      () => receiptId,
+    );
+
+    expect(result).toBe('recheck_authorization_spent_failed_terminal');
+  });
+
+  it('projects the distinct recovery marker without terminalizing it outside atomic profile recovery', async () => {
+    const result = await reconcileOwnerKemerbetReadinessRootReceipt(
+      {
+        rootReceipt: async () => ({
+          claimId,
+          event: 'security_recovery_failed_terminal',
+        }),
+      },
+      {
+        recordRootReceipt: async () => {
+          throw new Error('terminal receipt must be recorded only inside atomic profile recovery');
+        },
+      },
+      () => receiptId,
+    );
+
+    expect(result).toBe('security_recovery_required');
+  });
+
+  it('projects the finalized-profile latch without writing a DB root receipt', async () => {
+    const result = await reconcileOwnerKemerbetReadinessRootReceipt(
+      {
+        rootReceipt: async () => ({
+          claimId,
+          event: 'security_recovery_profile_finalized',
+        }),
+      },
+      {
+        recordRootReceipt: async () => {
+          throw new Error('the finalized-profile latch is not a cohort outcome');
+        },
+      },
+      () => receiptId,
+    );
+
+    expect(result).toBe('security_recovery_cohort_required');
+  });
+
   it.each(['imported', 'completed'] as const)(
     'records an exact %s root receipt with a fresh server receipt identity',
     async (event) => {

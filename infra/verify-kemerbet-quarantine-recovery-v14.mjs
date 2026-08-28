@@ -1210,15 +1210,37 @@ assert.ok(
   'test:infra must run the H14 verifier',
 );
 
-const extractPythonHeredoc = (functionName) => {
-  const functionStart = installer.indexOf(`${functionName}() {`);
+const extractPythonHeredoc = (functionName, expectedArgumentBinding) => {
+  const declaration = `${functionName}() {`;
+  const functionStart = installer.indexOf(declaration);
   assert.ok(functionStart >= 0, `missing ${functionName}`);
-  const heredocStart = installer.indexOf("<<'PY'\n", functionStart);
-  assert.ok(heredocStart >= 0, `missing ${functionName} Python heredoc`);
-  const sourceStart = heredocStart + "<<'PY'\n".length;
+
+  const afterDeclaration = functionStart + declaration.length;
+  const nextFunctionOffset = installer
+    .slice(afterDeclaration)
+    .search(/\n[A-Za-z_][A-Za-z0-9_]*\(\) \{\n/);
+  const functionEnd =
+    nextFunctionOffset < 0 ? installer.length : afterDeclaration + nextFunctionOffset;
+  const functionSource = installer.slice(functionStart, functionEnd);
+  const heredocOpeners = [...functionSource.matchAll(/<<'PY'(?: \|\| return 1)?\n/g)];
+  assert.equal(
+    heredocOpeners.length,
+    1,
+    `${functionName} must contain exactly one supported Python heredoc`,
+  );
+  const heredocStart = functionStart + heredocOpeners[0].index;
+  const sourceStart = heredocStart + heredocOpeners[0][0].length;
   const sourceEnd = installer.indexOf('\nPY\n', sourceStart);
-  assert.ok(sourceEnd > sourceStart, `unterminated ${functionName} Python heredoc`);
-  return installer.slice(sourceStart, sourceEnd);
+  assert.ok(
+    sourceEnd > sourceStart && sourceEnd < functionEnd,
+    `unterminated ${functionName} Python heredoc`,
+  );
+  const source = installer.slice(sourceStart, sourceEnd);
+  assert.ok(
+    source.includes(expectedArgumentBinding),
+    `${functionName} Python heredoc has an unexpected argument contract`,
+  );
+  return source;
 };
 
 if (process.platform === 'linux') {
@@ -1227,7 +1249,10 @@ if (process.platform === 'linux') {
   const recordName = 'empty-predecessor-checkpoint-adoption-v1';
   const sourceName = `.installing-${predecessorRelease}`;
   const targetName = `.installing-${successorRelease}`;
-  const adoptionPython = extractPythonHeredoc('adopt_exact_empty_predecessor_checkpoint')
+  const adoptionPython = extractPythonHeredoc(
+    'adopt_exact_empty_predecessor_checkpoint',
+    'parent, predecessor_release, successor_release, record_name = sys.argv[1:]',
+  )
     .replaceAll('(0, 0, 0o700)', '(os.getuid(), os.getgid(), 0o700)')
     .replaceAll('(0, 0, 0o600, 1)', '(os.getuid(), os.getgid(), 0o600, 1)');
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'fetanagent-h14-empty-checkpoint-'));
@@ -1273,10 +1298,16 @@ if (process.platform === 'linux') {
       ['-I', '-', parent, predecessorRelease, successorRelease, recordName],
       { encoding: 'utf8', input: adoptionPython },
     );
-  const recordValidationPython = extractPythonHeredoc('require_adopted_empty_checkpoint_record')
+  const recordValidationPython = extractPythonHeredoc(
+    'require_adopted_empty_checkpoint_record',
+    'root, predecessor_release, successor_release, record_name = sys.argv[1:]',
+  )
     .replaceAll('(0, 0, 0o700)', '(os.getuid(), os.getgid(), 0o700)')
     .replaceAll('(0, 0, 0o600, 1)', '(os.getuid(), os.getgid(), 0o600, 1)');
-  const phasePython = extractPythonHeredoc('classify_h14_base_phase');
+  const phasePython = extractPythonHeredoc(
+    'classify_h14_base_phase',
+    'root, adoption_name = sys.argv[1:]',
+  );
   const runRecordValidation = (checkpoint) =>
     spawnSync(
       '/usr/bin/python3',
@@ -1289,14 +1320,20 @@ if (process.platform === 'linux') {
       input: phasePython,
     });
 
-  const shellPrefixPython = extractPythonHeredoc('publish_recovery_record')
+  const shellPrefixPython = extractPythonHeredoc(
+    'publish_recovery_record',
+    'path, mode_text, text = sys.argv[1:]',
+  )
     .replaceAll('os.fchown(descriptor, 0, 0)', 'os.fchown(descriptor, os.getuid(), os.getgid())')
     .replaceAll('(0, 0, mode, 1)', '(os.getuid(), os.getgid(), mode, 1)')
     .replaceAll(
       '(before.st_dev, before.st_ino, 0, 0, mode, 1, len(data))',
       '(before.st_dev, before.st_ino, os.getuid(), os.getgid(), mode, 1, len(data))',
     );
-  const forwardPython = extractPythonHeredoc('run_forward_only_recovery');
+  const forwardPython = extractPythonHeredoc(
+    'run_forward_only_recovery',
+    '    terminal_name,\n) = sys.argv[1:]',
+  );
   const forwardPublicationFunctions = forwardPython.slice(
     forwardPython.indexOf('def reject():'),
     forwardPython.indexOf('\ndef exact_ascii_record('),
@@ -1304,7 +1341,10 @@ if (process.platform === 'linux') {
   const pythonRecordHarness = `${['import os', 'import stat', '', forwardPublicationFunctions].join(
     '\n',
   )}\nroot, text, mode_text = __import__('sys').argv[1:]\npublish_record(root, 'record-v1', text.encode('ascii'), os.getuid(), os.getgid(), int(mode_text, 8))\n`;
-  const helperPrefixPython = extractPythonHeredoc('copy_helper_atomically')
+  const helperPrefixPython = extractPythonHeredoc(
+    'copy_helper_atomically',
+    'source, partial, digest, source_mode_text = sys.argv[1:]',
+  )
     .replaceAll('(0, 0, source_mode, 1)', '(os.getuid(), os.getgid(), source_mode, 1)')
     .replaceAll(
       'os.fchown(partial_descriptor, 0, 0)',

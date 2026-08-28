@@ -7275,6 +7275,8 @@ import re
 sha = re.compile(r'[0-9a-f]{64}')
 effective_release = '${'b'.repeat(40)}'
 effective_helper_sha = '${'c'.repeat(64)}'
+recheck_bridge_state = 'active'
+recheck_bridge_release = '${'a'.repeat(40)}'
 later_helper_bytes = b'later ordinary reviewed helper bytes'
 assert hashlib.sha256(later_helper_bytes).hexdigest() != effective_helper_sha
 v3_sha = '${'d'.repeat(64)}'
@@ -7296,7 +7298,7 @@ promotion_root = '/fixture/promotion'
 rpc_root = '/fixture/rpc'
 receipt_lines = [
     'version=1',
-    f'release={effective_release}',
+    f'release={recheck_bridge_release}',
     f'binding_sha256={v3_sha}',
     f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}',
     f'selector_sha256={hashlib.sha256(selector_bytes).hexdigest()}',

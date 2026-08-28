@@ -238,6 +238,21 @@ except Exception:
 PY
 }
 
+has_enabled_financial_gate() {
+  local entry environment="$1" status
+  while IFS= read -r entry; do
+    [[ "$entry" == 'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' ]] && continue
+    if grep -Eiq '^(FETANAGENT_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*|KEMERBET_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*)=(1|true|yes|on)$' \
+      <<<"$entry"; then
+      return 0
+    else
+      status=$?
+      [[ "$status" -eq 1 ]] || return 0
+    fi
+  done <<<"$environment"
+  return 1
+}
+
 require_financial_gates_disabled() {
   local container environment
   [[ ! -e "$FINAL_BINDING" && ! -L "$FINAL_BINDING" ]] || return 1
@@ -245,8 +260,7 @@ require_financial_gates_disabled() {
     [[ -n "$container" ]] || continue
     environment="$(docker_local container inspect "$container" \
       --format '{{range .Config.Env}}{{println .}}{{end}}')" || return 1
-    if grep -Eiq '^(FETANAGENT_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*|KEMERBET_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*)=(1|true|yes|on)$' \
-      <<<"$environment"; then
+    if has_enabled_financial_gate "$environment"; then
       return 1
     fi
   done < <(docker_local container ls --all --quiet \
@@ -291,8 +305,7 @@ require_recovery_container_contract() {
   grep -Fxq 'FINANCIAL_ACTIONS_MODE=dry_run' <<<"$environment" || return 1
   grep -Fxq 'KEMERBET_EXECUTOR_ENABLED=false' <<<"$environment" || return 1
   grep -Fxq 'KEMERBET_FINAL_ACTION_ENABLED=false' <<<"$environment" || return 1
-  ! grep -Eiq '^(FETANAGENT_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*|KEMERBET_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*)=(1|true|yes|on)$' \
-    <<<"$environment" || return 1
+  ! has_enabled_financial_gate "$environment" || return 1
   control_source="$(docker_local container inspect "$container_id" --format \
     '{{range .Mounts}}{{if eq .Destination "/run/fetanagent-kemerbet-session-control"}}{{.Name}}{{end}}{{end}}')" ||
     return 1

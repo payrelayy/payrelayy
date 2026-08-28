@@ -364,7 +364,8 @@ expected_completion() {
 }
 
 publish_record() {
-  local root="$1" name="$2" mode="$3" producer="$4" temporary="$root/.$name.installing"
+  local root="$1" name="$2" mode="$3" producer="$4"
+  local temporary="$root/.$name.installing"
   if [[ -e "$root/$name" || -L "$root/$name" ]]; then
     [[ ! -e "$temporary" && ! -L "$temporary" ]] || return 1
     cmp -s -- "$root/$name" <("$producer") || return 1

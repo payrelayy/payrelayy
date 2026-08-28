@@ -166,7 +166,7 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: /etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings
+        source: ${FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE:-/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings}
         target: /run/secrets/kemerbet_agent_identity_bindings
         read_only: true
         bind:

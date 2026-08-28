@@ -178,7 +178,7 @@ const reviewedV3RuntimeBridgeParserScopeRepairV12Sha =
 const reviewedV3RecheckBridgeHelperV13Sha =
   '3b789c983c415326171c6b4224016d2a04769a0b8c37cb91fc463383f2d141aa';
 const reviewedV3RecheckBridgeV13Sha =
-  '6eb4a913d852975d809cdf20eee340d2a984a38d5009badfe47dda2ccfe662aa';
+  'a3dcd512d7ed61c4f1b57f2f2f681c92f68341d9b0cf0d2ed2cdabb94cdaee10';
 const reviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha =
   'a20f6f5b813a3032477b7e7fcaaf5aac94b8083ac0ddfdaab4b673c56fccc3e7';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
@@ -7118,8 +7118,37 @@ for (const fixedRecheckBridgeV13Contract of [
   /executor_final_action_enabled=false/u,
   /10001:10001:600:1:230/u,
   /hmac-sha256-agent-profile-pin-v3/u,
+  /^  local root="\$1" name="\$2" mode="\$3" producer="\$4"$/mu,
+  /^  local temporary="\$root\/\.\$name\.installing"$/mu,
 ]) {
   assert.match(v3RecheckBridgeV13, fixedRecheckBridgeV13Contract);
+}
+if (process.platform === 'linux') {
+  const recheckBridgeV13Publisher = extractShellFunction(
+    v3RecheckBridgeV13,
+    'publish_record',
+    'copy_root_file_atomically',
+  );
+  const publisherFixture = `
+set -euo pipefail
+${recheckBridgeV13Publisher}
+cmp() { return 0; }
+stat() { printf 'root:root:600:1\\n'; }
+expected_record() { printf 'fixture\\n'; }
+fixture="$(mktemp -d)"
+trap 'rm -rf -- "$fixture"' EXIT
+touch "$fixture/intent-v1"
+publish_record "$fixture" intent-v1 600 expected_record
+`;
+  const publisherFixtureResult = spawnSync('/usr/bin/bash', ['--noprofile', '--norc'], {
+    encoding: 'utf8',
+    input: publisherFixture,
+  });
+  assert.equal(
+    publisherFixtureResult.status,
+    0,
+    `H13 publish_record must initialize dependent locals before use: ${publisherFixtureResult.stderr}`,
+  );
 }
 const recheckBridgeV13Main = v3RecheckBridgeV13.slice(
   v3RecheckBridgeV13.indexOf(

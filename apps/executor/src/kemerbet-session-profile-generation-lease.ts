@@ -11,6 +11,7 @@ interface LeaseStat {
   readonly ino: number | bigint;
   readonly mode: number;
   readonly nlink: number;
+  readonly size: number;
   readonly uid: number;
   isDirectory(): boolean;
   isFile(): boolean;
@@ -19,6 +20,7 @@ interface LeaseStat {
 
 interface LeaseHandle {
   close(): Promise<void>;
+  readFile(): Promise<Buffer>;
   stat(): Promise<LeaseStat>;
   sync(): Promise<void>;
   writeFile(value: Uint8Array): Promise<void>;
@@ -43,10 +45,23 @@ export interface KemerBetSessionProfileGenerationLease {
   releaseAfterCleanCheckpoint(): Promise<void>;
 }
 
+export type KemerBetSessionProfileGenerationLeaseInspection =
+  | Readonly<{ state: 'clear' }>
+  | Readonly<{ reasonCode: 'unclean_session_generation'; state: 'quarantined' }>;
+
 export class KemerBetSessionProfileGenerationLeaseUnavailableError extends Error {
   constructor() {
     super('The KemerBet session profile generation lease is unavailable.');
     this.name = 'KemerBetSessionProfileGenerationLeaseUnavailableError';
+  }
+}
+
+export class KemerBetSessionProfileGenerationQuarantinedError extends Error {
+  readonly reasonCode = 'unclean_session_generation' as const;
+
+  constructor() {
+    super('The KemerBet session profile generation is quarantined.');
+    this.name = 'KemerBetSessionProfileGenerationQuarantinedError';
   }
 }
 
@@ -75,6 +90,10 @@ function exactOwnedMarker(stat: LeaseStat, effectiveUserId: number): boolean {
     stat.nlink === 1 &&
     (stat.mode & 0o7777) === 0o600
   );
+}
+
+function missing(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 async function requireStableOwnedProfile(
@@ -114,6 +133,65 @@ async function syncProfileDirectory(
 }
 
 /**
+ * Inspect the immutable crash marker without changing it. Only the exact marker installed by this
+ * process contract is classified as quarantined; every ambiguous filesystem shape fails closed as
+ * unavailable and must not be described more precisely to callers.
+ */
+export async function inspectKemerBetSessionProfileGenerationLease(
+  profilePath: string,
+  effectiveUserId: number,
+  fileSystem: KemerBetSessionProfileGenerationLeaseFileSystem = productionFileSystem,
+): Promise<KemerBetSessionProfileGenerationLeaseInspection> {
+  if (!Number.isSafeInteger(effectiveUserId) || effectiveUserId <= 0) unavailable();
+  const markerPath = resolve(profilePath, MARKER_NAME);
+  if (relative(profilePath, markerPath) !== MARKER_NAME) unavailable();
+  try {
+    await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);
+    let pathBefore: LeaseStat;
+    try {
+      pathBefore = await fileSystem.lstat(markerPath);
+    } catch (error) {
+      if (!missing(error)) throw error;
+      await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);
+      return Object.freeze({ state: 'clear' });
+    }
+    if (
+      !exactOwnedMarker(pathBefore, effectiveUserId) ||
+      pathBefore.size !== MARKER_CONTENTS.byteLength ||
+      (await fileSystem.realpath(markerPath)) !== markerPath
+    ) {
+      unavailable();
+    }
+    const marker = await fileSystem.open(
+      markerPath,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+    );
+    try {
+      const handleBefore = await marker.stat();
+      if (!sameIdentity(pathBefore, handleBefore)) unavailable();
+      const contents = await marker.readFile();
+      const handleAfter = await marker.stat();
+      if (
+        !sameIdentity(handleBefore, handleAfter) ||
+        handleAfter.size !== MARKER_CONTENTS.byteLength ||
+        !contents.equals(MARKER_CONTENTS)
+      ) {
+        unavailable();
+      }
+    } finally {
+      await marker.close();
+    }
+    const pathAfter = await fileSystem.lstat(markerPath);
+    if (!sameIdentity(pathBefore, pathAfter)) unavailable();
+    await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);
+    return Object.freeze({ reasonCode: 'unclean_session_generation', state: 'quarantined' });
+  } catch (error) {
+    if (error instanceof KemerBetSessionProfileGenerationLeaseUnavailableError) throw error;
+    return unavailable();
+  }
+}
+
+/**
  * Atomically install a per-profile crash marker before Chromium exists. Existing markers are never
  * auto-recovered: they mean a previous process did not prove a clean checkpoint, so that immutable
  * profile revision must be retired/resealed rather than silently reused after restart.
@@ -128,6 +206,14 @@ export async function acquireKemerBetSessionProfileGenerationLease(
   if (relative(profilePath, markerPath) !== MARKER_NAME) unavailable();
   try {
     await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);
+    const inspection = await inspectKemerBetSessionProfileGenerationLease(
+      profilePath,
+      effectiveUserId,
+      fileSystem,
+    );
+    if (inspection.state === 'quarantined') {
+      throw new KemerBetSessionProfileGenerationQuarantinedError();
+    }
     const marker = await fileSystem.open(
       markerPath,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0),
@@ -160,6 +246,12 @@ export async function acquireKemerBetSessionProfileGenerationLease(
       async releaseAfterCleanCheckpoint(): Promise<void> {
         if (released) return unavailable();
         await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);
+        const inspection = await inspectKemerBetSessionProfileGenerationLease(
+          profilePath,
+          effectiveUserId,
+          fileSystem,
+        );
+        if (inspection.state !== 'quarantined') return unavailable();
         const beforeUnlink = await fileSystem.lstat(markerPath);
         if (
           !sameIdentity(acquiredStat, beforeUnlink) ||
@@ -188,7 +280,22 @@ export async function acquireKemerBetSessionProfileGenerationLease(
       },
     });
   } catch (error) {
-    if (error instanceof KemerBetSessionProfileGenerationLeaseUnavailableError) throw error;
+    if (
+      error instanceof KemerBetSessionProfileGenerationLeaseUnavailableError ||
+      error instanceof KemerBetSessionProfileGenerationQuarantinedError
+    ) {
+      throw error;
+    }
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'EEXIST') {
+      const inspection = await inspectKemerBetSessionProfileGenerationLease(
+        profilePath,
+        effectiveUserId,
+        fileSystem,
+      );
+      if (inspection.state === 'quarantined') {
+        throw new KemerBetSessionProfileGenerationQuarantinedError();
+      }
+    }
     return unavailable();
   }
 }

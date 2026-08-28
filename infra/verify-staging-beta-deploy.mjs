@@ -4558,7 +4558,7 @@ for (const requiredSessionWorkflowContract of [
   /confirm_v1_retirement:/,
   /CONFIRMED_V1_BINDING_SHA256/,
   /CONFIRMED_V1_RETIREMENT/,
-  /\^\(inspect\|start\|retire-v1-for-v2-reseal\|seal\|recheck\|stop\)\$/,
+  /\^\(inspect\|quarantine-recovery-inspect\|quarantine-recovery-finalize-profile\|quarantine-recovery-record-cohort\|start\|retire-v1-for-v2-reseal\|seal\|recheck\|stop\)\$/,
   /\^\[0-9a-f\]\{40\}\$/,
   /\^\[1-9\]\[0-9\]\{7,19\}\$/,
   /\^\[0-9a-f\]\{64\}\$/,
@@ -10572,7 +10572,8 @@ assert.ok(
 );
 for (const contract of [
   /published-with-kemerbet-session/,
-  /require_kemerbet_session_provision_runtime "\$commit_sha" "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha"\)"/,
+  /require_kemerbet_session_provision_runtime "\$commit_sha" "\$session_binding_source"/,
   /if \[\[ -e "\$KEMERBET_READINESS_BINDING" \|\| -L "\$KEMERBET_READINESS_BINDING" \]\]; then/,
   /\[\[ -e "\$KEMERBET_V1_RETIREMENT_ROOT" \|\| -L "\$KEMERBET_V1_RETIREMENT_ROOT" \]\] \|\|/,
   /the one-time KemerBet readiness binding already exists/,
@@ -10602,8 +10603,8 @@ assert.equal(
       /KemerBet readiness sealed: 5 of 5 Players, Transfer disabled\./g,
     ) ?? []
   ).length,
-  2,
-  'normal and recovered v2 seals must emit the same canonical aggregate success line',
+  4,
+  'normal, recovered v2, and both exact H14 recovery prefixes must emit the same canonical aggregate success line',
 );
 assert.doesNotMatch(
   sealKemerbetReadiness,
@@ -11156,6 +11157,9 @@ for (const contract of [
   /os\.fsync\(root_fd\)/,
   /not same\(residue_stat, named_residue\)/,
   /not same\(journal_stat, named_journal\)/,
+  /journal_lines\[0\] == b'version=2'/,
+  /b'state=execution_started'/,
+  /b'state=spent'/,
 ]) {
   assert.match(durableRecoveryResidue, contract);
 }
@@ -11182,6 +11186,8 @@ for (const contract of [
   /0:0:600:1/,
   /version=1/,
   /state=\(import_prepared\|prepared\|candidate_bound\)/,
+  /version=2/,
+  /state=\(candidate_bound\|execution_started\|spent\)/,
 ]) {
   assert.match(fallbackPublishBoundary, contract);
 }
@@ -11190,6 +11196,9 @@ for (const contract of [
   /KEMERBET_RECOVERY_FALLBACK_INSTALLING_NAME/,
   /journal_fd = os\.open/,
   /journal_content = os\.pread/,
+  /journal_lines\[0\] == b'version=2'/,
+  /b'state=execution_started'/,
+  /b'state=spent'/,
   /os\.O_WRONLY \| os\.O_CREAT \| os\.O_EXCL \| os\.O_NOFOLLOW/,
   /os\.fsync\(installing_fd\)/,
   /os\.rename\(/,
@@ -11787,7 +11796,11 @@ for (const contract of [
   /install_kemerbet_recheck_network_firewall "\$browser_full_container_id" browser/,
   /publish_kemerbet_recheck_firewall_release browser/,
   /install_kemerbet_recheck_network_firewall "\$recheck_full_container_id" controller/,
+  /KEMERBET_RECHECK_EXECUTION_STATE='execution_started'/,
+  /advance_kemerbet_recheck_promotion_journal_to_execution_started/,
   /publish_kemerbet_recheck_firewall_release controller/,
+  /KEMERBET_RECHECK_EXECUTION_STATE='spent'/,
+  /advance_kemerbet_recheck_promotion_journal_to_spent/,
   /require_kemerbet_recheck_running_network_contract/,
   /require_kemerbet_recheck_runtime_artifacts released "\$commit_sha" "\$account_id"/,
   /wait_for_kemerbet_recheck_service_healthy "\$proxy_full_container_id"[\s\S]*?\.Id.*\.State\.Status.*\.State\.Running.*\.State\.Paused.*\.State\.OOMKilled.*\.State\.Error.*\.RestartCount.*\.State\.Health[\s\S]*?\$proxy_full_container_id\|running\|true\|false\|false\|\|0\|healthy[\s\S]*?container start "\$browser_full_container_id"/u,
@@ -11833,7 +11846,7 @@ assert.match(
 );
 assert.match(
   recheckKemerbetReadiness,
-  /remove_owned_kemerbet_recheck_promotion_root[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"\s+inspect_kemerbet_v2_v3_successor_gate[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "\$commit_sha"/u,
+  /remove_owned_kemerbet_recheck_promotion_root[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"[\s\S]*?inspect_kemerbet_v2_v3_successor_gate[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "\$commit_sha"/u,
   'normal v3 completion must retire the promotion journal and derive the durable terminal state before reporting success',
 );
 assert.equal(
@@ -11911,7 +11924,11 @@ assertInOrder(
     'install_kemerbet_recheck_network_firewall "$recheck_full_container_id" controller',
     'require_kemerbet_recheck_network_firewall "$recheck_full_container_id" controller',
     'probe_kemerbet_recheck_denied_network "$recheck_full_container_id"',
+    "KEMERBET_RECHECK_EXECUTION_STATE='execution_started'",
+    'advance_kemerbet_recheck_promotion_journal_to_execution_started',
     'publish_kemerbet_recheck_firewall_release controller',
+    "KEMERBET_RECHECK_EXECUTION_STATE='spent'",
+    'advance_kemerbet_recheck_promotion_journal_to_spent',
     'close_pinned_kemerbet_recheck_network_namespace controller',
     'require_kemerbet_recheck_running_network_contract',
     'require_kemerbet_recheck_runtime_artifacts released "$commit_sha" "$account_id"',
@@ -13093,6 +13110,7 @@ assert.ok(
 );
 for (const contract of [
   /require_kemerbet_recheck_prepared_promotion_journal/,
+  /'version=2'/,
   /'state=candidate_bound'/,
   /"binding_dev_ino=\$binding_dev_ino"/,
   /"profile_identity_sha256=\$profile_identity_digest"/,
@@ -13134,6 +13152,73 @@ for (const [name, state, minimumLines] of [
   );
 }
 
+const writeBoundRecheckJournalState =
+  /write_kemerbet_recheck_bound_promotion_journal_state\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  writeBoundRecheckJournalState,
+  'the helper must durably rewrite the claim-bound journal at the irreversible execution boundary',
+);
+for (const contract of [
+  /\^\(execution_started\|spent\)\$/,
+  /'version=2'/,
+  /"state=\$journal_state"/,
+  /"claim_id=\$claim_id"/,
+  /"player_ids_sha256=\$player_ids_digest"/,
+  /sync -f "\$temporary"/,
+  /mv -f -- "\$temporary" "\$KEMERBET_RECHECK_PROMOTION_JOURNAL"/,
+  /sync -f "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
+]) {
+  assert.match(writeBoundRecheckJournalState, contract);
+}
+assert.doesNotMatch(
+  writeBoundRecheckJournalState,
+  /Player ID|agent_id=|account_id=|password|token|raw_|FINANCIAL_ACTIONS_MODE=live/iu,
+  'the irreversible journal states must remain redacted and carry no money authority',
+);
+
+const requireBoundRecheckJournalState =
+  /require_kemerbet_recheck_bound_promotion_journal_state\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(
+  requireBoundRecheckJournalState,
+  'the execution-started and spent journals must be exact',
+);
+for (const contract of [
+  /journal_version/,
+  /"version=\$journal_version"/,
+  /journal_version" == '1'[\s\S]*?journal_state" == 'candidate_bound'/,
+  /journal_version" == '2'[\s\S]*?journal_state" =~ \^\(execution_started\|spent\)\$/,
+  /"state=\$journal_state"/,
+  /"claim_id=\$claim_id"/,
+  /actual_digest/,
+  /expected_digest/,
+  /"\$actual_digest" == "\$expected_digest"/,
+]) {
+  assert.match(requireBoundRecheckJournalState, contract);
+}
+for (const [wrapper, state] of [
+  ['require_kemerbet_recheck_execution_started_promotion_journal', 'execution_started'],
+  ['require_kemerbet_recheck_spent_promotion_journal', 'spent'],
+]) {
+  const wrapperBody = new RegExp(`${wrapper}\\(\\) \\{[\\s\\S]*?\\n\\}`, 'u').exec(helper)?.[0];
+  assert.ok(wrapperBody, `${state} journal verifier must exist`);
+  assert.match(
+    wrapperBody,
+    new RegExp(`require_kemerbet_recheck_bound_promotion_journal_state 2 ${state}`),
+  );
+}
+const legacyCandidateJournalVerifier =
+  /require_kemerbet_recheck_legacy_candidate_promotion_journal\(\) \{[\s\S]*?\n\}/u.exec(
+    helper,
+  )?.[0];
+assert.ok(
+  legacyCandidateJournalVerifier,
+  'upgrade recovery must recognize the legacy candidate journal without treating it as pre-start',
+);
+assert.match(
+  legacyCandidateJournalVerifier,
+  /require_kemerbet_recheck_bound_promotion_journal_state 1 candidate_bound/,
+);
+
 const removeExactKemerbetSession =
   /remove_exact_kemerbet_session_provision\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
 assert.ok(
@@ -13166,9 +13251,11 @@ assert.ok(
   'the helper must recover every durable import, prepared, candidate, and committed crash prefix',
 );
 for (const contract of [
+  /\^version=\(1\|2\)\$/,
   /state=import_prepared/,
   /state=prepared/,
-  /state=candidate_bound/,
+  /candidate_bound\|execution_started\|spent/,
+  /authorization_state='legacy_candidate_unknown'/,
   /session_container=\(none\|\[0-9a-f\]/,
   /player_ids_dev_ino=/,
   /player_ids_sha256=/,
@@ -13220,7 +13307,25 @@ const preparedRecovery = recoverRecheckPromotion.slice(
   recoverRecheckPromotion.indexOf('state=candidate_bound'),
 );
 const candidateRecovery = recoverRecheckPromotion.slice(
-  recoverRecheckPromotion.indexOf('state=candidate_bound'),
+  recoverRecheckPromotion.indexOf('^state=(candidate_bound|execution_started|spent)'),
+);
+const postStartRecoveryStart = recoverRecheckPromotion.indexOf(
+  'authorization_state" =~ ^(execution_started|spent|legacy_candidate_unknown)$',
+);
+const postStartRecoveryReturn = recoverRecheckPromotion.indexOf('return 0', postStartRecoveryStart);
+const postStartRecoveryEnd = recoverRecheckPromotion.indexOf(
+  'KEMERBET_RECHECK_CANDIDATE_DEV_INO="$candidate_dev_ino"',
+  postStartRecoveryReturn,
+);
+assert.ok(
+  postStartRecoveryStart >= 0 &&
+    postStartRecoveryReturn > postStartRecoveryStart &&
+    postStartRecoveryEnd > postStartRecoveryReturn,
+  'the recovery helper must expose one exact post-start terminal branch',
+);
+const postStartRecovery = recoverRecheckPromotion.slice(
+  postStartRecoveryStart,
+  postStartRecoveryEnd,
 );
 assertInOrder(
   importRecovery,
@@ -13286,6 +13391,25 @@ assert.equal(
   (candidateRecovery.match(/require_current_kemerbet_success_runtime_boundary/g) ?? []).length,
   3,
   'committed recovery must re-prove the current release/image/profile/runtime/no-holder/singleton/no-transient boundary before consume, before completed publication, and after publication',
+);
+for (const contract of [
+  /execution_started\|spent\|legacy_candidate_unknown/,
+  /KEMERBET_RECHECK_EXECUTION_STATE='spent'/,
+  /authorization_state" == 'execution_started'[\s\S]*?advance_kemerbet_recheck_promotion_journal_to_spent/,
+  /terminalize_spent_kemerbet_recheck_authorization/,
+  /KEMERBET_RECHECK_RECOVERY_OUTCOME='spent_failed_terminal'/,
+]) {
+  assert.match(postStartRecovery, contract);
+}
+assert.doesNotMatch(
+  postStartRecovery,
+  /restore_(?:retryable_)?owner_staged_kemerbet_cohort|complete_owner_staged_kemerbet_cohort|container start|GeneralInfoByExternalId|PlayerEPOSDeposit/iu,
+  'execution-started, spent, and upgrade-ambiguous legacy claims must be terminal and non-retryable without replaying the provider lookup',
+);
+assert.match(
+  candidateRecovery,
+  /version=1'[\s\S]*?authorization_state='legacy_candidate_unknown'/,
+  'a legacy candidate journal has an unknown provider boundary and must be conservatively spent after upgrade',
 );
 
 const recheckEngineBoundary = extractShellFunction(
@@ -13362,8 +13486,8 @@ for (const v3BindingContract of [
 }
 assert.equal(
   (helper.match(/require_kemerbet_v3_binding_content/g) ?? []).length,
-  11,
-  'the stable v3 binding attestor must be defined once and used by all ten operational binding boundaries, including both preview-source states',
+  13,
+  'the stable v3 binding attestor must be defined once and used by all twelve operational binding boundaries, including H14 fresh-binding selection and final-source continuity',
 );
 const v1RetirementRuntimeStart = helper.indexOf('publish_kemerbet_v1_retirement_artifact() {');
 const v1RetirementRuntimeEnd = helper.indexOf('\nconsume_exact_one_use_kemerbet_file() {');
@@ -14268,10 +14392,76 @@ for (const contract of [
 ]) {
   assert.match(recheckCleanup, contract);
 }
+const postStartCleanup = recheckCleanup.slice(
+  recheckCleanup.indexOf('KEMERBET_RECHECK_EXECUTION_STATE" =~ ^(execution_started|spent)$'),
+  recheckCleanup.indexOf(
+    '\n      else',
+    recheckCleanup.indexOf('KEMERBET_RECHECK_EXECUTION_STATE" =~ ^(execution_started|spent)$'),
+  ),
+);
+assert.match(
+  postStartCleanup,
+  /terminalize_spent_kemerbet_recheck_authorization \|\| cleanup_status=1/,
+  'post-start cleanup must terminalize the spent claim',
+);
+assert.doesNotMatch(
+  postStartCleanup,
+  /restore_(?:retryable_)?owner_staged_kemerbet_cohort/,
+  'post-start cleanup must never restore the exact claim or expose it as retryable',
+);
 assert.doesNotMatch(
   recheckCleanup,
   /\bdie\b|container logs/,
   'the EXIT trap must accumulate cleanup failures without invoking an exiting helper or exposing logs',
+);
+
+const spentTerminalizer =
+  /terminalize_spent_kemerbet_recheck_authorization\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(spentTerminalizer, 'the helper must terminalize every spent or uncertain authorization');
+assertInOrder(
+  spentTerminalizer,
+  [
+    'remove_owned_kemerbet_recheck_receipt_root',
+    'rollback_kemerbet_recheck_final_binding',
+    'consume_exact_one_use_kemerbet_file',
+    'remove_kemerbet_recheck_candidate',
+    'consume_exact_kemerbet_binding_source',
+    'repair_kemerbet_identity_key_readability',
+    'consume_owner_staged_kemerbet_cohort',
+    'owner_kemerbet_cohort_marker remove-imported',
+    'owner_kemerbet_cohort_marker remove-failed',
+    'kemerbet_recheck_spent_failed_terminal_marker publish',
+    'remove_owned_kemerbet_recheck_promotion_root',
+    'kemerbet_recheck_spent_failed_terminal_marker require',
+  ],
+  'spent terminalization must consume every reusable input before publishing the dedicated terminal marker and retiring the journal',
+);
+assert.doesNotMatch(
+  spentTerminalizer,
+  /restore_(?:retryable_)?owner_staged_kemerbet_cohort|publish-completed|FINANCIAL_ACTIONS_MODE=live|PlayerEPOSDeposit/,
+  'spent terminalization must neither restore/retry, claim success, nor gain money authority',
+);
+
+const spentTerminalMarker =
+  /kemerbet_recheck_spent_failed_terminal_marker\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+assert.ok(spentTerminalMarker, 'the spent failure must have an independently durable claim marker');
+for (const contract of [
+  /kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1/,
+  /CLAIM\.fullmatch\(claim_id\)/,
+  /\(0, 10001, 0o440, links, len\(expected\)\)/,
+  /os\.O_EXCL \| os\.O_NOFOLLOW/,
+  /os\.fsync\(descriptor\)/,
+  /os\.link\(/,
+  /os\.fsync\(directory_fd\)/,
+  /os\.unlink\(installing_name/,
+  /require_latch/,
+]) {
+  assert.match(spentTerminalMarker, contract);
+}
+assert.doesNotMatch(
+  spentTerminalMarker,
+  /password|token|Player ID|account_id|amount|transfer|PlayerEPOSDeposit/iu,
+  'the terminal marker must contain only its immutable claim identity',
 );
 
 const recheckRollback = /rollback_kemerbet_recheck_final_binding\(\) \{[\s\S]*?\n\}/u.exec(
@@ -14827,10 +15017,10 @@ assert.match(ownerDiagnostic, /org\.opencontainers\.image\.revision/);
 assert.match(ownerDiagnostic, /container logs --tail 80/);
 assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container logs .*bot/);
 
-assert.equal(
+assert.notEqual(
   actualReviewedHelperSuccessorSha,
   reviewedV3RecheckBridgeHelperV13Sha,
-  'the reviewed helper LF bytes must remain frozen at the exact release-bound H13 recheck-bridge successor pin',
+  'the reviewed H14 helper must be distinct from the quarantined release-bound H13 predecessor',
 );
 assert.equal(
   actualReviewedV3RuntimeBridgeParserScopeRepairV12Sha,

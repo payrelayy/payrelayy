@@ -4,12 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Start, inspect, explicitly retire v1 for v2 reseal, seal, independently recheck, or stop the private no-transfer KemerBet browser
+        description: Inspect/finalize the H14 quarantine recovery, record its exact-five cohort, start, seal, independently recheck, or stop the private no-transfer KemerBet browser
         required: true
         default: inspect
         type: choice
         options:
           - inspect
+          - quarantine-recovery-inspect
+          - quarantine-recovery-finalize-profile
+          - quarantine-recovery-record-cohort
           - start
           - retire-v1-for-v2-reseal
           - seal
@@ -40,6 +43,11 @@ on:
         type: string
       confirm_v1_retirement:
         description: For explicit v1 retirement only, type I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL
+        required: false
+        default: ''
+        type: string
+      confirm_quarantine_recovery_authorization_sha256:
+        description: For H14 quarantine-recovery modes only, type the exact reviewed authorization SHA-256
         required: false
         default: ''
         type: string
@@ -80,6 +88,7 @@ jobs:
       CONFIRMED_PRIOR_SEAL_RUN_ID: ${{ inputs.confirm_prior_seal_run_id }}
       CONFIRMED_V1_BINDING_SHA256: ${{ inputs.confirm_v1_binding_sha256 }}
       CONFIRMED_V1_RETIREMENT: ${{ inputs.confirm_v1_retirement }}
+      CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256: ${{ inputs.confirm_quarantine_recovery_authorization_sha256 }}
       REQUESTED_MODE: ${{ inputs.mode }}
     steps:
       - name: Reject every non-staging or financial target
@@ -91,34 +100,45 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(inspect|start|retire-v1-for-v2-reseal|seal|recheck|stop)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|quarantine-recovery-inspect|quarantine-recovery-finalize-profile|quarantine-recovery-record-cohort|start|retire-v1-for-v2-reseal|seal|recheck|stop)$ ]]
           case "$REQUESTED_MODE" in
+            quarantine-recovery-inspect|quarantine-recovery-finalize-profile|quarantine-recovery-record-cohort)
+              [[ -z "$CONFIRMED_NO_TRANSFER" ]]
+              [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
+              [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
+              [[ "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" == '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874' ]]
+              ;;
             start)
               [[ "$CONFIRMED_NO_TRANSFER" == 'private-sign-in-no-transfer' ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
               [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
+              [[ -z "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" ]]
               ;;
             retire-v1-for-v2-reseal)
               [[ -z "$CONFIRMED_NO_TRANSFER" ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
               [[ "$CONFIRMED_V1_BINDING_SHA256" =~ ^[0-9a-f]{64}$ ]]
               [[ "$CONFIRMED_V1_RETIREMENT" == 'I-UNDERSTAND-THIS-RETIRES-THE-EXACT-V1-BINDING-FOR-V2-RESEAL' ]]
+              [[ -z "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" ]]
               ;;
             seal)
               [[ "$CONFIRMED_NO_TRANSFER" == 'seal-five-player-no-transfer' ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
               [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
+              [[ -z "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" ]]
               ;;
             recheck)
               [[ "$CONFIRMED_NO_TRANSFER" == 'independent-five-player-no-transfer-recheck' ]]
-              [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+              [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_PRIOR_SEAL_COMMIT" == "$GITHUB_SHA" ]]
               [[ "$CONFIRMED_PRIOR_SEAL_RUN_ID" =~ ^[1-9][0-9]{7,19}$ ]]
               [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
+              [[ -z "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" ]]
               ;;
             inspect|stop)
               [[ -z "$CONFIRMED_NO_TRANSFER" ]]
               [[ -z "$CONFIRMED_PRIOR_SEAL_COMMIT" && -z "$CONFIRMED_PRIOR_SEAL_RUN_ID" ]]
               [[ -z "$CONFIRMED_V1_BINDING_SHA256" && -z "$CONFIRMED_V1_RETIREMENT" ]]
+              [[ -z "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" ]]
               ;;
           esac
 
@@ -132,6 +152,7 @@ jobs:
       actions: read
       contents: read
     env:
+      CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256: ${{ inputs.confirm_quarantine_recovery_authorization_sha256 }}
       CONFIRMED_PRIOR_SEAL_COMMIT: ${{ inputs.confirm_prior_seal_commit_sha }}
       CONFIRMED_PRIOR_SEAL_RUN_ID: ${{ inputs.confirm_prior_seal_run_id }}
       CONFIRMED_V1_BINDING_SHA256: ${{ inputs.confirm_v1_binding_sha256 }}
@@ -174,6 +195,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_PRIOR_SEAL_COMMIT" == "$GITHUB_SHA" ]]
           [[ "$CONFIRMED_PRIOR_SEAL_RUN_ID" =~ ^[1-9][0-9]{7,19}$ ]]
           protected='${{ steps.protected.outputs.protected }}'
           metadata="$protected/seal-run.json"
@@ -243,6 +265,21 @@ jobs:
           ssh_options=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           prefix="test \"\$(id -u)\" -ne 0 && test \"\$(id -un)\" = 'fetanagent-admin' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}'"
           case '${{ inputs.mode }}' in
+            quarantine-recovery-inspect)
+              [[ "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" == '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874' ]]
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-quarantine-recovery-ready '$GITHUB_SHA'"
+              ;;
+            quarantine-recovery-finalize-profile)
+              [[ "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" == '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874' ]]
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper finalize-kemerbet-quarantine-recovery-profile '$GITHUB_SHA'"
+              ;;
+            quarantine-recovery-record-cohort)
+              [[ "$CONFIRMED_QUARANTINE_RECOVERY_AUTHORIZATION_SHA256" == '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874' ]]
+              ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper record-kemerbet-quarantine-recovery-cohort '$GITHUB_SHA'"
+              ;;
             start)
               ssh "${ssh_options[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
                 "$prefix && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-kemerbet-session-provision '$GITHUB_SHA' '${GITHUB_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper kemerbet-session-provision-ready '$GITHUB_SHA'"

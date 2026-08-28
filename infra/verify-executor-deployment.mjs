@@ -1022,12 +1022,17 @@ assert.match(
 );
 assert.match(
   noTransferReadinessSealSource,
-  /written\.nlink !== 1 \|\|[\s\S]*?written\.size !== EXACT_BINDING_FILE_BYTES[\s\S]*?installed\.nlink !== 1 \|\|[\s\S]*?installed\.size !== EXACT_BINDING_FILE_BYTES/,
-  'both the temporary and installed v3 binding must be exact one-link 230-byte files',
+  /written\.nlink !== 1 \|\|[\s\S]*?written\.size !== EXACT_BINDING_FILE_BYTES/,
+  'the fsynced temporary v3 binding must be an exact one-link 230-byte file',
 );
 assert.match(
   noTransferReadinessSealSource,
-  /constants\.O_DIRECTORY === undefined \|\| constants\.O_NOFOLLOW === undefined/,
+  /function isExactInstalledBinding[\s\S]*?candidate\.nlink === 1[\s\S]*?candidate\.size === EXACT_BINDING_FILE_BYTES[\s\S]*?sameBindingIdentity\(candidate, created\)/,
+  'every installed v3 binding revalidation must require the exact created one-link 230-byte inode',
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /directoryOpenFlag: constants\.O_DIRECTORY,[\s\S]*?noFollowOpenFlag: constants\.O_NOFOLLOW,[\s\S]*?directoryOpenFlag === undefined \|\| noFollowOpenFlag === undefined/,
   'binding publication must fail closed unless the platform exposes no-follow directory handles',
 );
 const atomicBindingWriter = noTransferReadinessSealSource.slice(
@@ -1036,16 +1041,16 @@ const atomicBindingWriter = noTransferReadinessSealSource.slice(
 );
 assert.match(
   atomicBindingWriter,
-  /`\$\{OUTPUT_ROOT\}\/\.kemerbet_agent_identity_bindings\.\$\{randomUUID\(\)\}\.tmp`/,
+  /createTemporaryId: \(\) => string = randomUUID[\s\S]*?`\$\{OUTPUT_ROOT\}\/\.kemerbet_agent_identity_bindings\.\$\{createTemporaryId\(\)\}\.tmp`/,
   'the executor may create only one unpredictable output-root-local binding temporary',
 );
 assert.match(
   atomicBindingWriter,
-  /await open\(\s*OUTPUT_ROOT,\s*constants\.O_RDONLY \| constants\.O_DIRECTORY \| constants\.O_NOFOLLOW/u,
+  /await fileSystem\.open\(\s*OUTPUT_ROOT,\s*constants\.O_RDONLY \| directoryOpenFlag \| noFollowOpenFlag/u,
 );
 assert.match(
   atomicBindingWriter,
-  /openedDirectory\.isDirectory\(\)[\s\S]*?openedDirectory\.isSymbolicLink\(\)[\s\S]*?sameMetadata\(openedDirectory, namedDirectory\)[\s\S]*?realpath\(OUTPUT_ROOT\)/,
+  /openedDirectory\.isDirectory\(\)[\s\S]*?openedDirectory\.isSymbolicLink\(\)[\s\S]*?sameMetadata\(openedDirectory, namedDirectory\)[\s\S]*?fileSystem\.realpath\(OUTPUT_ROOT\)/,
   'the fsynced output directory handle must be bound to the exact safe named directory',
 );
 assertOrderedFragments(
@@ -1053,21 +1058,22 @@ assertOrderedFragments(
   [
     'await handle.writeFile(serializedBinding',
     'await handle.sync();',
-    'const written = (await handle.stat()) as SafeStat;',
+    'const written = await handle.stat();',
+    '!sameBindingIdentity(createdByThisRun, written)',
     'await handle.close();',
     'await outputDirectoryHandle.sync();',
-    'await link(temporary, OUTPUT_FILE);',
-    'await unlink(temporary);',
+    'await fileSystem.link(temporary, OUTPUT_FILE);',
+    'await unlinkOnlyCreatedBindingInode(fileSystem, temporary, createdByThisRun)',
     'await outputDirectoryHandle.sync();',
-    'const installed = (await lstat(OUTPUT_FILE)) as SafeStat;',
-    'installed.dev !== written.dev',
-    'installed.ino !== written.ino',
+    'await revalidateInstalledBinding(',
+    'await reattestImportedStage();',
+    'await revalidateInstalledBinding(',
   ],
-  'the exact fsynced temporary inode must be linked, unlinked, directory-fsynced, and reidentified as the final binding',
+  'the exact fsynced temporary inode must be linked, conditionally unlinked, directory-fsynced, and twice revalidated as the final binding',
 );
 assert.match(
   atomicBindingWriter,
-  /await unlink\(temporary\)[\s\S]*?directoryChanged = true;[\s\S]*?if \(installedByThisRun && !installationComplete\)[\s\S]*?await unlink\(OUTPUT_FILE\)[\s\S]*?directoryChanged = true;[\s\S]*?if \(directoryChanged\) await outputDirectoryHandle\?\.sync\(\)\.catch/u,
+  /unlinkOnlyCreatedBindingInode\(fileSystem, temporary, createdByThisRun\)[\s\S]*?directoryChanged = true;[\s\S]*?installedByThisRun[\s\S]*?!installationComplete[\s\S]*?unlinkOnlyCreatedBindingInode\(fileSystem, OUTPUT_FILE, createdByThisRun\)[\s\S]*?directoryChanged = true;[\s\S]*?if \(directoryChanged\) await outputDirectoryHandle\?\.sync\(\)\.catch/u,
   'every failed temporary or partial-final cleanup must durably fsync the output directory',
 );
 assertOrderedFragments(
@@ -1078,7 +1084,11 @@ assertOrderedFragments(
     'await probe.finalizeReadOnlyProof();',
     'const providerAuthorizationDigest = probe.providerAuthorizationDigest();',
     "reportStage('binding_write');",
-    'dependencies.writeBinding ?? writeBindingAtomically',
+    'if (dependencies.writeBinding) {',
+    'await players.reattest();',
+    'await dependencies.writeBinding(',
+    '} else {',
+    'await writeBindingAtomically(',
   ],
   'the same-UID browser must be confirmed closed and the five-lookup digest complete before binding installation',
 );
@@ -2165,18 +2175,44 @@ assert.match(
   privateSessionProvisionServerSource,
   /const MAX_GENERATION_LIFETIME_MS = LOGIN_LIFETIME_MS \+ AUTHENTICATED_SESSION_LIFETIME_MS/,
 );
+const provisionCheckpointIdentityVerifierSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf(
+    'async function verifyKemerBetProvisionCheckpointAuthenticatedPage',
+  ),
+  privateSessionProvisionServerSource.indexOf(
+    'export async function checkpointKemerBetProvisionSignedInPage',
+  ),
+);
+assert.match(
+  provisionCheckpointIdentityVerifierSource,
+  /loadKemerBetAgentIdentityBindings\(\{[\s\S]*?filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,[\s\S]*?bindings\.platformAgentAccountIds\.length !== 1[\s\S]*?bindings\.platformAgentAccountIds\[0\] !== input\.accountId[\s\S]*?observedFingerprint !== expectedFingerprint/u,
+  'the final checkpoint must compare the observed identity with the sole immutable exact-account binding',
+);
+const provisionAuthenticatedIdentityVerifierSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf(
+    'export async function prepareKemerBetProvisionAuthenticatedIdentityVerifier',
+  ),
+  privateSessionProvisionServerSource.indexOf('export type KemerBetSessionRequestDecision'),
+);
+assert.match(
+  provisionAuthenticatedIdentityVerifierSource,
+  /loadKemerBetSessionIdentityAuthorization\(\{[\s\S]*?filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,[\s\S]*?authorization\.platformAgentAccountId !== accountId/u,
+  'initial authentication must load one exact ordinary-or-recovery identity authorization for the requested Profile',
+);
+assert.match(
+  provisionAuthenticatedIdentityVerifierSource,
+  /fingerprintAgentIdentityWithKey\(\s*authorization\.verificationPlatformAgentAccountId,\s*rawIdentity,[\s\S]*?equalAgentIdentityFingerprints\([\s\S]*?authorization\.expectedAgentIdentityFingerprint[\s\S]*?fingerprintAgentIdentityWithKey\(accountId, rawIdentity\)/u,
+  'recovery authentication must prove the raw observation under the retired UUID before deriving its fresh UUID-bound digest',
+);
 assert.match(
   privateSessionProvisionServerSource,
-  /loadKemerBetAgentIdentityBindings\(\{[\s\S]*?filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,[\s\S]*?bindings\.platformAgentAccountIds\.length !== 1[\s\S]*?bindings\.platformAgentAccountIds\[0\] !== accountId[\s\S]*?observedFingerprint !== expectedFingerprint/u,
-  'candidate authentication must compare the observed identity with the sole immutable exact-account binding',
+  /createAgentIdentityFingerprinter: async \(\) =>\s*retainedAuthenticatedIdentityVerifier\.fingerprintAgentIdentity/u,
+  'the readiness seal must reuse the authenticated identity wrapper so its exact DOM observation is continuity-checked before publication',
 );
-assert.equal(
-  countMatches(
-    privateSessionProvisionServerSource,
-    /if \(observedFingerprint !== expectedFingerprint\) return unavailable\(\);/g,
-  ),
-  2,
-  'both initial authentication and final checkpoint must compare against the immutable binding rather than self-observation',
+assert.doesNotMatch(
+  provisionAuthenticatedIdentityVerifierSource,
+  /console\.(?:debug|error|info|log|warn)\([^\n]*rawIdentity/u,
+  'the recovery identity verifier must never log the raw signed-in identity',
 );
 assert.match(
   privateSessionProvisionServerSource,
@@ -2514,8 +2550,8 @@ assert.match(privateSessionProvisionServerSource, /transferDisabled: true/);
 assert.match(privateSessionProvisionServerSource, /moneyMoved: false/);
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /checkpointedForRecheck\s*=\s*true/g),
-  6,
-  'only hard-deadline, unexpected-close, forced-close, checkpoint, and readiness-seal boundaries may install the irreversible latch',
+  8,
+  'only exact pre-start or Start marker quarantine, hard-deadline, unexpected-close, forced-close, checkpoint, and readiness-seal boundaries may install the irreversible latch',
 );
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /checkpointedForRecheck\s*=\s*false/g),
@@ -2607,8 +2643,13 @@ assert.doesNotMatch(
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /const status = async[\s\S]*?if \(checkpointedForRecheck && phase !== 'checkpointed'\) return unavailable\(\);[\s\S]*?return snapshot\(\);[\s\S]*?const initialize = async/,
-  'a terminal checkpoint latch must suppress metadata that could make a possibly still-live failed close look reusable',
+  /const status = async[\s\S]*?checkpointedForRecheck && phase !== 'checkpointed' && quarantineReasonCode === undefined[\s\S]*?return unavailable\(\);[\s\S]*?return snapshot\(\);[\s\S]*?const initialize = async/,
+  'a terminal checkpoint latch must expose only the exact inactive recovery-required quarantine or suppress metadata entirely',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const status = async \(expectedAccountId\?: string\)[\s\S]*?inspectRequestedProfileGenerationStatus\([\s\S]*?checkpointedForRecheck = true;[\s\S]*?quarantineReasonCode = inspection\.reasonCode;[\s\S]*?return snapshot\(\);/u,
+  'status must surface an exact durable profile marker before Start and irreversibly close ordinary reuse',
 );
 assert.doesNotMatch(
   privateSessionProvisionServerSource.slice(
@@ -2655,6 +2696,80 @@ assert.match(
   /close: closeRetainedContextForSeal/,
   'the seal must receive the exact retained-context close callback rather than a no-op',
 );
+assert.match(
+  privateSessionProvisionServerSource,
+  /const READINESS_PLAYER_IDS_FILE = `\$\{CONTROL_ROOT\}\/kemerbet-readiness-player-ids\.stage-v1`[\s\S]*?loadExactKemerBetImportedReadinessPlayerIds\(\{[\s\S]*?effectiveUserId,[\s\S]*?filePath: READINESS_PLAYER_IDS_FILE,[\s\S]*?loadPlayerIds: loadReadinessPlayerIds/u,
+  'the supervised seal must load the strict imported exact-five stage from the already-mounted private control volume',
+);
+assert.match(
+  executorRuntimeIsolationSource,
+  /export async function loadExactKemerBetStandaloneReadinessPlayerIds[\s\S]*?contract: \{[\s\S]*?fileGroupId: 10_001,[\s\S]*?fileMode: 0o400,[\s\S]*?fileUserId: 10_001,/u,
+  'the standalone one-shot secret must retain its exact executor-owned 0400 contract',
+);
+assert.match(
+  executorRuntimeIsolationSource,
+  /export async function loadExactKemerBetImportedReadinessPlayerIds[\s\S]*?contract: \{[\s\S]*?fileGroupId: 0,[\s\S]*?fileMode: 0o444,[\s\S]*?fileUserId: 0,[\s\S]*?parent: \{[\s\S]*?groupId: 10_001,[\s\S]*?mode: 0o700,[\s\S]*?userId: 10_001,/u,
+  'the imported readiness stage must be a frozen root-owned single-link file inside the exact private control directory',
+);
+assert.match(
+  executorRuntimeIsolationSource,
+  /function exactReadinessStageStat[\s\S]*?stat\.nlink === 1[\s\S]*?\(stat\.mode & 0o7777\) === contract\.fileMode/u,
+  'every exact readiness stage contract must require one regular link and its exact mode',
+);
+assert.match(
+  executorRuntimeIsolationSource,
+  /function exactReadinessStageParentStat[\s\S]*?stat\.isDirectory\?\.\(\) === true[\s\S]*?stat\.uid === contract\.userId[\s\S]*?stat\.gid === contract\.groupId[\s\S]*?\(stat\.mode & 0o7777\) === contract\.mode/u,
+  'the imported control parent must be the exact executor-owned 0700 directory',
+);
+assert.match(
+  executorRuntimeIsolationSource,
+  /options\.platform !== 'linux'[\s\S]*?constants\.O_DIRECTORY !== LINUX_OPEN_DIRECTORY[\s\S]*?constants\.O_NOFOLLOW !== LINUX_OPEN_NOFOLLOW[\s\S]*?constants\.O_RDONLY \| LINUX_OPEN_DIRECTORY \| LINUX_OPEN_NOFOLLOW[\s\S]*?constants\.O_RDONLY \| LINUX_OPEN_NOFOLLOW/u,
+  'the exact stage reader must use Linux no-follow handles for both the control directory and stage file',
+);
+assert.match(
+  executorRuntimeIsolationSource,
+  /if \(!decoded\.endsWith\([^)]*\)\) return unavailable\(\)[\s\S]*?createHash\('sha256'\)\.update\(bytes\)\.digest\(\)[\s\S]*?reattest:[\s\S]*?!sameFile\(initial\.identity, current\.identity\)[\s\S]*?!sameFile\(initial\.parentIdentity, current\.parentIdentity\)[\s\S]*?!timingSafeEqual\(current\.digest, expectedDigest\)/u,
+  'the exact readiness stage must be canonical LF bytes with opaque file, parent, and digest re-attestation',
+);
+assert.match(
+  noTransferReadinessSealSource,
+  /loadExactKemerBetStandaloneReadinessPlayerIds\(\{[\s\S]*?filePath: KEMERBET_NO_TRANSFER_READINESS_PLAYER_IDS_FILE/u,
+  'the standalone seal entry point must not accept the imported root-owned stage contract',
+);
+assertOrderedFragments(
+  noTransferReadinessSealSource.slice(
+    noTransferReadinessSealSource.indexOf("reportStage('binding_write');"),
+    noTransferReadinessSealSource.indexOf('(dependencies.logSuccess ?? defaultSuccessLog)'),
+  ),
+  [
+    "reportStage('binding_write');",
+    'await players.reattest();',
+    'await dependencies.writeBinding(',
+  ],
+  'an injected binding writer must receive an immediate imported-cohort re-attestation',
+);
+const atomicReadinessBindingWriterSource = noTransferReadinessSealSource.slice(
+  noTransferReadinessSealSource.indexOf('async function writeBindingAtomically('),
+  noTransferReadinessSealSource.indexOf('function defaultSuccessLog('),
+);
+assertOrderedFragments(
+  atomicReadinessBindingWriterSource,
+  [
+    'await reattestImportedStage();',
+    'await fileSystem.link(temporary, OUTPUT_FILE);',
+    'await unlinkOnlyCreatedBindingInode(fileSystem, temporary, createdByThisRun)',
+    'await revalidateInstalledBinding(',
+    'await reattestImportedStage();',
+    'await revalidateInstalledBinding(',
+    'installationComplete = true;',
+  ],
+  'the production binding transaction must be bracketed by the same imported-stage attestation',
+);
+assert.match(
+  atomicReadinessBindingWriterSource,
+  /installedByThisRun[\s\S]*?!installationComplete[\s\S]*?unlinkOnlyCreatedBindingInode\(fileSystem, OUTPUT_FILE, createdByThisRun\)[\s\S]*?if \(directoryChanged\) await outputDirectoryHandle\?\.sync/u,
+  "a failed post-install stage attestation must remove and synchronize only this run's binding",
+);
 assert.doesNotMatch(
   privateSessionProvisionServerSource.slice(
     privateSessionProvisionServerSource.indexOf(
@@ -2700,6 +2815,11 @@ assert.match(
 );
 assert.match(
   privateSessionProfileGenerationLeaseSource,
+  /constants\.O_RDONLY \| \(constants\.O_NOFOLLOW \?\? 0\)[\s\S]*?contents\.equals\(MARKER_CONTENTS\)/u,
+  'an existing crash marker must be inspected read-only and match the exact fixed contract',
+);
+assert.match(
+  privateSessionProfileGenerationLeaseSource,
   /constants\.O_CREAT \|[\s\S]*?constants\.O_EXCL \|[\s\S]*?constants\.O_WRONLY \|[\s\S]*?constants\.O_NOFOLLOW/u,
   'a profile generation must acquire one atomic no-follow crash marker',
 );
@@ -2709,6 +2829,7 @@ assertOrderedFragments(
   ),
   [
     'await requireStableOwnedProfile(fileSystem, profilePath, effectiveUserId);',
+    'const inspection = await inspectKemerBetSessionProfileGenerationLease(',
     'const beforeUnlink = await fileSystem.lstat(markerPath);',
     'await fileSystem.unlink(markerPath);',
     'await syncProfileDirectory(fileSystem, profilePath);',

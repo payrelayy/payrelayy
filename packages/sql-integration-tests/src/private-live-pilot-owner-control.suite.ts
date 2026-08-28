@@ -193,6 +193,9 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)',
         },
+        {
+          signature: 'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)',
+        },
         { signature: 'app.review_owner_dry_run_fixture_assessment(uuid,uuid,text)' },
         {
           signature: 'app.review_owner_player_registration_request(uuid,uuid,text,text)',

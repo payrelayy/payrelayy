@@ -35,6 +35,7 @@ const CLAIM_ID = '88888888-8888-4888-8888-888888888888';
 const OTHER_CLAIM_ID = '88888888-8888-4888-9888-888888888889';
 const RECEIPT_ID = '66666666-6666-4666-8666-666666666666';
 const REPLAY_RECEIPT_ID = '55555555-5555-4555-8555-555555555555';
+const RECOVERY_PROFILE_ID = '44444444-4444-4444-8444-444444444444';
 
 function eligiblePlayer(index: number): OwnerPlayerDepositEligibilityRecord {
   return {
@@ -57,6 +58,21 @@ function exactFive(): OwnerPlayerDepositEligibilityRecord[] {
 
 const PLAYER_CONTENT = Buffer.from('PLAYER_1\nPLAYER_2\nPLAYER_3\nPLAYER_4\nPLAYER_5\n');
 const CLAIM_CONTENT = Buffer.from(`${CLAIM_ID}\n`, 'ascii');
+const RECOVERY_ACK_CONTENT = Buffer.from(
+  [
+    'version=1',
+    `claim_id=${CLAIM_ID}`,
+    `receipt_id=${RECEIPT_ID}`,
+    'platform_code=kemerbet',
+    `platform_agent_account_id=${RECOVERY_PROFILE_ID}`,
+    'profile_revision=2',
+    'configuration_reason=security_recovery',
+    'transfer_disabled=true',
+    'money_moved=false',
+    '',
+  ].join('\n'),
+  'ascii',
+);
 
 describe('Owner KemerBet readiness-cohort derivation', () => {
   it('derives exactly five eligible identifiers in deterministic account-ID order', () => {
@@ -99,6 +115,12 @@ describe('Owner KemerBet readiness-cohort derivation', () => {
     expect(source).toContain('kemerbet-readiness-cohort-imported-v1');
     expect(source).toContain('kemerbet-readiness-cohort-completed-v1');
     expect(source).toContain('kemerbet-readiness-cohort-failed-v1');
+    expect(source).toContain('kemerbet-readiness-cohort-security-recovery-failed-terminal-v1');
+    expect(source).toContain('kemerbet-readiness-cohort-security-recovery-profile-finalized-v1');
+    expect(source).toContain(
+      'kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1',
+    );
+    expect(source).toContain('kemerbet-quarantine-recovery-profile-prepared-v1');
     expect(source).toContain('kemerbet-readiness-recovery-in-progress-or-failed-v1');
     expect(source).toContain('.kemerbet-readiness-recovery-in-progress-or-failed-v1.installing');
     expect(source).not.toContain('.stage-v1.${requestId}');
@@ -381,6 +403,14 @@ interface LinuxBoundary {
     readonly failedInstalling: string;
     readonly imported: string;
     readonly importedInstalling: string;
+    readonly recoveryAcknowledgment: string;
+    readonly recoveryAcknowledgmentInstalling: string;
+    readonly recheckAuthorizationSpentFailedTerminal: string;
+    readonly recheckAuthorizationSpentFailedTerminalInstalling: string;
+    readonly securityRecoveryFailedTerminal: string;
+    readonly securityRecoveryFailedTerminalInstalling: string;
+    readonly securityRecoveryProfileFinalized: string;
+    readonly securityRecoveryProfileFinalizedInstalling: string;
   };
   readonly controlRoot: string;
   readonly receiptRoot: string;
@@ -437,7 +467,10 @@ async function removeLinuxRoot(root: string): Promise<void> {
   await rm(root, { recursive: true });
 }
 
-async function linuxBoundary(): Promise<LinuxBoundary> {
+async function linuxBoundary(
+  afterStagingForLinuxTest?: () => Promise<void>,
+  afterLifecycleInspectionForLinuxTest?: () => Promise<void>,
+): Promise<LinuxBoundary> {
   const root = await mkdtemp(join(tmpdir(), 'fetanagent-readiness-cohort-'));
   linuxRoots.push(root);
   const controlRoot = join(root, 'control');
@@ -447,7 +480,12 @@ async function linuxBoundary(): Promise<LinuxBoundary> {
   await chmod(controlRoot, 0o700);
   await chmod(receiptRoot, 0o555);
   return {
-    control: createFileOwnerKemerbetReadinessCohortControlForLinuxTests(controlRoot, receiptRoot),
+    control: createFileOwnerKemerbetReadinessCohortControlForLinuxTests(
+      controlRoot,
+      receiptRoot,
+      afterStagingForLinuxTest,
+      afterLifecycleInspectionForLinuxTest,
+    ),
     controlRoot,
     paths: {
       claim: join(controlRoot, 'kemerbet-readiness-cohort-claim.stage-v1'),
@@ -460,6 +498,35 @@ async function linuxBoundary(): Promise<LinuxBoundary> {
       failedInstalling: join(receiptRoot, '.kemerbet-readiness-cohort-failed-v1.installing'),
       imported: join(receiptRoot, 'kemerbet-readiness-cohort-imported-v1'),
       importedInstalling: join(receiptRoot, '.kemerbet-readiness-cohort-imported-v1.installing'),
+      recoveryAcknowledgment: join(controlRoot, 'kemerbet-quarantine-recovery-profile-prepared-v1'),
+      recoveryAcknowledgmentInstalling: join(
+        controlRoot,
+        '.kemerbet-quarantine-recovery-profile-prepared-v1.installing',
+      ),
+      recheckAuthorizationSpentFailedTerminal: join(
+        receiptRoot,
+        'kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1',
+      ),
+      recheckAuthorizationSpentFailedTerminalInstalling: join(
+        receiptRoot,
+        '.kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1.installing',
+      ),
+      securityRecoveryFailedTerminal: join(
+        receiptRoot,
+        'kemerbet-readiness-cohort-security-recovery-failed-terminal-v1',
+      ),
+      securityRecoveryFailedTerminalInstalling: join(
+        receiptRoot,
+        '.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing',
+      ),
+      securityRecoveryProfileFinalized: join(
+        receiptRoot,
+        'kemerbet-readiness-cohort-security-recovery-profile-finalized-v1',
+      ),
+      securityRecoveryProfileFinalizedInstalling: join(
+        receiptRoot,
+        '.kemerbet-readiness-cohort-security-recovery-profile-finalized-v1.installing',
+      ),
     },
     receiptRoot,
     root,
@@ -744,6 +811,7 @@ describe.skipIf(process.platform !== 'linux')(
           claimId: CLAIM_ID,
           event: 'imported',
         });
+        await expect(control.lifecycle()).resolves.toBe('imported');
         await expect(control.completed(CLAIM_ID)).resolves.toBe(false);
       }
     });
@@ -757,6 +825,7 @@ describe.skipIf(process.platform !== 'linux')(
         claimId: CLAIM_ID,
         event: 'completed',
       });
+      await expect(control.lifecycle()).resolves.toBe('completed');
       await expect(control.completed(CLAIM_ID)).resolves.toBe(true);
       await expect(control.completed(OTHER_CLAIM_ID)).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortRejectedError,
@@ -780,9 +849,299 @@ describe.skipIf(process.platform !== 'linux')(
         claimId: CLAIM_ID,
         event: 'retryable_failed',
       });
+      await expect(control.lifecycle()).resolves.toBe('retryable_failed');
 
       await unlink(paths.cohort);
       await expect(control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+    });
+
+    it('reads only the distinct terminal-recovery marker and idempotently installs the exact redacted DB acknowledgment', async () => {
+      const boundary = await linuxBoundary();
+      await writeReceiptExact(
+        boundary,
+        boundary.paths.securityRecoveryFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+
+      await expect(boundary.control.rootReceipt()).resolves.toEqual({
+        claimId: CLAIM_ID,
+        event: 'security_recovery_failed_terminal',
+      });
+      await expect(boundary.control.lifecycle()).resolves.toBe('security_recovery_failed_terminal');
+      await expect(
+        boundary.control.acknowledgeSecurityRecovery({
+          claimId: CLAIM_ID,
+          platformAgentAccountId: RECOVERY_PROFILE_ID,
+          profileRevision: 2,
+          receiptId: RECEIPT_ID,
+        }),
+      ).resolves.toEqual({
+        alreadyAcknowledged: false,
+        identifiersRedacted: true,
+        moneyMoved: false,
+        transferDisabled: true,
+      });
+      await expectExactFile(boundary.paths.recoveryAcknowledgment, RECOVERY_ACK_CONTENT, 0o400);
+      await expect(lstat(boundary.paths.recoveryAcknowledgmentInstalling)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+
+      await expect(
+        boundary.control.acknowledgeSecurityRecovery({
+          claimId: CLAIM_ID,
+          platformAgentAccountId: RECOVERY_PROFILE_ID,
+          profileRevision: 2,
+          receiptId: RECEIPT_ID,
+        }),
+      ).resolves.toMatchObject({ alreadyAcknowledged: true });
+      await expect(
+        boundary.control.acknowledgeSecurityRecovery({
+          claimId: CLAIM_ID,
+          platformAgentAccountId: RECOVERY_PROFILE_ID,
+          profileRevision: 2,
+          receiptId: REPLAY_RECEIPT_ID,
+        }),
+      ).rejects.toBeInstanceOf(OwnerKemerbetReadinessCohortRejectedError);
+      await expectExactFile(boundary.paths.recoveryAcknowledgment, RECOVERY_ACK_CONTENT, 0o400);
+    });
+
+    it('recognizes only the exact spent-recheck terminal marker with every stage absent', async () => {
+      const boundary = await linuxBoundary();
+      await writeReceiptExact(
+        boundary,
+        boundary.paths.recheckAuthorizationSpentFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+
+      await expect(boundary.control.rootReceipt()).resolves.toEqual({
+        claimId: CLAIM_ID,
+        event: 'recheck_authorization_spent_failed_terminal',
+      });
+      await expect(boundary.control.lifecycle()).resolves.toBe(
+        'recheck_authorization_spent_failed_terminal',
+      );
+      await expect(boundary.control.completed(CLAIM_ID)).resolves.toBe(false);
+
+      const stageResidue = await linuxBoundary();
+      await writeExact(stageResidue.paths.claim, CLAIM_CONTENT, 0o444);
+      await writeExact(stageResidue.paths.cohort, PLAYER_CONTENT, 0o444);
+      await writeReceiptExact(
+        stageResidue,
+        stageResidue.paths.recheckAuthorizationSpentFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(stageResidue.control.lifecycle()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const installing = await linuxBoundary();
+      await writeReceiptExact(
+        installing,
+        installing.paths.recheckAuthorizationSpentFailedTerminalInstalling,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(installing.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const malformed = await linuxBoundary();
+      await writeReceiptExact(
+        malformed,
+        malformed.paths.recheckAuthorizationSpentFailedTerminal,
+        Buffer.from('not-a-claim\n', 'ascii'),
+        0o440,
+      );
+      await expect(malformed.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+    });
+
+    it('keeps an exact spent terminal plus its prior finalized-profile latch permanently non-retryable', async () => {
+      const boundary = await linuxBoundary();
+      await writeReceiptExact(
+        boundary,
+        boundary.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await writeReceiptExact(
+        boundary,
+        boundary.paths.recheckAuthorizationSpentFailedTerminal,
+        Buffer.from(`${OTHER_CLAIM_ID}\n`, 'ascii'),
+        0o440,
+      );
+
+      await expect(boundary.control.rootReceipt()).resolves.toEqual({
+        claimId: OTHER_CLAIM_ID,
+        event: 'recheck_authorization_spent_failed_terminal',
+      });
+      await expect(boundary.control.lifecycle()).resolves.toBe(
+        'recheck_authorization_spent_failed_terminal',
+      );
+      await expect(boundary.control.completed(OTHER_CLAIM_ID)).resolves.toBe(false);
+      await expect(
+        boundary.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID),
+      ).rejects.toBeInstanceOf(OwnerKemerbetReadinessCohortRejectedError);
+      await expect(lstat(boundary.paths.claim)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(lstat(boundary.paths.cohort)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('rejects every non-exact spent-terminal and finalized-profile coexistence', async () => {
+      const sameClaim = await linuxBoundary();
+      await writeReceiptExact(
+        sameClaim,
+        sameClaim.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await writeReceiptExact(
+        sameClaim,
+        sameClaim.paths.recheckAuthorizationSpentFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(sameClaim.control.lifecycle()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const installing = await linuxBoundary();
+      await writeReceiptExact(
+        installing,
+        installing.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await writeReceiptExact(
+        installing,
+        installing.paths.recheckAuthorizationSpentFailedTerminal,
+        Buffer.from(`${OTHER_CLAIM_ID}\n`, 'ascii'),
+        0o440,
+      );
+      await writeReceiptExact(
+        installing,
+        installing.paths.securityRecoveryProfileFinalizedInstalling,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(installing.control.lifecycle()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const malformedLatch = await linuxBoundary();
+      await writeReceiptExact(
+        malformedLatch,
+        malformedLatch.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o400,
+      );
+      await writeReceiptExact(
+        malformedLatch,
+        malformedLatch.paths.recheckAuthorizationSpentFailedTerminal,
+        Buffer.from(`${OTHER_CLAIM_ID}\n`, 'ascii'),
+        0o440,
+      );
+      await expect(malformedLatch.control.lifecycle()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const conflict = await linuxBoundary();
+      await writeReceiptExact(
+        conflict,
+        conflict.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await writeReceiptExact(
+        conflict,
+        conflict.paths.recheckAuthorizationSpentFailedTerminal,
+        Buffer.from(`${OTHER_CLAIM_ID}\n`, 'ascii'),
+        0o440,
+      );
+      await writeReceiptExact(conflict, conflict.paths.completed, CLAIM_CONTENT, 0o440);
+      await expect(conflict.control.lifecycle()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+    });
+
+    it('recovers a service-owned partial acknowledgment installer after an idempotent DB replay', async () => {
+      const boundary = await linuxBoundary();
+      await writeReceiptExact(
+        boundary,
+        boundary.paths.securityRecoveryFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await writeExact(
+        boundary.paths.recoveryAcknowledgmentInstalling,
+        Buffer.from('version=1\n', 'ascii'),
+        0o400,
+      );
+
+      await expect(boundary.control.lifecycle()).resolves.toBe('security_recovery_failed_terminal');
+      await expect(
+        boundary.control.acknowledgeSecurityRecovery({
+          claimId: CLAIM_ID,
+          platformAgentAccountId: RECOVERY_PROFILE_ID,
+          profileRevision: 2,
+          receiptId: RECEIPT_ID,
+        }),
+      ).resolves.toMatchObject({ alreadyAcknowledged: false });
+      await expectExactFile(boundary.paths.recoveryAcknowledgment, RECOVERY_ACK_CONTENT, 0o400);
+      await expect(lstat(boundary.paths.recoveryAcknowledgmentInstalling)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    });
+
+    it('rejects terminal-recovery marker residue, conflicts, installers, and unsafe metadata', async () => {
+      const stageResidue = await linuxBoundary();
+      await writeExact(stageResidue.paths.claim, CLAIM_CONTENT, 0o400);
+      await writeReceiptExact(
+        stageResidue,
+        stageResidue.paths.securityRecoveryFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(stageResidue.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const conflict = await linuxBoundary();
+      await writeReceiptExact(
+        conflict,
+        conflict.paths.securityRecoveryFailedTerminal,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await writeReceiptExact(conflict, conflict.paths.completed, CLAIM_CONTENT, 0o440);
+      await expect(conflict.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const installer = await linuxBoundary();
+      await writeReceiptExact(
+        installer,
+        installer.paths.securityRecoveryFailedTerminalInstalling,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(installer.control.rootReceipt()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
+
+      const wrongMode = await linuxBoundary();
+      await writeReceiptExact(
+        wrongMode,
+        wrongMode.paths.securityRecoveryFailedTerminal,
+        CLAIM_CONTENT,
+        0o400,
+      );
+      await expect(wrongMode.control.rootReceipt()).rejects.toBeInstanceOf(
         OwnerKemerbetReadinessCohortUnavailableError,
       );
     });
@@ -868,6 +1227,108 @@ describe.skipIf(process.platform !== 'linux')(
     it('returns undefined only after an exact stable no-marker scan', async () => {
       const { control } = await linuxBoundary();
       await expect(control.rootReceipt()).resolves.toBeUndefined();
+      await expect(control.lifecycle()).resolves.toBe('empty');
+    });
+
+    it('distinguishes an exact open staged claim from an empty readiness namespace', async () => {
+      const { control } = await linuxBoundary();
+      await control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
+      await expect(control.rootReceipt()).resolves.toBeUndefined();
+      await expect(control.lifecycle()).resolves.toBe('staged');
+    });
+
+    it('classifies an exact unreceipted frozen pair as a security-recovery staged lifecycle', async () => {
+      const boundary = await linuxBoundary();
+      await boundary.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
+      const claimBefore = await lstat(boundary.paths.claim);
+      const cohortBefore = await lstat(boundary.paths.cohort);
+      await chmod(boundary.paths.claim, 0o444);
+      await chmod(boundary.paths.cohort, 0o444);
+
+      await expect(boundary.control.rootReceipt()).resolves.toBeUndefined();
+      await expect(boundary.control.lifecycle()).resolves.toBe('security_recovery_cohort_staged');
+      expect((await lstat(boundary.paths.claim)).ino).toBe(claimBefore.ino);
+      expect((await lstat(boundary.paths.cohort)).ino).toBe(cohortBefore.ino);
+    });
+
+    it('accepts only the same two inodes across a monotonic raw-to-frozen lifecycle scan', async () => {
+      let boundary!: LinuxBoundary;
+      let transitioned = false;
+      boundary = await linuxBoundary(undefined, async () => {
+        if (transitioned) return;
+        transitioned = true;
+        await chmod(boundary.paths.claim, 0o444);
+        await chmod(boundary.paths.cohort, 0o444);
+      });
+      await boundary.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID);
+      const claimBefore = await lstat(boundary.paths.claim);
+      const cohortBefore = await lstat(boundary.paths.cohort);
+
+      await expect(boundary.control.lifecycle()).resolves.toBe('security_recovery_cohort_staged');
+      expect(transitioned).toBe(true);
+      expect((await lstat(boundary.paths.claim)).ino).toBe(claimBefore.ino);
+      expect((await lstat(boundary.paths.cohort)).ino).toBe(cohortBefore.ino);
+      expect((await lstat(boundary.paths.claim)).mode & 0o7777).toBe(0o444);
+      expect((await lstat(boundary.paths.cohort)).mode & 0o7777).toBe(0o444);
+    });
+
+    it('uses the exact finalized-profile marker only to authorize one fresh staged cohort', async () => {
+      const boundary = await linuxBoundary();
+      await writeReceiptExact(
+        boundary,
+        boundary.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o440,
+      );
+
+      await expect(boundary.control.rootReceipt()).resolves.toEqual({
+        claimId: CLAIM_ID,
+        event: 'security_recovery_profile_finalized',
+      });
+      await expect(boundary.control.lifecycle()).resolves.toBe(
+        'security_recovery_profile_finalized',
+      );
+      await expect(
+        boundary.control.prepare(exactFive(), REQUEST_ID, OTHER_CLAIM_ID),
+      ).resolves.toMatchObject({ alreadyPrepared: false });
+      await expectExactFile(
+        boundary.paths.claim,
+        Buffer.from(`${OTHER_CLAIM_ID}\n`, 'ascii'),
+        0o400,
+      );
+      await expectExactFile(boundary.paths.cohort, PLAYER_CONTENT, 0o400);
+      await expectExactFile(boundary.paths.securityRecoveryProfileFinalized, CLAIM_CONTENT, 0o440);
+      await expect(boundary.control.lifecycle()).resolves.toBe(
+        'security_recovery_profile_finalized',
+      );
+      await chmod(boundary.paths.claim, 0o444);
+      await chmod(boundary.paths.cohort, 0o444);
+      await expect(boundary.control.lifecycle()).resolves.toBe(
+        'security_recovery_profile_finalized',
+      );
+
+      const reusedClaim = await linuxBoundary();
+      await writeReceiptExact(
+        reusedClaim,
+        reusedClaim.paths.securityRecoveryProfileFinalized,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(
+        reusedClaim.control.prepare(exactFive(), REQUEST_ID, CLAIM_ID),
+      ).rejects.toBeInstanceOf(OwnerKemerbetReadinessCohortRejectedError);
+      await expect(lstat(reusedClaim.paths.claim)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const installing = await linuxBoundary();
+      await writeReceiptExact(
+        installing,
+        installing.paths.securityRecoveryProfileFinalizedInstalling,
+        CLAIM_CONTENT,
+        0o440,
+      );
+      await expect(installing.control.lifecycle()).rejects.toBeInstanceOf(
+        OwnerKemerbetReadinessCohortUnavailableError,
+      );
     });
 
     it('rejects an unsafe or non-exact receipt-root namespace', async () => {

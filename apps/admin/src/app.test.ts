@@ -7,7 +7,7 @@ import {
 } from '@fetanagent/config/owner-control';
 import { describe, expect, it } from 'vitest';
 
-import { buildOwnerControlApp } from './app.js';
+import { buildOwnerControlApp as buildOwnerControlAppProduction } from './app.js';
 import {
   OwnerKemerbetReadinessCohortRejectedError,
   type OwnerKemerbetReadinessCohortControl,
@@ -122,6 +122,18 @@ const inactiveKemerbetSession: OwnerKemerbetSessionStatus = {
   transferDisabled: true,
 };
 
+const quarantinedKemerbetSession: OwnerKemerbetSessionStatus = {
+  active: false,
+  loginRequired: false,
+  phase: 'idle',
+  quarantine: {
+    reasonCode: 'unclean_session_generation',
+    recoveryRequired: true,
+  },
+  signedIn: false,
+  transferDisabled: true,
+};
+
 const activeKemerbetSession: OwnerKemerbetSessionStatus = {
   active: true,
   expiresAt: '2026-08-23T12:10:00.000Z',
@@ -132,6 +144,24 @@ const activeKemerbetSession: OwnerKemerbetSessionStatus = {
   signedIn: false,
   transferDisabled: true,
 };
+
+const noMarkerReadinessControl: OwnerKemerbetReadinessCohortControl = {
+  completed: async () => false,
+  lifecycle: async () => 'empty',
+  prepare: async () => {
+    throw new Error('readiness preparation was not expected');
+  },
+  rootReceipt: async () => undefined,
+};
+
+function buildOwnerControlApp(
+  ...[appConfig, dependencies]: Parameters<typeof buildOwnerControlAppProduction>
+) {
+  return buildOwnerControlAppProduction(appConfig, {
+    kemerbetReadinessCohortControl: noMarkerReadinessControl,
+    ...dependencies,
+  });
+}
 
 function readinessEligiblePlayers() {
   return [1, 2, 3, 4, 5].map((index) => ({
@@ -421,6 +451,43 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('/v1/owner/kemerbet-session/stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-session-v1'");
     expect(response.body).toContain('owner_confirmed_private_kemerbet_sign_in');
+    expect(response.body).toContain("'unclean_session_generation'");
+    expect(response.body).toContain("'browser_cleanup_unverified'");
+    expect(response.body).toContain("'profile_integrity_unverified'");
+    expect(response.body).toContain("'recheck_authorization_spent_failed_terminal'");
+    expect(response.body).toContain("'security_recovery_cohort_required'");
+    expect(response.body).toContain("'security_recovery_in_progress'");
+    expect(response.body).toContain('terminally failed');
+    expect(response.body).toContain('It is non-retryable.');
+    expect(response.body).toContain('function requireKemerbetReadinessCohortMutation()');
+    expect(response.body).toContain("value.phase !== 'idle'");
+    expect(response.body).toContain("kemerbetAgentProfileReason.value = 'security_recovery'");
+    expect(response.body).toContain(
+      'Security recovery must retire it before another private sign-in.',
+    );
+    expect(response.body).toContain('kemerbetSessionConfirmation.disabled = recoveryRequired');
+    expect(response.body).toContain(
+      'currentKemerbetSession?.quarantine?.recoveryRequired === true',
+    );
+    expect(response.body).toContain('const baseDelay = recoveryRequired ? 15000');
+    expect(response.body).toContain('Status-only recovery checks continue automatically.');
+    expect(response.body).toContain('let kemerbetSecurityRecoveryRequired = false');
+    expect(response.body).toContain('function applyKemerbetQuarantineMutationBoundary()');
+    expect(response.body).toContain("failure.error === 'kemerbet_security_recovery_required'");
+    expect(response.body).toContain('kemerbetSecurityRecoveryRequired = true');
+    expect(response.body).toContain(
+      'document.querySelectorAll(\'[data-kemerbet-state-mutation="ordinary"]\')',
+    );
+    expect(
+      response.body.match(/requireOrdinaryKemerbetMutation\(\)/gu)?.length,
+    ).toBeGreaterThanOrEqual(11);
+    expect(response.body).toContain(
+      "(configurationReason === 'security_recovery') !== recoveryRequired",
+    );
+    expect(response.body).toMatch(
+      /await loadKemerbetAgentProfiles\(\);[\s\S]*await Promise\.all\(\[/u,
+    );
+    expect(response.body).not.toContain('kemerbetAgentProfileForm.requestSubmit');
     expect(response.body).toContain('response.status !== 202');
     expect(response.body).toContain('kemerbetSessionReconnectNeeded = true');
     expect(response.body).toContain('displayedKemerbetFrameSequence');
@@ -1037,7 +1104,7 @@ describe('Owner-control HTTP boundary', () => {
       },
     });
 
-    expect(events).toEqual(['root-receipt']);
+    expect(events).toEqual(['root-receipt', 'root-receipt']);
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({ error: 'readiness_cohort_open_pilot' });
     expect(response.body).not.toContain(pilotRevisionId);
@@ -1099,7 +1166,7 @@ describe('Owner-control HTTP boundary', () => {
     ['imported', 'imported'],
     ['completed', 'succeeded'],
   ] as const)(
-    'reconciles an exact root %s receipt before reusing the %s DB claim',
+    'handles an exact root %s receipt before reusing the %s DB claim',
     async (event, claimState) => {
       const order: string[] = [];
       let observedReceipt: readonly string[] | undefined;
@@ -1158,8 +1225,16 @@ describe('Owner-control HTTP boundary', () => {
         },
       });
 
+      if (event === 'imported') {
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toEqual({ error: 'kemerbet_security_recovery_required' });
+        expect(order).toEqual(['root-receipt']);
+        expect(observedReceipt).toBeUndefined();
+        await app.close();
+        return;
+      }
       expect(response.statusCode).toBe(200);
-      expect(order).toEqual(['root-receipt', 'record-root-receipt', 'claim']);
+      expect(order).toEqual(['root-receipt', 'root-receipt', 'record-root-receipt', 'claim']);
       expect(observedReceipt?.[0]).toBe(claimId);
       expect(observedReceipt?.[1]).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
@@ -1565,13 +1640,933 @@ describe('Owner-control HTTP boundary', () => {
       url: '/v1/owner/kemerbet-agent-profiles/prepare',
       headers: kemerbetAgentProfileMutationHeaders(),
       payload: {
-        configurationReason: 'security_recovery',
+        configurationReason: 'agent_rotation',
         confirmation: 'owner_confirmed_kemerbet_agent_profile',
         requestId: pilotRequestId,
       },
     });
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({ error: 'kemerbet_session_must_stop' });
+    expect(prepareCalls).toBe(0);
+    await app.close();
+  });
+
+  it.each(['staged', 'imported', 'retryable_failed'] as const)(
+    'blocks ordinary profile mutation while the one-use readiness lifecycle is %s',
+    async (lifecycle) => {
+      const profile = {
+        configuredAt: '2026-08-22T19:30:00.000Z',
+        configurationReason: 'initial_configuration' as const,
+        platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+        platformCode: 'kemerbet' as const,
+        profileContractVersion: 1 as const,
+        profileLabel: 'Primary KemerBet agent revision 1',
+        profileRevision: 1,
+        profileStatus: 'active' as const,
+      };
+      let prepareCalls = 0;
+      let statusCalls = 0;
+      const app = buildOwnerControlApp(config(), {
+        fetch: verifiedAuthFetch(),
+        kemerbetReadinessCohortControl: {
+          completed: async () => false,
+          lifecycle: async () => lifecycle,
+          prepare: async () => {
+            throw new Error('cohort preparation must not run');
+          },
+          rootReceipt: async () =>
+            lifecycle === 'staged'
+              ? undefined
+              : {
+                  claimId: '99999999-9999-4999-8999-999999999999',
+                  event: lifecycle,
+                },
+        },
+        kemerbetSessionControl: {
+          frame: async () => undefined,
+          input: async () => inactiveKemerbetSession,
+          start: async () => inactiveKemerbetSession,
+          status: async () => {
+            statusCalls += 1;
+            return inactiveKemerbetSession;
+          },
+          stop: async () => inactiveKemerbetSession,
+        },
+        runtime: runtime({
+          kemerbetAgentProfiles: {
+            list: async () => [profile],
+            prepare: async () => {
+              prepareCalls += 1;
+              return profile;
+            },
+          },
+        }),
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-agent-profiles/prepare',
+        headers: kemerbetAgentProfileMutationHeaders(),
+        payload: {
+          configurationReason: 'agent_rotation',
+          confirmation: 'owner_confirmed_kemerbet_agent_profile',
+          requestId: pilotRequestId,
+        },
+      });
+      expect(response.statusCode).toBe(lifecycle === 'staged' ? 403 : 409);
+      expect(prepareCalls).toBe(0);
+      expect(statusCalls).toBe(0);
+      await app.close();
+    },
+  );
+
+  it('permits security recovery only for the exact terminal root marker and records the redacted DB acknowledgment', async () => {
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const recoveredProfile = {
+      ...profile,
+      configuredAt: '2026-08-28T15:00:00.000Z',
+      configurationReason: 'security_recovery' as const,
+      platformAgentAccountId: '88888888-8888-4888-8888-888888888888',
+      profileLabel: 'Primary KemerBet agent revision 2',
+      profileRevision: 2,
+    };
+    const claimId = '99999999-9999-4999-8999-999999999999';
+    const canonicalReceiptId = '66666666-6666-4666-8666-666666666666';
+    let recoverCalls = 0;
+    const acknowledgments: unknown[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        acknowledgeSecurityRecovery: async (acknowledgment) => {
+          acknowledgments.push(acknowledgment);
+          return {
+            alreadyAcknowledged: false,
+            identifiersRedacted: true,
+            moneyMoved: false,
+            transferDisabled: true,
+          };
+        },
+        completed: async () => false,
+        lifecycle: async () => 'security_recovery_failed_terminal',
+        prepare: async () => {
+          throw new Error('cohort preparation must not run');
+        },
+        rootReceipt: async () => ({
+          claimId,
+          event: 'security_recovery_failed_terminal',
+        }),
+      },
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => quarantinedKemerbetSession,
+        start: async () => quarantinedKemerbetSession,
+        status: async () => quarantinedKemerbetSession,
+        stop: async () => quarantinedKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => [profile],
+          prepare: async () => {
+            throw new Error('plain profile preparation must not run');
+          },
+          recover: async (actor, request) => {
+            expect(actor).toBe(authUserId);
+            expect(request).toEqual({ claimId, receiptId: pilotRequestId });
+            recoverCalls += 1;
+            return {
+              claimId,
+              profile: recoveredProfile,
+              receiptId: canonicalReceiptId,
+              recordedAt: '2026-08-28T14:59:59.000Z',
+            };
+          },
+        },
+      }),
+    });
+
+    const ordinaryRotation = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(),
+      payload: {
+        configurationReason: 'agent_rotation',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(ordinaryRotation.statusCode).toBe(409);
+    expect(ordinaryRotation.json()).toEqual({ error: 'kemerbet_security_recovery_required' });
+    expect(recoverCalls).toBe(0);
+
+    const recovery = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(),
+      payload: {
+        configurationReason: 'security_recovery',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(recovery.statusCode).toBe(201);
+    expect(recovery.json()).toEqual({ profile: recoveredProfile });
+    expect(recoverCalls).toBe(1);
+    expect(acknowledgments).toEqual([
+      {
+        claimId,
+        platformAgentAccountId: recoveredProfile.platformAgentAccountId,
+        profileRevision: 2,
+        receiptId: canonicalReceiptId,
+      },
+    ]);
+    await app.close();
+  });
+
+  it('projects the exact recovery marker on status and blocks every session or cohort action while pending', async () => {
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const claimId = '99999999-9999-4999-8999-999999999999';
+    const controlCalls: string[] = [];
+    let readinessDatabaseCalls = 0;
+    let pilotCalls = 0;
+    const stateMutationCalls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => false,
+        prepare: async () => {
+          controlCalls.push('prepare-cohort');
+          throw new Error('cohort preparation must remain blocked');
+        },
+        rootReceipt: async () => ({
+          claimId,
+          event: 'security_recovery_failed_terminal',
+        }),
+      },
+      kemerbetSessionControl: {
+        frame: async () => {
+          controlCalls.push('frame');
+          throw new Error('frame must remain blocked');
+        },
+        input: async () => {
+          controlCalls.push('input');
+          throw new Error('input must remain blocked');
+        },
+        start: async () => {
+          controlCalls.push('start');
+          throw new Error('start must remain blocked');
+        },
+        status: async () => {
+          controlCalls.push('status');
+          throw new Error('socket status must not override the exact root marker');
+        },
+        stop: async () => {
+          controlCalls.push('stop');
+          throw new Error('stop must remain blocked');
+        },
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => [profile],
+          prepare: async () => {
+            stateMutationCalls.push('profile-prepare');
+            throw new Error('profile preparation must not run');
+          },
+        },
+        kemerbetReadinessCohorts: {
+          claim: async () => {
+            readinessDatabaseCalls += 1;
+            throw new Error('claim must remain blocked');
+          },
+          markExported: async () => {
+            readinessDatabaseCalls += 1;
+            throw new Error('export must remain blocked');
+          },
+          recordRootReceipt: async () => {
+            readinessDatabaseCalls += 1;
+            throw new Error('terminal receipt belongs only to atomic profile recovery');
+          },
+        },
+        privateLivePilot: {
+          ...runtime().privateLivePilot,
+          arm: async () => {
+            stateMutationCalls.push('pilot-arm');
+            throw new Error('pilot arm must remain blocked');
+          },
+          current: async () => {
+            pilotCalls += 1;
+            return undefined;
+          },
+          prepare: async () => {
+            stateMutationCalls.push('pilot-prepare');
+            throw new Error('pilot preparation must remain blocked');
+          },
+          stop: async () => {
+            stateMutationCalls.push('pilot-stop');
+            throw new Error('pilot stop must remain blocked');
+          },
+        },
+        eligibility: {
+          ...runtime().eligibility,
+          decide: async () => {
+            stateMutationCalls.push('eligibility-decide');
+            throw new Error('eligibility mutation must remain blocked');
+          },
+        },
+        playerRegistrations: {
+          ...runtime().playerRegistrations,
+          associate: async () => {
+            stateMutationCalls.push('player-associate');
+            throw new Error('association mutation must remain blocked');
+          },
+          review: async () => {
+            stateMutationCalls.push('player-review');
+            throw new Error('review mutation must remain blocked');
+          },
+        },
+        receivers: {
+          ...runtime().receivers,
+          rotate: async () => {
+            stateMutationCalls.push('receiver-rotate');
+            throw new Error('receiver mutation must remain blocked');
+          },
+        },
+      }),
+    });
+
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toEqual({
+      session: {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'profile_integrity_unverified',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      },
+    });
+
+    const safeStatusReads = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/v1/owner/kemerbet-agent-profiles',
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/v1/owner/private-live-deposit-pilots/current',
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+    ]);
+    expect(safeStatusReads.map((response) => response.statusCode)).toEqual([200, 200]);
+
+    const blocked = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: `/v1/owner/kemerbet-session/frame?generation=${pilotRequestId}&after=0`,
+        headers: { authorization: `Bearer ${bearer}` },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/start',
+        headers: kemerbetSessionMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/input',
+        headers: kemerbetSessionMutationHeaders(),
+        payload: {
+          frameSequence: 1,
+          kind: 'pointer',
+          requestId: pilotRequestId,
+          sessionGeneration: pilotRequestId,
+          x: 1,
+          y: 1,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/stop',
+        headers: kemerbetSessionMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_stop_private_kemerbet_session',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+        headers: kemerbetReadinessCohortMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/v1/owner/player-registration-requests/${pilotRequestId}/review`,
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+        },
+        payload: { decision: 'exists' },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/v1/owner/player-registration-requests/${pilotRequestId}/associate`,
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+        },
+        payload: { confirmation: 'owner_verified_platform_ownership' },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/v1/owner/player-deposit-eligibility/${pilotRevisionId}/decide`,
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+        },
+        payload: {
+          confirmation: 'owner_confirmed_financial_eligibility',
+          decision: 'eligible',
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/receiver-accounts/rotate',
+        headers: receiverMutationHeaders(),
+        payload: {
+          accountHolderName: 'Exact Receiver',
+          accountReference: '0912345678',
+          confirmation: 'owner_confirmed_receiver_rotation',
+          providerCode: 'telebirr',
+          requestId: pilotRequestId,
+          rotationReason: 'owner_correction',
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-agent-profiles/prepare',
+        headers: kemerbetAgentProfileMutationHeaders(),
+        payload: {
+          configurationReason: 'agent_rotation',
+          confirmation: 'owner_confirmed_kemerbet_agent_profile',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/private-live-deposit-pilots/prepare',
+        headers: pilotMutationHeaders(),
+        payload: {
+          activeFrom: '2026-08-28T12:00:00.000Z',
+          confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
+          expiresAt: '2026-08-28T14:00:00.000Z',
+          playerIds: ['PLAYER_1', 'PLAYER_2', 'PLAYER_3', 'PLAYER_4', 'PLAYER_5'],
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+        headers: pilotMutationHeaders(pilotRevisionId),
+        payload: {
+          confirmation: 'owner_confirmed_dry_run_only',
+          requestId: pilotRevisionId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/stop`,
+        headers: pilotMutationHeaders(pilotRevisionId),
+        payload: {
+          confirmation: 'owner_confirmed_emergency_stop',
+          reasonCode: 'execution_uncertainty',
+          requestId: pilotRevisionId,
+        },
+      }),
+    ]);
+    for (const response of blocked) {
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: 'kemerbet_security_recovery_required' });
+    }
+    expect(controlCalls).toEqual([]);
+    expect(readinessDatabaseCalls).toBe(0);
+    expect(pilotCalls).toBe(1);
+    expect(stateMutationCalls).toEqual([]);
+    await app.close();
+  });
+
+  it('allows only exact cohort preparation while the recovered profile awaits durable cohort binding', async () => {
+    const oldClaimId = '99999999-9999-4999-8999-999999999999';
+    const newClaimId = '88888888-8888-4888-8888-888888888888';
+    const calls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => false,
+        lifecycle: async () => 'security_recovery_profile_finalized',
+        prepare: async (_players, requestId, claimId) => {
+          calls.push(`stage:${requestId}:${claimId}`);
+          return {
+            alreadyPrepared: false,
+            identifiersRedacted: true,
+            moneyMoved: false,
+            playersPrepared: 5,
+            transferDisabled: true,
+          };
+        },
+        rootReceipt: async () => ({
+          claimId: oldClaimId,
+          event: 'security_recovery_profile_finalized',
+        }),
+      },
+      kemerbetSessionControl: {
+        frame: async () => {
+          calls.push('frame');
+          return undefined;
+        },
+        input: async () => {
+          calls.push('input');
+          return inactiveKemerbetSession;
+        },
+        start: async () => {
+          calls.push('start');
+          return inactiveKemerbetSession;
+        },
+        status: async () => inactiveKemerbetSession,
+        stop: async () => {
+          calls.push('stop');
+          return inactiveKemerbetSession;
+        },
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => {
+            calls.push('profiles');
+            return [];
+          },
+          prepare: async () => {
+            calls.push('profile-prepare');
+            throw new Error('profile mutation must remain blocked');
+          },
+        },
+        kemerbetReadinessCohorts: {
+          claim: async (actor, requestId) => {
+            expect(actor).toBe(authUserId);
+            expect(requestId).toBe(pilotRequestId);
+            calls.push('claim');
+            return {
+              alreadyClaimed: false,
+              claimId: newClaimId,
+              players: readinessEligiblePlayers(),
+              state: 'prepared',
+            };
+          },
+          markExported: async (actor, requestId, claimId) => {
+            expect([actor, requestId, claimId]).toEqual([authUserId, pilotRequestId, newClaimId]);
+            calls.push('export');
+            return {
+              alreadyRecorded: false,
+              claimId,
+              state: 'exported',
+              transitionedAt: '2026-08-28T16:00:00.000Z',
+            };
+          },
+          recordRootReceipt: async () => {
+            calls.push('record-root-receipt');
+            throw new Error('the phase latch is not a cohort result');
+          },
+        },
+        privateLivePilot: {
+          ...runtime().privateLivePilot,
+          current: async () => {
+            calls.push('pilot-current');
+            return undefined;
+          },
+        },
+        receivers: {
+          ...runtime().receivers,
+          rotate: async () => {
+            calls.push('receiver-rotate');
+            throw new Error('receiver mutation must remain blocked');
+          },
+        },
+      }),
+    });
+
+    const [started, receiver, profile] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/start',
+        headers: kemerbetSessionMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/receiver-accounts/rotate',
+        headers: receiverMutationHeaders(),
+        payload: {
+          accountHolderName: 'Exact Receiver',
+          accountReference: '0912345678',
+          confirmation: 'owner_confirmed_receiver_rotation',
+          providerCode: 'telebirr',
+          requestId: pilotRequestId,
+          rotationReason: 'owner_correction',
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-agent-profiles/prepare',
+        headers: kemerbetAgentProfileMutationHeaders(),
+        payload: {
+          configurationReason: 'security_recovery',
+          confirmation: 'owner_confirmed_kemerbet_agent_profile',
+          requestId: pilotRequestId,
+        },
+      }),
+    ]);
+    expect(started.statusCode).toBe(409);
+    expect(receiver.statusCode).toBe(409);
+    expect(profile.statusCode).toBe(403);
+    expect(calls).toEqual([]);
+
+    const recoveryStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(recoveryStatus.statusCode).toBe(200);
+    expect(recoveryStatus.json()).toEqual({
+      session: {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'security_recovery_cohort_required',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      },
+    });
+    expect(calls).toEqual([]);
+
+    const prepared = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+    expect(prepared.json()).toEqual({
+      alreadyPrepared: false,
+      identifiersRedacted: true,
+      moneyMoved: false,
+      playersPrepared: 5,
+      transferDisabled: true,
+    });
+    expect(calls).toEqual([
+      'pilot-current',
+      'claim',
+      `stage:${pilotRequestId}:${newClaimId}`,
+      'export',
+    ]);
+    await app.close();
+  });
+
+  it('projects spent recheck authorization as non-retryable and blocks every mutation mode', async () => {
+    const claimId = '88888888-8888-4888-8888-888888888888';
+    const calls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => false,
+        lifecycle: async () => 'recheck_authorization_spent_failed_terminal',
+        prepare: async () => {
+          calls.push('cohort-prepare');
+          throw new Error('spent authorization must not be prepared');
+        },
+        rootReceipt: async () => ({
+          claimId,
+          event: 'recheck_authorization_spent_failed_terminal',
+        }),
+      },
+      kemerbetSessionControl: {
+        frame: async () => {
+          calls.push('frame');
+          return undefined;
+        },
+        input: async () => {
+          calls.push('input');
+          return inactiveKemerbetSession;
+        },
+        start: async () => {
+          calls.push('start');
+          return inactiveKemerbetSession;
+        },
+        status: async () => {
+          calls.push('status');
+          return inactiveKemerbetSession;
+        },
+        stop: async () => {
+          calls.push('stop');
+          return inactiveKemerbetSession;
+        },
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => {
+            calls.push('profiles');
+            return [];
+          },
+          prepare: async () => {
+            calls.push('profile-prepare');
+            throw new Error('spent authorization must not rotate a profile');
+          },
+        },
+        kemerbetReadinessCohorts: {
+          claim: async () => {
+            calls.push('claim');
+            throw new Error('spent authorization must not claim another cohort');
+          },
+          markExported: async () => {
+            calls.push('export');
+            throw new Error('spent authorization must not export another cohort');
+          },
+          recordRootReceipt: async () => {
+            calls.push('record');
+            throw new Error('spent authorization is already terminal');
+          },
+        },
+      }),
+    });
+
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toEqual({
+      session: {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'recheck_authorization_spent_failed_terminal',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      },
+    });
+
+    const [ordinary, cohort, recovery] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-session/start',
+        headers: kemerbetSessionMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+        headers: kemerbetReadinessCohortMutationHeaders(),
+        payload: {
+          confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+          requestId: pilotRequestId,
+        },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/owner/kemerbet-agent-profiles/prepare',
+        headers: kemerbetAgentProfileMutationHeaders(),
+        payload: {
+          configurationReason: 'security_recovery',
+          confirmation: 'owner_confirmed_kemerbet_agent_profile',
+          requestId: pilotRequestId,
+        },
+      }),
+    ]);
+    expect(ordinary.statusCode).toBe(409);
+    expect(cohort.statusCode).toBe(409);
+    expect(recovery.statusCode).toBe(403);
+    expect(calls).toEqual([]);
+    await app.close();
+  });
+
+  it.each(['security_recovery_cohort_staged', 'imported', 'retryable_failed'] as const)(
+    'keeps every mutation blocked while recovery remains %s',
+    async (lifecycle) => {
+      const calls: string[] = [];
+      const app = buildOwnerControlApp(config(), {
+        fetch: verifiedAuthFetch(),
+        kemerbetReadinessCohortControl: {
+          completed: async () => false,
+          lifecycle: async () => lifecycle,
+          prepare: async () => {
+            calls.push('cohort-prepare');
+            throw new Error('recovery cohort must not be replaced');
+          },
+          rootReceipt: async () =>
+            lifecycle === 'security_recovery_cohort_staged'
+              ? undefined
+              : {
+                  claimId: '88888888-8888-4888-8888-888888888888',
+                  event: lifecycle,
+                },
+        },
+        kemerbetSessionControl: {
+          frame: async () => undefined,
+          input: async () => inactiveKemerbetSession,
+          start: async () => {
+            calls.push('start');
+            return inactiveKemerbetSession;
+          },
+          status: async () => {
+            calls.push('status');
+            return inactiveKemerbetSession;
+          },
+          stop: async () => inactiveKemerbetSession,
+        },
+        runtime: runtime({
+          kemerbetReadinessCohorts: {
+            ...runtime().kemerbetReadinessCohorts,
+            claim: async () => {
+              calls.push('claim');
+              throw new Error('recovery cohort must not be replaced');
+            },
+          },
+        }),
+      });
+
+      const status = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/kemerbet-session',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(status.statusCode).toBe(200);
+      expect(status.json()).toMatchObject({
+        session: {
+          quarantine: {
+            reasonCode: 'security_recovery_in_progress',
+            recoveryRequired: true,
+          },
+          transferDisabled: true,
+        },
+      });
+
+      const [start, cohort] = await Promise.all([
+        app.inject({
+          method: 'POST',
+          url: '/v1/owner/kemerbet-session/start',
+          headers: kemerbetSessionMutationHeaders(),
+          payload: {
+            confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+            requestId: pilotRequestId,
+          },
+        }),
+        app.inject({
+          method: 'POST',
+          url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+          headers: kemerbetReadinessCohortMutationHeaders(),
+          payload: {
+            confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+            requestId: pilotRequestId,
+          },
+        }),
+      ]);
+      expect(start.statusCode).toBe(409);
+      expect(cohort.statusCode).toBe(409);
+      expect(calls).toEqual([]);
+      await app.close();
+    },
+  );
+
+  it('never treats generic private-session unavailability as recovery authority', async () => {
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    let prepareCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => inactiveKemerbetSession,
+        start: async () => inactiveKemerbetSession,
+        status: async () => {
+          throw new Error('unavailable');
+        },
+        stop: async () => inactiveKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => [profile],
+          prepare: async () => {
+            prepareCalls += 1;
+            return profile;
+          },
+        },
+      }),
+    });
+    const recovery = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-agent-profiles/prepare',
+      headers: kemerbetAgentProfileMutationHeaders(),
+      payload: {
+        configurationReason: 'security_recovery',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(recovery.statusCode).toBe(403);
     expect(prepareCalls).toBe(0);
     await app.close();
   });
@@ -1657,7 +2652,7 @@ describe('Owner-control HTTP boundary', () => {
         url: '/v1/owner/kemerbet-agent-profiles/prepare',
         headers: kemerbetAgentProfileMutationHeaders(),
         payload: {
-          configurationReason: 'security_recovery',
+          configurationReason: 'agent_rotation',
           confirmation: 'owner_confirmed_kemerbet_agent_profile',
           requestId: pilotRequestId,
         },
@@ -1701,7 +2696,7 @@ describe('Owner-control HTTP boundary', () => {
     const newProfile = {
       ...oldProfile,
       configuredAt: '2026-08-27T12:00:00.000Z',
-      configurationReason: 'security_recovery' as const,
+      configurationReason: 'agent_rotation' as const,
       platformAgentAccountId: '88888888-8888-4888-8888-888888888888',
       profileLabel: 'Primary KemerBet agent revision 2',
       profileRevision: 2,
@@ -1755,7 +2750,7 @@ describe('Owner-control HTTP boundary', () => {
           prepare: async (actor, request) => {
             expect(actor).toBe(authUserId);
             expect(request).toEqual({
-              configurationReason: 'security_recovery',
+              configurationReason: 'agent_rotation',
               requestId: rotationRequestId,
             });
             databasePrepareCalls += 1;
@@ -1777,7 +2772,7 @@ describe('Owner-control HTTP boundary', () => {
       url: '/v1/owner/kemerbet-agent-profiles/prepare',
       headers: kemerbetAgentProfileMutationHeaders(rotationRequestId),
       payload: {
-        configurationReason: 'security_recovery',
+        configurationReason: 'agent_rotation',
         confirmation: 'owner_confirmed_kemerbet_agent_profile',
         requestId: rotationRequestId,
       },
@@ -1844,7 +2839,7 @@ describe('Owner-control HTTP boundary', () => {
     const newProfile = {
       ...oldProfile,
       configuredAt: '2026-08-22T19:35:00.000Z',
-      configurationReason: 'security_recovery' as const,
+      configurationReason: 'agent_rotation' as const,
       platformAgentAccountId: '88888888-8888-4888-8888-888888888888',
       profileLabel: 'Primary KemerBet agent revision 2',
       profileRevision: 2,
@@ -1859,7 +2854,9 @@ describe('Owner-control HTTP boundary', () => {
         start: async () => inactiveKemerbetSession,
         status: async (accountId) => {
           observedStatusAccounts.push(accountId);
-          return inactiveKemerbetSession;
+          return accountId === oldProfile.platformAgentAccountId
+            ? inactiveKemerbetSession
+            : inactiveKemerbetSession;
         },
         stop: async () => inactiveKemerbetSession,
       },
@@ -1881,6 +2878,7 @@ describe('Owner-control HTTP boundary', () => {
         headers: { authorization: `Bearer ${bearer}` },
       });
       expect(status.statusCode).toBe(200);
+      expect(status.json()).toEqual({ session: inactiveKemerbetSession });
       expect(observedStatusAccounts.at(-1)).toBe(expectedAccountId);
     }
     const prepared = await app.inject({
@@ -1888,7 +2886,7 @@ describe('Owner-control HTTP boundary', () => {
       url: '/v1/owner/kemerbet-agent-profiles/prepare',
       headers: kemerbetAgentProfileMutationHeaders(),
       payload: {
-        configurationReason: 'security_recovery',
+        configurationReason: 'agent_rotation',
         confirmation: 'owner_confirmed_kemerbet_agent_profile',
         requestId: pilotRequestId,
       },

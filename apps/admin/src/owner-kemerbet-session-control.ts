@@ -15,6 +15,14 @@ export type OwnerKemerbetSessionPhase =
   | 'starting'
   | 'stopping';
 
+export type OwnerKemerbetSessionQuarantineReason =
+  'browser_cleanup_unverified' | 'profile_integrity_unverified' | 'unclean_session_generation';
+
+export interface OwnerKemerbetSessionQuarantine {
+  readonly reasonCode: OwnerKemerbetSessionQuarantineReason;
+  readonly recoveryRequired: true;
+}
+
 export interface OwnerKemerbetSessionStatus {
   readonly active: boolean;
   readonly expiresAt?: string;
@@ -22,6 +30,7 @@ export interface OwnerKemerbetSessionStatus {
   readonly generation?: string;
   readonly loginRequired: boolean;
   readonly phase: OwnerKemerbetSessionPhase;
+  readonly quarantine?: OwnerKemerbetSessionQuarantine;
   readonly signedIn: boolean;
   readonly transferDisabled: true;
 }
@@ -90,6 +99,7 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     throw new OwnerKemerbetSessionUnavailableError();
   }
   const object = value as Record<string, unknown>;
+  const quarantined = object.active === false && object.quarantine !== undefined;
   const exactKeys = object.active
     ? [
         'active',
@@ -101,7 +111,9 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
         'signedIn',
         'transferDisabled',
       ]
-    : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
+    : quarantined
+      ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
+      : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
   const activePhases = new Set([
     'authenticated',
     'authenticating',
@@ -111,6 +123,12 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     'stopping',
   ]);
   const inactivePhases = new Set(['checkpointed', 'idle']);
+  const quarantineReasons = new Set<unknown>([
+    'browser_cleanup_unverified',
+    'profile_integrity_unverified',
+    'unclean_session_generation',
+  ]);
+  const quarantine = object.quarantine as Record<string, unknown> | undefined;
   if (
     Object.keys(object).sort().join('\0') !== exactKeys.sort().join('\0') ||
     typeof object.active !== 'boolean' ||
@@ -127,6 +145,15 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
         Number(object.frameSequence) < 0 ||
         !activePhases.has(object.phase))) ||
     (!object.active && !inactivePhases.has(object.phase)) ||
+    (quarantined &&
+      (typeof quarantine !== 'object' ||
+        quarantine === null ||
+        Array.isArray(quarantine) ||
+        Object.keys(quarantine).sort().join('\0') !==
+          ['reasonCode', 'recoveryRequired'].join('\0') ||
+        !quarantineReasons.has(quarantine.reasonCode) ||
+        quarantine.recoveryRequired !== true ||
+        object.phase !== 'idle')) ||
     (!object.active && (object.loginRequired || object.signedIn)) ||
     (object.signedIn && (object.loginRequired || object.phase !== 'authenticated')) ||
     (object.loginRequired && object.phase !== 'login_required')

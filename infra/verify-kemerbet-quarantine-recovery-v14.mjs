@@ -68,6 +68,75 @@ assert.match(installer, /transfer_enabled=false/);
 assert.match(installer, /amount_entry_enabled=false/);
 assert.match(installer, /lookup_authorized=false/);
 assert.match(installer, /recheck_authorized=false/);
+const financialGateCheck = installer.slice(
+  installer.indexOf('has_enabled_financial_gate() {'),
+  installer.indexOf('\n\nrequire_financial_gates_disabled() {'),
+);
+assert.match(
+  financialGateCheck,
+  /\[\[ "\$entry" == 'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' \]\] && continue/,
+  'only the exact no-transfer readiness seal safety flag may be excluded from the broad financial-gate scan',
+);
+assert.match(
+  financialGateCheck,
+  /grep -Eiq '\^\(FETANAGENT_\.\*\(EXECUTOR\|FINAL_ACTION\|TRANSFER\|AMOUNT_ENTRY\)\.\*\|KEMERBET_\.\*\(EXECUTOR\|FINAL_ACTION\|TRANSFER\|AMOUNT_ENTRY\)\.\*\)=\(1\|true\|yes\|on\)\$'/,
+);
+assert.match(
+  financialGateCheck,
+  /status=\$\?\s+\[\[ "\$status" -eq 1 \]\] \|\| return 0/,
+  'a gate-scanner error must fail closed',
+);
+assert.equal(
+  (installer.match(/\bhas_enabled_financial_gate\b/g) ?? []).length,
+  3,
+  'both the global and exact-container financial checks must use the same narrow allowlist',
+);
+for (const [environment, expectedEnabledGate, description] of [
+  [
+    [
+      'FINANCIAL_ACTIONS_MODE=dry_run',
+      'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true',
+      'KEMERBET_EXECUTOR_ENABLED=false',
+      'KEMERBET_FINAL_ACTION_ENABLED=false',
+      'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false',
+    ].join('\n'),
+    false,
+    'the exact no-transfer readiness seal is a safety gate, not a money-moving gate',
+  ],
+  [
+    'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=TRUE',
+    true,
+    'the allowlist is byte-exact and rejects alternate spellings',
+  ],
+  [
+    'KEMERBET_NO_TRANSFER_READINESS_ENABLED=true',
+    true,
+    'a similarly named flag is not implicitly allowlisted',
+  ],
+  ['KEMERBET_EXECUTOR_ENABLED=1', true, 'executor enablement remains rejected'],
+  ['KEMERBET_FINAL_ACTION_ENABLED=yes', true, 'final-action enablement remains rejected'],
+  ['KEMERBET_TRANSFER_ENABLED=true', true, 'transfer enablement remains rejected'],
+  ['KEMERBET_AMOUNT_ENTRY_ENABLED=on', true, 'Amount-entry enablement remains rejected'],
+  [
+    'FETANAGENT_INTERNAL_EXECUTOR_ENABLED=true',
+    true,
+    'FetanAgent executor enablement remains rejected',
+  ],
+  [
+    ['KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true', 'FETANAGENT_TRANSFER_ENABLED=true'].join(
+      '\n',
+    ),
+    true,
+    'the exact safety flag cannot mask a real enabled financial gate',
+  ],
+]) {
+  const result = spawnSync(
+    'bash',
+    ['-c', `${financialGateCheck}\nhas_enabled_financial_gate "$(cat)"`],
+    { cwd: root, encoding: 'utf8', input: environment },
+  );
+  assert.equal(result.status === 0, expectedEnabledGate, description);
+}
 assert.match(
   installer,
   /exact_directory\(owner_root, \(0, 0\), 0o755\)/,

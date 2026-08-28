@@ -100,6 +100,13 @@ const v3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecovery = readFileSync(
   ),
   'utf8',
 );
+const v3RuntimeBridgeParserScopeRepairV12 = readFileSync(
+  resolve(
+    root,
+    'infra/operations/fetanagent-kemerbet-v3-runtime-bridge-parser-scope-repair-v12.sh',
+  ),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -160,6 +167,10 @@ const reviewedV3HelperRotationV10SuccessorSha =
   '73eabc728bc25462ab96d17dc8faa5775526571caae9d2ab0265f523b84a387e';
 const reviewedV3RuntimeBridgeHelperV11Sha =
   '8696fd6d606b7c3440ab180e9d409bb113da2ba14434752b47fca07e34a09728';
+const reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha =
+  '9f9c7f124820c1c8c8aabbe411de5ccc0d914bf7f4696904d6ba557eee62b3da';
+const reviewedV3RuntimeBridgeParserScopeRepairV12Sha =
+  '171b98279bffec64558b309d9a793fa8306d64615e0f73b95607553640dbbb54';
 const reviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha =
   'a20f6f5b813a3032477b7e7fcaaf5aac94b8083ac0ddfdaab4b673c56fccc3e7';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
@@ -169,6 +180,9 @@ const actualReviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha 
   'sha256',
 )
   .update(v3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecovery.replaceAll('\r\n', '\n'))
+  .digest('hex');
+const actualReviewedV3RuntimeBridgeParserScopeRepairV12Sha = createHash('sha256')
+  .update(v3RuntimeBridgeParserScopeRepairV12.replaceAll('\r\n', '\n'))
   .digest('hex');
 const stagingDropletIpv6 = '2a03:b0c0:1:e0:0:1:a8b4:2001';
 const staleStagingBannedIpv6 = '2a05:d018:135e:1602:5210:739d:5667:fee4';
@@ -6016,6 +6030,11 @@ assert.match(
   /^readonly KEMERBET_V3_HELPER_ROTATION_V11_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v11'$/mu,
   'the one-time runtime bridge must use a distinct append-only H11 evidence namespace',
 );
+assert.match(
+  helper,
+  /^readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v12'$/mu,
+  'the parser-scope repair must use a distinct append-only H12 evidence namespace',
+);
 for (const successorGateContract of [
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'/,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='invalid'/,
@@ -6586,7 +6605,7 @@ for (const runtimeBridgeContract of [
   /rotation_v10_completion_data is None/u,
   /archived_rotation_v10_predecessor_helper is None/u,
   /overlay_release = effective_release/u,
-  /predecessor_helper_sha = effective_helper_sha/u,
+  /runtime_bridge_predecessor_helper_sha = effective_helper_sha/u,
   /exact_directory\(rotation_v11_parent, 0o700, \[rotation_v11_release\]\)/u,
   /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v11/u,
   /len\(rotation_v11_intent\) != 21/u,
@@ -6606,13 +6625,18 @@ for (const runtimeBridgeContract of [
   /recheck_authorized=false/u,
   /rotation_v11_completion\[1\] != 'state=runtime-bridge-installed'/u,
   /rotation_v11_completion\[2:21\] != rotation_v11_intent\[2:21\]/u,
-  /hashlib\.sha256\(archived_rotation_v11_predecessor_helper\)\.hexdigest\(\) != predecessor_helper_sha/u,
+  /hashlib\.sha256\(archived_rotation_v11_predecessor_helper\)\.hexdigest\(\) !=\s+runtime_bridge_predecessor_helper_sha/u,
   /effective_helper_sha = rotation_v11_intent\[5\]\.split\('=', 1\)\[1\]/u,
   /runtime_bridge_state = 'active'/u,
   /runtime_bridge_release = rotation_v11_release/u,
 ]) {
   assert.match(runtimeBridgeChain, runtimeBridgeContract);
 }
+assert.doesNotMatch(
+  runtimeBridgeChain,
+  /^\s*predecessor_helper_sha = effective_helper_sha\s*$/mu,
+  'H11 must never overwrite the immutable historical/base helper digest used by retirement validation',
+);
 assert.doesNotMatch(
   runtimeBridgeChain,
   /effective_release = rotation_v11_release/u,
@@ -6622,7 +6646,7 @@ assertInOrder(
   runtimeBridgeChain,
   [
     'overlay_release = effective_release',
-    'predecessor_helper_sha = effective_helper_sha',
+    'runtime_bridge_predecessor_helper_sha = effective_helper_sha',
     'exact_directory(rotation_v11_parent, 0o700, [rotation_v11_release])',
     "'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v11'",
     "'transition=historical-overlay-current-runtime-separated-v1'",
@@ -6634,6 +6658,409 @@ assertInOrder(
     'runtime_bridge_release = rotation_v11_release',
   ],
   'H11 must causally attest H10, retain the historical overlay identity, and activate only a no-finance runtime bridge',
+);
+const parserScopeRepairChain = runtimeBridgeChain.slice(
+  runtimeBridgeChain.indexOf('if os.path.lexists(rotation_v12_parent):'),
+);
+assert.ok(
+  parserScopeRepairChain.length > 0,
+  'the successor inspector must expose a bounded H12 parser-scope repair parser',
+);
+for (const parserScopeRepairContract of [
+  /if os\.path\.lexists\(rotation_v12_parent\):/u,
+  /runtime_bridge_state != 'active'/u,
+  /rotation_v12_predecessor_helper_sha = effective_helper_sha/u,
+  /exact_directory\(rotation_v12_parent, 0o700, \[rotation_v12_release\]\)/u,
+  /\['completed-v1', 'intent-v1', 'predecessor-helper'\]/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v12/u,
+  /len\(rotation_v12_intent\) != 22/u,
+  /len\(rotation_v12_completion\) != 23/u,
+  /rotation_v12_intent\[2\] != f'overlay_release=\{overlay_release\}'/u,
+  /rotation_v12_intent\[3\] != f'runtime_bridge_release=\{rotation_v11_release\}'/u,
+  /rotation_v12_intent\[4\] != f'repair_release=\{rotation_v12_release\}'/u,
+  /predecessor_helper_sha256=\{rotation_v12_predecessor_helper_sha\}/u,
+  /successor_helper_sha256=/u,
+  /predecessor_rotation_intent_sha256=\{hashlib\.sha256\(rotation_v11_intent_data\)\.hexdigest\(\)\}/u,
+  /predecessor_rotation_completion_sha256=\{hashlib\.sha256\(rotation_v11_completion_data\)\.hexdigest\(\)\}/u,
+  /predecessor_rotation_helper_archive_sha256=\{hashlib\.sha256\(archived_rotation_v11_predecessor_helper\)\.hexdigest\(\)\}/u,
+  /base_binding_v3_sha256=\{v3_sha\}/u,
+  /rotation_v12_intent\[11\] != rotation_v11_intent\[10\]/u,
+  /rotation_v12_intent\[12\] != rotation_v11_intent\[11\]/u,
+  /rotation_v12_intent\[13\] != rotation_v11_intent\[12\]/u,
+  /rotation_v12_intent\[14\] != rotation_v11_intent\[13\]/u,
+  /transition=runtime-bridge-parser-scope-repair-v1/u,
+  /financial_actions_mode=dry_run/u,
+  /kemerbet_executor_enabled=false/u,
+  /kemerbet_final_action_enabled=false/u,
+  /transfer_enabled=false/u,
+  /lookup_authorized=false/u,
+  /recheck_authorized=false/u,
+  /rotation_v12_completion\[1\] != 'state=parser-repair-installed'/u,
+  /rotation_v12_completion\[2:22\] != rotation_v12_intent\[2:22\]/u,
+  /rotation_intent_sha256=\{hashlib\.sha256\(rotation_v12_intent_data\)\.hexdigest\(\)\}/u,
+  /hashlib\.sha256\(archived_rotation_v12_predecessor_helper\)\.hexdigest\(\) !=\s+rotation_v12_predecessor_helper_sha/u,
+  /effective_helper_sha = rotation_v12_intent\[6\]\.split\('=', 1\)\[1\]/u,
+]) {
+  assert.match(parserScopeRepairChain, parserScopeRepairContract);
+}
+assert.doesNotMatch(
+  parserScopeRepairChain,
+  /^\s*predecessor_helper_sha\s*=/mu,
+  'H12 must never assign the immutable historical/base helper digest',
+);
+assert.doesNotMatch(
+  parserScopeRepairChain,
+  /effective_release = rotation_v12_release|runtime_bridge_release = rotation_v12_release/u,
+  'H12 may update only the effective helper digest, never the historical overlay or H11 bridge release',
+);
+assertInOrder(
+  parserScopeRepairChain,
+  [
+    'if os.path.lexists(rotation_v12_parent):',
+    "runtime_bridge_state != 'active'",
+    'rotation_v12_predecessor_helper_sha = effective_helper_sha',
+    'exact_directory(rotation_v12_parent, 0o700, [rotation_v12_release])',
+    "'contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v12'",
+    "'transition=runtime-bridge-parser-scope-repair-v1'",
+    "'lookup_authorized=false'",
+    "'recheck_authorized=false'",
+    'archived_rotation_v12_predecessor_helper = exact_file(',
+    "effective_helper_sha = rotation_v12_intent[6].split('=', 1)[1]",
+  ],
+  'H12 must attest the active H11 bridge, append its immutable repair record, and only then advance the effective helper digest',
+);
+
+const h11ScopedCaptureStatement =
+  /^\s*(runtime_bridge_predecessor_helper_sha = effective_helper_sha)\s*$/mu.exec(
+    runtimeBridgeChain,
+  )?.[1];
+const h11EffectiveUpdateStatement =
+  /^\s*(effective_helper_sha = rotation_v11_intent\[5\]\.split\('=', 1\)\[1\])\s*$/mu.exec(
+    runtimeBridgeChain,
+  )?.[1];
+const h12ScopedCaptureStatement =
+  /^\s*(rotation_v12_predecessor_helper_sha = effective_helper_sha)\s*$/mu.exec(
+    parserScopeRepairChain,
+  )?.[1];
+const h12EffectiveUpdateStatement =
+  /^\s*(effective_helper_sha = rotation_v12_intent\[6\]\.split\('=', 1\)\[1\])\s*$/mu.exec(
+    parserScopeRepairChain,
+  )?.[1];
+const immutableRetirementComparison =
+  /(retirement_intent\[4\] != f'helper_sha256=\{predecessor_helper_sha\}')/u.exec(
+    inspectV2V3SuccessorGate,
+  )?.[1];
+assert.ok(
+  h11ScopedCaptureStatement &&
+    h11EffectiveUpdateStatement &&
+    h12ScopedCaptureStatement &&
+    h12EffectiveUpdateStatement &&
+    immutableRetirementComparison,
+  'the exact H11/H12 scope-changing statements and immutable retirement comparison must be extractable',
+);
+if (process.platform === 'linux') {
+  const parserScopeRegression = `
+predecessor_helper_sha = '${'a'.repeat(64)}'
+effective_helper_sha = '${'b'.repeat(64)}'
+rotation_v11_intent = [''] * 6
+rotation_v11_intent[5] = 'successor_helper_sha256=${'c'.repeat(64)}'
+${h11ScopedCaptureStatement}
+assert runtime_bridge_predecessor_helper_sha == '${'b'.repeat(64)}'
+${h11EffectiveUpdateStatement}
+assert effective_helper_sha == '${'c'.repeat(64)}'
+assert predecessor_helper_sha == '${'a'.repeat(64)}'
+rotation_v12_intent = [''] * 7
+rotation_v12_intent[6] = 'successor_helper_sha256=${'d'.repeat(64)}'
+${h12ScopedCaptureStatement}
+assert rotation_v12_predecessor_helper_sha == '${'c'.repeat(64)}'
+${h12EffectiveUpdateStatement}
+assert effective_helper_sha == '${'d'.repeat(64)}'
+assert predecessor_helper_sha == '${'a'.repeat(64)}'
+retirement_intent = [''] * 5
+retirement_intent[4] = 'helper_sha256=${'a'.repeat(64)}'
+assert not (${immutableRetirementComparison})
+`;
+  const parserScopeRegressionResult = spawnSync('/usr/bin/python3', ['-I', '-'], {
+    encoding: 'utf8',
+    input: parserScopeRegression,
+  });
+  assert.equal(
+    parserScopeRegressionResult.status,
+    0,
+    `H11/H12 must preserve the distinct historical helper digest through immutable retirement validation: ${parserScopeRegressionResult.stderr}`,
+  );
+}
+
+for (const fixedParserScopeRepairV12Contract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly TARGET='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'$/mu,
+  /^readonly HISTORICAL_OVERLAY_RELEASE='c061f9dc05e60d641d306f16b5d826e6e1b2c6c4'$/mu,
+  /^readonly REVIEWED_BRIDGE_RELEASE='21ef5f0d987d9dc21efc1a81916316a3f6d7f864'$/mu,
+  new RegExp(`^readonly PREDECESSOR_HELPER_SHA256='${reviewedV3RuntimeBridgeHelperV11Sha}'$`, 'mu'),
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha}'$`,
+    'mu',
+  ),
+  /^readonly CONFIRMATION='I-UNDERSTAND-THIS-INSTALLS-ONE-H12-PARSER-SCOPE-REPAIR-WITH-TRANSFER-DISABLED'$/mu,
+  /^readonly EXPECTED_DROPLET_ID='593344964'$/mu,
+  /^readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'$/mu,
+  /^readonly SUDOERS_DISABLED='\/etc\/sudoers\.d\/\.fetanagent-staging-deploy-helper\.v3-runtime-bridge-v11-disabled'$/mu,
+  /^readonly ROTATION_V11_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v11'$/mu,
+  /^readonly ROTATION_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v12'$/mu,
+  /\[\[ \$# -eq 3 \]\] \|\| die 'expected the repair release, reviewed helper digest, and exact H12 confirmation'/u,
+  /\[\[ "\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION" \]\] \|\| die 'the exact H12 confirmation is required'/u,
+  /load_exact_h10_evidence/u,
+  /load_exact_h11_evidence/u,
+  /contract=fetanagent-kemerbet-readiness-v3-helper-rotation-v12/u,
+  /state=parser-repair-installed/u,
+  /transition=runtime-bridge-parser-scope-repair-v1/u,
+  /financial_actions_mode=dry_run/u,
+  /kemerbet_executor_enabled=false/u,
+  /kemerbet_final_action_enabled=false/u,
+  /transfer_enabled=false/u,
+  /lookup_authorized=false/u,
+  /recheck_authorized=false/u,
+  /print\('absent'\)/u,
+  /print\('empty-parent'\)/u,
+  /print\('interrupted'\)/u,
+  /print\('completed'\)/u,
+  /entries == \[f'\.installing-\{release\}'\]/u,
+  /entries == \[release\]/u,
+]) {
+  assert.match(v3RuntimeBridgeParserScopeRepairV12, fixedParserScopeRepairV12Contract);
+}
+const parserScopeRepairV12Classifier = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'classify_rotation',
+  'require_rotation_prefix',
+);
+const parserScopeRepairV12ClassifierPython = extractSingleQuotedPythonHeredoc(
+  parserScopeRepairV12Classifier,
+  'classify_rotation',
+);
+if (process.platform === 'linux') {
+  const classifierFixtureRoot = mkdtempSync(join(tmpdir(), 'fetanagent-h12-classifier-'));
+  const classifierParent = join(classifierFixtureRoot, 'rotation-v12');
+  const classifierRelease = 'a'.repeat(40);
+  const classifierProgram = join(classifierFixtureRoot, 'classify.py');
+  writeFileSync(
+    classifierProgram,
+    parserScopeRepairV12ClassifierPython.replace(
+      '(0, 0, 0o700)',
+      '(os.getuid(), os.getgid(), 0o700)',
+    ),
+    { mode: 0o600 },
+  );
+  const runClassifierFixture = () =>
+    spawnSync('/usr/bin/python3', ['-I', classifierProgram, classifierParent, classifierRelease], {
+      encoding: 'utf8',
+    });
+  try {
+    let result = runClassifierFixture();
+    assert.equal(result.status, 0, `H12 absent classifier failed: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'absent');
+
+    mkdirSync(classifierParent, { mode: 0o700 });
+    chmodSync(classifierParent, 0o700);
+    result = runClassifierFixture();
+    assert.equal(result.status, 0, `H12 empty-parent classifier failed: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'empty-parent');
+
+    mkdirSync(join(classifierParent, `.installing-${classifierRelease}`), { mode: 0o700 });
+    result = runClassifierFixture();
+    assert.equal(result.status, 0, `H12 interrupted classifier failed: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'interrupted');
+
+    rmSync(join(classifierParent, `.installing-${classifierRelease}`), { recursive: true });
+    mkdirSync(join(classifierParent, classifierRelease), { mode: 0o700 });
+    result = runClassifierFixture();
+    assert.equal(result.status, 0, `H12 completed classifier failed: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'completed');
+
+    mkdirSync(join(classifierParent, 'foreign-entry'), { mode: 0o700 });
+    result = runClassifierFixture();
+    assert.notEqual(result.status, 0, 'H12 classifier must reject any foreign namespace entry');
+  } finally {
+    rmSync(classifierFixtureRoot, { recursive: true, force: true });
+  }
+}
+const parserScopeRepairV12Prefix = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'require_rotation_prefix',
+  'require_record_prefix',
+);
+for (const prefixContract of [
+  /'\.completed-v1\.installing': \(0o600, 4096\)/u,
+  /'\.intent-v1\.installing': \(0o600, 4096\)/u,
+  /'\.predecessor-helper\.installing': \(0o400, 2 \* 1024 \* 1024\)/u,
+  /'completed-v1': \(0o600, 4096\)/u,
+  /'intent-v1': \(0o600, 4096\)/u,
+  /'predecessor-helper': \(0o400, 2 \* 1024 \* 1024\)/u,
+  /any\(name not in allowed for name in entries\)/u,
+  /if final in entries and f'\.\{final\}\.installing' in entries/u,
+  /item\.st_nlink\) !=\s+\(0, 0, mode, 1\)/u,
+  /item\.st_size > maximum/u,
+]) {
+  assert.match(parserScopeRepairV12Prefix, prefixContract);
+}
+const parserScopeRepairV12InterruptedPrefix = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'require_interrupted_prefix_consistency',
+  'require_exact_rotation_record',
+);
+for (const interruptedPrefixContract of [
+  /require_rotation_prefix/u,
+  /require_disabled_grant_only/u,
+  /require_record_prefix "\$ROTATION_INSTALLING\/intent-v1"/u,
+  /require_record_prefix "\$ROTATION_INSTALLING\/completed-v1"/u,
+  /target_state='predecessor'/u,
+  /target_state='successor'/u,
+  /require_copy_prefix "\$ROTATION_INSTALLING\/\.predecessor-helper\.installing"/u,
+  /require_helper_file "\$ROTATION_INSTALLING\/predecessor-helper"/u,
+  /require_helper_file "\$INSTALLING_HELPER" "\$SUCCESSOR_HELPER_SHA256" 755/u,
+  /require_copy_prefix "\$INSTALLING_HELPER_PARTIAL" "\$STAGED_HELPER" 755 600/u,
+]) {
+  assert.match(parserScopeRepairV12InterruptedPrefix, interruptedPrefixContract);
+}
+const parserScopeRepairV12Main = v3RuntimeBridgeParserScopeRepairV12.slice(
+  v3RuntimeBridgeParserScopeRepairV12.indexOf(
+    "require_exact_droplet || die 'the DigitalOcean Droplet identity is not exact'",
+  ),
+);
+assert.ok(
+  parserScopeRepairV12Main.length > 0,
+  'the H12 repair must expose one bounded root-only execution path',
+);
+const parserScopeRepairV12PreInstall = parserScopeRepairV12Main.slice(
+  0,
+  parserScopeRepairV12Main.indexOf('mv -- "$INSTALLING_HELPER" "$TARGET"'),
+);
+assert.doesNotMatch(
+  parserScopeRepairV12PreInstall,
+  /^\s*run_helper_direct\s+(?!\(\))/mu,
+  'the known-broken H11 helper must never be invoked before the corrected helper replaces it',
+);
+assertInOrder(
+  parserScopeRepairV12Main,
+  [
+    "load_exact_h10_evidence || die 'the immutable H10 rotation evidence is invalid'",
+    "load_exact_h11_evidence || die 'the immutable H11 runtime-bridge evidence is invalid'",
+    'rotation_state="$(classify_rotation)"',
+    "open_lock || die 'the exact staging mutation lock is unsafe or another mutation is active'",
+    "load_exact_h11_evidence || die 'the immutable H11 runtime-bridge evidence changed under lock'",
+    'publish_record "$ROTATION_INSTALLING" intent-v1 0600 expected_intent',
+    'copy_root_file_atomically "$TARGET"',
+    'mv -- "$INSTALLING_HELPER" "$TARGET"',
+    'publish_record "$ROTATION_INSTALLING" completed-v1 0600 expected_completion',
+    'mv -- "$ROTATION_INSTALLING" "$ROTATION_ROOT"',
+    'close_lock',
+    'run_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_helper_direct kemerbet-v3-runtime-bridge-ready "$SUCCESSOR_HELPER_SHA256"',
+    "open_lock || die 'the exact staging mutation lock changed or another mutation appeared'",
+    "load_exact_h11_evidence || die 'the immutable H11 runtime-bridge evidence changed before grant restoration'",
+    '[[ "$(classify_rotation)" == \'completed\' ]]',
+    "restore_sudoers || die 'the deployment grant could not be restored safely'",
+  ],
+  'H12 must append intent, archive H11, install and attest the corrected helper, publish completion, re-lock, and restore sudo last',
+);
+assert.equal(
+  (parserScopeRepairV12Main.match(/^\s*restore_sudoers \|\| die/gmu) ?? []).length,
+  1,
+  'the H12 execution path may restore the deployment grant at exactly one final checkpoint',
+);
+assert.equal(
+  (parserScopeRepairV12Main.match(/^\s*run_helper_direct\s+/gmu) ?? []).length,
+  2,
+  'the corrected H12 helper may be invoked only for digest verification and the no-finance bridge-ready attestation',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeParserScopeRepairV12,
+  /(?:^|\n)\s*(?:rm|rmdir|unlink)\s/u,
+  'H12 must preserve every prior evidence and checkpoint rather than deleting recovery state',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeParserScopeRepairV12,
+  /docker_local_read_only\s+(?:container|network|volume|image|system)\s+(?:create|start|stop|kill|restart|rm|prune)/u,
+  'H12 Docker inspection must remain read-only',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeParserScopeRepairV12,
+  /^\s*run_helper_direct\s+(?:kemerbet-readiness-(?:lookup|recheck)|kemerbet-final|transfer|deposit|withdraw|executor)/mu,
+  'H12 must not authorize lookup, recheck, Transfer, executor, or any financial action',
+);
+assert.doesNotMatch(
+  v3RuntimeBridgeParserScopeRepairV12,
+  /(?:publish_record|copy_root_file_atomically|install -d|mv --)[^\n]*ROTATION_V11/u,
+  'H12 must treat the complete H11 namespace as immutable input only',
+);
+const parserScopeRepairV12InitialAdmission = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'require_initial_namespace',
+  'require_exact_empty_checkpoint',
+);
+for (const initialAdmissionContract of [
+  /require_exact_h11_repair_boundary/u,
+  /absent/u,
+  /empty-parent/u,
+]) {
+  assert.match(parserScopeRepairV12InitialAdmission, initialAdmissionContract);
+}
+const parserScopeRepairV12HistoricalBoundary = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'require_exact_h11_repair_boundary',
+  'expected_intent',
+);
+for (const historicalBoundaryContract of [
+  /require_helper_file "\$TARGET" "\$PREDECESSOR_HELPER_SHA256" 755/u,
+  /load_exact_h10_evidence/u,
+  /load_exact_h11_evidence/u,
+  /require_disabled_grant_only/u,
+  /require_stopped_durable_boundary/u,
+]) {
+  assert.match(parserScopeRepairV12HistoricalBoundary, historicalBoundaryContract);
+}
+const parserScopeRepairV12Lock = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'open_lock',
+  'close_lock',
+);
+for (const lockContract of [
+  /LOCK_ROOT/u,
+  /mkdir --mode=0700/u,
+  /root:root:700/u,
+  /root:root:600:1/u,
+  /exec 9<>"\$LOCK"/u,
+  /stat --format='%u:%g:%a:%h:%d:%i' "\$LOCK"/u,
+  /stat -L --format='%u:%g:%a:%h:%d:%i' \/proc\/self\/fd\/9/u,
+  /flock --exclusive --nonblock 9/u,
+]) {
+  assert.match(parserScopeRepairV12Lock, lockContract);
+}
+assertInOrder(
+  parserScopeRepairV12Lock,
+  [
+    'path_identity="$(stat --format=\'%u:%g:%a:%h:%d:%i\' "$LOCK")"',
+    'fd_identity="$(stat -L --format=\'%u:%g:%a:%h:%d:%i\' /proc/self/fd/9)"',
+    '[[ "$fd_identity" == \'0:0:600:1:\'* && "$fd_identity" == "$path_identity" ]]',
+    'flock --exclusive --nonblock 9',
+    '[[ "$(stat --format=\'%u:%g:%a:%h:%d:%i\' "$LOCK")" == "$fd_identity" ]]',
+  ],
+  'H12 must prove lock path/fd identity both before and after flock',
+);
+const parserScopeRepairV12Restore = extractShellFunction(
+  v3RuntimeBridgeParserScopeRepairV12,
+  'restore_sudoers',
+  'open_lock',
+);
+assertInOrder(
+  parserScopeRepairV12Restore,
+  [
+    'mv -- "$SUDOERS_DISABLED" "$SUDOERS"',
+    'require_exact_sudoers_file "$SUDOERS"',
+    'mv -- "$SUDOERS" "$SUDOERS_DISABLED"',
+  ],
+  'a failed post-move sudoers validation must roll back to the disabled path',
 );
 assert.doesNotMatch(
   successorRotationChain,
@@ -14223,8 +14650,13 @@ assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container 
 
 assert.equal(
   actualReviewedHelperSuccessorSha,
-  reviewedV3RuntimeBridgeHelperV11Sha,
-  'the reviewed helper LF bytes must remain frozen at the exact H11 runtime-bridge successor pin',
+  reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha,
+  'the reviewed helper LF bytes must remain frozen at the exact corrected H12 parser-scope successor pin',
+);
+assert.equal(
+  actualReviewedV3RuntimeBridgeParserScopeRepairV12Sha,
+  reviewedV3RuntimeBridgeParserScopeRepairV12Sha,
+  'the reviewed H12 parser-scope repair LF bytes must remain frozen at its exact pin',
 );
 assert.equal(
   actualReviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha,
@@ -14235,6 +14667,11 @@ assert.notEqual(
   reviewedV3RuntimeBridgeHelperV11Sha,
   reviewedV3HelperRotationV10SuccessorSha,
   'the H11 bridge parser cannot be represented by the historical H10 helper bytes',
+);
+assert.notEqual(
+  reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha,
+  reviewedV3RuntimeBridgeHelperV11Sha,
+  'the corrected H12 parser cannot be represented by the known-broken H11 helper bytes',
 );
 assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 

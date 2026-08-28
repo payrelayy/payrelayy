@@ -345,6 +345,38 @@ may then resume the private-session readiness and supervised seal on that releas
 must never reopen the private sign-in ceremony; it proceeds directly to the same-release independent
 recheck. Only the committed binding plus exact receipt continuity unlocks normal release mutation.
 
+### Release-bound v3 recheck bridge (H13)
+
+H13 is the one-use compatibility bridge between the retained v3 KemerBet profile produced by the
+reviewed H10/H11/H12 transition and the current reviewed release. It exists only to remove the
+bootstrap deadlock in which the private preview required the final binding even though that final
+binding can be created only after the independent recheck succeeds. H13 does not replace or weaken
+the v3 identity binding and does not authorize another cohort.
+
+Install H13 only from the root console on the fixed staging Droplet, only while staging is stopped,
+and only with the exact confirmation `CONFIRM EXACT-FIVE NO-TRANSFER KEMERBET RECHECK`. The installer
+pins the predecessor and successor helper digests, fixed Droplet identity, H10/H11 evidence, exact
+one-use v3 binding, and exact retained volumes. It appends immutable intent and completion evidence,
+rotates only the reviewed helper, and restores deployment access last. The installer itself does not
+start a browser, perform a Profile or Player lookup, enter Amount, click Transfer, enable an executor
+or final action, or move money.
+
+Before the recheck completes, the private preview may mount only
+`/var/lib/fetanagent/kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings` as its explicit
+read-only binding source. That exception is available only when the installed H13 evidence, helper
+digest, current release, one-use 230-byte v3 binding, absent final binding, and disabled financial
+flags all agree. The recheck runtime independently requires that same source. After success, the
+one-use source is consumed and only the canonical root-owned
+`/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings` is accepted; H13 can never reopen
+the pre-completion path.
+
+The operational sequence is: install H13, deploy that exact protected-main release, run the normal
+`start` mode, complete private sign-in only if the retained profile is no longer authenticated, and
+then run exactly one `recheck` mode. At every step `financial_actions_mode=dry_run`,
+`kemerbet_executor_enabled=false`, `kemerbet_final_action_enabled=false`,
+`executor_final_action_enabled=false`, `amount_entry_enabled=false`, and
+`transfer_enabled=false` remain exact fail-closed requirements.
+
 ### Independent bound-profile recheck
 
 Run this only after the Owner has completed manual session provisioning and the visible signed-in

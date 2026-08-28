@@ -54,6 +54,7 @@ readonly KEMERBET_V3_HELPER_ROTATION_V9_PARENT='/var/lib/fetanagent/kemerbet-rea
 readonly KEMERBET_V3_HELPER_ROTATION_V10_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v10'
 readonly KEMERBET_V3_HELPER_ROTATION_V11_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v11'
 readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v12'
+readonly KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-recheck-bridge-v13'
 readonly KEMERBET_V1_REINSTALL_JOURNAL='/var/lib/fetanagent/kemerbet-v1-retirement-secrets-reinstall-v1'
 readonly KEMERBET_V1_REINSTALL_JOURNAL_INSTALLING="${KEMERBET_V1_REINSTALL_JOURNAL}.installing"
 readonly KEMERBET_RECHECK_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-recheck'
@@ -3818,6 +3819,8 @@ KEMERBET_V2_V3_SUCCESSOR_RELEASE=''
 KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256=''
 KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='absent'
 KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE=''
+KEMERBET_V3_RECHECK_BRIDGE_STATE='absent'
+KEMERBET_V3_RECHECK_BRIDGE_RELEASE=''
 
 inspect_kemerbet_v2_v3_successor_gate() {
   local inspection
@@ -3827,6 +3830,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
   KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256=''
   KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='absent'
   KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE=''
+  KEMERBET_V3_RECHECK_BRIDGE_STATE='absent'
+  KEMERBET_V3_RECHECK_BRIDGE_RELEASE=''
   if [[ ! -e "$parent" && ! -L "$parent" ]]; then
     return 0
   fi
@@ -3849,7 +3854,8 @@ inspect_kemerbet_v2_v3_successor_gate() {
     "$KEMERBET_V3_HELPER_ROTATION_V9_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V10_PARENT" \
     "$KEMERBET_V3_HELPER_ROTATION_V11_PARENT" \
-    "$KEMERBET_V3_HELPER_ROTATION_V12_PARENT" <<'PY'
+    "$KEMERBET_V3_HELPER_ROTATION_V12_PARENT" \
+    "$KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT" <<'PY'
 import hashlib
 import os
 import re
@@ -3882,6 +3888,7 @@ import sys
     rotation_v10_parent,
     rotation_v11_parent,
     rotation_v12_parent,
+    recheck_bridge_v13_parent,
 ) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
@@ -5379,6 +5386,121 @@ if os.path.lexists(rotation_v12_parent):
         reject()
     effective_helper_sha = rotation_v12_intent[6].split('=', 1)[1]
 
+recheck_bridge_state = 'absent'
+recheck_bridge_release = ''
+if os.path.lexists(recheck_bridge_v13_parent):
+    if (
+        runtime_bridge_state != 'active'
+        or rotation_v12_intent_data is None
+        or rotation_v12_completion_data is None
+        or archived_rotation_v12_predecessor_helper is None
+    ):
+        reject()
+    recheck_bridge_predecessor_helper_sha = effective_helper_sha
+    parent_value = os.lstat(recheck_bridge_v13_parent)
+    if (
+        not stat.S_ISDIR(parent_value.st_mode)
+        or (parent_value.st_uid, parent_value.st_gid, stat.S_IMODE(parent_value.st_mode)) !=
+           (0, 0, 0o700)
+        or os.path.realpath(recheck_bridge_v13_parent) != recheck_bridge_v13_parent
+    ):
+        reject()
+    children = os.listdir(recheck_bridge_v13_parent)
+    if len(children) != 1 or release.fullmatch(children[0]) is None:
+        reject()
+    recheck_bridge_release = children[0]
+    if recheck_bridge_release in (overlay_release, rotation_v11_release, rotation_v12_release):
+        reject()
+    recheck_bridge_root = f'{recheck_bridge_v13_parent}/{recheck_bridge_release}'
+    exact_directory(recheck_bridge_v13_parent, 0o700, [recheck_bridge_release])
+    exact_directory(
+        recheck_bridge_root,
+        0o700,
+        ['completed-v1', 'intent-v1', 'predecessor-helper'],
+    )
+    recheck_bridge_intent_data = exact_file(
+        f'{recheck_bridge_root}/intent-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    recheck_bridge_completion_data = exact_file(
+        f'{recheck_bridge_root}/completed-v1',
+        (0, 0),
+        0o600,
+        4096,
+    )
+    recheck_bridge_intent = recheck_bridge_intent_data.decode('ascii').splitlines()
+    recheck_bridge_completion = recheck_bridge_completion_data.decode('ascii').splitlines()
+    if (
+        len(recheck_bridge_intent) != 25
+        or len(recheck_bridge_completion) != 26
+        or recheck_bridge_intent[0] !=
+           'contract=fetanagent-kemerbet-readiness-v3-recheck-bridge-v13'
+        or recheck_bridge_intent[1] != 'state=authorized'
+        or recheck_bridge_intent[2] != f'overlay_release={overlay_release}'
+        or recheck_bridge_intent[3] != f'runtime_bridge_release={rotation_v11_release}'
+        or recheck_bridge_intent[4] != f'parser_repair_release={rotation_v12_release}'
+        or recheck_bridge_intent[5] != f'recheck_release={recheck_bridge_release}'
+        or recheck_bridge_intent[6] !=
+           f'predecessor_helper_sha256={recheck_bridge_predecessor_helper_sha}'
+        or not recheck_bridge_intent[7].startswith('successor_helper_sha256=')
+        or sha.fullmatch(recheck_bridge_intent[7].split('=', 1)[1]) is None
+        or recheck_bridge_intent[7].split('=', 1)[1] == recheck_bridge_predecessor_helper_sha
+        or recheck_bridge_intent[8] !=
+           f'predecessor_rotation_intent_sha256={hashlib.sha256(rotation_v12_intent_data).hexdigest()}'
+        or recheck_bridge_intent[9] !=
+           f'predecessor_rotation_completion_sha256={hashlib.sha256(rotation_v12_completion_data).hexdigest()}'
+        or recheck_bridge_intent[10] !=
+           f'predecessor_rotation_helper_archive_sha256={hashlib.sha256(archived_rotation_v12_predecessor_helper).hexdigest()}'
+        or recheck_bridge_intent[11] != f'base_binding_v3_sha256={v3_sha}'
+        or recheck_bridge_intent[12] != rotation_v12_intent[11]
+        or recheck_bridge_intent[13] != rotation_v12_intent[12]
+        or recheck_bridge_intent[14] != rotation_v12_intent[13]
+        or recheck_bridge_intent[15] != rotation_v12_intent[14]
+        or recheck_bridge_intent[16] !=
+           'authorization=CONFIRM EXACT-FIVE NO-TRANSFER KEMERBET RECHECK'
+        or recheck_bridge_intent[17] != 'financial_actions_mode=dry_run'
+        or recheck_bridge_intent[18] != 'kemerbet_executor_enabled=false'
+        or recheck_bridge_intent[19] != 'kemerbet_final_action_enabled=false'
+        or recheck_bridge_intent[20] != 'transfer_enabled=false'
+        or recheck_bridge_intent[21] != 'amount_entry_enabled=false'
+        or recheck_bridge_intent[22] !=
+           'lookup_authorized=exact-five-profile-read-only-once'
+        or recheck_bridge_intent[23] !=
+           'recheck_authorized=exact-five-no-transfer-once'
+        or recheck_bridge_intent[24] != 'executor_final_action_enabled=false'
+        or not recheck_bridge_intent[12].startswith('compose5_durable_volume_digest=')
+        or sha.fullmatch(recheck_bridge_intent[12].split('=', 1)[1]) is None
+        or not recheck_bridge_intent[13].startswith('compose5_profile_config_hash=')
+        or sha.fullmatch(recheck_bridge_intent[13].split('=', 1)[1]) is None
+        or not recheck_bridge_intent[14].startswith('compose5_session_control_config_hash=')
+        or sha.fullmatch(recheck_bridge_intent[14].split('=', 1)[1]) is None
+        or not recheck_bridge_intent[15].startswith('compose5_volume_version=')
+        or compose_version.fullmatch(recheck_bridge_intent[15].split('=', 1)[1]) is None
+        or recheck_bridge_completion[:1] != recheck_bridge_intent[:1]
+        or recheck_bridge_completion[1] != 'state=recheck-bridge-installed'
+        or recheck_bridge_completion[2:25] != recheck_bridge_intent[2:25]
+        or recheck_bridge_completion[25] !=
+           f'rotation_intent_sha256={hashlib.sha256(recheck_bridge_intent_data).hexdigest()}'
+        or recheck_bridge_intent_data !=
+           ('\n'.join(recheck_bridge_intent) + '\n').encode('ascii')
+        or recheck_bridge_completion_data !=
+           ('\n'.join(recheck_bridge_completion) + '\n').encode('ascii')
+    ):
+        reject()
+    archived_recheck_bridge_predecessor_helper = exact_file(
+        f'{recheck_bridge_root}/predecessor-helper',
+        (0, 0),
+        0o400,
+        2 * 1024 * 1024,
+    )
+    if (hashlib.sha256(archived_recheck_bridge_predecessor_helper).hexdigest() !=
+            recheck_bridge_predecessor_helper_sha):
+        reject()
+    effective_helper_sha = recheck_bridge_intent[7].split('=', 1)[1]
+    recheck_bridge_state = 'active'
+
 exact_directory(retirement, 0o700, ['completed-v1', 'intent-v1'])
 retirement_intent_data = exact_file(f'{retirement}/intent-v1', (0, 0), 0o600, 4096)
 retirement_completion_data = exact_file(f'{retirement}/completed-v1', (0, 0), 0o600, 4096)
@@ -5486,7 +5608,8 @@ else:
     if (
         len(receipt_lines) != 8
         or receipt_lines[0] != 'version=1'
-        or receipt_lines[1] != f'release={effective_release}'
+        or receipt_lines[1] !=
+           f'release={recheck_bridge_release if recheck_bridge_state == "active" else effective_release}'
         or receipt_lines[2] != f'binding_sha256={v3_sha}'
         or receipt_lines[3] !=
            f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}'
@@ -5524,30 +5647,50 @@ else:
 
 sys.stdout.write(
     effective_release + '\n' + effective_helper_sha + '\n' + gate_state + '\n' +
-    runtime_bridge_state + '\n' + runtime_bridge_release + '\n'
+    runtime_bridge_state + '\n' + runtime_bridge_release + '\n' +
+    recheck_bridge_state + '\n' + recheck_bridge_release + '\n'
 )
 PY
 )" || return 0
   mapfile -t inspection_lines <<<"$inspection"
-  [[ "${#inspection_lines[@]}" -eq 5 && "${inspection_lines[0]}" =~ ^[0-9a-f]{40}$ &&
+  [[ "${#inspection_lines[@]}" -eq 7 && "${inspection_lines[0]}" =~ ^[0-9a-f]{40}$ &&
     "${inspection_lines[1]}" =~ ^[0-9a-f]{64}$ &&
     "${inspection_lines[2]}" =~ ^(successor-installed|successor-recheck-recoverable|successor-completed)$ &&
     "${inspection_lines[3]}" == 'active' &&
-    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ ]] || return 0
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[5]}" =~ ^(absent|active)$ &&
+    ( ( "${inspection_lines[5]}" == 'absent' && -z "${inspection_lines[6]}" ) ||
+      ( "${inspection_lines[5]}" == 'active' && "${inspection_lines[6]}" =~ ^[0-9a-f]{40}$ ) ) ]] ||
+    return 0
   KEMERBET_V2_V3_SUCCESSOR_RELEASE="${inspection_lines[0]}"
   KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="${inspection_lines[1]}"
   KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="${inspection_lines[2]}"
   KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="${inspection_lines[3]}"
   KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="${inspection_lines[4]}"
+  KEMERBET_V3_RECHECK_BRIDGE_STATE="${inspection_lines[5]}"
+  KEMERBET_V3_RECHECK_BRIDGE_RELEASE="${inspection_lines[6]}"
+}
+
+required_kemerbet_v3_recheck_release() {
+  if [[ "$KEMERBET_V3_RECHECK_BRIDGE_STATE" == 'active' ]]; then
+    [[ "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'the KemerBet v3 recheck bridge release is invalid'
+    printf '%s\n' "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE"
+    return 0
+  fi
+  [[ "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the historical KemerBet v3 recheck release is invalid'
+  printf '%s\n' "$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
 }
 
 enforce_kemerbet_v2_v3_successor_gate() {
-  local command="$1" release=''
-  if [[ "$command" =~ ^(verify|kemerbet-v3-runtime-bridge-ready|docker-storage-ready)$ ]]; then
+  local command="$1" expected_recheck_release='' release=''
+  if [[ "$command" =~ ^(verify|kemerbet-v3-runtime-bridge-ready|kemerbet-v3-recheck-bridge-ready|docker-storage-ready)$ ]]; then
     return 0
   fi
   inspect_kemerbet_v2_v3_successor_gate
   [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]] || return 0
+  expected_recheck_release="$(required_kemerbet_v3_recheck_release)"
   if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' ]]; then
     case "$command" in
       retire-kemerbet-readiness-binding-v1-for-v2-reseal|reinstall-kemerbet-v1-retirement-secrets|seal-kemerbet-readiness|kemerbet-v1-retirement-recovery-ready)
@@ -5561,7 +5704,7 @@ enforce_kemerbet_v2_v3_successor_gate() {
         ;;
       recheck-kemerbet-readiness)
         release="${2:-}"
-        [[ "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
+        [[ "$release" == "$expected_recheck_release" ]] ||
           die 'the completed KemerBet v3 successor recheck belongs to another reviewed release'
         return 0
         ;;
@@ -5587,7 +5730,7 @@ enforce_kemerbet_v2_v3_successor_gate() {
   if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-recheck-recoverable' ]]; then
     release="${2:-}"
     [[ "$command" == 'recheck-kemerbet-readiness' &&
-      "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
+      "$release" == "$expected_recheck_release" ]] ||
       die 'an interrupted KemerBet v3 recheck permits only exact-release recovery'
     return 0
   fi
@@ -5597,10 +5740,16 @@ enforce_kemerbet_v2_v3_successor_gate() {
     network-ready)
       return 0
       ;;
-    recheck-kemerbet-readiness|kemerbet-v3-successor-ready)
+    recheck-kemerbet-readiness)
+      release="${2:-}"
+      [[ "$release" == "$expected_recheck_release" ]] ||
+        die 'the KemerBet v3 lookup/recheck boundary is bound to another reviewed release'
+      return 0
+      ;;
+    kemerbet-v3-successor-ready)
       release="${2:-}"
       [[ "$release" == "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" ]] ||
-        die 'the KemerBet v3 lookup/recheck boundary is bound to another reviewed release'
+        die 'the KemerBet v3 successor overlay is bound to another reviewed release'
       return 0
       ;;
     install|fresh-start|fresh-host-ready|arm-expiry-stop|bot-disabled-ready|install-bot-token|start-bot|bot-ready|fresh-public-edge-ready|start-fresh-public-edge|diagnose-owner-startup|discard|stop-bot|start-kemerbet-session-provision|kemerbet-session-provision-ready|stop-kemerbet-session-provision)
@@ -5628,6 +5777,47 @@ require_kemerbet_v3_runtime_bridge() {
     "$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" =~ ^[0-9a-f]{64}$ &&
     "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" =~ ^(successor-installed|successor-completed)$ ]] ||
     die 'the future-release-neutral KemerBet v3 runtime bridge is unavailable or invalid'
+}
+
+require_kemerbet_v3_recheck_bridge() {
+  local expected_release="$1"
+  [[ "$expected_release" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the KemerBet v3 recheck bridge expected release is invalid'
+  require_kemerbet_v3_runtime_bridge
+  [[ "$KEMERBET_V3_RECHECK_BRIDGE_STATE" == 'active' &&
+    "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$expected_release" ]] ||
+    die 'the release-bound KemerBet v3 recheck bridge is unavailable or belongs to another release'
+}
+
+select_kemerbet_session_binding_source() {
+  local commit_sha="$1"
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the private KemerBet session binding release is invalid'
+  inspect_kemerbet_v2_v3_successor_gate
+  case "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" in
+    successor-installed)
+      require_kemerbet_v3_recheck_bridge "$commit_sha"
+      require_kemerbet_readiness_output_directory
+      [[ ! -L "$KEMERBET_READINESS_BINDING" && -f "$KEMERBET_READINESS_BINDING" &&
+        "$(realpath -- "$KEMERBET_READINESS_BINDING")" == "$KEMERBET_READINESS_BINDING" &&
+        "$(stat --format='%u:%g:%a:%h:%s' "$KEMERBET_READINESS_BINDING")" == \
+          '10001:10001:600:1:230' ]] ||
+        die 'the one-use KemerBet v3 preview binding is unavailable or unsafe'
+      require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING" ||
+        die 'the one-use KemerBet v3 preview binding contract is invalid'
+      [[ ! -e "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+        ! -L "$KEMERBET_AGENT_IDENTITY_BINDINGS" ]] ||
+        die 'the final KemerBet binding appeared before the authorized recheck'
+      printf '%s\n' "$KEMERBET_READINESS_BINDING"
+      ;;
+    successor-completed)
+      require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+      require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
+        die 'the final KemerBet v3 preview binding contract is invalid'
+      printf '%s\n' "$KEMERBET_AGENT_IDENTITY_BINDINGS"
+      ;;
+    *) die 'the private KemerBet session is outside an exact installed or completed v3 boundary' ;;
+  esac
 }
 
 consume_exact_one_use_kemerbet_file() {
@@ -10342,7 +10532,8 @@ prepare_retryable_kemerbet_session_player_ids() {
           die 'the retryable KemerBet v3 binding contract changed'
         inspect_kemerbet_v2_v3_successor_gate
         [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
-          "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+          "$KEMERBET_V3_RECHECK_BRIDGE_STATE" == 'active' &&
+          "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$commit_sha" ]] ||
           die 'the retryable Player-ID input no longer matches the same-release KemerBet v3 successor'
       fi
       return 0
@@ -14131,15 +14322,28 @@ require_exact_fresh_bot_runtime() {
 }
 
 require_kemerbet_session_provision_runtime() {
-  local commit_sha="$1"
+  local commit_sha="$1" expected_binding_source="$2"
   local binding_source container_id environment health mount_contract owner_container owner_socket_source
   local identity_key_source profile_volume_source readiness_output_source revision selector_source
   local session_socket_source
 
   require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
-  require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
-  require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
-    die 'the private KemerBet session identity binding is not an exact immutable v3 binding'
+  case "$expected_binding_source" in
+    "$KEMERBET_READINESS_BINDING")
+      require_kemerbet_readiness_output_directory
+      [[ ! -L "$expected_binding_source" && -f "$expected_binding_source" &&
+        "$(realpath -- "$expected_binding_source")" == "$expected_binding_source" &&
+        "$(stat --format='%u:%g:%a:%h:%s' "$expected_binding_source")" == \
+          '10001:10001:600:1:230' ]] ||
+        die 'the private KemerBet session one-use binding source is unsafe'
+      ;;
+    "$KEMERBET_AGENT_IDENTITY_BINDINGS")
+      require_root_readable_immutable_file "$expected_binding_source"
+      ;;
+    *) die 'the private KemerBet session binding source is outside the exact allowlist' ;;
+  esac
+  require_kemerbet_v3_binding_content "$expected_binding_source" ||
+    die 'the private KemerBet session identity binding is not an exact v3 binding'
   require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
   require_kemerbet_readiness_output_directory
 
@@ -14229,7 +14433,7 @@ require_kemerbet_session_provision_runtime() {
   profile_volume_source="$(docker_local container inspect "$container_id" \
     --format '{{range .Mounts}}{{if eq .Destination "/var/lib/fetanagent/kemerbet-sessions"}}{{.Name}}{{end}}{{end}}')"
   [[ "$identity_key_source" == "$KEMERBET_AGENT_IDENTITY_HMAC_KEY" &&
-    "$binding_source" == "$KEMERBET_AGENT_IDENTITY_BINDINGS" &&
+    "$binding_source" == "$expected_binding_source" &&
     "$selector_source" == "$KEMERBET_SELECTOR_CONTRACT" &&
     "$readiness_output_source" == "$KEMERBET_READINESS_OUTPUT_ROOT" &&
     "$profile_volume_source" == "$KEMERBET_PROFILE_VOLUME" ]] ||
@@ -14803,6 +15007,16 @@ case "$command" in
       die 'the KemerBet v3 runtime bridge helper digest is not exact'
     printf '%s\n' \
       "KemerBet v3 runtime bridge ready: historical overlay $KEMERBET_V2_V3_SUCCESSOR_RELEASE; current releases remain Transfer-disabled."
+    ;;
+
+  kemerbet-v3-recheck-bridge-ready)
+    [[ $# -eq 3 && "$2" =~ ^[0-9a-f]{64}$ && "$3" =~ ^[0-9a-f]{40}$ ]] ||
+      die 'kemerbet-v3-recheck-bridge-ready requires the exact helper digest and recheck release'
+    require_kemerbet_v3_recheck_bridge "$3"
+    [[ "$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$2" ]] ||
+      die 'the KemerBet v3 recheck bridge helper digest is not exact'
+    printf '%s\n' \
+      "KemerBet v3 exact-five recheck bridge ready for $3: lookup-only once; Transfer disabled."
     ;;
 
   docker-storage-ready)
@@ -15472,16 +15686,16 @@ case "$command" in
       --format '{{.Config.User}}')" == '10001:10001' ]] ||
       die 'the private KemerBet session image user is not exact'
     require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"
-    require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"
-    require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS" ||
-      die 'private KemerBet sign-in requires the exact immutable v3 identity binding'
     require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
     require_kemerbet_readiness_output_directory
     require_kemerbet_v3_runtime_bridge
+    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"
     successor_session_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
     successor_session_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
     successor_session_helper_sha="$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256"
     successor_session_bridge_release="$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE"
+    successor_session_recheck_bridge_state="$KEMERBET_V3_RECHECK_BRIDGE_STATE"
+    successor_session_recheck_bridge_release="$KEMERBET_V3_RECHECK_BRIDGE_RELEASE"
 
     compose_file="$RELEASE_ROOT/$commit_sha/infra/compose.staging-beta.yaml"
     [[ ! -L "$compose_file" && "$(stat --format='%U:%G:%a' "$compose_file")" == 'root:root:444' ]] ||
@@ -15515,6 +15729,7 @@ case "$command" in
       FETANAGENT_STAGING_BOT_TOKEN_FILE="$SECRET_ROOT/bot-token"
       FETANAGENT_STAGING_BOT_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-transport-hmac"
       FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE="$SECRET_ROOT/bot-action-transport-hmac"
+      FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE="$session_binding_source"
     )
     compose_command=(
       docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null
@@ -15523,7 +15738,7 @@ case "$command" in
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
-    require_kemerbet_session_provision_runtime "$commit_sha"
+    require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"
     require_kemerbet_v1_retirement_expiry_guard_armed ||
       die 'the recovery expiry guard changed during private KemerBet session startup'
     inspect_kemerbet_v2_v3_successor_gate
@@ -15531,7 +15746,9 @@ case "$command" in
       "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_session_release" &&
       "$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256" == "$successor_session_helper_sha" &&
       "$KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == 'active' &&
-      "$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$successor_session_bridge_release" ]] ||
+      "$KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE" == "$successor_session_bridge_release" &&
+      "$KEMERBET_V3_RECHECK_BRIDGE_STATE" == "$successor_session_recheck_bridge_state" &&
+      "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$successor_session_recheck_bridge_release" ]] ||
       die 'the private KemerBet session changed the immutable historical overlay or runtime bridge'
     ;;
 
@@ -15541,8 +15758,9 @@ case "$command" in
     commit_sha="$2"
     [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
       die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
+    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
-    require_kemerbet_session_provision_runtime "$commit_sha"
+    require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"
     require_kemerbet_v1_retirement_expiry_guard_armed ||
       die 'the recovery expiry guard changed before private KemerBet session attestation'
     require_kemerbet_v3_runtime_bridge
@@ -15821,7 +16039,7 @@ case "$command" in
       exit 0
     fi
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
-    require_kemerbet_session_provision_runtime "$commit_sha"
+    require_kemerbet_session_provision_runtime "$commit_sha" "$KEMERBET_AGENT_IDENTITY_BINDINGS"
     owner_container="$(docker_local container ls --all --quiet \
       --filter "label=com.docker.compose.project=$PROJECT_NAME" \
       --filter 'label=com.docker.compose.service=owner-control')"
@@ -15899,11 +16117,14 @@ case "$command" in
     command -v python3 >/dev/null 2>&1 || die 'the canonical artifact validator is unavailable'
     recover_incomplete_kemerbet_recheck_promotion_guarded
     inspect_kemerbet_v2_v3_successor_gate
+    if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
+      require_kemerbet_v3_recheck_bridge "$commit_sha"
+    fi
     if [[ -e "$KEMERBET_RECHECK_RECEIPT_ROOT" || -L "$KEMERBET_RECHECK_RECEIPT_ROOT" ]]; then
       require_completed_kemerbet_recheck_for_release "$commit_sha" "$image_tag"
       if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
         [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' &&
-          "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+          "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$commit_sha" ]] ||
           die 'the durable KemerBet v3 successor completion boundary is not exact'
       fi
       printf '%s\n' 'KemerBet server readiness passed: 5 of 5 Players, Transfer disabled.'
@@ -15969,7 +16190,7 @@ case "$command" in
           die 'the v1 retirement is not completed by this exact same-agent v2 binding'
       else
         [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&
-          "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+          "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$commit_sha" ]] ||
           die 'the v3 successor recheck is not bound to this exact migrated release'
       fi
     fi
@@ -15993,7 +16214,7 @@ case "$command" in
       [[ "$session_container" =~ ^[0-9a-f]{12,64}$ ]] ||
         die 'the private KemerBet session inventory is ambiguous before recheck'
       require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
-      require_kemerbet_session_provision_runtime "$commit_sha"
+      require_kemerbet_session_provision_runtime "$commit_sha" "$KEMERBET_READINESS_BINDING"
       checkpoint_kemerbet_session_for_recheck "$session_container"
       journal_session_container="$session_container"
     else
@@ -16438,7 +16659,7 @@ case "$command" in
     inspect_kemerbet_v2_v3_successor_gate
     if [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' ]]; then
       [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed' &&
-        "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha" ]] ||
+        "$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$commit_sha" ]] ||
         die 'the committed KemerBet v3 successor completion boundary is not exact'
     fi
     KEMERBET_RECHECK_COMMITTED='true'
@@ -16710,6 +16931,6 @@ case "$command" in
     ;;
 
   *)
-    die 'expected verify, kemerbet-v3-runtime-bridge-ready, docker-storage-ready, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, kemerbet-v1-retirement-recovery-ready, reinstall-kemerbet-v1-retirement-secrets, retire-kemerbet-readiness-binding-v1-for-v2-reseal, seal-kemerbet-readiness, recheck-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
+    die 'expected verify, kemerbet-v3-runtime-bridge-ready, kemerbet-v3-recheck-bridge-ready, docker-storage-ready, stop, arm-expiry-stop, expiry-stop, cutover-ready, fresh-host-ready, network-ready, public-edge-ready, fresh-public-edge-ready, discard, install, start, fresh-start, bot-disabled-ready, install-bot-token, start-bot, bot-ready, stop-bot, start-kemerbet-session-provision, kemerbet-session-provision-ready, kemerbet-v1-retirement-recovery-ready, reinstall-kemerbet-v1-retirement-secrets, retire-kemerbet-readiness-binding-v1-for-v2-reseal, seal-kemerbet-readiness, recheck-kemerbet-readiness, stop-kemerbet-session-provision, start-public-edge, start-fresh-public-edge, stop-public-edge, or diagnose-owner-startup'
     ;;
 esac

@@ -107,6 +107,10 @@ const v3RuntimeBridgeParserScopeRepairV12 = readFileSync(
   ),
   'utf8',
 );
+const v3RecheckBridgeV13 = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-kemerbet-v3-recheck-bridge-v13.sh'),
+  'utf8',
+);
 const legacyBrand = 'pay' + 'replayy';
 const legacyAdmin = `${legacyBrand}-admin`;
 const legacyHelper = `/usr/local/sbin/${legacyBrand}-staging-deploy-helper`;
@@ -171,6 +175,10 @@ const reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha =
   '9f9c7f124820c1c8c8aabbe411de5ccc0d914bf7f4696904d6ba557eee62b3da';
 const reviewedV3RuntimeBridgeParserScopeRepairV12Sha =
   '171b98279bffec64558b309d9a793fa8306d64615e0f73b95607553640dbbb54';
+const reviewedV3RecheckBridgeHelperV13Sha =
+  '3b789c983c415326171c6b4224016d2a04769a0b8c37cb91fc463383f2d141aa';
+const reviewedV3RecheckBridgeV13Sha =
+  '6eb4a913d852975d809cdf20eee340d2a984a38d5009badfe47dda2ccfe662aa';
 const reviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha =
   'a20f6f5b813a3032477b7e7fcaaf5aac94b8083ac0ddfdaab4b673c56fccc3e7';
 const actualReviewedHelperSuccessorSha = createHash('sha256')
@@ -183,6 +191,9 @@ const actualReviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha 
   .digest('hex');
 const actualReviewedV3RuntimeBridgeParserScopeRepairV12Sha = createHash('sha256')
   .update(v3RuntimeBridgeParserScopeRepairV12.replaceAll('\r\n', '\n'))
+  .digest('hex');
+const actualReviewedV3RecheckBridgeV13Sha = createHash('sha256')
+  .update(v3RecheckBridgeV13.replaceAll('\r\n', '\n'))
   .digest('hex');
 const stagingDropletIpv6 = '2a03:b0c0:1:e0:0:1:a8b4:2001';
 const staleStagingBannedIpv6 = '2a05:d018:135e:1602:5210:739d:5667:fee4';
@@ -6035,6 +6046,11 @@ assert.match(
   /^readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v12'$/mu,
   'the parser-scope repair must use a distinct append-only H12 evidence namespace',
 );
+assert.match(
+  helper,
+  /^readonly KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-recheck-bridge-v13'$/mu,
+  'the release-bound exact-five recheck bridge must use a distinct append-only H13 evidence namespace',
+);
 for (const successorGateContract of [
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='absent'/,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE='invalid'/,
@@ -6066,7 +6082,7 @@ for (const successorGateContract of [
   /exact_directory\(os\.path\.dirname\(recheck_receipt\), 0o700, \['ready-v1'\]\)/u,
   /identity_key_owner_mode != \(0, 0, 0o444\)/u,
   /selector_data = exact_file\(selector_contract, \(0, 0\), 0o444, 1024 \* 1024\)/u,
-  /receipt_lines\[1\] != f'release=\{effective_release\}'/u,
+  /receipt_lines\[1\] !=\s+f'release=\{recheck_bridge_release if recheck_bridge_state == "active" else effective_release\}'/u,
   /receipt_lines\[2\] != f'binding_sha256=\{v3_sha\}'/u,
   /identity_hmac_key_sha256=\{hashlib\.sha256\(identity_key_data\)\.hexdigest\(\)\}/u,
   /selector_sha256=\{hashlib\.sha256\(selector_data\)\.hexdigest\(\)\}/u,
@@ -6076,13 +6092,15 @@ for (const successorGateContract of [
   /for consumed_or_transient in \([\s\S]*?binding,[\s\S]*?readiness_player_ids,[\s\S]*?candidate_root,[\s\S]*?promotion_root,[\s\S]*?rpc_root,[\s\S]*?\)/u,
   /gate_state = 'successor-recheck-recoverable'/u,
   /gate_state = 'successor-completed'/u,
-  /sys\.stdout\.write\([\s\S]*?effective_release \+ '\\n' \+ effective_helper_sha \+ '\\n' \+ gate_state \+ '\\n' \+[\s\S]*?runtime_bridge_state \+ '\\n' \+ runtime_bridge_release \+ '\\n'[\s\S]*?\)/u,
+  /sys\.stdout\.write\([\s\S]*?effective_release \+ '\\n' \+ effective_helper_sha \+ '\\n' \+ gate_state \+ '\\n' \+[\s\S]*?runtime_bridge_state \+ '\\n' \+ runtime_bridge_release \+ '\\n' \+[\s\S]*?recheck_bridge_state \+ '\\n' \+ recheck_bridge_release \+ '\\n'[\s\S]*?\)/u,
   /\^\(successor-installed\|successor-recheck-recoverable\|successor-completed\)\$/u,
-  /"\$\{#inspection_lines\[@\]\}" -eq 5/u,
+  /"\$\{#inspection_lines\[@\]\}" -eq 7/u,
   /"\$\{inspection_lines\[3\]\}" == 'active'/u,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="\$\{inspection_lines\[2\]\}"/u,
   /KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="\$\{inspection_lines\[3\]\}"/u,
   /KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="\$\{inspection_lines\[4\]\}"/u,
+  /KEMERBET_V3_RECHECK_BRIDGE_STATE="\$\{inspection_lines\[5\]\}"/u,
+  /KEMERBET_V3_RECHECK_BRIDGE_RELEASE="\$\{inspection_lines\[6\]\}"/u,
 ]) {
   assert.match(inspectV2V3SuccessorGate, successorGateContract);
 }
@@ -7062,6 +7080,117 @@ assertInOrder(
   ],
   'a failed post-move sudoers validation must roll back to the disabled path',
 );
+
+for (const fixedRecheckBridgeV13Contract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly TARGET='\/usr\/local\/sbin\/fetanagent-staging-deploy-helper'$/mu,
+  /^readonly HISTORICAL_OVERLAY_RELEASE='c061f9dc05e60d641d306f16b5d826e6e1b2c6c4'$/mu,
+  /^readonly RUNTIME_BRIDGE_RELEASE='21ef5f0d987d9dc21efc1a81916316a3f6d7f864'$/mu,
+  new RegExp(
+    `^readonly PREDECESSOR_HELPER_SHA256='${reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha}'$`,
+    'mu',
+  ),
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${reviewedV3RecheckBridgeHelperV13Sha}'$`,
+    'mu',
+  ),
+  /^readonly CONFIRMATION='CONFIRM EXACT-FIVE NO-TRANSFER KEMERBET RECHECK'$/mu,
+  /^readonly EXPECTED_DROPLET_ID='593344964'$/mu,
+  /^readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'$/mu,
+  /^readonly ROTATION_V12_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-helper-rotation-v12'$/mu,
+  /^readonly BRIDGE_PARENT='\/var\/lib\/fetanagent\/kemerbet-readiness-v3-recheck-bridge-v13'$/mu,
+  /^readonly SOURCE_BINDING='\/var\/lib\/fetanagent\/kemerbet-readiness-seal-output\/kemerbet_agent_identity_bindings'$/mu,
+  /^readonly FINAL_BINDING='\/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings'$/mu,
+  /\[\[ \$# -eq 3 \]\] \|\| die 'expected the recheck release, reviewed helper digest, and exact confirmation'/u,
+  /\[\[ "\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION" \]\] \|\|\s+die 'the exact no-transfer exact-five confirmation is required'/u,
+  /contract=fetanagent-kemerbet-readiness-v3-recheck-bridge-v13/u,
+  /state=authorized/u,
+  /state=recheck-bridge-installed/u,
+  /authorization=\$CONFIRMATION/u,
+  /financial_actions_mode=dry_run/u,
+  /kemerbet_executor_enabled=false/u,
+  /kemerbet_final_action_enabled=false/u,
+  /transfer_enabled=false/u,
+  /amount_entry_enabled=false/u,
+  /lookup_authorized=exact-five-profile-read-only-once/u,
+  /recheck_authorized=exact-five-no-transfer-once/u,
+  /executor_final_action_enabled=false/u,
+  /10001:10001:600:1:230/u,
+  /hmac-sha256-agent-profile-pin-v3/u,
+]) {
+  assert.match(v3RecheckBridgeV13, fixedRecheckBridgeV13Contract);
+}
+const recheckBridgeV13Main = v3RecheckBridgeV13.slice(
+  v3RecheckBridgeV13.indexOf(
+    "require_exact_droplet || die 'the DigitalOcean Droplet identity is not exact'",
+  ),
+);
+assert.ok(
+  recheckBridgeV13Main.length > 0,
+  'H13 must expose one bounded root-only installation path',
+);
+assertInOrder(
+  recheckBridgeV13Main,
+  [
+    "load_exact_h12_evidence || die 'the immutable H12 parser-repair evidence is invalid'",
+    'require_stopped_durable_boundary ||',
+    'run_helper_direct verify "$PREDECESSOR_HELPER_SHA256"',
+    'run_helper_direct kemerbet-v3-runtime-bridge-ready "$PREDECESSOR_HELPER_SHA256"',
+    "open_lock || die 'the exact staging mutation lock is unsafe or another mutation is active'",
+    "disable_sudoers || die 'the deployment grant could not be disabled safely'",
+    'publish_record "$BRIDGE_INSTALLING" intent-v1 600 expected_intent',
+    'copy_root_file_atomically "$TARGET"',
+    'mv -- "$INSTALLING_HELPER" "$TARGET"',
+    'publish_record "$BRIDGE_INSTALLING" completed-v1 600 expected_completion',
+    'mv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
+    'run_helper_direct verify "$SUCCESSOR_HELPER_SHA256"',
+    'run_helper_direct kemerbet-v3-recheck-bridge-ready "$SUCCESSOR_HELPER_SHA256" "$RECHECK_RELEASE"',
+    "open_lock || die 'the exact staging mutation lock changed before grant restoration'",
+    "restore_sudoers || die 'the deployment grant could not be restored safely'",
+  ],
+  'H13 must attest H12, stop, disable the grant, append evidence, rotate and attest the helper, and restore the grant last',
+);
+assert.equal(
+  (recheckBridgeV13Main.match(/^\s*restore_sudoers \|\| die/gmu) ?? []).length,
+  1,
+  'H13 may restore deployment access at exactly one final checkpoint',
+);
+assert.equal(
+  (recheckBridgeV13Main.match(/^\s*run_helper_direct\s+/gmu) ?? []).length,
+  4,
+  'H13 may invoke only the predecessor and successor digest/read-only bridge attestations',
+);
+assert.doesNotMatch(
+  v3RecheckBridgeV13,
+  /^\s*run_helper_direct\s+(?:kemerbet-readiness-(?:lookup|recheck)|kemerbet-final|transfer|deposit|withdraw|executor)/mu,
+  'the H13 installer must never perform a lookup, recheck, Transfer, executor, or financial action',
+);
+assert.doesNotMatch(
+  v3RecheckBridgeV13,
+  /docker_local_read_only\s+(?:container|network|volume|image|system)\s+(?:create|start|stop|kill|restart|rm|prune)/u,
+  'H13 Docker inspection must remain read-only',
+);
+assert.doesNotMatch(
+  v3RecheckBridgeV13,
+  /PlayerEPOSDeposit|financial_actions_mode=live|kemerbet_executor_enabled=true|kemerbet_final_action_enabled=true|executor_final_action_enabled=true/u,
+  'H13 must not contain a financial-action implementation or live financial switch',
+);
+assert.doesNotMatch(
+  v3RecheckBridgeV13,
+  /(?:publish_record|copy_root_file_atomically|install -d|mv --)[^\n]*ROTATION_V12/u,
+  'H13 must treat the complete H12 namespace as immutable input only',
+);
+assert.match(
+  compose,
+  /source: \$\{FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE:-\/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings\}/u,
+  'the private preview binding source must use the single explicit H13 interpolation with the final binding as its fail-closed default',
+);
+assert.doesNotMatch(
+  compose,
+  /^\s+FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE:/mu,
+  'the host-only H13 binding selector must never be passed into a container environment',
+);
 assert.doesNotMatch(
   successorRotationChain,
   /os\.(?:rename|replace|unlink|mkdir|makedirs)|open\([^\n]*O_(?:WRONLY|RDWR|CREAT)/u,
@@ -7069,8 +7198,8 @@ assert.doesNotMatch(
 );
 assert.match(
   inspectV2V3SuccessorGate,
-  /receipt_lines\[1\] != f'release=\{effective_release\}/u,
-  'a later terminal ready receipt must bind the effective rotated recheck release, not the immutable base migration release',
+  /receipt_lines\[1\] !=\s+f'release=\{recheck_bridge_release if recheck_bridge_state == "active" else effective_release\}/u,
+  'a later terminal ready receipt must bind the authorized H13 recheck release while retaining the legacy fallback',
 );
 const successorRecoverableBranch =
   /promotion_exists = promotion_exists_and_is_safe\(\)\nif promotion_exists:([\s\S]*?)\nelif os\.path\.lexists\(binding\):/u.exec(
@@ -7146,6 +7275,8 @@ import re
 sha = re.compile(r'[0-9a-f]{64}')
 effective_release = '${'b'.repeat(40)}'
 effective_helper_sha = '${'c'.repeat(64)}'
+recheck_bridge_state = 'active'
+recheck_bridge_release = '${'a'.repeat(40)}'
 later_helper_bytes = b'later ordinary reviewed helper bytes'
 assert hashlib.sha256(later_helper_bytes).hexdigest() != effective_helper_sha
 v3_sha = '${'d'.repeat(64)}'
@@ -7167,7 +7298,7 @@ promotion_root = '/fixture/promotion'
 rpc_root = '/fixture/rpc'
 receipt_lines = [
     'version=1',
-    f'release={effective_release}',
+    f'release={recheck_bridge_release}',
     f'binding_sha256={v3_sha}',
     f'identity_hmac_key_sha256={hashlib.sha256(identity_key_data).hexdigest()}',
     f'selector_sha256={hashlib.sha256(selector_bytes).hexdigest()}',
@@ -7239,19 +7370,24 @@ for (const forbiddenSuccessorCompletionMarker of [
     'terminal v3 completion must be derived from existing durable artifacts without a fifth overlay marker',
   );
 }
+const requiredV3RecheckRelease = extractShellFunction(
+  helper,
+  'required_kemerbet_v3_recheck_release',
+  'enforce_kemerbet_v2_v3_successor_gate',
+);
 const enforceV2V3SuccessorGate = extractShellFunction(
   helper,
   'enforce_kemerbet_v2_v3_successor_gate',
   'consume_exact_one_use_kemerbet_file',
 );
 for (const successorGateEnforcementContract of [
-  /if \[\[ "\$command" =~ \^\(verify\|kemerbet-v3-runtime-bridge-ready\|docker-storage-ready\)\$ \]\]; then\s+return 0\s+fi/u,
+  /if \[\[ "\$command" =~ \^\(verify\|kemerbet-v3-runtime-bridge-ready\|kemerbet-v3-recheck-bridge-ready\|docker-storage-ready\)\$ \]\]; then\s+return 0\s+fi/u,
   /inspect_kemerbet_v2_v3_successor_gate/,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'/u,
   /retire-kemerbet-readiness-binding-v1-for-v2-reseal\|reinstall-kemerbet-v1-retirement-secrets\|seal-kemerbet-readiness\|kemerbet-v1-retirement-recovery-ready/u,
   /permanently forbids legacy v1\/v2 reseal or recovery commands/u,
   /stop-bot\|stop-kemerbet-session-provision\)[\s\S]*?return 0/u,
-  /recheck-kemerbet-readiness\)[\s\S]*?"\$release" == "\$KEMERBET_V2_V3_SUCCESSOR_RELEASE"/u,
+  /recheck-kemerbet-readiness\)[\s\S]*?"\$release" == "\$expected_recheck_release"/u,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-recheck-recoverable'/u,
   /an interrupted KemerBet v3 recheck permits only exact-release recovery/u,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/,
@@ -7260,7 +7396,8 @@ for (const successorGateEnforcementContract of [
   /stop-bot\|stop-kemerbet-session-provision/u,
   /the KemerBet v3 successor stop command belongs to another reviewed release/u,
   /network-ready\)\s+return 0/u,
-  /recheck-kemerbet-readiness\|kemerbet-v3-successor-ready/u,
+  /recheck-kemerbet-readiness\)[\s\S]*?the KemerBet v3 lookup\/recheck boundary is bound to another reviewed release/u,
+  /kemerbet-v3-successor-ready\)[\s\S]*?the KemerBet v3 successor overlay is bound to another reviewed release/u,
   /the KemerBet v3 lookup\/recheck boundary is bound to another reviewed release/u,
   /install\|fresh-start\|fresh-host-ready\|arm-expiry-stop\|bot-disabled-ready\|install-bot-token\|start-bot\|bot-ready\|fresh-public-edge-ready\|start-fresh-public-edge\|diagnose-owner-startup\|discard\|stop-bot\|start-kemerbet-session-provision\|kemerbet-session-provision-ready\|stop-kemerbet-session-provision/u,
   /KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE" == 'active'/u,
@@ -7294,7 +7431,8 @@ if (process.platform === 'linux' || process.platform === 'win32') {
     'set -euo pipefail',
     `CURRENT_RELEASE='${currentRelease}'`,
     'die() { return 1; }',
-    'inspect_kemerbet_v2_v3_successor_gate() { KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$BRIDGE_STATE"; }',
+    'inspect_kemerbet_v2_v3_successor_gate() { KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$OVERLAY_STATE"; KEMERBET_V2_V3_SUCCESSOR_RELEASE="$OVERLAY_RELEASE"; KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE="$BRIDGE_STATE"; KEMERBET_V3_RECHECK_BRIDGE_STATE="$RECHECK_BRIDGE_STATE"; KEMERBET_V3_RECHECK_BRIDGE_RELEASE="$RECHECK_BRIDGE_RELEASE"; }',
+    requiredV3RecheckRelease,
     enforceV2V3SuccessorGate,
     'enforce_kemerbet_v2_v3_successor_gate "$COMPONENT_COMMAND" "$CURRENT_RELEASE"',
   ].join('\n');
@@ -7365,6 +7503,8 @@ if (process.platform === 'linux' || process.platform === 'win32') {
         OVERLAY_STATE: overlayState,
         OVERLAY_RELEASE: overlayRelease,
         BRIDGE_STATE: bridgeState,
+        RECHECK_BRIDGE_STATE: 'absent',
+        RECHECK_BRIDGE_RELEASE: '',
       },
     });
     assert.equal(
@@ -10282,11 +10422,11 @@ assert.match(
 );
 assert.match(
   startKemerbetSession,
-  /require_root_readable_immutable_file "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha"\)"/,
 );
 assert.match(
   startKemerbetSession,
-  /require_kemerbet_v3_binding_content "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE="\$session_binding_source"/,
 );
 assert.doesNotMatch(startKemerbetSession, /prepare_retryable_kemerbet_session_player_ids/);
 assert.doesNotMatch(startKemerbetSession, /require_service_file "\$KEMERBET_READINESS_PLAYER_IDS"/);
@@ -10306,18 +10446,21 @@ assert.match(
   startKemerbetSession,
   /up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision/,
 );
-assert.match(startKemerbetSession, /require_kemerbet_session_provision_runtime "\$commit_sha"/);
+assert.match(
+  startKemerbetSession,
+  /require_kemerbet_session_provision_runtime "\$commit_sha" "\$session_binding_source"/,
+);
 assert.doesNotMatch(startKemerbetSession, /FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
 assertInOrder(
   startKemerbetSession,
   [
     'require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"',
-    'require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
-    'require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
     'require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"',
     'require_kemerbet_v3_runtime_bridge',
+    'session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"',
+    'FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE="$session_binding_source"',
     'up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision',
-    'require_kemerbet_session_provision_runtime "$commit_sha"',
+    'require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"',
     'inspect_kemerbet_v2_v3_successor_gate',
   ],
   'private sign-in must start only the no-transfer coordinator and re-attest the unchanged historical overlay/runtime bridge',
@@ -10353,13 +10496,16 @@ for (const contract of [
   /bind\|\/etc\/fetanagent\/kemerbet-selector-contract\.v2\.json\|false/,
   /bind\|\/run\/fetanagent-kemerbet-readiness-seal-output\|true/,
   /KEMERBET_AGENT_IDENTITY_HMAC_KEY/,
+  /expected_binding_source="\$2"/,
+  /"\$KEMERBET_READINESS_BINDING"\)/,
+  /10001:10001:600:1:230/,
   /KEMERBET_AGENT_IDENTITY_BINDINGS/,
   /KEMERBET_SELECTOR_CONTRACT/,
   /KEMERBET_READINESS_OUTPUT_ROOT/,
   /profile_volume_source="\$\(docker_local container inspect "\$container_id"/,
   /binding_source="\$\(docker_local container inspect "\$container_id"/,
   /\.Destination "\/run\/secrets\/kemerbet_agent_identity_bindings"/,
-  /"\$binding_source" == "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
+  /"\$binding_source" == "\$expected_binding_source"/,
   /\.Destination "\/var\/lib\/fetanagent\/kemerbet-sessions"/,
   /\{\{\.Name\}\}/,
   /"\$profile_volume_source" == "\$KEMERBET_PROFILE_VOLUME"/,
@@ -10373,13 +10519,15 @@ for (const contract of [
 assertInOrder(
   kemerbetSessionRuntime,
   [
-    'require_root_readable_immutable_file "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
-    'require_kemerbet_v3_binding_content "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+    'case "$expected_binding_source" in',
+    '"$KEMERBET_READINESS_BINDING")',
+    '"$KEMERBET_AGENT_IDENTITY_BINDINGS")',
+    'require_kemerbet_v3_binding_content "$expected_binding_source"',
     "grep -Fxq 'bind|/run/secrets/kemerbet_agent_identity_bindings|false'",
     'binding_source="$(docker_local container inspect "$container_id"',
-    '"$binding_source" == "$KEMERBET_AGENT_IDENTITY_BINDINGS"',
+    '"$binding_source" == "$expected_binding_source"',
   ],
-  'the private sign-in runtime must validate the immutable v3 binding before proving its exact read-only host-to-container mount',
+  'the private sign-in runtime must validate one explicitly allowlisted v3 binding before proving its exact read-only host-to-container mount',
 );
 assert.doesNotMatch(
   kemerbetSessionRuntime,
@@ -10395,7 +10543,7 @@ assert.ok(
 );
 for (const contract of [
   /published-with-kemerbet-session/,
-  /require_kemerbet_session_provision_runtime "\$commit_sha"/,
+  /require_kemerbet_session_provision_runtime "\$commit_sha" "\$KEMERBET_AGENT_IDENTITY_BINDINGS"/,
   /if \[\[ -e "\$KEMERBET_READINESS_BINDING" \|\| -L "\$KEMERBET_READINESS_BINDING" \]\]; then/,
   /\[\[ -e "\$KEMERBET_V1_RETIREMENT_ROOT" \|\| -L "\$KEMERBET_V1_RETIREMENT_ROOT" \]\] \|\|/,
   /the one-time KemerBet readiness binding already exists/,
@@ -10574,7 +10722,8 @@ for (const contract of [
   /require_kemerbet_v3_binding_content "\$KEMERBET_READINESS_BINDING"/,
   /inspect_kemerbet_v2_v3_successor_gate/,
   /KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/,
-  /KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/,
+  /KEMERBET_V3_RECHECK_BRIDGE_STATE" == 'active'/,
+  /KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "\$commit_sha"/,
   /! -e "\$KEMERBET_RECHECK_PROMOTION_ROOT" && ! -L "\$KEMERBET_RECHECK_PROMOTION_ROOT"/,
   /! -e "\$KEMERBET_RECHECK_RECEIPT_ROOT" && ! -L "\$KEMERBET_RECHECK_RECEIPT_ROOT"/,
   /! -e "\$KEMERBET_RECHECK_CANDIDATE_ROOT" && ! -L "\$KEMERBET_RECHECK_CANDIDATE_ROOT"/,
@@ -10666,7 +10815,8 @@ assertInOrder(
     'require_kemerbet_v3_binding_content "$KEMERBET_READINESS_BINDING"',
     'inspect_kemerbet_v2_v3_successor_gate',
     `[[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&`,
-    '"$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$commit_sha"',
+    `"$KEMERBET_V3_RECHECK_BRIDGE_STATE" == 'active' &&`,
+    '"$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "$commit_sha"',
     'return 0',
     '[[ ! -e "$KEMERBET_RECHECK_PROMOTION_ROOT"',
   ],
@@ -11644,17 +11794,17 @@ for (const contract of [
 }
 assert.match(
   recheckKemerbetReadiness,
-  /recover_incomplete_kemerbet_recheck_promotion_guarded\s+inspect_kemerbet_v2_v3_successor_gate\s+if \[\[ -e "\$KEMERBET_RECHECK_RECEIPT_ROOT" \|\| -L "\$KEMERBET_RECHECK_RECEIPT_ROOT" \]\]; then[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/u,
+  /recover_incomplete_kemerbet_recheck_promotion_guarded\s+inspect_kemerbet_v2_v3_successor_gate\s+if \[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" != 'absent' \]\]; then\s+require_kemerbet_v3_recheck_bridge "\$commit_sha"[\s\S]*?if \[\[ -e "\$KEMERBET_RECHECK_RECEIPT_ROOT" \|\| -L "\$KEMERBET_RECHECK_RECEIPT_ROOT" \]\]; then[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "\$commit_sha"/u,
   'guarded recovery must refresh the successor state before accepting an idempotent completed receipt',
 );
 assert.match(
   recheckKemerbetReadiness,
-  /if \[\[ -e "\$KEMERBET_V1_RETIREMENT_ROOT" \|\| -L "\$KEMERBET_V1_RETIREMENT_ROOT" \]\]; then\s+if \[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' \]\]; then\s+finalize_kemerbet_v1_retirement_after_v2_seal "\$commit_sha"[\s\S]*?else\s+\[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&\s+"\$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha" \]\]/u,
+  /if \[\[ -e "\$KEMERBET_V1_RETIREMENT_ROOT" \|\| -L "\$KEMERBET_V1_RETIREMENT_ROOT" \]\]; then\s+if \[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'absent' \]\]; then\s+finalize_kemerbet_v1_retirement_after_v2_seal "\$commit_sha"[\s\S]*?else\s+\[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' &&\s+"\$KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "\$commit_sha" \]\]/u,
   'the legacy v2 finalizer must run only without a successor overlay; v3 must use the exact migrated installed state',
 );
 assert.match(
   recheckKemerbetReadiness,
-  /remove_owned_kemerbet_recheck_promotion_root[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"\s+inspect_kemerbet_v2_v3_successor_gate[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "\$commit_sha"/u,
+  /remove_owned_kemerbet_recheck_promotion_root[\s\S]*?require_completed_kemerbet_recheck_for_release "\$commit_sha" "\$image_tag"\s+inspect_kemerbet_v2_v3_successor_gate[\s\S]*?KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-completed'[\s\S]*?KEMERBET_V3_RECHECK_BRIDGE_RELEASE" == "\$commit_sha"/u,
   'normal v3 completion must retire the promotion journal and derive the durable terminal state before reporting success',
 );
 assert.equal(
@@ -13183,8 +13333,8 @@ for (const v3BindingContract of [
 }
 assert.equal(
   (helper.match(/require_kemerbet_v3_binding_content/g) ?? []).length,
-  10,
-  'the stable v3 binding attestor must be defined once and used by all nine operational binding boundaries',
+  11,
+  'the stable v3 binding attestor must be defined once and used by all ten operational binding boundaries, including both preview-source states',
 );
 const v1RetirementRuntimeStart = helper.indexOf('publish_kemerbet_v1_retirement_artifact() {');
 const v1RetirementRuntimeEnd = helper.indexOf('\nconsume_exact_one_use_kemerbet_file() {');
@@ -14650,8 +14800,8 @@ assert.doesNotMatch(ownerDiagnostic, /inspect .*\{\{json \.Config\}\}|container 
 
 assert.equal(
   actualReviewedHelperSuccessorSha,
-  reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha,
-  'the reviewed helper LF bytes must remain frozen at the exact corrected H12 parser-scope successor pin',
+  reviewedV3RecheckBridgeHelperV13Sha,
+  'the reviewed helper LF bytes must remain frozen at the exact release-bound H13 recheck-bridge successor pin',
 );
 assert.equal(
   actualReviewedV3RuntimeBridgeParserScopeRepairV12Sha,
@@ -14663,6 +14813,11 @@ assert.equal(
   reviewedV3RuntimeBridgeHelperPromotionV11EmptyCheckpointRecoverySha,
   'the reviewed H11 empty-checkpoint recovery LF bytes must remain frozen at its exact pin',
 );
+assert.equal(
+  actualReviewedV3RecheckBridgeV13Sha,
+  reviewedV3RecheckBridgeV13Sha,
+  'the reviewed H13 exact-five recheck-bridge installer LF bytes must remain frozen at its exact pin',
+);
 assert.notEqual(
   reviewedV3RuntimeBridgeHelperV11Sha,
   reviewedV3HelperRotationV10SuccessorSha,
@@ -14672,6 +14827,11 @@ assert.notEqual(
   reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha,
   reviewedV3RuntimeBridgeHelperV11Sha,
   'the corrected H12 parser cannot be represented by the known-broken H11 helper bytes',
+);
+assert.notEqual(
+  reviewedV3RecheckBridgeHelperV13Sha,
+  reviewedV3RuntimeBridgeParserScopeRepairHelperV12Sha,
+  'the H13 release-bound recheck helper cannot be represented by the H12 parser-repair bytes',
 );
 assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 

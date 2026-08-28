@@ -256,7 +256,12 @@ assert.match(
 );
 assert.match(
   kemerbetSessionService,
-  /source: \/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings[\s\S]*?target: \/run\/secrets\/kemerbet_agent_identity_bindings[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+  /source: \$\{FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE:-\/etc\/fetanagent\/executor-secrets\/kemerbet_agent_identity_bindings\}[\s\S]*?target: \/run\/secrets\/kemerbet_agent_identity_bindings[\s\S]*?read_only: true[\s\S]*?create_host_path: false/,
+);
+assert.doesNotMatch(
+  kemerbetSessionService,
+  /^\s+FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE:/mu,
+  'the host-selected private-session binding path must never be passed into the container environment',
 );
 assert.doesNotMatch(
   kemerbetSessionVolumes,

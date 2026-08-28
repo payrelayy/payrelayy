@@ -3862,6 +3862,7 @@ inspect_kemerbet_h14_recovery_gate() {
   KEMERBET_H14_RECOVERY_PROFILE_ID=''
   if [[ ! -e "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT" &&
     ! -L "$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT" ]]; then
+    KEMERBET_H14_RECOVERY_STATE='invalid'
     return 0
   fi
   KEMERBET_H14_RECOVERY_STATE='invalid'
@@ -4106,6 +4107,11 @@ try:
     if len(parent_entries) != 1 or RELEASE.fullmatch(parent_entries[0]) is None:
         reject()
     release = parent_entries[0]
+    if release in {
+        '306818ca812bd2abce8479396c4eea8383ea00f9',
+        '4239201b5496bd08912cce4b5581fe19b29a84d4',
+    }:
+        reject()
     root = f'{parent}/{release}'
     root_value = exact_directory(root, (0, 0), 0o700)
     base = {
@@ -4121,6 +4127,37 @@ try:
         'runtime-retired-v1',
         'runtime-retirement-intent-v1',
     }
+    empty_checkpoint_record_name = 'empty-predecessor-checkpoint-adoption-v1'
+    empty_checkpoint_record_path = f'{root}/{empty_checkpoint_record_name}'
+    empty_checkpoint_record, _, _ = exact_ascii_lines(
+        empty_checkpoint_record_path, (0, 0), 0o600, 20
+    )
+    if empty_checkpoint_record != [
+        'version=1',
+        'contract=fetanagent-kemerbet-quarantine-recovery-v14-empty-checkpoint-adoption',
+        'state=adoption-prepared',
+        'same_inode_target_rename_authorized=true',
+        'namespace_rename_pending_at_publication=true',
+        'predecessor_recovery_release=4239201b5496bd08912cce4b5581fe19b29a84d4',
+        f'successor_recovery_release={release}',
+        f'checkpoint_dev_ino={root_value.st_dev}:{root_value.st_ino}',
+        'source_namespace=.installing-4239201b5496bd08912cce4b5581fe19b29a84d4',
+        f'target_namespace=.installing-{release}',
+        'durable_retirement_intent_present=false',
+        'deployment_grant_changed=false',
+        'helper_changed=false',
+        'runtime_mutated=false',
+        'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false',
+        'amount_entry_enabled=false',
+        'transfer_enabled=false',
+        'money_moved=false',
+    ]:
+        reject()
+    if empty_checkpoint_record[8].split('=', 1)[1] == empty_checkpoint_record[9].split('=', 1)[1]:
+        reject()
+    base.add(empty_checkpoint_record_name)
     runtime = base | {
         'database-profile-prepared-v1',
         'recovery-identity-authorization-v1',

@@ -13,7 +13,7 @@ readonly PROJECT_NAME='fetanagent-staging-beta'
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly PREDECESSOR_RELEASE='306818ca812bd2abce8479396c4eea8383ea00f9'
 readonly PREDECESSOR_HELPER_SHA256='3b789c983c415326171c6b4224016d2a04769a0b8c37cb91fc463383f2d141aa'
-readonly REVIEWED_SUCCESSOR_HELPER_SHA256='951c656b6aac56aeb4c90b7b740abb24785ba70504d3b959ec8384bbe30bb3f7'
+readonly REVIEWED_SUCCESSOR_HELPER_SHA256='c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58'
 readonly AUTHORIZATION_SHA256='6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'
 readonly EXPECTED_DROPLET_ID='593344964'
 readonly EXPECTED_PUBLIC_IPV4='161.35.41.232'
@@ -24,6 +24,8 @@ readonly SUDOERS='/etc/sudoers.d/fetanagent-staging-deploy-helper'
 readonly SUDOERS_DISABLED='/etc/sudoers.d/.fetanagent-staging-deploy-helper.kemerbet-quarantine-recovery-v14-disabled'
 readonly H13_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-recheck-bridge-v13'
 readonly H14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
+readonly EMPTY_CHECKPOINT_RELEASE='4239201b5496bd08912cce4b5581fe19b29a84d4'
+readonly EMPTY_CHECKPOINT_RECORD_NAME='empty-predecessor-checkpoint-adoption-v1'
 readonly SOURCE_BINDING='/var/lib/fetanagent/kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings'
 readonly FINAL_BINDING='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -54,9 +56,11 @@ readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_HELPER="$STAGING_ROOT/fetanagent-staging-deploy-helper.next"
 readonly RECOVERY_ROOT="$H14_PARENT/$RECOVERY_RELEASE"
 readonly RECOVERY_INSTALLING="$H14_PARENT/.installing-$RECOVERY_RELEASE"
+readonly EMPTY_CHECKPOINT_INSTALLING="$H14_PARENT/.installing-$EMPTY_CHECKPOINT_RELEASE"
 
 [[ "$RECOVERY_RELEASE" =~ ^[0-9a-f]{40}$ &&
-  "$RECOVERY_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$PREDECESSOR_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$EMPTY_CHECKPOINT_RELEASE" ]] ||
   die 'the H14 recovery release must be a distinct full lowercase Git commit SHA'
 [[ "$SUCCESSOR_HELPER_SHA256" == "$REVIEWED_SUCCESSOR_HELPER_SHA256" &&
   "$SUCCESSOR_HELPER_SHA256" != "$PREDECESSOR_HELPER_SHA256" ]] ||
@@ -68,8 +72,8 @@ readonly RECOVERY_INSTALLING="$H14_PARENT/.installing-$RECOVERY_RELEASE"
 [[ -z "${SUDO_USER:-}" && -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] ||
   die 'sudo and Docker environment overrides are forbidden'
 
-for command in awk bash chmod chown cmp curl dirname docker env find flock grep id install mkdir mv \
-  python3 realpath seq sha256sum sleep sort stat sync visudo; do
+for command in awk bash chmod chown cmp curl dirname docker env find flock grep head id install mkdir mv \
+  python3 realpath seq sha256sum sleep sort stat sync tail visudo; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 
@@ -241,8 +245,12 @@ PY
 has_enabled_financial_gate() {
   local entry environment="$1" status
   while IFS= read -r entry; do
+    case "$entry" in
+      FINANCIAL_ACTIONS_MODE=dry_run) continue ;;
+      FINANCIAL_ACTIONS_MODE=*) return 0 ;;
+    esac
     [[ "$entry" == 'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' ]] && continue
-    if grep -Eiq '^(FETANAGENT_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*|KEMERBET_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*)=(1|true|yes|on)$' \
+    if grep -Eiq '^(FETANAGENT_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*|KEMERBET_.*(EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY).*|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED)=(1|true|yes|on)$' \
       <<<"$entry"; then
       return 0
     else
@@ -254,8 +262,10 @@ has_enabled_financial_gate() {
 }
 
 require_financial_gates_disabled() {
-  local container environment
+  local container environment inventory
   [[ ! -e "$FINAL_BINDING" && ! -L "$FINAL_BINDING" ]] || return 1
+  inventory="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
   while IFS= read -r container; do
     [[ -n "$container" ]] || continue
     environment="$(docker_local container inspect "$container" \
@@ -263,8 +273,7 @@ require_financial_gates_disabled() {
     if has_enabled_financial_gate "$environment"; then
       return 1
     fi
-  done < <(docker_local container ls --all --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")
+  done <<<"$inventory"
 }
 
 container_contract_digest() {
@@ -311,6 +320,8 @@ require_recovery_container_contract() {
     return 1
   [[ "$control_source" == "$CONTROL_VOLUME" ]] || return 1
   if [[ "$service" == 'kemerbet-session-provision' ]]; then
+    grep -Fxq 'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false' <<<"$environment" || return 1
+    grep -Fxq 'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false' <<<"$environment" || return 1
     [[ "$(docker_local container inspect "$container_id" --format '{{json .Config.Cmd}}')" == \
       '["node","apps/executor/dist/kemerbet-session-provision-server.js"]' ]] || return 1
     profile_source="$(docker_local container inspect "$container_id" --format \
@@ -324,9 +335,12 @@ require_recovery_container_contract() {
 
 require_container_no_chromium() {
   local container_id="$1" processes
-  processes="$(docker_local container top "$container_id" -eo comm,args)" || return 1
+  processes="$(docker_local container top "$container_id" -eo pid,comm,args)" || return 1
+  [[ "$(head -n 1 <<<"$processes")" =~ ^[[:space:]]*PID[[:space:]]+COMMAND[[:space:]]+COMMAND([[:space:]]|$) ]] ||
+    return 1
+  [[ "$(tail -n +2 <<<"$processes")" =~ ^[[:space:]]*[0-9]+[[:space:]] ]] || return 1
   ! grep -Eiq '(^|[[:space:]/])(chromium|chrome|google-chrome|headless_shell|chromedriver)([[:space:]/-]|$)' \
-    <<<"$processes"
+    <<<"$(tail -n +2 <<<"$processes")"
 }
 
 require_no_host_chromium() {
@@ -350,12 +364,331 @@ for entry in os.listdir('/proc'):
 PY
 }
 
+require_exact_empty_predecessor_checkpoint_prefix() {
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$H14_PARENT" "$EMPTY_CHECKPOINT_RELEASE" "$RECOVERY_RELEASE" \
+    "$EMPTY_CHECKPOINT_RECORD_NAME" <<'PY' || return 1
+import os
+import stat
+import sys
+
+parent, predecessor_release, successor_release, record_name = sys.argv[1:]
+source_name = f'.installing-{predecessor_release}'
+source = f'{parent}/{source_name}'
+target = f'{parent}/.installing-{successor_release}'
+temporary_name = f'.{record_name}.installing'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def expected_record(value):
+    return ('\n'.join([
+        'version=1',
+        'contract=fetanagent-kemerbet-quarantine-recovery-v14-empty-checkpoint-adoption',
+        'state=adoption-prepared',
+        'same_inode_target_rename_authorized=true',
+        'namespace_rename_pending_at_publication=true',
+        f'predecessor_recovery_release={predecessor_release}',
+        f'successor_recovery_release={successor_release}',
+        f'checkpoint_dev_ino={value.st_dev}:{value.st_ino}',
+        f'source_namespace={source_name}',
+        f'target_namespace=.installing-{successor_release}',
+        'durable_retirement_intent_present=false',
+        'deployment_grant_changed=false',
+        'helper_changed=false',
+        'runtime_mutated=false',
+        'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false',
+        'amount_entry_enabled=false',
+        'transfer_enabled=false',
+        'money_moved=false',
+    ]) + '\n').encode('ascii')
+
+
+def exact_candidate(path, expected, allow_prefix):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        data = os.pread(descriptor, len(expected) + 1, 0)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, 0o600, 1)
+            or len(data) != before.st_size
+            or before.st_size > len(expected)
+            or (data != expected if not allow_prefix else not expected.startswith(data))
+            or os.path.realpath(path) != path
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+                before.st_nlink, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+                after.st_nlink, after.st_size, after.st_mtime_ns)
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+
+
+try:
+    parent_value = os.lstat(parent)
+    source_value = os.lstat(source)
+    if (
+        not stat.S_ISDIR(parent_value.st_mode)
+        or (parent_value.st_uid, parent_value.st_gid, stat.S_IMODE(parent_value.st_mode))
+        != (0, 0, 0o700)
+        or os.path.realpath(parent) != parent
+        or os.listdir(parent) != [source_name]
+        or not stat.S_ISDIR(source_value.st_mode)
+        or (source_value.st_uid, source_value.st_gid, stat.S_IMODE(source_value.st_mode))
+        != (0, 0, 0o700)
+        or source_value.st_dev != parent_value.st_dev
+        or os.path.realpath(source) != source
+        or os.path.lexists(target)
+    ):
+        reject()
+    entries = os.listdir(source)
+    if entries not in ([], [temporary_name], [record_name]):
+        reject()
+    expected = expected_record(source_value)
+    if entries == [temporary_name]:
+        exact_candidate(f'{source}/{temporary_name}', expected, True)
+    elif entries == [record_name]:
+        exact_candidate(f'{source}/{record_name}', expected, False)
+except Exception:
+    raise SystemExit(1)
+PY
+  [[ ! -e "$INSTALLING_HELPER" && ! -L "$INSTALLING_HELPER" &&
+    ! -e "$INSTALLING_HELPER_PARTIAL" && ! -L "$INSTALLING_HELPER_PARTIAL" ]]
+}
+
+adopt_exact_empty_predecessor_checkpoint() {
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$H14_PARENT" "$EMPTY_CHECKPOINT_RELEASE" "$RECOVERY_RELEASE" \
+    "$EMPTY_CHECKPOINT_RECORD_NAME" <<'PY'
+import os
+import stat
+import sys
+
+parent, predecessor_release, successor_release, record_name = sys.argv[1:]
+source_name = f'.installing-{predecessor_release}'
+target_name = f'.installing-{successor_release}'
+source = f'{parent}/{source_name}'
+target = f'{parent}/{target_name}'
+temporary_name = f'.{record_name}.installing'
+temporary = f'{source}/{temporary_name}'
+final = f'{source}/{record_name}'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def write_all(descriptor, data):
+    offset = 0
+    while offset < len(data):
+        written = os.write(descriptor, data[offset:])
+        if written <= 0:
+            reject()
+        offset += written
+
+
+def expected_record(value):
+    return ('\n'.join([
+        'version=1',
+        'contract=fetanagent-kemerbet-quarantine-recovery-v14-empty-checkpoint-adoption',
+        'state=adoption-prepared',
+        'same_inode_target_rename_authorized=true',
+        'namespace_rename_pending_at_publication=true',
+        f'predecessor_recovery_release={predecessor_release}',
+        f'successor_recovery_release={successor_release}',
+        f'checkpoint_dev_ino={value.st_dev}:{value.st_ino}',
+        f'source_namespace={source_name}',
+        f'target_namespace={target_name}',
+        'durable_retirement_intent_present=false',
+        'deployment_grant_changed=false',
+        'helper_changed=false',
+        'runtime_mutated=false',
+        'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false',
+        'amount_entry_enabled=false',
+        'transfer_enabled=false',
+        'money_moved=false',
+    ]) + '\n').encode('ascii')
+
+
+def exact_file(path, expected, allow_prefix=False):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        data = os.pread(descriptor, len(expected) + 1, 0)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, 0o600, 1)
+            or len(data) != before.st_size
+            or before.st_size > len(expected)
+            or (data != expected if not allow_prefix else not expected.startswith(data))
+            or os.path.realpath(path) != path
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+                before.st_nlink, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+                after.st_nlink, after.st_size, after.st_mtime_ns)
+        ):
+            reject()
+        return data
+    finally:
+        os.close(descriptor)
+
+
+try:
+    parent_value = os.lstat(parent)
+    source_value = os.lstat(source)
+    if (
+        not stat.S_ISDIR(parent_value.st_mode)
+        or (parent_value.st_uid, parent_value.st_gid, stat.S_IMODE(parent_value.st_mode))
+        != (0, 0, 0o700)
+        or os.path.realpath(parent) != parent
+        or os.listdir(parent) != [source_name]
+        or not stat.S_ISDIR(source_value.st_mode)
+        or (source_value.st_uid, source_value.st_gid, stat.S_IMODE(source_value.st_mode))
+        != (0, 0, 0o700)
+        or source_value.st_dev != parent_value.st_dev
+        or os.path.realpath(source) != source
+        or os.path.lexists(target)
+    ):
+        reject()
+    entries = os.listdir(source)
+    if entries not in ([], [temporary_name], [record_name]):
+        reject()
+    expected = expected_record(source_value)
+    if entries == [record_name]:
+        exact_file(final, expected)
+        sync_directory(source)
+    else:
+        if entries == []:
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+            )
+            existing = b''
+        else:
+            existing = exact_file(temporary, expected, True)
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            os.fchmod(descriptor, 0o600)
+            os.lseek(descriptor, len(existing), os.SEEK_SET)
+            write_all(descriptor, expected[len(existing):])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        exact_file(temporary, expected)
+        os.rename(temporary, final)
+        sync_directory(source)
+        exact_file(final, expected)
+    if os.listdir(source) != [record_name]:
+        reject()
+    os.rename(source, target)
+    sync_directory(parent)
+    target_value = os.lstat(target)
+    if (
+        os.listdir(parent) != [target_name]
+        or (target_value.st_dev, target_value.st_ino) != (source_value.st_dev, source_value.st_ino)
+        or os.path.realpath(target) != target
+    ):
+        reject()
+    exact_file(f'{target}/{record_name}', expected)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+require_adopted_empty_checkpoint_record() {
+  local root="$1"
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$root" "$EMPTY_CHECKPOINT_RELEASE" "$RECOVERY_RELEASE" \
+    "$EMPTY_CHECKPOINT_RECORD_NAME" <<'PY'
+import os
+import stat
+import sys
+
+root, predecessor_release, successor_release, record_name = sys.argv[1:]
+path = f'{root}/{record_name}'
+
+try:
+    root_value = os.lstat(root)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        data = os.pread(descriptor, 4097, 0)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    lines = data.decode('ascii').splitlines()
+    expected = [
+        'version=1',
+        'contract=fetanagent-kemerbet-quarantine-recovery-v14-empty-checkpoint-adoption',
+        'state=adoption-prepared',
+        'same_inode_target_rename_authorized=true',
+        'namespace_rename_pending_at_publication=true',
+        f'predecessor_recovery_release={predecessor_release}',
+        f'successor_recovery_release={successor_release}',
+        f'checkpoint_dev_ino={root_value.st_dev}:{root_value.st_ino}',
+        f'source_namespace=.installing-{predecessor_release}',
+        f'target_namespace=.installing-{successor_release}',
+        'durable_retirement_intent_present=false',
+        'deployment_grant_changed=false',
+        'helper_changed=false',
+        'runtime_mutated=false',
+        'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false',
+        'amount_entry_enabled=false',
+        'transfer_enabled=false',
+        'money_moved=false',
+    ]
+    if (
+        not stat.S_ISDIR(root_value.st_mode)
+        or (root_value.st_uid, root_value.st_gid, stat.S_IMODE(root_value.st_mode))
+        != (0, 0, 0o700)
+        or os.path.realpath(root) != root
+        or not stat.S_ISREG(before.st_mode)
+        or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+        or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+        != (0, 0, 0o600, 1)
+        or data != ('\n'.join(expected) + '\n').encode('ascii')
+        or lines != expected
+        or os.path.realpath(path) != path
+        or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+            before.st_nlink, before.st_size, before.st_mtime_ns)
+        != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+            after.st_nlink, after.st_size, after.st_mtime_ns)
+    ):
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 prepare_h14_recovery_root() {
-  if [[ ! -e "$H14_PARENT" && ! -L "$H14_PARENT" ]]; then
-    mkdir --mode=0700 -- "$H14_PARENT" || return 1
-    chown root:root "$H14_PARENT" || return 1
-    sync -f "$(dirname -- "$H14_PARENT")" || return 1
-  fi
   [[ ! -L "$H14_PARENT" && -d "$H14_PARENT" &&
     "$(realpath -- "$H14_PARENT")" == "$H14_PARENT" &&
     "$(stat --format='%U:%G:%a' "$H14_PARENT")" == 'root:root:700' ]] || return 1
@@ -365,17 +698,16 @@ prepare_h14_recovery_root() {
       "$(realpath -- "$RECOVERY_ROOT")" == "$RECOVERY_ROOT" &&
       "$(stat --format='%U:%G:%a' "$RECOVERY_ROOT")" == 'root:root:700' ]] || return 1
     H14_WORK_ROOT="$RECOVERY_ROOT"
-    return 0
-  fi
-  if [[ ! -e "$RECOVERY_INSTALLING" && ! -L "$RECOVERY_INSTALLING" ]]; then
-    mkdir --mode=0700 -- "$RECOVERY_INSTALLING" || return 1
-    chown root:root "$RECOVERY_INSTALLING" || return 1
+    require_adopted_empty_checkpoint_record "$H14_WORK_ROOT" || return 1
     sync -f "$H14_PARENT" || return 1
+    return 0
   fi
   [[ ! -L "$RECOVERY_INSTALLING" && -d "$RECOVERY_INSTALLING" &&
     "$(realpath -- "$RECOVERY_INSTALLING")" == "$RECOVERY_INSTALLING" &&
     "$(stat --format='%U:%G:%a' "$RECOVERY_INSTALLING")" == 'root:root:700' ]] || return 1
   H14_WORK_ROOT="$RECOVERY_INSTALLING"
+  require_adopted_empty_checkpoint_record "$H14_WORK_ROOT" || return 1
+  sync -f "$H14_PARENT"
 }
 
 require_h14_installer_prefix_namespace() {
@@ -388,6 +720,7 @@ require_h14_installer_prefix_namespace() {
     case "$entry" in
       runtime-retirement-intent-v1|.runtime-retirement-intent-v1.installing|\
         runtime-retired-v1|.runtime-retired-v1.installing|\
+        empty-predecessor-checkpoint-adoption-v1|\
         intent-v1|.intent-v1.installing|\
         player-stage-consumption-v1|.player-stage-consumption-v1.installing|\
         claim-stage-consumption-v1|.claim-stage-consumption-v1.installing|\
@@ -415,28 +748,144 @@ require_h14_installer_prefix_namespace() {
       *) return 1 ;;
     esac
   done <<<"$entries"
+  require_adopted_empty_checkpoint_record "$H14_WORK_ROOT"
+}
+
+classify_h14_base_phase() {
+  local root="$1"
+  [[ ! -L "$root" && -d "$root" && "$(realpath -- "$root")" == "$root" &&
+    "$(stat --format='%U:%G:%a' "$root")" == 'root:root:700' ]] || return 1
+  H14_WORK_ROOT="$root"
+  require_h14_installer_prefix_namespace || return 1
+  H14_PREFIX_PHASE="$(env -i PATH="$SAFE_PATH" python3 -I - "$root" \
+    "$EMPTY_CHECKPOINT_RECORD_NAME" <<'PY'
+import os
+import sys
+
+root, adoption_name = sys.argv[1:]
+entries = set(os.listdir(root))
+completed = {adoption_name}
+
+
+def accept(phase):
+    print(phase)
+    raise SystemExit(0)
+
+
+if entries == completed:
+    accept('adoption-only')
+if entries == completed | {'.runtime-retirement-intent-v1.installing'}:
+    accept('runtime-intent-prepared')
+completed.add('runtime-retirement-intent-v1')
+if entries == completed:
+    accept('runtime-intent')
+
+for name, has_temporary in [
+    ('runtime-retired-v1', True),
+    ('intent-v1', True),
+    ('predecessor-helper', True),
+    ('retired-binding-v3', False),
+    ('player-stage-consumption-v1', True),
+    ('claim-stage-consumption-v1', True),
+    ('retired-retryable-failure-v1', False),
+    ('quarantined-profile-v1', False),
+    ('host-retired-v1', True),
+    ('owner-runtime-restored-v1', True),
+]:
+    if has_temporary and entries == completed | {f'.{name}.installing'}:
+        accept('post-retirement')
+    completed.add(name)
+    if entries == completed:
+        if name == 'owner-runtime-restored-v1':
+            accept('complete')
+        accept('post-retirement')
+
+raise SystemExit(1)
+PY
+  )" || return 1
+  if [[ "$H14_PREFIX_PHASE" != 'adoption-only' &&
+    "$H14_PREFIX_PHASE" != 'runtime-intent-prepared' ]]; then
+    load_runtime_retirement_intent || return 1
+  fi
 }
 
 publish_recovery_record() {
-  local root="$1" name="$2" mode="$3" producer="$4" final temporary
+  local root="$1" name="$2" mode="$3" producer="$4" expected final temporary
   final="$root/$name"
   temporary="$root/.$name.installing"
+  expected="$("$producer")" || return 1
+  expected+=$'\n'
   if [[ -e "$final" || -L "$final" ]]; then
     [[ ! -e "$temporary" && ! -L "$temporary" && ! -L "$final" && -f "$final" &&
       "$(realpath -- "$final")" == "$final" &&
       "$(stat --format='%U:%G:%a:%h' "$final")" == "root:root:$mode:1" ]] || return 1
-    cmp -s -- "$final" <("$producer")
+    cmp -s -- "$final" <(printf '%s' "$expected") || return 1
+    sync -f "$root"
     return
   fi
-  if [[ ! -e "$temporary" && ! -L "$temporary" ]]; then
-    (set -o noclobber; "$producer" >"$temporary") || return 1
-    chown root:root "$temporary" || return 1
-    chmod "$mode" "$temporary" || return 1
-    sync -f "$temporary" || return 1
-  fi
-  [[ ! -L "$temporary" && -f "$temporary" && "$(realpath -- "$temporary")" == "$temporary" &&
-    "$(stat --format='%U:%G:%a:%h' "$temporary")" == "root:root:$mode:1" ]] || return 1
-  cmp -s -- "$temporary" <("$producer") || return 1
+  env -i PATH="$SAFE_PATH" python3 -I - "$temporary" "$mode" "$expected" <<'PY' || return 1
+import os
+import re
+import stat
+import sys
+
+path, mode_text, text = sys.argv[1:]
+if re.fullmatch(r'[0-7]{3}', mode_text) is None:
+    raise SystemExit(1)
+try:
+    data = text.encode('ascii')
+except UnicodeEncodeError:
+    raise SystemExit(1)
+mode = int(mode_text, 8)
+flags = os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC
+created = False
+try:
+    descriptor = os.open(path, flags)
+except FileNotFoundError:
+    try:
+        descriptor = os.open(path, flags | os.O_CREAT | os.O_EXCL, mode)
+        created = True
+    except OSError:
+        raise SystemExit(1)
+except OSError:
+    raise SystemExit(1)
+try:
+    if created:
+        os.fchown(descriptor, 0, 0)
+        os.fchmod(descriptor, mode)
+    before = os.fstat(descriptor)
+    named = os.lstat(path)
+    current = os.pread(descriptor, len(data) + 1, 0)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+        or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+        != (0, 0, mode, 1)
+        or before.st_size > len(data)
+        or len(current) != before.st_size
+        or current != data[:before.st_size]
+        or os.path.realpath(path) != path
+    ):
+        raise SystemExit(1)
+    offset = before.st_size
+    while offset < len(data):
+        written = os.write(descriptor, data[offset:])
+        if written <= 0:
+            raise SystemExit(1)
+        offset += written
+    os.fsync(descriptor)
+    after = os.fstat(descriptor)
+    completed = os.pread(descriptor, len(data) + 1, 0)
+    if (
+        (after.st_dev, after.st_ino, after.st_uid, after.st_gid,
+         stat.S_IMODE(after.st_mode), after.st_nlink, after.st_size)
+        != (before.st_dev, before.st_ino, 0, 0, mode, 1, len(data))
+        or completed != data
+    ):
+        raise SystemExit(1)
+finally:
+    os.close(descriptor)
+PY
   mv -- "$temporary" "$final" || return 1
   sync -f "$root"
 }
@@ -566,14 +1015,22 @@ host_retired_prefix_exists() {
 }
 
 require_pre_retirement_intent_only() {
+  local entries
   [[ "$H14_WORK_ROOT" == "$RECOVERY_INSTALLING" ]] || return 1
-  [[ "$(find -P "$H14_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" == \
-    'runtime-retirement-intent-v1' ]] || return 1
+  entries="$(find -P "$H14_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" ||
+    return 1
+  case "$entries" in
+    $'empty-predecessor-checkpoint-adoption-v1\nruntime-retirement-intent-v1')
+      require_adopted_empty_checkpoint_record "$H14_WORK_ROOT" || return 1
+      ;;
+    *) return 1 ;;
+  esac
   load_runtime_retirement_intent
 }
 
 retire_recovery_runtime() {
   local actual_digest coordinator_inventory owner_state profile_holders control_holders
+  local running_control_holders running_profile_holders
   load_runtime_retirement_intent || return 1
   if [[ "$COORDINATOR_CONTAINER_ID" != 'absent' ]] &&
     docker_local container inspect "$COORDINATOR_CONTAINER_ID" >/dev/null 2>&1; then
@@ -608,8 +1065,11 @@ retire_recovery_runtime() {
   profile_holders="$(container_full_ids_for_volume "$PROFILE_VOLUME")" || return 1
   control_holders="$(container_full_ids_for_volume "$CONTROL_VOLUME")" || return 1
   [[ -z "$profile_holders" && "$control_holders" == "$OWNER_CONTAINER_ID" ]] || return 1
-  [[ -z "$(docker_local container ls --quiet --filter "volume=$PROFILE_VOLUME")" &&
-    -z "$(docker_local container ls --quiet --filter "volume=$CONTROL_VOLUME")" ]] || return 1
+  running_profile_holders="$(docker_local container ls --quiet \
+    --filter "volume=$PROFILE_VOLUME")" || return 1
+  running_control_holders="$(docker_local container ls --quiet \
+    --filter "volume=$CONTROL_VOLUME")" || return 1
+  [[ -z "$running_profile_holders" && -z "$running_control_holders" ]] || return 1
   require_no_host_chromium || return 1
   publish_recovery_record "$H14_WORK_ROOT" runtime-retired-v1 600 expected_runtime_retired
 }
@@ -630,7 +1090,7 @@ expected_owner_runtime_restored() {
 }
 
 restore_owner_runtime_and_finalize() {
-  local actual_digest attempt control_holders coordinator_inventory profile_holders state
+  local actual_digest attempt control_holders coordinator_inventory expected_entries profile_holders state
   [[ "$H14_WORK_ROOT" == "$RECOVERY_INSTALLING" ]] || return 1
   load_runtime_retirement_intent || return 1
   require_recovery_container_contract "$OWNER_CONTAINER_ID" owner-control "$PREDECESSOR_RELEASE" || return 1
@@ -664,8 +1124,10 @@ restore_owner_runtime_and_finalize() {
   require_no_host_chromium || return 1
   publish_recovery_record "$H14_WORK_ROOT" owner-runtime-restored-v1 600 \
     expected_owner_runtime_restored || return 1
+  require_adopted_empty_checkpoint_record "$H14_WORK_ROOT" || return 1
+  expected_entries=$'claim-stage-consumption-v1\nempty-predecessor-checkpoint-adoption-v1\nhost-retired-v1\nintent-v1\nowner-runtime-restored-v1\nplayer-stage-consumption-v1\npredecessor-helper\nquarantined-profile-v1\nretired-binding-v3\nretired-retryable-failure-v1\nruntime-retired-v1\nruntime-retirement-intent-v1'
   [[ "$(find -P "$H14_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" == \
-    $'claim-stage-consumption-v1\nhost-retired-v1\nintent-v1\nowner-runtime-restored-v1\nplayer-stage-consumption-v1\npredecessor-helper\nquarantined-profile-v1\nretired-binding-v3\nretired-retryable-failure-v1\nruntime-retired-v1\nruntime-retirement-intent-v1' ]] || return 1
+    "$expected_entries" ]] || return 1
   [[ ! -e "$RECOVERY_ROOT" && ! -L "$RECOVERY_ROOT" ]] || return 1
   mv -- "$RECOVERY_INSTALLING" "$RECOVERY_ROOT" || return 1
   sync -f "$H14_PARENT" || return 1
@@ -675,12 +1137,114 @@ restore_owner_runtime_and_finalize() {
 copy_helper_atomically() {
   local source="$1" source_mode="$2" digest="$3"
   if [[ ! -e "$INSTALLING_HELPER" && ! -L "$INSTALLING_HELPER" ]]; then
-    if [[ ! -e "$INSTALLING_HELPER_PARTIAL" && ! -L "$INSTALLING_HELPER_PARTIAL" ]]; then
-      require_helper_file "$source" "$digest" "$source_mode" || return 1
-      install -o root -g root -m 0600 -- "$source" "$INSTALLING_HELPER_PARTIAL" || return 1
-    fi
-    require_helper_file "$INSTALLING_HELPER_PARTIAL" "$digest" 600 || return 1
+    require_helper_file "$source" "$digest" "$source_mode" || return 1
+    env -i PATH="$SAFE_PATH" python3 -I - \
+      "$source" "$INSTALLING_HELPER_PARTIAL" "$digest" "$source_mode" <<'PY' || return 1
+import hashlib
+import os
+import re
+import stat
+import sys
+
+source, partial, digest, source_mode_text = sys.argv[1:]
+if re.fullmatch(r'[0-9a-f]{64}', digest) is None or re.fullmatch(r'[0-7]{3}', source_mode_text) is None:
+    raise SystemExit(1)
+source_mode = int(source_mode_text, 8)
+
+
+def reject():
+    raise SystemExit(1)
+
+
+source_descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+try:
+    source_before = os.fstat(source_descriptor)
+    source_named = os.lstat(source)
+    if (
+        not stat.S_ISREG(source_before.st_mode)
+        or (source_before.st_dev, source_before.st_ino) != (source_named.st_dev, source_named.st_ino)
+        or (source_before.st_uid, source_before.st_gid,
+            stat.S_IMODE(source_before.st_mode), source_before.st_nlink)
+        != (0, 0, source_mode, 1)
+        or not 0 < source_before.st_size <= 2 * 1024 * 1024
+        or os.path.realpath(source) != source
+    ):
+        reject()
+    expected = os.pread(source_descriptor, source_before.st_size + 1, 0)
+    if len(expected) != source_before.st_size or hashlib.sha256(expected).hexdigest() != digest:
+        reject()
+
+    flags = os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC
+    created = False
+    try:
+        partial_descriptor = os.open(partial, flags)
+    except FileNotFoundError:
+        partial_descriptor = os.open(partial, flags | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+    try:
+        if created:
+            os.fchown(partial_descriptor, 0, 0)
+            os.fchmod(partial_descriptor, 0o600)
+        before = os.fstat(partial_descriptor)
+        named = os.lstat(partial)
+        partial_mode = stat.S_IMODE(before.st_mode)
+        current = os.pread(partial_descriptor, len(expected) + 1, 0)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, before.st_nlink) != (0, 0, 1)
+            or partial_mode not in (0o600, 0o755)
+            or before.st_size > len(expected)
+            or len(current) != before.st_size
+            or current != expected[:before.st_size]
+            or (partial_mode == 0o755 and before.st_size != len(expected))
+            or os.path.realpath(partial) != partial
+        ):
+            reject()
+        offset = before.st_size
+        while offset < len(expected):
+            written = os.write(partial_descriptor, expected[offset:])
+            if written <= 0:
+                reject()
+            offset += written
+        os.fsync(partial_descriptor)
+        after = os.fstat(partial_descriptor)
+        completed = os.pread(partial_descriptor, len(expected) + 1, 0)
+        if (
+            (after.st_dev, after.st_ino, after.st_uid, after.st_gid,
+             stat.S_IMODE(after.st_mode), after.st_nlink, after.st_size)
+            != (before.st_dev, before.st_ino, 0, 0, partial_mode, 1, len(expected))
+            or completed != expected
+        ):
+            reject()
+    finally:
+        os.close(partial_descriptor)
+    source_after = os.fstat(source_descriptor)
+    if (
+        source_after.st_dev,
+        source_after.st_ino,
+        source_after.st_mode,
+        source_after.st_uid,
+        source_after.st_gid,
+        source_after.st_nlink,
+        source_after.st_size,
+        source_after.st_mtime_ns,
+    ) != (
+        source_before.st_dev,
+        source_before.st_ino,
+        source_before.st_mode,
+        source_before.st_uid,
+        source_before.st_gid,
+        source_before.st_nlink,
+        source_before.st_size,
+        source_before.st_mtime_ns,
+    ):
+        reject()
+finally:
+    os.close(source_descriptor)
+PY
     chmod 0755 "$INSTALLING_HELPER_PARTIAL" || return 1
+    sync -f "$INSTALLING_HELPER_PARTIAL" || return 1
     mv -- "$INSTALLING_HELPER_PARTIAL" "$INSTALLING_HELPER" || return 1
     sync -f /usr/local/sbin || return 1
   fi
@@ -692,8 +1256,9 @@ run_forward_only_recovery() {
   local profile_mountpoint="$1" control_mountpoint="$2"
   env -i PATH="$SAFE_PATH" python3 -I - \
     "$H14_PARENT" "$RECOVERY_RELEASE" "$TARGET" "$PREDECESSOR_HELPER_SHA256" \
-    "$SUCCESSOR_HELPER_SHA256" "$AUTHORIZATION_SHA256" "$profile_mountpoint" \
-    "$control_mountpoint" "$SOURCE_BINDING" "$OWNER_RECEIPT_ROOT" \
+    "$SUCCESSOR_HELPER_SHA256" "$AUTHORIZATION_SHA256" "$EMPTY_CHECKPOINT_RELEASE" \
+    "$EMPTY_CHECKPOINT_RECORD_NAME" "$profile_mountpoint" "$control_mountpoint" \
+    "$SOURCE_BINDING" "$OWNER_RECEIPT_ROOT" \
     "$PLAYER_STAGE_NAME" "$CLAIM_STAGE_NAME" "$FAILED_MARKER_NAME" \
     "$TERMINAL_MARKER_NAME" <<'PY'
 import hashlib
@@ -709,6 +1274,8 @@ import sys
     predecessor_sha,
     successor_sha,
     authorization_sha,
+    empty_checkpoint_release,
+    empty_checkpoint_record_name,
     profile_root,
     control_root,
     source_binding,
@@ -823,6 +1390,82 @@ def create_exact(path, data, uid, gid, mode):
         os.close(descriptor)
 
 
+def complete_empty_creation_metadata(path, uid, gid, mode):
+    expected_created_mode = mode & ~0o077
+    descriptor = os.open(
+        path,
+        os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        identity = (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode))
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_nlink != 1
+            or before.st_size != 0
+            or identity not in {
+                (0, 0, expected_created_mode),
+                (uid, gid, expected_created_mode),
+            }
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, mode)
+        os.fsync(descriptor)
+        after = os.fstat(descriptor)
+        if (
+            (after.st_dev, after.st_ino, after.st_uid, after.st_gid,
+             stat.S_IMODE(after.st_mode), after.st_nlink, after.st_size)
+            != (before.st_dev, before.st_ino, uid, gid, mode, 1, 0)
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+
+
+def append_complete_exact(path, data, uid, gid, mode):
+    if not os.path.lexists(path):
+        create_exact(path, data, uid, gid, mode)
+        return
+    initial = os.lstat(path)
+    if (initial.st_uid, initial.st_gid, stat.S_IMODE(initial.st_mode)) != (uid, gid, mode):
+        complete_empty_creation_metadata(path, uid, gid, mode)
+    current, before = exact_file(path, (uid, gid), mode, len(data))
+    if current != data[:len(current)]:
+        reject()
+    descriptor = os.open(
+        path,
+        os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    try:
+        opened = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+            or (opened.st_uid, opened.st_gid, stat.S_IMODE(opened.st_mode), opened.st_nlink)
+            != (uid, gid, mode, 1)
+            or opened.st_size != len(current)
+        ):
+            reject()
+        write_all(descriptor, data[len(current):])
+        os.fsync(descriptor)
+        after = os.fstat(descriptor)
+        completed = os.pread(descriptor, len(data) + 1, 0)
+        if (
+            (after.st_dev, after.st_ino, after.st_uid, after.st_gid,
+             stat.S_IMODE(after.st_mode), after.st_nlink, after.st_size)
+            != (before.st_dev, before.st_ino, uid, gid, mode, 1, len(data))
+            or completed != data
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+
+
 def publish_record(root, name, data, uid=0, gid=0, mode=0o600):
     final = f'{root}/{name}'
     temporary = f'{root}/.{name}.installing'
@@ -832,9 +1475,9 @@ def publish_record(root, name, data, uid=0, gid=0, mode=0o600):
         current, _ = exact_file(final, (uid, gid), mode, len(data), len(data))
         if current != data:
             reject()
+        sync_directory(root)
         return
-    if not os.path.lexists(temporary):
-        create_exact(temporary, data, uid, gid, mode)
+    append_complete_exact(temporary, data, uid, gid, mode)
     current, _ = exact_file(temporary, (uid, gid), mode, len(data), len(data))
     if current != data:
         reject()
@@ -877,7 +1520,8 @@ def validate_profile_tree(path, expected_dev):
 
 
 def rename_file(source, target, owner, mode, expected_data, expected_dev_ino, expected_sha=None):
-    if os.path.lexists(target):
+    target_present = os.path.lexists(target)
+    if target_present:
         if os.path.lexists(source):
             reject()
         data, value = exact_file(target, owner, mode, max(8192, len(expected_data)), len(expected_data))
@@ -895,6 +1539,9 @@ def rename_file(source, target, owner, mode, expected_data, expected_dev_ino, ex
         reject()
     if expected_sha is not None and hashlib.sha256(data).hexdigest() != expected_sha:
         reject()
+    if target_present:
+        sync_directory(os.path.dirname(source))
+        sync_directory(os.path.dirname(target))
 
 
 def attest_stage(
@@ -944,6 +1591,7 @@ def consume_stage(
     if authorization != authorization_data:
         reject()
     if not os.path.lexists(source):
+        sync_directory(os.path.dirname(source))
         return
     parent_path = os.path.dirname(source)
     basename = os.path.basename(source)
@@ -1011,7 +1659,8 @@ def consume_stage(
 
 
 def rename_profile(source, target, profile_id, expected_dev_ino):
-    if os.path.lexists(target):
+    target_present = os.path.lexists(target)
+    if target_present:
         if os.path.lexists(source):
             reject()
         value = os.lstat(target)
@@ -1029,24 +1678,27 @@ def rename_profile(source, target, profile_id, expected_dev_ino):
     if f'{value.st_dev}:{value.st_ino}' != expected_dev_ino:
         reject()
     validate_profile_tree(target, value.st_dev)
+    if target_present:
+        sync_directory(os.path.dirname(source))
+        sync_directory(os.path.dirname(target))
 
 
 try:
-    if RELEASE.fullmatch(release) is None or SHA.fullmatch(authorization_sha) is None:
+    if (
+        RELEASE.fullmatch(release) is None
+        or RELEASE.fullmatch(empty_checkpoint_release) is None
+        or release == empty_checkpoint_release
+        or SHA.fullmatch(authorization_sha) is None
+    ):
         reject()
     exact_directory(profile_root)
     exact_directory(control_root)
     exact_directory(owner_root, (0, 0), 0o755)
-    if not os.path.lexists(parent):
-        os.mkdir(parent, 0o700)
-        os.chown(parent, 0, 0)
-        os.chmod(parent, 0o700)
-        sync_directory(os.path.dirname(parent))
     parent_value = exact_directory(parent, (0, 0), 0o700)
     installing = f'{parent}/.installing-{release}'
     final_root = f'{parent}/{release}'
     parent_entries = set(os.listdir(parent))
-    if parent_entries not in ({f'.installing-{release}'}, {release}, set()):
+    if parent_entries not in ({f'.installing-{release}'}, {release}):
         reject()
     if os.path.lexists(final_root):
         if os.path.lexists(installing):
@@ -1055,16 +1707,41 @@ try:
         exact_directory(root, (0, 0), 0o700)
     else:
         if not os.path.lexists(installing):
-            os.mkdir(installing, 0o700)
-            os.chown(installing, 0, 0)
-            os.chmod(installing, 0o700)
-            sync_directory(parent)
+            reject()
         root = installing
         exact_directory(root, (0, 0), 0o700)
-    if os.lstat(root).st_dev != parent_value.st_dev:
+    root_value = os.lstat(root)
+    if root_value.st_dev != parent_value.st_dev:
+        reject()
+
+    adoption_path = f'{root}/{empty_checkpoint_record_name}'
+    adoption, _, _ = exact_ascii_record(adoption_path, (0, 0), 0o600, 20)
+    if adoption != [
+        'version=1',
+        'contract=fetanagent-kemerbet-quarantine-recovery-v14-empty-checkpoint-adoption',
+        'state=adoption-prepared',
+        'same_inode_target_rename_authorized=true',
+        'namespace_rename_pending_at_publication=true',
+        f'predecessor_recovery_release={empty_checkpoint_release}',
+        f'successor_recovery_release={release}',
+        f'checkpoint_dev_ino={root_value.st_dev}:{root_value.st_ino}',
+        f'source_namespace=.installing-{empty_checkpoint_release}',
+        f'target_namespace=.installing-{release}',
+        'durable_retirement_intent_present=false',
+        'deployment_grant_changed=false',
+        'helper_changed=false',
+        'runtime_mutated=false',
+        'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false',
+        'amount_entry_enabled=false',
+        'transfer_enabled=false',
+        'money_moved=false',
+    ]:
         reject()
 
     allowed_root_entries = {
+        empty_checkpoint_record_name,
         'runtime-retirement-intent-v1',
         'runtime-retired-v1',
         'intent-v1',
@@ -1081,6 +1758,7 @@ try:
         'host-retired-v1',
         '.host-retired-v1.installing',
         'owner-runtime-restored-v1',
+        '.owner-runtime-restored-v1.installing',
     }
     if not set(os.listdir(root)).issubset(allowed_root_entries):
         reject()
@@ -1130,7 +1808,9 @@ try:
 
     intent_path = f'{root}/intent-v1'
     intent_temporary = f'{root}/.intent-v1.installing'
-    if not os.path.lexists(intent_path) and not os.path.lexists(intent_temporary):
+    if os.path.lexists(intent_path) and os.path.lexists(intent_temporary):
+        reject()
+    if not os.path.lexists(intent_path):
         profile_entries = os.listdir(profile_root)
         control_entries = set(os.listdir(control_root))
         owner_entries = set(os.listdir(owner_root))
@@ -1359,6 +2039,7 @@ try:
 
     expected_entries = {
         'claim-stage-consumption-v1',
+        empty_checkpoint_record_name,
         'host-retired-v1',
         'intent-v1',
         'player-stage-consumption-v1',
@@ -1369,8 +2050,44 @@ try:
         'runtime-retired-v1',
         'runtime-retirement-intent-v1',
     }
+    owner_restored_lines = [
+        'version=1',
+        f'recovery_release={release}',
+        f'runtime_release={PREDECESSOR_RUNTIME_RELEASE}',
+        f'owner_container_id={owner_container_id}',
+        f'owner_contract_sha256={runtime_intent[6].split("=", 1)[1]}',
+        'owner_running=true',
+        'owner_healthy=true',
+        'coordinator_absent=true',
+        'transfer_disabled=true',
+        'amount_entry_enabled=false',
+        'money_moved=false',
+    ]
+    owner_restored_data = ('\n'.join(owner_restored_lines) + '\n').encode('ascii')
     if root == installing:
-        if set(os.listdir(root)) != expected_entries or set(os.listdir(owner_root)) != {terminal_name}:
+        owner_restored_path = f'{root}/owner-runtime-restored-v1'
+        owner_restored_temporary = f'{root}/.owner-runtime-restored-v1.installing'
+        if os.path.lexists(owner_restored_path) and os.path.lexists(owner_restored_temporary):
+            reject()
+        owner_restore_entries = set()
+        if os.path.lexists(owner_restored_temporary):
+            owner_restored_prefix, _ = exact_file(
+                owner_restored_temporary,
+                (0, 0),
+                0o600,
+                len(owner_restored_data),
+            )
+            if owner_restored_prefix != owner_restored_data[:len(owner_restored_prefix)]:
+                reject()
+            owner_restore_entries.add('.owner-runtime-restored-v1.installing')
+        elif os.path.lexists(owner_restored_path):
+            owner_restored, _, _ = exact_ascii_record(
+                owner_restored_path, (0, 0), 0o600, 11
+            )
+            if owner_restored != owner_restored_lines:
+                reject()
+            owner_restore_entries.add('owner-runtime-restored-v1')
+        if set(os.listdir(root)) != expected_entries | owner_restore_entries or set(os.listdir(owner_root)) != {terminal_name}:
             reject()
         if os.path.lexists(final_root) or set(os.listdir(parent)) != {f'.installing-{release}'}:
             reject()
@@ -1380,19 +2097,7 @@ try:
         owner_restored, _, _ = exact_ascii_record(
             f'{root}/owner-runtime-restored-v1', (0, 0), 0o600, 11
         )
-        if owner_restored != [
-            'version=1',
-            f'recovery_release={release}',
-            f'runtime_release={PREDECESSOR_RUNTIME_RELEASE}',
-            f'owner_container_id={owner_container_id}',
-            f'owner_contract_sha256={runtime_intent[6].split("=", 1)[1]}',
-            'owner_running=true',
-            'owner_healthy=true',
-            'coordinator_absent=true',
-            'transfer_disabled=true',
-            'amount_entry_enabled=false',
-            'money_moved=false',
-        ]:
+        if owner_restored != owner_restored_lines:
             reject()
         expected_entries.add('owner-runtime-restored-v1')
         if set(os.listdir(parent)) != {release} or set(os.listdir(root)) != expected_entries:
@@ -1412,55 +2117,99 @@ require_helper_file "$STAGED_HELPER" "$SUCCESSOR_HELPER_SHA256" 600 ||
 require_exact_h13_evidence || die 'the immutable H13 predecessor evidence is invalid'
 require_financial_gates_disabled || die 'a financial, executor, final-action, Amount, or Transfer gate is not disabled'
 
-h14_state='absent'
-if [[ -e "$H14_PARENT" || -L "$H14_PARENT" ]]; then
-  [[ ! -L "$H14_PARENT" && -d "$H14_PARENT" && "$(realpath -- "$H14_PARENT")" == "$H14_PARENT" &&
-    "$(stat --format='%U:%G:%a' "$H14_PARENT")" == 'root:root:700' ]] ||
-    die 'the H14 recovery parent is unsafe'
-  h14_children="$(find -P "$H14_PARENT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
-    die 'the H14 recovery namespace could not be read'
-  case "$h14_children" in
-    '') h14_state='interrupted' ;;
-    ".installing-$RECOVERY_RELEASE") h14_state='interrupted' ;;
-    "$RECOVERY_RELEASE") h14_state='retired' ;;
-    *) die 'the H14 recovery namespace is foreign or ambiguous' ;;
-  esac
-fi
+[[ -e "$H14_PARENT" || -L "$H14_PARENT" ]] ||
+  die 'the exact predecessor H14 checkpoint namespace is absent'
+[[ ! -L "$H14_PARENT" && -d "$H14_PARENT" && "$(realpath -- "$H14_PARENT")" == "$H14_PARENT" &&
+  "$(stat --format='%U:%G:%a' "$H14_PARENT")" == 'root:root:700' ]] ||
+  die 'the H14 recovery parent is unsafe'
+h14_children="$(find -P "$H14_PARENT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ||
+  die 'the H14 recovery namespace could not be read'
+case "$h14_children" in
+  ".installing-$EMPTY_CHECKPOINT_RELEASE") h14_state='predecessor-empty' ;;
+  ".installing-$RECOVERY_RELEASE") h14_state='interrupted' ;;
+  "$RECOVERY_RELEASE") h14_state='retired' ;;
+  '') die 'the empty H14 recovery parent cannot establish checkpoint lineage' ;;
+  *) die 'the H14 recovery namespace is foreign or ambiguous' ;;
+esac
 
-if [[ "$h14_state" == 'absent' ]]; then
-  if require_active_grant_only; then
-    initial_grant_state='active'
-  else
-    require_disabled_grant_only ||
-      die 'the absent H14 prefix has neither the exact active nor exact disabled deployment grant'
-    initial_grant_state='disabled-preintent'
-  fi
+if [[ "$h14_state" == 'predecessor-empty' ]]; then
+  require_exact_empty_predecessor_checkpoint_prefix ||
+    die 'the predecessor H14 empty checkpoint is not the one exact resumable prefix'
+  require_active_grant_only ||
+    die 'the predecessor H14 empty checkpoint must retain the unchanged active deployment grant'
   require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 ||
-    die 'the installed H13 predecessor helper is not exact'
+    die 'the predecessor H14 empty checkpoint must retain the exact H13 helper'
   run_helper_direct verify "$PREDECESSOR_HELPER_SHA256" >/dev/null ||
-    die 'the H13 helper rejected its reviewed digest'
+    die 'the H13 helper rejected its reviewed digest beside the empty checkpoint'
   run_helper_direct kemerbet-v3-recheck-bridge-ready \
     "$PREDECESSOR_HELPER_SHA256" "$PREDECESSOR_RELEASE" >/dev/null ||
-    die 'the H13 helper rejected its exact no-transfer predecessor state'
+    die 'the H13 helper rejected its exact no-transfer state beside the empty checkpoint'
+  initial_grant_state='active-predecessor-empty'
 elif [[ "$h14_state" == 'interrupted' ]]; then
+  require_adopted_empty_checkpoint_record "$RECOVERY_INSTALLING" ||
+    die 'the interrupted H14 hotfix prefix is missing its exact predecessor-checkpoint adoption record'
+  classify_h14_base_phase "$RECOVERY_INSTALLING" ||
+    die 'the interrupted H14 hotfix prefix phase is not exact'
+  initial_h14_prefix_phase="$H14_PREFIX_PHASE"
   require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 ||
     die 'an interrupted pre-install H14 recovery must retain the exact predecessor helper'
-  if require_disabled_grant_only; then
-    initial_grant_state='disabled'
-  else
-    require_active_grant_only ||
-      die 'the interrupted H14 prefix has neither the exact active nor exact disabled deployment grant'
-    initial_grant_state='active-prefix-review-required'
-  fi
+  case "$initial_h14_prefix_phase" in
+    adoption-only)
+      require_active_grant_only ||
+        die 'an adoption-only H14 hotfix prefix requires the unchanged active grant'
+      initial_grant_state='active-adoption-only'
+      ;;
+    runtime-intent-prepared)
+      require_active_grant_only ||
+        die 'a prepared runtime-intent temporary prefix requires the active grant'
+      initial_grant_state='active-runtime-intent-prepared'
+      ;;
+    runtime-intent)
+      if require_active_grant_only; then
+        initial_grant_state='active-runtime-intent'
+      else
+        require_disabled_grant_only ||
+          die 'the runtime-intent H14 prefix has neither the exact active nor exact disabled grant'
+        initial_grant_state='disabled-runtime-intent'
+      fi
+      ;;
+    post-retirement)
+      require_disabled_grant_only ||
+        die 'a post-retirement H14 prefix requires the disabled deployment grant'
+      initial_grant_state='disabled-post-retirement'
+      ;;
+    complete)
+      require_disabled_grant_only ||
+        die 'a complete installing H14 prefix requires the disabled deployment grant'
+      initial_grant_state='disabled-installing-complete'
+      ;;
+    *) die 'the interrupted H14 prefix phase is unrecognized' ;;
+  esac
 else
-  require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 ||
-    require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755 ||
-    die 'the retired H14 state has an unreviewed installed helper'
-  if require_disabled_grant_only; then
-    initial_grant_state='disabled'
+  require_adopted_empty_checkpoint_record "$RECOVERY_ROOT" ||
+    die 'the completed H14 hotfix prefix is missing its exact predecessor-checkpoint adoption record'
+  if require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755; then
+    classify_h14_base_phase "$RECOVERY_ROOT" ||
+      die 'the completed H14 predecessor-helper namespace is not an exact installer base'
+    [[ "$H14_PREFIX_PHASE" == 'complete' ]] ||
+      die 'the completed H14 predecessor-helper namespace is an impossible partial prefix'
+    require_disabled_grant_only ||
+      die 'a completed H14 prefix with the predecessor helper requires the disabled grant'
+    initial_grant_state='disabled-retired-predecessor'
+  elif require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755; then
+    run_helper_direct verify "$SUCCESSOR_HELPER_SHA256" >/dev/null ||
+      die 'the completed H14 successor helper rejected its reviewed digest'
+    run_helper_direct kemerbet-quarantine-recovery-ready "$RECOVERY_RELEASE" >/dev/null ||
+      die 'the completed H14 successor helper rejected its exact derived namespace'
+    if require_active_grant_only; then
+      initial_grant_state='active-retired-successor'
+    else
+      require_disabled_grant_only ||
+        die 'the completed H14 successor-helper grant topology is invalid'
+      initial_grant_state='disabled-retired-successor'
+    fi
   else
-    require_active_grant_only || die 'the retired H14 deployment grant topology is invalid'
-    initial_grant_state='active-retired-review-required'
+    die 'the retired H14 state has an unreviewed installed helper'
   fi
 fi
 
@@ -1481,16 +2230,106 @@ else
   locked_grant_state='disabled'
 fi
 case "$initial_grant_state:$locked_grant_state" in
-  active:active|active-prefix-review-required:active|active-retired-review-required:active|disabled-preintent:disabled|disabled:disabled) ;;
+  active-predecessor-empty:active|active-adoption-only:active|active-runtime-intent-prepared:active|active-runtime-intent:active|active-retired-successor:active|disabled-runtime-intent:disabled|disabled-post-retirement:disabled|disabled-installing-complete:disabled|disabled-retired-predecessor:disabled|disabled-retired-successor:disabled) ;;
   *) die 'the exact deployment grant prefix changed before durable intent preparation' ;;
 esac
+sync -f /etc/sudoers.d || die 'the exact deployment grant namespace could not be durably re-attested'
+
+case "$h14_state" in
+  predecessor-empty) ;;
+  interrupted)
+    classify_h14_base_phase "$RECOVERY_INSTALLING" ||
+      die 'the interrupted H14 prefix phase changed before durable intent preparation'
+    [[ "$H14_PREFIX_PHASE" == "$initial_h14_prefix_phase" ]] ||
+      die 'the interrupted H14 prefix advanced outside the mutation lock'
+    require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 ||
+      die 'the interrupted H14 predecessor helper changed before durable intent preparation'
+    case "$H14_PREFIX_PHASE:$locked_grant_state" in
+      adoption-only:active|runtime-intent-prepared:active|runtime-intent:active|runtime-intent:disabled|post-retirement:disabled|complete:disabled) ;;
+      *) die 'the interrupted H14 phase/grant topology is unsafe' ;;
+    esac
+    sync -f "$H14_PARENT" ||
+      die 'the interrupted H14 namespace rename could not be durably re-attested'
+    ;;
+  retired)
+    require_adopted_empty_checkpoint_record "$RECOVERY_ROOT" ||
+      die 'the completed H14 adoption record changed before helper attestation'
+    if require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755; then
+      classify_h14_base_phase "$RECOVERY_ROOT" ||
+        die 'the completed H14 predecessor-helper namespace changed before attestation'
+      [[ "$H14_PREFIX_PHASE" == 'complete' ]] ||
+        die 'the completed H14 predecessor-helper namespace became partial'
+      [[ "$locked_grant_state" == 'disabled' ]] ||
+        die 'the completed H14 predecessor-helper topology became active'
+    else
+      require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755 ||
+        die 'the completed H14 helper changed before attestation'
+      run_helper_direct kemerbet-quarantine-recovery-ready "$RECOVERY_RELEASE" >/dev/null ||
+        die 'the completed H14 derived namespace changed before attestation'
+    fi
+    sync -f "$H14_PARENT" ||
+      die 'the completed H14 namespace rename could not be durably re-attested'
+    ;;
+  *) die 'the H14 state changed before durable intent preparation' ;;
+esac
+
+if [[ "$h14_state" == 'retired' ]] &&
+  require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755; then
+  [[ ! -e "$INSTALLING_HELPER" && ! -L "$INSTALLING_HELPER" &&
+    ! -e "$INSTALLING_HELPER_PARTIAL" && ! -L "$INSTALLING_HELPER_PARTIAL" ]] ||
+    die 'the completed H14 successor-helper topology contains installer residue'
+  sync -f /usr/local/sbin ||
+    die 'the completed H14 successor-helper rename could not be durably re-attested'
+  run_helper_direct verify "$SUCCESSOR_HELPER_SHA256" >/dev/null ||
+    die 'the completed H14 successor helper failed its under-lock digest verification'
+  run_helper_direct kemerbet-quarantine-recovery-ready "$RECOVERY_RELEASE" >/dev/null ||
+    die 'the completed H14 successor helper rejected its exact derived recovery state'
+  require_financial_gates_disabled ||
+    die 'a financial gate changed during completed H14 idempotent attestation'
+  require_no_other_mutator_processes ||
+    die 'another helper or H14 mutation process appeared during completed-state attestation'
+  require_exact_droplet ||
+    die 'the DigitalOcean Droplet identity changed during completed-state attestation'
+  if [[ "$locked_grant_state" == 'disabled' ]]; then
+    restore_sudoers || die 'the deployment grant could not be restored after completed-state attestation'
+  else
+    require_active_grant_only || die 'the active deployment grant changed during completed-state attestation'
+  fi
+  flock -u "$lock_fd"
+  exec {lock_fd}>&-
+  printf '%s\n' \
+    'KemerBet H14 quarantine recovery already valid: Amount and Transfer disabled; no money moved.'
+  exit 0
+fi
+
+if [[ "$h14_state" == 'predecessor-empty' ]]; then
+  require_exact_empty_predecessor_checkpoint_prefix ||
+    die 'the predecessor H14 empty checkpoint changed under lock'
+  require_helper_file "$TARGET" "$PREDECESSOR_HELPER_SHA256" 755 ||
+    die 'the exact predecessor helper changed before checkpoint adoption'
+  run_helper_direct verify "$PREDECESSOR_HELPER_SHA256" >/dev/null ||
+    die 'the predecessor helper failed verification before checkpoint adoption'
+  run_helper_direct kemerbet-v3-recheck-bridge-ready \
+    "$PREDECESSOR_HELPER_SHA256" "$PREDECESSOR_RELEASE" >/dev/null ||
+    die 'the predecessor H13 bridge changed before checkpoint adoption'
+  adopt_exact_empty_predecessor_checkpoint ||
+    die 'the exact predecessor empty checkpoint could not be durably adopted by the hotfix release'
+  [[ ! -e "$EMPTY_CHECKPOINT_INSTALLING" && ! -L "$EMPTY_CHECKPOINT_INSTALLING" &&
+    ! -L "$RECOVERY_INSTALLING" && -d "$RECOVERY_INSTALLING" &&
+    "$(realpath -- "$RECOVERY_INSTALLING")" == "$RECOVERY_INSTALLING" &&
+    "$(stat --format='%U:%G:%a' "$RECOVERY_INSTALLING")" == 'root:root:700' ]] ||
+    die 'the adopted H14 hotfix checkpoint namespace is invalid'
+  require_adopted_empty_checkpoint_record "$RECOVERY_INSTALLING" ||
+    die 'the adopted H14 hotfix checkpoint evidence is invalid'
+  h14_state='interrupted'
+fi
 
 prepare_or_load_runtime_retirement_intent ||
   die 'the exact coordinator/Owner retirement intent could not be durably prepared or resumed'
 
 if [[ "$locked_grant_state" == 'active' ]]; then
   case "$h14_state" in
-    absent|interrupted)
+    interrupted)
       require_pre_retirement_intent_only ||
         die 'an active grant is allowed only beside the exact durable pre-retirement intent prefix'
       ;;
@@ -1503,20 +2342,6 @@ if [[ "$locked_grant_state" == 'active' ]]; then
   disable_sudoers || die 'the deployment grant could not be disabled safely'
 else
   require_disabled_grant_only || die 'the disabled deployment grant is unsafe'
-fi
-
-if require_helper_file "$TARGET" "$SUCCESSOR_HELPER_SHA256" 755; then
-  run_helper_direct verify "$SUCCESSOR_HELPER_SHA256" >/dev/null ||
-    die 'the installed H14 helper rejected its reviewed digest'
-  run_helper_direct kemerbet-quarantine-recovery-ready "$RECOVERY_RELEASE" >/dev/null ||
-    die 'the installed helper rejected the exact completed H14 recovery namespace'
-  require_financial_gates_disabled || die 'a financial gate changed during H14 idempotent attestation'
-  restore_sudoers || die 'the deployment grant could not be restored safely'
-  flock -u "$lock_fd"
-  exec {lock_fd}>&-
-  printf '%s\n' \
-    'KemerBet H14 quarantine recovery already valid: Amount and Transfer disabled; no money moved.'
-  exit 0
 fi
 
 if [[ "$H14_WORK_ROOT" == "$RECOVERY_INSTALLING" ]] && ! host_retired_prefix_exists; then

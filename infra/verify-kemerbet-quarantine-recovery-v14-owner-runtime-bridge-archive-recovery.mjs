@@ -135,7 +135,8 @@ for (const needle of [
   "readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'",
   "readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
   "readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
+  "readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -150,6 +151,119 @@ for (const needle of [
   'money_moved=false',
 ]) {
   assert.ok(script.includes(needle), `recovery script is missing ${needle}`);
+}
+for (const needle of [
+  "FAILED_CATALOG_CORRECTION_RELEASE='04f51a521280fed43cd1504107c702940e523688'",
+  "FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102909'",
+  "FAILED_CATALOG_CORRECTION_SCRIPT_SHA256='6f2812be35d632c7b9d4430be0de21241b5ad9e57a9b61193d7d360c32bf6e36'",
+  "FAILED_CATALOG_CORRECTION_MANIFEST_SHA256='c2502c5add54b0414d4e0e3d538554ec8e6057f5dbafc537ec8ed8f84a340dc1'",
+  "FAILED_CATALOG_BRIDGE_PARENT_DEV_INO='64769:6102913'",
+  "FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO='64769:6102914'",
+  "FAILED_CATALOG_BRIDGE_INTENT_DEV_INO='64769:6102916'",
+  "FAILED_CATALOG_BRIDGE_INTENT_SHA256='994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799'",
+  "fs.readFileSync('/run/secrets/player_action_database_url'",
+  "fs.existsSync('/run/secrets/owner_control_database_url')",
+  "has_function_privilege(\n          'fetanagent_owner_control_runtime'",
+  'not has_function_privilege(\n          current_user',
+  "not has_function_privilege(\n          'public'",
+  'role.rolconnlimit = 2',
+  'role.rolconnlimit = 1',
+  "await client.query('begin transaction read only')",
+  "await client.query('rollback')",
+  'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1"',
+  'require_exact_api_catalog_container_contract() {',
+  "config.get('Image') != f'fetanagent-api:{release[:12]}'",
+  "config.get('Cmd') != ['node','apps/api/dist/index.js']",
+  "'/run/secrets/owner_control_database_url' in destinations",
+  'len(mounts) != 12',
+  "len({m['Destination'] for m in mounts}) != 12",
+  "(m['Type'],m['Source'],m['Mode'],m['RW'],m['Propagation'])",
+  "source_root='/srv/fetanagent/secrets/staging'",
+  "f'{source_root}/player-action-database-url','',False,'rprivate'",
+  "f'{source_root}/api-action-capability-hmac','',False,'rprivate'",
+  "f'{source_root}/cbe-deposit-reference-fingerprint-key','',False,'rprivate'",
+  "f'{source_root}/deposit-proof-reference-fingerprint-master','',False,'rprivate'",
+  "f'{source_root}/api-action-transport-hmac','',False,'rprivate'",
+  "f'{source_root}/cbe-deposit-reference-key-profile.v1.json','',False,'rprivate'",
+  "f'{source_root}/api-action-semantic-hmac','',False,'rprivate'",
+  "f'{source_root}/cbe-deposit-reference-encryption-key','',False,'rprivate'",
+  "f'{source_root}/deposit-proof-reference-encryption-master','',False,'rprivate'",
+  "f'{source_root}/supabase-ca.crt','',False,'rprivate'",
+  "f'{source_root}/api-action-payload-hmac','',False,'rprivate'",
+  "f'{source_root}/deposit-proof-reference-profile.v2.json','',False,'rprivate'",
+  "host.get('NetworkMode') != expected_network",
+  "host.get('PublishAllPorts') is not False",
+  "config.get('ExposedPorts') is not None",
+  'select count(*) = 1',
+  'select count(*) = 2',
+  "count(*) filter (where grantee.rolname = 'postgres') = 1",
+  "count(*) filter (where grantee.rolname = 'fetanagent_owner_control') = 1",
+  'count(*) filter (where grantee.rolname is null) = 0',
+  "p.proconfig = array['search_path=pg_catalog']::text[]",
+  "p.prorettype = 'record'::regtype",
+  "privilege.privilege_type = 'EXECUTE'",
+]) {
+  assert.ok(script.includes(needle), `API catalog correction proof is missing ${needle}`);
+}
+const catalogProofStart = script.indexOf('require_migration_through_api_catalog()');
+const catalogProofEnd = script.indexOf('\n}\n\nexpected_api_catalog_proof()', catalogProofStart);
+const catalogProof = script.slice(catalogProofStart, catalogProofEnd);
+const acceptsExactFunctionAcl = (rows) =>
+  rows.length === 2 &&
+  rows.filter(
+    (row) =>
+      row.grantee === 'postgres' &&
+      row.grantor === 'postgres' &&
+      row.privilege === 'EXECUTE' &&
+      row.grantable === false,
+  ).length === 1 &&
+  rows.filter(
+    (row) =>
+      row.grantee === 'fetanagent_owner_control' &&
+      row.grantor === 'postgres' &&
+      row.privilege === 'EXECUTE' &&
+      row.grantable === false,
+  ).length === 1;
+const exactFunctionAcl = [
+  { grantee: 'postgres', grantor: 'postgres', privilege: 'EXECUTE', grantable: false },
+  {
+    grantee: 'fetanagent_owner_control',
+    grantor: 'postgres',
+    privilege: 'EXECUTE',
+    grantable: false,
+  },
+];
+assert.ok(acceptsExactFunctionAcl(exactFunctionAcl), 'exact function ACL fixture rejected');
+for (const invalidAcl of [
+  [exactFunctionAcl[0], exactFunctionAcl[0]],
+  [exactFunctionAcl[1], exactFunctionAcl[1]],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantee: null }],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantee: 'PUBLIC' }],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantable: true }],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantor: 'other' }],
+]) {
+  assert.ok(
+    !acceptsExactFunctionAcl(invalidAcl),
+    `invalid function ACL fixture accepted: ${JSON.stringify(invalidAcl)}`,
+  );
+}
+for (const forbidden of [
+  /\bcall\b/iu,
+  /\bdo\s+\$/iu,
+  /\bset\s+role\b/iu,
+  /\binsert\b/iu,
+  /\bupdate\b/iu,
+  /\bdelete\b/iu,
+  /\btruncate\b/iu,
+  /\balter\b/iu,
+  /\bdrop\b/iu,
+  /select\s+.+\s+from\s+app\./isu,
+]) {
+  assert.doesNotMatch(
+    catalogProof,
+    forbidden,
+    `catalog proof contains forbidden operation ${forbidden}`,
+  );
 }
 
 assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
@@ -205,11 +319,11 @@ assert.ok(
   'all Owner generations must use one exact tmpfs contract',
 );
 for (const needle of [
-  "createRequire('/workspace/apps/admin/dist/index.js')",
-  "adminRequire.resolve('pg')",
+  "createRequire('/workspace/apps/api/dist/index.js')",
+  "apiRequire.resolve('pg')",
   "'/workspace/node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/index.js'",
   "pgPackage.version !== '8.22.0'",
-  "const { Client } = adminRequire('pg')",
+  "const { Client } = apiRequire('pg')",
   "typeof Client !== 'function'",
 ]) {
   assert.ok(script.includes(needle), `immutable admin pg resolution proof is missing ${needle}`);
@@ -224,7 +338,7 @@ for (const needle of [
   "FAILED_PG_BRIDGE_INSTALLING_DEV_INO='64769:6102900'",
   "FAILED_PG_BRIDGE_INTENT_DEV_INO='64769:6102901'",
   "FAILED_PG_BRIDGE_INTENT_SHA256='417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72'",
-  'require_prior_failed_runtime_ledger_absent || return 1\n  result="$(env -i',
+  'require_prior_failed_runtime_ledger_absent || return 1\n  require_non_owner_inventory_unchanged || return 1',
 ]) {
   assert.ok(script.includes(needle), `failed fa35244 evidence is missing ${needle}`);
 }
@@ -318,9 +432,7 @@ const intentPublish = execution.indexOf(
 const postIntentValidation = execution.indexOf(
   "require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'",
 );
-const migrationProof = execution.indexOf(
-  'require_migration_through_old_owner "$OLD_OWNER_CONTAINER_ID"',
-);
+const migrationProof = execution.indexOf('require_migration_through_api_catalog');
 const postIntentTerminalProof = execution.indexOf(
   'require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running',
   migrationProof,
@@ -363,6 +475,7 @@ for (const needle of [
   'git fetch --no-tags --depth=1 origin 911758fa1407093bee700918d5a663a7735f1658',
   'git fetch --no-tags --depth=1 origin ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
   'git fetch --no-tags --depth=1 origin 0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
+  'git fetch --no-tags --depth=1 origin 04f51a521280fed43cd1504107c702940e523688',
   'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
   'failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70',
   'failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
@@ -386,6 +499,8 @@ for (const needle of [
   'failed_image_correction_implementation_sha=0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
   'failed_image_correction_manifest_sha256=845d891088a30878e2162f050aa45f7110fadb9831c5bcd7dddd5cec2e3999d8',
   'failed_image_bridge_intent_sha256=89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b',
+  'failed_catalog_correction_implementation_sha=04f51a521280fed43cd1504107c702940e523688',
+  'failed_catalog_bridge_intent_sha256=994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799',
   'canonical_h14_image_initial_state=exact-loaded-before-intent',
   'owner_tmpfs_host_config=required-exact',
   'owner_inspect_mount_inventory=non-tmpfs-eight',
@@ -404,8 +519,9 @@ for (const state of [
   '"$(basename "$prior_root")" "$(basename "$failed_root")"',
   '"$(basename "$failed_root")" "$(basename "$failed_pg_root")"',
   '"$(basename "$failed_pg_root")" "$(basename "$failed_image_root")"',
-  '"$(basename "$failed_image_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_image_root")" "$(basename "$root")"',
+  '"$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")"',
+  '"$(basename "$failed_catalog_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_catalog_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -423,21 +539,23 @@ const prior = '911758fa1407093bee700918d5a663a7735f1658';
 const failed = 'ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b';
 const failedPg = 'fa35244c8e8e2b9f10fe7abb2cd2341864b43471';
 const failedImage = '0a2adc0bf3591fe2449379ac2bf76c21538fadf5';
+const failedCatalog = '04f51a521280fed43cd1504107c702940e523688';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
-  if (exact === [prior, failed, failedPg, failedImage].sort().join('\n')) return 'append';
-  if (exact === [prior, failed, failedPg, failedImage, installing].sort().join('\n'))
+  if (exact === [prior, failed, failedPg, failedImage, failedCatalog].sort().join('\n'))
+    return 'append';
+  if (exact === [prior, failed, failedPg, failedImage, failedCatalog, installing].sort().join('\n'))
     return 'resume';
-  if (exact === [prior, failed, failedPg, failedImage, current].sort().join('\n'))
+  if (exact === [prior, failed, failedPg, failedImage, failedCatalog, current].sort().join('\n'))
     return 'complete';
   return 'reject';
 };
 for (const [children, expected] of [
-  [[prior, failed, failedPg, failedImage], 'append'],
-  [[prior, failed, failedPg, failedImage, installing], 'resume'],
-  [[prior, failed, failedPg, failedImage, current], 'complete'],
+  [[prior, failed, failedPg, failedImage, failedCatalog], 'append'],
+  [[prior, failed, failedPg, failedImage, failedCatalog, installing], 'resume'],
+  [[prior, failed, failedPg, failedImage, failedCatalog, current], 'complete'],
   [[], 'reject'],
   [[current], 'reject'],
   [[prior, installing, current], 'reject'],

@@ -151,6 +151,28 @@ readonly FAILED_IMAGE_BRIDGE_INSTALLING_DEV_INO='64769:6102907'
 readonly FAILED_IMAGE_BRIDGE_INTENT_DEV_INO='64769:6102908'
 readonly FAILED_IMAGE_BRIDGE_INTENT_SIZE='6190'
 readonly FAILED_IMAGE_BRIDGE_INTENT_SHA256='89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b'
+readonly FAILED_CATALOG_CORRECTION_RELEASE='04f51a521280fed43cd1504107c702940e523688'
+readonly FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102909'
+readonly FAILED_CATALOG_CORRECTION_SCRIPT_DEV_INO='64769:6102910'
+readonly FAILED_CATALOG_CORRECTION_SCRIPT_SHA256='6f2812be35d632c7b9d4430be0de21241b5ad9e57a9b61193d7d360c32bf6e36'
+readonly FAILED_CATALOG_CORRECTION_SCRIPT_SIZE='196672'
+readonly FAILED_CATALOG_CORRECTION_VALIDATOR_DEV_INO='64769:6102911'
+readonly FAILED_CATALOG_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_CATALOG_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_CATALOG_CORRECTION_MANIFEST_DEV_INO='64769:6102912'
+readonly FAILED_CATALOG_CORRECTION_MANIFEST_SHA256='c2502c5add54b0414d4e0e3d538554ec8e6057f5dbafc537ec8ed8f84a340dc1'
+readonly FAILED_CATALOG_CORRECTION_MANIFEST_SIZE='6092'
+readonly FAILED_CATALOG_CORRECTION_WORKFLOW_RUN_ID='33245096968'
+readonly FAILED_CATALOG_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_CATALOG_BRIDGE_PARENT_DEV_INO='64769:6102913'
+readonly FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO='64769:6102914'
+readonly FAILED_CATALOG_BRIDGE_INTENT_DEV_INO='64769:6102916'
+readonly FAILED_CATALOG_BRIDGE_INTENT_SIZE='7171'
+readonly FAILED_CATALOG_BRIDGE_INTENT_SHA256='994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799'
+readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
+readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
+readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'
+readonly SOURCE_API_COMPOSE_CONFIG_SHA256='ee42feef7beb518881d5ab726e806ae4a25acf922127be111c016064b54f5591'
 readonly RECOVERY_BUNDLE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
@@ -170,7 +192,8 @@ readonly ORIGINAL_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recover
 readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'
 readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'
 readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'
+readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -220,6 +243,7 @@ readonly PRIOR_FAILED_RECOVERY_ROOT="$RECOVERY_BUNDLE_PARENT/$PRIOR_FAILED_RECOV
 readonly FAILED_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CORRECTION_RELEASE"
 readonly FAILED_PG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_PG_CORRECTION_RELEASE"
 readonly FAILED_IMAGE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_IMAGE_CORRECTION_RELEASE"
+readonly FAILED_CATALOG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CATALOG_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -240,6 +264,9 @@ readonly FAILED_PG_BRIDGE_INTENT="$FAILED_PG_BRIDGE_INSTALLING/intent-v1"
 readonly FAILED_IMAGE_BRIDGE_INSTALLING="$FAILED_IMAGE_BRIDGE_PARENT/.installing-$FAILED_IMAGE_CORRECTION_RELEASE"
 readonly FAILED_IMAGE_BRIDGE_ROOT="$FAILED_IMAGE_BRIDGE_PARENT/$FAILED_IMAGE_CORRECTION_RELEASE"
 readonly FAILED_IMAGE_BRIDGE_INTENT="$FAILED_IMAGE_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_CATALOG_BRIDGE_INSTALLING="$FAILED_CATALOG_BRIDGE_PARENT/.installing-$FAILED_CATALOG_CORRECTION_RELEASE"
+readonly FAILED_CATALOG_BRIDGE_ROOT="$FAILED_CATALOG_BRIDGE_PARENT/$FAILED_CATALOG_CORRECTION_RELEASE"
+readonly FAILED_CATALOG_BRIDGE_INTENT="$FAILED_CATALOG_BRIDGE_INSTALLING/intent-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -258,7 +285,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$PRIOR_FAILED_RECOVERY_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_PG_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_IMAGE_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_IMAGE_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_CATALOG_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -283,9 +311,9 @@ require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:7" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:8" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -346,6 +374,21 @@ require_prior_failed_recovery_claim() {
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_IMAGE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == \
       "$FAILED_IMAGE_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_IMAGE_CORRECTION_MANIFEST_SIZE" &&
     "$(sha256sum -- "$FAILED_IMAGE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_IMAGE_CORRECTION_MANIFEST_SHA256" ]] || return 1
+  [[ ! -L "$FAILED_CATALOG_CORRECTION_ROOT" && -d "$FAILED_CATALOG_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_CATALOG_CORRECTION_ROOT")" == "$FAILED_CATALOG_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CATALOG_CORRECTION_ROOT")" == \
+      "$FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_CATALOG_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  [[ "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CATALOG_CORRECTION_ROOT/$SCRIPT_BASENAME")" == \
+      "$FAILED_CATALOG_CORRECTION_SCRIPT_DEV_INO:root:root:400:1:$FAILED_CATALOG_CORRECTION_SCRIPT_SIZE" &&
+    "$(sha256sum -- "$FAILED_CATALOG_CORRECTION_ROOT/$SCRIPT_BASENAME" | awk '{print $1}')" == "$FAILED_CATALOG_CORRECTION_SCRIPT_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CATALOG_CORRECTION_ROOT/$VALIDATOR_BASENAME")" == \
+      "$FAILED_CATALOG_CORRECTION_VALIDATOR_DEV_INO:root:root:400:1:$FAILED_CATALOG_CORRECTION_VALIDATOR_SIZE" &&
+    "$(sha256sum -- "$FAILED_CATALOG_CORRECTION_ROOT/$VALIDATOR_BASENAME" | awk '{print $1}')" == "$FAILED_CATALOG_CORRECTION_VALIDATOR_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CATALOG_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == \
+      "$FAILED_CATALOG_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_CATALOG_CORRECTION_MANIFEST_SIZE" &&
+    "$(sha256sum -- "$FAILED_CATALOG_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_CATALOG_CORRECTION_MANIFEST_SHA256" ]] || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -480,6 +523,29 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_image_bridge_intent_dev_ino=$FAILED_IMAGE_BRIDGE_INTENT_DEV_INO" \
   "failed_image_bridge_intent_sha256=$FAILED_IMAGE_BRIDGE_INTENT_SHA256" \
   "failed_image_bridge_intent_size=$FAILED_IMAGE_BRIDGE_INTENT_SIZE" \
+  "failed_catalog_correction_implementation_sha=$FAILED_CATALOG_CORRECTION_RELEASE" \
+  "failed_catalog_correction_bundle_root_dev_ino=$FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_catalog_correction_script_dev_ino=$FAILED_CATALOG_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_catalog_correction_script_sha256=$FAILED_CATALOG_CORRECTION_SCRIPT_SHA256" \
+  "failed_catalog_correction_script_size=$FAILED_CATALOG_CORRECTION_SCRIPT_SIZE" \
+  "failed_catalog_correction_validator_dev_ino=$FAILED_CATALOG_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_catalog_correction_validator_sha256=$FAILED_CATALOG_CORRECTION_VALIDATOR_SHA256" \
+  "failed_catalog_correction_validator_size=$FAILED_CATALOG_CORRECTION_VALIDATOR_SIZE" \
+  "failed_catalog_correction_manifest_dev_ino=$FAILED_CATALOG_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_catalog_correction_manifest_sha256=$FAILED_CATALOG_CORRECTION_MANIFEST_SHA256" \
+  "failed_catalog_correction_manifest_size=$FAILED_CATALOG_CORRECTION_MANIFEST_SIZE" \
+  "failed_catalog_correction_workflow_run_id=$FAILED_CATALOG_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_catalog_correction_workflow_run_attempt=$FAILED_CATALOG_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_catalog_bridge_parent_dev_ino=$FAILED_CATALOG_BRIDGE_PARENT_DEV_INO" \
+  "failed_catalog_bridge_installing_dev_ino=$FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_catalog_bridge_intent_dev_ino=$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO" \
+  "failed_catalog_bridge_intent_sha256=$FAILED_CATALOG_BRIDGE_INTENT_SHA256" \
+  "failed_catalog_bridge_intent_size=$FAILED_CATALOG_BRIDGE_INTENT_SIZE" \
+  'migration_catalog_proof=exact-api-player-action-read-only-v1' \
+  "source_api_container_id=$SOURCE_API_CONTAINER_ID" \
+  "source_api_image_id=$SOURCE_API_IMAGE_ID" \
+  "source_api_env_sha256=$SOURCE_API_ENV_SHA256" \
+  "source_api_compose_config_sha256=$SOURCE_API_COMPOSE_CONFIG_SHA256" \
   "source_owner_config_id=$SOURCE_OWNER_IMAGE_ID" \
   "loaded_owner_manifest_image_id=$SOURCE_OWNER_LOADED_IMAGE_ID" \
   'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids' \
@@ -597,7 +663,24 @@ require_prior_failed_runtime_ledger_absent() {
     "$(realpath -- "$FAILED_IMAGE_BRIDGE_INTENT")" == "$FAILED_IMAGE_BRIDGE_INTENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_IMAGE_BRIDGE_INTENT")" == \
       "$FAILED_IMAGE_BRIDGE_INTENT_DEV_INO:root:root:600:1:$FAILED_IMAGE_BRIDGE_INTENT_SIZE" &&
-    "$(sha256sum -- "$FAILED_IMAGE_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_IMAGE_BRIDGE_INTENT_SHA256" ]]
+    "$(sha256sum -- "$FAILED_IMAGE_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_IMAGE_BRIDGE_INTENT_SHA256" &&
+    ! -e "$FAILED_CATALOG_BRIDGE_ROOT" && ! -L "$FAILED_CATALOG_BRIDGE_ROOT" &&
+    ! -L "$FAILED_CATALOG_BRIDGE_PARENT" && -d "$FAILED_CATALOG_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_CATALOG_BRIDGE_PARENT")" == "$FAILED_CATALOG_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CATALOG_BRIDGE_PARENT")" == \
+      "$FAILED_CATALOG_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_CATALOG_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_CATALOG_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_CATALOG_BRIDGE_INSTALLING" && -d "$FAILED_CATALOG_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_CATALOG_BRIDGE_INSTALLING")" == "$FAILED_CATALOG_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CATALOG_BRIDGE_INSTALLING")" == \
+      "$FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_CATALOG_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == 'intent-v1:f' &&
+    ! -L "$FAILED_CATALOG_BRIDGE_INTENT" && -f "$FAILED_CATALOG_BRIDGE_INTENT" &&
+    "$(realpath -- "$FAILED_CATALOG_BRIDGE_INTENT")" == "$FAILED_CATALOG_BRIDGE_INTENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CATALOG_BRIDGE_INTENT")" == \
+      "$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO:root:root:600:1:$FAILED_CATALOG_BRIDGE_INTENT_SIZE" &&
+    "$(sha256sum -- "$FAILED_CATALOG_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_CATALOG_BRIDGE_INTENT_SHA256" ]]
 }
 
 require_exact_droplet() {
@@ -2383,7 +2466,8 @@ require_loaded_image_used_only_by() {
 }
 
 require_pre_create_image_boundary() {
-  require_exact_recovery_source_anchors &&
+  require_api_catalog_proof &&
+    require_exact_recovery_source_anchors &&
     require_original_bridge_namespace_absent &&
     require_prior_failed_runtime_ledger_absent &&
     require_financial_gates_disabled &&
@@ -2393,7 +2477,8 @@ require_pre_create_image_boundary() {
 
 require_post_create_image_boundary() {
   local expected_id="$1"
-  require_exact_recovery_source_anchors &&
+  require_api_catalog_proof &&
+    require_exact_recovery_source_anchors &&
     require_original_bridge_namespace_absent &&
     require_prior_failed_runtime_ledger_absent &&
     require_financial_gates_disabled &&
@@ -2461,6 +2546,87 @@ capture_non_owner_inventory() {
   fi
 }
 
+exact_api_catalog_container_contract_digest() {
+  local api_id="$1"
+  [[ "$api_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+  docker_local container inspect "$api_id" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$api_id" "$PROJECT_NAME" "$PREDECESSOR_RELEASE" "$SOURCE_API_ENV_SHA256" "$SOURCE_API_IMAGE_ID" 3<<'PY'
+import hashlib, json, sys
+expected_id, project, release, expected_env_sha, expected_image_id = sys.argv[1:]
+try:
+    values = json.load(sys.stdin)
+    if not isinstance(values, list) or len(values) != 1 or values[0].get('Id') != expected_id:
+        raise RuntimeError()
+    value = values[0]; config = value['Config']; host = value['HostConfig']; state = value['State']
+    if value.get('Name') != '/fetanagent-staging-beta-api-1' or value.get('Image') != expected_image_id: raise RuntimeError()
+    labels = config['Labels']
+    if labels.get('com.docker.compose.project') != project or labels.get('com.docker.compose.service') != 'api': raise RuntimeError()
+    if labels.get('com.docker.compose.config-hash') != 'ee42feef7beb518881d5ab726e806ae4a25acf922127be111c016064b54f5591': raise RuntimeError()
+    if labels.get('org.opencontainers.image.revision') != release: raise RuntimeError()
+    if config.get('Image') != f'fetanagent-api:{release[:12]}' or config.get('User') != '10001:10001': raise RuntimeError()
+    if config.get('Cmd') != ['node','apps/api/dist/index.js'] or config.get('WorkingDir') != '/workspace' or config.get('Entrypoint') != ['docker-entrypoint.sh']: raise RuntimeError()
+    if not state.get('Running') or state.get('Health',{}).get('Status') != 'healthy': raise RuntimeError()
+    expected_health={'Test':['CMD','node','-e',"fetch('http://127.0.0.1:3000/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"],'Interval':30000000000,'Timeout':3000000000,'StartPeriod':15000000000,'Retries':3}
+    if config.get('Healthcheck') != expected_health: raise RuntimeError()
+    if host.get('ReadonlyRootfs') is not True or host.get('RestartPolicy') != {'Name':'no','MaximumRetryCount':0}: raise RuntimeError()
+    if host.get('CapDrop') != ['ALL'] or host.get('CapAdd') is not None or host.get('Privileged') is not False: raise RuntimeError()
+    if host.get('SecurityOpt') != ['no-new-privileges:true'] or host.get('PidsLimit') != 128: raise RuntimeError()
+    if host.get('Memory') != 268435456 or host.get('NanoCpus') != 500000000 or host.get('Init') is not True: raise RuntimeError()
+    if host.get('Tmpfs') != {'/tmp':'rw,noexec,nosuid,size=32m,mode=1777'}: raise RuntimeError()
+    mounts=value['Mounts']
+    if len(mounts) != 12 or len({m['Destination'] for m in mounts}) != 12: raise RuntimeError()
+    destinations={m['Destination']:(m['Type'],m['Source'],m['Mode'],m['RW'],m['Propagation']) for m in mounts}
+    source_root='/srv/fetanagent/secrets/staging'
+    expected={
+      '/run/secrets/player_action_database_url':('bind',f'{source_root}/player-action-database-url','',False,'rprivate'),
+      '/run/secrets/api_player_action_capability_hmac':('bind',f'{source_root}/api-action-capability-hmac','',False,'rprivate'),
+      '/run/secrets/cbe_deposit_reference_fingerprint_key':('bind',f'{source_root}/cbe-deposit-reference-fingerprint-key','',False,'rprivate'),
+      '/run/secrets/deposit_proof_reference_fingerprint_master':('bind',f'{source_root}/deposit-proof-reference-fingerprint-master','',False,'rprivate'),
+      '/run/secrets/api_player_action_transport_hmac':('bind',f'{source_root}/api-action-transport-hmac','',False,'rprivate'),
+      '/etc/fetanagent/cbe-deposit-reference-key-profile.v1.json':('bind',f'{source_root}/cbe-deposit-reference-key-profile.v1.json','',False,'rprivate'),
+      '/run/secrets/api_player_action_semantic_hmac':('bind',f'{source_root}/api-action-semantic-hmac','',False,'rprivate'),
+      '/run/secrets/cbe_deposit_reference_encryption_key':('bind',f'{source_root}/cbe-deposit-reference-encryption-key','',False,'rprivate'),
+      '/run/secrets/deposit_proof_reference_encryption_master':('bind',f'{source_root}/deposit-proof-reference-encryption-master','',False,'rprivate'),
+      '/run/configs/supabase_ca_certificate':('bind',f'{source_root}/supabase-ca.crt','',False,'rprivate'),
+      '/run/secrets/api_player_action_payload_hmac':('bind',f'{source_root}/api-action-payload-hmac','',False,'rprivate'),
+      '/etc/fetanagent/deposit-proof-reference-profile.v2.json':('bind',f'{source_root}/deposit-proof-reference-profile.v2.json','',False,'rprivate'),
+    }
+    if destinations != expected or '/run/secrets/owner_control_database_url' in destinations: raise RuntimeError()
+    expected_network=f'{project}_staging_service'
+    if host.get('NetworkMode') != expected_network or host.get('PublishAllPorts') is not False: raise RuntimeError()
+    if config.get('ExposedPorts') is not None: raise RuntimeError()
+    if set(value['NetworkSettings']['Networks']) != {expected_network}: raise RuntimeError()
+    if value['NetworkSettings'].get('Ports') not in ({}, None) or host.get('PortBindings') not in ({}, None): raise RuntimeError()
+    required_env={
+      'NODE_ENV':'production','LOG_LEVEL':'info','FINANCIAL_ACTIONS_MODE':'dry_run','API_HOST':'0.0.0.0','API_PORT':'3000',
+      'NODE_EXTRA_CA_CERTS':'/run/configs/supabase_ca_certificate','INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED':'true',
+      'INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED':'true','INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED':'true',
+      'PLAYER_ACTION_DATABASE_URL_FILE':'/run/secrets/player_action_database_url','INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED':'false',
+      'INTERNAL_POSTGRES_RUNTIME_ENABLED':'false','INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED':'false','TELEGRAM_BOT_ENABLED':'false',
+      'TELEGRAM_BETA_ADMISSION_ENABLED':'false','INTERNAL_TELEGRAM_INGRESS_ENABLED':'false',
+      'INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED':'false','KEMERBET_EXECUTOR_ENABLED':'false','KEMERBET_FINAL_ACTION_ENABLED':'false'}
+    if hashlib.sha256(('\n'.join(sorted(config['Env']))+'\n').encode()).hexdigest() != expected_env_sha: raise RuntimeError()
+    env=dict(item.split('=',1) for item in config['Env'])
+    if any(env.get(k)!=v for k,v in required_env.items()): raise RuntimeError()
+    if any(k in env for k in ('PLAYER_ACTION_DATABASE_URL','OWNER_CONTROL_DATABASE_URL','DATABASE_URL')): raise RuntimeError()
+    contract={'id':expected_id,'image':value['Image'],'config_image':config['Image'],'revision':release,'semantic':destinations,'network':sorted(value['NetworkSettings']['Networks']),'state':'running|healthy'}
+    print(hashlib.sha256((json.dumps(contract,sort_keys=True,separators=(',',':'))+'\n').encode()).hexdigest())
+except Exception: raise SystemExit(1)
+PY
+}
+
+require_exact_api_catalog_container_contract() {
+  local api_id="$1" container_image digest image_descriptor image_id
+  digest="$(exact_api_catalog_container_contract_digest "$api_id")" || return 1
+  container_image="$(docker_local container inspect "$api_id" --format '{{.Image}}')" || return 1
+  image_id="$(docker_local image inspect "$container_image" --format '{{.Id}}')" || return 1
+  image_descriptor="$(docker_local image inspect "$container_image" --format '{{.Descriptor.digest}}')" || return 1
+  [[ "$api_id" == "$SOURCE_API_CONTAINER_ID" && "$digest" =~ ^[0-9a-f]{64}$ &&
+    "$container_image" == "$SOURCE_API_IMAGE_ID" && "$container_image" == "$image_id" && "$image_id" == "$image_descriptor" &&
+    "$(docker_local image inspect "$container_image" --format '{{json .RepoTags}}|{{json .RepoDigests}}|{{.Config.User}}')" == \
+      '["fetanagent-api:306818ca812b"]|["fetanagent-api@sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82"]|fetanagent:fetanagent' ]]
+}
+
 require_non_owner_inventory_unchanged() {
   local current current_count current_sha
   current="$(capture_non_owner_inventory)" || return 1
@@ -2485,23 +2651,33 @@ require_runtime_boundary() {
   require_no_host_chromium
 }
 
-require_migration_through_old_owner() {
-  local owner_id="$1" result
+require_migration_through_api_catalog() {
+  local api_id api_semantic api_state expected_line result
   require_prior_failed_runtime_ledger_absent || return 1
+  require_non_owner_inventory_unchanged || return 1
+  api_id="$(container_full_ids_for_service api)" || return 1
+  [[ "$api_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+  require_exact_api_catalog_container_contract "$api_id" || return 1
+  api_semantic="$(container_semantic_contract_digest "$api_id")" || return 1
+  api_state="$(container_runtime_state_digest "$api_id")" || return 1
+  expected_line="$api_id|api|$api_semantic|$api_state"
+  [[ "$(grep -Fxc -- "$expected_line" <<<"$NON_OWNER_INVENTORY")" == '1' ]] || return 1
+  [[ "$(docker_local container inspect "$api_id" --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == 'running|healthy' ]] || return 1
   result="$(env -i PATH="$SAFE_PATH" HOME='/root' DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
-    timeout 30s docker --host "$LOCAL_DOCKER_SOCKET" container exec -i "$owner_id" node - 2>/dev/null <<'JS'
+    timeout 30s docker --host "$LOCAL_DOCKER_SOCKET" container exec -i "$api_id" node - 2>/dev/null <<'JS'
 const fs = require('node:fs');
 const { createRequire } = require('node:module');
-const adminRequire = createRequire('/workspace/apps/admin/dist/index.js');
-const resolvedPg = adminRequire.resolve('pg');
+const apiRequire = createRequire('/workspace/apps/api/dist/index.js');
+const resolvedPg = apiRequire.resolve('pg');
 if (fs.realpathSync(resolvedPg) !== '/workspace/node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/index.js') process.exit(1);
-const pgPackage = adminRequire('pg/package.json');
+const pgPackage = apiRequire('pg/package.json');
 if (pgPackage.name !== 'pg' || pgPackage.version !== '8.22.0') process.exit(1);
-const { Client } = adminRequire('pg');
+const { Client } = apiRequire('pg');
 if (typeof Client !== 'function') process.exit(1);
 
 (async () => {
-  const connectionString = fs.readFileSync('/run/secrets/owner_control_database_url', 'utf8').trim();
+  if (fs.existsSync('/run/secrets/owner_control_database_url')) process.exit(1);
+  const connectionString = fs.readFileSync('/run/secrets/player_action_database_url', 'utf8').trim();
   if (!connectionString) process.exit(1);
   let target;
   try {
@@ -2525,7 +2701,7 @@ if (typeof Client !== 'function') process.exit(1);
     || target.hostname !== 'db.spzpiyxheappsfyswewl.supabase.co'
     || target.hostname.includes('xzztugbgtulptnbpoelr')
     || target.port !== '5432'
-    || username !== 'fetanagent_owner_control_runtime'
+    || username !== 'fetanagent_player_actions_runtime'
     || password === ''
     || database !== 'postgres'
     || searchEntries.length !== 1
@@ -2539,28 +2715,137 @@ if (typeof Client !== 'function') process.exit(1);
     await client.query('begin transaction read only');
     const result = await client.query(`
       select (
-        to_regclass('app.private_owner_kemerbet_quarantine_recoveries') is not null
-        and to_regclass('app.private_owner_kemerbet_quarantine_recovery_requests') is not null
+        current_setting('transaction_read_only') = 'on'
+        and current_user = 'fetanagent_player_actions_runtime'
+        and session_user = current_user
+        and exists (
+          select 1 from pg_catalog.pg_roles role
+           where role.rolname = 'fetanagent_player_actions_runtime'
+             and role.rolcanlogin and not role.rolinherit and not role.rolsuper
+             and not role.rolcreatedb and not role.rolcreaterole
+             and not role.rolreplication and not role.rolbypassrls
+             and role.rolconnlimit = 2
+        )
+        and exists (
+          select 1 from pg_catalog.pg_roles role
+           where role.rolname = 'fetanagent_owner_control_runtime'
+             and role.rolcanlogin and not role.rolinherit and not role.rolsuper
+             and not role.rolcreatedb and not role.rolcreaterole
+             and not role.rolreplication and not role.rolbypassrls
+             and role.rolconnlimit = 1
+        )
+        and (
+          select count(*) = 2 and bool_and(c.relkind = 'r' and c.relrowsecurity and c.relforcerowsecurity)
+            from pg_catalog.pg_class c
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+           where n.nspname = 'app'
+             and c.relname in (
+               'private_owner_kemerbet_quarantine_recoveries',
+               'private_owner_kemerbet_quarantine_recovery_requests'
+             )
+        )
         and to_regprocedure('app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)') is not null
         and has_function_privilege(
+          'fetanagent_owner_control_runtime',
+          'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)',
+          'EXECUTE'
+        )
+        and not has_function_privilege(
           current_user,
           'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)',
           'EXECUTE'
         )
-        and exists (
-          select 1
+        and (
+          select count(*) = 1
+          from pg_catalog.pg_proc p
+          join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'app'
+            and p.proname = 'recover_owner_kemerbet_quarantined_agent_profile'
+        )
+        and (
+          select count(*) = 1
+          from pg_catalog.pg_auth_members membership
+          join pg_catalog.pg_roles member on member.oid = membership.member
+          where member.rolname = 'fetanagent_owner_control_runtime'
+        )
+        and (
+          select count(*) = 1
+          from pg_catalog.pg_auth_members membership
+          join pg_catalog.pg_roles member on member.oid = membership.member
+          where member.rolname = 'fetanagent_player_actions_runtime'
+        )
+        and not has_function_privilege(
+          'public',
+          'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)',
+          'EXECUTE'
+        )
+        and (
+          select count(*) = 1
+            from pg_catalog.pg_auth_members membership
+            join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+            join pg_catalog.pg_roles member on member.oid = membership.member
+           where member.rolname = 'fetanagent_owner_control_runtime'
+             and granted.rolname = 'fetanagent_owner_control'
+             and membership.inherit_option
+             and not membership.set_option
+             and not membership.admin_option
+        )
+        and not exists (
+          select 1 from pg_catalog.pg_auth_members membership
+          join pg_catalog.pg_roles member on member.oid = membership.member
+          where member.rolname = 'fetanagent_owner_control'
+        )
+        and (
+          select count(*) = 1
+            from pg_catalog.pg_auth_members membership
+            join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+            join pg_catalog.pg_roles member on member.oid = membership.member
+           where member.rolname = 'fetanagent_player_actions_runtime'
+             and granted.rolname = 'fetanagent_player_actions'
+             and membership.inherit_option
+             and not membership.set_option
+             and not membership.admin_option
+        )
+        and (
+          select count(*) = 1
             from pg_catalog.pg_proc p
             join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+            join pg_catalog.pg_roles owner on owner.oid = p.proowner
            where n.nspname = 'app'
              and p.proname = 'recover_owner_kemerbet_quarantined_agent_profile'
              and p.pronargs = 3
+             and p.proargtypes::oid[] = array['uuid'::regtype::oid, 'uuid'::regtype::oid, 'uuid'::regtype::oid]
+             and p.prokind = 'f'
+             and p.prorettype = 'record'::regtype
+             and p.proretset
              and p.prosecdef
+             and p.provolatile = 'v'
+             and p.proparallel = 'u'
+             and not p.proleakproof
+             and not p.proisstrict
+             and p.proconfig = array['search_path=pg_catalog']::text[]
+             and owner.rolname = 'postgres'
+             and (
+               select count(*) = 2
+                 and count(*) filter (where grantee.rolname = 'postgres') = 1
+                 and count(*) filter (where grantee.rolname = 'fetanagent_owner_control') = 1
+                 and count(*) filter (where grantee.rolname is null) = 0
+                 and coalesce(bool_and(
+                 privilege.privilege_type = 'EXECUTE'
+                 and not privilege.is_grantable
+                 and grantor.rolname = 'postgres'
+                 and grantee.rolname in ('postgres', 'fetanagent_owner_control')
+                 ), false)
+                 from pg_catalog.aclexplode(p.proacl) privilege
+                 left join pg_catalog.pg_roles grantor on grantor.oid = privilege.grantor
+                 left join pg_catalog.pg_roles grantee on grantee.oid = privilege.grantee
+             )
         )
       ) as ready
     `);
     await client.query('rollback');
     if (result.rows.length !== 1 || result.rows[0].ready !== true) process.exit(1);
-    process.stdout.write('H14_CLAIM_BOUND_MIGRATION_READY');
+    process.stdout.write('H14_API_CATALOG_MIGRATION_READY');
   } catch {
     process.exitCode = 1;
   } finally {
@@ -2569,7 +2854,37 @@ if (typeof Client !== 'function') process.exit(1);
 })();
 JS
 )" || return 1
-  [[ "$result" == 'H14_CLAIM_BOUND_MIGRATION_READY' ]]
+  [[ "$result" == 'H14_API_CATALOG_MIGRATION_READY' ]]
+}
+
+expected_api_catalog_proof() {
+  local api_contract api_id api_state
+  api_id="$(container_full_ids_for_service api)" || return 1
+  [[ "$api_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+  api_contract="$(exact_api_catalog_container_contract_digest "$api_id")" || return 1
+  require_exact_api_catalog_container_contract "$api_id" || return 1
+  api_state="$(container_runtime_state_digest "$api_id")" || return 1
+  [[ "$(grep -Ec -- "^$api_id\\|api\\|[0-9a-f]{64}\\|$api_state$" <<<"$NON_OWNER_INVENTORY")" == '1' ]] || return 1
+  printf '%s\n' \
+    'version=1' \
+    'proof=exact-api-player-action-read-only-catalog-v1' \
+    "api_container_id=$api_id" \
+    "api_normative_contract_sha256=$api_contract" \
+    "api_runtime_state_sha256=$api_state" \
+    "non_owner_inventory_sha256=$NON_OWNER_INVENTORY_SHA256" \
+    'database_target=db.spzpiyxheappsfyswewl.supabase.co:5432/postgres' \
+    'database_role=fetanagent_player_actions_runtime' \
+    'sslmode=verify-full' \
+    'transaction=read-only-rolled-back' \
+    'private_data_read=false' \
+    'recovery_function_called=false'
+}
+
+require_api_catalog_proof() {
+  local path="$BRIDGE_WORK_ROOT/api-catalog-proof-v1"
+  [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+    "$(stat --format='%U:%G:%a:%h' "$path")" == 'root:root:600:1' ]] || return 1
+  cmp -s -- "$path" <(expected_api_catalog_proof)
 }
 
 publish_exact_record() {
@@ -2690,14 +3005,15 @@ create_or_discover_bridge_ledger() {
   require_prior_failed_runtime_ledger_absent || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
-    [[ "$entries" == $'completed-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
+    [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
   else
     case "$entries" in
-      ''|'.intent-v1.installing'|'intent-v1'|$'.replacement-owner-v1.installing\nintent-v1'|\
-      $'intent-v1\nreplacement-owner-v1'|$'.start-owner-v1.installing\nintent-v1\nreplacement-owner-v1'|\
-      $'intent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
-      $'.completed-v1.installing\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
-      $'completed-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1') ;;
+      ''|'.intent-v1.installing'|'intent-v1'|$'.api-catalog-proof-v1.installing\nintent-v1'|\
+      $'api-catalog-proof-v1\nintent-v1'|$'.replacement-owner-v1.installing\napi-catalog-proof-v1\nintent-v1'|\
+      $'api-catalog-proof-v1\nintent-v1\nreplacement-owner-v1'|$'.start-owner-v1.installing\napi-catalog-proof-v1\nintent-v1\nreplacement-owner-v1'|\
+      $'api-catalog-proof-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
+      $'.completed-v1.installing\napi-catalog-proof-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
+      $'api-catalog-proof-v1\ncompleted-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1') ;;
       *) return 1 ;;
     esac
   fi
@@ -2713,6 +3029,20 @@ expected_bridge_intent() {
     "failed_image_bridge_installing_dev_ino=$FAILED_IMAGE_BRIDGE_INSTALLING_DEV_INO" \
     "failed_image_bridge_intent_dev_ino=$FAILED_IMAGE_BRIDGE_INTENT_DEV_INO" \
     "failed_image_bridge_intent_sha256=$FAILED_IMAGE_BRIDGE_INTENT_SHA256" \
+    "failed_catalog_correction_implementation_sha=$FAILED_CATALOG_CORRECTION_RELEASE" \
+    "failed_catalog_correction_bundle_root_dev_ino=$FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_catalog_correction_script_dev_ino=$FAILED_CATALOG_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_catalog_correction_script_sha256=$FAILED_CATALOG_CORRECTION_SCRIPT_SHA256" \
+    "failed_catalog_correction_manifest_dev_ino=$FAILED_CATALOG_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_catalog_correction_manifest_sha256=$FAILED_CATALOG_CORRECTION_MANIFEST_SHA256" \
+    "failed_catalog_bridge_parent_dev_ino=$FAILED_CATALOG_BRIDGE_PARENT_DEV_INO" \
+    "failed_catalog_bridge_installing_dev_ino=$FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_catalog_bridge_intent_dev_ino=$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO" \
+    "failed_catalog_bridge_intent_sha256=$FAILED_CATALOG_BRIDGE_INTENT_SHA256" \
+    'migration_catalog_proof=exact-api-player-action-read-only-v1' \
+    "api_catalog_container_id=$(container_full_ids_for_service api)" \
+    "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
+    "api_catalog_runtime_state_sha256=$(container_runtime_state_digest "$(container_full_ids_for_service api)")" \
     "source_owner_config_id=$SOURCE_OWNER_IMAGE_ID" \
     "loaded_owner_manifest_image_id=$SOURCE_OWNER_LOADED_IMAGE_ID" \
     'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids' \
@@ -2895,6 +3225,20 @@ expected_bridge_completed() {
     "failed_image_bridge_installing_dev_ino=$FAILED_IMAGE_BRIDGE_INSTALLING_DEV_INO" \
     "failed_image_bridge_intent_dev_ino=$FAILED_IMAGE_BRIDGE_INTENT_DEV_INO" \
     "failed_image_bridge_intent_sha256=$FAILED_IMAGE_BRIDGE_INTENT_SHA256" \
+    "failed_catalog_correction_implementation_sha=$FAILED_CATALOG_CORRECTION_RELEASE" \
+    "failed_catalog_correction_bundle_root_dev_ino=$FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_catalog_correction_script_dev_ino=$FAILED_CATALOG_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_catalog_correction_script_sha256=$FAILED_CATALOG_CORRECTION_SCRIPT_SHA256" \
+    "failed_catalog_correction_manifest_dev_ino=$FAILED_CATALOG_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_catalog_correction_manifest_sha256=$FAILED_CATALOG_CORRECTION_MANIFEST_SHA256" \
+    "failed_catalog_bridge_parent_dev_ino=$FAILED_CATALOG_BRIDGE_PARENT_DEV_INO" \
+    "failed_catalog_bridge_installing_dev_ino=$FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_catalog_bridge_intent_dev_ino=$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO" \
+    "failed_catalog_bridge_intent_sha256=$FAILED_CATALOG_BRIDGE_INTENT_SHA256" \
+    'migration_catalog_proof=exact-api-player-action-read-only-v1' \
+    "api_catalog_container_id=$(container_full_ids_for_service api)" \
+    "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
+    "api_catalog_runtime_state_sha256=$(container_runtime_state_digest "$(container_full_ids_for_service api)")" \
     "source_owner_config_id=$SOURCE_OWNER_IMAGE_ID" \
     "loaded_owner_manifest_image_id=$SOURCE_OWNER_LOADED_IMAGE_ID" \
     'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids' \
@@ -3273,21 +3617,25 @@ fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
 # No container process may be entered until the exact recovery intent is
-# durable. Re-run this read-only proof after an interrupted intent whenever the
-# historical Owner is still running; this necessarily precedes the first image
-# load and every later persistent Docker mutation. A resume after the historical
-# Owner was already stopped or removed must instead prove that the exact image
-# was durably loaded by the prior, post-intent phase.
+# durable. Publish its catalog-only result before any persistent Docker mutation;
+# interrupted replay after the historical Owner stop consumes the exact durable
+# proof without opening another Owner-role connection.
 if [[ "$BRIDGE_STATE" != 'complete' ]]; then
   if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; then
     post_intent_old_state="$(docker_local container inspect "$OLD_OWNER_CONTAINER_ID" --format '{{.State.Status}}')" ||
       die 'the post-intent historical Owner state is unavailable'
     if [[ "$post_intent_old_state" == 'running' ]]; then
-      require_migration_through_old_owner "$OLD_OWNER_CONTAINER_ID" ||
-        die 'the exact existing Owner could not prove the claim-bound H14 migration read-only after durable intent'
+      require_migration_through_api_catalog ||
+        die 'the exact existing API could not prove the claim-bound H14 migration catalogs read-only after durable intent'
+      if [[ ! -e "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" && ! -L "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" ]]; then
+        publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof) ||
+          die 'the exact API catalog proof could not be published durably'
+      fi
+      require_api_catalog_proof || die 'the durable API catalog proof changed'
       require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
         die 'the live terminal-attestation boundary changed after durable intent'
     else
+      require_api_catalog_proof || die 'the interrupted Owner stop is missing its durable API catalog proof'
       [[ "$post_intent_old_state" == 'exited' ]] ||
         die 'the post-intent historical Owner is in an unreviewed state'
       require_owner_image_contract ||
@@ -3296,6 +3644,7 @@ if [[ "$BRIDGE_STATE" != 'complete' ]]; then
         die 'the interrupted post-intent terminal-attestation boundary is not exact'
     fi
   else
+    require_api_catalog_proof || die 'the interrupted Owner removal is missing its durable API catalog proof'
     require_owner_image_contract ||
       die 'an interrupted post-intent Owner removal is missing the exact previously loaded image'
   fi

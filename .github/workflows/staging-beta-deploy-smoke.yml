@@ -790,9 +790,11 @@ jobs:
           git fetch --no-tags --depth=1 origin 001316f1f65dc7a9976244e8fc01f90aec665a70
           git fetch --no-tags --depth=1 origin 911758fa1407093bee700918d5a663a7735f1658
           git fetch --no-tags --depth=1 origin ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b
+          git fetch --no-tags --depth=1 origin fa35244c8e8e2b9f10fe7abb2cd2341864b43471
           git cat-file -e 001316f1f65dc7a9976244e8fc01f90aec665a70^{commit}
           git cat-file -e 911758fa1407093bee700918d5a663a7735f1658^{commit}
           git cat-file -e ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b^{commit}
+          git cat-file -e fa35244c8e8e2b9f10fe7abb2cd2341864b43471^{commit}
           test "$(git show 001316f1f65dc7a9976244e8fc01f90aec665a70:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh | sha256sum | awk '{print $1}')" = b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9
           test "$(git show 911758fa1407093bee700918d5a663a7735f1658:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d
           test "$(git show 911758fa1407093bee700918d5a663a7735f1658:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 151404
@@ -802,6 +804,10 @@ jobs:
           test "$(git show ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 160511
           test "$(git show ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b:infra/operations/fetanagent-owner-archive-validator.py | sha256sum | awk '{print $1}')" = 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
           test "$(git show ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b:infra/operations/fetanagent-owner-archive-validator.py | wc -c)" = 11689
+          test "$(git show fa35244c8e8e2b9f10fe7abb2cd2341864b43471:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = 26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f
+          test "$(git show fa35244c8e8e2b9f10fe7abb2cd2341864b43471:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 170007
+          test "$(git show fa35244c8e8e2b9f10fe7abb2cd2341864b43471:infra/operations/fetanagent-owner-archive-validator.py | sha256sum | awk '{print $1}')" = 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          test "$(git show fa35244c8e8e2b9f10fe7abb2cd2341864b43471:infra/operations/fetanagent-owner-archive-validator.py | wc -c)" = 11689
           script=infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh
           validator=infra/operations/fetanagent-owner-archive-validator.py
           bash -n "$script"
@@ -859,6 +865,25 @@ jobs:
           owner_tmpfs_host_config=required-exact
           owner_inspect_mount_inventory=non-tmpfs-eight
           canonical_h14_image_initial_state=absent-before-intent
+          failed_pg_correction_implementation_sha=fa35244c8e8e2b9f10fe7abb2cd2341864b43471
+          failed_pg_correction_bundle_root_dev_ino=64769:6102895
+          failed_pg_correction_script_dev_ino=64769:6102896
+          failed_pg_correction_script_sha256=26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f
+          failed_pg_correction_script_size=170007
+          failed_pg_correction_validator_dev_ino=64769:6102897
+          failed_pg_correction_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          failed_pg_correction_validator_size=11689
+          failed_pg_correction_manifest_dev_ino=64769:6102898
+          failed_pg_correction_manifest_sha256=ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d
+          failed_pg_correction_manifest_size=3532
+          failed_pg_correction_workflow_run_id=33241916761
+          failed_pg_correction_workflow_run_attempt=1
+          failed_pg_bridge_parent_dev_ino=64769:6102899
+          failed_pg_bridge_installing_dev_ino=64769:6102900
+          failed_pg_bridge_intent_dev_ino=64769:6102901
+          failed_pg_bridge_intent_sha256=417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72
+          failed_pg_bridge_intent_size=5045
+          admin_pg_resolution=exact-create-require-admin-dist-pg-8.22.0
           failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70
           failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9
           owner_bundle_manifest_sha256=a5ed7bfb559cd62428fd9c18ac678534fd7a7c511c6be6050d02cb9f57e8ea94
@@ -946,6 +971,8 @@ jobs:
           prior_root="$parent/$prior_release"
           failed_release='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'
           failed_root="$parent/$failed_release"
+          failed_pg_release='fa35244c8e8e2b9f10fe7abb2cd2341864b43471'
+          failed_pg_root="$parent/$failed_pg_release"
           installing="$parent/.installing-$CONFIRMED_RECOVERY_RELEASE"
           root="$parent/$CONFIRMED_RECOVERY_RELEASE"
           script="$root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh"
@@ -964,6 +991,7 @@ jobs:
             echo "prior_release='$prior_release'"
             echo "prior_root='$prior_root'"
             echo "failed_root='$failed_root'"
+            echo "failed_pg_root='$failed_pg_root'"
             echo "installing='$installing'"
             echo "root='$root'"
             echo 'set -euo pipefail'
@@ -1000,11 +1028,16 @@ jobs:
             echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6102890:root:root:400:1:160511 && "$(sha256sum "$failed_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 2a9ce123b931799ba4ee4740789deb4747ba3d4148185c14625e4a430405f373 ]]'
             echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_root/fetanagent-owner-archive-validator.py")" == 64769:6102891:root:root:400:1:11689 && "$(sha256sum "$failed_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
             echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_root/manifest-v1")" == 64769:6102892:root:root:400:1:2457 && "$(sha256sum "$failed_root/manifest-v1" | awk '\''{print $1}'\'')" == 1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d ]]'
+            echo '[[ ! -L "$failed_pg_root" && -d "$failed_pg_root" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_pg_root")" == 64769:6102895:root:root:700:2 ]]'
+            echo '[[ "$(find -P "$failed_pg_root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_pg_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6102896:root:root:400:1:170007 && "$(sha256sum "$failed_pg_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f ]]'
+            echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_pg_root/fetanagent-owner-archive-validator.py")" == 64769:6102897:root:root:400:1:11689 && "$(sha256sum "$failed_pg_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
+            echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_pg_root/manifest-v1")" == 64769:6102898:root:root:400:1:3532 && "$(sha256sum "$failed_pg_root/manifest-v1" | awk '\''{print $1}'\'')" == ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d ]]'
             echo 'children="$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'' | LC_ALL=C sort)"'
             echo 'case "$children" in'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 4 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 5 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 5 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 5 && ! -e "$installing" && ! -L "$installing" ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 5 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 6 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 6 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 6 && ! -e "$installing" && ! -L "$installing" ]] ;;'
             echo '  *) false ;;'
             echo 'esac'
             echo 'if [[ ! -e "$root" && ! -L "$root" ]]; then'
@@ -1026,9 +1059,10 @@ jobs:
             echo "[[ \"\$(sha256sum '$validator' | awk '{print \$1}')\" == '$VALIDATOR_SHA' && \"\$(stat -c %s '$validator')\" == '$VALIDATOR_SIZE' ]]"
             echo "[[ \"\$(sha256sum '$root/manifest-v1' | awk '{print \$1}')\" == '$MANIFEST_SHA' && \"\$(stat -c %s '$root/manifest-v1')\" == '$MANIFEST_SIZE' ]]"
             echo '[[ "$(find -P "$root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
-            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$root")" | LC_ALL=C sort)" ]]'
+            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$root")" | LC_ALL=C sort)" ]]'
             echo '[[ "$(sha256sum "$prior_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d && "$(sha256sum "$prior_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$prior_root/manifest-v1" | awk '\''{print $1}'\'')" == 9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a ]]'
             echo '[[ "$(sha256sum "$failed_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 2a9ce123b931799ba4ee4740789deb4747ba3d4148185c14625e4a430405f373 && "$(sha256sum "$failed_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_root/manifest-v1" | awk '\''{print $1}'\'')" == 1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d ]]'
+            echo '[[ "$(sha256sum "$failed_pg_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f && "$(sha256sum "$failed_pg_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_pg_root/manifest-v1" | awk '\''{print $1}'\'')" == ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d ]]'
             echo "exec bash '$script' '$CONFIRMED_RECOVERY_RELEASE' '$SCRIPT_SHA' '$VALIDATOR_SHA' '$MANIFEST_SHA' 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52' '$H14_RECOVERY_AUTHORIZATION_SHA256'"
             echo '```'
             echo

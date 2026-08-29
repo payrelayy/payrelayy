@@ -20,6 +20,37 @@ const normalized = (path) => readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
 const script = normalized(operation);
 const workflow = normalized(workflowPath);
 
+const workflowManifestStart = workflow.indexOf('cat >"$manifest" <<EOF');
+assert.ok(workflowManifestStart >= 0, 'workflow recovery manifest emitter is missing');
+const workflowManifestEnd = workflow.indexOf('\n          EOF', workflowManifestStart);
+assert.ok(
+  workflowManifestEnd > workflowManifestStart,
+  'workflow recovery manifest terminator is missing',
+);
+const workflowManifestKeys = workflow
+  .slice(workflowManifestStart, workflowManifestEnd)
+  .split('\n')
+  .map((line) => /^\s{10}([a-z0-9_]+)=/.exec(line)?.[1])
+  .filter(Boolean);
+const shellManifestStart = script.indexOf('cmp -s -- "$STAGED_RECOVERY_MANIFEST"');
+assert.ok(shellManifestStart >= 0, 'shell recovery manifest comparator is missing');
+const shellManifestEnd = script.indexOf(
+  "die 'the append-only archive-recovery bundle manifest is not exact'",
+  shellManifestStart,
+);
+assert.ok(
+  shellManifestEnd > shellManifestStart,
+  'shell recovery manifest comparator terminator is missing',
+);
+const shellManifestKeys = [
+  ...script.slice(shellManifestStart, shellManifestEnd).matchAll(/["']([a-z0-9_]+)=/g),
+].map((match) => match[1]);
+assert.deepEqual(
+  shellManifestKeys,
+  workflowManifestKeys,
+  'workflow recovery manifest key order/schema drifted from the shell exact comparator',
+);
+
 function workflowRunBlock(stepName) {
   const step = workflow.indexOf(`      - name: ${stepName}\n`);
   assert.ok(step >= 0, `missing workflow step ${stepName}`);
@@ -101,7 +132,8 @@ for (const needle of [
   "readonly PRIOR_FAILED_RECOVERY_MANIFEST_SHA256='9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a'",
   "readonly ORIGINAL_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge'",
   "readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
+  "readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -145,12 +177,36 @@ assert.ok(
   !script.includes('tmpfs_mode'),
   'all Owner generations must use one exact tmpfs contract',
 );
+for (const needle of [
+  "createRequire('/workspace/apps/admin/dist/index.js')",
+  "adminRequire.resolve('pg')",
+  "'/workspace/node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/index.js'",
+  "pgPackage.version !== '8.22.0'",
+  "const { Client } = adminRequire('pg')",
+  "typeof Client !== 'function'",
+]) {
+  assert.ok(script.includes(needle), `immutable admin pg resolution proof is missing ${needle}`);
+}
+assert.ok(
+  !script.includes("const { Client } = require('pg')"),
+  'stdin-relative pg resolution must not return',
+);
+for (const needle of [
+  "FAILED_PG_CORRECTION_RELEASE='fa35244c8e8e2b9f10fe7abb2cd2341864b43471'",
+  "FAILED_PG_BRIDGE_PARENT_DEV_INO='64769:6102899'",
+  "FAILED_PG_BRIDGE_INSTALLING_DEV_INO='64769:6102900'",
+  "FAILED_PG_BRIDGE_INTENT_DEV_INO='64769:6102901'",
+  "FAILED_PG_BRIDGE_INTENT_SHA256='417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72'",
+  'require_prior_failed_runtime_ledger_absent || return 1\n  result="$(env -i',
+]) {
+  assert.ok(script.includes(needle), `failed fa35244 evidence is missing ${needle}`);
+}
 for (const boundary of [
-  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before image load'\n  docker_local image load",
-  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before Owner stop'\n      docker_local container stop",
-  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before Owner removal'\n  docker_local container rm",
-  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before replacement creation'\n    env -i",
-  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before replacement startup'\n    docker_local container start",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before image load'\n  docker_local image load",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner stop'\n      docker_local container stop",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner removal'\n  docker_local container rm",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement creation'\n    env -i",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement startup'\n    docker_local container start",
 ]) {
   assert.ok(
     script.includes(boundary),
@@ -250,6 +306,10 @@ for (const needle of [
   'failed_correction_manifest_sha256=1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d',
   'failed_correction_bridge_parent_dev_ino=64769:6102893',
   'failed_correction_bridge_installing_dev_ino=64769:6102894',
+  'failed_pg_correction_implementation_sha=fa35244c8e8e2b9f10fe7abb2cd2341864b43471',
+  'failed_pg_correction_manifest_sha256=ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d',
+  'failed_pg_bridge_intent_sha256=417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72',
+  'admin_pg_resolution=exact-create-require-admin-dist-pg-8.22.0',
   'owner_tmpfs_host_config=required-exact',
   'owner_inspect_mount_inventory=non-tmpfs-eight',
   'archive_encoding=oci',
@@ -265,8 +325,9 @@ for (const needle of [
 const rootEmission = workflowRunBlock('Emit exact root-console invocation without execution');
 for (const state of [
   '"$(basename "$prior_root")" "$(basename "$failed_root")"',
-  '"$(basename "$failed_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_root")" "$(basename "$root")"',
+  '"$(basename "$failed_root")" "$(basename "$failed_pg_root")"',
+  '"$(basename "$failed_pg_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_pg_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -282,19 +343,20 @@ assert.ok(
 
 const prior = '911758fa1407093bee700918d5a663a7735f1658';
 const failed = 'ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b';
+const failedPg = 'fa35244c8e8e2b9f10fe7abb2cd2341864b43471';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
-  if (exact === [prior, failed].sort().join('\n')) return 'append';
-  if (exact === [prior, failed, installing].sort().join('\n')) return 'resume';
-  if (exact === [prior, failed, current].sort().join('\n')) return 'complete';
+  if (exact === [prior, failed, failedPg].sort().join('\n')) return 'append';
+  if (exact === [prior, failed, failedPg, installing].sort().join('\n')) return 'resume';
+  if (exact === [prior, failed, failedPg, current].sort().join('\n')) return 'complete';
   return 'reject';
 };
 for (const [children, expected] of [
-  [[prior, failed], 'append'],
-  [[prior, failed, installing], 'resume'],
-  [[prior, failed, current], 'complete'],
+  [[prior, failed, failedPg], 'append'],
+  [[prior, failed, failedPg, installing], 'resume'],
+  [[prior, failed, failedPg, current], 'complete'],
   [[], 'reject'],
   [[current], 'reject'],
   [[prior, installing, current], 'reject'],

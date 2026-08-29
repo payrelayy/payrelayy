@@ -37,6 +37,7 @@ const compose = normalized(composePath);
 
 const canonicalH14 = '06459511d9330a0e1d956c42529b81aa9970e7a2';
 const h13Release = '306818ca812bd2abce8479396c4eea8383ea00f9';
+const reviewedRepairRelease = 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52';
 const authorizationSha256 = '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874';
 const successorHelperSha256 = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58';
 const stagingProjectRef = 'spzpiyxheappsfyswewl';
@@ -212,7 +213,8 @@ assert.match(buildStep, /"\$tar_size" -le 1073741824/);
 const requiredManifestLines = [
   'version=1',
   'contract=fetanagent-h14-owner-runtime-bridge-bundle',
-  'repair_implementation_sha=$CONFIRMED_REPAIR_IMPLEMENTATION',
+  'repair_implementation_sha=$REVIEWED_REPAIR_RELEASE',
+  'terminal_attestation_implementation_sha=$CONFIRMED_REPAIR_IMPLEMENTATION',
   'canonical_h14_sha=$CANONICAL_H14_COMMIT',
   'staging_project_ref=$STAGING_PROJECT_REF',
   'staging_droplet_id=$STAGING_DROPLET_ID',
@@ -290,7 +292,7 @@ assert.match(
 assert.match(emitStep, /sha256sum '\$root_script'/);
 assert.match(
   emitStep,
-  /invocation="bash '\$root_script' '\$CONFIRMED_REPAIR_IMPLEMENTATION' '\$CANONICAL_H14_COMMIT' '\$REMOTE_BUNDLE' '\$MANIFEST_SHA' '\$H14_RECOVERY_AUTHORIZATION_SHA256'"/,
+  /invocation="bash '\$root_script' '\$REVIEWED_REPAIR_RELEASE' '\$CANONICAL_H14_COMMIT' '\$CONFIRMED_REPAIR_IMPLEMENTATION' '\$REMOTE_BUNDLE' '\$MANIFEST_SHA' '\$H14_RECOVERY_AUTHORIZATION_SHA256'"/,
 );
 assert.doesNotMatch(emitStep, /\beval\b/);
 
@@ -323,7 +325,8 @@ assert.match(ownerCompose, /KEMERBET_EXECUTOR_ENABLED: 'false'/);
 assert.match(ownerCompose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/);
 assert.match(ownerCompose, /127\.0\.0\.1:3002:3002/);
 
-const repairFixture = 'a'.repeat(40);
+const repairFixture = reviewedRepairRelease;
+const attestationFixture = 'a'.repeat(40);
 const imageFixture = `fetanagent-owner-control:${canonicalH14.slice(0, 12)}`;
 const imageIdFixture = `sha256:${'b'.repeat(64)}`;
 const digestFixture = 'c'.repeat(64);
@@ -332,6 +335,7 @@ const manifestFixtureLines = [
   'version=1',
   'contract=fetanagent-h14-owner-runtime-bridge-bundle',
   `repair_implementation_sha=${repairFixture}`,
+  `terminal_attestation_implementation_sha=${attestationFixture}`,
   `canonical_h14_sha=${canonicalH14}`,
   `staging_project_ref=${stagingProjectRef}`,
   `staging_droplet_id=${stagingDropletId}`,
@@ -365,6 +369,7 @@ function validateManifestModel(lines) {
 
 const parsedManifestFixture = validateManifestModel(manifestFixtureLines);
 assert.equal(parsedManifestFixture.repair_implementation_sha, repairFixture);
+assert.equal(parsedManifestFixture.terminal_attestation_implementation_sha, attestationFixture);
 assert.equal(parsedManifestFixture.canonical_h14_sha, canonicalH14);
 assert.equal(parsedManifestFixture.owner_image_tag, imageFixture);
 assert.equal(parsedManifestFixture.owner_image_id, imageIdFixture);
@@ -610,12 +615,15 @@ assert.match(bridge, /set -euo pipefail/);
 assert.match(bridge, /umask 077/);
 assert.match(bridge, new RegExp(`readonly CANONICAL_H14='${canonicalH14}'`));
 assert.match(bridge, new RegExp(`readonly PREDECESSOR_RELEASE='${h13Release}'`));
+assert.match(bridge, new RegExp(`readonly REVIEWED_REPAIR_RELEASE='${reviewedRepairRelease}'`));
 assert.match(bridge, new RegExp(`readonly AUTHORIZATION_SHA256='${authorizationSha256}'`));
 assert.match(bridge, new RegExp(`readonly H14_HELPER_SHA256='${successorHelperSha256}'`));
 assert.match(bridge, new RegExp(`readonly STAGING_PROJECT_REF='${stagingProjectRef}'`));
 assert.match(bridge, new RegExp(`readonly EXPECTED_DROPLET_ID='${stagingDropletId}'`));
 assert.match(bridge, /readonly EXPECTED_PUBLIC_IPV4='161\.35\.41\.232'/);
-assert.match(bridge, /\[\[ \$# -eq 5 \]\]/);
+assert.match(bridge, /\[\[ \$# -eq 6 \]\]/);
+assert.match(bridge, /readonly ATTESTATION_RELEASE="\$3"/);
+assert.match(bridge, /\[\[ "\$REPAIR_RELEASE" == "\$REVIEWED_REPAIR_RELEASE" \]\]/);
 assert.match(bridge, /\[\[ "\$PROVIDED_CANONICAL_H14" == "\$CANONICAL_H14" \]\]/);
 assert.match(bridge, /\[\[ "\$PROVIDED_AUTHORIZATION_SHA256" == "\$AUTHORIZATION_SHA256" \]\]/);
 assert.match(bridge, /run only in a fresh DigitalOcean root console/);
@@ -663,21 +671,92 @@ assert.match(
 assert.match(loadH14Function, /tree\.hexdigest\(\)/);
 assert.doesNotMatch(loadH14Function, /os\.O_(?:WRONLY|RDWR)|os\.write|os\.rename|unlink|remove/);
 
-const hostRetiredFunction = shellFunction(bridge, 'require_h14_helper_host_retired');
-assert.match(hostRetiredFunction, /kemerbet-quarantine-recovery-ready/);
+const terminalAttestationFunction = shellFunction(bridge, 'load_exact_terminal_attestation');
 assert.match(
-  hostRetiredFunction,
-  /KemerBet H14 recovery state: host-retired; Transfer and Amount disabled\./,
+  terminalAttestationFunction,
+  /\['completed-v1', 'grant-restoration-intent-v1', 'intent-v1'\]/,
 );
+assert.match(terminalAttestationFunction, /attestation_implementation_release/);
+assert.match(terminalAttestationFunction, /grant_restoration_intent_sha256/);
+assert.match(terminalAttestationFunction, /repair_completion_sha256/);
+assert.match(terminalAttestationFunction, /provider_action_enabled/);
+for (const binding of [
+  "intent['deployment_grant_dev_ino']",
+  "intent['deployment_grant_sha256']",
+  "intent['repair_ledger_dev_ino']",
+  "intent['profile_volume_root_dev_ino']",
+  "intent['control_volume_root_dev_ino']",
+  "intent['owner_receipt_root_dev_ino']",
+  "intent['terminal_marker_dev_ino']",
+  "intent['terminal_marker_sha256']",
+  "intent['bundle_validator_dev_ino']",
+  "intent['differential_validator_sha256']",
+  "intent['differential_validator_size']",
+]) {
+  assert.ok(
+    terminalAttestationFunction.includes(binding),
+    `terminal parser omits live binding: ${binding}`,
+  );
+}
 assert.doesNotMatch(
-  hostRetiredFunction,
+  terminalAttestationFunction,
   /(?:lookup|recheck|private-sign-in|profile|cohort|executor|final-action)-?(?:start|run|create|prepare|arm)/,
+);
+assert.doesNotMatch(bridge, /kemerbet-quarantine-recovery-ready/);
+
+const liveTerminalBoundary = shellFunction(bridge, 'require_live_terminal_attestation_boundary');
+for (const required of [
+  'load_exact_terminal_attestation',
+  'load_exact_h14_and_mount_repair',
+  'require_active_grant_only',
+  'ATTESTED_SUDOERS_DEV_INO',
+  'ATTESTED_REPAIR_ROOT_DEV_INO',
+  'ATTESTED_PROFILE_ROOT_DEV_INO',
+  'ATTESTED_CONTROL_ROOT_DEV_INO',
+  'ATTESTED_RECEIPT_ROOT_DEV_INO',
+  'ATTESTED_TERMINAL_MARKER_DEV_INO',
+  'ATTESTED_VALIDATOR_DEV_INO',
+  'ATTESTED_CLAIM_ROOT_DEV_INO',
+  'ATTESTED_TERMINAL_BRIDGE_DEV_INO',
+  'ATTESTED_TERMINAL_MANIFEST_DEV_INO',
+  'directory(profile_root, (10001, 10001), 0o700, profile_dev_ino, [])',
+  'directory(control_root, (10001, 10001), 0o700, control_dev_ino, [])',
+  'directory(receipt_root, (0, 0), 0o755, receipt_dev_ino, [marker_name])',
+  "['completed-v1', 'intent-v1']",
+  'os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC',
+  'sorted(os.listdir(claim_parent)) != [attestation]',
+  'exact_file(bridge, (0, 0), 0o400, bridge_dev_ino, bridge_sha, bridge_size)',
+  'exact_file(manifest, (0, 0), 0o400, manifest_dev_ino, manifest_sha,',
+  'PASS H14-D000',
+  'require_financial_gates_disabled',
+  'require_no_host_chromium',
+  'container_full_ids_for_service kemerbet-session-provision',
+  'container_full_ids_for_volume "$PROFILE_VOLUME"',
+  'container_full_ids_for_volume "$CONTROL_VOLUME"',
+  'require_container_no_chromium "$expected_control_holder"',
+  'owner_state="$(docker_local container inspect "$expected_control_holder"',
+  'running)',
+  "owner_running\" == 'true'",
+  "owner_health\" == 'healthy'",
+  'exited|created)',
+  "owner_running\" == 'false'",
+  "owner_pid\" == '0'",
+  'kemerbet-readiness-cohort-completed-v1',
+  'kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1',
+  'terminal-recovery-marker-v1',
+]) {
+  assert.ok(liveTerminalBoundary.includes(required), `live terminal boundary omits: ${required}`);
+}
+assert.doesNotMatch(
+  liveTerminalBoundary,
+  /os\.O_(?:WRONLY|RDWR)|os\.write|os\.rename|unlink|remove/,
 );
 
 const claimFunction = shellFunction(bridge, 'claim_and_load_bundle_manifest');
 for (const required of [
   "names = ['compose.staging-beta.yaml', 'fetanagent-owner-control-canonical-h14.tar', 'manifest-v1']",
-  'if len(lines) != 19',
+  'if len(lines) != 20',
+  "'terminal_attestation_implementation_sha'",
   'def exact_descriptor(path, uid, gid, mode, maximum):',
   'os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC',
   'before.st_nlink',
@@ -1161,7 +1240,7 @@ for (const required of [
   'require_owner_image_contract',
   'running|healthy',
   'require_runtime_boundary',
-  'require_h14_helper_host_retired',
+  'require_live_terminal_attestation_boundary',
   'exit 0',
 ]) {
   assert.ok(completeBranch.includes(required), `terminal replay omits: ${required}`);
@@ -1176,6 +1255,46 @@ assert.ok(
   countMatches(main, /require_non_owner_inventory_unchanged/g) >= 12,
   'non-Owner continuity must bracket every Owner/image mutation and terminal check',
 );
+assert.ok(
+  countMatches(main, /require_live_terminal_attestation_boundary/g) >= 9,
+  'live terminal evidence must be revalidated before intent, every Docker mutation, and completion replay',
+);
+assert.doesNotMatch(
+  main,
+  /"\$\(load_exact_terminal_attestation\)"/,
+  'multi-field terminal attestation output must never be compared as one scalar',
+);
+assert.doesNotMatch(
+  main,
+  /require_live_terminal_attestation_boundary\s+\|\|/,
+  'every live-boundary call must supply an exact phase-appropriate control holder',
+);
+for (const [call, minimum] of [
+  ['require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running', 3],
+  ['require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" exited', 1],
+  ['require_live_terminal_attestation_boundary none none', 1],
+  ['require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" created', 1],
+  ['require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running', 3],
+]) {
+  assert.ok(
+    countMatches(main, new RegExp(call.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) >= minimum,
+  );
+}
+
+const phaseFixture = (expected, actual, running, pid, health = '') => {
+  if (expected === 'none') return actual === 'none' && running === false && pid === 0;
+  if (expected !== actual) return false;
+  if (expected === 'running') return running === true && pid > 0 && health === 'healthy';
+  if (expected === 'exited' || expected === 'created') return running === false && pid === 0;
+  return false;
+};
+assert.equal(phaseFixture('running', 'running', true, 71, 'healthy'), true);
+assert.equal(phaseFixture('exited', 'exited', false, 0), true);
+assert.equal(phaseFixture('none', 'none', false, 0), true);
+assert.equal(phaseFixture('created', 'created', false, 0), true);
+assert.equal(phaseFixture('running', 'running', true, 83, 'healthy'), true);
+assert.equal(phaseFixture('exited', 'exited', true, 83), false);
+assert.equal(phaseFixture('created', 'created', false, 12), false);
 assert.match(
   main,
   /running\)[\s\S]*?container stop --time 15 "\$OLD_OWNER_CONTAINER_ID"[\s\S]*?exited\) ;;[\s\S]*?\*\) die 'the historical Owner is in an unreviewed state'/,

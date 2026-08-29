@@ -7,9 +7,10 @@
 # or moves money.
 #
 # Exact CLI (the workflow emits the immutable values and path):
-#   bash /root/fetanagent-h14-owner-runtime-bridge-<repair-sha>/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh \
-#     <repair-implementation-sha> <canonical-h14-sha> <exact-absent-/tmp-bundle-path> \
-#     <manifest-sha256> <quarantine-recovery-authorization-sha256>
+#   bash /root/fetanagent-h14-owner-runtime-bridge-<terminal-attestation-sha>/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh \
+#     <exact-a579-repair-sha> <canonical-h14-sha> <terminal-attestation-sha> \
+#     <exact-absent-/tmp-bundle-path> <manifest-sha256> \
+#     <quarantine-recovery-authorization-sha256>
 
 set -euo pipefail
 
@@ -18,6 +19,7 @@ readonly PROJECT_NAME='fetanagent-staging-beta'
 readonly OWNER_SERVICE='owner-control'
 readonly LOCAL_DOCKER_SOCKET='unix:///var/run/docker.sock'
 readonly PREDECESSOR_RELEASE='306818ca812bd2abce8479396c4eea8383ea00f9'
+readonly REVIEWED_REPAIR_RELEASE='a579e3bf96c075dde9c36dbe3c66c09aaf84bc52'
 readonly CANONICAL_H14='06459511d9330a0e1d956c42529b81aa9970e7a2'
 readonly CANONICAL_TAG='06459511d933'
 readonly H14_HELPER_SHA256='c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58'
@@ -34,6 +36,8 @@ readonly LOCK="$LOCK_ROOT/mutation.lock"
 readonly H14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
 readonly H14_ROOT="$H14_PARENT/$CANONICAL_H14"
 readonly REPAIR_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-live-repair'
+readonly ATTESTATION_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-terminal-attestation'
+readonly ATTESTATION_CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-terminal-attestation-bundles'
 readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
@@ -41,7 +45,18 @@ readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
 readonly CONTROL_VOLUME="${PROJECT_NAME}_kemerbet_session_control"
 readonly OWNER_NETWORK="${PROJECT_NAME}_owner_control_service"
 readonly OWNER_RECEIPT_ROOT='/var/lib/fetanagent/kemerbet-readiness-cohort-receipts'
+readonly SEAL_BINDING='/var/lib/fetanagent/kemerbet-readiness-seal-output/kemerbet_agent_identity_bindings'
 readonly FINAL_BINDING='/etc/fetanagent/executor-secrets/kemerbet_agent_identity_bindings'
+readonly RECHECK_RECEIPT='/var/lib/fetanagent/kemerbet-readiness-recheck/ready-v1'
+readonly PROFILE_ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
+readonly TERMINAL_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
+readonly PROFILE_FINALIZED_NAME='kemerbet-readiness-cohort-security-recovery-profile-finalized-v1'
+readonly FAILED_MARKER_NAME='kemerbet-readiness-cohort-failed-v1'
+readonly PLAYER_STAGE_NAME='kemerbet-readiness-player-ids.stage-v1'
+readonly CLAIM_STAGE_NAME='kemerbet-readiness-cohort-claim.stage-v1'
+readonly TERMINAL_BRIDGE_BASENAME='fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bridge.sh'
+readonly TERMINAL_VALIDATOR_BASENAME='fetanagent-kemerbet-h14-terminal-differential-validator.py'
+readonly TERMINAL_MANIFEST_BASENAME='manifest-v1'
 readonly SCRIPT_BASENAME='fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh'
 readonly IMAGE_ARCHIVE_NAME='fetanagent-owner-control-canonical-h14.tar'
 readonly COMPOSE_NAME='compose.staging-beta.yaml'
@@ -55,24 +70,32 @@ die() {
   exit 1
 }
 
-[[ $# -eq 5 ]] || die 'expected repair SHA, canonical H14 SHA, staged bundle path, manifest digest, and authorization digest'
+[[ $# -eq 6 ]] || die 'expected exact a579 repair SHA, canonical H14 SHA, terminal-attestation SHA, staged bundle path, manifest digest, and authorization digest'
 readonly REPAIR_RELEASE="$1"
 readonly PROVIDED_CANONICAL_H14="$2"
-readonly STAGED_BUNDLE="$3"
-readonly PROVIDED_MANIFEST_SHA256="$4"
-readonly PROVIDED_AUTHORIZATION_SHA256="$5"
-readonly STAGING_ROOT="/root/fetanagent-h14-owner-runtime-bridge-$REPAIR_RELEASE"
+readonly ATTESTATION_RELEASE="$3"
+readonly STAGED_BUNDLE="$4"
+readonly PROVIDED_MANIFEST_SHA256="$5"
+readonly PROVIDED_AUTHORIZATION_SHA256="$6"
+readonly STAGING_ROOT="/root/fetanagent-h14-owner-runtime-bridge-$ATTESTATION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly REPAIR_ROOT="$REPAIR_PARENT/$REPAIR_RELEASE"
-readonly BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$REPAIR_RELEASE"
-readonly BRIDGE_ROOT="$BRIDGE_PARENT/$REPAIR_RELEASE"
-readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$REPAIR_RELEASE"
-readonly CLAIM_ROOT="$CLAIM_PARENT/$REPAIR_RELEASE"
+readonly ATTESTATION_ROOT="$ATTESTATION_PARENT/$ATTESTATION_RELEASE"
+readonly ATTESTATION_CLAIM_ROOT="$ATTESTATION_CLAIM_PARENT/$ATTESTATION_RELEASE"
+readonly ATTESTATION_VALIDATOR="$ATTESTATION_CLAIM_ROOT/$TERMINAL_VALIDATOR_BASENAME"
+readonly BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$ATTESTATION_RELEASE"
+readonly BRIDGE_ROOT="$BRIDGE_PARENT/$ATTESTATION_RELEASE"
+readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
+readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
 
-[[ "$REPAIR_RELEASE" =~ ^[0-9a-f]{40}$ && "$REPAIR_RELEASE" != "$CANONICAL_H14" &&
-  "$REPAIR_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
-  die 'the repair implementation must be one distinct full lowercase commit SHA'
+[[ "$REPAIR_RELEASE" == "$REVIEWED_REPAIR_RELEASE" ]] ||
+  die 'the completed live-repair release is not exact a579'
+[[ "$ATTESTATION_RELEASE" =~ ^[0-9a-f]{40}$ &&
+  "$ATTESTATION_RELEASE" != "$REPAIR_RELEASE" &&
+  "$ATTESTATION_RELEASE" != "$CANONICAL_H14" &&
+  "$ATTESTATION_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
+  die 'the terminal-attestation implementation must be one distinct full lowercase commit SHA'
 [[ "$PROVIDED_CANONICAL_H14" == "$CANONICAL_H14" ]] ||
   die 'the canonical H14 release is not exact'
 [[ "$PROVIDED_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -131,13 +154,6 @@ require_helper_exact() {
     "$TARGET" verify "$H14_HELPER_SHA256" >/dev/null
 }
 
-require_h14_helper_host_retired() {
-  local output
-  output="$(env -i PATH="$SAFE_PATH" HOME='/root' SUDO_USER='fetanagent-admin' \
-    "$TARGET" kemerbet-quarantine-recovery-ready "$CANONICAL_H14")" || return 1
-  [[ "$output" == 'KemerBet H14 recovery state: host-retired; Transfer and Amount disabled.' ]]
-}
-
 require_no_other_mutator_processes() {
   local argument basename cmdline pid
   for cmdline in /proc/[0-9]*/cmdline; do
@@ -150,6 +166,7 @@ require_no_other_mutator_processes() {
       case "$basename" in
         fetanagent-staging-deploy-helper|fetanagent-kemerbet-quarantine-recovery-v14.sh|\
         fetanagent-kemerbet-quarantine-recovery-v14-live-repair.sh|\
+        fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bridge.sh|\
         fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh) return 1 ;;
       esac
     done <"$cmdline" || true
@@ -512,6 +529,524 @@ except Exception:
 PY
 }
 
+load_exact_terminal_attestation() {
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$ATTESTATION_PARENT" "$ATTESTATION_ROOT" "$ATTESTATION_RELEASE" \
+    "$REPAIR_RELEASE" "$CANONICAL_H14" "$AUTHORIZATION_SHA256" \
+    "$H14_HELPER_SHA256" "$OLD_OWNER_CONTAINER_ID" "$RETIRED_COORDINATOR_CONTAINER_ID" \
+    "$OLD_OWNER_SEMANTIC_SHA256" "$H14_NAMESPACE_DEVICE" "$H14_NAMESPACE_INODE" \
+    "$H14_EVIDENCE_TREE_SHA256" "$MOUNT_REPAIR_INTENT_SHA256" \
+    "$MOUNT_REPAIR_COMPLETION_SHA256" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+(parent, root, attestation, repair, canonical, auth, helper, owner, coordinator,
+ semantic, h14_device, h14_inode, h14_tree, repair_intent_sha,
+ repair_completion_sha) = sys.argv[1:]
+sha = re.compile(r'[0-9a-f]{64}')
+dev_ino = re.compile(r'[0-9]+:[0-9]+')
+
+def reject():
+    raise RuntimeError()
+
+def directory(path, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != sorted(entries)
+    ):
+        reject()
+
+def record(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        data = os.pread(descriptor, 131073, 0)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+               != (0, 0, 0o600, 1)
+            or before.st_size > 131072
+            or len(data) != before.st_size
+            or os.path.realpath(path) != path
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid,
+                before.st_gid, before.st_nlink, before.st_size, before.st_mtime_ns)
+               != (after.st_dev, after.st_ino, after.st_mode, after.st_uid,
+                   after.st_gid, after.st_nlink, after.st_size, after.st_mtime_ns)
+        ):
+            reject()
+        lines = data.decode('ascii').splitlines()
+        if not lines or data != ('\n'.join(lines) + '\n').encode('ascii'):
+            reject()
+        pairs = []
+        for line in lines:
+            if line.count('=') != 1:
+                reject()
+            pairs.append(line.split('=', 1))
+        if len({key for key, _ in pairs}) != len(pairs):
+            reject()
+        return [key for key, _ in pairs], dict(pairs), data
+    finally:
+        os.close(descriptor)
+
+try:
+    directory(parent, [attestation])
+    directory(root, ['completed-v1', 'grant-restoration-intent-v1', 'intent-v1'])
+    intent_keys, intent, intent_data = record(f'{root}/intent-v1')
+    grant_keys, grant, grant_data = record(f'{root}/grant-restoration-intent-v1')
+    completed_keys, completed, completed_data = record(f'{root}/completed-v1')
+    if intent_keys != [
+        'version', 'contract', 'state', 'attestation_implementation_release',
+        'repair_implementation_release', 'canonical_h14_recovery_release',
+        'authorization_sha256', 'bundle_manifest_sha256', 'bundle_manifest_size',
+        'attestation_bridge_sha256',
+        'attestation_bridge_size', 'differential_validator_sha256',
+        'differential_validator_size', 'bundle_claim_dev_ino', 'bundle_bridge_dev_ino',
+        'bundle_validator_dev_ino', 'bundle_manifest_dev_ino', 'h14_namespace_device',
+        'h14_namespace_inode', 'h14_evidence_tree_sha256', 'repair_intent_sha256',
+        'repair_ledger_dev_ino', 'h14_owner_runtime_restored_sha256',
+        'installed_helper_sha256', 'owner_container_id', 'owner_running',
+        'owner_healthy', 'owner_semantic_contract_algorithm',
+        'owner_semantic_contract_sha256', 'coordinator_container_id',
+        'coordinator_absent', 'profile_volume_holders', 'control_volume_holder',
+        'profile_volume_root_dev_ino', 'control_volume_root_dev_ino',
+        'owner_receipt_root_dev_ino', 'terminal_marker_dev_ino',
+        'terminal_marker_sha256', 'terminal_marker_present', 'final_binding_absent',
+        'seal_binding_absent', 'fresh_stage_pair_absent', 'profile_finalized_absent',
+        'recheck_receipt_absent', 'deployment_grant', 'deployment_grant_dev_ino',
+        'deployment_grant_sha256', 'financial_actions_mode', 'kemerbet_executor_enabled',
+        'kemerbet_final_action_enabled', 'transfer_enabled', 'amount_entry_enabled',
+        'provider_action_enabled', 'money_moved', 'canonical_h14_evidence_rewritten',
+        'canonical_h14_helper_changed',
+    ]:
+        reject()
+    if grant_keys != [
+        'version', 'contract', 'state', 'attestation_implementation_release',
+        'repair_implementation_release', 'canonical_h14_recovery_release',
+        'authorization_sha256', 'attestation_intent_sha256', 'h14_evidence_tree_sha256',
+        'repair_intent_sha256', 'expected_repair_completion_sha256',
+        'owner_container_id', 'owner_semantic_contract_sha256',
+        'deployment_grant_before_publication', 'deployment_grant_dev_ino',
+        'deployment_grant_sha256', 'restore_exact_disabled_grant_only',
+        'financial_actions_mode', 'transfer_enabled', 'amount_entry_enabled',
+        'provider_action_enabled', 'money_moved',
+    ]:
+        reject()
+    if completed_keys != [
+        'version', 'contract', 'state', 'attestation_implementation_release',
+        'repair_implementation_release', 'canonical_h14_recovery_release',
+        'authorization_sha256', 'bundle_manifest_sha256', 'bundle_manifest_size',
+        'attestation_intent_sha256',
+        'grant_restoration_intent_sha256', 'repair_intent_sha256',
+        'repair_completion_sha256', 'expected_repair_completion_sha256',
+        'h14_namespace_device', 'h14_namespace_inode', 'h14_evidence_tree_sha256',
+        'installed_helper_sha256', 'owner_container_id', 'owner_running',
+        'owner_healthy', 'owner_semantic_contract_sha256', 'coordinator_container_id',
+        'coordinator_absent', 'profile_volume_holders', 'control_volume_holder',
+        'deployment_grant', 'deployment_grant_dev_ino', 'deployment_grant_sha256',
+        'financial_actions_mode', 'kemerbet_executor_enabled',
+        'kemerbet_final_action_enabled', 'transfer_enabled', 'amount_entry_enabled',
+        'provider_action_enabled', 'money_moved', 'canonical_h14_evidence_rewritten',
+        'canonical_h14_helper_changed', 'canonical_h14_release_superseded',
+    ]:
+        reject()
+    common = {
+        'version': '1',
+        'contract': 'fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation',
+        'attestation_implementation_release': attestation,
+        'repair_implementation_release': repair,
+        'canonical_h14_recovery_release': canonical,
+        'authorization_sha256': auth,
+    }
+    if any(intent.get(key) != value or grant.get(key) != value or completed.get(key) != value
+           for key, value in common.items()):
+        reject()
+    if (
+        intent['state'] != 'authorized'
+        or grant['state'] != 'grant-restoration-authorized'
+        or completed['state'] != 'completed'
+        or intent['h14_namespace_device'] != h14_device
+        or completed['h14_namespace_device'] != h14_device
+        or intent['h14_namespace_inode'] != h14_inode
+        or completed['h14_namespace_inode'] != h14_inode
+        or intent['h14_evidence_tree_sha256'] != h14_tree
+        or grant['h14_evidence_tree_sha256'] != h14_tree
+        or completed['h14_evidence_tree_sha256'] != h14_tree
+        or intent['repair_intent_sha256'] != repair_intent_sha
+        or grant['repair_intent_sha256'] != repair_intent_sha
+        or completed['repair_intent_sha256'] != repair_intent_sha
+        or grant['expected_repair_completion_sha256'] != repair_completion_sha
+        or completed['repair_completion_sha256'] != repair_completion_sha
+        or completed['expected_repair_completion_sha256'] != repair_completion_sha
+        or intent['installed_helper_sha256'] != helper
+        or completed['installed_helper_sha256'] != helper
+        or intent['owner_container_id'] != owner
+        or grant['owner_container_id'] != owner
+        or completed['owner_container_id'] != owner
+        or intent['owner_semantic_contract_sha256'] != semantic
+        or grant['owner_semantic_contract_sha256'] != semantic
+        or completed['owner_semantic_contract_sha256'] != semantic
+        or intent['coordinator_container_id'] != coordinator
+        or completed['coordinator_container_id'] != coordinator
+        or intent['control_volume_holder'] != owner
+        or completed['control_volume_holder'] != owner
+        or intent['bundle_manifest_sha256'] != completed['bundle_manifest_sha256']
+        or intent['bundle_manifest_size'] != completed['bundle_manifest_size']
+        or re.fullmatch(r'[1-9][0-9]{0,7}', intent['bundle_manifest_size']) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', intent['attestation_bridge_size']) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', intent['differential_validator_size']) is None
+        or grant['attestation_intent_sha256'] != hashlib.sha256(intent_data).hexdigest()
+        or completed['attestation_intent_sha256'] != hashlib.sha256(intent_data).hexdigest()
+        or completed['grant_restoration_intent_sha256'] != hashlib.sha256(grant_data).hexdigest()
+        or intent['deployment_grant_dev_ino'] != grant['deployment_grant_dev_ino']
+        or intent['deployment_grant_dev_ino'] != completed['deployment_grant_dev_ino']
+        or intent['deployment_grant_sha256'] != grant['deployment_grant_sha256']
+        or intent['deployment_grant_sha256'] != completed['deployment_grant_sha256']
+        or dev_ino.fullmatch(intent['deployment_grant_dev_ino']) is None
+        or sha.fullmatch(intent['deployment_grant_sha256']) is None
+    ):
+        reject()
+    for key in (
+        'bundle_manifest_sha256', 'attestation_bridge_sha256',
+        'differential_validator_sha256', 'h14_owner_runtime_restored_sha256',
+        'terminal_marker_sha256',
+    ):
+        if sha.fullmatch(intent.get(key, '')) is None:
+            reject()
+    for key in (
+        'bundle_claim_dev_ino', 'bundle_bridge_dev_ino', 'bundle_validator_dev_ino',
+        'bundle_manifest_dev_ino', 'repair_ledger_dev_ino',
+        'profile_volume_root_dev_ino', 'control_volume_root_dev_ino',
+        'owner_receipt_root_dev_ino', 'terminal_marker_dev_ino',
+    ):
+        if dev_ino.fullmatch(intent.get(key, '')) is None:
+            reject()
+    exact_intent = {
+        'owner_running': 'true', 'owner_healthy': 'true',
+        'owner_semantic_contract_algorithm': 'fetanagent-docker-semantic-contract-v2',
+        'coordinator_absent': 'true', 'profile_volume_holders': 'none',
+        'terminal_marker_present': 'true', 'final_binding_absent': 'true',
+        'seal_binding_absent': 'true', 'fresh_stage_pair_absent': 'true',
+        'profile_finalized_absent': 'true', 'recheck_receipt_absent': 'true',
+        'deployment_grant': 'disabled', 'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false', 'kemerbet_final_action_enabled': 'false',
+        'transfer_enabled': 'false', 'amount_entry_enabled': 'false',
+        'provider_action_enabled': 'false', 'money_moved': 'false',
+        'canonical_h14_evidence_rewritten': 'false',
+        'canonical_h14_helper_changed': 'false',
+    }
+    exact_grant = {
+        'deployment_grant_before_publication': 'disabled',
+        'restore_exact_disabled_grant_only': 'true',
+        'financial_actions_mode': 'dry_run', 'transfer_enabled': 'false',
+        'amount_entry_enabled': 'false', 'provider_action_enabled': 'false',
+        'money_moved': 'false',
+    }
+    exact_completed = {
+        'owner_running': 'true', 'owner_healthy': 'true',
+        'coordinator_absent': 'true', 'profile_volume_holders': 'none',
+        'deployment_grant': 'active', 'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false', 'kemerbet_final_action_enabled': 'false',
+        'transfer_enabled': 'false', 'amount_entry_enabled': 'false',
+        'provider_action_enabled': 'false', 'money_moved': 'false',
+        'canonical_h14_evidence_rewritten': 'false',
+        'canonical_h14_helper_changed': 'false',
+        'canonical_h14_release_superseded': 'false',
+    }
+    if (
+        any(intent.get(key) != value for key, value in exact_intent.items())
+        or any(grant.get(key) != value for key, value in exact_grant.items())
+        or any(completed.get(key) != value for key, value in exact_completed.items())
+    ):
+        reject()
+    print(hashlib.sha256(completed_data).hexdigest())
+    print(intent['deployment_grant_dev_ino'])
+    print(intent['deployment_grant_sha256'])
+    print(intent['repair_ledger_dev_ino'])
+    print(intent['bundle_claim_dev_ino'])
+    print(intent['profile_volume_root_dev_ino'])
+    print(intent['control_volume_root_dev_ino'])
+    print(intent['owner_receipt_root_dev_ino'])
+    print(intent['terminal_marker_dev_ino'])
+    print(intent['terminal_marker_sha256'])
+    print(intent['bundle_validator_dev_ino'])
+    print(intent['differential_validator_sha256'])
+    print(intent['differential_validator_size'])
+    print(intent['bundle_bridge_dev_ino'])
+    print(intent['attestation_bridge_sha256'])
+    print(intent['attestation_bridge_size'])
+    print(intent['bundle_manifest_dev_ino'])
+    print(intent['bundle_manifest_sha256'])
+    print(intent['bundle_manifest_size'])
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+require_live_terminal_attestation_boundary() {
+  local expected_control_holder="$1"
+  local expected_owner_state="$2"
+  local control_holders output owner_inventory profile_holders
+  local owner_health owner_pid owner_running owner_state
+  local current_control_root current_profile_root
+  local -a current_h14_values current_terminal_values
+
+  [[ "$expected_control_holder" == 'none' || "$expected_control_holder" =~ ^[0-9a-f]{64}$ ]] || return 1
+  case "$expected_control_holder:$expected_owner_state" in
+    none:none|[0-9a-f]*:running|[0-9a-f]*:exited|[0-9a-f]*:created) ;;
+    *) return 1 ;;
+  esac
+
+  mapfile -t current_terminal_values < <(load_exact_terminal_attestation) || return 1
+  [[ "${#current_terminal_values[@]}" -eq 19 &&
+    "${current_terminal_values[0]}" == "$TERMINAL_ATTESTATION_COMPLETION_SHA256" &&
+    "${current_terminal_values[1]}" == "$ATTESTED_SUDOERS_DEV_INO" &&
+    "${current_terminal_values[2]}" == "$ATTESTED_SUDOERS_SHA256" &&
+    "${current_terminal_values[3]}" == "$ATTESTED_REPAIR_ROOT_DEV_INO" &&
+    "${current_terminal_values[4]}" == "$ATTESTED_CLAIM_ROOT_DEV_INO" &&
+    "${current_terminal_values[5]}" == "$ATTESTED_PROFILE_ROOT_DEV_INO" &&
+    "${current_terminal_values[6]}" == "$ATTESTED_CONTROL_ROOT_DEV_INO" &&
+    "${current_terminal_values[7]}" == "$ATTESTED_RECEIPT_ROOT_DEV_INO" &&
+    "${current_terminal_values[8]}" == "$ATTESTED_TERMINAL_MARKER_DEV_INO" &&
+    "${current_terminal_values[9]}" == "$ATTESTED_TERMINAL_MARKER_SHA256" &&
+    "${current_terminal_values[10]}" == "$ATTESTED_VALIDATOR_DEV_INO" &&
+    "${current_terminal_values[11]}" == "$ATTESTED_VALIDATOR_SHA256" &&
+    "${current_terminal_values[12]}" == "$ATTESTED_VALIDATOR_SIZE" &&
+    "${current_terminal_values[13]}" == "$ATTESTED_TERMINAL_BRIDGE_DEV_INO" &&
+    "${current_terminal_values[14]}" == "$ATTESTED_TERMINAL_BRIDGE_SHA256" &&
+    "${current_terminal_values[15]}" == "$ATTESTED_TERMINAL_BRIDGE_SIZE" &&
+    "${current_terminal_values[16]}" == "$ATTESTED_TERMINAL_MANIFEST_DEV_INO" &&
+    "${current_terminal_values[17]}" == "$ATTESTED_TERMINAL_MANIFEST_SHA256" &&
+    "${current_terminal_values[18]}" == "$ATTESTED_TERMINAL_MANIFEST_SIZE" ]] || return 1
+
+  mapfile -t current_h14_values < <(load_exact_h14_and_mount_repair) || return 1
+  [[ "${#current_h14_values[@]}" -eq 8 &&
+    "${current_h14_values[0]}" == "$OLD_OWNER_CONTAINER_ID" &&
+    "${current_h14_values[1]}" == "$RETIRED_COORDINATOR_CONTAINER_ID" &&
+    "${current_h14_values[2]}" == "$OLD_OWNER_SEMANTIC_SHA256" &&
+    "${current_h14_values[3]}" == "$H14_NAMESPACE_DEVICE" &&
+    "${current_h14_values[4]}" == "$H14_NAMESPACE_INODE" &&
+    "${current_h14_values[5]}" == "$H14_EVIDENCE_TREE_SHA256" &&
+    "${current_h14_values[6]}" == "$MOUNT_REPAIR_INTENT_SHA256" &&
+    "${current_h14_values[7]}" == "$MOUNT_REPAIR_COMPLETION_SHA256" ]] || return 1
+
+  require_active_grant_only || return 1
+  current_profile_root="$(docker_local volume inspect --format '{{.Mountpoint}}' "$PROFILE_VOLUME")" || return 1
+  current_control_root="$(docker_local volume inspect --format '{{.Mountpoint}}' "$CONTROL_VOLUME")" || return 1
+  [[ "$current_profile_root" == "$PROFILE_ROOT" && "$current_control_root" == "$CONTROL_ROOT" ]] || return 1
+
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$SUDOERS" "$ATTESTED_SUDOERS_DEV_INO" "$ATTESTED_SUDOERS_SHA256" \
+    "$REPAIR_ROOT" "$ATTESTED_REPAIR_ROOT_DEV_INO" \
+    "$PROFILE_ROOT" "$ATTESTED_PROFILE_ROOT_DEV_INO" \
+    "$CONTROL_ROOT" "$ATTESTED_CONTROL_ROOT_DEV_INO" \
+    "$OWNER_RECEIPT_ROOT" "$ATTESTED_RECEIPT_ROOT_DEV_INO" \
+    "$TERMINAL_MARKER_NAME" "$ATTESTED_TERMINAL_MARKER_DEV_INO" \
+    "$ATTESTED_TERMINAL_MARKER_SHA256" "$ATTESTATION_CLAIM_PARENT" \
+    "$ATTESTATION_CLAIM_ROOT" "$ATTESTED_CLAIM_ROOT_DEV_INO" \
+    "$ATTESTATION_RELEASE" "$ATTESTATION_VALIDATOR" \
+    "$ATTESTED_VALIDATOR_DEV_INO" "$ATTESTED_VALIDATOR_SHA256" \
+    "$ATTESTED_VALIDATOR_SIZE" \
+    "$ATTESTATION_CLAIM_ROOT/$TERMINAL_BRIDGE_BASENAME" \
+    "$ATTESTED_TERMINAL_BRIDGE_DEV_INO" "$ATTESTED_TERMINAL_BRIDGE_SHA256" \
+    "$ATTESTED_TERMINAL_BRIDGE_SIZE" \
+    "$ATTESTATION_CLAIM_ROOT/$TERMINAL_MANIFEST_BASENAME" \
+    "$ATTESTED_TERMINAL_MANIFEST_DEV_INO" "$ATTESTED_TERMINAL_MANIFEST_SHA256" \
+    "$ATTESTED_TERMINAL_MANIFEST_SIZE" "$TERMINAL_BRIDGE_BASENAME" \
+    "$TERMINAL_VALIDATOR_BASENAME" "$TERMINAL_MANIFEST_BASENAME" \
+    "$SEAL_BINDING" "$FINAL_BINDING" "$RECHECK_RECEIPT" \
+    "$H14_ROOT" "$PROFILE_ACK_NAME" "$PROFILE_FINALIZED_NAME" \
+    "$FAILED_MARKER_NAME" "$PLAYER_STAGE_NAME" "$CLAIM_STAGE_NAME" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+(sudoers, sudoers_dev_ino, sudoers_sha, repair_root, repair_dev_ino,
+ profile_root, profile_dev_ino, control_root, control_dev_ino, receipt_root,
+ receipt_dev_ino, marker_name, marker_dev_ino, marker_sha, claim_parent,
+ claim_root, claim_root_dev_ino, attestation, validator, validator_dev_ino,
+ validator_sha, validator_size_text, bridge, bridge_dev_ino, bridge_sha,
+ bridge_size_text, manifest, manifest_dev_ino, manifest_sha, manifest_size_text,
+ bridge_name, validator_name, manifest_name, seal_binding,
+ final_binding, recheck_receipt, h14_root, profile_ack_name,
+ profile_finalized_name, failed_marker_name, player_stage_name,
+ claim_stage_name) = sys.argv[1:]
+
+DEV_INO = re.compile(r'[0-9]+:[0-9]+')
+SHA = re.compile(r'[0-9a-f]{64}')
+
+def reject():
+    raise RuntimeError()
+
+def directory(path, owner, mode, expected_dev_ino, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode))
+           != (*owner, mode)
+        or f'{value.st_dev}:{value.st_ino}' != expected_dev_ino
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != sorted(entries)
+    ):
+        reject()
+    return value
+
+def exact_file(path, owner, mode, expected_dev_ino, expected_sha, expected_size):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        data = os.pread(descriptor, expected_size + 1, 0)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode),
+                before.st_nlink) != (*owner, mode, 1)
+            or f'{before.st_dev}:{before.st_ino}' != expected_dev_ino
+            or before.st_size != expected_size
+            or len(data) != before.st_size
+            or hashlib.sha256(data).hexdigest() != expected_sha
+            or os.path.realpath(path) != path
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid,
+                before.st_gid, before.st_nlink, before.st_size, before.st_mtime_ns)
+               != (after.st_dev, after.st_ino, after.st_mode, after.st_uid,
+                   after.st_gid, after.st_nlink, after.st_size, after.st_mtime_ns)
+        ):
+            reject()
+    finally:
+        os.close(descriptor)
+
+try:
+    if (
+        any(DEV_INO.fullmatch(value) is None for value in (
+            sudoers_dev_ino, repair_dev_ino, profile_dev_ino, control_dev_ino,
+            receipt_dev_ino, marker_dev_ino, claim_root_dev_ino,
+            validator_dev_ino, bridge_dev_ino, manifest_dev_ino,
+        ))
+        or any(SHA.fullmatch(value) is None for value in (
+            sudoers_sha, marker_sha, validator_sha, bridge_sha, manifest_sha,
+        ))
+        or re.fullmatch(r'[1-9][0-9]{0,7}', validator_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', bridge_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', manifest_size_text) is None
+    ):
+        reject()
+    validator_size = int(validator_size_text)
+    bridge_size = int(bridge_size_text)
+    manifest_size = int(manifest_size_text)
+
+    exact_file(sudoers, (0, 0), 0o440, sudoers_dev_ino, sudoers_sha,
+               os.lstat(sudoers).st_size)
+    directory(repair_root, (0, 0), 0o700, repair_dev_ino,
+              ['completed-v1', 'intent-v1'])
+    directory(profile_root, (10001, 10001), 0o700, profile_dev_ino, [])
+    directory(control_root, (10001, 10001), 0o700, control_dev_ino, [])
+    directory(receipt_root, (0, 0), 0o755, receipt_dev_ino, [marker_name])
+    exact_file(f'{receipt_root}/{marker_name}', (0, 10001), 0o440,
+               marker_dev_ino, marker_sha, 37)
+
+    claim_parent_value = os.lstat(claim_parent)
+    if (
+        not stat.S_ISDIR(claim_parent_value.st_mode)
+        or (claim_parent_value.st_uid, claim_parent_value.st_gid,
+            stat.S_IMODE(claim_parent_value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(claim_parent) != claim_parent
+        or sorted(os.listdir(claim_parent)) != [attestation]
+    ):
+        reject()
+    claim_value = os.lstat(claim_root)
+    if (
+        not stat.S_ISDIR(claim_value.st_mode)
+        or (claim_value.st_uid, claim_value.st_gid,
+            stat.S_IMODE(claim_value.st_mode)) != (0, 0, 0o700)
+        or f'{claim_value.st_dev}:{claim_value.st_ino}' != claim_root_dev_ino
+        or os.path.realpath(claim_root) != claim_root
+        or sorted(os.listdir(claim_root))
+           != sorted([bridge_name, validator_name, manifest_name])
+    ):
+        reject()
+    exact_file(validator, (0, 0), 0o400, validator_dev_ino, validator_sha,
+               validator_size)
+    exact_file(bridge, (0, 0), 0o400, bridge_dev_ino, bridge_sha, bridge_size)
+    exact_file(manifest, (0, 0), 0o400, manifest_dev_ino, manifest_sha,
+               manifest_size)
+
+    absent = [
+        seal_binding,
+        final_binding,
+        recheck_receipt,
+        f'{control_root}/{player_stage_name}',
+        f'{control_root}/{claim_stage_name}',
+        f'{control_root}/{profile_ack_name}',
+        f'{control_root}/.{profile_ack_name}.installing',
+        f'{receipt_root}/{failed_marker_name}',
+        f'{receipt_root}/kemerbet-readiness-cohort-completed-v1',
+        f'{receipt_root}/.kemerbet-readiness-cohort-completed-v1.installing',
+        f'{receipt_root}/kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1',
+        f'{receipt_root}/.kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1.installing',
+        f'{receipt_root}/{profile_finalized_name}',
+        f'{receipt_root}/.{profile_finalized_name}.installing',
+        f'{receipt_root}/.{marker_name}.installing',
+        f'{h14_root}/terminal-recovery-marker-v1',
+        f'{h14_root}/.terminal-recovery-marker-v1.installing',
+    ]
+    if any(os.path.lexists(path) for path in absent):
+        reject()
+except Exception:
+    raise SystemExit(1)
+PY
+
+  output="$(env -i PATH="$SAFE_PATH" python3 -I "$ATTESTATION_VALIDATOR" \
+    "$H14_PARENT" "$TARGET" "$PROFILE_ROOT" "$CONTROL_ROOT" "$SEAL_BINDING" \
+    "$FINAL_BINDING" "$RECHECK_RECEIPT" "$OWNER_RECEIPT_ROOT" \
+    "$AUTHORIZATION_SHA256" "$PROFILE_ACK_NAME" "$TERMINAL_MARKER_NAME" \
+    "$PROFILE_FINALIZED_NAME")" || return 1
+  [[ "$output" == 'PASS H14-D000' ]] || return 1
+
+  require_financial_gates_disabled || return 1
+  require_no_host_chromium || return 1
+  [[ -z "$(container_full_ids_for_service kemerbet-session-provision)" ]] || return 1
+  [[ -z "$(docker_local container ls --all --quiet --filter "id=$RETIRED_COORDINATOR_CONTAINER_ID")" ]] || return 1
+  profile_holders="$(container_full_ids_for_volume "$PROFILE_VOLUME")" || return 1
+  control_holders="$(container_full_ids_for_volume "$CONTROL_VOLUME")" || return 1
+  owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || return 1
+  [[ -z "$profile_holders" ]] || return 1
+  if [[ "$expected_control_holder" == 'none' ]]; then
+    [[ -z "$control_holders" && -z "$owner_inventory" ]] || return 1
+  else
+    [[ "$control_holders" == "$expected_control_holder" &&
+      "$owner_inventory" == "$expected_control_holder" ]] || return 1
+    owner_state="$(docker_local container inspect "$expected_control_holder" --format '{{.State.Status}}')" || return 1
+    owner_running="$(docker_local container inspect "$expected_control_holder" --format '{{.State.Running}}')" || return 1
+    owner_pid="$(docker_local container inspect "$expected_control_holder" --format '{{.State.Pid}}')" || return 1
+    [[ "$owner_state" == "$expected_owner_state" ]] || return 1
+    case "$expected_owner_state" in
+      running)
+        [[ "$owner_running" == 'true' && "$owner_pid" =~ ^[1-9][0-9]*$ ]] || return 1
+        owner_health="$(docker_local container inspect "$expected_control_holder" \
+          --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
+        [[ "$owner_health" == 'healthy' ]] || return 1
+        require_container_no_chromium "$expected_control_holder" || return 1
+        ;;
+      exited|created)
+        [[ "$owner_running" == 'false' && "$owner_pid" == '0' ]] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+  fi
+}
+
 claim_and_load_bundle_manifest() {
   local admin_gid admin_uid script_sha
   admin_uid="$(id -u fetanagent-admin)" || return 1
@@ -519,7 +1054,7 @@ claim_and_load_bundle_manifest() {
   script_sha="$(sha256sum -- "$STAGED_INSTALLER" | awk '{print $1}')" || return 1
   env -i PATH="$SAFE_PATH" python3 -I - \
     "$STAGED_BUNDLE" "$CLAIM_PARENT" "$CLAIM_INSTALLING" "$CLAIM_ROOT" \
-    "$REPAIR_RELEASE" "$CANONICAL_H14" "$STAGING_PROJECT_REF" "$EXPECTED_DROPLET_ID" \
+    "$REPAIR_RELEASE" "$ATTESTATION_RELEASE" "$CANONICAL_H14" "$STAGING_PROJECT_REF" "$EXPECTED_DROPLET_ID" \
     "$AUTHORIZATION_SHA256" "$PROVIDED_MANIFEST_SHA256" "$script_sha" "$admin_uid" "$admin_gid" <<'PY'
 import hashlib
 import os
@@ -527,13 +1062,13 @@ import re
 import stat
 import sys
 
-(source, parent, installing, final, repair, canonical, project, droplet, auth,
+(source, parent, installing, final, repair, attestation, canonical, project, droplet, auth,
  manifest_sha, script_sha, admin_uid_text, admin_gid_text) = sys.argv[1:]
 admin_uid = int(admin_uid_text)
 admin_gid = int(admin_gid_text)
 sha = re.compile(r'[0-9a-f]{64}')
 image_id_pattern = re.compile(r'sha256:[0-9a-f]{64}')
-remote_pattern = re.compile(rf'/tmp/fetanagent-h14-owner-runtime-bridge-([1-9][0-9]*)-([1-9][0-9]*)-{repair}')
+remote_pattern = re.compile(rf'/tmp/fetanagent-h14-owner-runtime-bridge-([1-9][0-9]*)-([1-9][0-9]*)-{attestation}')
 names = ['compose.staging-beta.yaml', 'fetanagent-owner-control-canonical-h14.tar', 'manifest-v1']
 
 def reject():
@@ -805,12 +1340,13 @@ try:
     if observed_manifest_sha != manifest_sha:
         reject()
     lines = manifest_data.decode('ascii').splitlines()
-    if len(lines) != 19 or manifest_data != ('\n'.join(lines) + '\n').encode('ascii'):
+    if len(lines) != 20 or manifest_data != ('\n'.join(lines) + '\n').encode('ascii'):
         reject()
     values = dict(line.split('=', 1) for line in lines)
     run_match = remote_pattern.fullmatch(source)
     expected_keys = [
-        'version', 'contract', 'repair_implementation_sha', 'canonical_h14_sha',
+        'version', 'contract', 'repair_implementation_sha',
+        'terminal_attestation_implementation_sha', 'canonical_h14_sha',
         'staging_project_ref', 'staging_droplet_id', 'authorization_sha256',
         'workflow_run_id', 'workflow_run_attempt', 'owner_image_tag', 'owner_image_id',
         'owner_image_tar_sha256', 'owner_image_tar_size', 'canonical_compose_sha256',
@@ -822,6 +1358,7 @@ try:
         or values['version'] != '1'
         or values['contract'] != 'fetanagent-h14-owner-runtime-bridge-bundle'
         or values['repair_implementation_sha'] != repair
+        or values['terminal_attestation_implementation_sha'] != attestation
         or values['canonical_h14_sha'] != canonical
         or values['staging_project_ref'] != project
         or values['staging_droplet_id'] != droplet
@@ -1435,11 +1972,11 @@ create_or_discover_bridge_ledger() {
       BRIDGE_STATE='installing'
       BRIDGE_WORK_ROOT="$BRIDGE_INSTALLING"
       ;;
-    ".installing-$REPAIR_RELEASE")
+    ".installing-$ATTESTATION_RELEASE")
       BRIDGE_STATE='installing'
       BRIDGE_WORK_ROOT="$BRIDGE_INSTALLING"
       ;;
-    "$REPAIR_RELEASE")
+    "$ATTESTATION_RELEASE")
       BRIDGE_STATE='complete'
       BRIDGE_WORK_ROOT="$BRIDGE_ROOT"
       ;;
@@ -1468,6 +2005,8 @@ expected_bridge_intent() {
     'contract=fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge' \
     'state=authorized' \
     "repair_implementation_release=$REPAIR_RELEASE" \
+    "terminal_attestation_implementation_release=$ATTESTATION_RELEASE" \
+    "terminal_attestation_completion_sha256=$TERMINAL_ATTESTATION_COMPLETION_SHA256" \
     "canonical_h14_release=$CANONICAL_H14" \
     "authorization_sha256=$AUTHORIZATION_SHA256" \
     "bundle_manifest_sha256=$PROVIDED_MANIFEST_SHA256" \
@@ -1486,7 +2025,7 @@ expected_bridge_intent() {
     "retired_coordinator_container_id=$RETIRED_COORDINATOR_CONTAINER_ID" \
     "non_owner_project_container_count=$NON_OWNER_INVENTORY_COUNT" \
     "non_owner_project_inventory_sha256=$NON_OWNER_INVENTORY_SHA256" \
-    'migration_attestation=claim-bound-h14-read-only-ready' \
+    'migration_attestation=exact-terminal-attestation-completed-v1' \
     "installed_helper_sha256=$H14_HELPER_SHA256" \
     "owner_network=$OWNER_NETWORK" \
     'old_owner_state=running-healthy-at-publication' \
@@ -1575,6 +2114,8 @@ expected_bridge_completed() {
     'contract=fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge' \
     'state=completed' \
     "repair_implementation_release=$REPAIR_RELEASE" \
+    "terminal_attestation_implementation_release=$ATTESTATION_RELEASE" \
+    "terminal_attestation_completion_sha256=$TERMINAL_ATTESTATION_COMPLETION_SHA256" \
     "canonical_h14_release=$CANONICAL_H14" \
     "authorization_sha256=$AUTHORIZATION_SHA256" \
     "old_owner_container_id=$OLD_OWNER_CONTAINER_ID" \
@@ -1590,7 +2131,7 @@ expected_bridge_completed() {
     "h14_namespace_inode=$H14_NAMESPACE_INODE" \
     "h14_evidence_tree_sha256=$H14_EVIDENCE_TREE_SHA256" \
     "installed_helper_sha256=$H14_HELPER_SHA256" \
-    'migration_attestation=claim-bound-h14-read-only-ready' \
+    'migration_attestation=exact-terminal-attestation-completed-v1' \
     "non_owner_project_container_count=$NON_OWNER_INVENTORY_COUNT" \
     "non_owner_project_inventory_sha256=$NON_OWNER_INVENTORY_SHA256" \
     'financial_actions_mode=dry_run' \
@@ -1745,7 +2286,6 @@ trap 'release_staging_mutation_lock || true' EXIT
 require_no_other_mutator_processes || die 'another staging helper or recovery mutation is active'
 require_active_grant_only || die 'the exact H14 helper grant is not active'
 require_helper_exact || die 'the installed canonical H14 helper is not exact'
-require_h14_helper_host_retired || die 'the canonical H14 recovery is not in its exact host-retired state'
 
 mapfile -t h14_values < <(load_exact_h14_and_mount_repair) || die 'the final canonical H14 or completed mount-repair ledger is invalid'
 [[ "${#h14_values[@]}" -eq 8 ]] || die 'the H14 evidence attestation returned an invalid shape'
@@ -1761,6 +2301,56 @@ MOUNT_REPAIR_COMPLETION_SHA256="${h14_values[7]}"
   "$OLD_OWNER_SEMANTIC_SHA256" =~ ^[0-9a-f]{64}$ && "$H14_NAMESPACE_DEVICE" =~ ^[0-9]+$ &&
   "$H14_NAMESPACE_INODE" =~ ^[0-9]+$ && "$H14_EVIDENCE_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die 'the H14 evidence values are malformed'
+
+mapfile -t terminal_attestation_values < <(load_exact_terminal_attestation) ||
+  die 'the explicit terminal-attestation completion is invalid'
+[[ "${#terminal_attestation_values[@]}" -eq 19 &&
+  "${terminal_attestation_values[0]}" =~ ^[0-9a-f]{64}$ &&
+  "${terminal_attestation_values[1]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[2]}" =~ ^[0-9a-f]{64}$ &&
+  "${terminal_attestation_values[3]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[4]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[5]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[6]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[7]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[8]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[9]}" =~ ^[0-9a-f]{64}$ &&
+  "${terminal_attestation_values[10]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[11]}" =~ ^[0-9a-f]{64}$ &&
+  "${terminal_attestation_values[12]}" =~ ^[1-9][0-9]{0,7}$ &&
+  "${terminal_attestation_values[13]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[14]}" =~ ^[0-9a-f]{64}$ &&
+  "${terminal_attestation_values[15]}" =~ ^[1-9][0-9]{0,7}$ &&
+  "${terminal_attestation_values[16]}" =~ ^[0-9]+:[0-9]+$ &&
+  "${terminal_attestation_values[17]}" =~ ^[0-9a-f]{64}$ &&
+  "${terminal_attestation_values[18]}" =~ ^[1-9][0-9]{0,7}$ ]] ||
+  die 'the terminal-attestation completion returned an invalid shape'
+TERMINAL_ATTESTATION_COMPLETION_SHA256="${terminal_attestation_values[0]}"
+ATTESTED_SUDOERS_DEV_INO="${terminal_attestation_values[1]}"
+ATTESTED_SUDOERS_SHA256="${terminal_attestation_values[2]}"
+ATTESTED_REPAIR_ROOT_DEV_INO="${terminal_attestation_values[3]}"
+ATTESTED_CLAIM_ROOT_DEV_INO="${terminal_attestation_values[4]}"
+ATTESTED_PROFILE_ROOT_DEV_INO="${terminal_attestation_values[5]}"
+ATTESTED_CONTROL_ROOT_DEV_INO="${terminal_attestation_values[6]}"
+ATTESTED_RECEIPT_ROOT_DEV_INO="${terminal_attestation_values[7]}"
+ATTESTED_TERMINAL_MARKER_DEV_INO="${terminal_attestation_values[8]}"
+ATTESTED_TERMINAL_MARKER_SHA256="${terminal_attestation_values[9]}"
+ATTESTED_VALIDATOR_DEV_INO="${terminal_attestation_values[10]}"
+ATTESTED_VALIDATOR_SHA256="${terminal_attestation_values[11]}"
+ATTESTED_VALIDATOR_SIZE="${terminal_attestation_values[12]}"
+ATTESTED_TERMINAL_BRIDGE_DEV_INO="${terminal_attestation_values[13]}"
+ATTESTED_TERMINAL_BRIDGE_SHA256="${terminal_attestation_values[14]}"
+ATTESTED_TERMINAL_BRIDGE_SIZE="${terminal_attestation_values[15]}"
+ATTESTED_TERMINAL_MANIFEST_DEV_INO="${terminal_attestation_values[16]}"
+ATTESTED_TERMINAL_MANIFEST_SHA256="${terminal_attestation_values[17]}"
+ATTESTED_TERMINAL_MANIFEST_SIZE="${terminal_attestation_values[18]}"
+
+PROFILE_ROOT="$(docker_local volume inspect --format '{{.Mountpoint}}' "$PROFILE_VOLUME")" ||
+  die 'the attested KemerBet profile volume mountpoint is unavailable'
+CONTROL_ROOT="$(docker_local volume inspect --format '{{.Mountpoint}}' "$CONTROL_VOLUME")" ||
+  die 'the attested KemerBet control volume mountpoint is unavailable'
+[[ "$PROFILE_ROOT" == /* && "$CONTROL_ROOT" == /* && "$PROFILE_ROOT" != "$CONTROL_ROOT" ]] ||
+  die 'the attested KemerBet volume mountpoints are ambiguous'
 
 mapfile -t bundle_values < <(claim_and_load_bundle_manifest) || die 'the staged canonical Owner-only bundle could not be claimed exactly'
 [[ "${#bundle_values[@]}" -eq 6 ]] || die 'the claimed bundle manifest returned an invalid shape'
@@ -1816,6 +2406,8 @@ else
   require_container_no_chromium "$OLD_OWNER_CONTAINER_ID" || die 'the historical Owner contains a browser process'
   require_migration_through_old_owner "$OLD_OWNER_CONTAINER_ID" ||
     die 'the exact existing Owner could not prove the claim-bound H14 migration read-only'
+  require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
+    die 'the live terminal-attestation boundary changed before durable Owner intent'
   publish_exact_record "$BRIDGE_WORK_ROOT/intent-v1" 0600 < <(expected_bridge_intent) ||
     die 'the Owner-runtime bridge intent could not be published durably'
   require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
@@ -1839,10 +2431,8 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
   require_container_no_chromium "$NEW_OWNER_CONTAINER_ID" || die 'the completed Owner contains a browser process'
   require_runtime_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the completed Owner/coordinator/volume/gate boundary changed'
   require_owner_network || die 'the completed Owner network contract changed'
-  require_h14_helper_host_retired || die 'the canonical H14 host-retired state changed after bridge completion'
-  mapfile -t final_h14_values < <(load_exact_h14_and_mount_repair) || die 'the canonical H14 evidence changed after bridge completion'
-  [[ "${final_h14_values[3]}" == "$H14_NAMESPACE_DEVICE" && "${final_h14_values[4]}" == "$H14_NAMESPACE_INODE" &&
-    "${final_h14_values[5]}" == "$H14_EVIDENCE_TREE_SHA256" ]] || die 'the canonical H14 evidence inode or digest changed'
+  require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
+    die 'the live terminal-attestation boundary changed after bridge completion'
   printf '%s\n' 'FetanAgent H14 Owner runtime bridge already valid: Owner only; no provider action and no money moved.'
   exit 0
 fi
@@ -1853,6 +2443,10 @@ fi
 if docker_local image inspect "$OWNER_IMAGE" >/dev/null 2>&1; then
   require_owner_image_contract || die 'the canonical Owner tag already names a different image'
 else
+  docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1 ||
+    die 'an absent canonical image after historical Owner removal is an impossible replay state'
+  require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
+    die 'the live terminal-attestation boundary changed immediately before image load'
   docker_local image load --input "$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" >/dev/null ||
     die 'the one canonical Owner image could not be loaded'
   require_owner_image_contract || die 'the loaded canonical Owner image contract is invalid'
@@ -1868,6 +2462,8 @@ if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; the
   case "$old_state" in
     running)
       require_non_owner_inventory_unchanged || die 'an unrelated project service changed before the historical Owner stop'
+      require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
+        die 'the live terminal-attestation boundary changed immediately before historical Owner stop'
       docker_local container stop --time 15 "$OLD_OWNER_CONTAINER_ID" >/dev/null || die 'the exact historical Owner could not be stopped'
       require_non_owner_inventory_unchanged || die 'an unrelated project service changed during the historical Owner stop'
       ;;
@@ -1876,6 +2472,8 @@ if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; the
   esac
   [[ "$(docker_local container inspect "$OLD_OWNER_CONTAINER_ID" --format '{{.State.Running}}')" == 'false' ]] || die 'the historical Owner did not stop'
   require_non_owner_inventory_unchanged || die 'an unrelated project service changed before historical Owner removal'
+  require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" exited ||
+    die 'the live terminal-attestation boundary changed immediately before historical Owner removal'
   docker_local container rm "$OLD_OWNER_CONTAINER_ID" >/dev/null || die 'the exact stopped historical Owner could not be removed'
   require_non_owner_inventory_unchanged || die 'an unrelated project service changed during historical Owner removal'
 fi
@@ -1894,6 +2492,8 @@ else
   owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the replacement Owner inventory could not be inspected'
   if [[ -z "$owner_inventory" ]]; then
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed before replacement creation'
+    require_live_terminal_attestation_boundary none none ||
+      die 'the live terminal-attestation boundary changed immediately before replacement creation'
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       create --no-build --no-deps "$OWNER_SERVICE" >/dev/null || die 'canonical Compose could not create the Owner-only replacement'
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement creation'
@@ -1930,6 +2530,8 @@ new_state="$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" --format '
 case "$new_state" in
   created)
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed before replacement startup'
+    require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" created ||
+      die 'the live terminal-attestation boundary changed immediately before replacement startup'
     docker_local container start "$NEW_OWNER_CONTAINER_ID" >/dev/null || die 'the exact canonical Owner could not be started'
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement startup'
     ;;
@@ -1961,12 +2563,12 @@ require_runtime_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the final Owner/coord
 require_owner_network || die 'the final Owner network contract is not exact'
 require_active_grant_only || die 'the canonical H14 helper grant changed during the Owner bridge'
 require_helper_exact || die 'the canonical H14 helper changed during the Owner bridge'
-require_h14_helper_host_retired || die 'the canonical H14 host-retired evidence changed during the Owner bridge'
-mapfile -t final_h14_values < <(load_exact_h14_and_mount_repair) || die 'the canonical H14 evidence changed during the Owner bridge'
-[[ "${final_h14_values[3]}" == "$H14_NAMESPACE_DEVICE" && "${final_h14_values[4]}" == "$H14_NAMESPACE_INODE" &&
-  "${final_h14_values[5]}" == "$H14_EVIDENCE_TREE_SHA256" ]] || die 'the canonical H14 evidence inode or digest changed during the Owner bridge'
+require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
+  die 'the live terminal-attestation boundary changed during the Owner bridge'
 require_no_other_mutator_processes || die 'another staging mutation appeared before bridge completion'
 require_exact_droplet || die 'the staging Droplet identity changed before bridge completion'
+require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
+  die 'the live terminal-attestation boundary changed immediately before Owner bridge completion'
 
 publish_exact_record "$BRIDGE_WORK_ROOT/completed-v1" 0600 < <(expected_bridge_completed) ||
   die 'the Owner-runtime bridge completion could not be published durably'

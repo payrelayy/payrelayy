@@ -357,6 +357,32 @@ readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO='64769:6102992'
 readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256='0e9f180d49a7b630a17092e30f8bd1615c513c4cc77daedf34ba136d3c2a5437'
 readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE='18569'
 readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES='265'
+readonly FAILED_OWNER_DELTA_CORRECTION_RELEASE='a51b52201a94a669b8dcca38b7abb29d70d0200f'
+readonly FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'
+readonly FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102993'
+readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO='64769:6102994'
+readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256='b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73'
+readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE='393436'
+readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO='64769:6102995'
+readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO='64769:6102996'
+readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256='ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad'
+readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE='23785'
+readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES='356'
+readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102997'
+readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256='d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f'
+readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'
+readonly FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID='sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a'
+readonly FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID='sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'
+readonly FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID='33277082955'
+readonly FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO='64769:6102998'
+readonly FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO='64769:6102999'
+readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO='64769:6103000'
+readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256='efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2'
+readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE='20653'
+readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES='294'
 readonly CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
@@ -407,7 +433,8 @@ readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quara
 readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'
 readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'
 readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'
+readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -471,6 +498,7 @@ readonly FAILED_RUNNING_STATUS_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_
 readonly FAILED_COUNTER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
 readonly FAILED_CUSTOMER_WEB_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
 readonly FAILED_NETWORK_SCOPE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE"
+readonly FAILED_OWNER_DELTA_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OWNER_DELTA_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -526,6 +554,10 @@ readonly FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING="$FAILED_NETWORK_SCOPE_BRIDGE_PA
 readonly FAILED_NETWORK_SCOPE_BRIDGE_ROOT="$FAILED_NETWORK_SCOPE_BRIDGE_PARENT/$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE"
 readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT="$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING/intent-v1"
 readonly FAILED_NETWORK_SCOPE_BRIDGE_FINAL="$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING/completed-v1"
+readonly FAILED_OWNER_DELTA_BRIDGE_INSTALLING="$FAILED_OWNER_DELTA_BRIDGE_PARENT/.installing-$FAILED_OWNER_DELTA_CORRECTION_RELEASE"
+readonly FAILED_OWNER_DELTA_BRIDGE_ROOT="$FAILED_OWNER_DELTA_BRIDGE_PARENT/$FAILED_OWNER_DELTA_CORRECTION_RELEASE"
+readonly FAILED_OWNER_DELTA_BRIDGE_INTENT="$FAILED_OWNER_DELTA_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_OWNER_DELTA_BRIDGE_FINAL="$FAILED_OWNER_DELTA_BRIDGE_INSTALLING/completed-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -554,7 +586,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_COUNTER_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -688,15 +721,95 @@ except Exception:
 PY
 }
 
+derive_customer_web_archive_identities() {
+  local archive_path="$1" validator_path="$2" image_tag="$3" config_id="$4" release="$5"
+  env -i PATH="$SAFE_PATH" python3 -I "$validator_path" \
+    "$archive_path" "$image_tag" "$config_id" oci 10 28 || return 1
+  env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+    "$archive_path" "$image_tag" "$config_id" "$release" 3<<'PY'
+import hashlib
+import json
+import re
+import sys
+import tarfile
+
+archive_path, expected_tag, expected_config_id, expected_release = sys.argv[1:]
+
+try:
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', expected_config_id):
+        raise RuntimeError()
+    with tarfile.open(archive_path, mode='r:') as archive:
+        index = json.load(archive.extractfile('index.json'))
+        if not isinstance(index, dict) or set(index) != {'schemaVersion', 'mediaType', 'manifests'}:
+            raise RuntimeError()
+        if index['schemaVersion'] != 2 or index['mediaType'] != 'application/vnd.oci.image.index.v1+json':
+            raise RuntimeError()
+        descriptors = index['manifests']
+        if not isinstance(descriptors, list) or len(descriptors) != 1:
+            raise RuntimeError()
+        descriptor = descriptors[0]
+        if not isinstance(descriptor, dict) or set(descriptor) != {'mediaType', 'digest', 'size', 'annotations'}:
+            raise RuntimeError()
+        runtime_id = descriptor['digest']
+        if not re.fullmatch(r'sha256:[0-9a-f]{64}', runtime_id):
+            raise RuntimeError()
+        if descriptor != {
+            'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+            'digest': runtime_id,
+            'size': descriptor['size'],
+            'annotations': {
+                'io.containerd.image.name': f'docker.io/library/{expected_tag}',
+                'org.opencontainers.image.ref.name': expected_tag.rsplit(':', 1)[1],
+            },
+        } or isinstance(descriptor['size'], bool) or not isinstance(descriptor['size'], int) or descriptor['size'] <= 0:
+            raise RuntimeError()
+        manifest_stream = archive.extractfile(f"blobs/sha256/{runtime_id.removeprefix('sha256:')}")
+        if manifest_stream is None:
+            raise RuntimeError()
+        manifest_bytes = manifest_stream.read()
+        if len(manifest_bytes) != descriptor['size'] or hashlib.sha256(manifest_bytes).hexdigest() != runtime_id.removeprefix('sha256:'):
+            raise RuntimeError()
+        manifest = json.loads(manifest_bytes)
+        config_descriptor = manifest.get('config')
+        if not isinstance(config_descriptor, dict) or config_descriptor.get('digest') != expected_config_id:
+            raise RuntimeError()
+        if config_descriptor.get('mediaType') != 'application/vnd.oci.image.config.v1+json':
+            raise RuntimeError()
+        config_stream = archive.extractfile(f"blobs/sha256/{expected_config_id.removeprefix('sha256:')}")
+        if config_stream is None:
+            raise RuntimeError()
+        config_bytes = config_stream.read()
+        if len(config_bytes) != config_descriptor.get('size') or hashlib.sha256(config_bytes).hexdigest() != expected_config_id.removeprefix('sha256:'):
+            raise RuntimeError()
+        config = json.loads(config_bytes)
+        image_config = config.get('config')
+        if config.get('architecture') != 'amd64' or config.get('os') != 'linux' or not isinstance(image_config, dict):
+            raise RuntimeError()
+        if image_config.get('User') != '10001:10001' or image_config.get('Cmd') != ['node', 'apps/customer-web/dist/index.js']:
+            raise RuntimeError()
+        if image_config.get('Entrypoint') != ['docker-entrypoint.sh'] or image_config.get('WorkingDir') != '/workspace':
+            raise RuntimeError()
+        labels = image_config.get('Labels') or {}
+        if labels.get('org.opencontainers.image.revision') != expected_release or labels.get('org.opencontainers.image.title') != 'fetanagent-customer-web':
+            raise RuntimeError()
+    print(expected_config_id)
+    print(runtime_id)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 require_prior_failed_recovery_claim() {
-  [[ "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
+  [[ "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" &&
+    "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
     "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" ]] || return 1
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO:root:root:700:17" ]] || return 1
+      "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO:root:root:700:18" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -863,6 +976,24 @@ require_prior_failed_recovery_claim() {
   verify_exact_nofollow_file_digest "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME" \
     "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO" "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
     "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" 0400 || return 1
+  [[ ! -L "$FAILED_OWNER_DELTA_CORRECTION_ROOT" && -d "$FAILED_OWNER_DELTA_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_OWNER_DELTA_CORRECTION_ROOT")" == "$FAILED_OWNER_DELTA_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OWNER_DELTA_CORRECTION_ROOT")" == \
+      "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_OWNER_DELTA_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$SCRIPT_BASENAME" \
+    "$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO" "$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE" \
+    "$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$VALIDATOR_BASENAME" \
+    "$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE" \
+    "$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" \
+    "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO" "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  verify_exact_nofollow_file_digest "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME" \
+    "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO" "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256" 0400 || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -1083,10 +1214,107 @@ try:
 except Exception:
     raise SystemExit(1)
 PY
+  [[ "${PIPESTATUS[0]}" == '0' && "${PIPESTATUS[1]}" == '0' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" \
+    "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO" "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256" 0400 |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" "$REVIEWED_REPAIR_RELEASE" "$AUTHORIZATION_SHA256" \
+      "$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID" "$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+      "$STAGING_PROJECT_REF" "$EXPECTED_DROPLET_ID" "$CANONICAL_H14" "$SOURCE_ATTESTATION_RELEASE" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+      "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256" "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+      "$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID" "$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256" \
+      "$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE" "$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256" \
+      "$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE" "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+      "$SOURCE_CUSTOMER_WEB_IMAGE_ID" "$SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256" \
+      "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" "$SOURCE_NON_OWNER_INVENTORY_SHA256" \
+      "$CREATED_OWNER_CONTAINER_ID" "$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES" 3<<'PY'
+import sys
+
+(
+    release, repair, authorization, workflow_run, workflow_attempt, project_ref,
+    droplet_id, canonical_h14, attestation, failed_network_scope, bundle_parent,
+    archive_sha, archive_size, config_id, script_sha, script_size, validator_sha,
+    validator_size, source_customer, source_customer_image,
+    source_customer_unhealthy, source_customer_normalized, source_inventory,
+    created_owner, expected_line_count,
+) = sys.argv[1:]
+
+try:
+    raw = sys.stdin.buffer.read()
+    text = raw.decode('ascii')
+    if not text.endswith('\n') or '\r' in text or '\x00' in text:
+        raise RuntimeError()
+    lines = text.splitlines()
+    if len(lines) != int(expected_line_count) or any(not line or '=' not in line for line in lines):
+        raise RuntimeError()
+    pairs = [line.split('=', 1) for line in lines]
+    values = dict(pairs)
+    if len(values) != len(pairs):
+        raise RuntimeError()
+    expected = {
+        'version': '1',
+        'contract': 'fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
+        'recovery_implementation_sha': release,
+        'repair_implementation_sha': repair,
+        'authorization_sha256': authorization,
+        'workflow_run_id': workflow_run,
+        'workflow_run_attempt': workflow_attempt,
+        'staging_project_ref': project_ref,
+        'staging_droplet_id': droplet_id,
+        'canonical_h14_sha': canonical_h14,
+        'source_terminal_attestation_sha': attestation,
+        'failed_network_scope_correction_implementation_sha': failed_network_scope,
+        'prior_failed_recovery_bundle_parent_dev_ino': bundle_parent,
+        'customer_web_image_archive_sha256': archive_sha,
+        'customer_web_image_archive_size': archive_size,
+        'customer_web_image_id': config_id,
+        'recovery_script_sha256': script_sha,
+        'recovery_script_size': script_size,
+        'archive_validator_sha256': validator_sha,
+        'archive_validator_size': validator_size,
+        'source_customer_web_container_id': source_customer,
+        'source_customer_web_image_id': source_customer_image,
+        'source_customer_web_unhealthy_runtime_sha256': source_customer_unhealthy,
+        'source_customer_web_normalized_sha256': source_customer_normalized,
+        'source_non_owner_inventory_sha256': source_inventory,
+        'created_owner_container_id': created_owner,
+        'owner_delta_normalization_contract': 'customer-and-image-only-preserve-owner-delta-v1',
+        'owner_lifecycle_mutation': 'forbidden-already-running',
+        'customer_web_lifecycle_mutation': 'exact-single-self-recovery-replacement-v1',
+        'all_other_lifecycle_mutation': 'forbidden',
+        'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false',
+        'kemerbet_final_action_enabled': 'false',
+        'provider_action_enabled': 'false',
+        'transfer_enabled': 'false',
+        'amount_entry_enabled': 'false',
+        'money_moved': 'false',
+    }
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise RuntimeError()
+    if lines[:11] != [f'{key}={expected[key]}' for key in (
+        'version', 'contract', 'recovery_implementation_sha',
+        'repair_implementation_sha', 'authorization_sha256', 'workflow_run_id',
+        'workflow_run_attempt', 'staging_project_ref', 'staging_droplet_id',
+        'canonical_h14_sha', 'source_terminal_attestation_sha')]:
+        raise RuntimeError()
+    if lines[-10:] != [
+        'archive_encoding=oci', 'archive_layer_count=11',
+        'archive_member_count=30', 'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false', 'kemerbet_final_action_enabled=false',
+        'provider_action_enabled=false', 'transfer_enabled=false',
+        'amount_entry_enabled=false', 'money_moved=false',
+    ]:
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
 }
 
 require_prior_failed_recovery_claim ||
-  die 'OWNER-DELTA-001: the immutable failed 1f27 bundle, manifest semantics, or append-only chain is not exact'
+  die 'OCI-RUNTIME-ID-001: the immutable failed a51 bundle, manifest semantics, or append-only chain is not exact'
 
 [[ ! -L "$STAGED_INSTALLER" && -f "$STAGED_INSTALLER" &&
   "$(realpath -- "$0")" == "$STAGED_INSTALLER" &&
@@ -1107,6 +1335,18 @@ require_prior_failed_recovery_claim ||
   "$(find -P "$STAGING_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
     $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] ||
   die 'the exact append-only archive-recovery implementation claim is not sealed'
+
+mapfile -t customer_web_archive_identities < <(derive_customer_web_archive_identities \
+  "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$STAGED_VALIDATOR" \
+  "fetanagent-customer-web:${RECOVERY_RELEASE:0:12}" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" "$RECOVERY_RELEASE") ||
+  die 'the sealed customer-web OCI graph or its split config/runtime identities are invalid'
+[[ "${#customer_web_archive_identities[@]}" -eq 2 &&
+  "${customer_web_archive_identities[0]}" == "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" &&
+  "${customer_web_archive_identities[1]}" =~ ^sha256:[0-9a-f]{64}$ &&
+  "${customer_web_archive_identities[1]}" != "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" ]] ||
+  die 'the sealed customer-web OCI config and runtime descriptor identities are ambiguous'
+readonly CUSTOMER_WEB_CONFIG_IMAGE_ID="${customer_web_archive_identities[0]}"
+readonly CUSTOMER_WEB_RUNTIME_IMAGE_ID="${customer_web_archive_identities[1]}"
 
 RECOVERY_WORKFLOW_RUN_ID="$(sed -n 's/^workflow_run_id=//p' "$STAGED_RECOVERY_MANIFEST")"
 RECOVERY_WORKFLOW_RUN_ATTEMPT="$(sed -n 's/^workflow_run_attempt=//p' "$STAGED_RECOVERY_MANIFEST")"
@@ -1409,6 +1649,36 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   'failed_network_scope_image_runtime=tag-and-id-absent' \
   'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator' \
   'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1' \
+  "failed_owner_delta_correction_implementation_sha=$FAILED_OWNER_DELTA_CORRECTION_RELEASE" \
+  "failed_owner_delta_correction_bundle_parent_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+  "failed_owner_delta_correction_bundle_root_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_owner_delta_correction_script_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_owner_delta_correction_script_sha256=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256" \
+  "failed_owner_delta_correction_script_size=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE" \
+  "failed_owner_delta_correction_validator_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_owner_delta_correction_validator_sha256=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256" \
+  "failed_owner_delta_correction_validator_size=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE" \
+  "failed_owner_delta_correction_manifest_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_owner_delta_correction_manifest_sha256=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256" \
+  "failed_owner_delta_correction_manifest_size=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE" \
+  "failed_owner_delta_correction_manifest_lines=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES" \
+  "failed_owner_delta_correction_image_archive_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+  "failed_owner_delta_correction_image_archive_sha256=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+  "failed_owner_delta_correction_image_archive_size=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+  "failed_owner_delta_correction_config_image_id=$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID" \
+  "failed_owner_delta_correction_runtime_descriptor_id=$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+  "failed_owner_delta_correction_workflow_run_id=$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_owner_delta_correction_workflow_run_attempt=$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_owner_delta_bridge_parent_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO" \
+  "failed_owner_delta_bridge_installing_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_owner_delta_bridge_intent_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO" \
+  "failed_owner_delta_bridge_intent_sha256=$FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256" \
+  "failed_owner_delta_bridge_intent_size=$FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE" \
+  "failed_owner_delta_bridge_intent_lines=$FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES" \
+  'failed_owner_delta_bridge_inventory=single-intent-no-final' \
+  'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent' \
+  'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load' \
+  'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' \
   "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
   'failed_endpoint_phase_owner_state=created-never-started' \
   'failed_running_status_owner_state=running-healthy-no-completion' \
@@ -1444,6 +1714,7 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
   "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
   "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+  "customer_web_runtime_descriptor_id=$CUSTOMER_WEB_RUNTIME_IMAGE_ID" \
   "source_owner_config_id=$SOURCE_OWNER_IMAGE_ID" \
   "loaded_owner_manifest_image_id=$SOURCE_OWNER_LOADED_IMAGE_ID" \
   'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids' \
@@ -1791,6 +2062,96 @@ PY
   [[ "${PIPESTATUS[0]}" == '0' && "${PIPESTATUS[1]}" == '0' ]] || return 1
   ! docker_local image inspect "fetanagent-customer-web:${FAILED_NETWORK_SCOPE_CORRECTION_RELEASE:0:12}" >/dev/null 2>&1 || return 1
   ! docker_local image inspect "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" >/dev/null 2>&1
+}
+
+require_failed_owner_delta_runtime() {
+  [[ ! -e "$FAILED_OWNER_DELTA_BRIDGE_ROOT" && ! -L "$FAILED_OWNER_DELTA_BRIDGE_ROOT" &&
+    ! -e "$FAILED_OWNER_DELTA_BRIDGE_FINAL" && ! -L "$FAILED_OWNER_DELTA_BRIDGE_FINAL" &&
+    ! -L "$FAILED_OWNER_DELTA_BRIDGE_PARENT" && -d "$FAILED_OWNER_DELTA_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_OWNER_DELTA_BRIDGE_PARENT")" == "$FAILED_OWNER_DELTA_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OWNER_DELTA_BRIDGE_PARENT")" == \
+      "$FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_OWNER_DELTA_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_OWNER_DELTA_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING" && -d "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING")" == "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING")" == \
+      "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      'intent-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_OWNER_DELTA_BRIDGE_INTENT" \
+    "$FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO" "$FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE" \
+    "$FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256" 0600 |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" "$CREATED_OWNER_CONTAINER_ID" \
+      "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" "$SOURCE_CUSTOMER_WEB_IMAGE_ID" \
+      "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+      "$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+      "$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID" "$OWNER_NETWORK" \
+      "$FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES" 3<<'PY'
+import sys
+
+(
+    release, owner, source_customer, source_customer_image, archive_sha,
+    archive_size, config_id, owner_network, expected_line_count,
+) = sys.argv[1:]
+try:
+    raw = sys.stdin.buffer.read()
+    text = raw.decode('ascii')
+    if not text.endswith('\n') or '\r' in text or '\x00' in text:
+        raise RuntimeError()
+    lines = text.splitlines()
+    if len(lines) != int(expected_line_count) or any(not line or '=' not in line for line in lines):
+        raise RuntimeError()
+    pairs = [line.split('=', 1) for line in lines]
+    values = dict(pairs)
+    if len(values) != len(pairs):
+        raise RuntimeError()
+    expected = {
+        'version': '1',
+        'contract': 'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery',
+        'state': 'authorized',
+        'archive_recovery_implementation_release': release,
+        'owner_lifecycle_mutation': 'forbidden-already-running',
+        'running_owner_container_id': owner,
+        'running_owner_state': 'running-healthy-at-publication',
+        'control_volume_holder': owner,
+        'source_customer_web_container_id': source_customer,
+        'source_customer_web_image_id': source_customer_image,
+        'customer_web_image_archive_sha256': archive_sha,
+        'customer_web_image_archive_size': archive_size,
+        'customer_web_image_id': config_id,
+        'owner_network': owner_network,
+        'customer_web_network_contract': 'exact-owner-control-service-single-endpoint-v1',
+        'owner_delta_normalization_contract': 'customer-and-image-only-preserve-owner-delta-v1',
+        'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false',
+        'kemerbet_final_action_enabled': 'false',
+        'provider_action_enabled': 'false',
+        'transfer_enabled': 'false',
+        'amount_entry_enabled': 'false',
+        'money_moved': 'false',
+    }
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise RuntimeError()
+    if lines[-7:] != [
+        'financial_actions_mode=dry_run', 'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false', 'provider_action_enabled=false',
+        'transfer_enabled=false', 'amount_entry_enabled=false', 'money_moved=false',
+    ]:
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+  [[ "${PIPESTATUS[0]}" == '0' && "${PIPESTATUS[1]}" == '0' ]] || return 1
+  require_customer_web_runtime_image_contract \
+    "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME" \
+    "$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID" \
+    "$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}" \
+    "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" || return 1
+  [[ -z "$(docker_local container ls --all --quiet --no-trunc \
+    --filter "ancestor=fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}")" ]]
 }
 
 emit_owned_nofollow_file() {
@@ -3601,6 +3962,86 @@ except Exception:
 PY
 }
 
+require_customer_web_runtime_image_contract() {
+  local archive_path="$1" config_id="$2" runtime_id="$3" image_tag="$4" release="$5"
+  docker_local image inspect "$image_tag" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$archive_path" "$config_id" "$runtime_id" "$image_tag" "$release" 3<<'PY'
+import hashlib
+import json
+import re
+import sys
+import tarfile
+
+archive_path, expected_config_id, expected_runtime_id, expected_tag, expected_release = sys.argv[1:]
+
+try:
+    observed = json.load(sys.stdin)
+    if not isinstance(observed, list) or len(observed) != 1:
+        raise RuntimeError()
+    image = observed[0]
+    with tarfile.open(archive_path, mode='r:') as archive:
+        index = json.load(archive.extractfile('index.json'))
+        descriptor = index['manifests'][0]
+        if descriptor.get('digest') != expected_runtime_id:
+            raise RuntimeError()
+        manifest_stream = archive.extractfile(f"blobs/sha256/{expected_runtime_id.removeprefix('sha256:')}")
+        config_stream = archive.extractfile(f"blobs/sha256/{expected_config_id.removeprefix('sha256:')}")
+        if manifest_stream is None or config_stream is None:
+            raise RuntimeError()
+        manifest_bytes = manifest_stream.read()
+        config_bytes = config_stream.read()
+        if hashlib.sha256(manifest_bytes).hexdigest() != expected_runtime_id.removeprefix('sha256:'):
+            raise RuntimeError()
+        if hashlib.sha256(config_bytes).hexdigest() != expected_config_id.removeprefix('sha256:'):
+            raise RuntimeError()
+        manifest = json.loads(manifest_bytes)
+        config = json.loads(config_bytes)
+    if manifest.get('config', {}).get('digest') != expected_config_id:
+        raise RuntimeError()
+    runtime_descriptor = image.get('Descriptor')
+    if not isinstance(runtime_descriptor, dict) or runtime_descriptor.get('digest') != expected_runtime_id:
+        raise RuntimeError()
+    if image.get('Id') != expected_runtime_id or image.get('RepoTags') != [expected_tag]:
+        raise RuntimeError()
+    repository = expected_tag.rsplit(':', 1)[0]
+    if image.get('RepoDigests') != [f'{repository}@{expected_runtime_id}']:
+        raise RuntimeError()
+    if image.get('Architecture') != config.get('architecture') or image.get('Os') != config.get('os'):
+        raise RuntimeError()
+    if image.get('Variant') not in (None, '') or config.get('variant') is not None:
+        raise RuntimeError()
+    if image.get('Config') != config.get('config'):
+        raise RuntimeError()
+    image_config = config.get('config') or {}
+    labels = image_config.get('Labels') or {}
+    if image_config.get('User') != '10001:10001' or image_config.get('Cmd') != ['node', 'apps/customer-web/dist/index.js']:
+        raise RuntimeError()
+    if image_config.get('Entrypoint') != ['docker-entrypoint.sh'] or image_config.get('WorkingDir') != '/workspace':
+        raise RuntimeError()
+    if labels.get('org.opencontainers.image.revision') != expected_release or labels.get('org.opencontainers.image.title') != 'fetanagent-customer-web':
+        raise RuntimeError()
+    layer_descriptors = manifest.get('layers') or []
+    diff_ids = (config.get('rootfs') or {}).get('diff_ids')
+    if len(layer_descriptors) != 10 or not isinstance(diff_ids, list) or len(diff_ids) != 10:
+        raise RuntimeError()
+    if any(not isinstance(item, dict) or not re.fullmatch(r'sha256:[0-9a-f]{64}', item.get('digest') or '') for item in layer_descriptors):
+        raise RuntimeError()
+    if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', item or '') for item in diff_ids):
+        raise RuntimeError()
+    if image.get('RootFS') != {'Type': 'layers', 'Layers': diff_ids}:
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+  [[ "${PIPESTATUS[0]}" == '0' && "${PIPESTATUS[1]}" == '0' ]] || return 1
+  [[ "$(docker_local image inspect "$runtime_id" --format '{{.Id}}|{{.Descriptor.digest}}')" == \
+    "$runtime_id|$runtime_id" ]] || return 1
+  if [[ "$config_id" != "$runtime_id" ]]; then
+    ! docker_local image inspect "$config_id" >/dev/null 2>&1 || return 1
+  fi
+}
+
 require_loaded_image_unused() {
   [[ -z "$(docker_local container ls --all --quiet --filter "ancestor=$OWNER_IMAGE")" ]]
 }
@@ -3740,16 +4181,18 @@ PY
 }
 
 # Post-replacement comparator. The immutable 8f comparator above remains the
-# pre-mutation authority. This successor comparator additionally permits only
-# the attested customer image and exact old->new customer endpoint/holder swap.
+# pre-mutation authority. This successor permits only the exact failed-a51
+# image residue plus the new attested runtime descriptor, and the exact
+# old->new customer endpoint/holder swap.
 require_exact_successor_inventory_delta_inline_reference() {
-  local before="$1" after="$2" new_owner="$3" old_customer="$4" new_customer="$5" new_image="$6"
+  local before="$1" after="$2" new_owner="$3" old_customer="$4" new_customer="$5" new_image="$6" failed_image="$7"
   printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
     env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
       "$new_owner" "$OWNER_NETWORK" "$CONTROL_VOLUME" "$PROFILE_VOLUME" \
-      "$old_customer" "$new_customer" "$new_image" "$RECOVERY_RELEASE" 3<<'PY'
+      "$old_customer" "$new_customer" "$new_image" "$failed_image" \
+      "$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
 import copy, ipaddress, json, re, sys
-new_owner, owner_network, control_volume, profile_volume, old_customer, new_customer, new_image, release = sys.argv[1:]
+new_owner, owner_network, control_volume, profile_volume, old_customer, new_customer, new_image, failed_image, release, failed_release = sys.argv[1:]
 before_raw, after_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
 before = json.loads(before_raw); after = json.loads(after_raw)
 def keyed(items, key):
@@ -3759,16 +4202,28 @@ def keyed(items, key):
     return result
 try:
     if any(not re.fullmatch(r'[0-9a-f]{64}', value) for value in (new_owner, old_customer, new_customer)): raise RuntimeError()
-    if not re.fullmatch(r'sha256:[0-9a-f]{64}', new_image): raise RuntimeError()
+    if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in (new_image, failed_image)): raise RuntimeError()
+    if new_image == failed_image: raise RuntimeError()
     if set(before) != {'images','networks','volumes','holders'} or set(after) != set(before): raise RuntimeError()
     old_images = keyed(before['images'], 'Id'); new_images = keyed(after['images'], 'Id')
-    if new_image in old_images or set(new_images) != set(old_images) | {new_image}: raise RuntimeError()
+    if new_image in old_images or failed_image in old_images: raise RuntimeError()
+    if set(new_images) != set(old_images) | {failed_image, new_image}: raise RuntimeError()
     if any(new_images[key] != old_images[key] for key in old_images): raise RuntimeError()
     added = new_images[new_image]
     config = added.get('Config') or {}
+    if added.get('Id') != new_image or (added.get('Descriptor') or {}).get('digest') != new_image: raise RuntimeError()
     if added.get('RepoTags') != [f'fetanagent-customer-web:{release[:12]}']: raise RuntimeError()
+    if added.get('RepoDigests') != [f'fetanagent-customer-web@{new_image}']: raise RuntimeError()
     if config.get('User') != '10001:10001' or config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
     if (config.get('Labels') or {}).get('org.opencontainers.image.revision') != release: raise RuntimeError()
+    failed = new_images[failed_image]
+    failed_config = failed.get('Config') or {}
+    if failed.get('Id') != failed_image or (failed.get('Descriptor') or {}).get('digest') != failed_image: raise RuntimeError()
+    if failed.get('RepoTags') != [f'fetanagent-customer-web:{failed_release[:12]}']: raise RuntimeError()
+    if failed.get('RepoDigests') != [f'fetanagent-customer-web@{failed_image}']: raise RuntimeError()
+    if failed_config.get('User') != '10001:10001' or failed_config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+    if failed_config.get('Entrypoint') != ['docker-entrypoint.sh'] or failed_config.get('WorkingDir') != '/workspace': raise RuntimeError()
+    if (failed_config.get('Labels') or {}).get('org.opencontainers.image.revision') != failed_release: raise RuntimeError()
     old_networks = keyed(before['networks'], 'Id'); new_networks = keyed(after['networks'], 'Id')
     if set(old_networks) != set(new_networks): raise RuntimeError()
     owner_ids = [key for key, value in old_networks.items() if value.get('Name') == owner_network]
@@ -3829,12 +4284,13 @@ PY
 }
 
 require_exact_successor_inventory_delta() {
-  local before="$1" after="$2" new_owner="$3" old_customer="$4" new_customer="$5" new_image="$6" normalized_after
+  local before="$1" after="$2" new_owner="$3" old_customer="$4" new_customer="$5" new_image="$6" failed_image="$7" normalized_after
   normalized_after="$(printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
     env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
-      "$old_customer" "$new_customer" "$new_image" "$RECOVERY_RELEASE" 3<<'PY'
+      "$old_customer" "$new_customer" "$new_image" "$failed_image" \
+      "$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
 import copy, ipaddress, json, re, sys
-old_customer, new_customer, new_image, release = sys.argv[1:]
+old_customer, new_customer, new_image, failed_image, release, failed_release = sys.argv[1:]
 before_raw, after_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
 before = json.loads(before_raw); after = json.loads(after_raw)
 def keyed(items, key):
@@ -3844,13 +4300,17 @@ def keyed(items, key):
     return result
 try:
     if any(not re.fullmatch(r'[0-9a-f]{64}', value) for value in (old_customer, new_customer)): raise RuntimeError()
-    if not re.fullmatch(r'sha256:[0-9a-f]{64}', new_image): raise RuntimeError()
+    if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in (new_image, failed_image)): raise RuntimeError()
+    if new_image == failed_image: raise RuntimeError()
     if set(before) != {'images','networks','volumes','holders'} or set(after) != set(before): raise RuntimeError()
     old_images = keyed(before['images'], 'Id'); new_images = keyed(after['images'], 'Id')
-    if new_image in old_images or set(new_images) != set(old_images) | {new_image}: raise RuntimeError()
+    if new_image in old_images or failed_image in old_images: raise RuntimeError()
+    if set(new_images) != set(old_images) | {failed_image, new_image}: raise RuntimeError()
     if any(new_images[key] != old_images[key] for key in old_images): raise RuntimeError()
     image = new_images[new_image]; config = image.get('Config') or {}
+    if image.get('Id') != new_image or (image.get('Descriptor') or {}).get('digest') != new_image: raise RuntimeError()
     if image.get('RepoTags') != [f'fetanagent-customer-web:{release[:12]}']: raise RuntimeError()
+    if image.get('RepoDigests') != [f'fetanagent-customer-web@{new_image}']: raise RuntimeError()
     if config.get('User') != '10001:10001' or config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
     if config.get('Entrypoint') != ['docker-entrypoint.sh']: raise RuntimeError()
     if config.get('WorkingDir') != '/workspace': raise RuntimeError()
@@ -3860,8 +4320,15 @@ try:
         'Interval':30000000000,'Timeout':3000000000,'StartPeriod':15000000000,'Retries':3,
     }: raise RuntimeError()
     if (config.get('Labels') or {}).get('org.opencontainers.image.revision') != release: raise RuntimeError()
+    failed = new_images[failed_image]; failed_config = failed.get('Config') or {}
+    if failed.get('Id') != failed_image or (failed.get('Descriptor') or {}).get('digest') != failed_image: raise RuntimeError()
+    if failed.get('RepoTags') != [f'fetanagent-customer-web:{failed_release[:12]}']: raise RuntimeError()
+    if failed.get('RepoDigests') != [f'fetanagent-customer-web@{failed_image}']: raise RuntimeError()
+    if failed_config.get('User') != '10001:10001' or failed_config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+    if failed_config.get('Entrypoint') != ['docker-entrypoint.sh'] or failed_config.get('WorkingDir') != '/workspace': raise RuntimeError()
+    if (failed_config.get('Labels') or {}).get('org.opencontainers.image.revision') != failed_release: raise RuntimeError()
     normalized = copy.deepcopy(after)
-    normalized['images'] = [item for item in normalized['images'] if item.get('Id') != new_image]
+    normalized['images'] = [item for item in normalized['images'] if item.get('Id') not in {failed_image, new_image}]
     old_networks = keyed(before['networks'], 'Id'); normalized_networks = keyed(normalized['networks'], 'Id')
     if set(old_networks) != set(normalized_networks): raise RuntimeError()
     swaps = 0
@@ -3919,16 +4386,54 @@ load_pre_create_docker_inventory() {
     'import json,sys; value=json.load(sys.stdin); assert set(value)=={"images","networks","volumes","holders"}'
 }
 
+normalize_failed_owner_delta_image_residue() {
+  local before="$1" current="$2"
+  printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$current" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+      "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
+import copy, json, re, sys
+failed_image, failed_release = sys.argv[1:]
+before_raw, current_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
+before = json.loads(before_raw); current = json.loads(current_raw)
+def keyed(items):
+    if not isinstance(items, list) or any(not isinstance(item, dict) or 'Id' not in item for item in items): raise RuntimeError()
+    result = {item['Id']: item for item in items}
+    if len(result) != len(items): raise RuntimeError()
+    return result
+try:
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', failed_image): raise RuntimeError()
+    if set(before) != {'images','networks','volumes','holders'} or set(current) != set(before): raise RuntimeError()
+    old_images = keyed(before['images']); current_images = keyed(current['images'])
+    if failed_image in old_images or set(current_images) != set(old_images) | {failed_image}: raise RuntimeError()
+    if any(current_images[key] != old_images[key] for key in old_images): raise RuntimeError()
+    failed = current_images[failed_image]; config = failed.get('Config') or {}
+    if failed.get('Id') != failed_image or (failed.get('Descriptor') or {}).get('digest') != failed_image: raise RuntimeError()
+    if failed.get('RepoTags') != [f'fetanagent-customer-web:{failed_release[:12]}']: raise RuntimeError()
+    if failed.get('RepoDigests') != [f'fetanagent-customer-web@{failed_image}']: raise RuntimeError()
+    if config.get('User') != '10001:10001' or config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+    if config.get('Entrypoint') != ['docker-entrypoint.sh'] or config.get('WorkingDir') != '/workspace': raise RuntimeError()
+    if (config.get('Labels') or {}).get('org.opencontainers.image.revision') != failed_release: raise RuntimeError()
+    normalized = copy.deepcopy(current)
+    normalized['images'] = [item for item in normalized['images'] if item.get('Id') != failed_image]
+    print(json.dumps(normalized, sort_keys=True, separators=(',', ':')))
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 require_owner_endpoint_phase_boundary() {
-  local phase="$1" current_inventory state
+  local phase="$1" current_inventory normalized_inventory state
   [[ "$NEW_OWNER_CONTAINER_ID" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
   require_exact_owner_inventory "$NEW_OWNER_CONTAINER_ID" || return 1
   require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
   require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" || return 1
   require_non_owner_inventory_unchanged || return 1
   current_inventory="$(capture_complete_docker_create_inventory)" || return 1
+  normalized_inventory="$(normalize_failed_owner_delta_image_residue \
+    "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory")" || return 1
   require_exact_owner_inventory_delta_phase \
-    "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory" "$NEW_OWNER_CONTAINER_ID" "$phase" || return 1
+    "$PRE_CREATE_DOCKER_INVENTORY" "$normalized_inventory" "$NEW_OWNER_CONTAINER_ID" "$phase" || return 1
   state="$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" \
     --format '{{.State.Status}}|{{.State.Running}}|{{.State.Pid}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
   case "$phase:$state" in
@@ -3951,11 +4456,13 @@ require_successor_endpoint_phase_boundary() {
   require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
   require_owner_never_restarted || return 1
   require_replacement_customer_web_boundary || return 1
+  require_failed_owner_delta_runtime || return 1
   require_other_service_inventory_exact || return 1
   current_inventory="$(capture_complete_docker_create_inventory)" || return 1
   require_exact_successor_inventory_delta \
     "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory" "$NEW_OWNER_CONTAINER_ID" \
-    "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" "$NEW_CUSTOMER_WEB_CONTAINER_ID" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" || return 1
+    "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" "$NEW_CUSTOMER_WEB_CONTAINER_ID" \
+    "$CUSTOMER_WEB_RUNTIME_IMAGE_ID" "$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" || return 1
   state="$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" \
     --format '{{.State.Status}}|{{.State.Running}}|{{.State.Pid}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
   [[ "$state" =~ ^running\|true\|[1-9][0-9]*\|0\|healthy$ ]] || return 1
@@ -3969,6 +4476,7 @@ require_resumed_intent_pre_mutation_boundary() {
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
+  require_failed_owner_delta_runtime || return 1
   [[ "$(container_full_ids_for_service "$OWNER_SERVICE")" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
   require_owner_contract "$CREATED_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
   require_owner_never_restarted || return 1
@@ -3989,7 +4497,7 @@ require_resumed_intent_pre_mutation_boundary() {
     mode=absent
   elif [[ "$customer_inventory" =~ ^[0-9a-f]{64}$ && "$customer_inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
     [[ "$(docker_local container inspect "$customer_inventory" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.RestartCount}}')" == \
-      "$PROVIDED_CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
+      "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
     require_customer_web_security_contract "$customer_inventory" || return 1
     mode=replacement
   else
@@ -3998,9 +4506,11 @@ require_resumed_intent_pre_mutation_boundary() {
   current_inventory="$(capture_complete_docker_create_inventory)" || return 1
   normalized_current="$(printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory" |
     env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$mode" "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
-      "$customer_inventory" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" 3<<'PY'
+      "$customer_inventory" "$CUSTOMER_WEB_RUNTIME_IMAGE_ID" \
+      "$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+      "$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
 import copy, ipaddress, json, re, sys
-mode, old_customer, current_customer, expected_image = sys.argv[1:]
+mode, old_customer, current_customer, expected_image, failed_image, config_image, release, failed_release = sys.argv[1:]
 before_raw, current_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
 before = json.loads(before_raw); current = json.loads(current_raw)
 def keyed(items, key):
@@ -4013,12 +4523,31 @@ try:
     if set(before) != {'images','networks','volumes','holders'} or set(current) != set(before): raise RuntimeError()
     if not re.fullmatch(r'[0-9a-f]{64}', old_customer): raise RuntimeError()
     if current_customer and not re.fullmatch(r'[0-9a-f]{64}', current_customer): raise RuntimeError()
-    if not re.fullmatch(r'sha256:[0-9a-f]{64}', expected_image): raise RuntimeError()
+    if any(not re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in (expected_image, failed_image, config_image)): raise RuntimeError()
+    if len({expected_image, failed_image, config_image}) != 3: raise RuntimeError()
     normalized = copy.deepcopy(current)
     old_images = keyed(before['images'], 'Id'); current_images = keyed(current['images'], 'Id')
     extras = set(current_images) - set(old_images)
-    if extras not in (set(), {expected_image}) or any(current_images[key] != old_images[key] for key in old_images): raise RuntimeError()
-    normalized['images'] = [item for item in normalized['images'] if item.get('Id') != expected_image]
+    if failed_image in old_images or expected_image in old_images or config_image in current_images: raise RuntimeError()
+    if extras not in ({failed_image}, {failed_image, expected_image}): raise RuntimeError()
+    if mode == 'replacement' and expected_image not in extras: raise RuntimeError()
+    if any(current_images[key] != old_images[key] for key in old_images): raise RuntimeError()
+    failed = current_images[failed_image]; failed_config = failed.get('Config') or {}
+    if failed.get('Id') != failed_image or (failed.get('Descriptor') or {}).get('digest') != failed_image: raise RuntimeError()
+    if failed.get('RepoTags') != [f'fetanagent-customer-web:{failed_release[:12]}']: raise RuntimeError()
+    if failed.get('RepoDigests') != [f'fetanagent-customer-web@{failed_image}']: raise RuntimeError()
+    if failed_config.get('User') != '10001:10001' or failed_config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+    if failed_config.get('Entrypoint') != ['docker-entrypoint.sh'] or failed_config.get('WorkingDir') != '/workspace': raise RuntimeError()
+    if (failed_config.get('Labels') or {}).get('org.opencontainers.image.revision') != failed_release: raise RuntimeError()
+    if expected_image in extras:
+        expected = current_images[expected_image]; expected_config = expected.get('Config') or {}
+        if expected.get('Id') != expected_image or (expected.get('Descriptor') or {}).get('digest') != expected_image: raise RuntimeError()
+        if expected.get('RepoTags') != [f'fetanagent-customer-web:{release[:12]}']: raise RuntimeError()
+        if expected.get('RepoDigests') != [f'fetanagent-customer-web@{expected_image}']: raise RuntimeError()
+        if expected_config.get('User') != '10001:10001' or expected_config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+        if expected_config.get('Entrypoint') != ['docker-entrypoint.sh'] or expected_config.get('WorkingDir') != '/workspace': raise RuntimeError()
+        if (expected_config.get('Labels') or {}).get('org.opencontainers.image.revision') != release: raise RuntimeError()
+    normalized['images'] = [item for item in normalized['images'] if item.get('Id') not in {failed_image, expected_image}]
     old_networks = keyed(before['networks'], 'Id'); current_networks = keyed(current['networks'], 'Id')
     normalized_networks = keyed(normalized['networks'], 'Id')
     if set(old_networks) != set(current_networks) or set(normalized_networks) != set(old_networks): raise RuntimeError()
@@ -4105,6 +4634,7 @@ require_complete_owner_endpoint_phase_boundary() {
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
+  require_failed_owner_delta_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -4128,6 +4658,7 @@ require_running_owner_boundary_before_successor_intent() {
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
+  require_failed_owner_delta_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -4659,6 +5190,7 @@ create_or_discover_bridge_ledger() {
   require_prior_failed_recovery_claim || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
+  require_failed_owner_delta_runtime || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -4696,6 +5228,7 @@ create_or_discover_bridge_ledger() {
   require_prior_failed_recovery_claim || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
+  require_failed_owner_delta_runtime || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
@@ -4785,6 +5318,36 @@ expected_bridge_intent() {
     'failed_network_scope_image_runtime=tag-and-id-absent' \
     'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator' \
     'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1' \
+    "failed_owner_delta_correction_implementation_sha=$FAILED_OWNER_DELTA_CORRECTION_RELEASE" \
+    "failed_owner_delta_correction_bundle_parent_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_owner_delta_correction_bundle_root_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_owner_delta_correction_script_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_owner_delta_correction_script_sha256=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256" \
+    "failed_owner_delta_correction_script_size=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE" \
+    "failed_owner_delta_correction_validator_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_owner_delta_correction_validator_sha256=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256" \
+    "failed_owner_delta_correction_validator_size=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE" \
+    "failed_owner_delta_correction_manifest_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_owner_delta_correction_manifest_sha256=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256" \
+    "failed_owner_delta_correction_manifest_size=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE" \
+    "failed_owner_delta_correction_manifest_lines=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES" \
+    "failed_owner_delta_correction_image_archive_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_owner_delta_correction_image_archive_sha256=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_owner_delta_correction_image_archive_size=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_owner_delta_correction_config_image_id=$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID" \
+    "failed_owner_delta_correction_runtime_descriptor_id=$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "failed_owner_delta_correction_workflow_run_id=$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_owner_delta_correction_workflow_run_attempt=$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_owner_delta_bridge_parent_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO" \
+    "failed_owner_delta_bridge_installing_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_owner_delta_bridge_intent_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO" \
+    "failed_owner_delta_bridge_intent_sha256=$FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256" \
+    "failed_owner_delta_bridge_intent_size=$FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE" \
+    "failed_owner_delta_bridge_intent_lines=$FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES" \
+    'failed_owner_delta_bridge_inventory=single-intent-no-final' \
+    'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent' \
+    'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load' \
+    'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -5004,6 +5567,7 @@ expected_bridge_intent() {
     "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
     "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
     "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+    "customer_web_runtime_descriptor_id=$CUSTOMER_WEB_RUNTIME_IMAGE_ID" \
     'migration_attestation=exact-terminal-attestation-completed-v1' \
     "installed_helper_sha256=$H14_HELPER_SHA256" \
     "owner_network=$OWNER_NETWORK" \
@@ -5155,6 +5719,36 @@ expected_bridge_completed() {
     'failed_network_scope_image_runtime=tag-and-id-absent' \
     'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator' \
     'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1' \
+    "failed_owner_delta_correction_implementation_sha=$FAILED_OWNER_DELTA_CORRECTION_RELEASE" \
+    "failed_owner_delta_correction_bundle_parent_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_owner_delta_correction_bundle_root_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_owner_delta_correction_script_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_owner_delta_correction_script_sha256=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256" \
+    "failed_owner_delta_correction_script_size=$FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE" \
+    "failed_owner_delta_correction_validator_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_owner_delta_correction_validator_sha256=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256" \
+    "failed_owner_delta_correction_validator_size=$FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE" \
+    "failed_owner_delta_correction_manifest_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_owner_delta_correction_manifest_sha256=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256" \
+    "failed_owner_delta_correction_manifest_size=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE" \
+    "failed_owner_delta_correction_manifest_lines=$FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES" \
+    "failed_owner_delta_correction_image_archive_dev_ino=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_owner_delta_correction_image_archive_sha256=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_owner_delta_correction_image_archive_size=$FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_owner_delta_correction_config_image_id=$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID" \
+    "failed_owner_delta_correction_runtime_descriptor_id=$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "failed_owner_delta_correction_workflow_run_id=$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_owner_delta_correction_workflow_run_attempt=$FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_owner_delta_bridge_parent_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO" \
+    "failed_owner_delta_bridge_installing_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_owner_delta_bridge_intent_dev_ino=$FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO" \
+    "failed_owner_delta_bridge_intent_sha256=$FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256" \
+    "failed_owner_delta_bridge_intent_size=$FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE" \
+    "failed_owner_delta_bridge_intent_lines=$FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES" \
+    'failed_owner_delta_bridge_inventory=single-intent-no-final' \
+    'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent' \
+    'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load' \
+    'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -5632,10 +6226,12 @@ require_pre_customer_web_inventory() {
 
 require_loaded_customer_web_image() {
   local image_id image_tag="fetanagent-customer-web:${RECOVERY_RELEASE:0:12}"
-  image_id="$(docker_local image inspect "$image_tag" --format '{{.Id}}')" || return 1
-  [[ "$image_id" == "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" ]] || return 1
-  [[ "$(docker_local image inspect "$image_id" --format '{{json .RepoTags}}|{{.Config.User}}|{{json .Config.Cmd}}|{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
-    "[\"$image_tag\"]|10001:10001|[\"node\",\"apps/customer-web/dist/index.js\"]|$RECOVERY_RELEASE" ]] || return 1
+  require_customer_web_runtime_image_contract \
+    "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+    "$CUSTOMER_WEB_RUNTIME_IMAGE_ID" "$image_tag" "$RECOVERY_RELEASE" || return 1
+  image_id="$(docker_local image inspect "$image_tag" --format '{{.Id}}|{{.Descriptor.digest}}')" || return 1
+  [[ "$image_id" == "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|$CUSTOMER_WEB_RUNTIME_IMAGE_ID" ]] || return 1
+  image_id="$CUSTOMER_WEB_RUNTIME_IMAGE_ID"
   CUSTOMER_WEB_IMAGE_ID="$image_id"
 }
 
@@ -5669,6 +6265,7 @@ expected_customer_web_replacement_record() {
     "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
     "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
     "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+    "customer_web_runtime_descriptor_id=$CUSTOMER_WEB_RUNTIME_IMAGE_ID" \
     'owner_lifecycle_mutation=false' \
     'other_service_lifecycle_mutation=false' \
     'financial_actions_mode=dry_run' \
@@ -5709,7 +6306,7 @@ classify_customer_web_replacement_state() {
   normalized="$(customer_web_normalized_contract_digest "$customer_id")" || return 1
   [[ "$normalized" == "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
   [[ "$(docker_local container inspect "$customer_id" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.RestartCount}}')" == \
-    "$PROVIDED_CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
+    "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
   if [[ "$(docker_local container inspect "$customer_id" --format '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == 'running|true|healthy' ]]; then
     NEW_CUSTOMER_WEB_CONTAINER_ID="$customer_id"
     printf '%s\n' complete
@@ -5725,13 +6322,15 @@ replace_customer_web_once() {
   before_guard="$(capture_other_service_inventory)" || return 1
   require_owner_never_restarted || return 1
   # Always import the attested archive. A pre-existing release tag is never a
-  # substitute for the exact staged archive bytes and expected image ID.
+  # substitute for the exact staged archive bytes and its paired config and
+  # runtime-manifest identities.
   docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" >/dev/null || return 1
   require_loaded_customer_web_image || return 1
   require_prior_failed_recovery_claim || return 1
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
+  require_failed_owner_delta_runtime || return 1
   replacement_state="$(classify_customer_web_replacement_state)" || return 1
   if [[ "$replacement_state" != complete ]]; then
     [[ "$replacement_state" == source || "$replacement_state" == retry ]] || return 1
@@ -5739,11 +6338,13 @@ replace_customer_web_once() {
     require_failed_counter_runtime || return 1
     require_failed_customer_web_network_scope_runtime || return 1
     require_failed_network_scope_runtime || return 1
+    require_failed_owner_delta_runtime || return 1
     env -i "${compose_environment[@]}" FETANAGENT_VCS_REF="$RECOVERY_RELEASE" \
       FETANAGENT_IMAGE_TAG="${RECOVERY_RELEASE:0:12}" "${compose_command[@]}" \
       up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web || return 1
   fi
   require_replacement_customer_web_boundary || return 1
+  require_failed_owner_delta_runtime || return 1
   ! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1 || return 1
   after_guard="$(capture_other_service_inventory)" || return 1
   [[ "$before_guard" == "$after_guard" ]] || return 1
@@ -5876,6 +6477,8 @@ require_failed_customer_web_network_scope_runtime ||
   die 'CW-NET-SCOPE-002: the immutable failed 0110 empty pre-intent ledger changed'
 require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-002: the immutable failed 1f27 single-intent pre-mutation ledger changed'
+require_failed_owner_delta_runtime ||
+  die 'OCI-RUNTIME-ID-002: the immutable failed a51 intent-only runtime or loaded descriptor image changed'
 NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
@@ -5985,6 +6588,8 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'CW-NET-SCOPE-003: the immutable failed 0110 empty pre-intent ledger changed beside completion'
   require_failed_network_scope_runtime ||
     die 'OWNER-DELTA-003: the immutable failed 1f27 single-intent pre-mutation ledger changed beside completion'
+  require_failed_owner_delta_runtime ||
+    die 'OCI-RUNTIME-ID-003: the immutable failed a51 intent-only runtime or descriptor residue changed beside completion'
   require_complete_owner_endpoint_phase_boundary running ||
     die 'the complete running-phase boundary changed beside completed replay'
   printf '%s\n' 'FetanAgent H14 customer-web recovery already valid: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'
@@ -6016,6 +6621,8 @@ require_prior_failed_recovery_claim ||
   die 'OWNER-DELTA-006: the immutable failed 1f27 bundle changed before replacement-record replay'
 require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-007: the immutable failed 1f27 intent-only runtime changed before replacement-record replay'
+require_failed_owner_delta_runtime ||
+  die 'OCI-RUNTIME-ID-006: the immutable failed a51 intent-only runtime changed before replacement-record replay'
 if [[ -e "$BRIDGE_WORK_ROOT/replacement-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/replacement-owner-v1" ]]; then
   load_replacement_record || die 'the replacement Owner record is invalid'
 else
@@ -6034,6 +6641,8 @@ require_prior_failed_recovery_claim ||
   die 'OWNER-DELTA-008: the immutable failed 1f27 bundle changed before start-record replay'
 require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-009: the immutable failed 1f27 intent-only runtime changed before start-record replay'
+require_failed_owner_delta_runtime ||
+  die 'OCI-RUNTIME-ID-007: the immutable failed a51 intent-only runtime changed before start-record replay'
 if [[ -e "$BRIDGE_WORK_ROOT/start-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/start-owner-v1" ]]; then
   require_start_record || die 'the durable replacement start intent changed'
 else
@@ -6077,6 +6686,8 @@ require_failed_customer_web_network_scope_runtime ||
   die 'CW-NET-SCOPE-005: the immutable failed 0110 empty pre-intent ledger changed during finalization'
 require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'
+require_failed_owner_delta_runtime ||
+  die 'OCI-RUNTIME-ID-005: the immutable failed a51 intent-only runtime or descriptor residue changed during finalization'
 require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'
 
 printf '%s\n' 'FetanAgent H14 customer-web recovery installed: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'

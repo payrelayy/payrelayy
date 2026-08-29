@@ -100,9 +100,39 @@ for (const exact1f27 of [
   "readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE='18569'",
   "readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES='265'",
   "readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
 ])
   assert.ok(script.includes(exact1f27), `missing exact 1f27 pin ${exact1f27}`);
+for (const exactA51 of [
+  "readonly FAILED_OWNER_DELTA_CORRECTION_RELEASE='a51b52201a94a669b8dcca38b7abb29d70d0200f'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102993'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO='64769:6102994'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256='b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE='393436'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO='64769:6102995'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO='64769:6102996'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256='ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE='23785'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES='356'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102997'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256='d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID='sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID='sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID='33277082955'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO='64769:6102998'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO='64769:6102999'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO='64769:6103000'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256='efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE='20653'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES='294'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
+])
+  assert.ok(script.includes(exactA51), `missing exact a51 pin ${exactA51}`);
 for (const exactLivePin of [
   "readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'",
   "readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'",
@@ -205,6 +235,61 @@ assert.ok(
   (script.match(/require_failed_network_scope_runtime/gu) ?? []).length >= 9,
   '1f27 boundary is not connected to resumed, pre-intent, mutation, completion, replay, and finalization paths',
 );
+const failedOwnerDeltaStart = script.indexOf('require_failed_owner_delta_runtime() {');
+const failedOwnerDeltaEnd = script.indexOf('\n}\n', failedOwnerDeltaStart);
+const failedOwnerDeltaHelper = script.slice(failedOwnerDeltaStart, failedOwnerDeltaEnd);
+for (const exactFailedOwnerDeltaBoundary of [
+  '! -e "$FAILED_OWNER_DELTA_BRIDGE_ROOT"',
+  '! -e "$FAILED_OWNER_DELTA_BRIDGE_FINAL"',
+  '! -L "$FAILED_OWNER_DELTA_BRIDGE_PARENT"',
+  '"$FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_OWNER_DELTA_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING"',
+  '"$FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  "'intent-v1:f'",
+  '"$FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO" "$FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE"',
+  '"$FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256" 0600',
+  '"$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID"',
+  '"$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID"',
+  "'archive_recovery_implementation_release': release",
+  "'customer_web_image_id': config_id",
+  "'financial_actions_mode': 'dry_run'",
+  "'transfer_enabled': 'false'",
+  "'amount_entry_enabled': 'false'",
+  "'money_moved': 'false'",
+  'require_customer_web_runtime_image_contract',
+  'fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}',
+  '--filter "ancestor=fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}"',
+])
+  assert.ok(
+    failedOwnerDeltaHelper.includes(exactFailedOwnerDeltaBoundary),
+    `failed-owner-delta helper lacks ${exactFailedOwnerDeltaBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_owner_delta_runtime/gu) ?? []).length >= 9,
+  'a51 boundary is not connected to resumed, pre-intent, image-load, Compose, replay, and finalization paths',
+);
+for (const exactOciIdentityBridge of [
+  'derive_customer_web_archive_identities() {',
+  "config_descriptor.get('digest') != expected_config_id",
+  "hashlib.sha256(manifest_bytes).hexdigest() != runtime_id.removeprefix('sha256:')",
+  "hashlib.sha256(config_bytes).hexdigest() != expected_config_id.removeprefix('sha256:')",
+  'readonly CUSTOMER_WEB_CONFIG_IMAGE_ID="${customer_web_archive_identities[0]}"',
+  'readonly CUSTOMER_WEB_RUNTIME_IMAGE_ID="${customer_web_archive_identities[1]}"',
+  'require_customer_web_runtime_image_contract() {',
+  "descriptor.get('digest') != expected_runtime_id",
+  "manifest.get('config', {}).get('digest') != expected_config_id",
+  "descriptor != image.get('Descriptor')",
+  "image.get('Id') != expected_runtime_id",
+  '"$runtime_id|$runtime_id"',
+  '! docker_local image inspect "$config_id"',
+  'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1',
+  'customer_web_runtime_descriptor_id=$CUSTOMER_WEB_RUNTIME_IMAGE_ID',
+])
+  assert.ok(
+    script.includes(exactOciIdentityBridge),
+    `missing OCI identity bridge ${exactOciIdentityBridge}`,
+  );
 for (const streamingArchiveGuard of [
   'verify_exact_nofollow_file_digest() {',
   'expected_size > 1024 * 1024 * 1024',
@@ -212,6 +297,7 @@ for (const streamingArchiveGuard of [
   'os.O_NOFOLLOW',
   'before_contract != after_contract',
   'verify_exact_nofollow_file_digest "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  'verify_exact_nofollow_file_digest "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
 ])
   assert.ok(
     script.includes(streamingArchiveGuard),
@@ -222,6 +308,12 @@ assert.ok(
     'emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
   ),
   'the 405 MB failed archive must never be buffered into memory',
+);
+assert.ok(
+  !script.includes(
+    'emit_exact_nofollow_file "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  ),
+  'the 405 MB failed a51 archive must never be buffered into memory',
 );
 for (const transport of [
   'docker image save --output "$customer_archive" "$customer_tag"',
@@ -246,7 +338,7 @@ assert.ok(
 assert.ok(workflow.includes("config.get('Entrypoint') == ['docker-entrypoint.sh']"));
 assert.equal(
   (script.match(/config\.get\('Entrypoint'\) != \['docker-entrypoint\.sh'\]/gu) ?? []).length,
-  3,
+  10,
   'all customer image, successor-delta, and replacement security comparators must require the exact Node entrypoint',
 );
 assert.ok(
@@ -296,6 +388,10 @@ for (const fixedManifestLine of [
   'failed_network_scope_image_runtime=tag-and-id-absent',
   'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator',
   'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1',
+  'failed_owner_delta_bridge_inventory=single-intent-no-final',
+  'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent',
+  'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load',
+  'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1',
   'financial_actions_mode=dry_run',
   'kemerbet_executor_enabled=false',
   'kemerbet_final_action_enabled=false',
@@ -497,7 +593,9 @@ for (const needle of [
   "readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
   "readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'",
   "readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -739,7 +837,7 @@ assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
 const nofollowDefinition = script.indexOf('emit_exact_nofollow_file() {');
 const priorClaimDefinition = script.indexOf('require_prior_failed_recovery_claim() {');
 const priorClaimInvocation = script.indexOf(
-  "require_prior_failed_recovery_claim ||\n  die 'OWNER-DELTA-001: the immutable failed 1f27 bundle, manifest semantics, or append-only chain is not exact'",
+  "require_prior_failed_recovery_claim ||\n  die 'OCI-RUNTIME-ID-001: the immutable failed a51 bundle, manifest semantics, or append-only chain is not exact'",
 );
 assert.ok(nofollowDefinition >= 0 && nofollowDefinition < priorClaimDefinition);
 assert.ok(priorClaimDefinition < priorClaimInvocation);
@@ -934,6 +1032,10 @@ const fixturePython = resolvePython();
 const fixtureOwner = 'a'.repeat(64);
 const fixtureCustomer = 'b'.repeat(64);
 const fixtureImage = `sha256:${'c'.repeat(64)}`;
+const fixtureFailedImage = `sha256:${'d'.repeat(64)}`;
+const fixtureConfigImage = `sha256:${'e'.repeat(64)}`;
+const fixtureRelease = '1'.repeat(40);
+const fixtureFailedRelease = '2'.repeat(40);
 const fixtureOwnerNetworkName = 'fetanagent-staging-beta_owner_control_service';
 const fixtureOwnerNetworkId = '1'.repeat(64);
 const fixtureCustomerNetworkId = '2'.repeat(64);
@@ -997,6 +1099,19 @@ savedCheckpoint.networks[1].Containers[fixtureCustomer] = fixtureCustomerEndpoin
 for (const { Name } of savedCheckpoint.volumes) savedCheckpoint.holders[Name] = [];
 savedCheckpoint.holders[fixtureCustomerVolume] = [fixtureCustomer];
 const currentSourceMode = cloneJson(savedCheckpoint);
+currentSourceMode.images.push({
+  Id: fixtureFailedImage,
+  Descriptor: { digest: fixtureFailedImage },
+  RepoTags: [`fetanagent-customer-web:${fixtureFailedRelease.slice(0, 12)}`],
+  RepoDigests: [`fetanagent-customer-web@${fixtureFailedImage}`],
+  Config: {
+    User: '10001:10001',
+    Cmd: ['node', 'apps/customer-web/dist/index.js'],
+    Entrypoint: ['docker-entrypoint.sh'],
+    WorkingDir: '/workspace',
+    Labels: { 'org.opencontainers.image.revision': fixtureFailedRelease },
+  },
+});
 const currentOwnerNetwork = currentSourceMode.networks[0];
 currentOwnerNetwork.Containers[fixtureOwner] = fixtureOwnerEndpoint;
 for (const counters of Object.values(currentOwnerNetwork.Status.IPAM.Subnets)) {
@@ -1027,7 +1142,16 @@ const runInventoryPython = (program, args, before, after) =>
 const normalizeSourceMode = (current) =>
   runInventoryPython(
     resumedCustomerNormalizer,
-    ['source', fixtureCustomer, fixtureCustomer, fixtureImage],
+    [
+      'source',
+      fixtureCustomer,
+      fixtureCustomer,
+      fixtureImage,
+      fixtureFailedImage,
+      fixtureConfigImage,
+      fixtureRelease,
+      fixtureFailedRelease,
+    ],
     savedCheckpoint,
     current,
   );
@@ -1177,19 +1301,24 @@ for (const finalizationGuard of [
     `missing finalization guard ${finalizationGuard}`,
   );
 }
-for (const failed1f27Guard of [
-  "require_prior_failed_recovery_claim ||\n  die 'OWNER-DELTA-001: the immutable failed 1f27 bundle, manifest semantics, or append-only chain is not exact'",
+for (const failedPredecessorGuard of [
+  "require_prior_failed_recovery_claim ||\n  die 'OCI-RUNTIME-ID-001: the immutable failed a51 bundle, manifest semantics, or append-only chain is not exact'",
   "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-002: the immutable failed 1f27 single-intent pre-mutation ledger changed'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-002: the immutable failed a51 intent-only runtime or loaded descriptor image changed'",
   "require_failed_network_scope_runtime ||\n    die 'OWNER-DELTA-003: the immutable failed 1f27 single-intent pre-mutation ledger changed beside completion'",
+  "require_failed_owner_delta_runtime ||\n    die 'OCI-RUNTIME-ID-003: the immutable failed a51 intent-only runtime or descriptor residue changed beside completion'",
   "require_prior_failed_recovery_claim ||\n  die 'OWNER-DELTA-006: the immutable failed 1f27 bundle changed before replacement-record replay'",
   "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-007: the immutable failed 1f27 intent-only runtime changed before replacement-record replay'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-006: the immutable failed a51 intent-only runtime changed before replacement-record replay'",
   "require_prior_failed_recovery_claim ||\n  die 'OWNER-DELTA-008: the immutable failed 1f27 bundle changed before start-record replay'",
   "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-009: the immutable failed 1f27 intent-only runtime changed before start-record replay'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-007: the immutable failed a51 intent-only runtime changed before start-record replay'",
   "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-005: the immutable failed a51 intent-only runtime or descriptor residue changed during finalization'",
 ])
   assert.ok(
-    script.includes(failed1f27Guard),
-    `failed 1f27 guard is disconnected or reordered: ${failed1f27Guard}`,
+    script.includes(failedPredecessorGuard),
+    `failed predecessor guard is disconnected or reordered: ${failedPredecessorGuard}`,
   );
 assert.equal(
   (script.match(/docker_local image load --input "\$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"/gu) ?? [])
@@ -1626,11 +1755,29 @@ for (const exact1f27WorkflowPin of [
     workflow.includes(exact1f27WorkflowPin),
     `workflow lacks exact failed 1f27 pin ${exact1f27WorkflowPin}`,
   );
+for (const exactA51WorkflowPin of [
+  'git fetch --no-tags --depth=1 origin a51b52201a94a669b8dcca38b7abb29d70d0200f',
+  'git cat-file -e a51b52201a94a669b8dcca38b7abb29d70d0200f^{commit}',
+  'git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum',
+  '= b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73',
+  '= 393436',
+  'failed_owner_delta_correction_workflow_run_id=33277082955',
+  'failed_owner_delta_correction_workflow_run_attempt=1',
+  'failed_owner_delta_bridge_intent_lines=294',
+  'failed_owner_delta_correction_runtime_descriptor_id=sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083',
+])
+  assert.ok(
+    workflow.includes(exactA51WorkflowPin),
+    `workflow lacks exact failed a51 pin ${exactA51WorkflowPin}`,
+  );
 const preExec020Rehash = rootEmission.lastIndexOf(
   '# Rehash the exact 020 bundle and empty runtime immediately before execution.',
 );
 const preExec1f27Rehash = rootEmission.lastIndexOf(
   '# Re-prove the exact failed 1f27 four-file bundle, manifest semantics, one-intent ledger, and absent image immediately before execution.',
+);
+const preExecA51Rehash = rootEmission.lastIndexOf(
+  '# Re-prove the exact failed a51 four-file bundle, manifest semantics, one-intent ledger, loaded descriptor image, and unused-container state immediately before execution.',
 );
 const finalExec = rootEmission.lastIndexOf("exec bash '$script'");
 assert.ok(
@@ -1681,15 +1828,47 @@ for (const exact1f27RootProof of [
   'money_moved=false',
   '! docker image inspect fetanagent-customer-web:1f27af7f9294',
   '! docker image inspect sha256:103b17a10a678ffa8ae913b50d4daeb121f932113a70b0ce2066f535f553f6e5',
-  '"$(stat -c %h "$parent")" == 17',
 ])
   assert.ok(
     preExec1f27Proof.includes(exact1f27RootProof),
     `final root emission lacks exact failed 1f27 proof ${exact1f27RootProof}`,
   );
+assert.ok(
+  preExecA51Rehash > preExec1f27Rehash && finalExec > preExecA51Rehash,
+  'exact failed a51 evidence is not re-proved immediately before execution',
+);
+const preExecA51Proof = rootEmission.slice(preExecA51Rehash, finalExec);
+for (const exactA51RootProof of [
+  '64769:6102993:root:root:700:2',
+  '64769:6102994:root:root:400:1:393436',
+  'b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73',
+  '64769:6102995:root:root:400:1:11689',
+  '64769:6102996:root:root:400:1:23785',
+  'ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad',
+  '== 356',
+  '64769:6102997:root:root:400:1:404797952',
+  'd44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f',
+  'recovery_implementation_sha=a51b52201a94a669b8dcca38b7abb29d70d0200f',
+  'workflow_run_id=33277082955',
+  'workflow_run_attempt=1',
+  '64769:6102998:root:root:700:3',
+  '64769:6102999:root:root:700:2',
+  '64769:6103000:root:root:600:1:20653',
+  'efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2',
+  '== 294',
+  'archive_recovery_implementation_release=a51b52201a94a669b8dcca38b7abb29d70d0200f',
+  'sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083',
+  '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a',
+  'docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94',
+  '"$(stat -c %h "$parent")" == 18',
+])
+  assert.ok(
+    preExecA51Proof.includes(exactA51RootProof),
+    `final root emission lacks exact failed a51 proof ${exactA51RootProof}`,
+  );
 for (const chainLinkTransition of [
-  '"$(stat -c %h "$parent")" == 16',
   '"$(stat -c %h "$parent")" == 17',
+  '"$(stat -c %h "$parent")" == 18',
 ])
   assert.ok(
     rootEmission.includes(chainLinkTransition),
@@ -1709,8 +1888,9 @@ for (const state of [
   '"$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")"',
   '"$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")"',
   '"$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")"',
-  '"$(basename "$failed_network_scope_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_network_scope_root")" "$(basename "$root")"',
+  '"$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")"',
+  '"$(basename "$failed_owner_delta_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_owner_delta_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing append-only interruption state ${state}`);
 }
@@ -1752,6 +1932,7 @@ const failedRunningStatus = '8f1ef460a231fe2c21e2df2d986749400d08c38c';
 const failedCounter = '0202304e3c606d2a7927a5b027d76926c0117189';
 const failedCustomer = '0110d1965d7efdc0436abda8c0bc686fb33c084b';
 const failedNetworkScope = '1f27af7f929434b1f40f65901df9ebd683ebe62c';
+const failedOwnerDelta = 'a51b52201a94a669b8dcca38b7abb29d70d0200f';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const exactHistoricalChain = [
@@ -1769,23 +1950,24 @@ const exactHistoricalChain = [
   failedCounter,
   failedCustomer,
   failedNetworkScope,
+  failedOwnerDelta,
 ];
 const directoryLinkCount = (children) => children.length + 2;
-assert.equal(exactHistoricalChain.length, 14, 'the failed 1f27 chain inventory is incomplete');
+assert.equal(exactHistoricalChain.length, 15, 'the failed a51 chain inventory is incomplete');
 assert.equal(
   directoryLinkCount(exactHistoricalChain),
-  16,
-  'the pre-claim append-only bundle parent must have link count 16',
+  17,
+  'the pre-claim append-only bundle parent must have link count 17',
 );
 assert.equal(
   directoryLinkCount([...exactHistoricalChain, installing]),
-  17,
-  'the installing append must move the bundle parent link count from 16 to 17',
+  18,
+  'the installing append must move the bundle parent link count from 17 to 18',
 );
 assert.equal(
   directoryLinkCount([...exactHistoricalChain, current]),
-  17,
-  'the finalized append-only successor must retain bundle parent link count 17',
+  18,
+  'the finalized append-only successor must retain bundle parent link count 18',
 );
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
@@ -1806,6 +1988,7 @@ const classifyChain = (children) => {
       failedCounter,
       failedCustomer,
       failedNetworkScope,
+      failedOwnerDelta,
     ]
       .sort()
       .join('\n')
@@ -1828,6 +2011,7 @@ const classifyChain = (children) => {
       failedCounter,
       failedCustomer,
       failedNetworkScope,
+      failedOwnerDelta,
       installing,
     ]
       .sort()
@@ -1851,6 +2035,7 @@ const classifyChain = (children) => {
       failedCounter,
       failedCustomer,
       failedNetworkScope,
+      failedOwnerDelta,
       current,
     ]
       .sort()
@@ -1876,6 +2061,7 @@ for (const [children, expected] of [
       failedCounter,
       failedCustomer,
       failedNetworkScope,
+      failedOwnerDelta,
     ],
     'append',
   ],
@@ -1895,6 +2081,7 @@ for (const [children, expected] of [
       failedCounter,
       failedCustomer,
       failedNetworkScope,
+      failedOwnerDelta,
       installing,
     ],
     'resume',
@@ -1915,6 +2102,7 @@ for (const [children, expected] of [
       failedCounter,
       failedCustomer,
       failedNetworkScope,
+      failedOwnerDelta,
       current,
     ],
     'complete',

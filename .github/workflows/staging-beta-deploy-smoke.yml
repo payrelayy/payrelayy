@@ -802,6 +802,7 @@ jobs:
           git fetch --no-tags --depth=1 origin 0202304e3c606d2a7927a5b027d76926c0117189
           git fetch --no-tags --depth=1 origin 0110d1965d7efdc0436abda8c0bc686fb33c084b
           git fetch --no-tags --depth=1 origin 1f27af7f929434b1f40f65901df9ebd683ebe62c
+          git fetch --no-tags --depth=1 origin a51b52201a94a669b8dcca38b7abb29d70d0200f
           git cat-file -e 001316f1f65dc7a9976244e8fc01f90aec665a70^{commit}
           git cat-file -e 911758fa1407093bee700918d5a663a7735f1658^{commit}
           git cat-file -e ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b^{commit}
@@ -813,6 +814,7 @@ jobs:
           git cat-file -e 0202304e3c606d2a7927a5b027d76926c0117189^{commit}
           git cat-file -e 0110d1965d7efdc0436abda8c0bc686fb33c084b^{commit}
           git cat-file -e 1f27af7f929434b1f40f65901df9ebd683ebe62c^{commit}
+          git cat-file -e a51b52201a94a669b8dcca38b7abb29d70d0200f^{commit}
           test "$(git show 0202304e3c606d2a7927a5b027d76926c0117189:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = 7e4d1d7cbcc8494b0120ee6477b4a3e355e8bb88c55a68a9f1ca6f02b9d1d244
           test "$(git show 0202304e3c606d2a7927a5b027d76926c0117189:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 294196
           test "$(git show 0110d1965d7efdc0436abda8c0bc686fb33c084b:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = 986e031158229b7474cc5d31b6a2962b30fbe75497d3bef646c40d228cfeab59
@@ -823,6 +825,10 @@ jobs:
           test "$(git show 1f27af7f929434b1f40f65901df9ebd683ebe62c:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 367698
           test "$(git show 1f27af7f929434b1f40f65901df9ebd683ebe62c:infra/operations/fetanagent-owner-archive-validator.py | sha256sum | awk '{print $1}')" = 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
           test "$(git show 1f27af7f929434b1f40f65901df9ebd683ebe62c:infra/operations/fetanagent-owner-archive-validator.py | wc -c)" = 11689
+          test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73
+          test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 393436
+          test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-owner-archive-validator.py | sha256sum | awk '{print $1}')" = 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-owner-archive-validator.py | wc -c)" = 11689
           test "$(git show 001316f1f65dc7a9976244e8fc01f90aec665a70:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh | sha256sum | awk '{print $1}')" = b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9
           test "$(git show 911758fa1407093bee700918d5a663a7735f1658:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d
           test "$(git show 911758fa1407093bee700918d5a663a7735f1658:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 151404
@@ -895,9 +901,35 @@ jobs:
           docker image save --output "$customer_archive" "$customer_tag"
           customer_archive_sha="$(sha256sum "$customer_archive" | awk '{print $1}')"
           customer_archive_size="$(stat -c %s "$customer_archive")"
-          customer_image_id="$(docker image inspect "$customer_tag" --format '{{.Id}}')"
+          mapfile -t customer_identities < <(python3 -I - "$customer_archive" <<'PY'
+          import json, re, sys, tarfile
+
+          archive_path = sys.argv[1]
+          with tarfile.open(archive_path, mode="r:") as archive:
+              manifest_stream = archive.extractfile("manifest.json")
+              index_stream = archive.extractfile("index.json")
+              assert manifest_stream is not None and index_stream is not None
+              manifest = json.load(manifest_stream)
+              index = json.load(index_stream)
+          assert isinstance(manifest, list) and len(manifest) == 1
+          config_path = manifest[0]["Config"]
+          assert re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", config_path)
+          assert isinstance(index, dict) and isinstance(index.get("manifests"), list) and len(index["manifests"]) == 1
+          descriptor = index["manifests"][0]
+          runtime_descriptor_id = descriptor["digest"]
+          assert re.fullmatch(r"sha256:[0-9a-f]{64}", runtime_descriptor_id)
+          print(f"sha256:{config_path.rsplit('/', 1)[-1]}")
+          print(runtime_descriptor_id)
+          PY
+          )
+          [[ "${#customer_identities[@]}" == 2 ]]
+          customer_image_id="${customer_identities[0]}"
+          customer_runtime_descriptor_id="${customer_identities[1]}"
+          runner_customer_image_id="$(docker image inspect "$customer_tag" --format '{{.Id}}')"
           [[ "$customer_archive_sha" =~ ^[0-9a-f]{64}$ && "$customer_archive_size" =~ ^[1-9][0-9]*$ ]]
           [[ "$customer_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$customer_runtime_descriptor_id" =~ ^sha256:[0-9a-f]{64}$ && "$customer_runtime_descriptor_id" != "$customer_image_id" ]]
+          [[ "$runner_customer_image_id" == "$customer_image_id" || "$runner_customer_image_id" == "$customer_runtime_descriptor_id" ]]
           manifest="$RUNNER_TEMP/h14-owner-archive-recovery-manifest-v1"
           cat >"$manifest" <<EOF
           version=1
@@ -1196,6 +1228,36 @@ jobs:
           failed_network_scope_image_runtime=tag-and-id-absent
           failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator
           owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1
+          failed_owner_delta_correction_implementation_sha=a51b52201a94a669b8dcca38b7abb29d70d0200f
+          failed_owner_delta_correction_bundle_parent_dev_ino=64769:6102884
+          failed_owner_delta_correction_bundle_root_dev_ino=64769:6102993
+          failed_owner_delta_correction_script_dev_ino=64769:6102994
+          failed_owner_delta_correction_script_sha256=b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73
+          failed_owner_delta_correction_script_size=393436
+          failed_owner_delta_correction_validator_dev_ino=64769:6102995
+          failed_owner_delta_correction_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          failed_owner_delta_correction_validator_size=11689
+          failed_owner_delta_correction_manifest_dev_ino=64769:6102996
+          failed_owner_delta_correction_manifest_sha256=ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad
+          failed_owner_delta_correction_manifest_size=23785
+          failed_owner_delta_correction_manifest_lines=356
+          failed_owner_delta_correction_image_archive_dev_ino=64769:6102997
+          failed_owner_delta_correction_image_archive_sha256=d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f
+          failed_owner_delta_correction_image_archive_size=404797952
+          failed_owner_delta_correction_config_image_id=sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a
+          failed_owner_delta_correction_runtime_descriptor_id=sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083
+          failed_owner_delta_correction_workflow_run_id=33277082955
+          failed_owner_delta_correction_workflow_run_attempt=1
+          failed_owner_delta_bridge_parent_dev_ino=64769:6102998
+          failed_owner_delta_bridge_installing_dev_ino=64769:6102999
+          failed_owner_delta_bridge_intent_dev_ino=64769:6103000
+          failed_owner_delta_bridge_intent_sha256=efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2
+          failed_owner_delta_bridge_intent_size=20653
+          failed_owner_delta_bridge_intent_lines=294
+          failed_owner_delta_bridge_inventory=single-intent-no-final
+          failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent
+          failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load
+          customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1
           created_owner_container_id=44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f
           failed_endpoint_phase_owner_state=created-never-started
           failed_running_status_owner_state=running-healthy-no-completion
@@ -1231,6 +1293,7 @@ jobs:
           customer_web_image_archive_sha256=$customer_archive_sha
           customer_web_image_archive_size=$customer_archive_size
           customer_web_image_id=$customer_image_id
+          customer_web_runtime_descriptor_id=$customer_runtime_descriptor_id
           source_owner_config_id=sha256:ce2cb11cb28cd1b16411a94dc6f9225aaa37877bb0de688578645c5d296b3ce3
           loaded_owner_manifest_image_id=sha256:45932c0e99318e305223bec96c166a82aa0330195e5cdd651c0b435756f7feeb
           oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids
@@ -1257,10 +1320,10 @@ jobs:
           amount_entry_enabled=false
           money_moved=false
           EOF
-          [[ "$(wc -l <"$manifest" | tr -d '[:space:]')" == 356 ]]
+          [[ "$(wc -l <"$manifest" | tr -d '[:space:]')" == 387 ]]
           manifest_sha="$(sha256sum "$manifest" | awk '{print $1}')"
           manifest_size="$(stat -c %s "$manifest")"
-          printf 'script_sha=%s\nvalidator_sha=%s\nscript_size=%s\nvalidator_size=%s\nmanifest=%s\nmanifest_sha=%s\nmanifest_size=%s\ncustomer_archive=%s\ncustomer_archive_sha=%s\ncustomer_archive_size=%s\ncustomer_image_id=%s\n' "$script_sha" "$validator_sha" "$script_size" "$validator_size" "$manifest" "$manifest_sha" "$manifest_size" "$customer_archive" "$customer_archive_sha" "$customer_archive_size" "$customer_image_id" >>"$GITHUB_OUTPUT"
+          printf 'script_sha=%s\nvalidator_sha=%s\nscript_size=%s\nvalidator_size=%s\nmanifest=%s\nmanifest_sha=%s\nmanifest_size=%s\ncustomer_archive=%s\ncustomer_archive_sha=%s\ncustomer_archive_size=%s\ncustomer_image_id=%s\ncustomer_runtime_descriptor_id=%s\n' "$script_sha" "$validator_sha" "$script_size" "$validator_size" "$manifest" "$manifest_sha" "$manifest_size" "$customer_archive" "$customer_archive_sha" "$customer_archive_size" "$customer_image_id" "$customer_runtime_descriptor_id" >>"$GITHUB_OUTPUT"
 
       - name: Stage only the no-secret archive-recovery bundle
         id: stage
@@ -1325,6 +1388,7 @@ jobs:
           CUSTOMER_ARCHIVE_SHA: ${{ steps.bundle.outputs.customer_archive_sha }}
           CUSTOMER_ARCHIVE_SIZE: ${{ steps.bundle.outputs.customer_archive_size }}
           CUSTOMER_IMAGE_ID: ${{ steps.bundle.outputs.customer_image_id }}
+          CUSTOMER_RUNTIME_DESCRIPTOR_ID: ${{ steps.bundle.outputs.customer_runtime_descriptor_id }}
         run: |
           set -euo pipefail
           parent='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles'
@@ -1356,6 +1420,8 @@ jobs:
           failed_customer_web_root="$parent/$failed_customer_web_release"
           failed_network_scope_release='1f27af7f929434b1f40f65901df9ebd683ebe62c'
           failed_network_scope_root="$parent/$failed_network_scope_release"
+          failed_owner_delta_release='a51b52201a94a669b8dcca38b7abb29d70d0200f'
+          failed_owner_delta_root="$parent/$failed_owner_delta_release"
           installing="$parent/.installing-$CONFIRMED_RECOVERY_RELEASE"
           root="$parent/$CONFIRMED_RECOVERY_RELEASE"
           script="$root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh"
@@ -1373,6 +1439,7 @@ jobs:
             echo "manifest_size='$MANIFEST_SIZE'"
             echo "customer_archive_sha='$CUSTOMER_ARCHIVE_SHA'"
             echo "customer_archive_size='$CUSTOMER_ARCHIVE_SIZE'"
+            echo "customer_runtime_descriptor_id='$CUSTOMER_RUNTIME_DESCRIPTOR_ID'"
             echo "parent='$parent'"
             echo "prior_release='$prior_release'"
             echo "prior_root='$prior_root'"
@@ -1389,6 +1456,7 @@ jobs:
             echo "failed_counter_root='$failed_counter_root'"
             echo "failed_customer_web_root='$failed_customer_web_root'"
             echo "failed_network_scope_root='$failed_network_scope_root'"
+            echo "failed_owner_delta_root='$failed_owner_delta_root'"
             echo "installing='$installing'"
             echo "root='$root'"
             echo 'set -euo pipefail'
@@ -1518,11 +1586,34 @@ jobs:
             echo '[[ "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$failed_network_scope_intent")" == 1 ]]'
             echo '! docker image inspect fetanagent-customer-web:1f27af7f9294 >/dev/null 2>&1'
             echo '! docker image inspect sha256:103b17a10a678ffa8ae913b50d4daeb121f932113a70b0ce2066f535f553f6e5 >/dev/null 2>&1'
+            echo '[[ ! -L "$failed_owner_delta_root" && -d "$failed_owner_delta_root" && "$(realpath "$failed_owner_delta_root")" == "$failed_owner_delta_root" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_owner_delta_root")" == 64769:6102993:root:root:700:2 ]]'
+            echo '[[ "$(find -P "$failed_owner_delta_root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" && "$(realpath "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6102994:root:root:400:1:393436 && "$(sha256sum "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73 ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/fetanagent-owner-archive-validator.py" && "$(realpath "$failed_owner_delta_root/fetanagent-owner-archive-validator.py")" == "$failed_owner_delta_root/fetanagent-owner-archive-validator.py" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/fetanagent-owner-archive-validator.py")" == 64769:6102995:root:root:400:1:11689 && "$(sha256sum "$failed_owner_delta_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/manifest-v1" && "$(realpath "$failed_owner_delta_root/manifest-v1")" == "$failed_owner_delta_root/manifest-v1" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/manifest-v1")" == 64769:6102996:root:root:400:1:23785 && "$(sha256sum "$failed_owner_delta_root/manifest-v1" | awk '\''{print $1}'\'')" == ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad && "$(wc -l <"$failed_owner_delta_root/manifest-v1" | tr -d '\''[:space:]'\'')" == 356 ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar" && "$(realpath "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar")" == "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar")" == 64769:6102997:root:root:400:1:404797952 && "$(sha256sum "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar" | awk '\''{print $1}'\'')" == d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f ]]'
+            echo '[[ "$(grep -Fxc '\''version=1'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''authorization_sha256=6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''staging_project_ref=spzpiyxheappsfyswewl'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''staging_droplet_id=593344964'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''recovery_implementation_sha=a51b52201a94a669b8dcca38b7abb29d70d0200f'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''workflow_run_id=33277082955'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''workflow_run_attempt=1'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''recovery_script_sha256=b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''recovery_script_size=393436'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''archive_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''archive_validator_size=11689'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''customer_web_image_archive_sha256=d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_image_archive_size=404797952'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_image_id=sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo 'failed_owner_delta_runtime_parent=/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'
+            echo 'failed_owner_delta_runtime="$failed_owner_delta_runtime_parent/.installing-a51b52201a94a669b8dcca38b7abb29d70d0200f"'
+            echo 'failed_owner_delta_runtime_final="$failed_owner_delta_runtime_parent/a51b52201a94a669b8dcca38b7abb29d70d0200f"'
+            echo 'failed_owner_delta_intent="$failed_owner_delta_runtime/intent-v1"'
+            echo '[[ ! -L "$failed_owner_delta_runtime_parent" && -d "$failed_owner_delta_runtime_parent" && "$(realpath "$failed_owner_delta_runtime_parent")" == "$failed_owner_delta_runtime_parent" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_owner_delta_runtime_parent")" == 64769:6102998:root:root:700:3 && "$(find -P "$failed_owner_delta_runtime_parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'')" == .installing-a51b52201a94a669b8dcca38b7abb29d70d0200f:d ]]'
+            echo '[[ ! -e "$failed_owner_delta_runtime_final" && ! -L "$failed_owner_delta_runtime_final" && ! -L "$failed_owner_delta_runtime" && -d "$failed_owner_delta_runtime" && "$(realpath "$failed_owner_delta_runtime")" == "$failed_owner_delta_runtime" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_owner_delta_runtime")" == 64769:6102999:root:root:700:2 && "$(find -P "$failed_owner_delta_runtime" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'')" == intent-v1:f ]]'
+            echo '[[ ! -L "$failed_owner_delta_intent" && "$(realpath "$failed_owner_delta_intent")" == "$failed_owner_delta_intent" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_intent")" == 64769:6103000:root:root:600:1:20653 && "$(sha256sum "$failed_owner_delta_intent" | awk '\''{print $1}'\'')" == efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2 && "$(wc -l <"$failed_owner_delta_intent" | tr -d '\''[:space:]'\'')" == 294 ]]'
+            echo '[[ "$(grep -Fxc '\''version=1'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''contract=fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''archive_recovery_implementation_release=a51b52201a94a669b8dcca38b7abb29d70d0200f'\'' "$failed_owner_delta_intent")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$failed_owner_delta_intent")" == 1 ]]'
+            echo '[[ "$(docker image inspect fetanagent-customer-web:a51b52201a94 --format '\''{{.Id}}|{{.Descriptor.digest}}'\'')" == '\''sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'\'' ]]'
+            echo '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a >/dev/null 2>&1'
+            echo '[[ -z "$(docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94)" ]]'
             echo 'children="$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'' | LC_ALL=C sort)"'
             echo 'case "$children" in'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 16 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 17 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 17 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 17 && ! -e "$installing" && ! -L "$installing" ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 17 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 18 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 18 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 18 && ! -e "$installing" && ! -L "$installing" ]] ;;'
             echo '  *) false ;;'
             echo 'esac'
             echo 'if [[ ! -e "$root" && ! -L "$root" ]]; then'
@@ -1544,8 +1635,10 @@ jobs:
             echo "[[ \"\$(sha256sum '$validator' | awk '{print \$1}')\" == '$VALIDATOR_SHA' && \"\$(stat -c %s '$validator')\" == '$VALIDATOR_SIZE' ]]"
             echo "[[ \"\$(sha256sum '$root/manifest-v1' | awk '{print \$1}')\" == '$MANIFEST_SHA' && \"\$(stat -c %s '$root/manifest-v1')\" == '$MANIFEST_SIZE' ]]"
             echo "[[ \"\$(sha256sum '$customer_archive' | awk '{print \$1}')\" == '$CUSTOMER_ARCHIVE_SHA' && \"\$(stat -c %s '$customer_archive')\" == '$CUSTOMER_ARCHIVE_SIZE' ]]"
+            echo "[[ \"\$(grep -Fxc 'customer_web_image_id=$CUSTOMER_IMAGE_ID' '$root/manifest-v1')\" == 1 && \"\$(grep -Fxc 'customer_web_runtime_descriptor_id=$CUSTOMER_RUNTIME_DESCRIPTOR_ID' '$root/manifest-v1')\" == 1 ]]"
+            echo '[[ "$(grep -Fxc '\''customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$root/manifest-v1")" == 1 ]]'
             echo '[[ "$(find -P "$root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
-            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 17 ]]'
+            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 18 ]]'
             echo '[[ "$(sha256sum "$prior_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d && "$(sha256sum "$prior_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$prior_root/manifest-v1" | awk '\''{print $1}'\'')" == 9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a ]]'
             echo '[[ "$(sha256sum "$failed_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 2a9ce123b931799ba4ee4740789deb4747ba3d4148185c14625e4a430405f373 && "$(sha256sum "$failed_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_root/manifest-v1" | awk '\''{print $1}'\'')" == 1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d ]]'
             echo '[[ "$(sha256sum "$failed_pg_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f && "$(sha256sum "$failed_pg_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_pg_root/manifest-v1" | awk '\''{print $1}'\'')" == ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d ]]'
@@ -1602,7 +1695,27 @@ jobs:
             echo '[[ "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$failed_network_scope_intent")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$failed_network_scope_intent")" == 1 ]]'
             echo '! docker image inspect fetanagent-customer-web:1f27af7f9294 >/dev/null 2>&1'
             echo '! docker image inspect sha256:103b17a10a678ffa8ae913b50d4daeb121f932113a70b0ce2066f535f553f6e5 >/dev/null 2>&1'
-            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 17 ]]'
+            echo '# Re-prove the exact failed a51 four-file bundle, manifest semantics, one-intent ledger, loaded descriptor image, and unused-container state immediately before execution.'
+            echo '[[ ! -L "$failed_owner_delta_root" && -d "$failed_owner_delta_root" && "$(realpath "$failed_owner_delta_root")" == "$failed_owner_delta_root" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_owner_delta_root")" == 64769:6102993:root:root:700:2 ]]'
+            echo '[[ "$(find -P "$failed_owner_delta_root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" && "$(realpath "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6102994:root:root:400:1:393436 && "$(sha256sum "$failed_owner_delta_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73 ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/fetanagent-owner-archive-validator.py" && "$(realpath "$failed_owner_delta_root/fetanagent-owner-archive-validator.py")" == "$failed_owner_delta_root/fetanagent-owner-archive-validator.py" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/fetanagent-owner-archive-validator.py")" == 64769:6102995:root:root:400:1:11689 && "$(sha256sum "$failed_owner_delta_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/manifest-v1" && "$(realpath "$failed_owner_delta_root/manifest-v1")" == "$failed_owner_delta_root/manifest-v1" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/manifest-v1")" == 64769:6102996:root:root:400:1:23785 && "$(sha256sum "$failed_owner_delta_root/manifest-v1" | awk '\''{print $1}'\'')" == ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad && "$(wc -l <"$failed_owner_delta_root/manifest-v1" | tr -d '\''[:space:]'\'')" == 356 ]]'
+            echo '[[ ! -L "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar" && "$(realpath "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar")" == "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar")" == 64769:6102997:root:root:400:1:404797952 && "$(sha256sum "$failed_owner_delta_root/fetanagent-customer-web-self-recovery.tar" | awk '\''{print $1}'\'')" == d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f ]]'
+            echo '[[ "$(grep -Fxc '\''version=1'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''authorization_sha256=6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''staging_project_ref=spzpiyxheappsfyswewl'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''staging_droplet_id=593344964'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''recovery_implementation_sha=a51b52201a94a669b8dcca38b7abb29d70d0200f'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''workflow_run_id=33277082955'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''workflow_run_attempt=1'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''recovery_script_sha256=b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''recovery_script_size=393436'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''archive_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''archive_validator_size=11689'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''customer_web_image_archive_sha256=d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_image_archive_size=404797952'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_image_id=sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$failed_owner_delta_root/manifest-v1")" == 1 ]]'
+            echo '[[ ! -L "$failed_owner_delta_runtime_parent" && -d "$failed_owner_delta_runtime_parent" && "$(realpath "$failed_owner_delta_runtime_parent")" == "$failed_owner_delta_runtime_parent" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_owner_delta_runtime_parent")" == 64769:6102998:root:root:700:3 && "$(find -P "$failed_owner_delta_runtime_parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'')" == .installing-a51b52201a94a669b8dcca38b7abb29d70d0200f:d ]]'
+            echo '[[ ! -e "$failed_owner_delta_runtime_final" && ! -L "$failed_owner_delta_runtime_final" && ! -L "$failed_owner_delta_runtime" && -d "$failed_owner_delta_runtime" && "$(realpath "$failed_owner_delta_runtime")" == "$failed_owner_delta_runtime" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_owner_delta_runtime")" == 64769:6102999:root:root:700:2 && "$(find -P "$failed_owner_delta_runtime" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'')" == intent-v1:f ]]'
+            echo '[[ ! -L "$failed_owner_delta_intent" && "$(realpath "$failed_owner_delta_intent")" == "$failed_owner_delta_intent" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_owner_delta_intent")" == 64769:6103000:root:root:600:1:20653 && "$(sha256sum "$failed_owner_delta_intent" | awk '\''{print $1}'\'')" == efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2 && "$(wc -l <"$failed_owner_delta_intent" | tr -d '\''[:space:]'\'')" == 294 ]]'
+            echo '[[ "$(grep -Fxc '\''version=1'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''contract=fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''archive_recovery_implementation_release=a51b52201a94a669b8dcca38b7abb29d70d0200f'\'' "$failed_owner_delta_intent")" == 1 ]]'
+            echo '[[ "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$failed_owner_delta_intent")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$failed_owner_delta_intent")" == 1 ]]'
+            echo '[[ "$(docker image inspect fetanagent-customer-web:a51b52201a94 --format '\''{{.Id}}|{{.Descriptor.digest}}'\'')" == '\''sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'\'' ]]'
+            echo '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a >/dev/null 2>&1'
+            echo '[[ -z "$(docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94)" ]]'
+            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 18 ]]'
             echo "exec bash '$script' '$CONFIRMED_RECOVERY_RELEASE' '$SCRIPT_SHA' '$VALIDATOR_SHA' '$MANIFEST_SHA' 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52' '$H14_RECOVERY_AUTHORIZATION_SHA256' '$CUSTOMER_ARCHIVE_SHA' '$CUSTOMER_ARCHIVE_SIZE' '$CUSTOMER_IMAGE_ID'"
             echo '```'
             echo

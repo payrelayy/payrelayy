@@ -447,7 +447,11 @@ jobs:
           import tarfile
 
           path, expected_tag, expected_id = sys.argv[1:]
-          expected_config = expected_id.removeprefix('sha256:') + '.json'
+          expected_config_digest = expected_id.removeprefix('sha256:')
+          expected_configs = {
+              expected_config_digest + '.json',
+              'blobs/sha256/' + expected_config_digest,
+          }
           with tarfile.open(path, mode='r:') as archive:
               members = archive.getmembers()
               if not members or len(members) > 4096:
@@ -468,13 +472,16 @@ jobs:
               if (
                   not isinstance(manifest, list)
                   or len(manifest) != 1
-                  or manifest[0].get('Config') != expected_config
+                  or manifest[0].get('Config') not in expected_configs
                   or manifest[0].get('RepoTags') != [expected_tag]
                   or not isinstance(manifest[0].get('Layers'), list)
                   or not manifest[0]['Layers']
               ):
                   raise SystemExit(
-                      'Docker archive manifest does not bind the exact image config, tag, and layers'
+                      'Docker archive manifest does not bind the exact image config, tag, and layers: '
+                      f"config={manifest[0].get('Config')!r} expected={sorted(expected_configs)!r} "
+                      f"tags={manifest[0].get('RepoTags')!r} layers_type="
+                      f"{type(manifest[0].get('Layers')).__name__}"
                   )
           PY
 

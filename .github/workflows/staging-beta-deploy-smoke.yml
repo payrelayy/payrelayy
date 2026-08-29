@@ -15,6 +15,7 @@ on:
           - unban-and-connectivity-check
           - deploy-and-smoke
           - h14-owner-runtime-bridge-stage
+          - h14-owner-runtime-bridge-archive-recovery-stage
           - recover-v1-retirement-after-expiry
           - predecessor-stop-and-disable
           - ecd47f5d-predecessor-stop-and-disable
@@ -47,17 +48,17 @@ on:
         default: ''
         type: string
       confirm_repair_implementation_sha:
-        description: For h14-owner-runtime-bridge-stage type the exact reviewed terminal-attestation and Owner-bridge pull-request head SHA
+        description: For either H14 Owner bridge mode type the exact reviewed pull-request head SHA
         required: false
         default: ''
         type: string
       confirm_quarantine_recovery_authorization_sha256:
-        description: For h14-owner-runtime-bridge-stage type the exact reviewed quarantine-recovery authorization digest
+        description: For either H14 Owner bridge mode type the exact reviewed quarantine-recovery authorization digest
         required: false
         default: ''
         type: string
       confirm_owner_only_no_provider_action:
-        description: For h14-owner-runtime-bridge-stage type owner-only-no-provider-action-no-money
+        description: For either H14 Owner bridge mode type owner-only-no-provider-action-no-money
         required: false
         default: ''
         type: string
@@ -108,7 +109,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$REQUESTED_MODE" == 'h14-owner-runtime-bridge-stage' ]]; then
+          if [[ "$REQUESTED_MODE" =~ ^h14-owner-runtime-bridge(-archive-recovery)?-stage$ ]]; then
             [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != 'refs/heads/main' ]]
             [[ "$CONFIRMED_COMMIT" == "$CANONICAL_H14_COMMIT" ]]
             [[ "$CONFIRMED_REPAIR_IMPLEMENTATION" =~ ^[0-9a-f]{40}$ &&
@@ -134,7 +135,7 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|h14-owner-runtime-bridge-stage|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|h14-owner-runtime-bridge-stage|h14-owner-runtime-bridge-archive-recovery-stage|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
           if [[ "$REQUESTED_MODE" == 'transition-stop-legacy' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
@@ -739,6 +740,237 @@ jobs:
             echo "[[ \"\$(sha256sum '$root_script' | awk '{print \$1}')\" == '$SCRIPT_SHA' ]]"
             echo "$invocation"
             echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  h14-owner-runtime-bridge-archive-recovery-stage:
+    name: Stage release-pinned H14 Owner archive recovery
+    if: inputs.mode == 'h14-owner-runtime-bridge-archive-recovery-stage'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    environment: staging
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      CONFIRMED_RECOVERY_RELEASE: ${{ inputs.confirm_repair_implementation_sha }}
+      CONFIRMED_H14_AUTHORIZATION: ${{ inputs.confirm_quarantine_recovery_authorization_sha256 }}
+      CONFIRMED_OWNER_ONLY: ${{ inputs.confirm_owner_only_no_provider_action }}
+      STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+      STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+      STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Re-prove exact recovery pull request and immutable source release
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != refs/heads/main ]]
+          [[ "$GITHUB_SHA" == "$CONFIRMED_RECOVERY_RELEASE" && "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_H14_AUTHORIZATION" == "$H14_RECOVERY_AUTHORIZATION_SHA256" ]]
+          [[ "$CONFIRMED_OWNER_ONLY" == owner-only-no-provider-action-no-money ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$CANONICAL_H14_COMMIT" ]]
+          branch_name="${GITHUB_REF#refs/heads/}"
+          mapfile -t pulls < <(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq ".[] | select(.state == \"open\" and .base.ref == \"main\" and .base.sha == \"$CANONICAL_H14_COMMIT\" and .head.sha == \"$GITHUB_SHA\" and .head.ref == \"$branch_name\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\") | .number")
+          [[ "${#pulls[@]}" == 1 && "${pulls[0]}" =~ ^[1-9][0-9]*$ ]]
+
+      - name: Check out exact archive-recovery implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ inputs.confirm_repair_implementation_sha }}
+
+      - name: Verify immutable predecessor and recovery syntax
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$CONFIRMED_RECOVERY_RELEASE" ]]
+          git fetch --no-tags --depth=1 origin 001316f1f65dc7a9976244e8fc01f90aec665a70
+          git cat-file -e 001316f1f65dc7a9976244e8fc01f90aec665a70^{commit}
+          test "$(git show 001316f1f65dc7a9976244e8fc01f90aec665a70:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh | sha256sum | awk '{print $1}')" = b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9
+          script=infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh
+          validator=infra/operations/fetanagent-owner-archive-validator.py
+          bash -n "$script"
+          python3 -I - "$validator" <<'PY'
+          import ast, pathlib, sys
+          ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          PY
+          script_sha="$(sha256sum "$script" | awk '{print $1}')"
+          validator_sha="$(sha256sum "$validator" | awk '{print $1}')"
+          script_size="$(stat -c %s "$script")"
+          validator_size="$(stat -c %s "$validator")"
+          [[ "$script_sha" =~ ^[0-9a-f]{64}$ && "$validator_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$script_size" -le 2097152 && "$validator_size" -le 2097152 ]]
+          manifest="$RUNNER_TEMP/h14-owner-archive-recovery-manifest-v1"
+          cat >"$manifest" <<EOF
+          version=1
+          contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle
+          recovery_implementation_sha=$CONFIRMED_RECOVERY_RELEASE
+          repair_implementation_sha=a579e3bf96c075dde9c36dbe3c66c09aaf84bc52
+          authorization_sha256=$H14_RECOVERY_AUTHORIZATION_SHA256
+          workflow_run_id=$GITHUB_RUN_ID
+          workflow_run_attempt=$GITHUB_RUN_ATTEMPT
+          staging_project_ref=$STAGING_PROJECT_REF
+          staging_droplet_id=$STAGING_DROPLET_ID
+          canonical_h14_sha=$CANONICAL_H14_COMMIT
+          source_terminal_attestation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70
+          failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70
+          failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9
+          owner_bundle_manifest_sha256=a5ed7bfb559cd62428fd9c18ac678534fd7a7c511c6be6050d02cb9f57e8ea94
+          owner_compose_sha256=1e39773a55b85bc74d02bf482398a036ad5843ebe0bc8b9e7bcdd70ede983fa0
+          owner_image_tar_sha256=4b6348d76bfef9553fbea799da381cd1b6b27e78237c97386c694d9c9305a80e
+          owner_image_tar_size=405925888
+          owner_image_tag=fetanagent-owner-control:06459511d933
+          owner_image_id=sha256:ce2cb11cb28cd1b16411a94dc6f9225aaa37877bb0de688578645c5d296b3ce3
+          recovery_script_sha256=$script_sha
+          recovery_script_size=$script_size
+          archive_validator_sha256=$validator_sha
+          archive_validator_size=$validator_size
+          archive_encoding=oci
+          archive_layer_count=11
+          archive_member_count=30
+          financial_actions_mode=dry_run
+          kemerbet_executor_enabled=false
+          kemerbet_final_action_enabled=false
+          provider_action_enabled=false
+          transfer_enabled=false
+          amount_entry_enabled=false
+          money_moved=false
+          EOF
+          manifest_sha="$(sha256sum "$manifest" | awk '{print $1}')"
+          manifest_size="$(stat -c %s "$manifest")"
+          printf 'script_sha=%s\nvalidator_sha=%s\nscript_size=%s\nvalidator_size=%s\nmanifest=%s\nmanifest_sha=%s\nmanifest_size=%s\n' "$script_sha" "$validator_sha" "$script_size" "$validator_size" "$manifest" "$manifest_sha" "$manifest_size" >>"$GITHUB_OUTPUT"
+
+      - name: Stage only the no-secret archive-recovery bundle
+        id: stage
+        shell: bash
+        env:
+          SCRIPT_SHA: ${{ steps.bundle.outputs.script_sha }}
+          VALIDATOR_SHA: ${{ steps.bundle.outputs.validator_sha }}
+          SCRIPT_SIZE: ${{ steps.bundle.outputs.script_size }}
+          VALIDATOR_SIZE: ${{ steps.bundle.outputs.validator_size }}
+          MANIFEST: ${{ steps.bundle.outputs.manifest }}
+          MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
+          MANIFEST_SIZE: ${{ steps.bundle.outputs.manifest_size }}
+        run: |
+          set -euo pipefail
+          secret_dir="$(mktemp -d "$RUNNER_TEMP/h14-owner-archive-recovery-ssh.XXXXXX")"
+          trap 'rm -rf "$secret_dir"' EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$secret_dir/known"
+          chmod 0600 "$secret_dir/key" "$secret_dir/known"
+          ssh-keygen -F "$STAGING_VM_HOST" -f "$secret_dir/known" >/dev/null
+          opts=(-F /dev/null -i "$secret_dir/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known")
+          remote="fetanagent-admin@$STAGING_VM_HOST"
+          bundle="/tmp/fetanagent-h14-owner-runtime-bridge-archive-recovery-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_SHA"
+          [[ "$bundle" =~ ^/tmp/fetanagent-h14-owner-runtime-bridge-archive-recovery-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{40}$ ]]
+          ssh "${opts[@]}" "$remote" "test \"\$(id -u)\" -ne 0 && test ! -e '$bundle' && install -d -m 0700 '$bundle'"
+          scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$remote:$bundle/"
+          ssh "${opts[@]}" "$remote" "mv '$bundle/h14-owner-archive-recovery-manifest-v1' '$bundle/manifest-v1'"
+          ssh "${opts[@]}" "$remote" bash -s -- "$bundle" "$SCRIPT_SHA" "$SCRIPT_SIZE" "$VALIDATOR_SHA" "$VALIDATOR_SIZE" "$MANIFEST_SHA" "$MANIFEST_SIZE" <<'REMOTE'
+          set -euo pipefail
+          bundle="$1"; script_sha="$2"; script_size="$3"; validator_sha="$4"; validator_size="$5"; manifest_sha="$6"; manifest_size="$7"
+          test "$(id -u)" -ne 0
+          chmod 0600 "$bundle"/*
+          test "$(find -P "$bundle" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | sort)" = "fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f
+          fetanagent-owner-archive-validator.py:f
+          manifest-v1:f"
+          test "$(sha256sum "$bundle/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '{print $1}')" = "$script_sha"
+          test "$(stat -c %s "$bundle/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" = "$script_size"
+          test "$(sha256sum "$bundle/fetanagent-owner-archive-validator.py" | awk '{print $1}')" = "$validator_sha"
+          test "$(stat -c %s "$bundle/fetanagent-owner-archive-validator.py")" = "$validator_size"
+          test "$(sha256sum "$bundle/manifest-v1" | awk '{print $1}')" = "$manifest_sha"
+          test "$(stat -c %s "$bundle/manifest-v1")" = "$manifest_size"
+          REMOTE
+          echo "remote_bundle=$bundle" >>"$GITHUB_OUTPUT"
+
+      - name: Emit exact root-console invocation without execution
+        shell: bash
+        env:
+          REMOTE_BUNDLE: ${{ steps.stage.outputs.remote_bundle }}
+          SCRIPT_SHA: ${{ steps.bundle.outputs.script_sha }}
+          VALIDATOR_SHA: ${{ steps.bundle.outputs.validator_sha }}
+          SCRIPT_SIZE: ${{ steps.bundle.outputs.script_size }}
+          VALIDATOR_SIZE: ${{ steps.bundle.outputs.validator_size }}
+          MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
+          MANIFEST_SIZE: ${{ steps.bundle.outputs.manifest_size }}
+        run: |
+          set -euo pipefail
+          parent='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles'
+          installing="$parent/.installing-$CONFIRMED_RECOVERY_RELEASE"
+          root="$parent/$CONFIRMED_RECOVERY_RELEASE"
+          script="$root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh"
+          validator="$root/fetanagent-owner-archive-validator.py"
+          {
+            echo '### Exact Owner archive-recovery root-console invocation'
+            echo
+            echo '```bash'
+            echo "script_sha='$SCRIPT_SHA'"
+            echo "script_size='$SCRIPT_SIZE'"
+            echo "validator_sha='$VALIDATOR_SHA'"
+            echo "validator_size='$VALIDATOR_SIZE'"
+            echo "manifest_sha='$MANIFEST_SHA'"
+            echo "manifest_size='$MANIFEST_SIZE'"
+            echo "parent='$parent'"
+            echo "installing='$installing'"
+            echo "root='$root'"
+            echo 'set -euo pipefail'
+            echo 'claim_one() {'
+            echo '  local src="$1" dst="$2" digest="$3" size="$4" temporary current'
+            echo '  temporary="$(dirname "$dst")/.$(basename "$dst").installing"'
+            echo '  [[ ! -L "$src" && -f "$src" && "$(stat -c %s "$src")" == "$size" && "$(sha256sum "$src" | awk '\''{print $1}'\'')" == "$digest" ]]'
+            echo '  if [[ -e "$dst" || -L "$dst" ]]; then'
+            echo '    [[ ! -L "$dst" && -f "$dst" && "$(stat -c '\''%U:%G:%a:%h:%s'\'' "$dst")" == "root:root:400:1:$size" && "$(sha256sum "$dst" | awk '\''{print $1}'\'')" == "$digest" && ! -e "$temporary" && ! -L "$temporary" ]]'
+            echo '    return'
+            echo '  fi'
+            echo '  if [[ ! -e "$temporary" && ! -L "$temporary" ]]; then'
+            echo '    install -o root -g root -m 0400 /dev/null "$temporary"'
+            echo '    sync -f "$(dirname "$temporary")"'
+            echo '  fi'
+            echo '  [[ ! -L "$temporary" && -f "$temporary" && "$(stat -c '\''%U:%G:%a:%h'\'' "$temporary")" == root:root:400:1 ]]'
+            echo '  current="$(stat -c %s "$temporary")"'
+            echo '  [[ "$current" =~ ^[0-9]+$ && "$current" -le "$size" ]]'
+            echo '  if [[ "$current" -gt 0 ]]; then cmp --bytes="$current" "$src" "$temporary"; fi'
+            echo '  if [[ "$current" -lt "$size" ]]; then tail --bytes=+"$((current + 1))" "$src" >>"$temporary"; fi'
+            echo '  sync -f "$temporary"'
+            echo '  [[ "$(stat -c %s "$temporary")" == "$size" && "$(sha256sum "$temporary" | awk '\''{print $1}'\'')" == "$digest" ]]'
+            echo '  mv "$temporary" "$dst"'
+            echo '  sync -f "$(dirname "$dst")"'
+            echo '}'
+            echo 'if [[ ! -e "$parent" && ! -L "$parent" ]]; then install -d -o root -g root -m 0700 "$parent"; sync -f "$(dirname "$parent")"; fi'
+            echo '[[ ! -L "$parent" && -d "$parent" && "$(stat -c '\''%U:%G:%a'\'' "$parent")" == root:root:700 ]]'
+            echo 'children="$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'')"'
+            echo 'case "$children" in'
+            echo '  "") install -d -o root -g root -m 0700 "$installing"; sync -f "$parent" ;;'
+            echo '  "$(basename "$installing")") ;;'
+            echo '  "$(basename "$root")") [[ ! -e "$installing" && ! -L "$installing" ]] ;;'
+            echo '  *) false ;;'
+            echo 'esac'
+            echo 'if [[ ! -e "$root" && ! -L "$root" ]]; then'
+            echo '  [[ ! -L "$installing" && -d "$installing" && "$(stat -c '\''%U:%G:%a'\'' "$installing")" == root:root:700 ]]'
+            echo '  entries="$(find -P "$installing" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'' | LC_ALL=C sort)"'
+            echo '  case "$entries" in'
+            echo '    ""|.fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh.installing|fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh|$'\''.fetanagent-owner-archive-validator.py.installing\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh'\''|$'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh\nfetanagent-owner-archive-validator.py'\''|$'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh\nfetanagent-owner-archive-validator.py\nmanifest-v1'\''|$'\''.manifest-v1.installing\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh\nfetanagent-owner-archive-validator.py'\'') ;;'
+            echo '    *) false ;;'
+            echo '  esac'
+            echo "  claim_one '$REMOTE_BUNDLE/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh' '$installing/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh' '$SCRIPT_SHA' '$SCRIPT_SIZE'"
+            echo "  claim_one '$REMOTE_BUNDLE/fetanagent-owner-archive-validator.py' '$installing/fetanagent-owner-archive-validator.py' '$VALIDATOR_SHA' '$VALIDATOR_SIZE'"
+            echo "  claim_one '$REMOTE_BUNDLE/manifest-v1' '$installing/manifest-v1' '$MANIFEST_SHA' '$MANIFEST_SIZE'"
+            echo '  [[ "$(find -P "$installing" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '  mv "$installing" "$root"'
+            echo '  sync -f "$parent"'
+            echo 'fi'
+            echo '[[ ! -L "$root" && -d "$root" && "$(stat -c '\''%U:%G:%a'\'' "$root")" == root:root:700 ]]'
+            echo "[[ \"\$(sha256sum '$script' | awk '{print \$1}')\" == '$SCRIPT_SHA' && \"\$(stat -c %s '$script')\" == '$SCRIPT_SIZE' ]]"
+            echo "[[ \"\$(sha256sum '$validator' | awk '{print \$1}')\" == '$VALIDATOR_SHA' && \"\$(stat -c %s '$validator')\" == '$VALIDATOR_SIZE' ]]"
+            echo "[[ \"\$(sha256sum '$root/manifest-v1' | awk '{print \$1}')\" == '$MANIFEST_SHA' && \"\$(stat -c %s '$root/manifest-v1')\" == '$MANIFEST_SIZE' ]]"
+            echo '[[ "$(find -P "$root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo "exec bash '$script' '$CONFIRMED_RECOVERY_RELEASE' '$SCRIPT_SHA' '$VALIDATOR_SHA' '$MANIFEST_SHA' 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52' '$H14_RECOVERY_AUTHORIZATION_SHA256'"
+            echo '```'
+            echo
+            echo 'Staged only. No Docker, provider, Supabase, Amount, Transfer, or money mutation was performed.'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
   connectivity:

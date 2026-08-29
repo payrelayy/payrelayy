@@ -118,7 +118,7 @@ const validateJob = section(
 const stageJob = section(
   workflow,
   '  h14-owner-runtime-bridge-stage:\n',
-  '\n  connectivity:\n',
+  '\n  h14-owner-runtime-bridge-archive-recovery-stage:\n',
   'Owner-only bridge staging job',
 );
 
@@ -138,7 +138,7 @@ assert.match(workflow, new RegExp(`STAGING_DROPLET_ID: '${stagingDropletId}'`));
 
 assert.match(
   validateJob,
-  /if \[\[ "\$REQUESTED_MODE" == 'h14-owner-runtime-bridge-stage' \]\]; then/,
+  /if \[\[ "\$REQUESTED_MODE" =~ \^h14-owner-runtime-bridge\(-archive-recovery\)\?-stage\$ \]\]; then/,
 );
 assert.match(validateJob, /"\$GITHUB_REF" != 'refs\/heads\/main'/);
 assert.match(validateJob, /"\$CONFIRMED_COMMIT" == "\$CANONICAL_H14_COMMIT"/);
@@ -164,7 +164,7 @@ for (const exactPrBinding of [
 assert.match(validateJob, /"\$\{#matching_pulls\[@\]\}" -eq 1/);
 assert.match(
   validateJob,
-  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|h14-owner-runtime-bridge-stage\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
+  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|h14-owner-runtime-bridge-stage\|h14-owner-runtime-bridge-archive-recovery-stage\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
 );
 assert.match(validateJob, /else\n            \[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/);
 assert.match(validateJob, /\[\[ -z "\$CONFIRMED_REPAIR_IMPLEMENTATION" \]\]/);

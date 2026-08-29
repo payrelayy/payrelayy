@@ -60,7 +60,7 @@ readonly SOURCE_ATTESTATION_PARENT_DEV_INO='64769:6102864'
 readonly SOURCE_ATTESTATION_ROOT_DEV_INO='64769:6102872'
 readonly SOURCE_ATTESTATION_INTENT_DEV_INO='64769:6102873'
 readonly SOURCE_ATTESTATION_INTENT_SIZE='3630'
-readonly SOURCE_ATTESTATION_INTENT_SHA256='36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'
+readonly SOURCE_ATTESTATION_INTENT_SHA256='36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245ab'
 readonly SOURCE_ATTESTATION_GRANT_DEV_INO='64769:6102874'
 readonly SOURCE_ATTESTATION_GRANT_SIZE='1307'
 readonly SOURCE_ATTESTATION_GRANT_SHA256='0115aaedff92fbfaf1d430254665354dbbe90ab9d31db7ee552f970b6984c72b'
@@ -85,6 +85,20 @@ readonly SOURCE_OWNER_MANIFEST_SIZE='1024'
 readonly SOURCE_OWNER_COMPOSE_DEV_INO='64769:6102882'
 readonly SOURCE_OWNER_COMPOSE_SIZE='39213'
 readonly SOURCE_OWNER_TAR_DEV_INO='64769:6102883'
+readonly PRIOR_FAILED_RECOVERY_RELEASE='911758fa1407093bee700918d5a663a7735f1658'
+readonly PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO='64769:6102884'
+readonly PRIOR_FAILED_RECOVERY_BUNDLE_ROOT_DEV_INO='64769:6102885'
+readonly PRIOR_FAILED_RECOVERY_SCRIPT_DEV_INO='64769:6102886'
+readonly PRIOR_FAILED_RECOVERY_SCRIPT_SHA256='d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d'
+readonly PRIOR_FAILED_RECOVERY_SCRIPT_SIZE='151404'
+readonly PRIOR_FAILED_RECOVERY_VALIDATOR_DEV_INO='64769:6102887'
+readonly PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly PRIOR_FAILED_RECOVERY_VALIDATOR_SIZE='11689'
+readonly PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO='64769:6102888'
+readonly PRIOR_FAILED_RECOVERY_MANIFEST_SHA256='9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a'
+readonly PRIOR_FAILED_RECOVERY_MANIFEST_SIZE='1673'
+readonly PRIOR_FAILED_RECOVERY_WORKFLOW_RUN_ID='33239376335'
+readonly PRIOR_FAILED_RECOVERY_WORKFLOW_RUN_ATTEMPT='1'
 readonly RECOVERY_BUNDLE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
@@ -147,6 +161,7 @@ readonly STAGED_BUNDLE="$SOURCE_STAGED_BUNDLE"
 readonly PROVIDED_MANIFEST_SHA256="$SOURCE_OWNER_MANIFEST_SHA256"
 readonly PROVIDED_AUTHORIZATION_SHA256="$6"
 readonly STAGING_ROOT="$RECOVERY_BUNDLE_PARENT/$RECOVERY_RELEASE"
+readonly PRIOR_FAILED_RECOVERY_ROOT="$RECOVERY_BUNDLE_PARENT/$PRIOR_FAILED_RECOVERY_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -157,6 +172,8 @@ readonly ATTESTATION_CLAIM_ROOT="$ATTESTATION_CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly ATTESTATION_VALIDATOR="$ATTESTATION_CLAIM_ROOT/$TERMINAL_VALIDATOR_BASENAME"
 readonly BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$RECOVERY_RELEASE"
 readonly BRIDGE_ROOT="$BRIDGE_PARENT/$RECOVERY_RELEASE"
+readonly PRIOR_FAILED_BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$PRIOR_FAILED_RECOVERY_RELEASE"
+readonly PRIOR_FAILED_BRIDGE_ROOT="$BRIDGE_PARENT/$PRIOR_FAILED_RECOVERY_RELEASE"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -171,7 +188,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$ATTESTATION_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
   die 'the terminal-attestation implementation must be one distinct full lowercase commit SHA'
 [[ "$RECOVERY_RELEASE" =~ ^[0-9a-f]{40}$ && "$RECOVERY_RELEASE" != "$ATTESTATION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$REPAIR_RELEASE" && "$RECOVERY_RELEASE" != "$CANONICAL_H14" ]] ||
+  "$RECOVERY_RELEASE" != "$REPAIR_RELEASE" && "$RECOVERY_RELEASE" != "$CANONICAL_H14" &&
+  "$RECOVERY_RELEASE" != "$PRIOR_FAILED_RECOVERY_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -191,6 +209,61 @@ for command in awk bash chmod chown cmp curl dirname docker env find grep head i
   mkdir mv python3 realpath sed seq sha256sum sleep sort ss stat sync tail timeout visudo; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
+
+require_prior_failed_recovery_claim() {
+  [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
+    "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a' "$RECOVERY_BUNDLE_PARENT")" == \
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700" ]] || return 1
+  [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+  [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
+    "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_ROOT_DEV_INO:root:root:700" &&
+    "$(find -P "$PRIOR_FAILED_RECOVERY_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  [[ "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$PRIOR_FAILED_RECOVERY_ROOT/$SCRIPT_BASENAME")" == \
+      "$PRIOR_FAILED_RECOVERY_SCRIPT_DEV_INO:root:root:400:1:$PRIOR_FAILED_RECOVERY_SCRIPT_SIZE" &&
+    "$(sha256sum -- "$PRIOR_FAILED_RECOVERY_ROOT/$SCRIPT_BASENAME" | awk '{print $1}')" == "$PRIOR_FAILED_RECOVERY_SCRIPT_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$PRIOR_FAILED_RECOVERY_ROOT/$VALIDATOR_BASENAME")" == \
+      "$PRIOR_FAILED_RECOVERY_VALIDATOR_DEV_INO:root:root:400:1:$PRIOR_FAILED_RECOVERY_VALIDATOR_SIZE" &&
+    "$(sha256sum -- "$PRIOR_FAILED_RECOVERY_ROOT/$VALIDATOR_BASENAME" | awk '{print $1}')" == "$PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME")" == \
+      "$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO:root:root:400:1:$PRIOR_FAILED_RECOVERY_MANIFEST_SIZE" &&
+    "$(sha256sum -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" ]] || return 1
+  cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
+    'version=1' \
+    'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
+    "recovery_implementation_sha=$PRIOR_FAILED_RECOVERY_RELEASE" \
+    "repair_implementation_sha=$REVIEWED_REPAIR_RELEASE" \
+    "authorization_sha256=$AUTHORIZATION_SHA256" \
+    "workflow_run_id=$PRIOR_FAILED_RECOVERY_WORKFLOW_RUN_ID" \
+    "workflow_run_attempt=$PRIOR_FAILED_RECOVERY_WORKFLOW_RUN_ATTEMPT" \
+    "staging_project_ref=$STAGING_PROJECT_REF" \
+    "staging_droplet_id=$EXPECTED_DROPLET_ID" \
+    "canonical_h14_sha=$CANONICAL_H14" \
+    "source_terminal_attestation_sha=$SOURCE_ATTESTATION_RELEASE" \
+    "failed_owner_bridge_implementation_sha=$SOURCE_ATTESTATION_RELEASE" \
+    "failed_owner_bridge_script_sha256=$SOURCE_OWNER_BRIDGE_SHA256" \
+    "owner_bundle_manifest_sha256=$SOURCE_OWNER_MANIFEST_SHA256" \
+    "owner_compose_sha256=$SOURCE_OWNER_COMPOSE_SHA256" \
+    "owner_image_tar_sha256=$SOURCE_OWNER_TAR_SHA256" \
+    "owner_image_tar_size=$SOURCE_OWNER_TAR_SIZE" \
+    "owner_image_tag=fetanagent-owner-control:$CANONICAL_TAG" \
+    "owner_image_id=$SOURCE_OWNER_IMAGE_ID" \
+    "recovery_script_sha256=$PRIOR_FAILED_RECOVERY_SCRIPT_SHA256" \
+    "recovery_script_size=$PRIOR_FAILED_RECOVERY_SCRIPT_SIZE" \
+    "archive_validator_sha256=$PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256" \
+    "archive_validator_size=$PRIOR_FAILED_RECOVERY_VALIDATOR_SIZE" \
+    'archive_encoding=oci' 'archive_layer_count=11' 'archive_member_count=30' \
+    'financial_actions_mode=dry_run' 'kemerbet_executor_enabled=false' \
+    'kemerbet_final_action_enabled=false' 'provider_action_enabled=false' \
+    'transfer_enabled=false' 'amount_entry_enabled=false' 'money_moved=false')
+}
+
+require_prior_failed_recovery_claim ||
+  die 'the immutable failed 911 recovery bundle claim is not exact or the append-only chain is incomplete'
 
 [[ ! -L "$STAGED_INSTALLER" && -f "$STAGED_INSTALLER" &&
   "$(realpath -- "$0")" == "$STAGED_INSTALLER" &&
@@ -225,6 +298,18 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "staging_droplet_id=$EXPECTED_DROPLET_ID" \
   "canonical_h14_sha=$CANONICAL_H14" \
   "source_terminal_attestation_sha=$SOURCE_ATTESTATION_RELEASE" \
+  "prior_failed_recovery_implementation_sha=$PRIOR_FAILED_RECOVERY_RELEASE" \
+  "prior_failed_recovery_bundle_parent_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" \
+  "prior_failed_recovery_bundle_root_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_ROOT_DEV_INO" \
+  "prior_failed_recovery_script_dev_ino=$PRIOR_FAILED_RECOVERY_SCRIPT_DEV_INO" \
+  "prior_failed_recovery_script_sha256=$PRIOR_FAILED_RECOVERY_SCRIPT_SHA256" \
+  "prior_failed_recovery_script_size=$PRIOR_FAILED_RECOVERY_SCRIPT_SIZE" \
+  "prior_failed_archive_validator_dev_ino=$PRIOR_FAILED_RECOVERY_VALIDATOR_DEV_INO" \
+  "prior_failed_archive_validator_sha256=$PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256" \
+  "prior_failed_archive_validator_size=$PRIOR_FAILED_RECOVERY_VALIDATOR_SIZE" \
+  "prior_failed_recovery_manifest_dev_ino=$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO" \
+  "prior_failed_recovery_manifest_sha256=$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" \
+  "prior_failed_recovery_manifest_size=$PRIOR_FAILED_RECOVERY_MANIFEST_SIZE" \
   "failed_owner_bridge_implementation_sha=$SOURCE_ATTESTATION_RELEASE" \
   "failed_owner_bridge_script_sha256=$SOURCE_OWNER_BRIDGE_SHA256" \
   "owner_bundle_manifest_sha256=$SOURCE_OWNER_MANIFEST_SHA256" \
@@ -289,6 +374,11 @@ EOF
 
 require_original_bridge_namespace_absent() {
   [[ ! -e "$ORIGINAL_BRIDGE_PARENT" && ! -L "$ORIGINAL_BRIDGE_PARENT" ]]
+}
+
+require_prior_failed_runtime_ledger_absent() {
+  [[ ! -e "$PRIOR_FAILED_BRIDGE_INSTALLING" && ! -L "$PRIOR_FAILED_BRIDGE_INSTALLING" &&
+    ! -e "$PRIOR_FAILED_BRIDGE_ROOT" && ! -L "$PRIOR_FAILED_BRIDGE_ROOT" ]]
 }
 
 require_exact_droplet() {
@@ -2206,6 +2296,7 @@ PY
 
 create_or_discover_bridge_ledger() {
   local children root entries
+  require_prior_failed_runtime_ledger_absent || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -2236,6 +2327,7 @@ create_or_discover_bridge_ledger() {
   esac
   [[ ! -L "$BRIDGE_WORK_ROOT" && -d "$BRIDGE_WORK_ROOT" && "$(realpath -- "$BRIDGE_WORK_ROOT")" == "$BRIDGE_WORK_ROOT" &&
     "$(stat --format='%U:%G:%a' "$BRIDGE_WORK_ROOT")" == 'root:root:700' ]] || return 1
+  require_prior_failed_runtime_ledger_absent || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     [[ "$entries" == $'completed-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
@@ -2259,6 +2351,16 @@ expected_bridge_intent() {
     "repair_implementation_release=$REPAIR_RELEASE" \
     "terminal_attestation_implementation_release=$ATTESTATION_RELEASE" \
     "archive_recovery_implementation_release=$RECOVERY_RELEASE" \
+    "prior_failed_archive_recovery_implementation_release=$PRIOR_FAILED_RECOVERY_RELEASE" \
+    "prior_failed_archive_recovery_bundle_parent_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" \
+    "prior_failed_archive_recovery_bundle_root_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_ROOT_DEV_INO" \
+    "prior_failed_archive_recovery_script_dev_ino=$PRIOR_FAILED_RECOVERY_SCRIPT_DEV_INO" \
+    "prior_failed_archive_recovery_script_sha256=$PRIOR_FAILED_RECOVERY_SCRIPT_SHA256" \
+    "prior_failed_archive_validator_dev_ino=$PRIOR_FAILED_RECOVERY_VALIDATOR_DEV_INO" \
+    "prior_failed_archive_validator_sha256=$PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256" \
+    "prior_failed_archive_recovery_manifest_dev_ino=$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO" \
+    "prior_failed_archive_recovery_manifest_sha256=$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" \
+    'prior_failed_archive_recovery_runtime_ledger_absent=true' \
     "archive_recovery_script_sha256=$PROVIDED_RECOVERY_SCRIPT_SHA256" \
     "archive_recovery_script_size=$(stat --format='%s' "$STAGED_INSTALLER")" \
     "archive_recovery_bundle_parent_dev_ino=$(stat --format='%d:%i' "$RECOVERY_BUNDLE_PARENT")" \
@@ -2380,6 +2482,16 @@ expected_bridge_completed() {
     "repair_implementation_release=$REPAIR_RELEASE" \
     "terminal_attestation_implementation_release=$ATTESTATION_RELEASE" \
     "archive_recovery_implementation_release=$RECOVERY_RELEASE" \
+    "prior_failed_archive_recovery_implementation_release=$PRIOR_FAILED_RECOVERY_RELEASE" \
+    "prior_failed_archive_recovery_bundle_parent_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" \
+    "prior_failed_archive_recovery_bundle_root_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_ROOT_DEV_INO" \
+    "prior_failed_archive_recovery_script_dev_ino=$PRIOR_FAILED_RECOVERY_SCRIPT_DEV_INO" \
+    "prior_failed_archive_recovery_script_sha256=$PRIOR_FAILED_RECOVERY_SCRIPT_SHA256" \
+    "prior_failed_archive_validator_dev_ino=$PRIOR_FAILED_RECOVERY_VALIDATOR_DEV_INO" \
+    "prior_failed_archive_validator_sha256=$PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256" \
+    "prior_failed_archive_recovery_manifest_dev_ino=$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO" \
+    "prior_failed_archive_recovery_manifest_sha256=$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" \
+    'prior_failed_archive_recovery_runtime_ledger_absent=true' \
     "archive_recovery_script_sha256=$PROVIDED_RECOVERY_SCRIPT_SHA256" \
     "archive_recovery_script_size=$(stat --format='%s' "$STAGED_INSTALLER")" \
     "archive_recovery_bundle_parent_dev_ino=$(stat --format='%d:%i' "$RECOVERY_BUNDLE_PARENT")" \
@@ -2674,6 +2786,7 @@ NON_OWNER_INVENTORY_SHA256="$(printf '%s' "$NON_OWNER_INVENTORY" | sha256sum | a
 [[ "$NON_OWNER_INVENTORY_COUNT" =~ ^[0-9]+$ && "$NON_OWNER_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die 'the unrelated project-service inventory attestation is malformed'
 
+require_prior_failed_runtime_ledger_absent || die 'the failed 911 recovery runtime ledger is not absent'
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
   require_bridge_intent || die 'the durable Owner-runtime bridge intent changed'
@@ -2745,6 +2858,8 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
   require_owner_network || die 'the completed Owner network contract changed'
   require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
     die 'the live terminal-attestation boundary changed after bridge completion'
+  require_prior_failed_runtime_ledger_absent ||
+    die 'the failed 911 recovery runtime ledger appeared beside completed recovery evidence'
   printf '%s\n' 'FetanAgent H14 Owner runtime bridge already valid: Owner only; no provider action and no money moved.'
   exit 0
 fi
@@ -2891,6 +3006,7 @@ require_no_other_mutator_processes || die 'another staging mutation appeared bef
 require_exact_droplet || die 'the staging Droplet identity changed before bridge completion'
 require_exact_recovery_source_anchors || die 'an immutable 001 terminal or Owner bundle source anchor changed during recovery'
 require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before recovery completion'
+require_prior_failed_runtime_ledger_absent || die 'the failed 911 recovery runtime ledger appeared before recovery completion'
 require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
   die 'the live terminal-attestation boundary changed immediately before Owner bridge completion'
 inspect_image_archive || die 'the immutable OCI archive changed before recovery completion'
@@ -2905,6 +3021,7 @@ mv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT" || die 'the bridge ledger could not be
 sync -f "$BRIDGE_PARENT" || die 'the bridge ledger rename could not be synchronized'
 BRIDGE_STATE='complete'
 BRIDGE_WORK_ROOT="$BRIDGE_ROOT"
+require_prior_failed_runtime_ledger_absent || die 'the failed 911 recovery runtime ledger appeared during finalization'
 require_start_record || die 'the finalized Owner-runtime bridge start intent is invalid'
 require_bridge_completed || die 'the finalized Owner-runtime bridge ledger is invalid'
 

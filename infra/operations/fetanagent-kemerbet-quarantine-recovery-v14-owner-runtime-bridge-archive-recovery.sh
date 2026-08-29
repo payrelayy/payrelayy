@@ -229,6 +229,19 @@ readonly FAILED_HOLDER_BRIDGE_INTENT_SHA256='2b80e49bd0aa3c3060ff09b8b2593f5caf5
 readonly FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO='64769:6102947'
 readonly FAILED_HOLDER_BRIDGE_API_PROOF_SIZE='643'
 readonly FAILED_HOLDER_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'
+readonly FAILED_ORDER_CORRECTION_RELEASE='132603c34afff4e0e6c78d89864c761034c0f3fa'
+readonly FAILED_ORDER_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102948'
+readonly FAILED_ORDER_CORRECTION_SCRIPT_DEV_INO='64769:6102949'
+readonly FAILED_ORDER_CORRECTION_SCRIPT_SHA256='dbea82dc71e3a61ce2c3392ad507eb952c1054c64c07f2145650f7aeac0d0e4e'
+readonly FAILED_ORDER_CORRECTION_SCRIPT_SIZE='257672'
+readonly FAILED_ORDER_CORRECTION_VALIDATOR_DEV_INO='64769:6102950'
+readonly FAILED_ORDER_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_ORDER_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_ORDER_CORRECTION_MANIFEST_DEV_INO='64769:6102951'
+readonly FAILED_ORDER_CORRECTION_MANIFEST_SHA256='1cfa9ddba283f1b6ae053a420aaea0caa2af39791271cd6e936bb109b2f42c4f'
+readonly FAILED_ORDER_CORRECTION_MANIFEST_SIZE='11954'
+readonly FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ID='33251242706'
+readonly FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
 readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'
@@ -256,7 +269,8 @@ readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-r
 readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'
 readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'
 readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'
+readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -310,6 +324,7 @@ readonly FAILED_CATALOG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CATALOG
 readonly FAILED_OIDVECTOR_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OIDVECTOR_CORRECTION_RELEASE"
 readonly FAILED_COMPOSE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COMPOSE_CORRECTION_RELEASE"
 readonly FAILED_HOLDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_HOLDER_CORRECTION_RELEASE"
+readonly FAILED_ORDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ORDER_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -366,7 +381,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_CATALOG_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_OIDVECTOR_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_COMPOSE_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_HOLDER_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_HOLDER_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_ORDER_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -387,13 +403,45 @@ for command in awk bash chmod chown cmp curl dirname docker env find grep head i
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 
+emit_exact_nofollow_file() {
+  local path="$1" expected_dev_ino="$2" expected_size="$3" expected_sha="$4" expected_mode="${5:-0600}"
+  env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$path" "$expected_dev_ino" "$expected_size" "$expected_sha" "$expected_mode" 3<<'PY'
+import hashlib, os, stat, sys
+path, expected_dev_ino, expected_size, expected_sha, expected_mode = sys.argv[1:]
+try:
+    if os.path.islink(path) or not os.path.isfile(path) or os.path.realpath(path) != path:
+        raise RuntimeError()
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        data = bytearray()
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk: break
+            data.extend(chunk)
+        after = os.fstat(fd)
+        exact = (before.st_dev, before.st_ino, before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode),
+                 before.st_nlink, before.st_size)
+        if before != after or exact != (int(expected_dev_ino.split(':')[0]), int(expected_dev_ino.split(':')[1]),
+                                        0, 0, int(expected_mode, 8), 1, int(expected_size)):
+            raise RuntimeError()
+        if hashlib.sha256(data).hexdigest() != expected_sha:
+            raise RuntimeError()
+        os.write(1, data)
+    finally:
+        os.close(fd)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:11" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:12" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -496,6 +544,13 @@ require_prior_failed_recovery_claim() {
   emit_exact_nofollow_file "$FAILED_HOLDER_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_HOLDER_CORRECTION_SCRIPT_DEV_INO" "$FAILED_HOLDER_CORRECTION_SCRIPT_SIZE" "$FAILED_HOLDER_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_HOLDER_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_HOLDER_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_HOLDER_CORRECTION_VALIDATOR_SIZE" "$FAILED_HOLDER_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_HOLDER_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_HOLDER_CORRECTION_MANIFEST_DEV_INO" "$FAILED_HOLDER_CORRECTION_MANIFEST_SIZE" "$FAILED_HOLDER_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  [[ ! -L "$FAILED_ORDER_CORRECTION_ROOT" && -d "$FAILED_ORDER_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_ORDER_CORRECTION_ROOT")" == "$FAILED_ORDER_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_ORDER_CORRECTION_ROOT")" == "$FAILED_ORDER_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_ORDER_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_ORDER_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_ORDER_CORRECTION_SCRIPT_DEV_INO" "$FAILED_ORDER_CORRECTION_SCRIPT_SIZE" "$FAILED_ORDER_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_ORDER_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_ORDER_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_ORDER_CORRECTION_VALIDATOR_SIZE" "$FAILED_ORDER_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_ORDER_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_ORDER_CORRECTION_MANIFEST_DEV_INO" "$FAILED_ORDER_CORRECTION_MANIFEST_SIZE" "$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -710,6 +765,21 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_holder_bridge_api_proof_sha256=$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256" \
   "failed_holder_bridge_api_proof_size=$FAILED_HOLDER_BRIDGE_API_PROOF_SIZE" \
   'holder_inventory_parser_contract=tab-preserving-exact-complete-v1' \
+  "failed_order_correction_implementation_sha=$FAILED_ORDER_CORRECTION_RELEASE" \
+  "failed_order_correction_bundle_root_dev_ino=$FAILED_ORDER_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_order_correction_script_dev_ino=$FAILED_ORDER_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_order_correction_script_sha256=$FAILED_ORDER_CORRECTION_SCRIPT_SHA256" \
+  "failed_order_correction_script_size=$FAILED_ORDER_CORRECTION_SCRIPT_SIZE" \
+  "failed_order_correction_validator_dev_ino=$FAILED_ORDER_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_order_correction_validator_sha256=$FAILED_ORDER_CORRECTION_VALIDATOR_SHA256" \
+  "failed_order_correction_validator_size=$FAILED_ORDER_CORRECTION_VALIDATOR_SIZE" \
+  "failed_order_correction_manifest_dev_ino=$FAILED_ORDER_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_order_correction_manifest_sha256=$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" \
+  "failed_order_correction_manifest_size=$FAILED_ORDER_CORRECTION_MANIFEST_SIZE" \
+  "failed_order_correction_workflow_run_id=$FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_order_correction_workflow_run_attempt=$FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  'failed_order_runtime_namespace=exact-absent' \
+  'nofollow_helper_definition_order=before-first-top-level-claim' \
   'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
   'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
   'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
@@ -890,39 +960,8 @@ require_prior_failed_runtime_ledger_absent() {
   emit_exact_nofollow_file "$FAILED_HOLDER_BRIDGE_INTENT" "$FAILED_HOLDER_BRIDGE_INTENT_DEV_INO" \
     "$FAILED_HOLDER_BRIDGE_INTENT_SIZE" "$FAILED_HOLDER_BRIDGE_INTENT_SHA256" >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_HOLDER_BRIDGE_API_PROOF" "$FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO" \
-    "$FAILED_HOLDER_BRIDGE_API_PROOF_SIZE" "$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256" >/dev/null
-}
-
-emit_exact_nofollow_file() {
-  local path="$1" expected_dev_ino="$2" expected_size="$3" expected_sha="$4" expected_mode="${5:-0600}"
-  env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$path" "$expected_dev_ino" "$expected_size" "$expected_sha" "$expected_mode" 3<<'PY'
-import hashlib, os, stat, sys
-path, expected_dev_ino, expected_size, expected_sha, expected_mode = sys.argv[1:]
-try:
-    if os.path.islink(path) or not os.path.isfile(path) or os.path.realpath(path) != path:
-        raise RuntimeError()
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    try:
-        before = os.fstat(fd)
-        data = bytearray()
-        while True:
-            chunk = os.read(fd, 1024 * 1024)
-            if not chunk: break
-            data.extend(chunk)
-        after = os.fstat(fd)
-        exact = (before.st_dev, before.st_ino, before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode),
-                 before.st_nlink, before.st_size)
-        if before != after or exact != (int(expected_dev_ino.split(':')[0]), int(expected_dev_ino.split(':')[1]),
-                                        0, 0, int(expected_mode, 8), 1, int(expected_size)):
-            raise RuntimeError()
-        if hashlib.sha256(data).hexdigest() != expected_sha:
-            raise RuntimeError()
-        os.write(1, data)
-    finally:
-        os.close(fd)
-except Exception:
-    raise SystemExit(1)
-PY
+    "$FAILED_HOLDER_BRIDGE_API_PROOF_SIZE" "$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256" >/dev/null || return 1
+  [[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]
 }
 
 emit_owned_nofollow_file() {
@@ -3448,6 +3487,12 @@ expected_bridge_intent() {
     "failed_holder_bridge_api_proof_dev_ino=$FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO" \
     "failed_holder_bridge_api_proof_sha256=$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256" \
     'holder_inventory_parser_contract=tab-preserving-exact-complete-v1' \
+    "failed_order_correction_implementation_sha=$FAILED_ORDER_CORRECTION_RELEASE" \
+    "failed_order_correction_bundle_root_dev_ino=$FAILED_ORDER_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_order_correction_script_sha256=$FAILED_ORDER_CORRECTION_SCRIPT_SHA256" \
+    "failed_order_correction_manifest_sha256=$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" \
+    'failed_order_runtime_namespace=exact-absent' \
+    'nofollow_helper_definition_order=before-first-top-level-claim' \
     'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
     'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
     'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
@@ -3681,6 +3726,12 @@ expected_bridge_completed() {
     "failed_holder_bridge_api_proof_dev_ino=$FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO" \
     "failed_holder_bridge_api_proof_sha256=$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256" \
     'holder_inventory_parser_contract=tab-preserving-exact-complete-v1' \
+    "failed_order_correction_implementation_sha=$FAILED_ORDER_CORRECTION_RELEASE" \
+    "failed_order_correction_bundle_root_dev_ino=$FAILED_ORDER_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_order_correction_script_sha256=$FAILED_ORDER_CORRECTION_SCRIPT_SHA256" \
+    "failed_order_correction_manifest_sha256=$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" \
+    'failed_order_runtime_namespace=exact-absent' \
+    'nofollow_helper_definition_order=before-first-top-level-claim' \
     'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
     'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
     'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \

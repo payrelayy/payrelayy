@@ -139,7 +139,8 @@ for (const needle of [
   "readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
   "readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
   "readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
+  "readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -186,6 +187,11 @@ for (const needle of [
   'for line in holders.splitlines():',
   "if line.count('\\t') != 1",
   'if set(holder_map) != volume_names',
+  "FAILED_ORDER_CORRECTION_RELEASE='132603c34afff4e0e6c78d89864c761034c0f3fa'",
+  "FAILED_ORDER_CORRECTION_SCRIPT_SHA256='dbea82dc71e3a61ce2c3392ad507eb952c1054c64c07f2145650f7aeac0d0e4e'",
+  "FAILED_ORDER_CORRECTION_MANIFEST_SHA256='1cfa9ddba283f1b6ae053a420aaea0caa2af39791271cd6e936bb109b2f42c4f'",
+  'failed_order_runtime_namespace=exact-absent',
+  'nofollow_helper_definition_order=before-first-top-level-claim',
   'emit_exact_nofollow_file() {',
   'os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW',
   'before != after',
@@ -324,6 +330,17 @@ for (const forbidden of [
 }
 
 assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
+const nofollowDefinition = script.indexOf('emit_exact_nofollow_file() {');
+const priorClaimDefinition = script.indexOf('require_prior_failed_recovery_claim() {');
+const priorClaimInvocation = script.indexOf(
+  "require_prior_failed_recovery_claim ||\n  die 'the immutable failed 911 recovery bundle claim is not exact or the append-only chain is incomplete'",
+);
+assert.ok(nofollowDefinition >= 0 && nofollowDefinition < priorClaimDefinition);
+assert.ok(priorClaimDefinition < priorClaimInvocation);
+assert.equal((script.match(/emit_exact_nofollow_file\(\) \{/gu) ?? []).length, 1);
+assert.ok(
+  script.includes('[[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]'),
+);
 assert.doesNotMatch(script, /create --no-build --no-deps/u);
 assert.ok(
   script.includes(
@@ -690,8 +707,9 @@ for (const state of [
   '"$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")"',
   '"$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")"',
   '"$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")"',
-  '"$(basename "$failed_holder_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_holder_root")" "$(basename "$root")"',
+  '"$(basename "$failed_holder_root")" "$(basename "$failed_order_root")"',
+  '"$(basename "$failed_order_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_order_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -713,6 +731,7 @@ const failedCatalog = '04f51a521280fed43cd1504107c702940e523688';
 const failedOidvector = 'f67cf783528f090169dbea1ebfdc6c46f90996bb';
 const failedCompose = 'e95ad99122ebf9f7257ea25d7cf215dd38c73b40';
 const failedHolder = '35d28aaa41cde5a2ccce7c2017dffc7c9d503238';
+const failedOrder = '132603c34afff4e0e6c78d89864c761034c0f3fa';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
@@ -728,6 +747,7 @@ const classifyChain = (children) => {
       failedOidvector,
       failedCompose,
       failedHolder,
+      failedOrder,
     ]
       .sort()
       .join('\n')
@@ -744,6 +764,7 @@ const classifyChain = (children) => {
       failedOidvector,
       failedCompose,
       failedHolder,
+      failedOrder,
       installing,
     ]
       .sort()
@@ -761,6 +782,7 @@ const classifyChain = (children) => {
       failedOidvector,
       failedCompose,
       failedHolder,
+      failedOrder,
       current,
     ]
       .sort()
@@ -780,6 +802,7 @@ for (const [children, expected] of [
       failedOidvector,
       failedCompose,
       failedHolder,
+      failedOrder,
     ],
     'append',
   ],
@@ -793,6 +816,7 @@ for (const [children, expected] of [
       failedOidvector,
       failedCompose,
       failedHolder,
+      failedOrder,
       installing,
     ],
     'resume',
@@ -807,6 +831,7 @@ for (const [children, expected] of [
       failedOidvector,
       failedCompose,
       failedHolder,
+      failedOrder,
       current,
     ],
     'complete',
@@ -822,6 +847,16 @@ for (const [children, expected] of [
 const bash = resolveBash();
 const bashCheck = spawnSync(bash, ['-n', operation], { encoding: 'utf8' });
 assert.equal(bashCheck.status, 0, bashCheck.stderr || bashCheck.stdout);
+const orderSyntaxOnly = spawnSync(bash, ['-n'], {
+  encoding: 'utf8',
+  input: 'caller() { late_helper; }\ncaller\nlate_helper() { :; }\n',
+});
+assert.equal(orderSyntaxOnly.status, 0, 'bash -n fixture must miss the definition-order hazard');
+const orderExecution = spawnSync(bash, [], {
+  encoding: 'utf8',
+  input: 'set -e\ncaller() { late_helper; }\ncaller\nlate_helper() { :; }\n',
+});
+assert.notEqual(orderExecution.status, 0, 'execution fixture must expose call-before-definition');
 const terminalEmissionCheck = spawnSync(bash, ['-n'], {
   encoding: 'utf8',
   input: workflowRunBlock('Emit the exact terminal-attestation root-console invocation'),

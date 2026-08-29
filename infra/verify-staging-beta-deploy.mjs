@@ -4707,6 +4707,7 @@ assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
 assert.match(workflow, /^\s+- transition-ssh-verify$/m);
 assert.match(workflow, /^\s+- transition-stop-legacy$/m);
+assert.match(workflow, /^\s+- h14-owner-runtime-bridge-stage$/m);
 assert.match(workflow, /^\s+- recover-v1-retirement-after-expiry$/m);
 assert.match(workflow, /^\s+- predecessor-stop-and-disable$/m);
 assert.match(workflow, /^\s+- ecd47f5d-predecessor-stop-and-disable$/m);
@@ -4715,7 +4716,7 @@ assert.match(workflow, /stop-current-staging-predecessor-runtime/);
 assert.match(workflow, /stop-exact-ecd47f5d-staging-predecessor-runtime/);
 assert.match(
   workflow,
-  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
+  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|h14-owner-runtime-bridge-stage\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
 );
 assert.match(
   workflow,

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build, verify transition SSH, stop legacy for transition, clean either exact pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
+        description: Build, stage the exact H14 Owner-only runtime bridge, verify transition SSH, stop legacy for transition, clean either exact pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
         required: true
         default: plan
         type: choice
@@ -14,6 +14,7 @@ on:
           - transition-stop-legacy
           - unban-and-connectivity-check
           - deploy-and-smoke
+          - h14-owner-runtime-bridge-stage
           - recover-v1-retirement-after-expiry
           - predecessor-stop-and-disable
           - ecd47f5d-predecessor-stop-and-disable
@@ -45,9 +46,25 @@ on:
         required: false
         default: ''
         type: string
+      confirm_repair_implementation_sha:
+        description: For h14-owner-runtime-bridge-stage type the exact reviewed repair pull-request head SHA
+        required: false
+        default: ''
+        type: string
+      confirm_quarantine_recovery_authorization_sha256:
+        description: For h14-owner-runtime-bridge-stage type the exact reviewed quarantine-recovery authorization digest
+        required: false
+        default: ''
+        type: string
+      confirm_owner_only_no_provider_action:
+        description: For h14-owner-runtime-bridge-stage type owner-only-no-provider-action-no-money
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: fetanagent-staging-beta-deploy
@@ -57,6 +74,8 @@ env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '593344964'
+  CANONICAL_H14_COMMIT: 06459511d9330a0e1d956c42529b81aa9970e7a2
+  H14_RECOVERY_AUTHORIZATION_SHA256: 6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
   STAGING_BANNED_IP: 2a03:b0c0:1:e0:0:1:a8b4:2001
@@ -78,18 +97,43 @@ jobs:
       CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
       CONFIRMED_V1_RETIREMENT_RECOVERY: ${{ inputs.confirm_v1_retirement_recovery }}
       CONFIRMED_V1_RETIREMENT_RELEASE: ${{ inputs.confirm_v1_retirement_release_sha }}
+      CONFIRMED_REPAIR_IMPLEMENTATION: ${{ inputs.confirm_repair_implementation_sha }}
+      CONFIRMED_H14_AUTHORIZATION: ${{ inputs.confirm_quarantine_recovery_authorization_sha256 }}
+      CONFIRMED_OWNER_ONLY: ${{ inputs.confirm_owner_only_no_provider_action }}
       REQUESTED_MODE: ${{ inputs.mode }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Reject every non-staging target
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
-          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          if [[ "$REQUESTED_MODE" == 'h14-owner-runtime-bridge-stage' ]]; then
+            [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != 'refs/heads/main' ]]
+            [[ "$CONFIRMED_COMMIT" == "$CANONICAL_H14_COMMIT" ]]
+            [[ "$CONFIRMED_REPAIR_IMPLEMENTATION" =~ ^[0-9a-f]{40}$ &&
+              "$CONFIRMED_REPAIR_IMPLEMENTATION" == "$GITHUB_SHA" &&
+              "$CONFIRMED_REPAIR_IMPLEMENTATION" != "$CANONICAL_H14_COMMIT" ]]
+            [[ "$CONFIRMED_H14_AUTHORIZATION" == "$H14_RECOVERY_AUTHORIZATION_SHA256" ]]
+            [[ "$CONFIRMED_OWNER_ONLY" == 'owner-only-no-provider-action-no-money' ]]
+            branch_name="${GITHUB_REF#refs/heads/}"
+            main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+            [[ "$main_sha" == "$CANONICAL_H14_COMMIT" ]]
+            mapfile -t matching_pulls < <(
+              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+                --jq ".[] | select(.state == \"open\" and .base.ref == \"main\" and .base.sha == \"$CANONICAL_H14_COMMIT\" and .head.sha == \"$GITHUB_SHA\" and .head.ref == \"$branch_name\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\") | .number"
+            )
+            [[ "${#matching_pulls[@]}" -eq 1 && "${matching_pulls[0]}" =~ ^[1-9][0-9]*$ ]]
+          else
+            [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+            [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+            [[ -z "$CONFIRMED_REPAIR_IMPLEMENTATION" ]]
+            [[ -z "$CONFIRMED_H14_AUTHORIZATION" ]]
+            [[ -z "$CONFIRMED_OWNER_ONLY" ]]
+          fi
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|h14-owner-runtime-bridge-stage|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
           if [[ "$REQUESTED_MODE" == 'transition-stop-legacy' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
@@ -233,6 +277,261 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+
+  h14-owner-runtime-bridge-stage:
+    name: Stage canonical H14 Owner-only runtime bridge
+    if: inputs.mode == 'h14-owner-runtime-bridge-stage'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    environment: staging
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_REPAIR_IMPLEMENTATION: ${{ inputs.confirm_repair_implementation_sha }}
+      CONFIRMED_H14_AUTHORIZATION: ${{ inputs.confirm_quarantine_recovery_authorization_sha256 }}
+      CONFIRMED_OWNER_ONLY: ${{ inputs.confirm_owner_only_no_provider_action }}
+      STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+      STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+      STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Re-prove the immutable repair pull-request head and canonical main
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_REPAIR_IMPLEMENTATION" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_COMMIT" == "$CANONICAL_H14_COMMIT" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" && "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$CONFIRMED_H14_AUTHORIZATION" == "$H14_RECOVERY_AUTHORIZATION_SHA256" ]]
+          [[ "$CONFIRMED_OWNER_ONLY" == 'owner-only-no-provider-action-no-money' ]]
+          branch_name="${GITHUB_REF#refs/heads/}"
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" == "$CANONICAL_H14_COMMIT" ]]
+          mapfile -t matching_pulls < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq ".[] | select(.state == \"open\" and .base.ref == \"main\" and .base.sha == \"$CANONICAL_H14_COMMIT\" and .head.sha == \"$GITHUB_SHA\" and .head.ref == \"$branch_name\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\") | .number"
+          )
+          [[ "${#matching_pulls[@]}" -eq 1 && "${matching_pulls[0]}" =~ ^[1-9][0-9]*$ ]]
+
+      - name: Check out the exact repair implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ inputs.confirm_repair_implementation_sha }}
+          path: repair
+
+      - name: Check out canonical H14 separately
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: 06459511d9330a0e1d956c42529b81aa9970e7a2
+          path: canonical-h14
+
+      - name: Verify both immutable source trees and the root bridge syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C repair rev-parse HEAD)" == "$CONFIRMED_REPAIR_IMPLEMENTATION" ]]
+          [[ "$(git -C canonical-h14 rev-parse HEAD)" == "$CANONICAL_H14_COMMIT" ]]
+          [[ -f repair/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh ]]
+          bash -n repair/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh
+          [[ -f canonical-h14/infra/compose.staging-beta.yaml ]]
+
+      - name: Build and seal only the canonical H14 Owner image
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${CANONICAL_H14_COMMIT:0:12}"
+          image="fetanagent-owner-control:$tag"
+          docker build --pull=false --target admin \
+            --build-arg "VCS_REF=$CANONICAL_H14_COMMIT" \
+            --tag "$image" canonical-h14
+          [[ "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$CANONICAL_H14_COMMIT" ]]
+          [[ "$(docker image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" == '["node","apps/admin/dist/index.js"]' ]]
+          image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+          [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          bundle_root="$RUNNER_TEMP/h14-owner-runtime-bridge"
+          install -d -m 0700 "$bundle_root"
+          tar_path="$bundle_root/fetanagent-owner-control-canonical-h14.tar"
+          compose_path="$bundle_root/compose.staging-beta.yaml"
+          manifest_path="$bundle_root/manifest-v1"
+          docker save --output "$tar_path" "$image"
+          install -m 0600 canonical-h14/infra/compose.staging-beta.yaml "$compose_path"
+          tar_sha="$(sha256sum "$tar_path" | awk '{print $1}')"
+          tar_size="$(stat --format='%s' "$tar_path")"
+          compose_sha="$(sha256sum "$compose_path" | awk '{print $1}')"
+          script_sha="$(sha256sum repair/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh | awk '{print $1}')"
+          [[ "$tar_sha" =~ ^[0-9a-f]{64}$ && "$compose_sha" =~ ^[0-9a-f]{64}$ && "$script_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$tar_size" =~ ^[1-9][0-9]{0,11}$ && "$tar_size" -le 1073741824 ]]
+
+          python3 -I - "$tar_path" "$image" "$image_id" <<'PY'
+          import json
+          import pathlib
+          import sys
+          import tarfile
+
+          path, expected_tag, expected_id = sys.argv[1:]
+          expected_config = expected_id.removeprefix('sha256:') + '.json'
+          with tarfile.open(path, mode='r:') as archive:
+              members = archive.getmembers()
+              if not members or len(members) > 4096:
+                  raise SystemExit(1)
+              for member in members:
+                  target = pathlib.PurePosixPath(member.name)
+                  if target.is_absolute() or '..' in target.parts or not (member.isfile() or member.isdir()):
+                      raise SystemExit(1)
+              manifest_member = archive.getmember('manifest.json')
+              manifest_file = archive.extractfile(manifest_member)
+              if manifest_file is None:
+                  raise SystemExit(1)
+              manifest = json.load(manifest_file)
+              if (
+                  not isinstance(manifest, list)
+                  or len(manifest) != 1
+                  or manifest[0].get('Config') != expected_config
+                  or manifest[0].get('RepoTags') != [expected_tag]
+                  or not isinstance(manifest[0].get('Layers'), list)
+                  or not manifest[0]['Layers']
+              ):
+                  raise SystemExit(1)
+          PY
+
+          cat >"$manifest_path" <<EOF
+          version=1
+          contract=fetanagent-h14-owner-runtime-bridge-bundle
+          repair_implementation_sha=$CONFIRMED_REPAIR_IMPLEMENTATION
+          canonical_h14_sha=$CANONICAL_H14_COMMIT
+          staging_project_ref=$STAGING_PROJECT_REF
+          staging_droplet_id=$STAGING_DROPLET_ID
+          authorization_sha256=$H14_RECOVERY_AUTHORIZATION_SHA256
+          workflow_run_id=$GITHUB_RUN_ID
+          workflow_run_attempt=$GITHUB_RUN_ATTEMPT
+          owner_image_tag=$image
+          owner_image_id=$image_id
+          owner_image_tar_sha256=$tar_sha
+          owner_image_tar_size=$tar_size
+          canonical_compose_sha256=$compose_sha
+          owner_runtime_bridge_script_sha256=$script_sha
+          provider_action_enabled=false
+          transfer_enabled=false
+          amount_entry_enabled=false
+          money_moved=false
+          EOF
+          chmod 0600 "$manifest_path"
+          manifest_sha="$(sha256sum "$manifest_path" | awk '{print $1}')"
+          [[ "$manifest_sha" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "bundle_root=$bundle_root"
+            echo "tar_sha=$tar_sha"
+            echo "tar_size=$tar_size"
+            echo "compose_sha=$compose_sha"
+            echo "script_sha=$script_sha"
+            echo "manifest_sha=$manifest_sha"
+            echo "image_id=$image_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Stage the no-secret Owner-only bundle as the unprivileged deployment identity
+        id: stage
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ steps.bundle.outputs.bundle_root }}
+          TAR_SHA: ${{ steps.bundle.outputs.tar_sha }}
+          TAR_SIZE: ${{ steps.bundle.outputs.tar_size }}
+          COMPOSE_SHA: ${{ steps.bundle.outputs.compose_sha }}
+          MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+          secret_dir="$(mktemp -d "$RUNNER_TEMP/h14-owner-runtime-bridge-ssh.XXXXXX")"
+          trap 'rm -rf -- "$secret_dir"' EXIT
+          printf '%s' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$secret_dir/known-hosts"
+          chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts"
+          ssh-keygen -F "$STAGING_VM_HOST" -f "$secret_dir/known-hosts" >/dev/null
+          remote="fetanagent-admin@$STAGING_VM_HOST"
+          remote_bundle="/tmp/fetanagent-h14-owner-runtime-bridge-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_SHA"
+          [[ "$remote_bundle" =~ ^/tmp/fetanagent-h14-owner-runtime-bridge-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{40}$ ]]
+          ssh_opts=(-F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts")
+          ssh "${ssh_opts[@]}" "$remote" bash -s -- "$remote_bundle" <<'REMOTE'
+          set -euo pipefail
+          remote_bundle="$1"
+          test "$(id -u)" -ne 0
+          test ! -e "$remote_bundle"
+          test ! -L "$remote_bundle"
+          umask 077
+          install -d -m 0700 "$remote_bundle"
+          REMOTE
+          scp "${ssh_opts[@]}" \
+            "$BUNDLE_ROOT/fetanagent-owner-control-canonical-h14.tar" \
+            "$BUNDLE_ROOT/compose.staging-beta.yaml" \
+            "$BUNDLE_ROOT/manifest-v1" \
+            "$remote:$remote_bundle/"
+          ssh "${ssh_opts[@]}" "$remote" bash -s -- \
+            "$remote_bundle" "$TAR_SIZE" "$TAR_SHA" "$COMPOSE_SHA" "$MANIFEST_SHA" <<'REMOTE'
+          set -euo pipefail
+          remote_bundle="$1"
+          tar_size="$2"
+          tar_sha="$3"
+          compose_sha="$4"
+          manifest_sha="$5"
+          test "$(id -u)" -ne 0
+          test "$(find -P "$remote_bundle" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" = "compose.staging-beta.yaml:f
+          fetanagent-owner-control-canonical-h14.tar:f
+          manifest-v1:f"
+          chmod 0600 \
+            "$remote_bundle/fetanagent-owner-control-canonical-h14.tar" \
+            "$remote_bundle/compose.staging-beta.yaml" \
+            "$remote_bundle/manifest-v1"
+          test "$(stat --format='%s' "$remote_bundle/fetanagent-owner-control-canonical-h14.tar")" = "$tar_size"
+          test "$(sha256sum "$remote_bundle/fetanagent-owner-control-canonical-h14.tar" | awk '{print $1}')" = "$tar_sha"
+          test "$(sha256sum "$remote_bundle/compose.staging-beta.yaml" | awk '{print $1}')" = "$compose_sha"
+          test "$(sha256sum "$remote_bundle/manifest-v1" | awk '{print $1}')" = "$manifest_sha"
+          REMOTE
+          echo "remote_bundle=$remote_bundle" >> "$GITHUB_OUTPUT"
+
+      - name: Emit the exact root-console invocation without executing it
+        shell: bash
+        env:
+          REMOTE_BUNDLE: ${{ steps.stage.outputs.remote_bundle }}
+          MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
+          SCRIPT_SHA: ${{ steps.bundle.outputs.script_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_BUNDLE" =~ ^/tmp/fetanagent-h14-owner-runtime-bridge-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{40}$ ]]
+          root_script_dir="/root/fetanagent-h14-owner-runtime-bridge-$CONFIRMED_REPAIR_IMPLEMENTATION"
+          root_script="$root_script_dir/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh"
+          invocation="bash '$root_script' '$CONFIRMED_REPAIR_IMPLEMENTATION' '$CANONICAL_H14_COMMIT' '$REMOTE_BUNDLE' '$MANIFEST_SHA' '$H14_RECOVERY_AUTHORIZATION_SHA256'"
+          {
+            echo '### Exact fresh root-console invocation'
+            echo
+            echo 'This was staged only. No remote Docker, Supabase, provider, helper, or financial mutation was performed.'
+            echo
+            echo '```bash'
+            echo "repair_release='$CONFIRMED_REPAIR_IMPLEMENTATION'"
+            echo "script_sha='$SCRIPT_SHA'"
+            echo "script_root='$root_script_dir'"
+            echo '[[ ! -e "$script_root" && ! -L "$script_root" ]]'
+            echo 'umask 077'
+            echo 'install -d -o root -g root -m 0700 "$script_root"'
+            echo "curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --output '$root_script' 'https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$CONFIRMED_REPAIR_IMPLEMENTATION/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh'"
+            echo "chown root:root '$root_script'"
+            echo "chmod 0600 '$root_script'"
+            echo "[[ \"\$(sha256sum '$root_script' | awk '{print \$1}')\" == '$SCRIPT_SHA' ]]"
+            echo "$invocation"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   connectivity:
     name: Unban exact staging IP and check connectivity once

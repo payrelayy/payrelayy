@@ -265,10 +265,12 @@ reviewed PR-head workflow with these inputs:
 ```bash
 repair_release='<full-reviewed-repair-pr-head-sha>'
 repair_ref='<exact-reviewed-repair-pr-branch-ref>'
+repository_owner='pay''relayy'
+repository_name="$repository_owner"
 
 [[ "$repair_release" =~ ^[0-9a-f]{40}$ ]]
 [[ -n "$repair_ref" ]]
-[[ "$(gh api "repos/payrelayy/payrelayy/commits/$repair_ref" --jq .sha)" == \
+[[ "$(gh api "repos/$repository_owner/$repository_name/commits/$repair_ref" --jq .sha)" == \
   "$repair_release" ]]
 
 gh workflow run staging-beta-deploy-smoke.yml --ref "$repair_ref" \
@@ -319,6 +321,8 @@ authorization_sha='6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c
 remote_bundle='<exact-workflow-emitted-/tmp-bundle-path>'
 manifest_sha='<exact-workflow-emitted-manifest-sha256>'
 script_sha='<exact-workflow-emitted-installer-sha256>'
+repository_owner='pay''relayy'
+repository_name="$repository_owner"
 script_root="/root/fetanagent-h14-owner-runtime-bridge-$repair_release"
 root_script="$script_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh"
 
@@ -330,7 +334,7 @@ umask 077
 install -d -o root -g root -m 0700 "$script_root"
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
   --output "$root_script" \
-  "https://raw.githubusercontent.com/payrelayy/payrelayy/$repair_release/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh"
+  "https://raw.githubusercontent.com/$repository_owner/$repository_name/$repair_release/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh"
 chown root:root "$root_script"
 chmod 0600 "$root_script"
 [[ "$(sha256sum "$root_script" | awk '{print $1}')" == "$script_sha" ]]

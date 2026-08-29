@@ -185,7 +185,7 @@ const baseInspect = {
   Id: ownerId,
   Image: `sha256:${'1'.repeat(64)}`,
   Config: {
-    Image: `ghcr.io/payrelayy/fetanagent-owner@sha256:${'2'.repeat(64)}`,
+    Image: `ghcr.io/fetanagent/owner@sha256:${'2'.repeat(64)}`,
     User: '10001:10001',
     Cmd: ['node', 'apps/api/dist/owner-control-server.js'],
     Env: [

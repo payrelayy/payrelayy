@@ -136,7 +136,8 @@ for (const needle of [
   "readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
   "readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
   "readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
+  "readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -161,6 +162,14 @@ for (const needle of [
   "FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO='64769:6102914'",
   "FAILED_CATALOG_BRIDGE_INTENT_DEV_INO='64769:6102916'",
   "FAILED_CATALOG_BRIDGE_INTENT_SHA256='994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799'",
+  "FAILED_OIDVECTOR_CORRECTION_RELEASE='f67cf783528f090169dbea1ebfdc6c46f90996bb'",
+  "FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102918'",
+  "FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256='440ed90b8c0987f7d94ab19f4b80513ef6bcf2984dd91c99d4d4caf27b0d077f'",
+  "FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256='8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed'",
+  "FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO='64769:6102925'",
+  "FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO='64769:6102926'",
+  "FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO='64769:6102930'",
+  "FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256='7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd'",
   "fs.readFileSync('/run/secrets/player_action_database_url'",
   "fs.existsSync('/run/secrets/owner_control_database_url')",
   "has_function_privilege(\n          'fetanagent_owner_control_runtime'",
@@ -201,6 +210,7 @@ for (const needle of [
   'count(*) filter (where grantee.rolname is null) = 0',
   "p.proconfig = array['search_path=pg_catalog']::text[]",
   "p.prorettype = 'record'::regtype",
+  "p.proargtypes = array['uuid'::regtype::oid, 'uuid'::regtype::oid, 'uuid'::regtype::oid]::oidvector",
   "privilege.privilege_type = 'EXECUTE'",
 ]) {
   assert.ok(script.includes(needle), `API catalog correction proof is missing ${needle}`);
@@ -208,6 +218,26 @@ for (const needle of [
 const catalogProofStart = script.indexOf('require_migration_through_api_catalog()');
 const catalogProofEnd = script.indexOf('\n}\n\nexpected_api_catalog_proof()', catalogProofStart);
 const catalogProof = script.slice(catalogProofStart, catalogProofEnd);
+assert.doesNotMatch(
+  catalogProof,
+  /p\.proargtypes::oid\[\]\s*=\s*array\[/u,
+  'zero-based oidvector must not be cast to an array and compared with a one-based array',
+);
+const postgresArrayEqual = (left, right) =>
+  left.lowerBound === right.lowerBound &&
+  left.values.length === right.values.length &&
+  left.values.every((value, index) => value === right.values[index]);
+const oidvectorCast = { lowerBound: 0, values: [2950, 2950, 2950] };
+const ordinaryArray = { lowerBound: 1, values: [2950, 2950, 2950] };
+assert.ok(
+  !postgresArrayEqual(oidvectorCast, ordinaryArray),
+  'fixture must reproduce the zero-based oidvector versus one-based array trap',
+);
+assert.deepEqual(
+  oidvectorCast.values,
+  ordinaryArray.values,
+  'oidvector equality alternative must compare the exact three ordered UUID OIDs',
+);
 const acceptsExactFunctionAcl = (rows) =>
   rows.length === 2 &&
   rows.filter(
@@ -501,6 +531,10 @@ for (const needle of [
   'failed_image_bridge_intent_sha256=89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b',
   'failed_catalog_correction_implementation_sha=04f51a521280fed43cd1504107c702940e523688',
   'failed_catalog_bridge_intent_sha256=994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799',
+  'failed_oidvector_correction_implementation_sha=f67cf783528f090169dbea1ebfdc6c46f90996bb',
+  'failed_oidvector_correction_manifest_sha256=8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed',
+  'failed_oidvector_bridge_intent_sha256=7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd',
+  'catalog_argument_contract=exact-zero-based-oidvector-equality',
   'canonical_h14_image_initial_state=exact-loaded-before-intent',
   'owner_tmpfs_host_config=required-exact',
   'owner_inspect_mount_inventory=non-tmpfs-eight',
@@ -520,8 +554,9 @@ for (const state of [
   '"$(basename "$failed_root")" "$(basename "$failed_pg_root")"',
   '"$(basename "$failed_pg_root")" "$(basename "$failed_image_root")"',
   '"$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")"',
-  '"$(basename "$failed_catalog_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_catalog_root")" "$(basename "$root")"',
+  '"$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")"',
+  '"$(basename "$failed_oidvector_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_oidvector_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }

@@ -169,6 +169,24 @@ readonly FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO='64769:6102914'
 readonly FAILED_CATALOG_BRIDGE_INTENT_DEV_INO='64769:6102916'
 readonly FAILED_CATALOG_BRIDGE_INTENT_SIZE='7171'
 readonly FAILED_CATALOG_BRIDGE_INTENT_SHA256='994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799'
+readonly FAILED_OIDVECTOR_CORRECTION_RELEASE='f67cf783528f090169dbea1ebfdc6c46f90996bb'
+readonly FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102918'
+readonly FAILED_OIDVECTOR_CORRECTION_SCRIPT_DEV_INO='64769:6102920'
+readonly FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256='440ed90b8c0987f7d94ab19f4b80513ef6bcf2984dd91c99d4d4caf27b0d077f'
+readonly FAILED_OIDVECTOR_CORRECTION_SCRIPT_SIZE='222490'
+readonly FAILED_OIDVECTOR_CORRECTION_VALIDATOR_DEV_INO='64769:6102922'
+readonly FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_OIDVECTOR_CORRECTION_MANIFEST_DEV_INO='64769:6102924'
+readonly FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256='8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed'
+readonly FAILED_OIDVECTOR_CORRECTION_MANIFEST_SIZE='7692'
+readonly FAILED_OIDVECTOR_CORRECTION_WORKFLOW_RUN_ID='33247086585'
+readonly FAILED_OIDVECTOR_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO='64769:6102925'
+readonly FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO='64769:6102926'
+readonly FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO='64769:6102930'
+readonly FAILED_OIDVECTOR_BRIDGE_INTENT_SIZE='8251'
+readonly FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256='7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
 readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'
@@ -193,7 +211,8 @@ readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantin
 readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'
 readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'
 readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'
+readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -244,6 +263,7 @@ readonly FAILED_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CORRECTION_RELE
 readonly FAILED_PG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_PG_CORRECTION_RELEASE"
 readonly FAILED_IMAGE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_IMAGE_CORRECTION_RELEASE"
 readonly FAILED_CATALOG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CATALOG_CORRECTION_RELEASE"
+readonly FAILED_OIDVECTOR_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OIDVECTOR_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -267,6 +287,9 @@ readonly FAILED_IMAGE_BRIDGE_INTENT="$FAILED_IMAGE_BRIDGE_INSTALLING/intent-v1"
 readonly FAILED_CATALOG_BRIDGE_INSTALLING="$FAILED_CATALOG_BRIDGE_PARENT/.installing-$FAILED_CATALOG_CORRECTION_RELEASE"
 readonly FAILED_CATALOG_BRIDGE_ROOT="$FAILED_CATALOG_BRIDGE_PARENT/$FAILED_CATALOG_CORRECTION_RELEASE"
 readonly FAILED_CATALOG_BRIDGE_INTENT="$FAILED_CATALOG_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_OIDVECTOR_BRIDGE_INSTALLING="$FAILED_OIDVECTOR_BRIDGE_PARENT/.installing-$FAILED_OIDVECTOR_CORRECTION_RELEASE"
+readonly FAILED_OIDVECTOR_BRIDGE_ROOT="$FAILED_OIDVECTOR_BRIDGE_PARENT/$FAILED_OIDVECTOR_CORRECTION_RELEASE"
+readonly FAILED_OIDVECTOR_BRIDGE_INTENT="$FAILED_OIDVECTOR_BRIDGE_INSTALLING/intent-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -286,7 +309,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_PG_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_IMAGE_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_CATALOG_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_CATALOG_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_OIDVECTOR_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -311,9 +335,9 @@ require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:8" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:9" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -389,6 +413,16 @@ require_prior_failed_recovery_claim() {
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CATALOG_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == \
       "$FAILED_CATALOG_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_CATALOG_CORRECTION_MANIFEST_SIZE" &&
     "$(sha256sum -- "$FAILED_CATALOG_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_CATALOG_CORRECTION_MANIFEST_SHA256" ]] || return 1
+  [[ ! -L "$FAILED_OIDVECTOR_CORRECTION_ROOT" && -d "$FAILED_OIDVECTOR_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_OIDVECTOR_CORRECTION_ROOT")" == "$FAILED_OIDVECTOR_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OIDVECTOR_CORRECTION_ROOT")" == "$FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_OIDVECTOR_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  [[ "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_OIDVECTOR_CORRECTION_ROOT/$SCRIPT_BASENAME")" == "$FAILED_OIDVECTOR_CORRECTION_SCRIPT_DEV_INO:root:root:400:1:$FAILED_OIDVECTOR_CORRECTION_SCRIPT_SIZE" &&
+    "$(sha256sum -- "$FAILED_OIDVECTOR_CORRECTION_ROOT/$SCRIPT_BASENAME" | awk '{print $1}')" == "$FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_OIDVECTOR_CORRECTION_ROOT/$VALIDATOR_BASENAME")" == "$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_DEV_INO:root:root:400:1:$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SIZE" &&
+    "$(sha256sum -- "$FAILED_OIDVECTOR_CORRECTION_ROOT/$VALIDATOR_BASENAME" | awk '{print $1}')" == "$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_OIDVECTOR_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == "$FAILED_OIDVECTOR_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SIZE" &&
+    "$(sha256sum -- "$FAILED_OIDVECTOR_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256" ]] || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -541,6 +575,25 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_catalog_bridge_intent_dev_ino=$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO" \
   "failed_catalog_bridge_intent_sha256=$FAILED_CATALOG_BRIDGE_INTENT_SHA256" \
   "failed_catalog_bridge_intent_size=$FAILED_CATALOG_BRIDGE_INTENT_SIZE" \
+  "failed_oidvector_correction_implementation_sha=$FAILED_OIDVECTOR_CORRECTION_RELEASE" \
+  "failed_oidvector_correction_bundle_root_dev_ino=$FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_oidvector_correction_script_dev_ino=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_oidvector_correction_script_sha256=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256" \
+  "failed_oidvector_correction_script_size=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_SIZE" \
+  "failed_oidvector_correction_validator_dev_ino=$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_oidvector_correction_validator_sha256=$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SHA256" \
+  "failed_oidvector_correction_validator_size=$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SIZE" \
+  "failed_oidvector_correction_manifest_dev_ino=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_oidvector_correction_manifest_sha256=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256" \
+  "failed_oidvector_correction_manifest_size=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SIZE" \
+  "failed_oidvector_correction_workflow_run_id=$FAILED_OIDVECTOR_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_oidvector_correction_workflow_run_attempt=$FAILED_OIDVECTOR_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_oidvector_bridge_parent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO" \
+  "failed_oidvector_bridge_installing_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_oidvector_bridge_intent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO" \
+  "failed_oidvector_bridge_intent_sha256=$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" \
+  "failed_oidvector_bridge_intent_size=$FAILED_OIDVECTOR_BRIDGE_INTENT_SIZE" \
+  'catalog_argument_contract=exact-zero-based-oidvector-equality' \
   'migration_catalog_proof=exact-api-player-action-read-only-v1' \
   "source_api_container_id=$SOURCE_API_CONTAINER_ID" \
   "source_api_image_id=$SOURCE_API_IMAGE_ID" \
@@ -680,7 +733,20 @@ require_prior_failed_runtime_ledger_absent() {
     "$(realpath -- "$FAILED_CATALOG_BRIDGE_INTENT")" == "$FAILED_CATALOG_BRIDGE_INTENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CATALOG_BRIDGE_INTENT")" == \
       "$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO:root:root:600:1:$FAILED_CATALOG_BRIDGE_INTENT_SIZE" &&
-    "$(sha256sum -- "$FAILED_CATALOG_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_CATALOG_BRIDGE_INTENT_SHA256" ]]
+    "$(sha256sum -- "$FAILED_CATALOG_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_CATALOG_BRIDGE_INTENT_SHA256" ]] || return 1
+  [[ ! -e "$FAILED_OIDVECTOR_BRIDGE_ROOT" && ! -L "$FAILED_OIDVECTOR_BRIDGE_ROOT" &&
+    ! -L "$FAILED_OIDVECTOR_BRIDGE_PARENT" && -d "$FAILED_OIDVECTOR_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_OIDVECTOR_BRIDGE_PARENT")" == "$FAILED_OIDVECTOR_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OIDVECTOR_BRIDGE_PARENT")" == "$FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_OIDVECTOR_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == ".installing-$FAILED_OIDVECTOR_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_OIDVECTOR_BRIDGE_INSTALLING" && -d "$FAILED_OIDVECTOR_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_OIDVECTOR_BRIDGE_INSTALLING")" == "$FAILED_OIDVECTOR_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OIDVECTOR_BRIDGE_INSTALLING")" == "$FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_OIDVECTOR_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == 'intent-v1:f' &&
+    ! -L "$FAILED_OIDVECTOR_BRIDGE_INTENT" && -f "$FAILED_OIDVECTOR_BRIDGE_INTENT" &&
+    "$(realpath -- "$FAILED_OIDVECTOR_BRIDGE_INTENT")" == "$FAILED_OIDVECTOR_BRIDGE_INTENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_OIDVECTOR_BRIDGE_INTENT")" == "$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO:root:root:600:1:$FAILED_OIDVECTOR_BRIDGE_INTENT_SIZE" &&
+    "$(sha256sum -- "$FAILED_OIDVECTOR_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" ]]
 }
 
 require_exact_droplet() {
@@ -2814,7 +2880,7 @@ if (typeof Client !== 'function') process.exit(1);
            where n.nspname = 'app'
              and p.proname = 'recover_owner_kemerbet_quarantined_agent_profile'
              and p.pronargs = 3
-             and p.proargtypes::oid[] = array['uuid'::regtype::oid, 'uuid'::regtype::oid, 'uuid'::regtype::oid]
+             and p.proargtypes = array['uuid'::regtype::oid, 'uuid'::regtype::oid, 'uuid'::regtype::oid]::oidvector
              and p.prokind = 'f'
              and p.prorettype = 'record'::regtype
              and p.proretset
@@ -3039,6 +3105,17 @@ expected_bridge_intent() {
     "failed_catalog_bridge_installing_dev_ino=$FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO" \
     "failed_catalog_bridge_intent_dev_ino=$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO" \
     "failed_catalog_bridge_intent_sha256=$FAILED_CATALOG_BRIDGE_INTENT_SHA256" \
+    "failed_oidvector_correction_implementation_sha=$FAILED_OIDVECTOR_CORRECTION_RELEASE" \
+    "failed_oidvector_correction_bundle_root_dev_ino=$FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_oidvector_correction_script_dev_ino=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_oidvector_correction_script_sha256=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256" \
+    "failed_oidvector_correction_manifest_dev_ino=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_oidvector_correction_manifest_sha256=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256" \
+    "failed_oidvector_bridge_parent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO" \
+    "failed_oidvector_bridge_installing_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_oidvector_bridge_intent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO" \
+    "failed_oidvector_bridge_intent_sha256=$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" \
+    'catalog_argument_contract=exact-zero-based-oidvector-equality' \
     'migration_catalog_proof=exact-api-player-action-read-only-v1' \
     "api_catalog_container_id=$(container_full_ids_for_service api)" \
     "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
@@ -3235,6 +3312,17 @@ expected_bridge_completed() {
     "failed_catalog_bridge_installing_dev_ino=$FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO" \
     "failed_catalog_bridge_intent_dev_ino=$FAILED_CATALOG_BRIDGE_INTENT_DEV_INO" \
     "failed_catalog_bridge_intent_sha256=$FAILED_CATALOG_BRIDGE_INTENT_SHA256" \
+    "failed_oidvector_correction_implementation_sha=$FAILED_OIDVECTOR_CORRECTION_RELEASE" \
+    "failed_oidvector_correction_bundle_root_dev_ino=$FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_oidvector_correction_script_dev_ino=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_oidvector_correction_script_sha256=$FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256" \
+    "failed_oidvector_correction_manifest_dev_ino=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_oidvector_correction_manifest_sha256=$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256" \
+    "failed_oidvector_bridge_parent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO" \
+    "failed_oidvector_bridge_installing_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_oidvector_bridge_intent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO" \
+    "failed_oidvector_bridge_intent_sha256=$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" \
+    'catalog_argument_contract=exact-zero-based-oidvector-equality' \
     'migration_catalog_proof=exact-api-player-action-read-only-v1' \
     "api_catalog_container_id=$(container_full_ids_for_service api)" \
     "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \

@@ -242,6 +242,31 @@ readonly FAILED_ORDER_CORRECTION_MANIFEST_SHA256='1cfa9ddba283f1b6ae053a420aaea0
 readonly FAILED_ORDER_CORRECTION_MANIFEST_SIZE='11954'
 readonly FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ID='33251242706'
 readonly FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE='51e5170488d720fd04decd1896971ab72cfe9603'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102952'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO='64769:6102953'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256='9cd67e0d820075fd8fac3bf6100ce26cfdc65f67540a8d086fcae8b2bf9f0ac8'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE='262609'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO='64769:6102954'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO='64769:6102955'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256='8c3682673339a7d57740b4890987932eee14013df0a6f05e50bda994cc5aaaac'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE='12911'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ID='33252232473'
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO='64769:6102956'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO='64769:6102957'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO='64769:6102958'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SIZE='11433'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256='5eebab9353a3f251020a997706c2c1a85c00209f08ae83a1b32cf9b64e55d5fb'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO='64769:6102959'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE='643'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO='64769:6102960'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE='60863'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256='460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7'
+readonly CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
 readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'
@@ -270,7 +295,8 @@ readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine
 readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'
 readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'
 readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -325,6 +351,7 @@ readonly FAILED_OIDVECTOR_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OIDVE
 readonly FAILED_COMPOSE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COMPOSE_CORRECTION_RELEASE"
 readonly FAILED_HOLDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_HOLDER_CORRECTION_RELEASE"
 readonly FAILED_ORDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ORDER_CORRECTION_RELEASE"
+readonly FAILED_ENDPOINT_PHASE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -359,6 +386,11 @@ readonly FAILED_HOLDER_BRIDGE_INSTALLING="$FAILED_HOLDER_BRIDGE_PARENT/.installi
 readonly FAILED_HOLDER_BRIDGE_ROOT="$FAILED_HOLDER_BRIDGE_PARENT/$FAILED_HOLDER_CORRECTION_RELEASE"
 readonly FAILED_HOLDER_BRIDGE_INTENT="$FAILED_HOLDER_BRIDGE_INSTALLING/intent-v1"
 readonly FAILED_HOLDER_BRIDGE_API_PROOF="$FAILED_HOLDER_BRIDGE_INSTALLING/api-catalog-proof-v1"
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING="$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT/.installing-$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE"
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_ROOT="$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT/$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE"
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_INTENT="$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF="$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING/api-catalog-proof-v1"
+readonly FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT="$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING/docker-pre-create-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -382,7 +414,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_OIDVECTOR_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_COMPOSE_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_HOLDER_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_ORDER_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_ORDER_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -439,9 +472,9 @@ require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:12" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:13" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -551,6 +584,13 @@ require_prior_failed_recovery_claim() {
   emit_exact_nofollow_file "$FAILED_ORDER_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_ORDER_CORRECTION_SCRIPT_DEV_INO" "$FAILED_ORDER_CORRECTION_SCRIPT_SIZE" "$FAILED_ORDER_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_ORDER_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_ORDER_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_ORDER_CORRECTION_VALIDATOR_SIZE" "$FAILED_ORDER_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_ORDER_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_ORDER_CORRECTION_MANIFEST_DEV_INO" "$FAILED_ORDER_CORRECTION_MANIFEST_SIZE" "$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  [[ ! -L "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT" && -d "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT")" == "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT")" == "$FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO" "$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE" "$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SIZE" "$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO" "$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE" "$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -780,9 +820,36 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_order_correction_workflow_run_attempt=$FAILED_ORDER_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
   'failed_order_runtime_namespace=exact-absent' \
   'nofollow_helper_definition_order=before-first-top-level-claim' \
-  'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
-  'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
-  'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
+  "failed_endpoint_phase_correction_implementation_sha=$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" \
+  "failed_endpoint_phase_correction_bundle_root_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_endpoint_phase_correction_script_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_endpoint_phase_correction_script_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256" \
+  "failed_endpoint_phase_correction_script_size=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE" \
+  "failed_endpoint_phase_correction_validator_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_endpoint_phase_correction_validator_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256" \
+  "failed_endpoint_phase_correction_validator_size=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SIZE" \
+  "failed_endpoint_phase_correction_manifest_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_endpoint_phase_correction_manifest_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256" \
+  "failed_endpoint_phase_correction_manifest_size=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE" \
+  "failed_endpoint_phase_correction_workflow_run_id=$FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_endpoint_phase_correction_workflow_run_attempt=$FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_endpoint_phase_bridge_parent_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO" \
+  "failed_endpoint_phase_bridge_installing_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_endpoint_phase_bridge_intent_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO" \
+  "failed_endpoint_phase_bridge_intent_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256" \
+  "failed_endpoint_phase_bridge_intent_size=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SIZE" \
+  "failed_endpoint_phase_bridge_api_proof_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO" \
+  "failed_endpoint_phase_bridge_api_proof_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256" \
+  "failed_endpoint_phase_bridge_api_proof_size=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE" \
+  "failed_endpoint_phase_bridge_docker_snapshot_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+  "failed_endpoint_phase_bridge_docker_snapshot_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256" \
+  "failed_endpoint_phase_bridge_docker_snapshot_size=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" \
+  "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
+  'failed_endpoint_phase_owner_state=created-never-started' \
+  'compose_reentry=forbidden' \
+  'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1' \
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2' \
+  'complete_phase_boundary_contract=single-final-phase-aware-command-v1' \
   'migration_catalog_proof=exact-api-player-action-read-only-v1' \
   "source_api_container_id=$SOURCE_API_CONTAINER_ID" \
   "source_api_image_id=$SOURCE_API_IMAGE_ID" \
@@ -962,6 +1029,31 @@ require_prior_failed_runtime_ledger_absent() {
   emit_exact_nofollow_file "$FAILED_HOLDER_BRIDGE_API_PROOF" "$FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO" \
     "$FAILED_HOLDER_BRIDGE_API_PROOF_SIZE" "$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256" >/dev/null || return 1
   [[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]
+}
+
+require_failed_endpoint_phase_runtime() {
+  [[ ! -e "$FAILED_ENDPOINT_PHASE_BRIDGE_ROOT" && ! -L "$FAILED_ENDPOINT_PHASE_BRIDGE_ROOT" &&
+    ! -L "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT" && -d "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT")" == "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT")" == \
+      "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING" && -d "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING")" == "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING")" == \
+      "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'api-catalog-proof-v1:f\ndocker-pre-create-v1:f\nintent-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO" "$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SIZE" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256" >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO" "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256" >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256" >/dev/null
 }
 
 emit_owned_nofollow_file() {
@@ -2828,17 +2920,20 @@ print(json.dumps(result,sort_keys=True,separators=(',',':')))
 PY
 }
 
-require_exact_owner_create_inventory_delta() {
-  local before="$1" after="$2" new_owner="$3"
+require_exact_owner_inventory_delta_phase() {
+  local before="$1" after="$2" new_owner="$3" phase="$4"
   printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
-    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$new_owner" "$OWNER_NETWORK" "$PROFILE_VOLUME" "$CONTROL_VOLUME" 3<<'PY'
-import copy,json,sys
-new_owner,owner_network,profile_volume,control_volume=sys.argv[1:]
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$new_owner" "$OWNER_NETWORK" "$PROFILE_VOLUME" "$CONTROL_VOLUME" "$phase" 3<<'PY'
+import copy, ipaddress, json, re, sys
+new_owner,owner_network,profile_volume,control_volume,phase=sys.argv[1:]
 before_raw,after_raw=sys.stdin.read().split('\n__FETANAGENT_AFTER__\n',1)
 before=json.loads(before_raw); after=json.loads(after_raw)
 try:
+    if not re.fullmatch(r'[0-9a-f]{64}', new_owner) or phase not in {'created','running'}: raise RuntimeError()
+    if set(before) != {'images','networks','volumes','holders'} or set(after) != set(before): raise RuntimeError()
     if before['images'] != after['images']: raise RuntimeError()
     def keyed(items,key):
+        if not isinstance(items,list) or any(not isinstance(item,dict) or key not in item for item in items): raise RuntimeError()
         result={item[key]:item for item in items}
         if len(result)!=len(items): raise RuntimeError()
         return result
@@ -2846,19 +2941,31 @@ try:
     before_volumes=keyed(before['volumes'],'Name'); after_volumes=keyed(after['volumes'],'Name')
     if set(before_networks)!=set(after_networks) or set(before_volumes)!=set(after_volumes): raise RuntimeError()
     owner_ids=[key for key,value in before_networks.items() if value.get('Name')==owner_network]
-    if len(owner_ids)!=1: raise RuntimeError()
+    if len(owner_ids)!=1 or [key for key,value in after_networks.items() if value.get('Name')==owner_network] != owner_ids: raise RuntimeError()
     owner_id=owner_ids[0]
     for key in before_networks:
         old=copy.deepcopy(before_networks[key]); new=copy.deepcopy(after_networks[key])
         old_endpoints=old.pop('Containers',{}) or {}; new_endpoints=new.pop('Containers',{}) or {}
-        if old!=new: raise RuntimeError()
-        if key==owner_id:
-            if new_owner in old_endpoints or set(new_endpoints)!=set(old_endpoints)|{new_owner}: raise RuntimeError()
-            if any(new_endpoints[item]!=old_endpoints[item] for item in old_endpoints): raise RuntimeError()
-            endpoint=new_endpoints[new_owner]
-            if endpoint.get('Name') != 'fetanagent-staging-beta-owner-control-1': raise RuntimeError()
-        elif old_endpoints!=new_endpoints: raise RuntimeError()
+        if old!=new or not isinstance(old_endpoints,dict) or not isinstance(new_endpoints,dict): raise RuntimeError()
+        if phase=='created' or key!=owner_id:
+            if old_endpoints!=new_endpoints: raise RuntimeError()
+            continue
+        if new_owner in old_endpoints or set(new_endpoints)!=set(old_endpoints)|{new_owner}: raise RuntimeError()
+        if any(new_endpoints[item]!=old_endpoints[item] for item in old_endpoints): raise RuntimeError()
+        endpoint=new_endpoints[new_owner]
+        if not isinstance(endpoint,dict) or set(endpoint)!={'Name','EndpointID','MacAddress','IPv4Address','IPv6Address'}: raise RuntimeError()
+        if endpoint['Name']!='fetanagent-staging-beta-owner-control-1': raise RuntimeError()
+        if not re.fullmatch(r'[0-9a-f]{64}',endpoint['EndpointID'] or ''): raise RuntimeError()
+        if not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}',endpoint['MacAddress'] or ''): raise RuntimeError()
+        ipv4=ipaddress.ip_interface(endpoint['IPv4Address']); ipv6=ipaddress.ip_interface(endpoint['IPv6Address'])
+        if ipv4.version!=4 or ipv6.version!=6: raise RuntimeError()
+        subnets=[]
+        for config in (old.get('IPAM') or {}).get('Config') or []:
+            if isinstance(config,dict) and isinstance(config.get('Subnet'),str): subnets.append(ipaddress.ip_network(config['Subnet']))
+        if not any(ipv4.ip in subnet for subnet in subnets if subnet.version==4): raise RuntimeError()
+        if not any(ipv6.ip in subnet for subnet in subnets if subnet.version==6): raise RuntimeError()
     if before_volumes!=after_volumes: raise RuntimeError()
+    if not isinstance(before['holders'],dict) or not isinstance(after['holders'],dict): raise RuntimeError()
     if set(before['holders'])!=set(after['holders']) or set(before['holders'])!=set(before_volumes): raise RuntimeError()
     for name in before['holders']:
         old=before['holders'][name]; new=after['holders'][name]
@@ -2878,11 +2985,60 @@ load_pre_create_docker_inventory() {
     'import json,sys; value=json.load(sys.stdin); assert set(value)=={"images","networks","volumes","holders"}'
 }
 
+require_owner_endpoint_phase_boundary() {
+  local phase="$1" current_inventory state
+  [[ "$NEW_OWNER_CONTAINER_ID" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
+  require_exact_owner_inventory "$NEW_OWNER_CONTAINER_ID" || return 1
+  require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
+  require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" || return 1
+  require_non_owner_inventory_unchanged || return 1
+  current_inventory="$(capture_complete_docker_create_inventory)" || return 1
+  require_exact_owner_inventory_delta_phase \
+    "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory" "$NEW_OWNER_CONTAINER_ID" "$phase" || return 1
+  state="$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" \
+    --format '{{.State.Status}}|{{.State.Running}}|{{.State.Pid}}|{{.RestartCount}}')" || return 1
+  case "$phase:$state" in
+    'created:created|false|0|0')
+      [[ "$(ss -ltnH | awk '$4 ~ /:3002$/ {count += 1} END {print count + 0}')" == '0' ]] || return 1
+      require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" created
+      ;;
+    running:running\|true\|[1-9]\|0|running:running\|true\|[1-9][0-9]*\|0)
+      [[ "$(ss -ltnH | awk '$4 ~ /:3002$/ {count += 1} END {print count + 0}')" == '1' ]] || return 1
+      require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+require_complete_owner_endpoint_phase_boundary() {
+  local phase="$1"
+  [[ "$phase" == 'created' || "$phase" == 'running' ]] || return 1
+  require_bridge_intent || return 1
+  require_api_catalog_proof || return 1
+  require_exact_recovery_source_anchors || return 1
+  require_prior_failed_recovery_claim || return 1
+  require_original_bridge_namespace_absent || return 1
+  require_prior_failed_runtime_ledger_absent || return 1
+  require_failed_endpoint_phase_runtime || return 1
+  require_exact_droplet || return 1
+  require_no_other_mutator_processes || return 1
+  require_financial_gates_disabled || return 1
+  require_owner_image_contract || return 1
+  require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" || return 1
+  require_non_owner_inventory_unchanged || return 1
+  load_pre_create_docker_inventory || return 1
+  cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256") || return 1
+  require_owner_endpoint_phase_boundary "$phase"
+}
+
 require_pre_create_image_boundary() {
   require_api_catalog_proof &&
     require_exact_recovery_source_anchors &&
     require_original_bridge_namespace_absent &&
     require_prior_failed_runtime_ledger_absent &&
+    require_failed_endpoint_phase_runtime &&
     require_financial_gates_disabled &&
     require_owner_image_contract &&
     require_loaded_image_unused
@@ -2894,6 +3050,7 @@ require_post_create_image_boundary() {
     require_exact_recovery_source_anchors &&
     require_original_bridge_namespace_absent &&
     require_prior_failed_runtime_ledger_absent &&
+    require_failed_endpoint_phase_runtime &&
     require_financial_gates_disabled &&
     require_owner_image_contract &&
     require_loaded_image_used_only_by "$expected_id"
@@ -3385,6 +3542,7 @@ PY
 create_or_discover_bridge_ledger() {
   local children root entries
   require_prior_failed_runtime_ledger_absent || return 1
+  require_failed_endpoint_phase_runtime || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -3416,6 +3574,7 @@ create_or_discover_bridge_ledger() {
   [[ ! -L "$BRIDGE_WORK_ROOT" && -d "$BRIDGE_WORK_ROOT" && "$(realpath -- "$BRIDGE_WORK_ROOT")" == "$BRIDGE_WORK_ROOT" &&
     "$(stat --format='%U:%G:%a' "$BRIDGE_WORK_ROOT")" == 'root:root:700' ]] || return 1
   require_prior_failed_runtime_ledger_absent || return 1
+  require_failed_endpoint_phase_runtime || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
@@ -3493,9 +3652,36 @@ expected_bridge_intent() {
     "failed_order_correction_manifest_sha256=$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" \
     'failed_order_runtime_namespace=exact-absent' \
     'nofollow_helper_definition_order=before-first-top-level-claim' \
-    'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
-    'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
-    'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
+    "failed_endpoint_phase_correction_implementation_sha=$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" \
+    "failed_endpoint_phase_correction_bundle_root_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_endpoint_phase_correction_script_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_endpoint_phase_correction_script_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256" \
+    "failed_endpoint_phase_correction_script_size=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE" \
+    "failed_endpoint_phase_correction_validator_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_endpoint_phase_correction_validator_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256" \
+    "failed_endpoint_phase_correction_validator_size=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SIZE" \
+    "failed_endpoint_phase_correction_manifest_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_endpoint_phase_correction_manifest_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256" \
+    "failed_endpoint_phase_correction_manifest_size=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE" \
+    "failed_endpoint_phase_correction_workflow_run_id=$FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_endpoint_phase_correction_workflow_run_attempt=$FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_endpoint_phase_bridge_parent_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO" \
+    "failed_endpoint_phase_bridge_installing_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_endpoint_phase_bridge_intent_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO" \
+    "failed_endpoint_phase_bridge_intent_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256" \
+    "failed_endpoint_phase_bridge_intent_size=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SIZE" \
+    "failed_endpoint_phase_bridge_api_proof_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO" \
+    "failed_endpoint_phase_bridge_api_proof_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256" \
+    "failed_endpoint_phase_bridge_api_proof_size=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE" \
+    "failed_endpoint_phase_bridge_docker_snapshot_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+    "failed_endpoint_phase_bridge_docker_snapshot_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256" \
+    "failed_endpoint_phase_bridge_docker_snapshot_size=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" \
+    "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
+    'failed_endpoint_phase_owner_state=created-never-started' \
+    'compose_reentry=forbidden' \
+    'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1' \
+    'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2' \
+    'complete_phase_boundary_contract=single-final-phase-aware-command-v1' \
     'migration_catalog_proof=exact-api-player-action-read-only-v1' \
     "api_catalog_container_id=$(container_full_ids_for_service api)" \
     "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
@@ -3732,9 +3918,36 @@ expected_bridge_completed() {
     "failed_order_correction_manifest_sha256=$FAILED_ORDER_CORRECTION_MANIFEST_SHA256" \
     'failed_order_runtime_namespace=exact-absent' \
     'nofollow_helper_definition_order=before-first-top-level-claim' \
-    'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
-    'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
-    'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
+    "failed_endpoint_phase_correction_implementation_sha=$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" \
+    "failed_endpoint_phase_correction_bundle_root_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_endpoint_phase_correction_script_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_endpoint_phase_correction_script_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256" \
+    "failed_endpoint_phase_correction_script_size=$FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE" \
+    "failed_endpoint_phase_correction_validator_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_endpoint_phase_correction_validator_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256" \
+    "failed_endpoint_phase_correction_validator_size=$FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SIZE" \
+    "failed_endpoint_phase_correction_manifest_dev_ino=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_endpoint_phase_correction_manifest_sha256=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256" \
+    "failed_endpoint_phase_correction_manifest_size=$FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE" \
+    "failed_endpoint_phase_correction_workflow_run_id=$FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_endpoint_phase_correction_workflow_run_attempt=$FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_endpoint_phase_bridge_parent_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO" \
+    "failed_endpoint_phase_bridge_installing_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_endpoint_phase_bridge_intent_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO" \
+    "failed_endpoint_phase_bridge_intent_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256" \
+    "failed_endpoint_phase_bridge_intent_size=$FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SIZE" \
+    "failed_endpoint_phase_bridge_api_proof_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO" \
+    "failed_endpoint_phase_bridge_api_proof_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256" \
+    "failed_endpoint_phase_bridge_api_proof_size=$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE" \
+    "failed_endpoint_phase_bridge_docker_snapshot_dev_ino=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+    "failed_endpoint_phase_bridge_docker_snapshot_sha256=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256" \
+    "failed_endpoint_phase_bridge_docker_snapshot_size=$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" \
+    "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
+    'failed_endpoint_phase_owner_state=created-never-started' \
+    'compose_reentry=forbidden' \
+    'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1' \
+    'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2' \
+    'complete_phase_boundary_contract=single-final-phase-aware-command-v1' \
     'migration_catalog_proof=exact-api-player-action-read-only-v1' \
     "api_catalog_container_id=$(container_full_ids_for_service api)" \
     "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
@@ -4074,7 +4287,6 @@ require_original_bridge_namespace_absent ||
   die 'the immutable 001 Owner bridge namespace appeared during recovery preflight'
 require_all_compose_inputs || die 'the exact existing staging Compose input files are unavailable or unsafe'
 require_compose_contract_parses || die 'the canonical H14 Compose contract did not parse with the existing staging inputs'
-require_exact_compose_create_contract || die 'Compose v5.1.4 or the exact zero-dependency Owner create contract changed'
 require_owner_network || die 'the existing Owner-only network is not exact'
 require_financial_gates_disabled || die 'a financial, executor, final-action, Amount, or Transfer gate is enabled'
 require_no_host_chromium || die 'a host browser process exists before the Owner bridge'
@@ -4092,7 +4304,8 @@ NON_OWNER_INVENTORY_SHA256="$(printf '%s' "$NON_OWNER_INVENTORY" | sha256sum | a
 [[ "$NON_OWNER_INVENTORY_COUNT" =~ ^[0-9]+$ && "$NON_OWNER_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die 'the unrelated project-service inventory attestation is malformed'
 
-require_prior_failed_runtime_ledger_absent || die 'the 911-absent and ff989-empty-pre-intent runtime evidence is not exact'
+require_prior_failed_runtime_ledger_absent || die 'the chained pre-51e failed runtime evidence is not exact'
+require_failed_endpoint_phase_runtime || die 'the immutable 51e created-phase interruption evidence is not exact'
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
   require_bridge_intent || die 'the durable Owner-runtime bridge intent changed'
@@ -4100,32 +4313,40 @@ else
   [[ "$BRIDGE_STATE" == 'installing' ]] || die 'a complete bridge is missing its intent'
   require_non_owner_inventory_unchanged || die 'an unrelated project service changed before durable intent'
   ! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1 || die 'the removed historical Owner reappeared before durable intent'
-  [[ -z "$(container_full_ids_for_service "$OWNER_SERVICE")" ]] || die 'Owner inventory must be empty before the post-removal intent'
+  [[ "$(container_full_ids_for_service "$OWNER_SERVICE")" == "$CREATED_OWNER_CONTAINER_ID" ]] ||
+    die 'the new correction accepts only the exact 51e-created Owner before durable intent'
   [[ -z "$(container_full_ids_for_service kemerbet-session-provision)" ]] || die 'the retired coordinator exists'
   [[ -z "$(docker_local container ls --all --quiet --filter "id=$RETIRED_COORDINATOR_CONTAINER_ID")" ]] || die 'the retired coordinator identity still exists'
-  [[ -z "$(container_full_ids_for_volume "$PROFILE_VOLUME")" && -z "$(container_full_ids_for_volume "$CONTROL_VOLUME")" ]] || die 'post-removal volumes acquired a holder'
+  [[ -z "$(container_full_ids_for_volume "$PROFILE_VOLUME")" &&
+    "$(container_full_ids_for_volume "$CONTROL_VOLUME")" == "$CREATED_OWNER_CONTAINER_ID" ]] ||
+    die 'the exact 51e-created Owner/control-volume boundary changed before durable intent'
   [[ "$(ss -ltnH | awk '$4 ~ /:3002$/ {count += 1} END {print count + 0}')" == '0' ]] || die 'port 3002 is occupied before durable intent'
   require_owner_image_contract ||
     die 'the canonical H14 OCI-manifest image must already be exact before the new correction intent is first published'
-  require_loaded_image_unused ||
-    die 'the canonical H14 image must still be unused before the new correction intent is first published'
+  require_loaded_image_used_only_by "$CREATED_OWNER_CONTAINER_ID" ||
+    die 'the canonical H14 image is not used only by the exact 51e-created Owner'
+  [[ "$(docker_local container inspect "$CREATED_OWNER_CONTAINER_ID" \
+    --format '{{.State.Status}}|{{.State.Running}}|{{.State.Pid}}|{{.RestartCount}}')" == 'created|false|0|0' ]] ||
+    die 'the exact 51e Owner was started or changed before successor intent publication'
   publish_exact_record "$BRIDGE_WORK_ROOT/intent-v1" 0600 < <(expected_bridge_intent) ||
     die 'the Owner-runtime bridge intent could not be published durably'
 fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
-# The predecessor already published the exact catalog-only result before it
-# removed the historical Owner. Revalidate that immutable proof and republish it
-# durably into this correction; never reopen the database proof on replay.
+# The exact 51e predecessor already republished the catalog-only result and
+# captured the final pre-create Docker inventory before creating one never-
+# started Owner. Consume those immutable records; never reopen the database
+# proof or recapture the already-past pre-create state on replay.
 if [[ "$BRIDGE_STATE" != 'complete' ]]; then
-  cmp -s -- <(emit_exact_nofollow_file "$FAILED_HOLDER_BRIDGE_API_PROOF" "$FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO" \
-    "$FAILED_HOLDER_BRIDGE_API_PROOF_SIZE" "$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256") <(expected_api_catalog_proof) ||
-    die 'the immutable predecessor API catalog proof is not exact'
+  cmp -s -- <(emit_exact_nofollow_file "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO" "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256") <(expected_api_catalog_proof) ||
+    die 'the immutable 51e API catalog proof is not exact'
   if [[ ! -e "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" && ! -L "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" ]]; then
     publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file \
-      "$FAILED_HOLDER_BRIDGE_API_PROOF" "$FAILED_HOLDER_BRIDGE_API_PROOF_DEV_INO" \
-      "$FAILED_HOLDER_BRIDGE_API_PROOF_SIZE" "$FAILED_HOLDER_BRIDGE_API_PROOF_SHA256") ||
-      die 'the predecessor API catalog proof could not be republished durably'
+      "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF" "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO" \
+      "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SIZE" "$FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256") ||
+      die 'the exact 51e API catalog proof could not be republished durably'
   fi
   require_api_catalog_proof || die 'the republished durable API catalog proof changed'
   ! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1 || die 'the removed historical Owner reappeared after durable intent'
@@ -4135,21 +4356,18 @@ if [[ "$BRIDGE_STATE" != 'complete' ]]; then
 fi
 prepare_record_digests || die 'the bridge intent digest is invalid'
 
-if [[ -e "$BRIDGE_WORK_ROOT/docker-pre-create-v1" && ! -L "$BRIDGE_WORK_ROOT/docker-pre-create-v1" ]]; then
-  load_pre_create_docker_inventory || die 'the durable pre-create Docker inventory is unsafe or malformed'
-elif [[ "$BRIDGE_STATE" != 'complete' ]]; then
-  [[ -z "$(container_full_ids_for_service "$OWNER_SERVICE")" ]] ||
-    die 'a pre-create Docker inventory may only be published while Owner inventory is empty'
-  FIRST_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
-    die 'the first complete pre-create Docker inventory could not be captured'
-  PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
-    die 'the second complete pre-create Docker inventory could not be captured'
-  [[ "$FIRST_PRE_CREATE_DOCKER_INVENTORY" == "$PRE_CREATE_DOCKER_INVENTORY" ]] ||
-    die 'the Docker inventory changed while establishing the durable pre-create baseline'
-  publish_exact_record "$BRIDGE_WORK_ROOT/docker-pre-create-v1" 0600 <<<"$PRE_CREATE_DOCKER_INVENTORY" ||
-    die 'the complete pre-create Docker inventory could not be published durably'
-  load_pre_create_docker_inventory || die 'the published pre-create Docker inventory changed'
+if [[ ! -e "$BRIDGE_WORK_ROOT/docker-pre-create-v1" && ! -L "$BRIDGE_WORK_ROOT/docker-pre-create-v1" &&
+  "$BRIDGE_STATE" != 'complete' ]]; then
+  publish_exact_record "$BRIDGE_WORK_ROOT/docker-pre-create-v1" 0600 < <(emit_exact_nofollow_file \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+    "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256") ||
+    die 'the exact 51e pre-create Docker snapshot could not be republished durably'
 fi
+load_pre_create_docker_inventory || die 'the republished 51e pre-create Docker snapshot is unsafe or malformed'
+cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file \
+  "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+  "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256") ||
+  die 'the republished 51e pre-create Docker snapshot is not byte-exact'
 
 if [[ "$BRIDGE_STATE" == 'complete' ]]; then
   load_replacement_record || die 'the completed bridge replacement record is invalid'
@@ -4174,11 +4392,10 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'the live terminal-attestation boundary changed after bridge completion'
   require_prior_failed_runtime_ledger_absent ||
     die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed beside completion'
-  require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" ||
-    die 'the complete post-create boundary changed beside completed replay'
-  POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" || die 'the completed Docker inventory is unavailable'
-  require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$NEW_OWNER_CONTAINER_ID" ||
-    die 'the completed Docker inventory differs beyond the exact Owner-only create delta'
+  require_failed_endpoint_phase_runtime ||
+    die 'the immutable 51e created-phase interruption evidence changed beside completion'
+  require_complete_owner_endpoint_phase_boundary running ||
+    die 'the complete running-phase boundary changed beside completed replay'
   printf '%s\n' 'FetanAgent H14 Owner runtime bridge already valid: Owner only; no provider action and no money moved.'
   exit 0
 fi
@@ -4189,6 +4406,7 @@ fi
 require_owner_image_contract || die 'the exact previously loaded canonical Owner image is unavailable or changed'
 require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before Owner replacement'
 require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner replacement'
+require_failed_endpoint_phase_runtime || die 'the immutable 51e created-phase evidence changed before Owner replacement'
 require_non_owner_inventory_unchanged || die 'an unrelated project service changed before Owner replacement'
 
 owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the Owner inventory could not be inspected'
@@ -4197,51 +4415,17 @@ if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; the
 fi
 [[ -z "$(container_full_ids_for_service kemerbet-session-provision)" ]] || die 'the retired coordinator reappeared'
 [[ -z "$(container_full_ids_for_volume "$PROFILE_VOLUME")" ]] || die 'the profile volume acquired a holder'
-[[ -z "$(container_full_ids_for_volume "$CONTROL_VOLUME")" ]] || die 'the control volume did not become holder-free'
-[[ "$(ss -ltnH | awk '$4 ~ /:3002$/ {count += 1} END {print count + 0}')" == '0' ]] ||
-  die 'TCP port 3002 remains occupied after the exact Owner stop'
+[[ "$owner_inventory" == "$CREATED_OWNER_CONTAINER_ID" ]] ||
+  die 'the exact 51e-created Owner is not the sole Owner inventory'
+[[ "$(container_full_ids_for_volume "$CONTROL_VOLUME")" == "$CREATED_OWNER_CONTAINER_ID" ]] ||
+  die 'the exact 51e-created Owner is not the sole control-volume holder'
+NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 
 if [[ -e "$BRIDGE_WORK_ROOT/replacement-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/replacement-owner-v1" ]]; then
   load_replacement_record || die 'the replacement Owner record is invalid'
 else
-  owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the replacement Owner inventory could not be inspected'
-  if [[ -z "$owner_inventory" ]]; then
-    require_loaded_image_unused || die 'the canonical H14 image acquired a user before replacement creation'
-    require_non_owner_inventory_unchanged || die 'an unrelated project service changed before replacement creation'
-    require_live_terminal_attestation_boundary none none ||
-      die 'the live terminal-attestation boundary changed immediately before replacement creation'
-    require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before replacement creation'
-    require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement creation'
-    require_exact_compose_create_contract || die 'the exact supported Compose create contract changed before Owner creation'
-    require_pre_create_image_boundary || die 'the complete pre-create boundary changed before replacement creation'
-    CURRENT_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
-      die 'the immediately pre-create Docker inventory could not be captured'
-    [[ "$CURRENT_PRE_CREATE_DOCKER_INVENTORY" == "$PRE_CREATE_DOCKER_INVENTORY" ]] ||
-      die 'an image, network, volume, endpoint, or holder changed since the durable pre-create inventory'
-    env -i "${compose_environment[@]}" "${compose_command[@]}" \
-      create --no-build --pull never "$OWNER_SERVICE" >/dev/null || die 'canonical Compose could not create the Owner-only replacement'
-    owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the created Owner inventory could not be inspected'
-    [[ "$owner_inventory" =~ ^[0-9a-f]{64}$ ]] || die 'Compose did not create exactly one Owner container'
-    POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
-      die 'the immediately post-create Docker inventory could not be captured'
-    require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$owner_inventory" ||
-      die 'Compose changed an image, network, volume, endpoint, or holder outside the exact Owner-only delta'
-    require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during replacement creation'
-    require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement creation'
-  fi
-  [[ "$owner_inventory" =~ ^[0-9a-f]{64}$ && "$owner_inventory" != "$OLD_OWNER_CONTAINER_ID" ]] ||
-    die 'interruption recovery accepts only one exact replacement Owner'
-  NEW_OWNER_CONTAINER_ID="$owner_inventory"
-  POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
-    die 'the complete post-create Docker inventory could not be captured'
-  require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$NEW_OWNER_CONTAINER_ID" ||
-    die 'Compose changed an image, network, volume, endpoint, or holder outside the exact Owner-only delta'
-  [[ "$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" --format '{{.State.Status}}')" == 'created' ]] ||
-    die 'an unrecorded replacement Owner must be in its exact never-started created state'
-  require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" ||
-    die 'the one stopped replacement Owner is not the exact canonical contract'
-  require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement creation'
-  require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the complete post-create boundary changed before replacement publication'
+  require_complete_owner_endpoint_phase_boundary created ||
+    die 'the complete created-phase boundary changed before replacement publication'
   publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1" 0600 < <(expected_replacement_record) ||
     die 'the exact replacement Owner identity could not be published durably'
   load_replacement_record || die 'the published replacement Owner record is invalid'
@@ -4254,10 +4438,8 @@ require_exact_owner_inventory "$NEW_OWNER_CONTAINER_ID" || die 'the replacement 
 if [[ -e "$BRIDGE_WORK_ROOT/start-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/start-owner-v1" ]]; then
   require_start_record || die 'the durable replacement start intent changed'
 else
-  [[ "$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" --format '{{.State.Status}}')" == 'created' ]] ||
-    die 'a replacement without durable start intent must remain in its never-started created state'
-  require_non_owner_inventory_unchanged || die 'an unrelated project service changed before durable replacement start intent'
-  require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the complete post-create boundary changed before start-intent publication'
+  require_complete_owner_endpoint_phase_boundary created ||
+    die 'the complete created-phase boundary changed before start-intent publication'
   publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1" 0600 < <(expected_start_record) ||
     die 'the replacement start intent could not be published durably'
   require_start_record || die 'the published replacement start intent is invalid'
@@ -4267,18 +4449,18 @@ new_state="$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" --format '
 case "$new_state" in
   created)
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed before replacement startup'
-    require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" created ||
-      die 'the live terminal-attestation boundary changed immediately before replacement startup'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before replacement startup'
     require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement startup'
-    require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the complete post-create boundary changed before replacement startup'
+    require_failed_endpoint_phase_runtime || die 'the immutable 51e evidence changed before replacement startup'
+    require_complete_owner_endpoint_phase_boundary created ||
+      die 'the complete created-phase boundary changed immediately before startup'
     docker_local container start "$NEW_OWNER_CONTAINER_ID" >/dev/null || die 'the exact canonical Owner could not be started'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during replacement startup'
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement startup'
     ;;
   running)
-    [[ "$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == 'healthy' ]] ||
-      die 'an interrupted replacement startup may be resumed only after the exact Owner is already healthy'
+    require_complete_owner_endpoint_phase_boundary running ||
+      die 'an interrupted replacement startup is not in the complete running phase'
     ;;
   exited) die 'the replacement Owner exited after its durable start intent; manual review is required' ;;
   *) die 'the recorded replacement Owner is in an unreviewed state' ;;
@@ -4297,6 +4479,8 @@ done
 [[ "$owner_state" == 'running' && "$owner_health" == 'healthy' ]] || die 'the canonical Owner did not become healthy within the bounded wait'
 env -i PATH="$SAFE_PATH" curl --fail --silent --show-error --noproxy '*' --max-time 5 \
   http://127.0.0.1:3002/readyz >/dev/null || die 'the loopback-only Owner readiness endpoint failed'
+require_complete_owner_endpoint_phase_boundary running ||
+  die 'the Owner did not enter the complete running phase after startup and health'
 require_owner_image_contract || die 'the canonical Owner image changed during startup'
 require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" ||
   die 'the canonical Owner image has an unexpected user during startup'
@@ -4318,8 +4502,8 @@ require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
 inspect_image_archive || die 'the immutable OCI archive changed before recovery completion'
 [[ ! -e "$ORIGINAL_BRIDGE_PARENT" && ! -L "$ORIGINAL_BRIDGE_PARENT" ]] ||
   die 'the immutable 001 Owner bridge namespace appeared during recovery'
-require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the complete post-create boundary changed before completion publication'
-
+require_complete_owner_endpoint_phase_boundary running ||
+  die 'the complete running-phase boundary changed before completion publication'
 publish_exact_record "$BRIDGE_WORK_ROOT/completed-v1" 0600 < <(expected_bridge_completed) ||
   die 'the Owner-runtime bridge completion could not be published durably'
 require_bridge_completed || die 'the published Owner-runtime bridge completion is invalid'
@@ -4332,7 +4516,8 @@ require_no_other_mutator_processes || die 'another staging mutation appeared bef
 require_exact_droplet || die 'the staging Droplet identity changed before ledger finalization'
 require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
   die 'the terminal-attestation boundary changed before ledger finalization'
-require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die 'the complete post-create boundary changed before ledger finalization'
+require_complete_owner_endpoint_phase_boundary running ||
+  die 'the complete running-phase boundary changed before ledger finalization'
 mv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT" || die 'the bridge ledger could not be finalized'
 sync -f "$BRIDGE_PARENT" || die 'the bridge ledger rename could not be synchronized'
 BRIDGE_STATE='complete'

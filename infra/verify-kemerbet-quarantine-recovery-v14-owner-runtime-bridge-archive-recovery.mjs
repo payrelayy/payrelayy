@@ -140,7 +140,8 @@ for (const needle of [
   "readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
   "readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
   "readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
+  "readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -192,14 +193,40 @@ for (const needle of [
   "FAILED_ORDER_CORRECTION_MANIFEST_SHA256='1cfa9ddba283f1b6ae053a420aaea0caa2af39791271cd6e936bb109b2f42c4f'",
   'failed_order_runtime_namespace=exact-absent',
   'nofollow_helper_definition_order=before-first-top-level-claim',
+  "FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE='51e5170488d720fd04decd1896971ab72cfe9603'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102952'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO='64769:6102953'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256='9cd67e0d820075fd8fac3bf6100ce26cfdc65f67540a8d086fcae8b2bf9f0ac8'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE='262609'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO='64769:6102954'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO='64769:6102955'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256='8c3682673339a7d57740b4890987932eee14013df0a6f05e50bda994cc5aaaac'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE='12911'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ID='33252232473'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO='64769:6102956'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO='64769:6102957'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO='64769:6102958'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256='5eebab9353a3f251020a997706c2c1a85c00209f08ae83a1b32cf9b64e55d5fb'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO='64769:6102959'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO='64769:6102960'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256='460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7'",
+  "CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'",
+  'failed_endpoint_phase_owner_state=created-never-started',
+  'compose_reentry=forbidden',
+  'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1',
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2',
+  'complete_phase_boundary_contract=single-final-phase-aware-command-v1',
   'emit_exact_nofollow_file() {',
   'os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW',
   'before != after',
   'os.path.realpath(path) != path',
   'capture_complete_docker_create_inventory() {',
-  'require_exact_owner_create_inventory_delta() {',
-  'docker_create_inventory_contract=complete-exact-owner-only-delta-v1',
-  'create --no-build --pull never "$OWNER_SERVICE"',
+  'require_exact_owner_inventory_delta_phase() {',
+  'require_owner_endpoint_phase_boundary() {',
+  'require_complete_owner_endpoint_phase_boundary() {',
   'require_exact_compose_create_contract() {',
   "compose version --short)\" == '5.1.4'",
   'owner.get("depends_on") not in (None, {})',
@@ -341,7 +368,17 @@ assert.equal((script.match(/emit_exact_nofollow_file\(\) \{/gu) ?? []).length, 1
 assert.ok(
   script.includes('[[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]'),
 );
-assert.doesNotMatch(script, /create --no-build --no-deps/u);
+for (const forbiddenMutation of [
+  /create --no-build/u,
+  /\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm)\b/u,
+  /docker_local container (?:create|rm|remove)\b/u,
+]) {
+  assert.doesNotMatch(
+    script,
+    forbiddenMutation,
+    `the correction must consume the exact created Owner without a Compose/container lifecycle mutation ${forbiddenMutation}`,
+  );
+}
 assert.ok(
   script.includes(
     'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file',
@@ -349,8 +386,9 @@ assert.ok(
   'the post-removal correction must republish the immutable predecessor catalog proof',
 );
 assert.doesNotMatch(script, /36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'/);
-assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 12);
+assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 11);
 assert.ok((script.match(/require_prior_failed_runtime_ledger_absent/g) ?? []).length >= 6);
+assert.ok((script.match(/require_failed_endpoint_phase_runtime/g) ?? []).length >= 9);
 for (const needle of [
   "FAILED_CORRECTION_RELEASE='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'",
   "FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO='64769:6102893'",
@@ -423,37 +461,84 @@ for (const needle of [
 ]) {
   assert.ok(script.includes(needle), `failed fa35244 evidence is missing ${needle}`);
 }
+const completeBoundaryStart = script.indexOf('require_complete_owner_endpoint_phase_boundary() {');
+const completeBoundaryEnd = script.indexOf(
+  '\n}\n\nrequire_pre_create_image_boundary()',
+  completeBoundaryStart,
+);
+assert.ok(
+  completeBoundaryStart >= 0 && completeBoundaryEnd > completeBoundaryStart,
+  'complete phase-aware boundary helper is missing or unterminated',
+);
+const completeBoundary = script.slice(completeBoundaryStart, completeBoundaryEnd);
 for (const helperConstituent of [
-  'require_exact_recovery_source_anchors &&',
-  'require_original_bridge_namespace_absent &&',
-  'require_prior_failed_runtime_ledger_absent &&',
-  'require_financial_gates_disabled &&',
-  'require_owner_image_contract &&',
+  'require_bridge_intent || return 1',
+  'require_api_catalog_proof || return 1',
+  'require_exact_recovery_source_anchors || return 1',
+  'require_prior_failed_recovery_claim || return 1',
+  'require_original_bridge_namespace_absent || return 1',
+  'require_prior_failed_runtime_ledger_absent || return 1',
+  'require_failed_endpoint_phase_runtime || return 1',
+  'require_exact_droplet || return 1',
+  'require_no_other_mutator_processes || return 1',
+  'require_financial_gates_disabled || return 1',
+  'require_owner_image_contract || return 1',
+  'require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" || return 1',
+  'require_non_owner_inventory_unchanged || return 1',
+  'load_pre_create_docker_inventory || return 1',
+  'cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file',
+  'require_owner_endpoint_phase_boundary "$phase"',
 ]) {
   assert.ok(
-    script.includes(helperConstituent),
+    completeBoundary.includes(helperConstituent),
     `complete phase-boundary helper is missing ${helperConstituent}`,
   );
 }
 assert.match(
-  script,
-  /require_pre_create_image_boundary\(\) \{[\s\S]*?require_owner_image_contract &&\s+require_loaded_image_unused\s*\}/,
+  completeBoundary,
+  /require_owner_endpoint_phase_boundary "\$phase"\s*$/u,
+  'the runtime Docker phase delta must be the final constituent of the complete helper',
 );
-assert.match(
-  script,
-  /require_post_create_image_boundary\(\) \{[\s\S]*?require_owner_image_contract &&\s+require_loaded_image_used_only_by "\$expected_id"\s*\}/,
+assert.equal(
+  (script.match(/require_complete_owner_endpoint_phase_boundary created/gu) ?? []).length,
+  3,
+  'created phase must close exactly before replacement publication, start-intent publication, and start',
+);
+assert.equal(
+  (script.match(/require_complete_owner_endpoint_phase_boundary running/gu) ?? []).length,
+  5,
+  'running phase must close on completed replay, interrupted running replay, post-health, pre-completion, and pre-finalization',
 );
 for (const guardedBoundary of [
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before replacement publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1"',
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before start-intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1"',
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before replacement startup\'\n    docker_local container start',
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before completion publication\'\n\npublish_exact_record "$BRIDGE_WORK_ROOT/completed-v1"',
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before ledger finalization\'\nmv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" ||\n    die \'the complete post-create boundary changed beside completed replay\'\n  POST_CREATE_DOCKER_INVENTORY=',
+  'require_complete_owner_endpoint_phase_boundary created ||\n    die \'the complete created-phase boundary changed before replacement publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1"',
+  'require_complete_owner_endpoint_phase_boundary created ||\n    die \'the complete created-phase boundary changed before start-intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1"',
+  'require_complete_owner_endpoint_phase_boundary created ||\n      die \'the complete created-phase boundary changed immediately before startup\'\n    docker_local container start "$NEW_OWNER_CONTAINER_ID"',
+  'require_complete_owner_endpoint_phase_boundary running ||\n  die \'the complete running-phase boundary changed before completion publication\'\npublish_exact_record "$BRIDGE_WORK_ROOT/completed-v1"',
+  'require_complete_owner_endpoint_phase_boundary running ||\n  die \'the complete running-phase boundary changed before ledger finalization\'\nmv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
 ]) {
   assert.ok(
     script.includes(guardedBoundary),
-    `missing or reordered complete boundary: ${guardedBoundary}`,
+    `missing, reordered, or interposed complete endpoint-phase boundary ${guardedBoundary}`,
+  );
+}
+const acceptsAtomicBoundaryCommands = (commands, phase, target) =>
+  JSON.stringify(commands) === JSON.stringify([`complete:${phase}`, target]);
+assert.ok(
+  acceptsAtomicBoundaryCommands(
+    ['complete:created', 'publish:replacement'],
+    'created',
+    'publish:replacement',
+  ),
+);
+for (const invalidCommands of [
+  ['phase:created', 'post-image', 'publish:replacement'],
+  ['complete:created', 'financial-check', 'publish:replacement'],
+  ['complete:created', 'inspect', 'start:owner'],
+  ['complete:running', 'publish:completion', 'rename:ledger'],
+]) {
+  assert.ok(
+    !acceptsAtomicBoundaryCommands(invalidCommands, 'created', 'publish:replacement'),
+    `an interposed or split boundary fixture was accepted: ${JSON.stringify(invalidCommands)}`,
   );
 }
 for (const finalizationGuard of [
@@ -514,42 +599,51 @@ const predecessorProof = execution.indexOf('cmp -s -- <(emit_exact_nofollow_file
 const republishedProof = execution.indexOf(
   'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file',
 );
+const republishedSnapshot = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/docker-pre-create-v1" 0600 < <(emit_exact_nofollow_file',
+);
+const exactSnapshotComparison = execution.indexOf(
+  'cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file',
+);
+const replacementPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1" 0600 < <(expected_replacement_record)',
+);
+const startIntentPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1" 0600 < <(expected_start_record)',
+);
 const firstPersistentDockerMutation = execution.indexOf(
-  'create --no-build --pull never "$OWNER_SERVICE"',
+  'docker_local container start "$NEW_OWNER_CONTAINER_ID"',
 );
 assert.ok(intentPublish > 0, 'intent is not published');
 assert.ok(postIntentValidation > intentPublish, 'intent is not validated after publication');
 assert.ok(predecessorProof > postIntentValidation, 'predecessor proof precedes durable intent');
 assert.ok(republishedProof > predecessorProof, 'predecessor proof is not durably republished');
 assert.ok(
-  firstPersistentDockerMutation > republishedProof,
-  'Owner create precedes durable proof republication',
+  republishedSnapshot > republishedProof && exactSnapshotComparison > republishedSnapshot,
+  'the exact 51e pre-create snapshot is not durably republished and byte-compared after the proof',
 );
-const preInventory = execution.lastIndexOf(
-  'CURRENT_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)"',
-  firstPersistentDockerMutation,
-);
-const postInventory = execution.indexOf(
-  'POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)"',
-  firstPersistentDockerMutation,
-);
-const exactDelta = execution.indexOf(
-  'require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$owner_inventory"',
-  postInventory,
-);
-const uninterruptedPreCreate = `require_pre_create_image_boundary || die 'the complete pre-create boundary changed before replacement creation'
-    CURRENT_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
-      die 'the immediately pre-create Docker inventory could not be captured'
-    [[ "$CURRENT_PRE_CREATE_DOCKER_INVENTORY" == "$PRE_CREATE_DOCKER_INVENTORY" ]] ||
-      die 'an image, network, volume, endpoint, or holder changed since the durable pre-create inventory'
-    env -i "\${compose_environment[@]}" "\${compose_command[@]}" \\
-      create --no-build --pull never "$OWNER_SERVICE"`;
 assert.ok(
-  execution.includes(uninterruptedPreCreate),
-  'pre-create boundary, complete inventory proof, and Compose create must be uninterrupted and exact',
+  replacementPublish > exactSnapshotComparison && startIntentPublish > replacementPublish,
+  'replacement identity and start intent must follow the immutable 51e proof/snapshot publication',
 );
-assert.ok(preInventory > republishedProof && preInventory < firstPersistentDockerMutation);
-assert.ok(postInventory > firstPersistentDockerMutation && exactDelta > postInventory);
+assert.ok(
+  firstPersistentDockerMutation > startIntentPublish,
+  'the sole allowed persistent Docker mutation must follow the durable start intent',
+);
+assert.equal(
+  (execution.match(/docker_local container start "\$NEW_OWNER_CONTAINER_ID"/gu) ?? []).length,
+  1,
+  'the exact created Owner may be started at only one reachable call site',
+);
+assert.ok(
+  execution.includes('NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"'),
+  'the successor must bind the exact already-created 51e Owner identity',
+);
+assert.doesNotMatch(
+  execution.slice(0, firstPersistentDockerMutation),
+  /docker_local (?:container|image|network|volume) (?:create|rm|remove|prune)|\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm)\b/u,
+  'no Docker/Compose create, recreate, remove, or cleanup may precede the exact Owner start',
+);
 
 const acceptsNofollowEvidence = (entry) =>
   entry.type === 'file' &&
@@ -582,41 +676,63 @@ for (const invalid of [
     `unsafe predecessor evidence accepted: ${JSON.stringify(invalid)}`,
   );
 
-const acceptsOwnerOnlyDelta = ({
+const exactOwnerEndpoint = {
+  Name: 'fetanagent-staging-beta-owner-control-1',
+  EndpointID: 'a'.repeat(64),
+  MacAddress: '02:42:ac:12:00:02',
+  IPv4Address: '172.18.0.2/16',
+  IPv6Address: 'fd00::2/64',
+};
+const acceptsOwnerOnlyPhaseDelta = ({
+  phase = 'created',
   imagesSame = true,
   networkIdsSame = true,
   volumeIdsSame = true,
   specsSame = true,
   oldEndpointsSame = true,
-  addedEndpoints = ['owner'],
+  addedEndpointIds = phase === 'running' ? ['owner'] : [],
+  ownerEndpoint = phase === 'running' ? exactOwnerEndpoint : null,
   profileHolders = [[], []],
   controlHolders = [[], ['owner']],
   otherHoldersSame = true,
 } = {}) =>
+  ['created', 'running'].includes(phase) &&
   imagesSame &&
   networkIdsSame &&
   volumeIdsSame &&
   specsSame &&
   oldEndpointsSame &&
-  JSON.stringify(addedEndpoints) === JSON.stringify(['owner']) &&
+  (phase === 'created'
+    ? addedEndpointIds.length === 0 && ownerEndpoint === null
+    : JSON.stringify(addedEndpointIds) === JSON.stringify(['owner']) &&
+      JSON.stringify(ownerEndpoint) === JSON.stringify(exactOwnerEndpoint)) &&
   JSON.stringify(profileHolders) === JSON.stringify([[], []]) &&
   JSON.stringify(controlHolders) === JSON.stringify([[], ['owner']]) &&
   otherHoldersSame;
-assert.ok(acceptsOwnerOnlyDelta());
+assert.ok(acceptsOwnerOnlyPhaseDelta({ phase: 'created' }), 'exact created-phase delta rejected');
+assert.ok(acceptsOwnerOnlyPhaseDelta({ phase: 'running' }), 'exact running-phase delta rejected');
 for (const invalid of [
+  { phase: 'invalid' },
   { networkIdsSame: false },
   { volumeIdsSame: false },
   { imagesSame: false },
   { specsSame: false },
   { oldEndpointsSame: false },
-  { addedEndpoints: ['owner', 'extra'] },
+  { phase: 'created', addedEndpointIds: ['owner'], ownerEndpoint: exactOwnerEndpoint },
+  { phase: 'running', addedEndpointIds: [], ownerEndpoint: null },
+  { phase: 'running', addedEndpointIds: ['owner', 'extra'] },
+  { phase: 'running', addedEndpointIds: ['wrong'], ownerEndpoint: exactOwnerEndpoint },
+  { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, Name: 'wrong-owner' } },
+  { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, EndpointID: 'bad' } },
+  { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, Unexpected: true } },
   { profileHolders: [[], ['owner']] },
   { controlHolders: [[], ['other']] },
+  { controlHolders: [[], ['owner', 'extra']] },
   { otherHoldersSame: false },
 ])
   assert.ok(
-    !acceptsOwnerOnlyDelta(invalid),
-    `unsafe Docker delta accepted: ${JSON.stringify(invalid)}`,
+    !acceptsOwnerOnlyPhaseDelta(invalid),
+    `unsafe phase-aware Docker delta accepted: ${JSON.stringify(invalid)}`,
   );
 
 const parseHolderRows = (text, expectedVolumes) => {
@@ -656,6 +772,7 @@ for (const needle of [
   'git fetch --no-tags --depth=1 origin ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
   'git fetch --no-tags --depth=1 origin 0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
   'git fetch --no-tags --depth=1 origin 04f51a521280fed43cd1504107c702940e523688',
+  'git fetch --no-tags --depth=1 origin 51e5170488d720fd04decd1896971ab72cfe9603',
   'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
   'failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70',
   'failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
@@ -684,6 +801,28 @@ for (const needle of [
   'failed_oidvector_correction_implementation_sha=f67cf783528f090169dbea1ebfdc6c46f90996bb',
   'failed_oidvector_correction_manifest_sha256=8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed',
   'failed_oidvector_bridge_intent_sha256=7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd',
+  'failed_endpoint_phase_correction_implementation_sha=51e5170488d720fd04decd1896971ab72cfe9603',
+  'failed_endpoint_phase_correction_bundle_root_dev_ino=64769:6102952',
+  'failed_endpoint_phase_correction_script_dev_ino=64769:6102953',
+  'failed_endpoint_phase_correction_script_sha256=9cd67e0d820075fd8fac3bf6100ce26cfdc65f67540a8d086fcae8b2bf9f0ac8',
+  'failed_endpoint_phase_correction_script_size=262609',
+  'failed_endpoint_phase_correction_validator_dev_ino=64769:6102954',
+  'failed_endpoint_phase_correction_manifest_dev_ino=64769:6102955',
+  'failed_endpoint_phase_correction_manifest_sha256=8c3682673339a7d57740b4890987932eee14013df0a6f05e50bda994cc5aaaac',
+  'failed_endpoint_phase_bridge_parent_dev_ino=64769:6102956',
+  'failed_endpoint_phase_bridge_installing_dev_ino=64769:6102957',
+  'failed_endpoint_phase_bridge_intent_dev_ino=64769:6102958',
+  'failed_endpoint_phase_bridge_intent_sha256=5eebab9353a3f251020a997706c2c1a85c00209f08ae83a1b32cf9b64e55d5fb',
+  'failed_endpoint_phase_bridge_api_proof_dev_ino=64769:6102959',
+  'failed_endpoint_phase_bridge_api_proof_sha256=868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee',
+  'failed_endpoint_phase_bridge_docker_snapshot_dev_ino=64769:6102960',
+  'failed_endpoint_phase_bridge_docker_snapshot_sha256=460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7',
+  'created_owner_container_id=44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f',
+  'failed_endpoint_phase_owner_state=created-never-started',
+  'compose_reentry=forbidden',
+  'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1',
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2',
+  'complete_phase_boundary_contract=single-final-phase-aware-command-v1',
   'catalog_argument_contract=exact-zero-based-oidvector-equality',
   'canonical_h14_image_initial_state=exact-loaded-before-intent',
   'owner_tmpfs_host_config=required-exact',
@@ -708,8 +847,9 @@ for (const state of [
   '"$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")"',
   '"$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")"',
   '"$(basename "$failed_holder_root")" "$(basename "$failed_order_root")"',
-  '"$(basename "$failed_order_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_order_root")" "$(basename "$root")"',
+  '"$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")"',
+  '"$(basename "$failed_endpoint_phase_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_endpoint_phase_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -732,6 +872,7 @@ const failedOidvector = 'f67cf783528f090169dbea1ebfdc6c46f90996bb';
 const failedCompose = 'e95ad99122ebf9f7257ea25d7cf215dd38c73b40';
 const failedHolder = '35d28aaa41cde5a2ccce7c2017dffc7c9d503238';
 const failedOrder = '132603c34afff4e0e6c78d89864c761034c0f3fa';
+const failedEndpointPhase = '51e5170488d720fd04decd1896971ab72cfe9603';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
@@ -748,6 +889,7 @@ const classifyChain = (children) => {
       failedCompose,
       failedHolder,
       failedOrder,
+      failedEndpointPhase,
     ]
       .sort()
       .join('\n')
@@ -765,6 +907,7 @@ const classifyChain = (children) => {
       failedCompose,
       failedHolder,
       failedOrder,
+      failedEndpointPhase,
       installing,
     ]
       .sort()
@@ -783,6 +926,7 @@ const classifyChain = (children) => {
       failedCompose,
       failedHolder,
       failedOrder,
+      failedEndpointPhase,
       current,
     ]
       .sort()
@@ -803,6 +947,7 @@ for (const [children, expected] of [
       failedCompose,
       failedHolder,
       failedOrder,
+      failedEndpointPhase,
     ],
     'append',
   ],
@@ -817,6 +962,7 @@ for (const [children, expected] of [
       failedCompose,
       failedHolder,
       failedOrder,
+      failedEndpointPhase,
       installing,
     ],
     'resume',
@@ -832,6 +978,7 @@ for (const [children, expected] of [
       failedCompose,
       failedHolder,
       failedOrder,
+      failedEndpointPhase,
       current,
     ],
     'complete',

@@ -141,7 +141,8 @@ for (const needle of [
   "readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
   "readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
   "readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
+  "readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -213,11 +214,34 @@ for (const needle of [
   "FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
   "FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO='64769:6102960'",
   "FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256='460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7'",
+  "FAILED_RUNNING_STATUS_CORRECTION_RELEASE='8f1ef460a231fe2c21e2df2d986749400d08c38c'",
+  "FAILED_RUNNING_STATUS_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102961'",
+  "FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_DEV_INO='64769:6102962'",
+  "FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_SHA256='9cd020e2b79d5d53b5686f56ab9a291ae20af3ca700f581ec44f7b5eeb421d0e'",
+  "FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_SIZE='278033'",
+  "FAILED_RUNNING_STATUS_CORRECTION_VALIDATOR_DEV_INO='64769:6102963'",
+  "FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_DEV_INO='64769:6102964'",
+  "FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_SHA256='b58fb16735c70bd4d7f9fd3022d675d11b4e815715fcb3e3804b55daa23364e5'",
+  "FAILED_RUNNING_STATUS_BRIDGE_PARENT_DEV_INO='64769:6102965'",
+  "FAILED_RUNNING_STATUS_BRIDGE_INSTALLING_DEV_INO='64769:6102966'",
+  "FAILED_RUNNING_STATUS_BRIDGE_INTENT_DEV_INO='64769:6102967'",
+  "FAILED_RUNNING_STATUS_BRIDGE_INTENT_SHA256='d02d6076765c789b45b1aa973183fc0c159a6e10c3b928927e7bee72de839e14'",
+  "FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_DEV_INO='64769:6102968'",
+  "FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  "FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_DEV_INO='64769:6102969'",
+  "FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SHA256='460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7'",
+  "FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT_DEV_INO='64769:6102970'",
+  "FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT_SHA256='6e85eeb5e09ea7941bb5da4cf27890c37faa956ce81bf0d6e35c59d2c8066be1'",
+  "FAILED_RUNNING_STATUS_BRIDGE_START_DEV_INO='64769:6102971'",
+  "FAILED_RUNNING_STATUS_BRIDGE_START_SHA256='518341dc096934ce1166c68cb09b3ff727587bafa21e3e2e97ce36bc07d03a52'",
   "CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'",
   'failed_endpoint_phase_owner_state=created-never-started',
   'compose_reentry=forbidden',
   'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1',
-  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2',
+  'failed_running_status_owner_state=running-healthy-no-completion',
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v3',
+  'network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1',
+  'owner_lifecycle_mutation=forbidden-already-running',
   'complete_phase_boundary_contract=single-final-phase-aware-command-v1',
   'emit_exact_nofollow_file() {',
   'os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW',
@@ -370,8 +394,8 @@ assert.ok(
 );
 for (const forbiddenMutation of [
   /create --no-build/u,
-  /\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm)\b/u,
-  /docker_local container (?:create|rm|remove)\b/u,
+  /\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm|start|stop|restart)\b/u,
+  /docker_local (?:container|network|image|volume) (?:start|create|rm|remove|restart|stop|kill|connect|disconnect|load|tag|prune)\b/u,
 ]) {
   assert.doesNotMatch(
     script,
@@ -386,9 +410,10 @@ assert.ok(
   'the post-removal correction must republish the immutable predecessor catalog proof',
 );
 assert.doesNotMatch(script, /36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'/);
-assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 11);
+assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 10);
 assert.ok((script.match(/require_prior_failed_runtime_ledger_absent/g) ?? []).length >= 6);
 assert.ok((script.match(/require_failed_endpoint_phase_runtime/g) ?? []).length >= 9);
+assert.ok((script.match(/require_failed_running_status_runtime/g) ?? []).length >= 6);
 for (const needle of [
   "FAILED_CORRECTION_RELEASE='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'",
   "FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO='64769:6102893'",
@@ -463,7 +488,7 @@ for (const needle of [
 }
 const completeBoundaryStart = script.indexOf('require_complete_owner_endpoint_phase_boundary() {');
 const completeBoundaryEnd = script.indexOf(
-  '\n}\n\nrequire_pre_create_image_boundary()',
+  '\n}\n\nrequire_running_owner_boundary_before_successor_intent()',
   completeBoundaryStart,
 );
 assert.ok(
@@ -479,6 +504,7 @@ for (const helperConstituent of [
   'require_original_bridge_namespace_absent || return 1',
   'require_prior_failed_runtime_ledger_absent || return 1',
   'require_failed_endpoint_phase_runtime || return 1',
+  'require_failed_running_status_runtime || return 1',
   'require_exact_droplet || return 1',
   'require_no_other_mutator_processes || return 1',
   'require_financial_gates_disabled || return 1',
@@ -501,18 +527,15 @@ assert.match(
 );
 assert.equal(
   (script.match(/require_complete_owner_endpoint_phase_boundary created/gu) ?? []).length,
-  3,
-  'created phase must close exactly before replacement publication, start-intent publication, and start',
+  0,
+  'the successor must never re-enter a created-phase execution path',
 );
 assert.equal(
   (script.match(/require_complete_owner_endpoint_phase_boundary running/gu) ?? []).length,
-  5,
-  'running phase must close on completed replay, interrupted running replay, post-health, pre-completion, and pre-finalization',
+  3,
+  'running phase must close on completed replay, pre-completion, and pre-finalization',
 );
 for (const guardedBoundary of [
-  'require_complete_owner_endpoint_phase_boundary created ||\n    die \'the complete created-phase boundary changed before replacement publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1"',
-  'require_complete_owner_endpoint_phase_boundary created ||\n    die \'the complete created-phase boundary changed before start-intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1"',
-  'require_complete_owner_endpoint_phase_boundary created ||\n      die \'the complete created-phase boundary changed immediately before startup\'\n    docker_local container start "$NEW_OWNER_CONTAINER_ID"',
   'require_complete_owner_endpoint_phase_boundary running ||\n  die \'the complete running-phase boundary changed before completion publication\'\npublish_exact_record "$BRIDGE_WORK_ROOT/completed-v1"',
   'require_complete_owner_endpoint_phase_boundary running ||\n  die \'the complete running-phase boundary changed before ledger finalization\'\nmv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
 ]) {
@@ -525,19 +548,19 @@ const acceptsAtomicBoundaryCommands = (commands, phase, target) =>
   JSON.stringify(commands) === JSON.stringify([`complete:${phase}`, target]);
 assert.ok(
   acceptsAtomicBoundaryCommands(
-    ['complete:created', 'publish:replacement'],
-    'created',
-    'publish:replacement',
+    ['complete:running', 'publish:completion'],
+    'running',
+    'publish:completion',
   ),
 );
 for (const invalidCommands of [
-  ['phase:created', 'post-image', 'publish:replacement'],
-  ['complete:created', 'financial-check', 'publish:replacement'],
-  ['complete:created', 'inspect', 'start:owner'],
+  ['phase:running', 'post-image', 'publish:completion'],
+  ['complete:running', 'financial-check', 'publish:completion'],
+  ['complete:running', 'inspect', 'rename:ledger'],
   ['complete:running', 'publish:completion', 'rename:ledger'],
 ]) {
   assert.ok(
-    !acceptsAtomicBoundaryCommands(invalidCommands, 'created', 'publish:replacement'),
+    !acceptsAtomicBoundaryCommands(invalidCommands, 'running', 'publish:completion'),
     `an interposed or split boundary fixture was accepted: ${JSON.stringify(invalidCommands)}`,
   );
 }
@@ -606,13 +629,13 @@ const exactSnapshotComparison = execution.indexOf(
   'cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file',
 );
 const replacementPublish = execution.indexOf(
-  'publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1" 0600 < <(expected_replacement_record)',
+  'publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1" 0600 < <(emit_exact_nofollow_file',
 );
 const startIntentPublish = execution.indexOf(
-  'publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1" 0600 < <(expected_start_record)',
+  'publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1" 0600 < <(emit_exact_nofollow_file',
 );
-const firstPersistentDockerMutation = execution.indexOf(
-  'docker_local container start "$NEW_OWNER_CONTAINER_ID"',
+const completionPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/completed-v1" 0600 < <(expected_bridge_completed)',
 );
 assert.ok(intentPublish > 0, 'intent is not published');
 assert.ok(postIntentValidation > intentPublish, 'intent is not validated after publication');
@@ -620,29 +643,35 @@ assert.ok(predecessorProof > postIntentValidation, 'predecessor proof precedes d
 assert.ok(republishedProof > predecessorProof, 'predecessor proof is not durably republished');
 assert.ok(
   republishedSnapshot > republishedProof && exactSnapshotComparison > republishedSnapshot,
-  'the exact 51e pre-create snapshot is not durably republished and byte-compared after the proof',
+  'the exact 8f pre-create snapshot is not durably republished and byte-compared after the proof',
 );
 assert.ok(
   replacementPublish > exactSnapshotComparison && startIntentPublish > replacementPublish,
-  'replacement identity and start intent must follow the immutable 51e proof/snapshot publication',
+  'replacement identity and start authorization must follow the immutable 8f proof/snapshot publication',
 );
 assert.ok(
-  firstPersistentDockerMutation > startIntentPublish,
-  'the sole allowed persistent Docker mutation must follow the durable start intent',
+  completionPublish > startIntentPublish,
+  'completion must follow all four exact predecessor record republications',
 );
 assert.equal(
-  (execution.match(/docker_local container start "\$NEW_OWNER_CONTAINER_ID"/gu) ?? []).length,
-  1,
-  'the exact created Owner may be started at only one reachable call site',
+  (execution.match(/require_complete_owner_endpoint_phase_boundary running/gu) ?? []).length,
+  3,
+  'the execution must use only the three closed already-running boundaries',
 );
 assert.ok(
   execution.includes('NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"'),
-  'the successor must bind the exact already-created 51e Owner identity',
+  'the successor must bind the exact already-running Owner identity',
 );
 assert.doesNotMatch(
-  execution.slice(0, firstPersistentDockerMutation),
-  /docker_local (?:container|image|network|volume) (?:create|rm|remove|prune)|\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm)\b/u,
-  'no Docker/Compose create, recreate, remove, or cleanup may precede the exact Owner start',
+  execution,
+  /docker_local (?:container|image|network|volume) (?:start|create|rm|remove|restart|stop|kill|prune|connect|disconnect)|\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm|start|stop|restart)\b/u,
+  'the already-running successor must contain no reachable Docker or Compose lifecycle mutation',
+);
+assert.ok(
+  execution.includes(
+    'require_running_owner_boundary_before_successor_intent ||\n    die \'the exact already-running Owner boundary changed before successor intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/intent-v1"',
+  ),
+  'the complete pre-intent running boundary must be adjacent to intent publication',
 );
 
 const acceptsNofollowEvidence = (entry) =>
@@ -683,6 +712,63 @@ const exactOwnerEndpoint = {
   IPv4Address: '172.18.0.2/16',
   IPv6Address: 'fd00::2/64',
 };
+const exactStatusBefore = {
+  IPAM: {
+    Subnets: {
+      '172.18.0.0/16': { IPsInUse: 5, DynamicIPsAvailable: 65531 },
+      'fd00::/64': { IPsInUse: 4, DynamicIPsAvailable: 18446744073709551612n },
+    },
+  },
+};
+const exactStatusRunning = {
+  IPAM: {
+    Subnets: {
+      '172.18.0.0/16': { IPsInUse: 6, DynamicIPsAvailable: 65530 },
+      'fd00::/64': { IPsInUse: 5, DynamicIPsAvailable: 18446744073709551611n },
+    },
+  },
+};
+const sameStatus = (left, right) =>
+  JSON.stringify(left, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ===
+  JSON.stringify(right, (_key, value) => (typeof value === 'bigint' ? value.toString() : value));
+const stringifyStatusFixture = (value) =>
+  JSON.stringify(value, (_key, item) => (typeof item === 'bigint' ? item.toString() : item));
+const acceptsStatusPhaseDelta = (phase, before, after) => {
+  if (phase === 'created') return sameStatus(before, after);
+  if (phase !== 'running') return false;
+  if (
+    !before ||
+    !after ||
+    JSON.stringify(Object.keys(before)) !== JSON.stringify(['IPAM']) ||
+    JSON.stringify(Object.keys(after)) !== JSON.stringify(['IPAM']) ||
+    JSON.stringify(Object.keys(before.IPAM)) !== JSON.stringify(['Subnets']) ||
+    JSON.stringify(Object.keys(after.IPAM)) !== JSON.stringify(['Subnets'])
+  )
+    return false;
+  const oldSubnets = before.IPAM.Subnets;
+  const newSubnets = after.IPAM.Subnets;
+  if (!sameStatus(Object.keys(oldSubnets), Object.keys(newSubnets))) return false;
+  const changed = new Set(['172.18.0.0/16', 'fd00::/64']);
+  if (![...changed].every((subnet) => Object.hasOwn(oldSubnets, subnet))) return false;
+  return Object.keys(oldSubnets).every((subnet) => {
+    const oldValue = oldSubnets[subnet];
+    const newValue = newSubnets[subnet];
+    if (
+      !oldValue ||
+      !newValue ||
+      !sameStatus(Object.keys(oldValue).sort(), ['DynamicIPsAvailable', 'IPsInUse']) ||
+      !sameStatus(Object.keys(newValue).sort(), ['DynamicIPsAvailable', 'IPsInUse'])
+    )
+      return false;
+    return changed.has(subnet)
+      ? newValue.IPsInUse === oldValue.IPsInUse + 1 &&
+          newValue.DynamicIPsAvailable ===
+            (typeof oldValue.DynamicIPsAvailable === 'bigint'
+              ? oldValue.DynamicIPsAvailable - 1n
+              : oldValue.DynamicIPsAvailable - 1)
+      : sameStatus(oldValue, newValue);
+  });
+};
 const acceptsOwnerOnlyPhaseDelta = ({
   phase = 'created',
   imagesSame = true,
@@ -692,6 +778,8 @@ const acceptsOwnerOnlyPhaseDelta = ({
   oldEndpointsSame = true,
   addedEndpointIds = phase === 'running' ? ['owner'] : [],
   ownerEndpoint = phase === 'running' ? exactOwnerEndpoint : null,
+  statusBefore = exactStatusBefore,
+  statusAfter = phase === 'running' ? exactStatusRunning : exactStatusBefore,
   profileHolders = [[], []],
   controlHolders = [[], ['owner']],
   otherHoldersSame = true,
@@ -702,6 +790,7 @@ const acceptsOwnerOnlyPhaseDelta = ({
   volumeIdsSame &&
   specsSame &&
   oldEndpointsSame &&
+  acceptsStatusPhaseDelta(phase, statusBefore, statusAfter) &&
   (phase === 'created'
     ? addedEndpointIds.length === 0 && ownerEndpoint === null
     : JSON.stringify(addedEndpointIds) === JSON.stringify(['owner']) &&
@@ -725,6 +814,41 @@ for (const invalid of [
   { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, Name: 'wrong-owner' } },
   { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, EndpointID: 'bad' } },
   { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, Unexpected: true } },
+  { phase: 'created', statusAfter: exactStatusRunning },
+  {
+    phase: 'running',
+    statusAfter: {
+      IPAM: {
+        Subnets: {
+          ...exactStatusRunning.IPAM.Subnets,
+          'extra/24': { IPsInUse: 1, DynamicIPsAvailable: 1 },
+        },
+      },
+    },
+  },
+  {
+    phase: 'running',
+    statusAfter: {
+      IPAM: {
+        Subnets: {
+          ...exactStatusRunning.IPAM.Subnets,
+          '172.18.0.0/16': { IPsInUse: 7, DynamicIPsAvailable: 65530 },
+        },
+      },
+    },
+  },
+  {
+    phase: 'running',
+    statusAfter: {
+      IPAM: {
+        Subnets: {
+          ...exactStatusRunning.IPAM.Subnets,
+          'fd00::/64': { IPsInUse: 5, DynamicIPsAvailable: 18446744073709551612n },
+        },
+      },
+    },
+  },
+  { phase: 'running', statusAfter: { ...exactStatusRunning, Unexpected: true } },
   { profileHolders: [[], ['owner']] },
   { controlHolders: [[], ['other']] },
   { controlHolders: [[], ['owner', 'extra']] },
@@ -732,7 +856,7 @@ for (const invalid of [
 ])
   assert.ok(
     !acceptsOwnerOnlyPhaseDelta(invalid),
-    `unsafe phase-aware Docker delta accepted: ${JSON.stringify(invalid)}`,
+    `unsafe phase-aware Docker delta accepted: ${stringifyStatusFixture(invalid)}`,
   );
 
 const parseHolderRows = (text, expectedVolumes) => {
@@ -773,6 +897,7 @@ for (const needle of [
   'git fetch --no-tags --depth=1 origin 0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
   'git fetch --no-tags --depth=1 origin 04f51a521280fed43cd1504107c702940e523688',
   'git fetch --no-tags --depth=1 origin 51e5170488d720fd04decd1896971ab72cfe9603',
+  'git fetch --no-tags --depth=1 origin 8f1ef460a231fe2c21e2df2d986749400d08c38c',
   'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
   'failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70',
   'failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
@@ -817,11 +942,30 @@ for (const needle of [
   'failed_endpoint_phase_bridge_api_proof_sha256=868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee',
   'failed_endpoint_phase_bridge_docker_snapshot_dev_ino=64769:6102960',
   'failed_endpoint_phase_bridge_docker_snapshot_sha256=460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7',
+  'failed_running_status_correction_implementation_sha=8f1ef460a231fe2c21e2df2d986749400d08c38c',
+  'failed_running_status_correction_bundle_root_dev_ino=64769:6102961',
+  'failed_running_status_correction_script_dev_ino=64769:6102962',
+  'failed_running_status_correction_script_sha256=9cd020e2b79d5d53b5686f56ab9a291ae20af3ca700f581ec44f7b5eeb421d0e',
+  'failed_running_status_correction_manifest_dev_ino=64769:6102964',
+  'failed_running_status_correction_manifest_sha256=b58fb16735c70bd4d7f9fd3022d675d11b4e815715fcb3e3804b55daa23364e5',
+  'failed_running_status_bridge_parent_dev_ino=64769:6102965',
+  'failed_running_status_bridge_installing_dev_ino=64769:6102966',
+  'failed_running_status_bridge_intent_dev_ino=64769:6102967',
+  'failed_running_status_bridge_intent_sha256=d02d6076765c789b45b1aa973183fc0c159a6e10c3b928927e7bee72de839e14',
+  'failed_running_status_bridge_api_proof_dev_ino=64769:6102968',
+  'failed_running_status_bridge_docker_snapshot_dev_ino=64769:6102969',
+  'failed_running_status_bridge_replacement_dev_ino=64769:6102970',
+  'failed_running_status_bridge_replacement_sha256=6e85eeb5e09ea7941bb5da4cf27890c37faa956ce81bf0d6e35c59d2c8066be1',
+  'failed_running_status_bridge_start_dev_ino=64769:6102971',
+  'failed_running_status_bridge_start_sha256=518341dc096934ce1166c68cb09b3ff727587bafa21e3e2e97ce36bc07d03a52',
   'created_owner_container_id=44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f',
   'failed_endpoint_phase_owner_state=created-never-started',
   'compose_reentry=forbidden',
   'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1',
-  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v2',
+  'failed_running_status_owner_state=running-healthy-no-completion',
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v3',
+  'network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1',
+  'owner_lifecycle_mutation=forbidden-already-running',
   'complete_phase_boundary_contract=single-final-phase-aware-command-v1',
   'catalog_argument_contract=exact-zero-based-oidvector-equality',
   'canonical_h14_image_initial_state=exact-loaded-before-intent',
@@ -848,8 +992,9 @@ for (const state of [
   '"$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")"',
   '"$(basename "$failed_holder_root")" "$(basename "$failed_order_root")"',
   '"$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")"',
-  '"$(basename "$failed_endpoint_phase_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_endpoint_phase_root")" "$(basename "$root")"',
+  '"$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")"',
+  '"$(basename "$failed_running_status_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_running_status_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -873,6 +1018,7 @@ const failedCompose = 'e95ad99122ebf9f7257ea25d7cf215dd38c73b40';
 const failedHolder = '35d28aaa41cde5a2ccce7c2017dffc7c9d503238';
 const failedOrder = '132603c34afff4e0e6c78d89864c761034c0f3fa';
 const failedEndpointPhase = '51e5170488d720fd04decd1896971ab72cfe9603';
+const failedRunningStatus = '8f1ef460a231fe2c21e2df2d986749400d08c38c';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
@@ -890,6 +1036,7 @@ const classifyChain = (children) => {
       failedHolder,
       failedOrder,
       failedEndpointPhase,
+      failedRunningStatus,
     ]
       .sort()
       .join('\n')
@@ -908,6 +1055,7 @@ const classifyChain = (children) => {
       failedHolder,
       failedOrder,
       failedEndpointPhase,
+      failedRunningStatus,
       installing,
     ]
       .sort()
@@ -927,6 +1075,7 @@ const classifyChain = (children) => {
       failedHolder,
       failedOrder,
       failedEndpointPhase,
+      failedRunningStatus,
       current,
     ]
       .sort()
@@ -948,6 +1097,7 @@ for (const [children, expected] of [
       failedHolder,
       failedOrder,
       failedEndpointPhase,
+      failedRunningStatus,
     ],
     'append',
   ],
@@ -963,6 +1113,7 @@ for (const [children, expected] of [
       failedHolder,
       failedOrder,
       failedEndpointPhase,
+      failedRunningStatus,
       installing,
     ],
     'resume',
@@ -979,6 +1130,7 @@ for (const [children, expected] of [
       failedHolder,
       failedOrder,
       failedEndpointPhase,
+      failedRunningStatus,
       current,
     ],
     'complete',

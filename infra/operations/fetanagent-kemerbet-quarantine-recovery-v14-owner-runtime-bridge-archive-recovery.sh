@@ -3335,7 +3335,7 @@ try:
     image = new_images[new_image]; config = image.get('Config') or {}
     if image.get('RepoTags') != [f'fetanagent-customer-web:{release[:12]}']: raise RuntimeError()
     if config.get('User') != '10001:10001' or config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
-    if config.get('Entrypoint') not in (None, []): raise RuntimeError()
+    if config.get('Entrypoint') != ['docker-entrypoint.sh']: raise RuntimeError()
     if config.get('WorkingDir') != '/workspace': raise RuntimeError()
     if config.get('ExposedPorts') not in (None, {}): raise RuntimeError()
     if config.get('Healthcheck') != {
@@ -4920,7 +4920,7 @@ try:
     payload = json.load(sys.stdin)
     if not isinstance(payload, list) or len(payload) != 1 or payload[0].get('Id') != expected: raise RuntimeError()
     item = payload[0]; config = item.get('Config') or {}; host = item.get('HostConfig') or {}; networks = (item.get('NetworkSettings') or {}).get('Networks') or {}
-    if config.get('Entrypoint') not in (None, []): raise RuntimeError()
+    if config.get('Entrypoint') != ['docker-entrypoint.sh']: raise RuntimeError()
     if config.get('WorkingDir') != '/workspace' or config.get('ExposedPorts') not in (None, {}): raise RuntimeError()
     if config.get('Healthcheck') != {
         'Test':['CMD','node','-e',"fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"],

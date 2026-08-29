@@ -113,7 +113,16 @@ assert.ok(
     'fetanagent-customer-web-self-recovery.tar:f\n          fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\n          fetanagent-owner-archive-validator.py:f\n          manifest-v1:f',
   ),
 );
-assert.ok(workflow.includes("config.get('Entrypoint') in (None, [])"));
+assert.ok(workflow.includes("config.get('Entrypoint') == ['docker-entrypoint.sh']"));
+assert.equal(
+  (script.match(/config\.get\('Entrypoint'\) != \['docker-entrypoint\.sh'\]/gu) ?? []).length,
+  3,
+  'all customer image, successor-delta, and replacement security comparators must require the exact Node entrypoint',
+);
+assert.ok(
+  !script.includes("config.get('Entrypoint') not in (None, [])"),
+  'a stale empty customer entrypoint comparator remains',
+);
 assert.ok(workflow.includes("config['WorkingDir'] == '/workspace'"));
 assert.ok(workflow.includes("config['Healthcheck'] =="));
 

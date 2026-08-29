@@ -28,6 +28,10 @@ const repair = 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52';
 const canonical = '06459511d9330a0e1d956c42529b81aa9970e7a2';
 const c36 = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58';
 const auth = '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874';
+const previousAttestation = '38e9d2660b871c691afdd69541e17c17a7b55821';
+const previousScript = 'dfad82098c2042a5cd884f7c1116a9b4e424ac8685a68db3c7633f58a7e22bfb';
+const previousValidator = 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542';
+const previousManifest = '25ff5bb29342bbb1404ff888dacb43d464867c113f8f3db04ebb2df4e90ae733';
 const canonicalReceipt = '/var/lib/fetanagent/kemerbet-readiness-recheck/ready-v1';
 
 function sha(value) {
@@ -71,6 +75,25 @@ assert.match(bridge, new RegExp(`readonly REVIEWED_REPAIR_RELEASE='${repair}'`))
 assert.match(bridge, new RegExp(`readonly CANONICAL_H14='${canonical}'`));
 assert.match(bridge, new RegExp(`readonly H14_HELPER_SHA256='${c36}'`));
 assert.match(bridge, new RegExp(`readonly AUTHORIZATION_SHA256='${auth}'`));
+assert.match(bridge, new RegExp(`readonly PREVIOUS_ATTESTATION_RELEASE='${previousAttestation}'`));
+assert.match(bridge, new RegExp(`readonly PREVIOUS_ATTESTATION_SCRIPT_SHA256='${previousScript}'`));
+assert.match(
+  bridge,
+  new RegExp(`readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256='${previousValidator}'`),
+);
+assert.match(bridge, new RegExp(`readonly PREVIOUS_BUNDLE_MANIFEST_SHA256='${previousManifest}'`));
+assert.match(bridge, /readonly PREVIOUS_ATTESTATION_SCRIPT_SIZE='92946'/);
+assert.match(bridge, /readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE='17941'/);
+assert.match(bridge, /readonly PREVIOUS_BUNDLE_MANIFEST_SIZE='928'/);
+for (const devIno of [
+  "PREVIOUS_CLAIM_PARENT_DEV_INO='64769:6102851'",
+  "PREVIOUS_CLAIM_ROOT_DEV_INO='64769:6102854'",
+  "PREVIOUS_ATTESTATION_SCRIPT_DEV_INO='64769:6102855'",
+  "PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102856'",
+  "PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'",
+]) {
+  assert.ok(bridge.includes(devIno), `previous immutable claim identity omits ${devIno}`);
+}
 assert.ok(bridge.includes(`readonly RECHECK_RECEIPT='${canonicalReceipt}'`));
 assert.doesNotMatch(bridge, /kemerbet-readiness-recheck-ready-v1/);
 assert.match(bridge, /\[\[ \$# -eq 6 \]\]/);
@@ -110,6 +133,56 @@ const helper = spawnSync(
 assert.equal(helper.status, 0, helper.stderr?.toString('utf8'));
 assert.equal(sha(helper.stdout), c36, 'canonical c36 helper bytes changed');
 
+const previousBridgeBytes = spawnSync(
+  'git',
+  [
+    'show',
+    `${previousAttestation}:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bridge.sh`,
+  ],
+  { cwd: root, encoding: null, maxBuffer: 8 * 1024 * 1024 },
+);
+assert.equal(previousBridgeBytes.status, 0, previousBridgeBytes.stderr?.toString('utf8'));
+assert.equal(previousBridgeBytes.stdout.length, 92946);
+assert.equal(sha(previousBridgeBytes.stdout), previousScript);
+const previousValidatorBytes = spawnSync(
+  'git',
+  [
+    'show',
+    `${previousAttestation}:infra/operations/fetanagent-kemerbet-h14-terminal-differential-validator.py`,
+  ],
+  { cwd: root, encoding: null, maxBuffer: 8 * 1024 * 1024 },
+);
+assert.equal(previousValidatorBytes.status, 0, previousValidatorBytes.stderr?.toString('utf8'));
+assert.equal(previousValidatorBytes.stdout.length, 17941);
+assert.equal(sha(previousValidatorBytes.stdout), previousValidator);
+const previousManifestBytes = Buffer.from(
+  [
+    'version=1',
+    'contract=fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bundle',
+    `attestation_implementation_sha=${previousAttestation}`,
+    `repair_implementation_sha=${repair}`,
+    `canonical_h14_sha=${canonical}`,
+    'staging_project_ref=spzpiyxheappsfyswewl',
+    'staging_droplet_id=593344964',
+    `authorization_sha256=${auth}`,
+    `terminal_attestation_bridge_sha256=${previousScript}`,
+    'terminal_attestation_bridge_size=92946',
+    `terminal_differential_validator_sha256=${previousValidator}`,
+    'terminal_differential_validator_size=17941',
+    'provider_action_enabled=false',
+    'financial_actions_mode=dry_run',
+    'kemerbet_executor_enabled=false',
+    'kemerbet_final_action_enabled=false',
+    'transfer_enabled=false',
+    'amount_entry_enabled=false',
+    'money_moved=false',
+    '',
+  ].join('\n'),
+  'ascii',
+);
+assert.equal(previousManifestBytes.length, 928);
+assert.equal(sha(previousManifestBytes), previousManifest);
+
 const claim = shellFunction(bridge, 'claim_and_load_bundle');
 for (const required of [
   'names = [script_name, validator_name, manifest_name]',
@@ -127,20 +200,103 @@ for (const required of [
   'sync_directory(parent)',
   'A completed root-owned claim is the only replay authority',
   'Do not\n        # inspect an uploader-controlled leftover',
+  'def validate_previous_claim():',
+  'immutable_identity(previous_root)',
+  'directory(parent, root_owner, 0o700, [previous_attestation, attestation])',
+  "[previous_attestation, f'.installing-{attestation}']",
+  'if validate_previous_claim() != previous_boundary:',
 ]) {
   assert.ok(claim.includes(required), `bundle claim omits ${required}`);
 }
 assert.doesNotMatch(claim, /os\.rename\(source, installing\)|os\.chown\(source|os\.fchown\(source/);
+assert.doesNotMatch(claim, /os\.mkdir\(parent|os\.chown\(parent|os\.chmod\(parent/);
+for (const exactPreviousBoundary of [
+  'len(values[script_name]) != previous_script_size',
+  'hashlib.sha256(values[script_name]).hexdigest() != previous_script_sha',
+  'len(values[validator_name]) != previous_validator_size',
+  'hashlib.sha256(values[validator_name]).hexdigest() != previous_validator_sha',
+  'len(values[manifest_name]) != previous_manifest_size',
+  'hashlib.sha256(values[manifest_name]).hexdigest() != previous_manifest_sha',
+  'dev_ino(previous_root) != previous_root_dev_ino',
+  "dev_ino(f'{previous_root}/{script_name}') != previous_script_dev_ino",
+  "dev_ino(f'{previous_root}/{validator_name}') != previous_validator_dev_ino",
+  "dev_ino(f'{previous_root}/{manifest_name}') != previous_manifest_dev_ino",
+]) {
+  assert.ok(
+    claim.includes(exactPreviousBoundary),
+    `previous immutable claim validation omits ${exactPreviousBoundary}`,
+  );
+}
+assert.equal(
+  count(claim, /validate_previous_claim\(\) != previous_boundary/g),
+  4,
+  'the previous claim must be revalidated around both interrupted copy and atomic publication',
+);
 const committedClaimBranch = section(
   claim,
   '    if os.path.lexists(final):\n',
-  '    else:\n        source_values, source_identities, source_directory = snapshot_source()',
+  '    else:\n        directory(parent, root_owner, 0o700)',
   'committed-claim replay branch',
 );
 assert.doesNotMatch(committedClaimBranch, /snapshot_source|source_values|consume_source/);
 assert.match(
   claim,
-  /before\.st_size, before\.st_mtime_ns\)[\s\S]*after_read\.st_size, after_read\.st_mtime_ns/,
+  /before\.st_size, before\.st_mtime_ns, before\.st_ctime_ns\)[\s\S]*after\.st_size, after\.st_mtime_ns, after\.st_ctime_ns/,
+);
+
+function allowedClaimEntries(phase, current) {
+  if (phase === 'before') return [previousAttestation];
+  if (phase === 'installing') return [previousAttestation, `.installing-${current}`].sort();
+  if (phase === 'final') return [previousAttestation, current].sort();
+  throw new Error('unsupported claim phase');
+}
+function acceptsClaimEntries(actual, phase, current) {
+  return [...actual].sort().join('\0') === allowedClaimEntries(phase, current).join('\0');
+}
+const correctionRelease = 'f'.repeat(40);
+assert.deepEqual(allowedClaimEntries('before', correctionRelease), [previousAttestation]);
+assert.deepEqual(allowedClaimEntries('installing', correctionRelease), [
+  `.installing-${correctionRelease}`,
+  previousAttestation,
+]);
+assert.deepEqual(
+  allowedClaimEntries('final', correctionRelease),
+  [previousAttestation, correctionRelease].sort(),
+);
+for (const [phase, entries] of [
+  ['before', []],
+  ['before', [correctionRelease]],
+  ['before', [previousAttestation, 'unknown-third-claim']],
+  ['final', [previousAttestation, correctionRelease, 'unknown-third-claim']],
+  ['installing', [previousAttestation, `.installing-${'e'.repeat(40)}`]],
+  ['final', [previousAttestation, correctionRelease, `.installing-${correctionRelease}`]],
+]) {
+  assert.equal(acceptsClaimEntries(entries, phase, correctionRelease), false);
+}
+const copyIndex = claim.indexOf('for name in names:\n            copy_claim_file');
+const preRenameRevalidationIndex = claim.indexOf(
+  'if validate_previous_claim() != previous_boundary:',
+  copyIndex,
+);
+const claimRenameIndex = claim.indexOf('os.rename(installing, final)', copyIndex);
+const parentSyncIndex = claim.indexOf('sync_directory(parent)', claimRenameIndex);
+const postRenameRevalidationIndex = claim.indexOf(
+  'if validate_previous_claim() != previous_boundary:',
+  claimRenameIndex,
+);
+const currentValidationIndex = claim.indexOf(
+  'validate(final, root_owner, 0o400)',
+  claimRenameIndex,
+);
+const consumeSourceIndex = claim.indexOf('consume_source(source_identities, source_directory)');
+assert.ok(
+  copyIndex < preRenameRevalidationIndex &&
+    preRenameRevalidationIndex < claimRenameIndex &&
+    claimRenameIndex < parentSyncIndex &&
+    parentSyncIndex < postRenameRevalidationIndex &&
+    postRenameRevalidationIndex < currentValidationIndex &&
+    currentValidationIndex < consumeSourceIndex,
+  'claim publication must revalidate the legacy claim before and after atomic append',
 );
 assert.ok(count(bridge, /bundle_manifest_size=/g) >= 2);
 assert.match(bridge, /BUNDLE_MANIFEST_SIZE="\$\{bundle_values\[4\]\}"/);
@@ -181,10 +337,16 @@ for (const required of [
   'kemerbet-readiness-cohort-recheck-authorization-spent-failed-terminal-v1',
   'terminal-recovery-marker-v1',
   'root:root:755',
-  'root:10001:440:1:37',
+  "stat --format='%u:%g:%a:%h:%s'",
+  '0:10001:440:1:37',
 ]) {
   assert.ok(forward.includes(required), `forward-artifact gate omits ${required}`);
 }
+assert.doesNotMatch(
+  forward,
+  /stat --format='%U:%G:%a:%h:%s'[\s\S]*root:10001:440:1:37/,
+  'a numeric GID must not be compared through group-name resolution',
+);
 
 const sudoers = shellFunction(bridge, 'capture_sudoers_boundary');
 assert.match(sudoers, /stat --format='%d:%i'/);
@@ -262,6 +424,52 @@ if require_no_other_mutator_processes; then exit 1; fi
     { encoding: 'utf8' },
   );
   assert.equal(mutatorFixture.status, 0, mutatorFixture.stderr);
+
+  const unmappedMarkerGroupFixture = spawnSync(
+    'bash',
+    [
+      '-c',
+      `set -euo pipefail
+${forward}
+fixture="$(mktemp -d)"
+cleanup() { rm -rf -- "$fixture"; }
+trap cleanup EXIT
+CONTROL_ROOT="$fixture/control"
+OWNER_RECEIPT_ROOT="$fixture/receipts"
+SEAL_BINDING="$fixture/seal-binding"
+FINAL_BINDING="$fixture/final-binding"
+RECHECK_RECEIPT="$fixture/recheck-receipt"
+H14_ROOT="$fixture/h14"
+PLAYER_STAGE_NAME='player-stage'
+CLAIM_STAGE_NAME='claim-stage'
+PROFILE_ACK_NAME='profile-ack'
+FAILED_MARKER_NAME='failed-marker'
+PROFILE_FINALIZED_NAME='profile-finalized'
+TERMINAL_MARKER_NAME='terminal-marker'
+mkdir -p "$CONTROL_ROOT" "$OWNER_RECEIPT_ROOT" "$H14_ROOT"
+printf '%037d' 0 >"$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME"
+stat() {
+  local format="$1" path="\${!#}"
+  if [[ "$path" == "$OWNER_RECEIPT_ROOT" && "$format" == "--format=%U:%G:%a" ]]; then
+    printf '%s\\n' 'root:root:755'
+  elif [[ "$path" == "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME" &&
+    "$format" == "--format=%u:%g:%a:%h:%s" ]]; then
+    printf '%s\\n' '0:10001:440:1:37'
+  elif [[ "$path" == "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME" &&
+    "$format" == "--format=%U:%G:%a:%h:%s" ]]; then
+    printf '%s\\n' 'root:UNKNOWN:440:1:37'
+  else
+    command stat "$@"
+  fi
+}
+[[ "$(stat --format='%U:%G:%a:%h:%s' "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME")" ==
+  'root:UNKNOWN:440:1:37' ]]
+require_forward_artifacts_absent "$CONTROL_ROOT"
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(unmappedMarkerGroupFixture.status, 0, unmappedMarkerGroupFixture.stderr);
 }
 
 const matrixFunction = shellFunction(bridge, 'require_phase_matrix');

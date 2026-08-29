@@ -40,6 +40,10 @@ const h13Release = '306818ca812bd2abce8479396c4eea8383ea00f9';
 const reviewedRepairRelease = 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52';
 const authorizationSha256 = '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874';
 const successorHelperSha256 = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58';
+const previousAttestation = '38e9d2660b871c691afdd69541e17c17a7b55821';
+const previousScript = 'dfad82098c2042a5cd884f7c1116a9b4e424ac8685a68db3c7633f58a7e22bfb';
+const previousValidator = 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542';
+const previousManifest = '25ff5bb29342bbb1404ff888dacb43d464867c113f8f3db04ebb2df4e90ae733';
 const stagingProjectRef = 'spzpiyxheappsfyswewl';
 const productionProjectRef = 'xzztugbgtulptnbpoelr';
 const stagingDropletId = '593344964';
@@ -724,7 +728,12 @@ for (const required of [
   'directory(receipt_root, (0, 0), 0o755, receipt_dev_ino, [marker_name])',
   "['completed-v1', 'intent-v1']",
   'os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC',
-  'sorted(os.listdir(claim_parent)) != [attestation]',
+  '[previous_attestation, attestation]',
+  "previous_root = f'{claim_parent}/{previous_attestation}'",
+  'directory(previous_root, (0, 0), 0o700, previous_root_dev_ino, names)',
+  "exact_file(f'{previous_root}/{bridge_name}', (0, 0), 0o400,",
+  "exact_file(f'{previous_root}/{validator_name}', (0, 0), 0o400,",
+  "exact_file(f'{previous_root}/{manifest_name}', (0, 0), 0o400,",
   'exact_file(bridge, (0, 0), 0o400, bridge_dev_ino, bridge_sha, bridge_size)',
   'exact_file(manifest, (0, 0), 0o400, manifest_dev_ino, manifest_sha,',
   'PASS H14-D000',
@@ -746,6 +755,44 @@ for (const required of [
   'terminal-recovery-marker-v1',
 ]) {
   assert.ok(liveTerminalBoundary.includes(required), `live terminal boundary omits: ${required}`);
+}
+for (const exact of [
+  `PREVIOUS_ATTESTATION_RELEASE='${previousAttestation}'`,
+  `PREVIOUS_ATTESTATION_SCRIPT_SHA256='${previousScript}'`,
+  `PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256='${previousValidator}'`,
+  `PREVIOUS_BUNDLE_MANIFEST_SHA256='${previousManifest}'`,
+  "PREVIOUS_ATTESTATION_SCRIPT_SIZE='92946'",
+  "PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE='17941'",
+  "PREVIOUS_BUNDLE_MANIFEST_SIZE='928'",
+  "PREVIOUS_CLAIM_PARENT_DEV_INO='64769:6102851'",
+  "PREVIOUS_CLAIM_ROOT_DEV_INO='64769:6102854'",
+  "PREVIOUS_ATTESTATION_SCRIPT_DEV_INO='64769:6102855'",
+  "PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102856'",
+  "PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'",
+]) {
+  assert.ok(bridge.includes(exact), `Owner bridge omits prior terminal claim binding: ${exact}`);
+}
+assert.doesNotMatch(
+  liveTerminalBoundary,
+  /sorted\(os\.listdir\(claim_parent\)\) != \[attestation\]/,
+);
+function acceptsTerminalClaimEntries(actual, current) {
+  return [...actual].sort().join('\0') === [previousAttestation, current].sort().join('\0');
+}
+const correctionAttestation = 'f'.repeat(40);
+assert.equal(
+  acceptsTerminalClaimEntries([previousAttestation, correctionAttestation], correctionAttestation),
+  true,
+);
+for (const invalid of [
+  [],
+  [correctionAttestation],
+  [previousAttestation, 'unknown-third-claim'],
+  [previousAttestation, correctionAttestation, 'unknown-third-claim'],
+  [previousAttestation, `.installing-${correctionAttestation}`],
+  [previousAttestation, correctionAttestation, `.installing-${correctionAttestation}`],
+]) {
+  assert.equal(acceptsTerminalClaimEntries(invalid, correctionAttestation), false);
 }
 assert.doesNotMatch(
   liveTerminalBoundary,

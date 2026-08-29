@@ -17,6 +17,18 @@ readonly CANONICAL_H14='06459511d9330a0e1d956c42529b81aa9970e7a2'
 readonly H13_HELPER_SHA256='3b789c983c415326171c6b4224016d2a04769a0b8c37cb91fc463383f2d141aa'
 readonly H14_HELPER_SHA256='c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58'
 readonly AUTHORIZATION_SHA256='6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'
+readonly PREVIOUS_ATTESTATION_RELEASE='38e9d2660b871c691afdd69541e17c17a7b55821'
+readonly PREVIOUS_ATTESTATION_SCRIPT_SHA256='dfad82098c2042a5cd884f7c1116a9b4e424ac8685a68db3c7633f58a7e22bfb'
+readonly PREVIOUS_ATTESTATION_SCRIPT_SIZE='92946'
+readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256='d4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542'
+readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE='17941'
+readonly PREVIOUS_BUNDLE_MANIFEST_SHA256='25ff5bb29342bbb1404ff888dacb43d464867c113f8f3db04ebb2df4e90ae733'
+readonly PREVIOUS_BUNDLE_MANIFEST_SIZE='928'
+readonly PREVIOUS_CLAIM_PARENT_DEV_INO='64769:6102851'
+readonly PREVIOUS_CLAIM_ROOT_DEV_INO='64769:6102854'
+readonly PREVIOUS_ATTESTATION_SCRIPT_DEV_INO='64769:6102855'
+readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102856'
+readonly PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
 readonly EXPECTED_PUBLIC_IPV4='161.35.41.232'
@@ -75,6 +87,7 @@ readonly CLAIM_INSTALLING="${CLAIM_PARENT}/.installing-${ATTESTATION_RELEASE}"
 readonly CLAIM_ROOT="${CLAIM_PARENT}/${ATTESTATION_RELEASE}"
 
 [[ "$ATTESTATION_RELEASE" =~ ^[0-9a-f]{40}$ &&
+  "$ATTESTATION_RELEASE" != "$PREVIOUS_ATTESTATION_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$REPAIR_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$CANONICAL_H14" &&
   "$ATTESTATION_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
@@ -379,7 +392,13 @@ claim_and_load_bundle() {
     "$ATTESTATION_RELEASE" "$REPAIR_RELEASE" "$CANONICAL_H14" "$STAGING_PROJECT_REF" \
     "$EXPECTED_DROPLET_ID" "$AUTHORIZATION_SHA256" "$PROVIDED_MANIFEST_SHA256" \
     "$installer_sha" "$admin_uid" "$admin_gid" "$SCRIPT_BASENAME" \
-    "$VALIDATOR_BASENAME" "$MANIFEST_BASENAME" <<'PY'
+    "$VALIDATOR_BASENAME" "$MANIFEST_BASENAME" "$PREVIOUS_ATTESTATION_RELEASE" \
+    "$PREVIOUS_ATTESTATION_SCRIPT_SHA256" "$PREVIOUS_ATTESTATION_SCRIPT_SIZE" \
+    "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256" "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE" \
+    "$PREVIOUS_BUNDLE_MANIFEST_SHA256" "$PREVIOUS_BUNDLE_MANIFEST_SIZE" \
+    "$PREVIOUS_CLAIM_PARENT_DEV_INO" "$PREVIOUS_CLAIM_ROOT_DEV_INO" \
+    "$PREVIOUS_ATTESTATION_SCRIPT_DEV_INO" "$PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$PREVIOUS_BUNDLE_MANIFEST_DEV_INO" <<'PY'
 import hashlib
 import os
 import re
@@ -388,9 +407,16 @@ import sys
 
 (source, parent, installing, final, attestation, repair, canonical, project, droplet,
  auth, manifest_sha, installer_sha, admin_uid_text, admin_gid_text, script_name,
- validator_name, manifest_name) = sys.argv[1:]
+ validator_name, manifest_name, previous_attestation, previous_script_sha,
+ previous_script_size_text, previous_validator_sha, previous_validator_size_text,
+ previous_manifest_sha, previous_manifest_size_text, previous_parent_dev_ino,
+ previous_root_dev_ino, previous_script_dev_ino, previous_validator_dev_ino,
+ previous_manifest_dev_ino) = sys.argv[1:]
 admin_uid = int(admin_uid_text)
 admin_gid = int(admin_gid_text)
+previous_script_size = int(previous_script_size_text)
+previous_validator_size = int(previous_validator_size_text)
+previous_manifest_size = int(previous_manifest_size_text)
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
 names = [script_name, validator_name, manifest_name]
@@ -435,9 +461,9 @@ def read_file(path, owners, mode, maximum):
             or len(data) != before.st_size
             or os.path.realpath(path) != path
             or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
-                before.st_nlink, before.st_size, before.st_mtime_ns)
+                before.st_nlink, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
                != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
-                   after.st_nlink, after.st_size, after.st_mtime_ns)
+                   after.st_nlink, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
         ):
             reject()
         return data
@@ -527,6 +553,42 @@ def validate(root, owners, file_mode):
         for name in names
     }
     return (*validate_payloads(values), values)
+
+def immutable_identity(path):
+    value = os.lstat(path)
+    return (
+        value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+        value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+    )
+
+def dev_ino(path):
+    value = os.lstat(path)
+    return f'{value.st_dev}:{value.st_ino}'
+
+def validate_previous_claim():
+    previous_root = f'{parent}/{previous_attestation}'
+    directory(previous_root, {(0, 0)}, 0o700, names)
+    values = {
+        name: read_file(f'{previous_root}/{name}', {(0, 0)}, 0o400, 2 * 1024 * 1024)
+        for name in names
+    }
+    if (
+        dev_ino(previous_root) != previous_root_dev_ino
+        or dev_ino(f'{previous_root}/{script_name}') != previous_script_dev_ino
+        or dev_ino(f'{previous_root}/{validator_name}') != previous_validator_dev_ino
+        or dev_ino(f'{previous_root}/{manifest_name}') != previous_manifest_dev_ino
+        or len(values[script_name]) != previous_script_size
+        or hashlib.sha256(values[script_name]).hexdigest() != previous_script_sha
+        or len(values[validator_name]) != previous_validator_size
+        or hashlib.sha256(values[validator_name]).hexdigest() != previous_validator_sha
+        or len(values[manifest_name]) != previous_manifest_size
+        or hashlib.sha256(values[manifest_name]).hexdigest() != previous_manifest_sha
+    ):
+        reject()
+    return (
+        immutable_identity(previous_root),
+        *(immutable_identity(f'{previous_root}/{name}') for name in names),
+    )
 
 def snapshot_source():
     descriptor = os.open(
@@ -670,34 +732,63 @@ def consume_source(expected_identities, expected_directory):
 
 try:
     root_owner = {(0, 0)}
+    if (
+        not release.fullmatch(previous_attestation)
+        or previous_attestation == attestation
+        or not sha.fullmatch(previous_script_sha)
+        or not sha.fullmatch(previous_validator_sha)
+        or not sha.fullmatch(previous_manifest_sha)
+        or any(re.fullmatch(r'[0-9]+:[0-9]+', value) is None for value in (
+            previous_parent_dev_ino, previous_root_dev_ino, previous_script_dev_ino,
+            previous_validator_dev_ino, previous_manifest_dev_ino,
+        ))
+        or previous_script_size <= 0
+        or previous_validator_size <= 0
+        or previous_manifest_size <= 0
+    ):
+        reject()
     if os.path.lexists(final):
         if os.path.lexists(installing):
             reject()
-        directory(parent, root_owner, 0o700, [attestation])
+        directory(parent, root_owner, 0o700, [previous_attestation, attestation])
+        if dev_ino(parent) != previous_parent_dev_ino:
+            reject()
+        previous_boundary = validate_previous_claim()
         script_sha, script_size, validator_sha, validator_size, manifest_size, _ = validate(
             final, root_owner, 0o400,
         )
+        if validate_previous_claim() != previous_boundary:
+            reject()
         # A completed root-owned claim is the only replay authority.  Do not
         # inspect an uploader-controlled leftover: it cannot change or block
         # authorization after the atomic claim has committed.
     else:
+        directory(parent, root_owner, 0o700)
+        if dev_ino(parent) != previous_parent_dev_ino:
+            reject()
+        children = os.listdir(parent)
+        resuming = os.path.lexists(installing)
+        if not resuming:
+            if sorted(children) != [previous_attestation]:
+                reject()
+            previous_boundary = validate_previous_claim()
+        else:
+            if sorted(children) != sorted([previous_attestation, f'.installing-{attestation}']):
+                reject()
+            previous_boundary = validate_previous_claim()
         source_values, source_identities, source_directory = snapshot_source()
         validate_payloads(source_values)
-        if not os.path.lexists(parent):
-            os.mkdir(parent, 0o700)
-            os.chown(parent, 0, 0)
-            os.chmod(parent, 0o700)
-            sync_directory(os.path.dirname(parent))
-        directory(parent, root_owner, 0o700)
-        children = os.listdir(parent)
-        if not os.path.lexists(installing):
-            if children:
-                reject()
+        if not resuming:
             os.mkdir(installing, 0o700)
             os.chown(installing, 0, 0)
             os.chmod(installing, 0o700)
             sync_directory(parent)
-        directory(parent, root_owner, 0o700, [f'.installing-{attestation}'])
+        directory(
+            parent, root_owner, 0o700,
+            [previous_attestation, f'.installing-{attestation}'],
+        )
+        if validate_previous_claim() != previous_boundary:
+            reject()
         directory(installing, root_owner, 0o700)
         if any(name not in names for name in os.listdir(installing)):
             reject()
@@ -707,9 +798,13 @@ try:
         script_sha, script_size, validator_sha, validator_size, manifest_size, _ = validate(
             installing, root_owner, 0o400,
         )
+        if validate_previous_claim() != previous_boundary:
+            reject()
         os.rename(installing, final)
         sync_directory(parent)
-        directory(parent, root_owner, 0o700, [attestation])
+        directory(parent, root_owner, 0o700, [previous_attestation, attestation])
+        if validate_previous_claim() != previous_boundary:
+            reject()
         validate(final, root_owner, 0o400)
         consume_source(source_identities, source_directory)
     print(script_sha)
@@ -1121,7 +1216,7 @@ require_forward_artifacts_absent() {
     "$(find -P "$OWNER_RECEIPT_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n')" == "$TERMINAL_MARKER_NAME" &&
     ! -L "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME" &&
     -f "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME" &&
-    "$(stat --format='%U:%G:%a:%h:%s' "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME")" == 'root:10001:440:1:37' ]]
+    "$(stat --format='%u:%g:%a:%h:%s' "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME")" == '0:10001:440:1:37' ]]
 }
 
 run_differential_validator() {

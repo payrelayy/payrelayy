@@ -24,6 +24,18 @@ readonly CANONICAL_H14='06459511d9330a0e1d956c42529b81aa9970e7a2'
 readonly CANONICAL_TAG='06459511d933'
 readonly H14_HELPER_SHA256='c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58'
 readonly AUTHORIZATION_SHA256='6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'
+readonly PREVIOUS_ATTESTATION_RELEASE='38e9d2660b871c691afdd69541e17c17a7b55821'
+readonly PREVIOUS_ATTESTATION_SCRIPT_SHA256='dfad82098c2042a5cd884f7c1116a9b4e424ac8685a68db3c7633f58a7e22bfb'
+readonly PREVIOUS_ATTESTATION_SCRIPT_SIZE='92946'
+readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256='d4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542'
+readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE='17941'
+readonly PREVIOUS_BUNDLE_MANIFEST_SHA256='25ff5bb29342bbb1404ff888dacb43d464867c113f8f3db04ebb2df4e90ae733'
+readonly PREVIOUS_BUNDLE_MANIFEST_SIZE='928'
+readonly PREVIOUS_CLAIM_PARENT_DEV_INO='64769:6102851'
+readonly PREVIOUS_CLAIM_ROOT_DEV_INO='64769:6102854'
+readonly PREVIOUS_ATTESTATION_SCRIPT_DEV_INO='64769:6102855'
+readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102856'
+readonly PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
 readonly EXPECTED_PUBLIC_IPV4='161.35.41.232'
@@ -92,6 +104,7 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
 [[ "$REPAIR_RELEASE" == "$REVIEWED_REPAIR_RELEASE" ]] ||
   die 'the completed live-repair release is not exact a579'
 [[ "$ATTESTATION_RELEASE" =~ ^[0-9a-f]{40}$ &&
+  "$ATTESTATION_RELEASE" != "$PREVIOUS_ATTESTATION_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$REPAIR_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$CANONICAL_H14" &&
   "$ATTESTATION_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
@@ -865,6 +878,13 @@ require_live_terminal_attestation_boundary() {
     "$ATTESTED_TERMINAL_MANIFEST_DEV_INO" "$ATTESTED_TERMINAL_MANIFEST_SHA256" \
     "$ATTESTED_TERMINAL_MANIFEST_SIZE" "$TERMINAL_BRIDGE_BASENAME" \
     "$TERMINAL_VALIDATOR_BASENAME" "$TERMINAL_MANIFEST_BASENAME" \
+    "$PREVIOUS_ATTESTATION_RELEASE" "$PREVIOUS_CLAIM_PARENT_DEV_INO" \
+    "$PREVIOUS_CLAIM_ROOT_DEV_INO" "$PREVIOUS_ATTESTATION_SCRIPT_DEV_INO" \
+    "$PREVIOUS_ATTESTATION_SCRIPT_SHA256" "$PREVIOUS_ATTESTATION_SCRIPT_SIZE" \
+    "$PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256" "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE" \
+    "$PREVIOUS_BUNDLE_MANIFEST_DEV_INO" "$PREVIOUS_BUNDLE_MANIFEST_SHA256" \
+    "$PREVIOUS_BUNDLE_MANIFEST_SIZE" \
     "$SEAL_BINDING" "$FINAL_BINDING" "$RECHECK_RECEIPT" \
     "$H14_ROOT" "$PROFILE_ACK_NAME" "$PROFILE_FINALIZED_NAME" \
     "$FAILED_MARKER_NAME" "$PLAYER_STAGE_NAME" "$CLAIM_STAGE_NAME" <<'PY'
@@ -880,8 +900,12 @@ import sys
  claim_root, claim_root_dev_ino, attestation, validator, validator_dev_ino,
  validator_sha, validator_size_text, bridge, bridge_dev_ino, bridge_sha,
  bridge_size_text, manifest, manifest_dev_ino, manifest_sha, manifest_size_text,
- bridge_name, validator_name, manifest_name, seal_binding,
- final_binding, recheck_receipt, h14_root, profile_ack_name,
+ bridge_name, validator_name, manifest_name,
+ previous_attestation, previous_parent_dev_ino, previous_root_dev_ino,
+ previous_bridge_dev_ino, previous_bridge_sha, previous_bridge_size_text,
+ previous_validator_dev_ino, previous_validator_sha, previous_validator_size_text,
+ previous_manifest_dev_ino, previous_manifest_sha, previous_manifest_size_text,
+ seal_binding, final_binding, recheck_receipt, h14_root, profile_ack_name,
  profile_finalized_name, failed_marker_name, player_stage_name,
  claim_stage_name) = sys.argv[1:]
 
@@ -922,9 +946,11 @@ def exact_file(path, owner, mode, expected_dev_ino, expected_sha, expected_size)
             or hashlib.sha256(data).hexdigest() != expected_sha
             or os.path.realpath(path) != path
             or (before.st_dev, before.st_ino, before.st_mode, before.st_uid,
-                before.st_gid, before.st_nlink, before.st_size, before.st_mtime_ns)
+                before.st_gid, before.st_nlink, before.st_size, before.st_mtime_ns,
+                before.st_ctime_ns)
                != (after.st_dev, after.st_ino, after.st_mode, after.st_uid,
-                   after.st_gid, after.st_nlink, after.st_size, after.st_mtime_ns)
+                   after.st_gid, after.st_nlink, after.st_size, after.st_mtime_ns,
+                   after.st_ctime_ns)
         ):
             reject()
     finally:
@@ -936,18 +962,30 @@ try:
             sudoers_dev_ino, repair_dev_ino, profile_dev_ino, control_dev_ino,
             receipt_dev_ino, marker_dev_ino, claim_root_dev_ino,
             validator_dev_ino, bridge_dev_ino, manifest_dev_ino,
+            previous_parent_dev_ino, previous_root_dev_ino,
+            previous_bridge_dev_ino, previous_validator_dev_ino,
+            previous_manifest_dev_ino,
         ))
         or any(SHA.fullmatch(value) is None for value in (
             sudoers_sha, marker_sha, validator_sha, bridge_sha, manifest_sha,
+            previous_bridge_sha, previous_validator_sha, previous_manifest_sha,
         ))
         or re.fullmatch(r'[1-9][0-9]{0,7}', validator_size_text) is None
         or re.fullmatch(r'[1-9][0-9]{0,7}', bridge_size_text) is None
         or re.fullmatch(r'[1-9][0-9]{0,7}', manifest_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', previous_bridge_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', previous_validator_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', previous_manifest_size_text) is None
+        or previous_attestation == attestation
+        or re.fullmatch(r'[0-9a-f]{40}', previous_attestation) is None
     ):
         reject()
     validator_size = int(validator_size_text)
     bridge_size = int(bridge_size_text)
     manifest_size = int(manifest_size_text)
+    previous_bridge_size = int(previous_bridge_size_text)
+    previous_validator_size = int(previous_validator_size_text)
+    previous_manifest_size = int(previous_manifest_size_text)
 
     exact_file(sudoers, (0, 0), 0o440, sudoers_dev_ino, sudoers_sha,
                os.lstat(sudoers).st_size)
@@ -959,26 +997,22 @@ try:
     exact_file(f'{receipt_root}/{marker_name}', (0, 10001), 0o440,
                marker_dev_ino, marker_sha, 37)
 
-    claim_parent_value = os.lstat(claim_parent)
-    if (
-        not stat.S_ISDIR(claim_parent_value.st_mode)
-        or (claim_parent_value.st_uid, claim_parent_value.st_gid,
-            stat.S_IMODE(claim_parent_value.st_mode)) != (0, 0, 0o700)
-        or os.path.realpath(claim_parent) != claim_parent
-        or sorted(os.listdir(claim_parent)) != [attestation]
-    ):
-        reject()
-    claim_value = os.lstat(claim_root)
-    if (
-        not stat.S_ISDIR(claim_value.st_mode)
-        or (claim_value.st_uid, claim_value.st_gid,
-            stat.S_IMODE(claim_value.st_mode)) != (0, 0, 0o700)
-        or f'{claim_value.st_dev}:{claim_value.st_ino}' != claim_root_dev_ino
-        or os.path.realpath(claim_root) != claim_root
-        or sorted(os.listdir(claim_root))
-           != sorted([bridge_name, validator_name, manifest_name])
-    ):
-        reject()
+    names = [bridge_name, validator_name, manifest_name]
+    directory(
+        claim_parent, (0, 0), 0o700, previous_parent_dev_ino,
+        [previous_attestation, attestation],
+    )
+    previous_root = f'{claim_parent}/{previous_attestation}'
+    directory(previous_root, (0, 0), 0o700, previous_root_dev_ino, names)
+    exact_file(f'{previous_root}/{bridge_name}', (0, 0), 0o400,
+               previous_bridge_dev_ino, previous_bridge_sha, previous_bridge_size)
+    exact_file(f'{previous_root}/{validator_name}', (0, 0), 0o400,
+               previous_validator_dev_ino, previous_validator_sha,
+               previous_validator_size)
+    exact_file(f'{previous_root}/{manifest_name}', (0, 0), 0o400,
+               previous_manifest_dev_ino, previous_manifest_sha,
+               previous_manifest_size)
+    directory(claim_root, (0, 0), 0o700, claim_root_dev_ino, names)
     exact_file(validator, (0, 0), 0o400, validator_dev_ino, validator_sha,
                validator_size)
     exact_file(bridge, (0, 0), 0o400, bridge_dev_ino, bridge_sha, bridge_size)

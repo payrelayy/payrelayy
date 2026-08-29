@@ -99,6 +99,21 @@ readonly PRIOR_FAILED_RECOVERY_MANIFEST_SHA256='9c38e6fe7f5e24fd5309564fd0eda3a4
 readonly PRIOR_FAILED_RECOVERY_MANIFEST_SIZE='1673'
 readonly PRIOR_FAILED_RECOVERY_WORKFLOW_RUN_ID='33239376335'
 readonly PRIOR_FAILED_RECOVERY_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_CORRECTION_RELEASE='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'
+readonly FAILED_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102889'
+readonly FAILED_CORRECTION_SCRIPT_DEV_INO='64769:6102890'
+readonly FAILED_CORRECTION_SCRIPT_SHA256='2a9ce123b931799ba4ee4740789deb4747ba3d4148185c14625e4a430405f373'
+readonly FAILED_CORRECTION_SCRIPT_SIZE='160511'
+readonly FAILED_CORRECTION_VALIDATOR_DEV_INO='64769:6102891'
+readonly FAILED_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_CORRECTION_MANIFEST_DEV_INO='64769:6102892'
+readonly FAILED_CORRECTION_MANIFEST_SHA256='1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d'
+readonly FAILED_CORRECTION_MANIFEST_SIZE='2457'
+readonly FAILED_CORRECTION_WORKFLOW_RUN_ID='33240582644'
+readonly FAILED_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO='64769:6102893'
+readonly FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO='64769:6102894'
 readonly RECOVERY_BUNDLE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
@@ -115,7 +130,8 @@ readonly REPAIR_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-liv
 readonly ATTESTATION_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-terminal-attestation'
 readonly ATTESTATION_CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-terminal-attestation-bundles'
 readonly ORIGINAL_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'
+readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -162,6 +178,7 @@ readonly PROVIDED_MANIFEST_SHA256="$SOURCE_OWNER_MANIFEST_SHA256"
 readonly PROVIDED_AUTHORIZATION_SHA256="$6"
 readonly STAGING_ROOT="$RECOVERY_BUNDLE_PARENT/$RECOVERY_RELEASE"
 readonly PRIOR_FAILED_RECOVERY_ROOT="$RECOVERY_BUNDLE_PARENT/$PRIOR_FAILED_RECOVERY_RELEASE"
+readonly FAILED_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -174,6 +191,8 @@ readonly BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$RECOVERY_RELEASE"
 readonly BRIDGE_ROOT="$BRIDGE_PARENT/$RECOVERY_RELEASE"
 readonly PRIOR_FAILED_BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$PRIOR_FAILED_RECOVERY_RELEASE"
 readonly PRIOR_FAILED_BRIDGE_ROOT="$BRIDGE_PARENT/$PRIOR_FAILED_RECOVERY_RELEASE"
+readonly FAILED_CORRECTION_BRIDGE_INSTALLING="$FAILED_CORRECTION_BRIDGE_PARENT/.installing-$FAILED_CORRECTION_RELEASE"
+readonly FAILED_CORRECTION_BRIDGE_ROOT="$FAILED_CORRECTION_BRIDGE_PARENT/$FAILED_CORRECTION_RELEASE"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -189,7 +208,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   die 'the terminal-attestation implementation must be one distinct full lowercase commit SHA'
 [[ "$RECOVERY_RELEASE" =~ ^[0-9a-f]{40}$ && "$RECOVERY_RELEASE" != "$ATTESTATION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$REPAIR_RELEASE" && "$RECOVERY_RELEASE" != "$CANONICAL_H14" &&
-  "$RECOVERY_RELEASE" != "$PRIOR_FAILED_RECOVERY_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$PRIOR_FAILED_RECOVERY_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -216,7 +236,7 @@ require_prior_failed_recovery_claim() {
     "$(stat --format='%d:%i:%U:%G:%a' "$RECOVERY_BUNDLE_PARENT")" == \
       "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -232,6 +252,21 @@ require_prior_failed_recovery_claim() {
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME")" == \
       "$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO:root:root:400:1:$PRIOR_FAILED_RECOVERY_MANIFEST_SIZE" &&
     "$(sha256sum -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" ]] || return 1
+  [[ ! -L "$FAILED_CORRECTION_ROOT" && -d "$FAILED_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_CORRECTION_ROOT")" == "$FAILED_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a' "$FAILED_CORRECTION_ROOT")" == \
+      "$FAILED_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700" &&
+    "$(find -P "$FAILED_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  [[ "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CORRECTION_ROOT/$SCRIPT_BASENAME")" == \
+      "$FAILED_CORRECTION_SCRIPT_DEV_INO:root:root:400:1:$FAILED_CORRECTION_SCRIPT_SIZE" &&
+    "$(sha256sum -- "$FAILED_CORRECTION_ROOT/$SCRIPT_BASENAME" | awk '{print $1}')" == "$FAILED_CORRECTION_SCRIPT_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CORRECTION_ROOT/$VALIDATOR_BASENAME")" == \
+      "$FAILED_CORRECTION_VALIDATOR_DEV_INO:root:root:400:1:$FAILED_CORRECTION_VALIDATOR_SIZE" &&
+    "$(sha256sum -- "$FAILED_CORRECTION_ROOT/$VALIDATOR_BASENAME" | awk '{print $1}')" == "$FAILED_CORRECTION_VALIDATOR_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == \
+      "$FAILED_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_CORRECTION_MANIFEST_SIZE" &&
+    "$(sha256sum -- "$FAILED_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_CORRECTION_MANIFEST_SHA256" ]] || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -310,6 +345,25 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "prior_failed_recovery_manifest_dev_ino=$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO" \
   "prior_failed_recovery_manifest_sha256=$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" \
   "prior_failed_recovery_manifest_size=$PRIOR_FAILED_RECOVERY_MANIFEST_SIZE" \
+  "failed_correction_implementation_sha=$FAILED_CORRECTION_RELEASE" \
+  "failed_correction_bundle_root_dev_ino=$FAILED_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_correction_script_dev_ino=$FAILED_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_correction_script_sha256=$FAILED_CORRECTION_SCRIPT_SHA256" \
+  "failed_correction_script_size=$FAILED_CORRECTION_SCRIPT_SIZE" \
+  "failed_correction_validator_dev_ino=$FAILED_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_correction_validator_sha256=$FAILED_CORRECTION_VALIDATOR_SHA256" \
+  "failed_correction_validator_size=$FAILED_CORRECTION_VALIDATOR_SIZE" \
+  "failed_correction_manifest_dev_ino=$FAILED_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_correction_manifest_sha256=$FAILED_CORRECTION_MANIFEST_SHA256" \
+  "failed_correction_manifest_size=$FAILED_CORRECTION_MANIFEST_SIZE" \
+  "failed_correction_workflow_run_id=$FAILED_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_correction_workflow_run_attempt=$FAILED_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_correction_bridge_parent_dev_ino=$FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO" \
+  "failed_correction_bridge_installing_dev_ino=$FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO" \
+  'failed_correction_bridge_inventory=empty-no-intent' \
+  'owner_tmpfs_host_config=required-exact' \
+  'owner_inspect_mount_inventory=non-tmpfs-eight' \
+  'canonical_h14_image_initial_state=absent-before-intent' \
   "failed_owner_bridge_implementation_sha=$SOURCE_ATTESTATION_RELEASE" \
   "failed_owner_bridge_script_sha256=$SOURCE_OWNER_BRIDGE_SHA256" \
   "owner_bundle_manifest_sha256=$SOURCE_OWNER_MANIFEST_SHA256" \
@@ -378,7 +432,19 @@ require_original_bridge_namespace_absent() {
 
 require_prior_failed_runtime_ledger_absent() {
   [[ ! -e "$PRIOR_FAILED_BRIDGE_INSTALLING" && ! -L "$PRIOR_FAILED_BRIDGE_INSTALLING" &&
-    ! -e "$PRIOR_FAILED_BRIDGE_ROOT" && ! -L "$PRIOR_FAILED_BRIDGE_ROOT" ]]
+    ! -e "$PRIOR_FAILED_BRIDGE_ROOT" && ! -L "$PRIOR_FAILED_BRIDGE_ROOT" &&
+    ! -e "$FAILED_CORRECTION_BRIDGE_ROOT" && ! -L "$FAILED_CORRECTION_BRIDGE_ROOT" &&
+    ! -L "$FAILED_CORRECTION_BRIDGE_PARENT" && -d "$FAILED_CORRECTION_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_CORRECTION_BRIDGE_PARENT")" == "$FAILED_CORRECTION_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CORRECTION_BRIDGE_PARENT")" == \
+      "$FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_CORRECTION_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_CORRECTION_BRIDGE_INSTALLING" && -d "$FAILED_CORRECTION_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_CORRECTION_BRIDGE_INSTALLING")" == "$FAILED_CORRECTION_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CORRECTION_BRIDGE_INSTALLING")" == \
+      "$FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    -z "$(find -P "$FAILED_CORRECTION_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f\n')" ]]
 }
 
 require_exact_droplet() {
@@ -2012,7 +2078,6 @@ try:
     ):
         raise RuntimeError()
     expected_mounts = {
-        '/tmp': ('tmpfs', '', True),
         '/run/fetanagent-kemerbet-session-control': ('volume', control_volume, True),
         '/run/fetanagent-kemerbet-readiness-cohort-receipts': ('bind', receipt_root, False),
         '/run/secrets/owner_control_database_url': ('bind', f'{secret_root}/owner-database-url', False),
@@ -2022,6 +2087,9 @@ try:
         '/run/configs/supabase_ca_certificate': ('bind', f'{secret_root}/supabase-ca.crt', False),
         '/etc/fetanagent/deposit-proof-reference-profile.v2.json': ('bind', f'{secret_root}/deposit-proof-reference-profile.v2.json', False),
     }
+    expected_tmpfs = {'/tmp': 'rw,noexec,nosuid,size=32m,mode=1777'}
+    if host.get('Tmpfs') != expected_tmpfs:
+        raise RuntimeError()
     observed = {}
     for mount in value['Mounts']:
         destination = mount['Destination']
@@ -2361,6 +2429,26 @@ expected_bridge_intent() {
     "prior_failed_archive_recovery_manifest_dev_ino=$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO" \
     "prior_failed_archive_recovery_manifest_sha256=$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" \
     'prior_failed_archive_recovery_runtime_ledger_absent=true' \
+    "failed_correction_release=$FAILED_CORRECTION_RELEASE" \
+    "failed_correction_bundle_parent_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" \
+    "failed_correction_bundle_root_dev_ino=$FAILED_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_correction_script_dev_ino=$FAILED_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_correction_script_sha256=$FAILED_CORRECTION_SCRIPT_SHA256" \
+    "failed_correction_script_size=$FAILED_CORRECTION_SCRIPT_SIZE" \
+    "failed_correction_validator_dev_ino=$FAILED_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_correction_validator_sha256=$FAILED_CORRECTION_VALIDATOR_SHA256" \
+    "failed_correction_validator_size=$FAILED_CORRECTION_VALIDATOR_SIZE" \
+    "failed_correction_manifest_dev_ino=$FAILED_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_correction_manifest_sha256=$FAILED_CORRECTION_MANIFEST_SHA256" \
+    "failed_correction_manifest_size=$FAILED_CORRECTION_MANIFEST_SIZE" \
+    "failed_correction_workflow_run_id=$FAILED_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_correction_workflow_run_attempt=$FAILED_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_correction_bridge_parent_dev_ino=$FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO" \
+    "failed_correction_bridge_installing_dev_ino=$FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO" \
+    'failed_correction_bridge_inventory=empty-no-intent' \
+    'owner_tmpfs_host_config=required-exact' \
+    'owner_inspect_mount_inventory=non-tmpfs-eight' \
+    'canonical_h14_image_initial_state=absent-before-intent' \
     "archive_recovery_script_sha256=$PROVIDED_RECOVERY_SCRIPT_SHA256" \
     "archive_recovery_script_size=$(stat --format='%s' "$STAGED_INSTALLER")" \
     "archive_recovery_bundle_parent_dev_ino=$(stat --format='%d:%i' "$RECOVERY_BUNDLE_PARENT")" \
@@ -2492,6 +2580,26 @@ expected_bridge_completed() {
     "prior_failed_archive_recovery_manifest_dev_ino=$PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO" \
     "prior_failed_archive_recovery_manifest_sha256=$PRIOR_FAILED_RECOVERY_MANIFEST_SHA256" \
     'prior_failed_archive_recovery_runtime_ledger_absent=true' \
+    "failed_correction_release=$FAILED_CORRECTION_RELEASE" \
+    "failed_correction_bundle_parent_dev_ino=$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" \
+    "failed_correction_bundle_root_dev_ino=$FAILED_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_correction_script_dev_ino=$FAILED_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_correction_script_sha256=$FAILED_CORRECTION_SCRIPT_SHA256" \
+    "failed_correction_script_size=$FAILED_CORRECTION_SCRIPT_SIZE" \
+    "failed_correction_validator_dev_ino=$FAILED_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_correction_validator_sha256=$FAILED_CORRECTION_VALIDATOR_SHA256" \
+    "failed_correction_validator_size=$FAILED_CORRECTION_VALIDATOR_SIZE" \
+    "failed_correction_manifest_dev_ino=$FAILED_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_correction_manifest_sha256=$FAILED_CORRECTION_MANIFEST_SHA256" \
+    "failed_correction_manifest_size=$FAILED_CORRECTION_MANIFEST_SIZE" \
+    "failed_correction_workflow_run_id=$FAILED_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_correction_workflow_run_attempt=$FAILED_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_correction_bridge_parent_dev_ino=$FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO" \
+    "failed_correction_bridge_installing_dev_ino=$FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO" \
+    'failed_correction_bridge_inventory=empty-no-intent' \
+    'owner_tmpfs_host_config=required-exact' \
+    'owner_inspect_mount_inventory=non-tmpfs-eight' \
+    'canonical_h14_image_initial_state=absent-before-intent' \
     "archive_recovery_script_sha256=$PROVIDED_RECOVERY_SCRIPT_SHA256" \
     "archive_recovery_script_size=$(stat --format='%s' "$STAGED_INSTALLER")" \
     "archive_recovery_bundle_parent_dev_ino=$(stat --format='%d:%i' "$RECOVERY_BUNDLE_PARENT")" \
@@ -2786,7 +2894,7 @@ NON_OWNER_INVENTORY_SHA256="$(printf '%s' "$NON_OWNER_INVENTORY" | sha256sum | a
 [[ "$NON_OWNER_INVENTORY_COUNT" =~ ^[0-9]+$ && "$NON_OWNER_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die 'the unrelated project-service inventory attestation is malformed'
 
-require_prior_failed_runtime_ledger_absent || die 'the failed 911 recovery runtime ledger is not absent'
+require_prior_failed_runtime_ledger_absent || die 'the 911-absent and ff989-empty-pre-intent runtime evidence is not exact'
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
   require_bridge_intent || die 'the durable Owner-runtime bridge intent changed'
@@ -2802,6 +2910,8 @@ else
   [[ -z "$(docker_local container ls --all --quiet --filter "id=$RETIRED_COORDINATOR_CONTAINER_ID")" ]] || die 'the retired coordinator identity still exists'
   require_runtime_boundary "$OLD_OWNER_CONTAINER_ID" || die 'the pre-bridge Owner/coordinator/volume/gate boundary is not exact'
   require_container_no_chromium "$OLD_OWNER_CONTAINER_ID" || die 'the historical Owner contains a browser process'
+  ! docker_local image inspect "$OWNER_IMAGE" >/dev/null 2>&1 ||
+    die 'the canonical H14 image must be absent before the new correction intent is first published'
   publish_exact_record "$BRIDGE_WORK_ROOT/intent-v1" 0600 < <(expected_bridge_intent) ||
     die 'the Owner-runtime bridge intent could not be published durably'
 fi
@@ -2859,7 +2969,7 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
   require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
     die 'the live terminal-attestation boundary changed after bridge completion'
   require_prior_failed_runtime_ledger_absent ||
-    die 'the failed 911 recovery runtime ledger appeared beside completed recovery evidence'
+    die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed beside completion'
   printf '%s\n' 'FetanAgent H14 Owner runtime bridge already valid: Owner only; no provider action and no money moved.'
   exit 0
 fi
@@ -2875,6 +2985,7 @@ else
   require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
     die 'the live terminal-attestation boundary changed immediately before image load'
   require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before image load'
+  require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before image load'
   docker_local image load --input "$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" >/dev/null ||
     die 'the one canonical Owner image could not be loaded'
   require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during image load'
@@ -2894,6 +3005,7 @@ if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; the
       require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
         die 'the live terminal-attestation boundary changed immediately before historical Owner stop'
       require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before Owner stop'
+      require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before Owner stop'
       docker_local container stop --time 15 "$OLD_OWNER_CONTAINER_ID" >/dev/null || die 'the exact historical Owner could not be stopped'
       require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during Owner stop'
       require_non_owner_inventory_unchanged || die 'an unrelated project service changed during the historical Owner stop'
@@ -2906,6 +3018,7 @@ if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; the
   require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" exited ||
     die 'the live terminal-attestation boundary changed immediately before historical Owner removal'
   require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before Owner removal'
+  require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before Owner removal'
   docker_local container rm "$OLD_OWNER_CONTAINER_ID" >/dev/null || die 'the exact stopped historical Owner could not be removed'
   require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during Owner removal'
   require_non_owner_inventory_unchanged || die 'an unrelated project service changed during historical Owner removal'
@@ -2928,6 +3041,7 @@ else
     require_live_terminal_attestation_boundary none none ||
       die 'the live terminal-attestation boundary changed immediately before replacement creation'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before replacement creation'
+    require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before replacement creation'
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
       create --no-build --no-deps "$OWNER_SERVICE" >/dev/null || die 'canonical Compose could not create the Owner-only replacement'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during replacement creation'
@@ -2968,6 +3082,7 @@ case "$new_state" in
     require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" created ||
       die 'the live terminal-attestation boundary changed immediately before replacement startup'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before replacement startup'
+    require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before replacement startup'
     docker_local container start "$NEW_OWNER_CONTAINER_ID" >/dev/null || die 'the exact canonical Owner could not be started'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during replacement startup'
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement startup'
@@ -3006,7 +3121,7 @@ require_no_other_mutator_processes || die 'another staging mutation appeared bef
 require_exact_droplet || die 'the staging Droplet identity changed before bridge completion'
 require_exact_recovery_source_anchors || die 'an immutable 001 terminal or Owner bundle source anchor changed during recovery'
 require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before recovery completion'
-require_prior_failed_runtime_ledger_absent || die 'the failed 911 recovery runtime ledger appeared before recovery completion'
+require_prior_failed_runtime_ledger_absent || die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed before completion'
 require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running ||
   die 'the live terminal-attestation boundary changed immediately before Owner bridge completion'
 inspect_image_archive || die 'the immutable OCI archive changed before recovery completion'
@@ -3021,7 +3136,7 @@ mv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT" || die 'the bridge ledger could not be
 sync -f "$BRIDGE_PARENT" || die 'the bridge ledger rename could not be synchronized'
 BRIDGE_STATE='complete'
 BRIDGE_WORK_ROOT="$BRIDGE_ROOT"
-require_prior_failed_runtime_ledger_absent || die 'the failed 911 recovery runtime ledger appeared during finalization'
+require_prior_failed_runtime_ledger_absent || die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed during finalization'
 require_start_record || die 'the finalized Owner-runtime bridge start intent is invalid'
 require_bridge_completed || die 'the finalized Owner-runtime bridge ledger is invalid'
 

@@ -100,7 +100,8 @@ for (const needle of [
   "readonly PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO='64769:6102888'",
   "readonly PRIOR_FAILED_RECOVERY_MANIFEST_SHA256='9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a'",
   "readonly ORIGINAL_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'",
+  "readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -121,6 +122,61 @@ assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
 assert.doesNotMatch(script, /36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'/);
 assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 12);
 assert.ok((script.match(/require_prior_failed_runtime_ledger_absent/g) ?? []).length >= 6);
+for (const needle of [
+  "FAILED_CORRECTION_RELEASE='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'",
+  "FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO='64769:6102893'",
+  "FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO='64769:6102894'",
+  'require_owner_contract "$OLD_OWNER_CONTAINER_ID" "$PREDECESSOR_RELEASE" \'-\'',
+  "'/tmp': 'rw,noexec,nosuid,size=32m,mode=1777'",
+  'owner_tmpfs_host_config=required-exact',
+  'owner_inspect_mount_inventory=non-tmpfs-eight',
+]) {
+  assert.ok(script.includes(needle), `correction script is missing ${needle}`);
+}
+assert.ok(
+  !script.includes("expected_mounts['/tmp']"),
+  'Docker tmpfs must not be conflated with inspect Mounts',
+);
+assert.ok(
+  !script.includes('historical-absent'),
+  'the disproved historical-absent mode must not survive',
+);
+assert.ok(
+  !script.includes('tmpfs_mode'),
+  'all Owner generations must use one exact tmpfs contract',
+);
+for (const boundary of [
+  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before image load'\n  docker_local image load",
+  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before Owner stop'\n      docker_local container stop",
+  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before Owner removal'\n  docker_local container rm",
+  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before replacement creation'\n    env -i",
+  "require_prior_failed_runtime_ledger_absent || die 'the ff989 empty pre-intent evidence changed before replacement startup'\n    docker_local container start",
+]) {
+  assert.ok(
+    script.includes(boundary),
+    `missing immediate ff989 proof at mutation boundary: ${boundary}`,
+  );
+}
+const exactTmpfs = { '/tmp': 'rw,noexec,nosuid,size=32m,mode=1777' };
+const acceptsTmpfs = (observed, mountDestinations) =>
+  JSON.stringify(observed) === JSON.stringify(exactTmpfs) &&
+  mountDestinations.length === 8 &&
+  !mountDestinations.includes('/tmp');
+const eightMounts = Array.from({ length: 8 }, (_, index) => `/non-tmpfs-${index}`);
+assert.ok(acceptsTmpfs(exactTmpfs, eightMounts), 'H13 exact HostConfig.Tmpfs fixture rejected');
+assert.ok(acceptsTmpfs(exactTmpfs, eightMounts), 'H14 exact HostConfig.Tmpfs fixture rejected');
+for (const [tmpfs, mounts] of [
+  [null, eightMounts],
+  [{}, eightMounts],
+  [{ '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777' }, eightMounts],
+  [{ ...exactTmpfs, '/extra': 'rw' }, eightMounts],
+  [exactTmpfs, [...eightMounts, '/tmp']],
+]) {
+  assert.ok(
+    !acceptsTmpfs(tmpfs, mounts),
+    `invalid tmpfs fixture accepted: ${JSON.stringify(tmpfs)}`,
+  );
+}
 
 const executionStart = script.indexOf(
   "create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'",
@@ -177,6 +233,7 @@ for (const needle of [
   'h14-owner-runtime-bridge-archive-recovery-stage:',
   'git fetch --no-tags --depth=1 origin 001316f1f65dc7a9976244e8fc01f90aec665a70',
   'git fetch --no-tags --depth=1 origin 911758fa1407093bee700918d5a663a7735f1658',
+  'git fetch --no-tags --depth=1 origin ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
   'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
   'failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70',
   'failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
@@ -189,6 +246,12 @@ for (const needle of [
   'prior_failed_archive_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa',
   'prior_failed_recovery_manifest_dev_ino=64769:6102888',
   'prior_failed_recovery_manifest_sha256=9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a',
+  'failed_correction_implementation_sha=ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
+  'failed_correction_manifest_sha256=1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d',
+  'failed_correction_bridge_parent_dev_ino=64769:6102893',
+  'failed_correction_bridge_installing_dev_ino=64769:6102894',
+  'owner_tmpfs_host_config=required-exact',
+  'owner_inspect_mount_inventory=non-tmpfs-eight',
   'archive_encoding=oci',
   'archive_layer_count=11',
   'archive_member_count=30',
@@ -201,9 +264,9 @@ for (const needle of [
 
 const rootEmission = workflowRunBlock('Emit exact root-console invocation without execution');
 for (const state of [
-  '"$(basename "$prior_root")") install -d -o root -g root -m 0700 "$installing"',
-  '"$(basename "$prior_root")" "$(basename "$installing")"',
-  '"$(basename "$prior_root")" "$(basename "$root")"',
+  '"$(basename "$prior_root")" "$(basename "$failed_root")"',
+  '"$(basename "$failed_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -218,19 +281,20 @@ assert.ok(
 );
 
 const prior = '911758fa1407093bee700918d5a663a7735f1658';
+const failed = 'ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
-  if (exact === prior) return 'append';
-  if (exact === [prior, installing].sort().join('\n')) return 'resume';
-  if (exact === [prior, current].sort().join('\n')) return 'complete';
+  if (exact === [prior, failed].sort().join('\n')) return 'append';
+  if (exact === [prior, failed, installing].sort().join('\n')) return 'resume';
+  if (exact === [prior, failed, current].sort().join('\n')) return 'complete';
   return 'reject';
 };
 for (const [children, expected] of [
-  [[prior], 'append'],
-  [[prior, installing], 'resume'],
-  [[prior, current], 'complete'],
+  [[prior, failed], 'append'],
+  [[prior, failed, installing], 'resume'],
+  [[prior, failed, current], 'complete'],
   [[], 'reject'],
   [[current], 'reject'],
   [[prior, installing, current], 'reject'],

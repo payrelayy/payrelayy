@@ -462,8 +462,8 @@ stat() {
     command stat "$@"
   fi
 }
-[[ "$(stat --format='%U:%G:%a:%h:%s' "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME")" ==
-  'root:UNKNOWN:440:1:37' ]]
+resolved_marker_name="$(stat --format='%U:%G:%a:%h:%s' "$OWNER_RECEIPT_ROOT/$TERMINAL_MARKER_NAME")"
+test "$resolved_marker_name" = 'root:UNKNOWN:440:1:37'
 require_forward_artifacts_absent "$CONTROL_ROOT"
 `,
     ],

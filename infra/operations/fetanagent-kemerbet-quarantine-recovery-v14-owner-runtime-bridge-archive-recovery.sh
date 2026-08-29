@@ -332,6 +332,31 @@ readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID='33268571701'
 readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
 readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO='64769:6102983'
 readonly FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO='64769:6102984'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_RELEASE='1f27af7f929434b1f40f65901df9ebd683ebe62c'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102985'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_DEV_INO='64769:6102986'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256='da8702b24c505790a2f7d7f7eec126a2b5b82e9abb14312b6eb7636b0025b1cc'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE='367698'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_DEV_INO='64769:6102987'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO='64769:6102988'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256='2f201ee23bf5cc6c400b5a2f0df226719bfd3462b25749045985b54f14207536'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE='21701'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_LINES='327'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102989'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256='3cbc7329952ceb46a236902563ae668551814331b7cca53082c8a1eb5e6d94ba'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID='sha256:103b17a10a678ffa8ae913b50d4daeb121f932113a70b0ce2066f535f553f6e5'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ID='33274184825'
+readonly FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO='64769:6102990'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO='64769:6102991'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO='64769:6102992'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256='0e9f180d49a7b630a17092e30f8bd1615c513c4cc77daedf34ba136d3c2a5437'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE='18569'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES='265'
 readonly CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
@@ -381,7 +406,8 @@ readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quara
 readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'
 readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'
 readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'
+readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -444,6 +470,7 @@ readonly FAILED_ENDPOINT_PHASE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_
 readonly FAILED_RUNNING_STATUS_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_RUNNING_STATUS_CORRECTION_RELEASE"
 readonly FAILED_COUNTER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
 readonly FAILED_CUSTOMER_WEB_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
+readonly FAILED_NETWORK_SCOPE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -495,6 +522,10 @@ readonly FAILED_COUNTER_BRIDGE_INSTALLING="$FAILED_COUNTER_BRIDGE_PARENT/.instal
 readonly FAILED_COUNTER_BRIDGE_ROOT="$FAILED_COUNTER_BRIDGE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
 readonly FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING="$FAILED_CUSTOMER_WEB_BRIDGE_PARENT/.installing-$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
 readonly FAILED_CUSTOMER_WEB_BRIDGE_ROOT="$FAILED_CUSTOMER_WEB_BRIDGE_PARENT/$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING="$FAILED_NETWORK_SCOPE_BRIDGE_PARENT/.installing-$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE"
+readonly FAILED_NETWORK_SCOPE_BRIDGE_ROOT="$FAILED_NETWORK_SCOPE_BRIDGE_PARENT/$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE"
+readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT="$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_NETWORK_SCOPE_BRIDGE_FINAL="$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING/completed-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -522,7 +553,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_COUNTER_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -657,12 +689,14 @@ PY
 }
 
 require_prior_failed_recovery_claim() {
+  [[ "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
+    "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" ]] || return 1
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:16" ]] || return 1
+      "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO:root:root:700:17" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -811,6 +845,24 @@ require_prior_failed_recovery_claim() {
   verify_exact_nofollow_file_digest "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME" \
     "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO" "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE" \
     "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256" 0400 || return 1
+  [[ ! -L "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT" && -d "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT")" == "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT")" == \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT/$SCRIPT_BASENAME" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_DEV_INO" "$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT/$VALIDATOR_BASENAME" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO" "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  verify_exact_nofollow_file_digest "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO" "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" 0400 || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -934,10 +986,107 @@ try:
 except Exception:
     raise SystemExit(1)
 PY
+  [[ "${PIPESTATUS[0]}" == '0' && "${PIPESTATUS[1]}" == '0' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_NETWORK_SCOPE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO" "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256" 0400 |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$REVIEWED_REPAIR_RELEASE" "$AUTHORIZATION_SHA256" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ID" "$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+      "$STAGING_PROJECT_REF" "$EXPECTED_DROPLET_ID" "$CANONICAL_H14" "$SOURCE_ATTESTATION_RELEASE" \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" "$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE" "$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE" "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+      "$SOURCE_CUSTOMER_WEB_IMAGE_ID" "$SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256" \
+      "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" "$SOURCE_NON_OWNER_INVENTORY_SHA256" \
+      "$CREATED_OWNER_CONTAINER_ID" "$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_LINES" 3<<'PY'
+import sys
+
+(
+    release, repair, authorization, workflow_run, workflow_attempt, project_ref,
+    droplet_id, canonical_h14, attestation, failed_customer, bundle_parent,
+    archive_sha, archive_size, image_id, script_sha, script_size, validator_sha,
+    validator_size, source_customer, source_customer_image,
+    source_customer_unhealthy, source_customer_normalized, source_inventory,
+    created_owner, expected_line_count,
+) = sys.argv[1:]
+
+try:
+    raw = sys.stdin.buffer.read()
+    text = raw.decode('ascii')
+    if not text.endswith('\n') or '\r' in text or '\x00' in text:
+        raise RuntimeError()
+    lines = text.splitlines()
+    if len(lines) != int(expected_line_count) or any(not line or '=' not in line for line in lines):
+        raise RuntimeError()
+    pairs = [line.split('=', 1) for line in lines]
+    values = dict(pairs)
+    if len(values) != len(pairs):
+        raise RuntimeError()
+    expected = {
+        'version': '1',
+        'contract': 'fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
+        'recovery_implementation_sha': release,
+        'repair_implementation_sha': repair,
+        'authorization_sha256': authorization,
+        'workflow_run_id': workflow_run,
+        'workflow_run_attempt': workflow_attempt,
+        'staging_project_ref': project_ref,
+        'staging_droplet_id': droplet_id,
+        'canonical_h14_sha': canonical_h14,
+        'source_terminal_attestation_sha': attestation,
+        'failed_customer_web_correction_implementation_sha': failed_customer,
+        'prior_failed_recovery_bundle_parent_dev_ino': bundle_parent,
+        'customer_web_image_archive_sha256': archive_sha,
+        'customer_web_image_archive_size': archive_size,
+        'customer_web_image_id': image_id,
+        'recovery_script_sha256': script_sha,
+        'recovery_script_size': script_size,
+        'archive_validator_sha256': validator_sha,
+        'archive_validator_size': validator_size,
+        'source_customer_web_container_id': source_customer,
+        'source_customer_web_image_id': source_customer_image,
+        'source_customer_web_unhealthy_runtime_sha256': source_customer_unhealthy,
+        'source_customer_web_normalized_sha256': source_customer_normalized,
+        'source_non_owner_inventory_sha256': source_inventory,
+        'created_owner_container_id': created_owner,
+        'customer_web_network_contract': 'exact-owner-control-service-single-endpoint-v1',
+        'owner_lifecycle_mutation': 'forbidden-already-running',
+        'customer_web_lifecycle_mutation': 'exact-single-self-recovery-replacement-v1',
+        'all_other_lifecycle_mutation': 'forbidden',
+        'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false',
+        'kemerbet_final_action_enabled': 'false',
+        'provider_action_enabled': 'false',
+        'transfer_enabled': 'false',
+        'amount_entry_enabled': 'false',
+        'money_moved': 'false',
+    }
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise RuntimeError()
+    if lines[:11] != [f'{key}={expected[key]}' for key in (
+        'version', 'contract', 'recovery_implementation_sha',
+        'repair_implementation_sha', 'authorization_sha256', 'workflow_run_id',
+        'workflow_run_attempt', 'staging_project_ref', 'staging_droplet_id',
+        'canonical_h14_sha', 'source_terminal_attestation_sha')]:
+        raise RuntimeError()
+    if lines[-10:] != [
+        'archive_encoding=oci', 'archive_layer_count=11',
+        'archive_member_count=30', 'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false', 'kemerbet_final_action_enabled=false',
+        'provider_action_enabled=false', 'transfer_enabled=false',
+        'amount_entry_enabled=false', 'money_moved=false',
+    ]:
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
 }
 
 require_prior_failed_recovery_claim ||
-  die 'CW-NET-SCOPE-001: the immutable failed 0110 bundle, manifest semantics, or append-only chain is not exact'
+  die 'OWNER-DELTA-001: the immutable failed 1f27 bundle, manifest semantics, or append-only chain is not exact'
 
 [[ ! -L "$STAGED_INSTALLER" && -f "$STAGED_INSTALLER" &&
   "$(realpath -- "$0")" == "$STAGED_INSTALLER" &&
@@ -1231,6 +1380,35 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   'failed_customer_web_bridge_inventory=empty-no-intent' \
   'failed_customer_web_network_scope=stale-service-network-name-pre-intent' \
   'customer_web_network_contract=exact-owner-control-service-single-endpoint-v1' \
+  "failed_network_scope_correction_implementation_sha=$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" \
+  "failed_network_scope_correction_bundle_parent_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+  "failed_network_scope_correction_bundle_root_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_network_scope_correction_script_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_network_scope_correction_script_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256" \
+  "failed_network_scope_correction_script_size=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE" \
+  "failed_network_scope_correction_validator_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_network_scope_correction_validator_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256" \
+  "failed_network_scope_correction_validator_size=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE" \
+  "failed_network_scope_correction_manifest_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_network_scope_correction_manifest_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256" \
+  "failed_network_scope_correction_manifest_size=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE" \
+  "failed_network_scope_correction_manifest_lines=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_LINES" \
+  "failed_network_scope_correction_image_archive_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+  "failed_network_scope_correction_image_archive_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+  "failed_network_scope_correction_image_archive_size=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+  "failed_network_scope_correction_image_id=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" \
+  "failed_network_scope_correction_workflow_run_id=$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_network_scope_correction_workflow_run_attempt=$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_network_scope_bridge_parent_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO" \
+  "failed_network_scope_bridge_installing_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_network_scope_bridge_intent_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO" \
+  "failed_network_scope_bridge_intent_sha256=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256" \
+  "failed_network_scope_bridge_intent_size=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE" \
+  "failed_network_scope_bridge_intent_lines=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES" \
+  'failed_network_scope_bridge_inventory=single-intent-no-final' \
+  'failed_network_scope_image_runtime=tag-and-id-absent' \
+  'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator' \
+  'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1' \
   "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
   'failed_endpoint_phase_owner_state=created-never-started' \
   'failed_running_status_owner_state=running-healthy-no-completion' \
@@ -1528,6 +1706,91 @@ require_failed_customer_web_network_scope_runtime() {
     -z "$(find -P "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" ]] || return 1
   ! docker_local image inspect "fetanagent-customer-web:${FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:0:12}" >/dev/null 2>&1 || return 1
   ! docker_local image inspect "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID" >/dev/null 2>&1
+}
+
+require_failed_network_scope_runtime() {
+  [[ ! -e "$FAILED_NETWORK_SCOPE_BRIDGE_ROOT" && ! -L "$FAILED_NETWORK_SCOPE_BRIDGE_ROOT" &&
+    ! -e "$FAILED_NETWORK_SCOPE_BRIDGE_FINAL" && ! -L "$FAILED_NETWORK_SCOPE_BRIDGE_FINAL" &&
+    ! -L "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT" && -d "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT")" == "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT")" == \
+      "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING" && -d "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING")" == "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING")" == \
+      "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      'intent-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_NETWORK_SCOPE_BRIDGE_INTENT" \
+    "$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO" "$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE" \
+    "$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256" 0600 |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$CREATED_OWNER_CONTAINER_ID" \
+      "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" "$SOURCE_CUSTOMER_WEB_IMAGE_ID" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+      "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" "$OWNER_NETWORK" \
+      "$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES" 3<<'PY'
+import sys
+
+(
+    release, owner, source_customer, source_customer_image, archive_sha,
+    archive_size, image_id, owner_network, expected_line_count,
+) = sys.argv[1:]
+try:
+    raw = sys.stdin.buffer.read()
+    text = raw.decode('ascii')
+    if not text.endswith('\n') or '\r' in text or '\x00' in text:
+        raise RuntimeError()
+    lines = text.splitlines()
+    if len(lines) != int(expected_line_count) or any(not line or '=' not in line for line in lines):
+        raise RuntimeError()
+    values = {}
+    for line in lines:
+        key, value = line.split('=', 1)
+        if key in values and values[key] != value:
+            raise RuntimeError()
+        values[key] = value
+    expected = {
+        'version': '1',
+        'contract': 'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery',
+        'state': 'authorized',
+        'archive_recovery_implementation_release': release,
+        'owner_lifecycle_mutation': 'forbidden-already-running',
+        'running_owner_container_id': owner,
+        'running_owner_state': 'running-healthy-at-publication',
+        'control_volume_holder': owner,
+        'source_customer_web_container_id': source_customer,
+        'source_customer_web_image_id': source_customer_image,
+        'customer_web_image_archive_sha256': archive_sha,
+        'customer_web_image_archive_size': archive_size,
+        'customer_web_image_id': image_id,
+        'owner_network': owner_network,
+        'customer_web_network_contract': 'exact-owner-control-service-single-endpoint-v1',
+        'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false',
+        'kemerbet_final_action_enabled': 'false',
+        'provider_action_enabled': 'false',
+        'transfer_enabled': 'false',
+        'amount_entry_enabled': 'false',
+        'money_moved': 'false',
+    }
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise RuntimeError()
+    if lines[-7:] != [
+        'financial_actions_mode=dry_run', 'kemerbet_executor_enabled=false',
+        'kemerbet_final_action_enabled=false', 'provider_action_enabled=false',
+        'transfer_enabled=false', 'amount_entry_enabled=false', 'money_moved=false',
+    ]:
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+  [[ "${PIPESTATUS[0]}" == '0' && "${PIPESTATUS[1]}" == '0' ]] || return 1
+  ! docker_local image inspect "fetanagent-customer-web:${FAILED_NETWORK_SCOPE_CORRECTION_RELEASE:0:12}" >/dev/null 2>&1 || return 1
+  ! docker_local image inspect "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" >/dev/null 2>&1
 }
 
 emit_owned_nofollow_file() {
@@ -3705,6 +3968,7 @@ require_resumed_intent_pre_mutation_boundary() {
   require_prior_failed_recovery_claim || return 1
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
+  require_failed_network_scope_runtime || return 1
   [[ "$(container_full_ids_for_service "$OWNER_SERVICE")" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
   require_owner_contract "$CREATED_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
   require_owner_never_restarted || return 1
@@ -3740,30 +4004,41 @@ mode, old_customer, current_customer, expected_image = sys.argv[1:]
 before_raw, current_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
 before = json.loads(before_raw); current = json.loads(current_raw)
 def keyed(items, key):
+    if not isinstance(items, list) or any(not isinstance(item, dict) or key not in item for item in items): raise RuntimeError()
     result = {item[key]: item for item in items}
     if len(result) != len(items): raise RuntimeError()
     return result
 try:
+    if mode not in {'source', 'absent', 'replacement'}: raise RuntimeError()
+    if set(before) != {'images','networks','volumes','holders'} or set(current) != set(before): raise RuntimeError()
+    if not re.fullmatch(r'[0-9a-f]{64}', old_customer): raise RuntimeError()
+    if current_customer and not re.fullmatch(r'[0-9a-f]{64}', current_customer): raise RuntimeError()
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', expected_image): raise RuntimeError()
     normalized = copy.deepcopy(current)
     old_images = keyed(before['images'], 'Id'); current_images = keyed(current['images'], 'Id')
     extras = set(current_images) - set(old_images)
     if extras not in (set(), {expected_image}) or any(current_images[key] != old_images[key] for key in old_images): raise RuntimeError()
     normalized['images'] = [item for item in normalized['images'] if item.get('Id') != expected_image]
-    old_networks = keyed(before['networks'], 'Id'); new_networks = keyed(normalized['networks'], 'Id')
-    if set(old_networks) != set(new_networks): raise RuntimeError()
+    old_networks = keyed(before['networks'], 'Id'); current_networks = keyed(current['networks'], 'Id')
+    normalized_networks = keyed(normalized['networks'], 'Id')
+    if set(old_networks) != set(current_networks) or set(normalized_networks) != set(old_networks): raise RuntimeError()
     seen = 0
     for network_id, old_network in old_networks.items():
-        old_eps = old_network.get('Containers') or {}; new_eps = new_networks[network_id].get('Containers') or {}
-        if old_customer not in old_eps and (not current_customer or current_customer not in new_eps): continue
-        if old_customer not in old_eps: raise RuntimeError()
-        expected_keys = set(old_eps) if mode == 'source' else set(old_eps) - {old_customer}
-        if mode == 'replacement': expected_keys.add(current_customer)
-        if set(new_eps) != expected_keys: raise RuntimeError()
-        if any(new_eps[key] != old_eps[key] for key in old_eps if key != old_customer): raise RuntimeError()
+        current_network = current_networks[network_id]
+        old_base = copy.deepcopy(old_network); current_base = copy.deepcopy(current_network)
+        old_eps = old_base.pop('Containers', {}) or {}; current_eps = current_base.pop('Containers', {}) or {}
+        old_base.pop('Status', None); current_base.pop('Status', None)
+        if old_base != current_base or not isinstance(old_eps, dict) or not isinstance(current_eps, dict): raise RuntimeError()
+        if old_customer not in old_eps:
+            if old_customer in current_eps or (mode == 'replacement' and current_customer in current_eps): raise RuntimeError()
+            continue
+        seen += 1
+        normalized_eps = normalized_networks[network_id].setdefault('Containers', {})
         if mode == 'source':
-            if new_eps[old_customer] != old_eps[old_customer] or new_networks[network_id] != old_network: raise RuntimeError()
+            if current_customer != old_customer or current_eps.get(old_customer) != old_eps[old_customer]: raise RuntimeError()
         elif mode == 'replacement':
-            endpoint = new_eps[current_customer]
+            if not current_customer or current_customer == old_customer or old_customer in current_eps or current_customer not in current_eps: raise RuntimeError()
+            endpoint = current_eps[current_customer]
             if set(endpoint) != {'Name','EndpointID','MacAddress','IPv4Address','IPv6Address'}: raise RuntimeError()
             if endpoint.get('Name') != 'fetanagent-staging-beta-customer-web-1': raise RuntimeError()
             if not re.fullmatch(r'[0-9a-f]{64}', endpoint.get('EndpointID') or ''): raise RuntimeError()
@@ -3771,41 +4046,43 @@ try:
             ipv4 = ipaddress.ip_interface(endpoint['IPv4Address']); ipv6 = ipaddress.ip_interface(endpoint['IPv6Address'])
             subnets = [ipaddress.ip_network(item['Subnet']) for item in (old_network.get('IPAM') or {}).get('Config') or [] if isinstance(item, dict) and item.get('Subnet')]
             if ipv4.version != 4 or ipv6.version != 6 or not any(ipv4.ip in subnet and ipv4.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 4) or not any(ipv6.ip in subnet and ipv6.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 6): raise RuntimeError()
-            probe = copy.deepcopy(new_networks[network_id]); probe['Containers'].pop(current_customer); probe['Containers'][old_customer] = copy.deepcopy(old_eps[old_customer])
-            if probe != old_network: raise RuntimeError()
+            normalized_eps.pop(current_customer)
+            normalized_eps[old_customer] = copy.deepcopy(old_eps[old_customer])
         else:
-            probe = copy.deepcopy(new_networks[network_id]); probe['Containers'][old_customer] = copy.deepcopy(old_eps[old_customer]); probe['Status'] = copy.deepcopy(old_network.get('Status'))
-            old_base = copy.deepcopy(old_network); old_base.pop('Status', None); probe_base = copy.deepcopy(probe); probe_base.pop('Status', None)
-            if probe_base != old_base: raise RuntimeError()
+            if current_customer or old_customer in current_eps: raise RuntimeError()
+            normalized_eps[old_customer] = copy.deepcopy(old_eps[old_customer])
             endpoint = old_eps[old_customer]
             addresses = [ipaddress.ip_interface(endpoint[name]) for name in ('IPv4Address','IPv6Address')]
-            old_subnets = ((old_network.get('Status') or {}).get('IPAM') or {}).get('Subnets')
-            new_subnets = ((new_networks[network_id].get('Status') or {}).get('IPAM') or {}).get('Subnets')
-            if not isinstance(old_subnets, dict) or set(old_subnets) != set(new_subnets or {}): raise RuntimeError()
+            normalized_subnets = (((normalized_networks[network_id].get('Status') or {}).get('IPAM') or {}).get('Subnets'))
+            if not isinstance(normalized_subnets, dict): raise RuntimeError()
             changed = []
             for address in addresses:
-                matches = [name for name in old_subnets if address.ip in ipaddress.ip_network(name)]
+                matches = [name for name in normalized_subnets if address.ip in ipaddress.ip_network(name)]
                 if len(matches) != 1: raise RuntimeError()
                 changed.append(matches[0])
             if len(set(changed)) != 2: raise RuntimeError()
-            for name, old_count in old_subnets.items():
-                new_count = new_subnets[name]
-                if set(old_count) != {'IPsInUse','DynamicIPsAvailable'} or set(new_count) != set(old_count): raise RuntimeError()
-                if name in changed:
-                    if new_count['IPsInUse'] != old_count['IPsInUse'] - 1 or new_count['DynamicIPsAvailable'] != old_count['DynamicIPsAvailable'] + 1: raise RuntimeError()
-                elif new_count != old_count: raise RuntimeError()
-        new_networks[network_id] = copy.deepcopy(old_network); seen += 1
+            for name in changed:
+                counters = normalized_subnets[name]
+                if not isinstance(counters, dict) or set(counters) != {'IPsInUse','DynamicIPsAvailable'}: raise RuntimeError()
+                if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counters.values()): raise RuntimeError()
+                if counters['DynamicIPsAvailable'] < 1: raise RuntimeError()
+                counters['IPsInUse'] += 1
+                counters['DynamicIPsAvailable'] -= 1
     if seen != 1: raise RuntimeError()
     if keyed(before['volumes'], 'Name') != keyed(current['volumes'], 'Name'): raise RuntimeError()
-    if set(before['holders']) != set(current['holders']): raise RuntimeError()
+    if not isinstance(before['holders'], dict) or not isinstance(current['holders'], dict) or set(before['holders']) != set(current['holders']): raise RuntimeError()
     for name, old_holders in before['holders'].items():
         observed = current['holders'][name]
         if old_customer in old_holders:
-            expected = list(old_holders) if mode == 'source' else sorted(set(old_holders) - {old_customer})
-            if mode == 'replacement': expected = sorted(set(expected) | {current_customer})
-            if observed != expected: raise RuntimeError()
-            normalized['holders'][name] = list(old_holders)
-        elif current_customer and current_customer in observed: raise RuntimeError()
+            if mode == 'source':
+                if old_customer not in observed: raise RuntimeError()
+            elif mode == 'replacement':
+                if old_customer in observed or current_customer not in observed: raise RuntimeError()
+                normalized['holders'][name] = sorted((set(observed) - {current_customer}) | {old_customer})
+            else:
+                if old_customer in observed: raise RuntimeError()
+                normalized['holders'][name] = sorted(set(observed) | {old_customer})
+        elif old_customer in observed or (mode == 'replacement' and current_customer in observed): raise RuntimeError()
     print(json.dumps(normalized, sort_keys=True, separators=(',', ':')))
 except Exception:
     raise SystemExit(1)
@@ -3827,6 +4104,7 @@ require_complete_owner_endpoint_phase_boundary() {
   require_failed_running_status_runtime || return 1
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
+  require_failed_network_scope_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -3849,6 +4127,7 @@ require_running_owner_boundary_before_successor_intent() {
   require_failed_running_status_runtime || return 1
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
+  require_failed_network_scope_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -4379,6 +4658,7 @@ create_or_discover_bridge_ledger() {
   require_failed_counter_runtime || return 1
   require_prior_failed_recovery_claim || return 1
   require_failed_customer_web_network_scope_runtime || return 1
+  require_failed_network_scope_runtime || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -4415,6 +4695,7 @@ create_or_discover_bridge_ledger() {
   require_failed_counter_runtime || return 1
   require_prior_failed_recovery_claim || return 1
   require_failed_customer_web_network_scope_runtime || return 1
+  require_failed_network_scope_runtime || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
@@ -4475,6 +4756,35 @@ expected_bridge_intent() {
     'failed_customer_web_bridge_inventory=empty-no-intent' \
     'failed_customer_web_network_scope=stale-service-network-name-pre-intent' \
     'customer_web_network_contract=exact-owner-control-service-single-endpoint-v1' \
+    "failed_network_scope_correction_implementation_sha=$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" \
+    "failed_network_scope_correction_bundle_parent_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_network_scope_correction_bundle_root_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_network_scope_correction_script_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_network_scope_correction_script_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256" \
+    "failed_network_scope_correction_script_size=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE" \
+    "failed_network_scope_correction_validator_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_network_scope_correction_validator_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256" \
+    "failed_network_scope_correction_validator_size=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE" \
+    "failed_network_scope_correction_manifest_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_network_scope_correction_manifest_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256" \
+    "failed_network_scope_correction_manifest_size=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE" \
+    "failed_network_scope_correction_manifest_lines=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_LINES" \
+    "failed_network_scope_correction_image_archive_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_network_scope_correction_image_archive_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_network_scope_correction_image_archive_size=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_network_scope_correction_image_id=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" \
+    "failed_network_scope_correction_workflow_run_id=$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_network_scope_correction_workflow_run_attempt=$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_network_scope_bridge_parent_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO" \
+    "failed_network_scope_bridge_installing_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_network_scope_bridge_intent_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO" \
+    "failed_network_scope_bridge_intent_sha256=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256" \
+    "failed_network_scope_bridge_intent_size=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE" \
+    "failed_network_scope_bridge_intent_lines=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES" \
+    'failed_network_scope_bridge_inventory=single-intent-no-final' \
+    'failed_network_scope_image_runtime=tag-and-id-absent' \
+    'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator' \
+    'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -4816,6 +5126,35 @@ expected_bridge_completed() {
     'failed_customer_web_bridge_inventory=empty-no-intent' \
     'failed_customer_web_network_scope=stale-service-network-name-pre-intent' \
     'customer_web_network_contract=exact-owner-control-service-single-endpoint-v1' \
+    "failed_network_scope_correction_implementation_sha=$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" \
+    "failed_network_scope_correction_bundle_parent_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_network_scope_correction_bundle_root_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_network_scope_correction_script_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_network_scope_correction_script_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256" \
+    "failed_network_scope_correction_script_size=$FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE" \
+    "failed_network_scope_correction_validator_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_network_scope_correction_validator_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256" \
+    "failed_network_scope_correction_validator_size=$FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE" \
+    "failed_network_scope_correction_manifest_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_network_scope_correction_manifest_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256" \
+    "failed_network_scope_correction_manifest_size=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE" \
+    "failed_network_scope_correction_manifest_lines=$FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_LINES" \
+    "failed_network_scope_correction_image_archive_dev_ino=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_network_scope_correction_image_archive_sha256=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_network_scope_correction_image_archive_size=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_network_scope_correction_image_id=$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID" \
+    "failed_network_scope_correction_workflow_run_id=$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_network_scope_correction_workflow_run_attempt=$FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_network_scope_bridge_parent_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO" \
+    "failed_network_scope_bridge_installing_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_network_scope_bridge_intent_dev_ino=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO" \
+    "failed_network_scope_bridge_intent_sha256=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256" \
+    "failed_network_scope_bridge_intent_size=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE" \
+    "failed_network_scope_bridge_intent_lines=$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES" \
+    'failed_network_scope_bridge_inventory=single-intent-no-final' \
+    'failed_network_scope_image_runtime=tag-and-id-absent' \
+    'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator' \
+    'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -5392,12 +5731,14 @@ replace_customer_web_once() {
   require_prior_failed_recovery_claim || return 1
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
+  require_failed_network_scope_runtime || return 1
   replacement_state="$(classify_customer_web_replacement_state)" || return 1
   if [[ "$replacement_state" != complete ]]; then
     [[ "$replacement_state" == source || "$replacement_state" == retry ]] || return 1
     require_prior_failed_recovery_claim || return 1
     require_failed_counter_runtime || return 1
     require_failed_customer_web_network_scope_runtime || return 1
+    require_failed_network_scope_runtime || return 1
     env -i "${compose_environment[@]}" FETANAGENT_VCS_REF="$RECOVERY_RELEASE" \
       FETANAGENT_IMAGE_TAG="${RECOVERY_RELEASE:0:12}" "${compose_command[@]}" \
       up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web || return 1
@@ -5533,6 +5874,8 @@ require_failed_running_status_runtime || die 'the immutable 8f running-phase int
 require_failed_counter_runtime || die 'the immutable 020 empty pre-intent interruption evidence is not exact'
 require_failed_customer_web_network_scope_runtime ||
   die 'CW-NET-SCOPE-002: the immutable failed 0110 empty pre-intent ledger changed'
+require_failed_network_scope_runtime ||
+  die 'OWNER-DELTA-002: the immutable failed 1f27 single-intent pre-mutation ledger changed'
 NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
@@ -5546,11 +5889,12 @@ else
 fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
-# The exact 0110 predecessor also failed before intent: its customer-web security
-# comparator named the unrelated service network instead of the exact dedicated
-# Owner-control service network. This successor consumes that empty ledger,
-# durably authorizes exactly one customer-web replacement, and keeps Owner plus
-# every other service byte-for-byte and lifecycle stable.
+# The exact 1f27 predecessor published only its intent and then failed before
+# image load or container mutation: customer normalization rejected the already
+# authorized Owner endpoint/status/control-holder delta before the strict Owner
+# delta validator could judge it. This successor consumes that intent-only
+# ledger, normalizes only customer/image state, and leaves the Owner delta intact
+# for the unchanged strict downstream validator.
 if [[ -e "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" &&
   ! -L "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" ]]; then
   require_customer_web_replacement_record ||
@@ -5639,6 +5983,8 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'the immutable 020 empty pre-intent interruption evidence changed beside completion'
   require_failed_customer_web_network_scope_runtime ||
     die 'CW-NET-SCOPE-003: the immutable failed 0110 empty pre-intent ledger changed beside completion'
+  require_failed_network_scope_runtime ||
+    die 'OWNER-DELTA-003: the immutable failed 1f27 single-intent pre-mutation ledger changed beside completion'
   require_complete_owner_endpoint_phase_boundary running ||
     die 'the complete running-phase boundary changed beside completed replay'
   printf '%s\n' 'FetanAgent H14 customer-web recovery already valid: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'
@@ -5666,6 +6012,10 @@ fi
   die 'the exact 51e-created Owner is not the sole control-volume holder'
 NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 
+require_prior_failed_recovery_claim ||
+  die 'OWNER-DELTA-006: the immutable failed 1f27 bundle changed before replacement-record replay'
+require_failed_network_scope_runtime ||
+  die 'OWNER-DELTA-007: the immutable failed 1f27 intent-only runtime changed before replacement-record replay'
 if [[ -e "$BRIDGE_WORK_ROOT/replacement-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/replacement-owner-v1" ]]; then
   load_replacement_record || die 'the replacement Owner record is invalid'
 else
@@ -5680,6 +6030,10 @@ prepare_record_digests || die 'the replacement Owner digest is invalid'
 require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || die 'the recorded replacement Owner contract changed'
 require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" || die 'the recorded replacement is not the sole canonical-image user'
 require_exact_owner_inventory "$NEW_OWNER_CONTAINER_ID" || die 'the replacement Owner inventory is not exactly one recorded container'
+require_prior_failed_recovery_claim ||
+  die 'OWNER-DELTA-008: the immutable failed 1f27 bundle changed before start-record replay'
+require_failed_network_scope_runtime ||
+  die 'OWNER-DELTA-009: the immutable failed 1f27 intent-only runtime changed before start-record replay'
 if [[ -e "$BRIDGE_WORK_ROOT/start-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/start-owner-v1" ]]; then
   require_start_record || die 'the durable replacement start intent changed'
 else
@@ -5718,9 +6072,11 @@ require_owner_never_restarted || die 'Owner lifecycle changed before final immut
 require_other_service_inventory_exact || die 'a non-customer service changed before final immutable verification'
 require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'
 require_prior_failed_recovery_claim ||
-  die 'CW-NET-SCOPE-004: the immutable failed 0110 bundle or manifest changed during finalization'
+  die 'OWNER-DELTA-004: the immutable failed 1f27 bundle or manifest changed during finalization'
 require_failed_customer_web_network_scope_runtime ||
   die 'CW-NET-SCOPE-005: the immutable failed 0110 empty pre-intent ledger changed during finalization'
+require_failed_network_scope_runtime ||
+  die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'
 require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'
 
 printf '%s\n' 'FetanAgent H14 customer-web recovery installed: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'

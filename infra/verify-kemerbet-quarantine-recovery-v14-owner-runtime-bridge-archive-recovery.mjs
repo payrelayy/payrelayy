@@ -118,6 +118,7 @@ for (const needle of [
   "readonly SOURCE_OWNER_TAR_SHA256='4b6348d76bfef9553fbea799da381cd1b6b27e78237c97386c694d9c9305a80e'",
   "readonly SOURCE_OWNER_TAR_SIZE='405925888'",
   "readonly SOURCE_OWNER_IMAGE_ID='sha256:ce2cb11cb28cd1b16411a94dc6f9225aaa37877bb0de688578645c5d296b3ce3'",
+  "readonly SOURCE_OWNER_LOADED_IMAGE_ID='sha256:45932c0e99318e305223bec96c166a82aa0330195e5cdd651c0b435756f7feeb'",
   "readonly SOURCE_OWNER_CLAIM_PARENT_DEV_INO='64769:6102879'",
   "readonly SOURCE_OWNER_CLAIM_ROOT_DEV_INO='64769:6102880'",
   "readonly PRIOR_FAILED_RECOVERY_RELEASE='911758fa1407093bee700918d5a663a7735f1658'",
@@ -133,7 +134,8 @@ for (const needle of [
   "readonly ORIGINAL_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge'",
   "readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'",
   "readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
+  "readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -164,6 +166,31 @@ for (const needle of [
   'owner_inspect_mount_inventory=non-tmpfs-eight',
 ]) {
   assert.ok(script.includes(needle), `correction script is missing ${needle}`);
+}
+for (const needle of [
+  "FAILED_IMAGE_CORRECTION_RELEASE='0a2adc0bf3591fe2449379ac2bf76c21538fadf5'",
+  "FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102902'",
+  "FAILED_IMAGE_CORRECTION_SCRIPT_SHA256='338ad5f16d4761c9ce1d048eae5d7a38341aa5dee734a2a0c87cf47416564a6b'",
+  "FAILED_IMAGE_CORRECTION_MANIFEST_SHA256='845d891088a30878e2162f050aa45f7110fadb9831c5bcd7dddd5cec2e3999d8'",
+  "FAILED_IMAGE_BRIDGE_PARENT_DEV_INO='64769:6102906'",
+  "FAILED_IMAGE_BRIDGE_INSTALLING_DEV_INO='64769:6102907'",
+  "FAILED_IMAGE_BRIDGE_INTENT_DEV_INO='64769:6102908'",
+  "FAILED_IMAGE_BRIDGE_INTENT_SHA256='89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b'",
+  'source_owner_config_id=',
+  'loaded_owner_manifest_image_id=',
+  'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids',
+  "docker_local version --format '{{.Server.Version}}|{{.Server.APIVersion}}|{{.Server.Os}}|{{.Server.Arch}}'",
+  '\'overlayfs|[["driver-type","io.containerd.snapshotter.v1"]]|null\'',
+  "image.get('Descriptor')",
+  "image.get('RepoTags') != [expected_tag]",
+  "image.get('RepoDigests')",
+  "image.get('RootFS') != {'Type': 'layers', 'Layers': layers}",
+  "image.get('Config') != config['config']",
+  'require_loaded_image_unused() {',
+  'require_loaded_image_used_only_by() {',
+  'require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID"',
+]) {
+  assert.ok(script.includes(needle), `OCI import identity proof is missing ${needle}`);
 }
 assert.ok(
   !script.includes("expected_mounts['/tmp']"),
@@ -201,18 +228,64 @@ for (const needle of [
 ]) {
   assert.ok(script.includes(needle), `failed fa35244 evidence is missing ${needle}`);
 }
-for (const boundary of [
-  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before image load'\n  docker_local image load",
-  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner stop'\n      docker_local container stop",
-  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner removal'\n  docker_local container rm",
-  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement creation'\n    env -i",
-  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement startup'\n    docker_local container start",
+for (const helperConstituent of [
+  'require_exact_recovery_source_anchors &&',
+  'require_original_bridge_namespace_absent &&',
+  'require_prior_failed_runtime_ledger_absent &&',
+  'require_financial_gates_disabled &&',
+  'require_owner_image_contract &&',
 ]) {
   assert.ok(
-    script.includes(boundary),
-    `missing immediate ff989 proof at mutation boundary: ${boundary}`,
+    script.includes(helperConstituent),
+    `complete phase-boundary helper is missing ${helperConstituent}`,
   );
 }
+assert.match(
+  script,
+  /require_pre_create_image_boundary\(\) \{[\s\S]*?require_owner_image_contract &&\s+require_loaded_image_unused\s*\}/,
+);
+assert.match(
+  script,
+  /require_post_create_image_boundary\(\) \{[\s\S]*?require_owner_image_contract &&\s+require_loaded_image_used_only_by "\$expected_id"\s*\}/,
+);
+for (const guardedBoundary of [
+  "require_pre_create_image_boundary || die 'the complete pre-create boundary changed before Owner stop'\n      docker_local container stop",
+  "require_pre_create_image_boundary || die 'the complete pre-create boundary changed before Owner removal'\n  docker_local container rm",
+  "require_pre_create_image_boundary || die 'the complete pre-create boundary changed before replacement creation'\n    env -i",
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before replacement publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1"',
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before start-intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1"',
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before replacement startup\'\n    docker_local container start',
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before completion publication\'\n\npublish_exact_record "$BRIDGE_WORK_ROOT/completed-v1"',
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before ledger finalization\'\nmv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" ||\n    die \'the complete post-create boundary changed beside completed replay\'\n  printf',
+]) {
+  assert.ok(
+    script.includes(guardedBoundary),
+    `missing or reordered complete boundary: ${guardedBoundary}`,
+  );
+}
+for (const finalizationGuard of [
+  "require_exact_recovery_source_anchors || die 'an immutable 001 terminal or Owner bundle source anchor changed before ledger finalization'",
+  "require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before ledger finalization'",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before ledger finalization'",
+  "require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed before ledger finalization'",
+  "require_no_other_mutator_processes || die 'another staging mutation appeared before ledger finalization'",
+  "require_exact_droplet || die 'the staging Droplet identity changed before ledger finalization'",
+]) {
+  const guardIndex = script.indexOf(finalizationGuard);
+  const renameIndex = script.indexOf('mv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"');
+  assert.ok(
+    guardIndex >= 0 && guardIndex < renameIndex,
+    `missing finalization guard ${finalizationGuard}`,
+  );
+}
+assert.ok(
+  !script.includes('image load --input'),
+  'the chained correction must never reload the already-present H14 image',
+);
+assert.ok(!script.includes('image tag '), 'the chained correction must never retag an image');
+assert.ok(!script.includes('image rm '), 'the chained correction must never remove an image');
+assert.ok(!script.includes('image prune'), 'the chained correction must never prune images');
 const exactTmpfs = { '/tmp': 'rw,noexec,nosuid,size=32m,mode=1777' };
 const acceptsTmpfs = (observed, mountDestinations) =>
   JSON.stringify(observed) === JSON.stringify(exactTmpfs) &&
@@ -258,7 +331,6 @@ const postIntentNamespaceProof = execution.indexOf(
 );
 const firstPersistentDockerMutation = Math.min(
   ...[
-    'docker_local image load --input',
     'docker_local container stop --time',
     'docker_local container rm "$OLD_OWNER_CONTAINER_ID"',
     'create --no-build --no-deps "$OWNER_SERVICE"',
@@ -290,6 +362,7 @@ for (const needle of [
   'git fetch --no-tags --depth=1 origin 001316f1f65dc7a9976244e8fc01f90aec665a70',
   'git fetch --no-tags --depth=1 origin 911758fa1407093bee700918d5a663a7735f1658',
   'git fetch --no-tags --depth=1 origin ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
+  'git fetch --no-tags --depth=1 origin 0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
   'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
   'failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70',
   'failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
@@ -310,6 +383,10 @@ for (const needle of [
   'failed_pg_correction_manifest_sha256=ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d',
   'failed_pg_bridge_intent_sha256=417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72',
   'admin_pg_resolution=exact-create-require-admin-dist-pg-8.22.0',
+  'failed_image_correction_implementation_sha=0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
+  'failed_image_correction_manifest_sha256=845d891088a30878e2162f050aa45f7110fadb9831c5bcd7dddd5cec2e3999d8',
+  'failed_image_bridge_intent_sha256=89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b',
+  'canonical_h14_image_initial_state=exact-loaded-before-intent',
   'owner_tmpfs_host_config=required-exact',
   'owner_inspect_mount_inventory=non-tmpfs-eight',
   'archive_encoding=oci',
@@ -326,8 +403,9 @@ const rootEmission = workflowRunBlock('Emit exact root-console invocation withou
 for (const state of [
   '"$(basename "$prior_root")" "$(basename "$failed_root")"',
   '"$(basename "$failed_root")" "$(basename "$failed_pg_root")"',
-  '"$(basename "$failed_pg_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_pg_root")" "$(basename "$root")"',
+  '"$(basename "$failed_pg_root")" "$(basename "$failed_image_root")"',
+  '"$(basename "$failed_image_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_image_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -344,19 +422,22 @@ assert.ok(
 const prior = '911758fa1407093bee700918d5a663a7735f1658';
 const failed = 'ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b';
 const failedPg = 'fa35244c8e8e2b9f10fe7abb2cd2341864b43471';
+const failedImage = '0a2adc0bf3591fe2449379ac2bf76c21538fadf5';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
-  if (exact === [prior, failed, failedPg].sort().join('\n')) return 'append';
-  if (exact === [prior, failed, failedPg, installing].sort().join('\n')) return 'resume';
-  if (exact === [prior, failed, failedPg, current].sort().join('\n')) return 'complete';
+  if (exact === [prior, failed, failedPg, failedImage].sort().join('\n')) return 'append';
+  if (exact === [prior, failed, failedPg, failedImage, installing].sort().join('\n'))
+    return 'resume';
+  if (exact === [prior, failed, failedPg, failedImage, current].sort().join('\n'))
+    return 'complete';
   return 'reject';
 };
 for (const [children, expected] of [
-  [[prior, failed, failedPg], 'append'],
-  [[prior, failed, failedPg, installing], 'resume'],
-  [[prior, failed, failedPg, current], 'complete'],
+  [[prior, failed, failedPg, failedImage], 'append'],
+  [[prior, failed, failedPg, failedImage, installing], 'resume'],
+  [[prior, failed, failedPg, failedImage, current], 'complete'],
   [[], 'reject'],
   [[current], 'reject'],
   [[prior, installing, current], 'reject'],

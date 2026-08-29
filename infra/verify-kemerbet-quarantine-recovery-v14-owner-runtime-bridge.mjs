@@ -44,6 +44,10 @@ const previousAttestation = '38e9d2660b871c691afdd69541e17c17a7b55821';
 const previousScript = 'dfad82098c2042a5cd884f7c1116a9b4e424ac8685a68db3c7633f58a7e22bfb';
 const previousValidator = 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542';
 const previousManifest = '25ff5bb29342bbb1404ff888dacb43d464867c113f8f3db04ebb2df4e90ae733';
+const interruptedAttestation = '635557273ce4010df91b9e1be838479ad049528c';
+const interruptedScript = '6c8b9b9c00f9b701c48043242e94b90f5a7c225dbf3ff2a674d269f5b9f13251';
+const interruptedValidator = 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542';
+const interruptedManifest = '131dce3956028251b023318cb88917fab9d237b3a11d8599e1bff986cefeb077';
 const stagingProjectRef = 'spzpiyxheappsfyswewl';
 const productionProjectRef = 'xzztugbgtulptnbpoelr';
 const stagingDropletId = '593344964';
@@ -684,6 +688,19 @@ assert.match(terminalAttestationFunction, /attestation_implementation_release/);
 assert.match(terminalAttestationFunction, /grant_restoration_intent_sha256/);
 assert.match(terminalAttestationFunction, /repair_completion_sha256/);
 assert.match(terminalAttestationFunction, /provider_action_enabled/);
+for (const preservedInterruptedAttempt of [
+  "directory(parent, [f'.installing-{interrupted_attestation}', attestation]",
+  "directory(f'{parent}/.installing-{interrupted_attestation}', []",
+  'interrupted_parent_dev_ino',
+  'interrupted_empty_ledger_dev_ino',
+  'interrupted_empty_ledger_state',
+  'interrupted_attempt_preserved',
+]) {
+  assert.ok(
+    terminalAttestationFunction.includes(preservedInterruptedAttempt),
+    `terminal parser omits preserved interrupted attempt gate: ${preservedInterruptedAttempt}`,
+  );
+}
 for (const binding of [
   "intent['deployment_grant_dev_ino']",
   "intent['deployment_grant_sha256']",
@@ -728,9 +745,11 @@ for (const required of [
   'directory(receipt_root, (0, 0), 0o755, receipt_dev_ino, [marker_name])',
   "['completed-v1', 'intent-v1']",
   'os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC',
-  '[previous_attestation, attestation]',
+  '[previous_attestation, interrupted_attestation, attestation]',
   "previous_root = f'{claim_parent}/{previous_attestation}'",
+  "interrupted_root = f'{claim_parent}/{interrupted_attestation}'",
   'directory(previous_root, (0, 0), 0o700, previous_root_dev_ino, names)',
+  'directory(interrupted_root, (0, 0), 0o700, interrupted_root_dev_ino, names)',
   "exact_file(f'{previous_root}/{bridge_name}', (0, 0), 0o400,",
   "exact_file(f'{previous_root}/{validator_name}', (0, 0), 0o400,",
   "exact_file(f'{previous_root}/{manifest_name}', (0, 0), 0o400,",
@@ -772,25 +791,54 @@ for (const exact of [
 ]) {
   assert.ok(bridge.includes(exact), `Owner bridge omits prior terminal claim binding: ${exact}`);
 }
+for (const exact of [
+  `INTERRUPTED_ATTESTATION_RELEASE='${interruptedAttestation}'`,
+  `INTERRUPTED_ATTESTATION_SCRIPT_SHA256='${interruptedScript}'`,
+  `INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256='${interruptedValidator}'`,
+  `INTERRUPTED_BUNDLE_MANIFEST_SHA256='${interruptedManifest}'`,
+  "INTERRUPTED_ATTESTATION_SCRIPT_SIZE='97783'",
+  "INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE='17941'",
+  "INTERRUPTED_BUNDLE_MANIFEST_SIZE='928'",
+  "INTERRUPTED_CLAIM_ROOT_DEV_INO='64769:6102860'",
+  "INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO='64769:6102861'",
+  "INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102862'",
+  "INTERRUPTED_BUNDLE_MANIFEST_DEV_INO='64769:6102863'",
+  "INTERRUPTED_ATTESTATION_PARENT_DEV_INO='64769:6102864'",
+  "INTERRUPTED_EMPTY_LEDGER_DEV_INO='64769:6102865'",
+]) {
+  assert.ok(bridge.includes(exact), `Owner bridge omits interrupted attempt binding: ${exact}`);
+}
 assert.doesNotMatch(
   liveTerminalBoundary,
   /sorted\(os\.listdir\(claim_parent\)\) != \[attestation\]/,
 );
 function acceptsTerminalClaimEntries(actual, current) {
-  return [...actual].sort().join('\0') === [previousAttestation, current].sort().join('\0');
+  return (
+    [...actual].sort().join('\0') ===
+    [previousAttestation, interruptedAttestation, current].sort().join('\0')
+  );
 }
 const correctionAttestation = 'f'.repeat(40);
 assert.equal(
-  acceptsTerminalClaimEntries([previousAttestation, correctionAttestation], correctionAttestation),
+  acceptsTerminalClaimEntries(
+    [previousAttestation, interruptedAttestation, correctionAttestation],
+    correctionAttestation,
+  ),
   true,
 );
 for (const invalid of [
   [],
   [correctionAttestation],
-  [previousAttestation, 'unknown-third-claim'],
-  [previousAttestation, correctionAttestation, 'unknown-third-claim'],
-  [previousAttestation, `.installing-${correctionAttestation}`],
-  [previousAttestation, correctionAttestation, `.installing-${correctionAttestation}`],
+  [previousAttestation, correctionAttestation],
+  [previousAttestation, interruptedAttestation, 'unknown-third-claim'],
+  [previousAttestation, interruptedAttestation, correctionAttestation, 'unknown-fourth-claim'],
+  [previousAttestation, interruptedAttestation, `.installing-${correctionAttestation}`],
+  [
+    previousAttestation,
+    interruptedAttestation,
+    correctionAttestation,
+    `.installing-${correctionAttestation}`,
+  ],
 ]) {
   assert.equal(acceptsTerminalClaimEntries(invalid, correctionAttestation), false);
 }

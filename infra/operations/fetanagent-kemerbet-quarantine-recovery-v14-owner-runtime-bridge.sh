@@ -36,6 +36,19 @@ readonly PREVIOUS_CLAIM_ROOT_DEV_INO='64769:6102854'
 readonly PREVIOUS_ATTESTATION_SCRIPT_DEV_INO='64769:6102855'
 readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102856'
 readonly PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'
+readonly INTERRUPTED_ATTESTATION_RELEASE='635557273ce4010df91b9e1be838479ad049528c'
+readonly INTERRUPTED_ATTESTATION_SCRIPT_SHA256='6c8b9b9c00f9b701c48043242e94b90f5a7c225dbf3ff2a674d269f5b9f13251'
+readonly INTERRUPTED_ATTESTATION_SCRIPT_SIZE='97783'
+readonly INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256='d4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542'
+readonly INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE='17941'
+readonly INTERRUPTED_BUNDLE_MANIFEST_SHA256='131dce3956028251b023318cb88917fab9d237b3a11d8599e1bff986cefeb077'
+readonly INTERRUPTED_BUNDLE_MANIFEST_SIZE='928'
+readonly INTERRUPTED_CLAIM_ROOT_DEV_INO='64769:6102860'
+readonly INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO='64769:6102861'
+readonly INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102862'
+readonly INTERRUPTED_BUNDLE_MANIFEST_DEV_INO='64769:6102863'
+readonly INTERRUPTED_ATTESTATION_PARENT_DEV_INO='64769:6102864'
+readonly INTERRUPTED_EMPTY_LEDGER_DEV_INO='64769:6102865'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
 readonly EXPECTED_PUBLIC_IPV4='161.35.41.232'
@@ -93,6 +106,7 @@ readonly STAGING_ROOT="/root/fetanagent-h14-owner-runtime-bridge-$ATTESTATION_RE
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly REPAIR_ROOT="$REPAIR_PARENT/$REPAIR_RELEASE"
 readonly ATTESTATION_ROOT="$ATTESTATION_PARENT/$ATTESTATION_RELEASE"
+readonly INTERRUPTED_ATTESTATION_INSTALLING="$ATTESTATION_PARENT/.installing-$INTERRUPTED_ATTESTATION_RELEASE"
 readonly ATTESTATION_CLAIM_ROOT="$ATTESTATION_CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly ATTESTATION_VALIDATOR="$ATTESTATION_CLAIM_ROOT/$TERMINAL_VALIDATOR_BASENAME"
 readonly BRIDGE_INSTALLING="$BRIDGE_PARENT/.installing-$ATTESTATION_RELEASE"
@@ -105,6 +119,7 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   die 'the completed live-repair release is not exact a579'
 [[ "$ATTESTATION_RELEASE" =~ ^[0-9a-f]{40}$ &&
   "$ATTESTATION_RELEASE" != "$PREVIOUS_ATTESTATION_RELEASE" &&
+  "$ATTESTATION_RELEASE" != "$INTERRUPTED_ATTESTATION_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$REPAIR_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$CANONICAL_H14" &&
   "$ATTESTATION_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
@@ -552,7 +567,14 @@ load_exact_terminal_attestation() {
     "$H14_HELPER_SHA256" "$OLD_OWNER_CONTAINER_ID" "$RETIRED_COORDINATOR_CONTAINER_ID" \
     "$OLD_OWNER_SEMANTIC_SHA256" "$H14_NAMESPACE_DEVICE" "$H14_NAMESPACE_INODE" \
     "$H14_EVIDENCE_TREE_SHA256" "$MOUNT_REPAIR_INTENT_SHA256" \
-    "$MOUNT_REPAIR_COMPLETION_SHA256" <<'PY'
+    "$MOUNT_REPAIR_COMPLETION_SHA256" "$INTERRUPTED_ATTESTATION_RELEASE" \
+    "$INTERRUPTED_ATTESTATION_SCRIPT_SHA256" "$INTERRUPTED_ATTESTATION_SCRIPT_SIZE" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256" "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_SHA256" "$INTERRUPTED_BUNDLE_MANIFEST_SIZE" \
+    "$INTERRUPTED_CLAIM_ROOT_DEV_INO" "$INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_DEV_INO" \
+    "$INTERRUPTED_ATTESTATION_PARENT_DEV_INO" "$INTERRUPTED_EMPTY_LEDGER_DEV_INO" <<'PY'
 import hashlib
 import os
 import re
@@ -561,18 +583,25 @@ import sys
 
 (parent, root, attestation, repair, canonical, auth, helper, owner, coordinator,
  semantic, h14_device, h14_inode, h14_tree, repair_intent_sha,
- repair_completion_sha) = sys.argv[1:]
+ repair_completion_sha, interrupted_attestation, interrupted_bridge_sha,
+ interrupted_bridge_size, interrupted_validator_sha, interrupted_validator_size,
+ interrupted_manifest_sha, interrupted_manifest_size, interrupted_claim_dev_ino,
+ interrupted_bridge_dev_ino, interrupted_validator_dev_ino,
+ interrupted_manifest_dev_ino, interrupted_parent_dev_ino,
+ interrupted_empty_ledger_dev_ino) = sys.argv[1:]
 sha = re.compile(r'[0-9a-f]{64}')
 dev_ino = re.compile(r'[0-9]+:[0-9]+')
 
 def reject():
     raise RuntimeError()
 
-def directory(path, entries):
+def directory(path, entries, expected_dev_ino=None):
     value = os.lstat(path)
     if (
         not stat.S_ISDIR(value.st_mode)
         or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, 0o700)
+        or (expected_dev_ino is not None and
+            f'{value.st_dev}:{value.st_ino}' != expected_dev_ino)
         or os.path.realpath(path) != path
         or sorted(os.listdir(path)) != sorted(entries)
     ):
@@ -614,7 +643,10 @@ def record(path):
         os.close(descriptor)
 
 try:
-    directory(parent, [attestation])
+    directory(parent, [f'.installing-{interrupted_attestation}', attestation],
+              interrupted_parent_dev_ino)
+    directory(f'{parent}/.installing-{interrupted_attestation}', [],
+              interrupted_empty_ledger_dev_ino)
     directory(root, ['completed-v1', 'grant-restoration-intent-v1', 'intent-v1'])
     intent_keys, intent, intent_data = record(f'{root}/intent-v1')
     grant_keys, grant, grant_data = record(f'{root}/grant-restoration-intent-v1')
@@ -625,7 +657,18 @@ try:
         'authorization_sha256', 'bundle_manifest_sha256', 'bundle_manifest_size',
         'attestation_bridge_sha256',
         'attestation_bridge_size', 'differential_validator_sha256',
-        'differential_validator_size', 'bundle_claim_dev_ino', 'bundle_bridge_dev_ino',
+        'differential_validator_size',
+        'interrupted_attestation_implementation_release',
+        'interrupted_attestation_bridge_sha256', 'interrupted_attestation_bridge_size',
+        'interrupted_differential_validator_sha256',
+        'interrupted_differential_validator_size', 'interrupted_bundle_manifest_sha256',
+        'interrupted_bundle_manifest_size', 'interrupted_bundle_claim_dev_ino',
+        'interrupted_bundle_bridge_dev_ino', 'interrupted_bundle_validator_dev_ino',
+        'interrupted_bundle_manifest_dev_ino',
+        'interrupted_attestation_ledger_parent_dev_ino',
+        'interrupted_empty_ledger_dev_ino', 'interrupted_empty_ledger_state',
+        'interrupted_attempt_preserved',
+        'bundle_claim_dev_ino', 'bundle_bridge_dev_ino',
         'bundle_validator_dev_ino', 'bundle_manifest_dev_ino', 'h14_namespace_device',
         'h14_namespace_inode', 'h14_evidence_tree_sha256', 'repair_intent_sha256',
         'repair_ledger_dev_ino', 'h14_owner_runtime_restored_sha256',
@@ -728,6 +771,40 @@ try:
         or intent['deployment_grant_sha256'] != completed['deployment_grant_sha256']
         or dev_ino.fullmatch(intent['deployment_grant_dev_ino']) is None
         or sha.fullmatch(intent['deployment_grant_sha256']) is None
+    ):
+        reject()
+    interrupted_exact = {
+        'interrupted_attestation_implementation_release': interrupted_attestation,
+        'interrupted_attestation_bridge_sha256': interrupted_bridge_sha,
+        'interrupted_attestation_bridge_size': interrupted_bridge_size,
+        'interrupted_differential_validator_sha256': interrupted_validator_sha,
+        'interrupted_differential_validator_size': interrupted_validator_size,
+        'interrupted_bundle_manifest_sha256': interrupted_manifest_sha,
+        'interrupted_bundle_manifest_size': interrupted_manifest_size,
+        'interrupted_bundle_claim_dev_ino': interrupted_claim_dev_ino,
+        'interrupted_bundle_bridge_dev_ino': interrupted_bridge_dev_ino,
+        'interrupted_bundle_validator_dev_ino': interrupted_validator_dev_ino,
+        'interrupted_bundle_manifest_dev_ino': interrupted_manifest_dev_ino,
+        'interrupted_attestation_ledger_parent_dev_ino': interrupted_parent_dev_ino,
+        'interrupted_empty_ledger_dev_ino': interrupted_empty_ledger_dev_ino,
+        'interrupted_empty_ledger_state': 'empty',
+        'interrupted_attempt_preserved': 'true',
+    }
+    if (
+        any(intent.get(key) != value for key, value in interrupted_exact.items())
+        or interrupted_attestation == attestation
+        or re.fullmatch(r'[0-9a-f]{40}', interrupted_attestation) is None
+        or any(sha.fullmatch(value) is None for value in (
+            interrupted_bridge_sha, interrupted_validator_sha, interrupted_manifest_sha,
+        ))
+        or any(dev_ino.fullmatch(value) is None for value in (
+            interrupted_claim_dev_ino, interrupted_bridge_dev_ino,
+            interrupted_validator_dev_ino, interrupted_manifest_dev_ino,
+            interrupted_parent_dev_ino, interrupted_empty_ledger_dev_ino,
+        ))
+        or any(re.fullmatch(r'[1-9][0-9]{0,7}', value) is None for value in (
+            interrupted_bridge_size, interrupted_validator_size, interrupted_manifest_size,
+        ))
     ):
         reject()
     for key in (
@@ -884,7 +961,14 @@ require_live_terminal_attestation_boundary() {
     "$PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO" \
     "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256" "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE" \
     "$PREVIOUS_BUNDLE_MANIFEST_DEV_INO" "$PREVIOUS_BUNDLE_MANIFEST_SHA256" \
-    "$PREVIOUS_BUNDLE_MANIFEST_SIZE" \
+    "$PREVIOUS_BUNDLE_MANIFEST_SIZE" "$INTERRUPTED_ATTESTATION_RELEASE" \
+    "$INTERRUPTED_CLAIM_ROOT_DEV_INO" "$INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO" \
+    "$INTERRUPTED_ATTESTATION_SCRIPT_SHA256" "$INTERRUPTED_ATTESTATION_SCRIPT_SIZE" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_DEV_INO" "$INTERRUPTED_BUNDLE_MANIFEST_SHA256" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_SIZE" \
     "$SEAL_BINDING" "$FINAL_BINDING" "$RECHECK_RECEIPT" \
     "$H14_ROOT" "$PROFILE_ACK_NAME" "$PROFILE_FINALIZED_NAME" \
     "$FAILED_MARKER_NAME" "$PLAYER_STAGE_NAME" "$CLAIM_STAGE_NAME" <<'PY'
@@ -905,6 +989,11 @@ import sys
  previous_bridge_dev_ino, previous_bridge_sha, previous_bridge_size_text,
  previous_validator_dev_ino, previous_validator_sha, previous_validator_size_text,
  previous_manifest_dev_ino, previous_manifest_sha, previous_manifest_size_text,
+ interrupted_attestation, interrupted_root_dev_ino, interrupted_bridge_dev_ino,
+ interrupted_bridge_sha, interrupted_bridge_size_text,
+ interrupted_validator_dev_ino, interrupted_validator_sha,
+ interrupted_validator_size_text, interrupted_manifest_dev_ino,
+ interrupted_manifest_sha, interrupted_manifest_size_text,
  seal_binding, final_binding, recheck_receipt, h14_root, profile_ack_name,
  profile_finalized_name, failed_marker_name, player_stage_name,
  claim_stage_name) = sys.argv[1:]
@@ -964,11 +1053,14 @@ try:
             validator_dev_ino, bridge_dev_ino, manifest_dev_ino,
             previous_parent_dev_ino, previous_root_dev_ino,
             previous_bridge_dev_ino, previous_validator_dev_ino,
-            previous_manifest_dev_ino,
+            previous_manifest_dev_ino, interrupted_root_dev_ino,
+            interrupted_bridge_dev_ino, interrupted_validator_dev_ino,
+            interrupted_manifest_dev_ino,
         ))
         or any(SHA.fullmatch(value) is None for value in (
             sudoers_sha, marker_sha, validator_sha, bridge_sha, manifest_sha,
             previous_bridge_sha, previous_validator_sha, previous_manifest_sha,
+            interrupted_bridge_sha, interrupted_validator_sha, interrupted_manifest_sha,
         ))
         or re.fullmatch(r'[1-9][0-9]{0,7}', validator_size_text) is None
         or re.fullmatch(r'[1-9][0-9]{0,7}', bridge_size_text) is None
@@ -976,8 +1068,13 @@ try:
         or re.fullmatch(r'[1-9][0-9]{0,7}', previous_bridge_size_text) is None
         or re.fullmatch(r'[1-9][0-9]{0,7}', previous_validator_size_text) is None
         or re.fullmatch(r'[1-9][0-9]{0,7}', previous_manifest_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', interrupted_bridge_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', interrupted_validator_size_text) is None
+        or re.fullmatch(r'[1-9][0-9]{0,7}', interrupted_manifest_size_text) is None
         or previous_attestation == attestation
+        or interrupted_attestation in {previous_attestation, attestation}
         or re.fullmatch(r'[0-9a-f]{40}', previous_attestation) is None
+        or re.fullmatch(r'[0-9a-f]{40}', interrupted_attestation) is None
     ):
         reject()
     validator_size = int(validator_size_text)
@@ -986,6 +1083,9 @@ try:
     previous_bridge_size = int(previous_bridge_size_text)
     previous_validator_size = int(previous_validator_size_text)
     previous_manifest_size = int(previous_manifest_size_text)
+    interrupted_bridge_size = int(interrupted_bridge_size_text)
+    interrupted_validator_size = int(interrupted_validator_size_text)
+    interrupted_manifest_size = int(interrupted_manifest_size_text)
 
     exact_file(sudoers, (0, 0), 0o440, sudoers_dev_ino, sudoers_sha,
                os.lstat(sudoers).st_size)
@@ -1000,7 +1100,7 @@ try:
     names = [bridge_name, validator_name, manifest_name]
     directory(
         claim_parent, (0, 0), 0o700, previous_parent_dev_ino,
-        [previous_attestation, attestation],
+        [previous_attestation, interrupted_attestation, attestation],
     )
     previous_root = f'{claim_parent}/{previous_attestation}'
     directory(previous_root, (0, 0), 0o700, previous_root_dev_ino, names)
@@ -1012,6 +1112,17 @@ try:
     exact_file(f'{previous_root}/{manifest_name}', (0, 0), 0o400,
                previous_manifest_dev_ino, previous_manifest_sha,
                previous_manifest_size)
+    interrupted_root = f'{claim_parent}/{interrupted_attestation}'
+    directory(interrupted_root, (0, 0), 0o700, interrupted_root_dev_ino, names)
+    exact_file(f'{interrupted_root}/{bridge_name}', (0, 0), 0o400,
+               interrupted_bridge_dev_ino, interrupted_bridge_sha,
+               interrupted_bridge_size)
+    exact_file(f'{interrupted_root}/{validator_name}', (0, 0), 0o400,
+               interrupted_validator_dev_ino, interrupted_validator_sha,
+               interrupted_validator_size)
+    exact_file(f'{interrupted_root}/{manifest_name}', (0, 0), 0o400,
+               interrupted_manifest_dev_ino, interrupted_manifest_sha,
+               interrupted_manifest_size)
     directory(claim_root, (0, 0), 0o700, claim_root_dev_ino, names)
     exact_file(validator, (0, 0), 0o400, validator_dev_ino, validator_sha,
                validator_size)

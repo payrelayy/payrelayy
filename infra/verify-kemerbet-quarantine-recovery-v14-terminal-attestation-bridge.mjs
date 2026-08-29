@@ -32,6 +32,10 @@ const previousAttestation = '38e9d2660b871c691afdd69541e17c17a7b55821';
 const previousScript = 'dfad82098c2042a5cd884f7c1116a9b4e424ac8685a68db3c7633f58a7e22bfb';
 const previousValidator = 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542';
 const previousManifest = '25ff5bb29342bbb1404ff888dacb43d464867c113f8f3db04ebb2df4e90ae733';
+const interruptedAttestation = '635557273ce4010df91b9e1be838479ad049528c';
+const interruptedScript = '6c8b9b9c00f9b701c48043242e94b90f5a7c225dbf3ff2a674d269f5b9f13251';
+const interruptedValidator = 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542';
+const interruptedManifest = '131dce3956028251b023318cb88917fab9d237b3a11d8599e1bff986cefeb077';
 const canonicalReceipt = '/var/lib/fetanagent/kemerbet-readiness-recheck/ready-v1';
 
 function sha(value) {
@@ -93,6 +97,30 @@ for (const devIno of [
   "PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'",
 ]) {
   assert.ok(bridge.includes(devIno), `previous immutable claim identity omits ${devIno}`);
+}
+for (const interruptedBoundary of [
+  `INTERRUPTED_ATTESTATION_RELEASE='${interruptedAttestation}'`,
+  `INTERRUPTED_ATTESTATION_SCRIPT_SHA256='${interruptedScript}'`,
+  "INTERRUPTED_ATTESTATION_SCRIPT_SIZE='97783'",
+  `INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256='${interruptedValidator}'`,
+  "INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE='17941'",
+  `INTERRUPTED_BUNDLE_MANIFEST_SHA256='${interruptedManifest}'`,
+  "INTERRUPTED_BUNDLE_MANIFEST_SIZE='928'",
+  "INTERRUPTED_CLAIM_ROOT_DEV_INO='64769:6102860'",
+  "INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO='64769:6102861'",
+  "INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102862'",
+  "INTERRUPTED_BUNDLE_MANIFEST_DEV_INO='64769:6102863'",
+  "INTERRUPTED_ATTESTATION_PARENT_DEV_INO='64769:6102864'",
+  "INTERRUPTED_EMPTY_LEDGER_DEV_INO='64769:6102865'",
+]) {
+  assert.ok(
+    bridge.includes(interruptedBoundary),
+    `interrupted immutable attempt binding omits ${interruptedBoundary}`,
+  );
+  assert.ok(
+    ownerBridge.includes(interruptedBoundary),
+    `Owner bridge omits interrupted immutable attempt binding ${interruptedBoundary}`,
+  );
 }
 assert.ok(bridge.includes(`readonly RECHECK_RECEIPT='${canonicalReceipt}'`));
 assert.doesNotMatch(bridge, /kemerbet-readiness-recheck-ready-v1/);
@@ -183,6 +211,60 @@ const previousManifestBytes = Buffer.from(
 assert.equal(previousManifestBytes.length, 928);
 assert.equal(sha(previousManifestBytes), previousManifest);
 
+const interruptedBridgeBytes = spawnSync(
+  'git',
+  [
+    'show',
+    `${interruptedAttestation}:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bridge.sh`,
+  ],
+  { cwd: root, encoding: null, maxBuffer: 8 * 1024 * 1024 },
+);
+assert.equal(interruptedBridgeBytes.status, 0, interruptedBridgeBytes.stderr?.toString('utf8'));
+assert.equal(interruptedBridgeBytes.stdout.length, 97783);
+assert.equal(sha(interruptedBridgeBytes.stdout), interruptedScript);
+const interruptedValidatorBytes = spawnSync(
+  'git',
+  [
+    'show',
+    `${interruptedAttestation}:infra/operations/fetanagent-kemerbet-h14-terminal-differential-validator.py`,
+  ],
+  { cwd: root, encoding: null, maxBuffer: 8 * 1024 * 1024 },
+);
+assert.equal(
+  interruptedValidatorBytes.status,
+  0,
+  interruptedValidatorBytes.stderr?.toString('utf8'),
+);
+assert.equal(interruptedValidatorBytes.stdout.length, 17941);
+assert.equal(sha(interruptedValidatorBytes.stdout), interruptedValidator);
+const interruptedManifestBytes = Buffer.from(
+  [
+    'version=1',
+    'contract=fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bundle',
+    `attestation_implementation_sha=${interruptedAttestation}`,
+    `repair_implementation_sha=${repair}`,
+    `canonical_h14_sha=${canonical}`,
+    'staging_project_ref=spzpiyxheappsfyswewl',
+    'staging_droplet_id=593344964',
+    `authorization_sha256=${auth}`,
+    `terminal_attestation_bridge_sha256=${interruptedScript}`,
+    'terminal_attestation_bridge_size=97783',
+    `terminal_differential_validator_sha256=${interruptedValidator}`,
+    'terminal_differential_validator_size=17941',
+    'provider_action_enabled=false',
+    'financial_actions_mode=dry_run',
+    'kemerbet_executor_enabled=false',
+    'kemerbet_final_action_enabled=false',
+    'transfer_enabled=false',
+    'amount_entry_enabled=false',
+    'money_moved=false',
+    '',
+  ].join('\n'),
+  'ascii',
+);
+assert.equal(interruptedManifestBytes.length, 928);
+assert.equal(sha(interruptedManifestBytes), interruptedManifest);
+
 const claim = shellFunction(bridge, 'claim_and_load_bundle');
 for (const required of [
   'names = [script_name, validator_name, manifest_name]',
@@ -201,10 +283,13 @@ for (const required of [
   'A completed root-owned claim is the only replay authority',
   'Do not\n        # inspect an uploader-controlled leftover',
   'def validate_previous_claim():',
+  'def validate_interrupted_claim():',
   'immutable_identity(previous_root)',
-  'directory(parent, root_owner, 0o700, [previous_attestation, attestation])',
-  "[previous_attestation, f'.installing-{attestation}']",
+  'immutable_identity(interrupted_root)',
+  'previous_attestation, interrupted_attestation, attestation,',
+  "previous_attestation, interrupted_attestation, f'.installing-{attestation}'",
   'if validate_previous_claim() != previous_boundary:',
+  'if validate_interrupted_claim() != interrupted_boundary:',
 ]) {
   assert.ok(claim.includes(required), `bundle claim omits ${required}`);
 }
@@ -227,10 +312,32 @@ for (const exactPreviousBoundary of [
     `previous immutable claim validation omits ${exactPreviousBoundary}`,
   );
 }
+for (const exactInterruptedBoundary of [
+  'len(values[script_name]) != interrupted_script_size',
+  'hashlib.sha256(values[script_name]).hexdigest() != interrupted_script_sha',
+  'len(values[validator_name]) != interrupted_validator_size',
+  'hashlib.sha256(values[validator_name]).hexdigest() != interrupted_validator_sha',
+  'len(values[manifest_name]) != interrupted_manifest_size',
+  'hashlib.sha256(values[manifest_name]).hexdigest() != interrupted_manifest_sha',
+  'dev_ino(interrupted_root) != interrupted_root_dev_ino',
+  "dev_ino(f'{interrupted_root}/{script_name}') != interrupted_script_dev_ino",
+  "dev_ino(f'{interrupted_root}/{validator_name}') != interrupted_validator_dev_ino",
+  "dev_ino(f'{interrupted_root}/{manifest_name}') != interrupted_manifest_dev_ino",
+]) {
+  assert.ok(
+    claim.includes(exactInterruptedBoundary),
+    `interrupted immutable claim validation omits ${exactInterruptedBoundary}`,
+  );
+}
 assert.equal(
   count(claim, /validate_previous_claim\(\) != previous_boundary/g),
   4,
   'the previous claim must be revalidated around both interrupted copy and atomic publication',
+);
+assert.equal(
+  count(claim, /validate_interrupted_claim\(\) != interrupted_boundary/g),
+  4,
+  'the interrupted immutable claim must be revalidated around copy and atomic publication',
 );
 const committedClaimBranch = section(
   claim,
@@ -245,31 +352,47 @@ assert.match(
 );
 
 function allowedClaimEntries(phase, current) {
-  if (phase === 'before') return [previousAttestation];
-  if (phase === 'installing') return [previousAttestation, `.installing-${current}`].sort();
-  if (phase === 'final') return [previousAttestation, current].sort();
+  if (phase === 'before') return [previousAttestation, interruptedAttestation].sort();
+  if (phase === 'installing')
+    return [previousAttestation, interruptedAttestation, `.installing-${current}`].sort();
+  if (phase === 'final') return [previousAttestation, interruptedAttestation, current].sort();
   throw new Error('unsupported claim phase');
 }
 function acceptsClaimEntries(actual, phase, current) {
   return [...actual].sort().join('\0') === allowedClaimEntries(phase, current).join('\0');
 }
 const correctionRelease = 'f'.repeat(40);
-assert.deepEqual(allowedClaimEntries('before', correctionRelease), [previousAttestation]);
-assert.deepEqual(allowedClaimEntries('installing', correctionRelease), [
-  `.installing-${correctionRelease}`,
-  previousAttestation,
-]);
+assert.deepEqual(
+  allowedClaimEntries('before', correctionRelease),
+  [previousAttestation, interruptedAttestation].sort(),
+);
+assert.deepEqual(
+  allowedClaimEntries('installing', correctionRelease),
+  [`.installing-${correctionRelease}`, interruptedAttestation, previousAttestation].sort(),
+);
 assert.deepEqual(
   allowedClaimEntries('final', correctionRelease),
-  [previousAttestation, correctionRelease].sort(),
+  [previousAttestation, interruptedAttestation, correctionRelease].sort(),
 );
 for (const [phase, entries] of [
   ['before', []],
   ['before', [correctionRelease]],
-  ['before', [previousAttestation, 'unknown-third-claim']],
-  ['final', [previousAttestation, correctionRelease, 'unknown-third-claim']],
-  ['installing', [previousAttestation, `.installing-${'e'.repeat(40)}`]],
-  ['final', [previousAttestation, correctionRelease, `.installing-${correctionRelease}`]],
+  ['before', [previousAttestation]],
+  ['before', [previousAttestation, interruptedAttestation, 'unknown-third-claim']],
+  [
+    'final',
+    [previousAttestation, interruptedAttestation, correctionRelease, 'unknown-fourth-claim'],
+  ],
+  ['installing', [previousAttestation, interruptedAttestation, `.installing-${'e'.repeat(40)}`]],
+  [
+    'final',
+    [
+      previousAttestation,
+      interruptedAttestation,
+      correctionRelease,
+      `.installing-${correctionRelease}`,
+    ],
+  ],
 ]) {
   assert.equal(acceptsClaimEntries(entries, phase, correctionRelease), false);
 }
@@ -356,6 +479,76 @@ const loadSudoers = shellFunction(bridge, 'load_sudoers_binding_from_attestation
 assert.match(loadSudoers, /deployment_grant_dev_ino/);
 assert.match(loadSudoers, /deployment_grant_sha256/);
 assert.match(loadSudoers, /deployment_grant'\) != 'disabled'/);
+
+const interruptedLedger = shellFunction(bridge, 'require_interrupted_empty_attestation_ledger');
+for (const required of [
+  'INTERRUPTED_ATTESTATION_PARENT_DEV_INO',
+  'INTERRUPTED_ATTESTATION_INSTALLING',
+  'INTERRUPTED_EMPTY_LEDGER_DEV_INO',
+  "stat --format='%u:%g:%a:%d:%i'",
+  'find -P "$INTERRUPTED_ATTESTATION_INSTALLING" -mindepth 1 -maxdepth 1',
+]) {
+  assert.ok(
+    interruptedLedger.includes(required),
+    `interrupted empty-ledger gate omits ${required}`,
+  );
+}
+const discoverLedger = shellFunction(bridge, 'discover_attestation_ledger');
+for (const exactNamespace of [
+  'children" == "$interrupted_name"',
+  '".installing-$ATTESTATION_RELEASE"',
+  '"$ATTESTATION_RELEASE"',
+]) {
+  assert.ok(
+    discoverLedger.includes(exactNamespace),
+    `attestation recovery namespace omits ${exactNamespace}`,
+  );
+}
+const createLedger = shellFunction(bridge, 'create_attestation_ledger');
+assert.match(createLedger, /mkdir --mode=0700 -- "\$ATTESTATION_INSTALLING"/);
+assert.doesNotMatch(
+  createLedger,
+  /(?:mkdir|mv|rm|rmdir|unlink)[^\n]*INTERRUPTED_ATTESTATION_INSTALLING/,
+  'the failed immutable 635 ledger must never be written, finalized, or removed',
+);
+const attestationIntent = shellFunction(bridge, 'expected_attestation_intent');
+for (const exactBinding of [
+  'interrupted_attestation_implementation_release=',
+  'interrupted_attestation_bridge_sha256=',
+  'interrupted_attestation_bridge_size=',
+  'interrupted_differential_validator_sha256=',
+  'interrupted_differential_validator_size=',
+  'interrupted_bundle_manifest_sha256=',
+  'interrupted_bundle_manifest_size=',
+  'interrupted_bundle_claim_dev_ino=',
+  'interrupted_bundle_bridge_dev_ino=',
+  'interrupted_bundle_validator_dev_ino=',
+  'interrupted_bundle_manifest_dev_ino=',
+  'interrupted_attestation_ledger_parent_dev_ino=',
+  'interrupted_empty_ledger_dev_ino=',
+  'interrupted_empty_ledger_state=empty',
+  'interrupted_attempt_preserved=true',
+]) {
+  assert.ok(attestationIntent.includes(exactBinding), `terminal intent omits ${exactBinding}`);
+}
+
+const publishRecordFunction = shellFunction(bridge, 'publish_exact_record');
+for (const required of [
+  'python3 -I /dev/fd/3 "$path" "$mode" 3<<\'PY\'',
+  'expected = sys.stdin.buffer.read()',
+  'expected.startswith(data)',
+  'os.fsync(descriptor)',
+  'os.rename(temporary, path)',
+  'sync_directory(root)',
+]) {
+  assert.ok(publishRecordFunction.includes(required), `exact record transport omits ${required}`);
+}
+assert.doesNotMatch(
+  publishRecordFunction,
+  /python3 -I - "\$path" "\$mode" <<'PY'/,
+  'the Python source heredoc must not consume the caller-provided record stdin',
+);
+assert.doesNotMatch(publishRecordFunction, /O_TRUNC|unlink|remove|rmdir/);
 
 const mutatorGate = shellFunction(bridge, 'require_no_other_mutator_processes');
 assert.match(
@@ -623,6 +816,62 @@ assert.equal(replayClaim(exactRecordSha, '0'.repeat(64)), exactRecordSha);
 // Reproduce the canonical c36 transport defect exactly: command substitution
 // strips the trailing empty profile-ID line before mapfile parses the here-string.
 const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+const exactTransportScript = `set -euo pipefail
+readonly SAFE_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+${publishRecordFunction}
+fixture="$(mktemp -d)"
+record="$fixture/record-v1"
+cleanup() { rm -rf -- "$fixture"; }
+expected_record() {
+  printf '%s\\n' 'version=1' 'state=completed' 'money_moved=false'
+}
+trap cleanup EXIT
+chmod 0700 "$fixture"
+
+# Fresh nonempty stdin must reach Python rather than being replaced by its source heredoc.
+publish_exact_record "$record" 0600 < <(expected_record)
+cmp -s -- "$record" <(expected_record)
+
+# A durable exact interrupted prefix must be completed append-only.
+rm -- "$record"
+printf '%s\\n%s' 'version=1' 'sta' >"$fixture/.record-v1.installing"
+chmod 0600 "$fixture/.record-v1.installing"
+publish_exact_record "$record" 0600 < <(expected_record)
+cmp -s -- "$record" <(expected_record)
+
+# A committed final record is authoritative and exact replay is read-only.
+before="$(stat --format='%d:%i:%s:%Y' "$record")"
+publish_exact_record "$record" 0600 < <(expected_record)
+test "$(stat --format='%d:%i:%s:%Y' "$record")" = "$before"
+cmp -s -- "$record" <(expected_record)
+
+# Empty input and a foreign prefix both fail closed without replacing bytes.
+if publish_exact_record "$fixture/empty-v1" 0600 </dev/null; then exit 1; fi
+printf 'foreign-prefix' >"$fixture/.foreign-v1.installing"
+chmod 0600 "$fixture/.foreign-v1.installing"
+if publish_exact_record "$fixture/foreign-v1" 0600 < <(expected_record); then exit 1; fi
+test "$(cat "$fixture/.foreign-v1.installing")" = 'foreign-prefix'
+`;
+const exactTransportSyntax = spawnSync(bash, ['-n'], {
+  encoding: 'utf8',
+  input: exactTransportScript,
+});
+assert.equal(exactTransportSyntax.status, 0, exactTransportSyntax.stderr);
+if (process.platform !== 'win32') {
+  const rootInvocation =
+    typeof process.getuid === 'function' && process.getuid() === 0
+      ? { command: 'bash', args: ['-c', exactTransportScript] }
+      : { command: 'sudo', args: ['-n', 'bash', '-c', exactTransportScript] };
+  const exactTransport = spawnSync(rootInvocation.command, rootInvocation.args, {
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  assert.equal(
+    exactTransport.status,
+    0,
+    `exact publish stdin/prefix/replay fixture failed: ${exactTransport.stderr}`,
+  );
+}
 const emptyField = spawnSync(
   bash,
   [

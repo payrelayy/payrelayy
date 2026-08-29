@@ -29,6 +29,19 @@ readonly PREVIOUS_CLAIM_ROOT_DEV_INO='64769:6102854'
 readonly PREVIOUS_ATTESTATION_SCRIPT_DEV_INO='64769:6102855'
 readonly PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102856'
 readonly PREVIOUS_BUNDLE_MANIFEST_DEV_INO='64769:6102857'
+readonly INTERRUPTED_ATTESTATION_RELEASE='635557273ce4010df91b9e1be838479ad049528c'
+readonly INTERRUPTED_ATTESTATION_SCRIPT_SHA256='6c8b9b9c00f9b701c48043242e94b90f5a7c225dbf3ff2a674d269f5b9f13251'
+readonly INTERRUPTED_ATTESTATION_SCRIPT_SIZE='97783'
+readonly INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256='d4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542'
+readonly INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE='17941'
+readonly INTERRUPTED_BUNDLE_MANIFEST_SHA256='131dce3956028251b023318cb88917fab9d237b3a11d8599e1bff986cefeb077'
+readonly INTERRUPTED_BUNDLE_MANIFEST_SIZE='928'
+readonly INTERRUPTED_CLAIM_ROOT_DEV_INO='64769:6102860'
+readonly INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO='64769:6102861'
+readonly INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO='64769:6102862'
+readonly INTERRUPTED_BUNDLE_MANIFEST_DEV_INO='64769:6102863'
+readonly INTERRUPTED_ATTESTATION_PARENT_DEV_INO='64769:6102864'
+readonly INTERRUPTED_EMPTY_LEDGER_DEV_INO='64769:6102865'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
 readonly EXPECTED_PUBLIC_IPV4='161.35.41.232'
@@ -83,11 +96,13 @@ readonly REPAIR_INSTALLING="${REPAIR_PARENT}/.installing-${REPAIR_RELEASE}"
 readonly REPAIR_ROOT="${REPAIR_PARENT}/${REPAIR_RELEASE}"
 readonly ATTESTATION_INSTALLING="${ATTESTATION_PARENT}/.installing-${ATTESTATION_RELEASE}"
 readonly ATTESTATION_ROOT="${ATTESTATION_PARENT}/${ATTESTATION_RELEASE}"
+readonly INTERRUPTED_ATTESTATION_INSTALLING="${ATTESTATION_PARENT}/.installing-${INTERRUPTED_ATTESTATION_RELEASE}"
 readonly CLAIM_INSTALLING="${CLAIM_PARENT}/.installing-${ATTESTATION_RELEASE}"
 readonly CLAIM_ROOT="${CLAIM_PARENT}/${ATTESTATION_RELEASE}"
 
 [[ "$ATTESTATION_RELEASE" =~ ^[0-9a-f]{40}$ &&
   "$ATTESTATION_RELEASE" != "$PREVIOUS_ATTESTATION_RELEASE" &&
+  "$ATTESTATION_RELEASE" != "$INTERRUPTED_ATTESTATION_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$REPAIR_RELEASE" &&
   "$ATTESTATION_RELEASE" != "$CANONICAL_H14" &&
   "$ATTESTATION_RELEASE" != "$PREDECESSOR_RELEASE" ]] ||
@@ -398,7 +413,13 @@ claim_and_load_bundle() {
     "$PREVIOUS_BUNDLE_MANIFEST_SHA256" "$PREVIOUS_BUNDLE_MANIFEST_SIZE" \
     "$PREVIOUS_CLAIM_PARENT_DEV_INO" "$PREVIOUS_CLAIM_ROOT_DEV_INO" \
     "$PREVIOUS_ATTESTATION_SCRIPT_DEV_INO" "$PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO" \
-    "$PREVIOUS_BUNDLE_MANIFEST_DEV_INO" <<'PY'
+    "$PREVIOUS_BUNDLE_MANIFEST_DEV_INO" "$INTERRUPTED_ATTESTATION_RELEASE" \
+    "$INTERRUPTED_ATTESTATION_SCRIPT_SHA256" "$INTERRUPTED_ATTESTATION_SCRIPT_SIZE" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256" "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_SHA256" "$INTERRUPTED_BUNDLE_MANIFEST_SIZE" \
+    "$INTERRUPTED_CLAIM_ROOT_DEV_INO" "$INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_DEV_INO" <<'PY'
 import hashlib
 import os
 import re
@@ -411,12 +432,20 @@ import sys
  previous_script_size_text, previous_validator_sha, previous_validator_size_text,
  previous_manifest_sha, previous_manifest_size_text, previous_parent_dev_ino,
  previous_root_dev_ino, previous_script_dev_ino, previous_validator_dev_ino,
- previous_manifest_dev_ino) = sys.argv[1:]
+ previous_manifest_dev_ino, interrupted_attestation, interrupted_script_sha,
+ interrupted_script_size_text, interrupted_validator_sha,
+ interrupted_validator_size_text, interrupted_manifest_sha,
+ interrupted_manifest_size_text, interrupted_root_dev_ino,
+ interrupted_script_dev_ino, interrupted_validator_dev_ino,
+ interrupted_manifest_dev_ino) = sys.argv[1:]
 admin_uid = int(admin_uid_text)
 admin_gid = int(admin_gid_text)
 previous_script_size = int(previous_script_size_text)
 previous_validator_size = int(previous_validator_size_text)
 previous_manifest_size = int(previous_manifest_size_text)
+interrupted_script_size = int(interrupted_script_size_text)
+interrupted_validator_size = int(interrupted_validator_size_text)
+interrupted_manifest_size = int(interrupted_manifest_size_text)
 sha = re.compile(r'[0-9a-f]{64}')
 release = re.compile(r'[0-9a-f]{40}')
 names = [script_name, validator_name, manifest_name]
@@ -590,6 +619,31 @@ def validate_previous_claim():
         *(immutable_identity(f'{previous_root}/{name}') for name in names),
     )
 
+def validate_interrupted_claim():
+    interrupted_root = f'{parent}/{interrupted_attestation}'
+    directory(interrupted_root, {(0, 0)}, 0o700, names)
+    values = {
+        name: read_file(f'{interrupted_root}/{name}', {(0, 0)}, 0o400, 2 * 1024 * 1024)
+        for name in names
+    }
+    if (
+        dev_ino(interrupted_root) != interrupted_root_dev_ino
+        or dev_ino(f'{interrupted_root}/{script_name}') != interrupted_script_dev_ino
+        or dev_ino(f'{interrupted_root}/{validator_name}') != interrupted_validator_dev_ino
+        or dev_ino(f'{interrupted_root}/{manifest_name}') != interrupted_manifest_dev_ino
+        or len(values[script_name]) != interrupted_script_size
+        or hashlib.sha256(values[script_name]).hexdigest() != interrupted_script_sha
+        or len(values[validator_name]) != interrupted_validator_size
+        or hashlib.sha256(values[validator_name]).hexdigest() != interrupted_validator_sha
+        or len(values[manifest_name]) != interrupted_manifest_size
+        or hashlib.sha256(values[manifest_name]).hexdigest() != interrupted_manifest_sha
+    ):
+        reject()
+    return (
+        immutable_identity(interrupted_root),
+        *(immutable_identity(f'{interrupted_root}/{name}') for name in names),
+    )
+
 def snapshot_source():
     descriptor = os.open(
         source,
@@ -735,29 +789,44 @@ try:
     if (
         not release.fullmatch(previous_attestation)
         or previous_attestation == attestation
+        or not release.fullmatch(interrupted_attestation)
+        or interrupted_attestation in {attestation, previous_attestation}
         or not sha.fullmatch(previous_script_sha)
         or not sha.fullmatch(previous_validator_sha)
         or not sha.fullmatch(previous_manifest_sha)
+        or not sha.fullmatch(interrupted_script_sha)
+        or not sha.fullmatch(interrupted_validator_sha)
+        or not sha.fullmatch(interrupted_manifest_sha)
         or any(re.fullmatch(r'[0-9]+:[0-9]+', value) is None for value in (
             previous_parent_dev_ino, previous_root_dev_ino, previous_script_dev_ino,
             previous_validator_dev_ino, previous_manifest_dev_ino,
+            interrupted_root_dev_ino, interrupted_script_dev_ino,
+            interrupted_validator_dev_ino, interrupted_manifest_dev_ino,
         ))
         or previous_script_size <= 0
         or previous_validator_size <= 0
         or previous_manifest_size <= 0
+        or interrupted_script_size <= 0
+        or interrupted_validator_size <= 0
+        or interrupted_manifest_size <= 0
     ):
         reject()
     if os.path.lexists(final):
         if os.path.lexists(installing):
             reject()
-        directory(parent, root_owner, 0o700, [previous_attestation, attestation])
+        directory(parent, root_owner, 0o700, [
+            previous_attestation, interrupted_attestation, attestation,
+        ])
         if dev_ino(parent) != previous_parent_dev_ino:
             reject()
         previous_boundary = validate_previous_claim()
+        interrupted_boundary = validate_interrupted_claim()
         script_sha, script_size, validator_sha, validator_size, manifest_size, _ = validate(
             final, root_owner, 0o400,
         )
         if validate_previous_claim() != previous_boundary:
+            reject()
+        if validate_interrupted_claim() != interrupted_boundary:
             reject()
         # A completed root-owned claim is the only replay authority.  Do not
         # inspect an uploader-controlled leftover: it cannot change or block
@@ -769,13 +838,17 @@ try:
         children = os.listdir(parent)
         resuming = os.path.lexists(installing)
         if not resuming:
-            if sorted(children) != [previous_attestation]:
+            if sorted(children) != sorted([previous_attestation, interrupted_attestation]):
                 reject()
             previous_boundary = validate_previous_claim()
+            interrupted_boundary = validate_interrupted_claim()
         else:
-            if sorted(children) != sorted([previous_attestation, f'.installing-{attestation}']):
+            if sorted(children) != sorted([
+                previous_attestation, interrupted_attestation, f'.installing-{attestation}',
+            ]):
                 reject()
             previous_boundary = validate_previous_claim()
+            interrupted_boundary = validate_interrupted_claim()
         source_values, source_identities, source_directory = snapshot_source()
         validate_payloads(source_values)
         if not resuming:
@@ -785,9 +858,11 @@ try:
             sync_directory(parent)
         directory(
             parent, root_owner, 0o700,
-            [previous_attestation, f'.installing-{attestation}'],
+            [previous_attestation, interrupted_attestation, f'.installing-{attestation}'],
         )
         if validate_previous_claim() != previous_boundary:
+            reject()
+        if validate_interrupted_claim() != interrupted_boundary:
             reject()
         directory(installing, root_owner, 0o700)
         if any(name not in names for name in os.listdir(installing)):
@@ -800,10 +875,16 @@ try:
         )
         if validate_previous_claim() != previous_boundary:
             reject()
+        if validate_interrupted_claim() != interrupted_boundary:
+            reject()
         os.rename(installing, final)
         sync_directory(parent)
-        directory(parent, root_owner, 0o700, [previous_attestation, attestation])
+        directory(parent, root_owner, 0o700, [
+            previous_attestation, interrupted_attestation, attestation,
+        ])
         if validate_previous_claim() != previous_boundary:
+            reject()
+        if validate_interrupted_claim() != interrupted_boundary:
             reject()
         validate(final, root_owner, 0o400)
         consume_source(source_identities, source_directory)
@@ -1282,6 +1363,92 @@ capture_immutable_boundary() {
   fi
 }
 
+require_exact_terminal_claim_file() {
+  local path="$1" expected_dev_ino="$2" expected_sha="$3" expected_size="$4"
+  [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+    "$(stat --format='%u:%g:%a:%h:%d:%i:%s' "$path")" == \
+      "0:0:400:1:${expected_dev_ino}:${expected_size}" &&
+    "$(sha256sum -- "$path" | awk '{print $1}')" == "$expected_sha" ]]
+}
+
+require_terminal_claim_lineage_boundary() {
+  local entries names
+  names="$(printf '%s\n' "$SCRIPT_BASENAME" "$VALIDATOR_BASENAME" \
+    "$MANIFEST_BASENAME" | LC_ALL=C sort)" || return 1
+  entries="$(find -P "$CLAIM_PARENT" -mindepth 1 -maxdepth 1 -printf '%f\n' |
+    LC_ALL=C sort)" || return 1
+  [[ ! -L "$CLAIM_PARENT" && -d "$CLAIM_PARENT" &&
+    "$(realpath -- "$CLAIM_PARENT")" == "$CLAIM_PARENT" &&
+    "$(stat --format='%u:%g:%a:%d:%i' "$CLAIM_PARENT")" == \
+      "0:0:700:${PREVIOUS_CLAIM_PARENT_DEV_INO}" &&
+    "$entries" == "$(printf '%s\n' "$PREVIOUS_ATTESTATION_RELEASE" \
+      "$INTERRUPTED_ATTESTATION_RELEASE" "$ATTESTATION_RELEASE" | LC_ALL=C sort)" ]] ||
+    return 1
+
+  [[ ! -L "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE" &&
+    -d "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE" &&
+    "$(realpath -- "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE")" == \
+      "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE" &&
+    "$(stat --format='%u:%g:%a:%d:%i' \
+      "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE")" == \
+      "0:0:700:${PREVIOUS_CLAIM_ROOT_DEV_INO}" &&
+    "$(find -P "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE" -mindepth 1 \
+      -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" == "$names" ]] || return 1
+  require_exact_terminal_claim_file \
+    "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE/$SCRIPT_BASENAME" \
+    "$PREVIOUS_ATTESTATION_SCRIPT_DEV_INO" "$PREVIOUS_ATTESTATION_SCRIPT_SHA256" \
+    "$PREVIOUS_ATTESTATION_SCRIPT_SIZE" || return 1
+  require_exact_terminal_claim_file \
+    "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE/$VALIDATOR_BASENAME" \
+    "$PREVIOUS_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SHA256" \
+    "$PREVIOUS_DIFFERENTIAL_VALIDATOR_SIZE" || return 1
+  require_exact_terminal_claim_file \
+    "$CLAIM_PARENT/$PREVIOUS_ATTESTATION_RELEASE/$MANIFEST_BASENAME" \
+    "$PREVIOUS_BUNDLE_MANIFEST_DEV_INO" "$PREVIOUS_BUNDLE_MANIFEST_SHA256" \
+    "$PREVIOUS_BUNDLE_MANIFEST_SIZE" || return 1
+
+  [[ ! -L "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE" &&
+    -d "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE" &&
+    "$(realpath -- "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE")" == \
+      "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE" &&
+    "$(stat --format='%u:%g:%a:%d:%i' \
+      "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE")" == \
+      "0:0:700:${INTERRUPTED_CLAIM_ROOT_DEV_INO}" &&
+    "$(find -P "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE" -mindepth 1 \
+      -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" == "$names" ]] || return 1
+  require_exact_terminal_claim_file \
+    "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE/$SCRIPT_BASENAME" \
+    "$INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO" \
+    "$INTERRUPTED_ATTESTATION_SCRIPT_SHA256" "$INTERRUPTED_ATTESTATION_SCRIPT_SIZE" ||
+    return 1
+  require_exact_terminal_claim_file \
+    "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE/$VALIDATOR_BASENAME" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256" \
+    "$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE" || return 1
+  require_exact_terminal_claim_file \
+    "$CLAIM_PARENT/$INTERRUPTED_ATTESTATION_RELEASE/$MANIFEST_BASENAME" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_DEV_INO" "$INTERRUPTED_BUNDLE_MANIFEST_SHA256" \
+    "$INTERRUPTED_BUNDLE_MANIFEST_SIZE" || return 1
+
+  [[ ! -L "$CLAIM_ROOT" && -d "$CLAIM_ROOT" &&
+    "$(realpath -- "$CLAIM_ROOT")" == "$CLAIM_ROOT" &&
+    "$(stat --format='%u:%g:%a:%d:%i' "$CLAIM_ROOT")" == \
+      "0:0:700:${BUNDLE_CLAIM_DEV_INO}" &&
+    "$(find -P "$CLAIM_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' |
+      LC_ALL=C sort)" == "$names" ]] || return 1
+  require_exact_terminal_claim_file "$CLAIM_ROOT/$SCRIPT_BASENAME" \
+    "$BUNDLE_BRIDGE_DEV_INO" "$ATTESTATION_SCRIPT_SHA256" \
+    "$ATTESTATION_SCRIPT_SIZE" || return 1
+  require_exact_terminal_claim_file "$CLAIM_ROOT/$VALIDATOR_BASENAME" \
+    "$BUNDLE_VALIDATOR_DEV_INO" "$DIFFERENTIAL_VALIDATOR_SHA256" \
+    "$DIFFERENTIAL_VALIDATOR_SIZE" || return 1
+  require_exact_terminal_claim_file "$CLAIM_ROOT/$MANIFEST_BASENAME" \
+    "$BUNDLE_MANIFEST_DEV_INO" "$PROVIDED_MANIFEST_SHA256" \
+    "$BUNDLE_MANIFEST_SIZE"
+}
+
 capture_sudoers_boundary() {
   local expected_state="$1" path current_dev_ino current_sha
   case "$expected_state" in
@@ -1407,7 +1574,7 @@ require_phase_matrix() {
 publish_exact_record() {
   local path="$1" mode="$2" root
   root="$(dirname "$path")" || return 1
-  env -i PATH="$SAFE_PATH" python3 -I - "$path" "$mode" <<'PY'
+  env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$path" "$mode" 3<<'PY'
 import os
 import stat
 import sys
@@ -1499,30 +1666,45 @@ exact_file(path, False)
 PY
 }
 
+require_interrupted_empty_attestation_ledger() {
+  local entries
+  entries="$(find -P "$INTERRUPTED_ATTESTATION_INSTALLING" -mindepth 1 -maxdepth 1 \
+    -printf '%f\n')" || return 1
+  [[ ! -L "$ATTESTATION_PARENT" && -d "$ATTESTATION_PARENT" &&
+    "$(realpath -- "$ATTESTATION_PARENT")" == "$ATTESTATION_PARENT" &&
+    "$(stat --format='%u:%g:%a:%d:%i' "$ATTESTATION_PARENT")" == \
+      "0:0:700:${INTERRUPTED_ATTESTATION_PARENT_DEV_INO}" &&
+    ! -L "$INTERRUPTED_ATTESTATION_INSTALLING" &&
+    -d "$INTERRUPTED_ATTESTATION_INSTALLING" &&
+    "$(realpath -- "$INTERRUPTED_ATTESTATION_INSTALLING")" == \
+      "$INTERRUPTED_ATTESTATION_INSTALLING" &&
+    "$(stat --format='%u:%g:%a:%d:%i' "$INTERRUPTED_ATTESTATION_INSTALLING")" == \
+      "0:0:700:${INTERRUPTED_EMPTY_LEDGER_DEV_INO}" &&
+    -z "$entries" ]]
+}
+
 discover_attestation_ledger() {
-  local children entries
+  local children entries interrupted_name
   ATTESTATION_STATE='absent'
   ATTESTATION_PHASE='absent'
   ATTESTATION_WORK_ROOT=''
-  if [[ ! -e "$ATTESTATION_PARENT" && ! -L "$ATTESTATION_PARENT" ]]; then
+  require_interrupted_empty_attestation_ledger || return 1
+  interrupted_name=".installing-$INTERRUPTED_ATTESTATION_RELEASE"
+  children="$(find -P "$ATTESTATION_PARENT" -mindepth 1 -maxdepth 1 -printf '%f\n' |
+    LC_ALL=C sort)" || return 1
+  if [[ "$children" == "$interrupted_name" ]]; then
     return 0
+  elif [[ "$children" == "$(printf '%s\n' "$interrupted_name" \
+    ".installing-$ATTESTATION_RELEASE" | LC_ALL=C sort)" ]]; then
+    ATTESTATION_STATE='installing'
+    ATTESTATION_WORK_ROOT="$ATTESTATION_INSTALLING"
+  elif [[ "$children" == "$(printf '%s\n' "$interrupted_name" \
+    "$ATTESTATION_RELEASE" | LC_ALL=C sort)" ]]; then
+    ATTESTATION_STATE='complete'
+    ATTESTATION_WORK_ROOT="$ATTESTATION_ROOT"
+  else
+    return 1
   fi
-  [[ ! -L "$ATTESTATION_PARENT" && -d "$ATTESTATION_PARENT" &&
-    "$(realpath -- "$ATTESTATION_PARENT")" == "$ATTESTATION_PARENT" &&
-    "$(stat --format='%U:%G:%a' "$ATTESTATION_PARENT")" == 'root:root:700' ]] || return 1
-  children="$(find -P "$ATTESTATION_PARENT" -mindepth 1 -maxdepth 1 -printf '%f\n')" || return 1
-  case "$children" in
-    '') return 0 ;;
-    ".installing-$ATTESTATION_RELEASE")
-      ATTESTATION_STATE='installing'
-      ATTESTATION_WORK_ROOT="$ATTESTATION_INSTALLING"
-      ;;
-    "$ATTESTATION_RELEASE")
-      ATTESTATION_STATE='complete'
-      ATTESTATION_WORK_ROOT="$ATTESTATION_ROOT"
-      ;;
-    *) return 1 ;;
-  esac
   [[ ! -L "$ATTESTATION_WORK_ROOT" && -d "$ATTESTATION_WORK_ROOT" &&
     "$(realpath -- "$ATTESTATION_WORK_ROOT")" == "$ATTESTATION_WORK_ROOT" &&
     "$(stat --format='%U:%G:%a' "$ATTESTATION_WORK_ROOT")" == 'root:root:700' ]] || return 1
@@ -1546,22 +1728,20 @@ discover_attestation_ledger() {
 }
 
 create_attestation_ledger() {
-  if [[ ! -e "$ATTESTATION_PARENT" && ! -L "$ATTESTATION_PARENT" ]]; then
-    mkdir --mode=0700 -- "$ATTESTATION_PARENT" || return 1
-    chown root:root "$ATTESTATION_PARENT" || return 1
-    chmod 0700 "$ATTESTATION_PARENT" || return 1
-    sync -f "$(dirname "$ATTESTATION_PARENT")" || return 1
-  fi
+  local children
   discover_attestation_ledger || return 1
   if [[ "$ATTESTATION_STATE" == 'absent' ]]; then
-    [[ -z "$(find -P "$ATTESTATION_PARENT" -mindepth 1 -maxdepth 1 -printf '%f\n')" ]] || return 1
+    children="$(find -P "$ATTESTATION_PARENT" -mindepth 1 -maxdepth 1 \
+      -printf '%f\n')" || return 1
+    [[ "$children" == ".installing-$INTERRUPTED_ATTESTATION_RELEASE" ]] || return 1
     mkdir --mode=0700 -- "$ATTESTATION_INSTALLING" || return 1
     chown root:root "$ATTESTATION_INSTALLING" || return 1
     chmod 0700 "$ATTESTATION_INSTALLING" || return 1
     sync -f "$ATTESTATION_PARENT" || return 1
     discover_attestation_ledger || return 1
   fi
-  [[ "$ATTESTATION_STATE" == 'installing' && "$ATTESTATION_PHASE" == 'empty' ]]
+  [[ "$ATTESTATION_STATE" == 'installing' && "$ATTESTATION_PHASE" == 'empty' ]] &&
+    require_interrupted_empty_attestation_ledger
 }
 
 expected_attestation_intent() {
@@ -1579,6 +1759,21 @@ expected_attestation_intent() {
     "attestation_bridge_size=$ATTESTATION_SCRIPT_SIZE" \
     "differential_validator_sha256=$DIFFERENTIAL_VALIDATOR_SHA256" \
     "differential_validator_size=$DIFFERENTIAL_VALIDATOR_SIZE" \
+    "interrupted_attestation_implementation_release=$INTERRUPTED_ATTESTATION_RELEASE" \
+    "interrupted_attestation_bridge_sha256=$INTERRUPTED_ATTESTATION_SCRIPT_SHA256" \
+    "interrupted_attestation_bridge_size=$INTERRUPTED_ATTESTATION_SCRIPT_SIZE" \
+    "interrupted_differential_validator_sha256=$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SHA256" \
+    "interrupted_differential_validator_size=$INTERRUPTED_DIFFERENTIAL_VALIDATOR_SIZE" \
+    "interrupted_bundle_manifest_sha256=$INTERRUPTED_BUNDLE_MANIFEST_SHA256" \
+    "interrupted_bundle_manifest_size=$INTERRUPTED_BUNDLE_MANIFEST_SIZE" \
+    "interrupted_bundle_claim_dev_ino=$INTERRUPTED_CLAIM_ROOT_DEV_INO" \
+    "interrupted_bundle_bridge_dev_ino=$INTERRUPTED_ATTESTATION_SCRIPT_DEV_INO" \
+    "interrupted_bundle_validator_dev_ino=$INTERRUPTED_DIFFERENTIAL_VALIDATOR_DEV_INO" \
+    "interrupted_bundle_manifest_dev_ino=$INTERRUPTED_BUNDLE_MANIFEST_DEV_INO" \
+    "interrupted_attestation_ledger_parent_dev_ino=$INTERRUPTED_ATTESTATION_PARENT_DEV_INO" \
+    "interrupted_empty_ledger_dev_ino=$INTERRUPTED_EMPTY_LEDGER_DEV_INO" \
+    'interrupted_empty_ledger_state=empty' \
+    'interrupted_attempt_preserved=true' \
     "bundle_claim_dev_ino=$BUNDLE_CLAIM_DEV_INO" \
     "bundle_bridge_dev_ino=$BUNDLE_BRIDGE_DEV_INO" \
     "bundle_validator_dev_ino=$BUNDLE_VALIDATOR_DEV_INO" \
@@ -1757,6 +1952,7 @@ require_repair_completed() {
 }
 
 finalize_repair_ledger() {
+  require_interrupted_empty_attestation_ledger || return 1
   if [[ -e "$REPAIR_ROOT" || -L "$REPAIR_ROOT" ]]; then
     require_repair_completed
     return
@@ -1770,10 +1966,11 @@ finalize_repair_ledger() {
     LC_ALL=C sort)" == $'completed-v1\nintent-v1' ]] || return 1
   mv -- "$REPAIR_INSTALLING" "$REPAIR_ROOT" || return 1
   sync -f "$REPAIR_PARENT" || return 1
-  require_repair_completed
+  require_repair_completed && require_interrupted_empty_attestation_ledger
 }
 
 finalize_attestation_ledger() {
+  require_interrupted_empty_attestation_ledger || return 1
   publish_exact_record "$ATTESTATION_WORK_ROOT/completed-v1" 0600 < <(expected_attestation_completed) || return 1
   require_record expected_attestation_completed "$ATTESTATION_WORK_ROOT/completed-v1" || return 1
   [[ "$ATTESTATION_STATE" == 'installing' &&
@@ -1785,11 +1982,13 @@ finalize_attestation_ledger() {
   ATTESTATION_STATE='complete'
   ATTESTATION_PHASE='final'
   ATTESTATION_WORK_ROOT="$ATTESTATION_ROOT"
-  require_record expected_attestation_completed "$ATTESTATION_WORK_ROOT/completed-v1"
+  require_record expected_attestation_completed "$ATTESTATION_WORK_ROOT/completed-v1" &&
+    require_interrupted_empty_attestation_ledger
 }
 
 refresh_terminal_state() {
   local -a values
+  require_interrupted_empty_attestation_ledger || return 1
   mapfile -t values < <(load_exact_h14_and_repair) || return 1
   [[ "${#values[@]}" -eq 9 ]] || return 1
   CURRENT_REPAIR_STATE="${values[0]}"
@@ -1836,8 +2035,10 @@ refresh_terminal_state() {
   require_volume_root "$CONTROL_ROOT" || return 1
   require_forward_artifacts_absent "$CONTROL_ROOT" || return 1
   capture_immutable_boundary || return 1
+  require_terminal_claim_lineage_boundary || return 1
   run_differential_validator "$CONTROL_ROOT" "$PROFILE_ROOT" || return 1
-  require_runtime_boundary "$OWNER_CONTAINER_ID"
+  require_runtime_boundary "$OWNER_CONTAINER_ID" &&
+    require_interrupted_empty_attestation_ledger
 }
 
 acquire_staging_mutation_lock() {
@@ -2073,6 +2274,8 @@ else
     die 'the terminal-attestation intent could not be published durably'
   require_record expected_attestation_intent "$ATTESTATION_WORK_ROOT/intent-v1" ||
     die 'the published terminal-attestation intent is invalid'
+  require_interrupted_empty_attestation_ledger ||
+    die 'the preserved empty interrupted ledger changed during terminal-intent publication'
   ATTESTATION_PHASE='intent-only'
 fi
 prepare_attestation_hashes || die 'the terminal-attestation intent digest is invalid'
@@ -2102,6 +2305,8 @@ else
   require_record expected_grant_restoration_intent \
     "$ATTESTATION_WORK_ROOT/grant-restoration-intent-v1" ||
     die 'the published grant-restoration intent is invalid'
+  require_interrupted_empty_attestation_ledger ||
+    die 'the preserved empty interrupted ledger changed during grant-intent publication'
   ATTESTATION_PHASE='grant-intent'
 fi
 prepare_attestation_hashes || die 'the grant-restoration intent digest is invalid'

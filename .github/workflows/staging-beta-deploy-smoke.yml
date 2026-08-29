@@ -543,7 +543,7 @@ jobs:
           [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
           secret_dir="$(mktemp -d "$RUNNER_TEMP/h14-terminal-attestation-ssh.XXXXXX")"
           trap 'rm -rf -- "$secret_dir"' EXIT
-          printf '%s' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$secret_dir/known-hosts"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts"
           ssh-keygen -F "$STAGING_VM_HOST" -f "$secret_dir/known-hosts" >/dev/null
@@ -653,7 +653,7 @@ jobs:
           [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
           secret_dir="$(mktemp -d "$RUNNER_TEMP/h14-owner-runtime-bridge-ssh.XXXXXX")"
           trap 'rm -rf -- "$secret_dir"' EXIT
-          printf '%s' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$secret_dir/known-hosts"
           chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts"
           ssh-keygen -F "$STAGING_VM_HOST" -f "$secret_dir/known-hosts" >/dev/null

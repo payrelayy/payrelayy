@@ -59,10 +59,13 @@ is not something to normalize; it is a hard stop for a new read-only review.
   predecessor helper with SHA-256
   `3b789c983c415326171c6b4224016d2a04769a0b8c37cb91fc463383f2d141aa`.
   There is no helper-install temporary residue.
-- The final KemerBet identity binding is absent. Every project container is in
-  `FINANCIAL_ACTIONS_MODE=dry_run`; executor, final-action, internal execution,
-  private live-deposit, Amount-entry, and Transfer gates are disabled. No host
-  or container Chromium process exists.
+- The final KemerBet identity binding is absent. The canonical `gateway`
+  service has no `FINANCIAL_ACTIONS_MODE` entry by design. Every other project
+  service—including any unrecognized but syntactically valid service label—has
+  exactly one `FINANCIAL_ACTIONS_MODE=dry_run` entry. Executor, final-action, internal
+  execution, private live-deposit, Amount-entry, and Transfer gates are
+  disabled in every project container. No host or container Chromium process
+  exists.
 - No runtime-retired, consume, quarantine, host-retired, Owner-restored, helper
   promotion, replacement-profile, replacement-cohort, seal, or recheck result
   has been published by this interrupted attempt.
@@ -370,11 +373,13 @@ Do not continue until read-only verification proves all of the following:
   holder.
 - The canonical H14 recovery directory, its inode and records, the installed
   H14 helper, terminal recovery marker, and active grant are unchanged.
-- The final binding remains absent. Every project container has exactly one
-  `FINANCIAL_ACTIONS_MODE=dry_run`; executor, final-action, internal execution,
-  private live-provider, Amount, Transfer, withdrawal, and settlement gates are
-  disabled. No Chromium exists and no provider request or money movement
-  occurred.
+- The final binding remains absent. The canonical `gateway` has zero
+  `FINANCIAL_ACTIONS_MODE` entries; every other known or unrecognized but valid
+  project service has exactly one `FINANCIAL_ACTIONS_MODE=dry_run` entry. A
+  blank or malformed service identity fails closed. Executor, final-action,
+  internal execution, private live-provider, Amount, Transfer, withdrawal, and
+  settlement gates are disabled in every project container. No Chromium exists
+  and no provider request or money movement occurred.
 
 Only this verified canonical-H14 Owner may create the recovery profile below.
 
@@ -512,9 +517,10 @@ Throughout this runbook:
 
 - Amount fields and Transfer controls remain disabled; never type an Amount or
   note and never click Transfer.
-- `FINANCIAL_ACTIONS_MODE` stays `dry_run`; executor, final-action, internal
-  KemerBet execution, private live-deposit pilot, settlement, and payment
-  verification remain disabled.
+- `FINANCIAL_ACTIONS_MODE` remains absent only on the canonical `gateway` and
+  stays exactly `dry_run` on every other project service. Executor,
+  final-action, internal KemerBet execution, private live-deposit pilot,
+  settlement, and payment verification remain disabled everywhere.
 - Profile rotation and cohort preparation are configuration/evidence actions.
   They do not contact KemerBet or move money.
 - The private preview accepts credentials only from the human Owner and blocks

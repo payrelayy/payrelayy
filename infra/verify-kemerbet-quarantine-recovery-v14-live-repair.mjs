@@ -358,9 +358,41 @@ assert.match(
 assert.match(financialInventoryFunction, /inventory="\$\(docker_local container ls --all --quiet/);
 assert.match(
   financialInventoryFunction,
-  /mode_count="\$\(awk '\$0 == "FINANCIAL_ACTIONS_MODE=dry_run" \{ count \+= 1 \} END \{ print count \+ 0 \}'/,
+  /service="\$\(docker_local container inspect "\$container" --format[\s\S]*?com\.docker\.compose\.service/,
 );
-assert.match(financialInventoryFunction, /\[\[ "\$mode_count" == '1' \]\] \|\| return 1/);
+assert.match(
+  financialInventoryFunction,
+  /\[\[ "\$service" =~ \^\[a-z0-9\]\[a-z0-9_-\]\*\$ \]\] \|\| return 1/,
+  'blank and malformed service identities must fail rather than inherit the non-gateway rule',
+);
+assert.match(
+  financialInventoryFunction,
+  /mode_count="\$\(awk 'index\(\$0, "FINANCIAL_ACTIONS_MODE="\) == 1 \{ count \+= 1 \} END \{ print count \+ 0 \}'/,
+);
+assert.match(
+  financialInventoryFunction,
+  /dry_run_count="\$\(awk '\$0 == "FINANCIAL_ACTIONS_MODE=dry_run" \{ count \+= 1 \} END \{ print count \+ 0 \}'/,
+);
+assert.match(
+  financialInventoryFunction,
+  /if \[\[ "\$service" == 'gateway' \]\]; then[\s\S]*?"\$mode_count" == '0' && "\$dry_run_count" == '0'[\s\S]*?else[\s\S]*?"\$mode_count" == '1' && "\$dry_run_count" == '1'/,
+  'only the canonical gateway may omit FINANCIAL_ACTIONS_MODE; every other project service needs exactly one dry_run',
+);
+assert.match(
+  financialInventoryFunction,
+  /INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=\(1\|true\|yes\|on\)[\s\S]*?"\$dry_run_count" == '1'/,
+  'the non-money customer intake exception still requires an exact dry-run container',
+);
+for (const gate of [
+  'KEMERBET_EXECUTOR_ENABLED',
+  'KEMERBET_FINAL_ACTION_ENABLED',
+  'KEMERBET_TRANSFER_ENABLED',
+  'KEMERBET_AMOUNT_ENTRY_ENABLED',
+  'FETANAGENT_INTERNAL_KEMERBET_ENABLED',
+  'FETANAGENT_PRIVATE_LIVE_MODE',
+]) {
+  assert.ok(financialInventoryFunction.includes(gate), `financial inventory omits gate: ${gate}`);
+}
 assert.match(financialInventoryFunction, /done <<<"\$inventory"/);
 assert.doesNotMatch(financialInventoryFunction, /done < <\(docker_local container ls/);
 
@@ -373,45 +405,60 @@ docker_local() {
   if [[ "$1:$2" == 'container:ls' ]]; then
     case "$MOCK_MODE" in
       inventory-error) return 71 ;;
-      inspect-error) printf '%s\\n' broken-owner ;;
       *) printf '%s\\n' fixture-owner ;;
     esac
     return
   fi
-  if [[ "$1:$2" == 'container:inspect' ]]; then
-    case "$MOCK_MODE:$3" in
-      inspect-error:broken-owner) return 73 ;;
-      *:fixture-owner)
-        case "$MOCK_MODE" in
-          missing-mode|internal-customer-missing-mode) ;;
-          duplicate-mode|internal-customer-duplicate-mode)
-            printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=dry_run' 'FINANCIAL_ACTIONS_MODE=dry_run'
-            ;;
-          mixed-mode)
-            printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=dry_run' 'FINANCIAL_ACTIONS_MODE=live'
-            ;;
-          wrong-mode) printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=live' ;;
-          *) printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=dry_run' ;;
-        esac
-        printf '%s\\n' \\
-          'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' \\
-          'KEMERBET_EXECUTOR_ENABLED=false' \\
-          'KEMERBET_FINAL_ACTION_ENABLED=false' \\
-          'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false' \\
-          'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false'
-        case "$MOCK_MODE" in
-          transfer-enabled) printf '%s\\n' 'KEMERBET_TRANSFER_ENABLED=true' ;;
-          internal-customer-runtime|internal-customer-missing-mode|internal-customer-duplicate-mode)
-            printf '%s\\n' 'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true'
-            ;;
-          trusted-telebirr-pilot) printf '%s\\n' 'TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=true' ;;
-        esac
-        ;;
-      *) return 74 ;;
-    esac
-    return
-  fi
-  return 75
+  [[ "$1:$2:$3:$4" == 'container:inspect:fixture-owner:--format' ]] || return 72
+  case "$5" in
+    *'com.docker.compose.service'*)
+      [[ "$MOCK_MODE" == 'service-inspect-error' ]] && return 73
+      case "$MOCK_MODE" in
+        gateway-*) printf '%s\\n' gateway ;;
+        unknown-*) printf '%s\\n' future-project-service ;;
+        unlabeled-dry) printf '\\n' ;;
+        malformed-service-dry) printf '%s\\n' 'bad/service' ;;
+        *) printf '%s\\n' owner-control ;;
+      esac
+      ;;
+    '{{range .Config.Env}}{{println .}}{{end}}')
+      [[ "$MOCK_MODE" == 'environment-inspect-error' ]] && return 74
+      case "$MOCK_MODE" in
+        missing-mode|internal-customer-missing-mode|gateway-absent|gateway-enabled-gate|gateway-internal-customer|gateway-internal-provider|gateway-private-live-mode|gateway-trusted-telebirr|unknown-absent) ;;
+        duplicate-mode|internal-customer-duplicate-mode|gateway-duplicate)
+          printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=dry_run' 'FINANCIAL_ACTIONS_MODE=dry_run'
+          ;;
+        mixed-mode|gateway-mixed|unknown-mixed)
+          printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=dry_run' 'FINANCIAL_ACTIONS_MODE=live'
+          ;;
+        gateway-empty-mode|unknown-empty-mode) printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=' ;;
+        wrong-mode|gateway-live|unknown-live) printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=live' ;;
+        *) printf '%s\\n' 'FINANCIAL_ACTIONS_MODE=dry_run' ;;
+      esac
+      printf '%s\\n' \\
+        'KEMERBET_NO_TRANSFER_READINESS_SEAL_ENABLED=true' \\
+        'KEMERBET_EXECUTOR_ENABLED=false' \\
+        'KEMERBET_FINAL_ACTION_ENABLED=false' \\
+        'INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false' \\
+        'KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false'
+      case "$MOCK_MODE" in
+        transfer-enabled|gateway-enabled-gate) printf '%s\\n' 'KEMERBET_TRANSFER_ENABLED=true' ;;
+        internal-customer-runtime|internal-customer-missing-mode|internal-customer-duplicate-mode|gateway-internal-customer)
+          printf '%s\\n' 'INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true'
+          ;;
+        trusted-telebirr-pilot|gateway-trusted-telebirr)
+          printf '%s\\n' 'TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=true'
+          ;;
+        internal-provider-enabled|gateway-internal-provider|unknown-internal-provider)
+          printf '%s\\n' 'FETANAGENT_INTERNAL_KEMERBET_ENABLED=true'
+          ;;
+        private-live-mode-enabled|gateway-private-live-mode|unknown-private-live-mode)
+          printf '%s\\n' 'FETANAGENT_PRIVATE_LIVE_MODE=true'
+          ;;
+      esac
+      ;;
+    *) return 75 ;;
+  esac
 }
 require_financial_gates_disabled
 `;
@@ -423,12 +470,35 @@ for (const [mode, expectedSuccess] of [
   ['duplicate-mode', false],
   ['mixed-mode', false],
   ['wrong-mode', false],
+  ['gateway-absent', true],
+  ['gateway-dry', false],
+  ['gateway-live', false],
+  ['gateway-duplicate', false],
+  ['gateway-mixed', false],
+  ['gateway-empty-mode', false],
+  ['gateway-enabled-gate', false],
+  ['gateway-trusted-telebirr', false],
+  ['gateway-internal-customer', false],
+  ['gateway-internal-provider', false],
+  ['gateway-private-live-mode', false],
+  ['unknown-absent', false],
+  ['unknown-dry', true],
+  ['unknown-live', false],
+  ['unknown-mixed', false],
+  ['unknown-empty-mode', false],
+  ['unknown-internal-provider', false],
+  ['unknown-private-live-mode', false],
+  ['unlabeled-dry', false],
+  ['malformed-service-dry', false],
   ['transfer-enabled', false],
+  ['internal-provider-enabled', false],
+  ['private-live-mode-enabled', false],
   ['internal-customer-runtime', true],
   ['internal-customer-missing-mode', false],
   ['internal-customer-duplicate-mode', false],
   ['trusted-telebirr-pilot', false],
-  ['inspect-error', false],
+  ['service-inspect-error', false],
+  ['environment-inspect-error', false],
 ]) {
   const result = spawnSync('bash', ['-c', financialHarness], {
     cwd: root,

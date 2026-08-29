@@ -271,17 +271,37 @@ has_enabled_financial_gate() {
 }
 
 require_financial_gates_disabled() {
-  local container environment inventory mode_count
+  local container dry_run_count environment gate inventory mode_count service
   [[ ! -e "$FINAL_BINDING" && ! -L "$FINAL_BINDING" ]] || return 1
   inventory="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
   while IFS= read -r container; do
     [[ -n "$container" ]] || continue
+    service="$(docker_local container inspect "$container" --format \
+      '{{ index .Config.Labels "com.docker.compose.service" }}')" || return 1
+    [[ "$service" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
     environment="$(docker_local container inspect "$container" \
       --format '{{range .Config.Env}}{{println .}}{{end}}')" || return 1
-    mode_count="$(awk '$0 == "FINANCIAL_ACTIONS_MODE=dry_run" { count += 1 } END { print count + 0 }' \
+    mode_count="$(awk 'index($0, "FINANCIAL_ACTIONS_MODE=") == 1 { count += 1 } END { print count + 0 }' \
       <<<"$environment")" || return 1
-    [[ "$mode_count" == '1' ]] || return 1
+    dry_run_count="$(awk '$0 == "FINANCIAL_ACTIONS_MODE=dry_run" { count += 1 } END { print count + 0 }' \
+      <<<"$environment")" || return 1
+    if [[ "$service" == 'gateway' ]]; then
+      [[ "$mode_count" == '0' && "$dry_run_count" == '0' ]] || return 1
+    else
+      [[ "$mode_count" == '1' && "$dry_run_count" == '1' ]] || return 1
+    fi
+    if grep -Eiq '^INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=(1|true|yes|on)$' \
+      <<<"$environment"; then
+      [[ "$dry_run_count" == '1' ]] || return 1
+    fi
+    for gate in KEMERBET_EXECUTOR_ENABLED KEMERBET_FINAL_ACTION_ENABLED \
+      KEMERBET_TRANSFER_ENABLED KEMERBET_AMOUNT_ENTRY_ENABLED \
+      FETANAGENT_INTERNAL_KEMERBET_ENABLED FETANAGENT_PRIVATE_LIVE_MODE; do
+      if grep -Eiq "^${gate}=(1|true|yes|on)$" <<<"$environment"; then
+        return 1
+      fi
+    done
     if has_enabled_financial_gate "$environment"; then
       return 1
     fi

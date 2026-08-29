@@ -944,10 +944,62 @@ for (const required of [
 for (const required of [
   '"$FINAL_BINDING"',
   'com.docker.compose.project=$PROJECT_NAME',
+  'com.docker.compose.service',
   'FINANCIAL_ACTIONS_MODE=dry_run',
   'has_enabled_financial_gate "$environment"',
 ]) {
   assert.ok(financialGateFunction.includes(required), `financial gate check omits ${required}`);
+}
+assert.match(
+  financialGateFunction,
+  /if \[\[ "\$service" == 'gateway' \]\]; then[\s\S]*?"\$mode_count" == '0'[\s\S]*?else[\s\S]*?"\$mode_count" == '1'/,
+  'only the exact canonical gateway service may omit FINANCIAL_ACTIONS_MODE',
+);
+
+function validateFinancialGateCardinality(service, environment) {
+  assert.match(service, /^[a-z0-9][a-z0-9_-]*$/u);
+  const modes = environment.filter((entry) => entry.startsWith('FINANCIAL_ACTIONS_MODE='));
+  if (service === 'gateway') {
+    assert.deepEqual(modes, [], 'the canonical gateway has no financial-mode variable');
+  } else {
+    assert.deepEqual(
+      modes,
+      ['FINANCIAL_ACTIONS_MODE=dry_run'],
+      'every non-gateway service, including an unknown service, needs exactly one dry-run mode',
+    );
+  }
+  for (const entry of environment) {
+    assert.doesNotMatch(
+      entry,
+      /^(?:KEMERBET_EXECUTOR_ENABLED|KEMERBET_FINAL_ACTION_ENABLED|KEMERBET_TRANSFER_ENABLED|KEMERBET_AMOUNT_ENTRY_ENABLED|FETANAGENT_INTERNAL_KEMERBET_ENABLED|FETANAGENT_PRIVATE_LIVE_MODE)=(?:1|true|yes|on)$/iu,
+      'an enabled financial or provider gate must fail closed',
+    );
+  }
+}
+
+assert.doesNotThrow(() => validateFinancialGateCardinality('gateway', []));
+assert.doesNotThrow(() =>
+  validateFinancialGateCardinality('api', ['FINANCIAL_ACTIONS_MODE=dry_run']),
+);
+assert.doesNotThrow(() =>
+  validateFinancialGateCardinality('future-provider-neutral-service', [
+    'FINANCIAL_ACTIONS_MODE=dry_run',
+  ]),
+);
+for (const [service, environment] of [
+  ['gateway', ['FINANCIAL_ACTIONS_MODE=dry_run']],
+  ['gateway', ['FINANCIAL_ACTIONS_MODE=live']],
+  ['api', []],
+  ['unknown-service', []],
+  ['api', ['FINANCIAL_ACTIONS_MODE=dry_run', 'FINANCIAL_ACTIONS_MODE=dry_run']],
+  ['unknown-service', ['FINANCIAL_ACTIONS_MODE=live']],
+  ['api', ['FINANCIAL_ACTIONS_MODE=dry_run', 'KEMERBET_EXECUTOR_ENABLED=true']],
+  ['gateway', ['KEMERBET_TRANSFER_ENABLED=on']],
+]) {
+  assert.throws(
+    () => validateFinancialGateCardinality(service, environment),
+    `unsafe financial gate fixture must fail for ${service}`,
+  );
 }
 
 const createLedgerFunction = shellFunction(bridge, 'create_or_discover_bridge_ledger');

@@ -844,15 +844,29 @@ export async function createCustomerWorkspacePostgresRuntime(
     } satisfies CustomerWorkspaceDatabase);
   let closed = false;
   let poolHealthy = true;
+  let terminallyUnhealthy = false;
+  let healthRevision = 0;
   let closePromise: Promise<void> | undefined;
   const now = dependencies.now ?? Date.now;
   const readinessTtlMs = 30_000;
+  const recoveryRetryDelayMs = 30_000;
   let lastPreflightAt = 0;
+  let recoveryNotBefore = 0;
   let preflightInProgress = false;
   let readinessPromise: Promise<boolean> | undefined;
   const dispatch = createSerializedWorkspaceDispatch();
-  database.on?.('error', () => {
+  const markRecoverablyUnhealthy = (retryAt = now()) => {
     poolHealthy = false;
+    healthRevision += 1;
+    recoveryNotBefore = Math.max(recoveryNotBefore, retryAt);
+  };
+  const markTerminallyUnhealthy = () => {
+    terminallyUnhealthy = true;
+    poolHealthy = false;
+    healthRevision += 1;
+  };
+  database.on?.('error', () => {
+    if (!closed && !terminallyUnhealthy) markRecoverablyUnhealthy();
   });
 
   try {
@@ -870,32 +884,47 @@ export async function createCustomerWorkspacePostgresRuntime(
 
   const port = createWorkspacePort(
     database,
-    () => closed || !poolHealthy || preflightInProgress,
+    () => closed || terminallyUnhealthy || !poolHealthy || preflightInProgress,
     () => closed || !poolHealthy,
     dispatch,
-    () => {
-      poolHealthy = false;
-    },
+    markTerminallyUnhealthy,
   );
   return Object.freeze({
     ...port,
     async ready() {
-      if (closed || !poolHealthy) return false;
-      if (now() - lastPreflightAt < readinessTtlMs) return true;
+      if (closed || terminallyUnhealthy) return false;
+      const readinessStartedAt = now();
+      if (poolHealthy && readinessStartedAt - lastPreflightAt < readinessTtlMs) return true;
       if (readinessPromise) return readinessPromise;
+      if (!poolHealthy && readinessStartedAt < recoveryNotBefore) return false;
       preflightInProgress = true;
       readinessPromise = dispatch(async () => {
-        if (closed || !poolHealthy) return false;
+        if (closed || terminallyUnhealthy) return false;
+        const attemptStartedAt = now();
+        if (poolHealthy && attemptStartedAt - lastPreflightAt < readinessTtlMs) return true;
+        if (!poolHealthy && attemptStartedAt < recoveryNotBefore) return false;
+        const attemptHealthRevision = healthRevision;
         try {
           const preflightPassed = await customerWorkspaceCatalogPreflightPassed(database);
-          if (!preflightPassed || !poolHealthy || closed) {
-            poolHealthy = false;
+          if (
+            !preflightPassed ||
+            closed ||
+            terminallyUnhealthy ||
+            healthRevision !== attemptHealthRevision
+          ) {
+            if (!closed && !terminallyUnhealthy) {
+              markRecoverablyUnhealthy(now() + recoveryRetryDelayMs);
+            }
             return false;
           }
+          poolHealthy = true;
+          recoveryNotBefore = 0;
           lastPreflightAt = now();
           return true;
         } catch {
-          poolHealthy = false;
+          if (!closed && !terminallyUnhealthy) {
+            markRecoverablyUnhealthy(now() + recoveryRetryDelayMs);
+          }
           return false;
         }
       }).finally(() => {

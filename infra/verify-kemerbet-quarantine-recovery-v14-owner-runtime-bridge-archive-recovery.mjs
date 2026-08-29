@@ -19,6 +19,103 @@ const workflowPath = resolve(root, '.github/workflows/staging-beta-deploy-smoke.
 const normalized = (path) => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 const script = normalized(operation);
 const workflow = normalized(workflowPath);
+assert.ok(
+  workflow.includes(
+    'For h14-owner-runtime-bridge-stage type owner-only-no-provider-action-no-money; for h14-owner-runtime-bridge-archive-recovery-stage type owner-unchanged-customer-web-only-no-provider-action-no-money',
+  ),
+);
+assert.ok(
+  workflow.includes('[[ "$CONFIRMED_OWNER_ONLY" == \'owner-only-no-provider-action-no-money\' ]]'),
+);
+assert.ok(
+  workflow.includes(
+    '[[ "$CONFIRMED_OWNER_ONLY" == \'owner-unchanged-customer-web-only-no-provider-action-no-money\' ]]',
+  ),
+);
+for (const exact020 of [
+  "readonly FAILED_COUNTER_CORRECTION_RELEASE='0202304e3c606d2a7927a5b027d76926c0117189'",
+  "readonly FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102972'",
+  "readonly FAILED_COUNTER_CORRECTION_SCRIPT_DEV_INO='64769:6102973'",
+  "readonly FAILED_COUNTER_CORRECTION_SCRIPT_SHA256='7e4d1d7cbcc8494b0120ee6477b4a3e355e8bb88c55a68a9f1ca6f02b9d1d244'",
+  "readonly FAILED_COUNTER_CORRECTION_SCRIPT_SIZE='294196'",
+  "readonly FAILED_COUNTER_CORRECTION_VALIDATOR_DEV_INO='64769:6102974'",
+  "readonly FAILED_COUNTER_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_COUNTER_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_COUNTER_CORRECTION_MANIFEST_DEV_INO='64769:6102975'",
+  "readonly FAILED_COUNTER_CORRECTION_MANIFEST_SHA256='25b5f8e1a6b9fd9c853bbf6f6290b1c516329c85ef5bb57155bae503e1f85d67'",
+  "readonly FAILED_COUNTER_CORRECTION_MANIFEST_SIZE='17270'",
+  "readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ID='33258358642'",
+  "readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_COUNTER_BRIDGE_PARENT_DEV_INO='64769:6102976'",
+  "readonly FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO='64769:6102977'",
+])
+  assert.ok(script.includes(exact020), `missing exact 020 pin ${exact020}`);
+for (const exactLivePin of [
+  "readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'",
+  "readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'",
+  "readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'",
+  "readonly SOURCE_API_COMPOSE_CONFIG_SHA256='ee42feef7beb518881d5ab726e806ae4a25acf922127be111c016064b54f5591'",
+  "readonly SOURCE_CUSTOMER_WEB_CONTAINER_ID='fb7151ac21d99795939ec0dbbec05676109edabf8fa8a7bb349627fbbdd6dc49'",
+  "readonly SOURCE_CUSTOMER_WEB_IMAGE_ID='sha256:7551b33fd126a47898998dcc5a8a62e751e444e16a854be138abe6fedb35aa82'",
+  "readonly SOURCE_CUSTOMER_WEB_ENV_SHA256='eeaf8dee7d2d4f0bbb849dbe9f48e58b5e762520e06bb9162fd656cca7072f29'",
+  "readonly SOURCE_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256='b176e9d8b8c17796c92bdf1e59ac3b9c588f0b1c6291c86284d5d6c25ab07edd'",
+  "readonly SOURCE_CUSTOMER_WEB_HEALTHY_RUNTIME_SHA256='5e80a968bf1d4450789492d57d87b2099118c1f4c323e0354036f82ed5c50208'",
+  "readonly SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256='b5ce7d0c73ae297c7f92215077ccd6a0a61073034efe23c91f7199fba1869113'",
+  "readonly SOURCE_CUSTOMER_WEB_PID='179321'",
+  "readonly SOURCE_CUSTOMER_WEB_STARTED_AT='2026-08-28T14:49:52.189193639Z'",
+  "readonly SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256='c2d31ec2e32fb27ba760ee28eed24865416a3481693fedf2b7daf803737dc168'",
+  "readonly SOURCE_NON_OWNER_INVENTORY_SHA256='e26ef85318a9e2829b409536cd28043fd0a71f8625cb1afe9968da28895bffd7'",
+  "readonly SOURCE_OTHER_SERVICE_INVENTORY_SHA256='61fab7e78ea2e288a60f73b3683e749ff4a57fc753a7c6c419516cff99766bfd'",
+  "readonly SOURCE_GATEWAY_CONTAINER_ID='4aad462e26441c0d660ffeb2d3f825068522da83ee025caeb6eebb695cf5bc45'",
+  "readonly SOURCE_BOT_CONTAINER_ID='5e2b2eaa85f02f8bcc746415e693c5cbe8e3cd2ee01831ee7facf7d4185b3e52'",
+  "readonly SOURCE_BETA_CONTAINER_ID='c551f228d247c638b7865f739d5422b3e10eeec1534582d3a458daf0b2f56e14'",
+  "readonly SOURCE_OWNER_PID='685566'",
+  "readonly SOURCE_OWNER_STARTED_AT='2026-08-29T13:57:40.258370212Z'",
+])
+  assert.ok(script.includes(exactLivePin), `missing exact live pin ${exactLivePin}`);
+const failedCounterStart = script.indexOf('require_failed_counter_runtime() {');
+const failedCounterEnd = script.indexOf('\n}\n', failedCounterStart);
+const failedCounterHelper = script.slice(failedCounterStart, failedCounterEnd);
+for (const exactCounterBoundary of [
+  '! -L "$FAILED_COUNTER_BRIDGE_PARENT"',
+  '"$(realpath -- "$FAILED_COUNTER_BRIDGE_PARENT")" == "$FAILED_COUNTER_BRIDGE_PARENT"',
+  '"$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_COUNTER_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_COUNTER_BRIDGE_INSTALLING"',
+  '"$(realpath -- "$FAILED_COUNTER_BRIDGE_INSTALLING")" == "$FAILED_COUNTER_BRIDGE_INSTALLING"',
+  '"$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+])
+  assert.ok(
+    failedCounterHelper.includes(exactCounterBoundary),
+    `failed-counter helper lacks ${exactCounterBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_counter_runtime/gu) ?? []).length >= 7,
+  '020 boundary is not connected to pre-intent, completion, replay, and finalization paths',
+);
+for (const transport of [
+  'docker image save --output "$customer_archive" "$customer_tag"',
+  'customer_archive_sha="$(sha256sum "$customer_archive"',
+  'customer_archive_size="$(stat -c %s "$customer_archive")"',
+  'customer_image_id="$(docker image inspect "$customer_tag" --format \'{{.Id}}\')"',
+  'CUSTOMER_ARCHIVE_SHA: ${{ steps.bundle.outputs.customer_archive_sha }}',
+  'CUSTOMER_ARCHIVE_SIZE: ${{ steps.bundle.outputs.customer_archive_size }}',
+  'CUSTOMER_IMAGE_ID: ${{ steps.bundle.outputs.customer_image_id }}',
+  "claim_one '$REMOTE_BUNDLE/fetanagent-customer-web-self-recovery.tar'",
+  "'$CUSTOMER_ARCHIVE_SHA' '$CUSTOMER_ARCHIVE_SIZE' '$CUSTOMER_IMAGE_ID'",
+  'scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$CUSTOMER_ARCHIVE" "$remote:$bundle/"',
+  'sha256sum "$bundle/fetanagent-customer-web-self-recovery.tar"',
+  'stat -c %s "$bundle/fetanagent-customer-web-self-recovery.tar"',
+])
+  assert.ok(workflow.includes(transport), `missing archive/image transport ${transport}`);
+assert.ok(
+  workflow.includes(
+    'fetanagent-customer-web-self-recovery.tar:f\n          fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\n          fetanagent-owner-archive-validator.py:f\n          manifest-v1:f',
+  ),
+);
+assert.ok(workflow.includes("config.get('Entrypoint') in (None, [])"));
+assert.ok(workflow.includes("config['WorkingDir'] == '/workspace'"));
+assert.ok(workflow.includes("config['Healthcheck'] =="));
 
 const workflowManifestStart = workflow.indexOf('cat >"$manifest" <<EOF');
 assert.ok(workflowManifestStart >= 0, 'workflow recovery manifest emitter is missing');
@@ -50,6 +147,108 @@ assert.deepEqual(
   workflowManifestKeys,
   'workflow recovery manifest key order/schema drifted from the shell exact comparator',
 );
+for (const fixedManifestLine of [
+  'customer_web_lifecycle_mutation=exact-single-self-recovery-replacement-v1',
+  'all_other_lifecycle_mutation=forbidden',
+  'failed_counter_bridge_inventory=empty-no-intent',
+  'financial_actions_mode=dry_run',
+  'kemerbet_executor_enabled=false',
+  'kemerbet_final_action_enabled=false',
+  'provider_action_enabled=false',
+  'transfer_enabled=false',
+  'amount_entry_enabled=false',
+  'money_moved=false',
+]) {
+  assert.ok(workflow.slice(workflowManifestStart, workflowManifestEnd).includes(fixedManifestLine));
+  assert.ok(
+    script.slice(shellManifestStart, shellManifestEnd).includes(`'${fixedManifestLine}'`) ||
+      script.slice(shellManifestStart, shellManifestEnd).includes(`"${fixedManifestLine}"`),
+  );
+}
+for (const runtimeConnectivityContract of [
+  "if next(iter(networks)) != 'fetanagent-staging-beta_service': raise RuntimeError()",
+  "if host.get('PortBindings') not in (None, {}) or len(networks) != 1: raise RuntimeError()",
+  "if host.get('Privileged') is not False or host.get('ReadonlyRootfs') is not True or host.get('Init') is not True: raise RuntimeError()",
+  "if host.get('SecurityOpt') != ['no-new-privileges:true']: raise RuntimeError()",
+  'classify_customer_web_replacement_state() {',
+  '[[ "$inventory" =~ ^[0-9a-f]{64}$ && "$inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1',
+  'up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web',
+  "ipv4 = ipaddress.ip_interface(new_ep.get('IPv4Address') or '')",
+  "ipv6 = ipaddress.ip_interface(new_ep.get('IPv6Address') or '')",
+  'ipv4.network.prefixlen == subnet.prefixlen',
+  'ipv6.network.prefixlen == subnet.prefixlen',
+  'require_failed_counter_runtime || return 1',
+  'require_resumed_intent_pre_mutation_boundary || return 1',
+  'PRE_CREATE_DOCKER_INVENTORY="$(emit_exact_nofollow_file',
+])
+  assert.ok(
+    script.includes(runtimeConnectivityContract),
+    `missing helper connectivity/negative contract ${runtimeConnectivityContract}`,
+  );
+const otherGuard = script.indexOf('replace_customer_web_once() {');
+const preMutationExact = script.indexOf(
+  'require_other_service_inventory_exact || return 1',
+  otherGuard,
+);
+const archiveLoad = script.indexOf(
+  'docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"',
+  otherGuard,
+);
+assert.ok(
+  otherGuard >= 0 && preMutationExact > otherGuard && archiveLoad > preMutationExact,
+  'unrelated services are not proved exact before archive/load replacement mutation',
+);
+const resumedBoundary = script.indexOf(
+  'require_resumed_intent_pre_mutation_boundary || return 1',
+  otherGuard,
+);
+assert.ok(
+  resumedBoundary > otherGuard && resumedBoundary < archiveLoad,
+  'full resumed-intent Docker boundary is not proved before image load',
+);
+const resumedHelperStart = script.indexOf('require_resumed_intent_pre_mutation_boundary() {');
+const resumedHelperEnd = script.indexOf(
+  '\n}\n\nrequire_complete_owner_endpoint_phase_boundary()',
+  resumedHelperStart,
+);
+assert.ok(resumedHelperStart >= 0 && resumedHelperEnd > resumedHelperStart);
+const resumedHelper = script.slice(resumedHelperStart, resumedHelperEnd);
+for (const exactReplacementEndpointCheck of [
+  "re.fullmatch(r'[0-9a-f]{64}', endpoint.get('EndpointID') or '')",
+  "re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', endpoint.get('MacAddress') or '')",
+  'ipv4.network.prefixlen == subnet.prefixlen',
+  'ipv6.network.prefixlen == subnet.prefixlen',
+  'ipv4.ip in subnet',
+  'ipv6.ip in subnet',
+])
+  assert.ok(
+    resumedHelper.includes(exactReplacementEndpointCheck),
+    `resumed boundary lacks ${exactReplacementEndpointCheck}`,
+  );
+for (const serviceIdentityCheck of [
+  'container_full_ids_for_service gateway',
+  'container_full_ids_for_service bot',
+  'container_full_ids_for_service beta-admission',
+])
+  assert.ok(
+    script.includes(serviceIdentityCheck),
+    `service identity is not enforced: ${serviceIdentityCheck}`,
+  );
+const acceptsReplacementAddressFixture = (ipv4, ipv6) =>
+  /^172\.2[0-9]\.[0-9]{1,3}\.[0-9]{1,3}\/16$/u.test(ipv4) &&
+  /^fd[0-9a-f]{2}:[0-9a-f:]+\/64$/u.test(ipv6);
+assert.ok(acceptsReplacementAddressFixture('172.20.0.8/16', 'fd00:1234::8/64'));
+for (const pair of [
+  ['not-an-ip', 'fd00:1234::8/64'],
+  ['172.20.0.8/24', 'fd00:1234::8/64'],
+  ['10.0.0.8/16', 'fd00:1234::8/64'],
+  ['172.20.0.8/16', '172.20.0.9/16'],
+  ['172.20.0.8/16', 'fd00:1234::8/48'],
+])
+  assert.ok(
+    !acceptsReplacementAddressFixture(...pair),
+    `invalid endpoint address fixture accepted: ${pair}`,
+  );
 
 function workflowRunBlock(stepName) {
   const step = workflow.indexOf(`      - name: ${stepName}\n`);
@@ -142,7 +341,8 @@ for (const needle of [
   "readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
   "readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
   "readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'",
+  "readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -392,22 +592,41 @@ assert.equal((script.match(/emit_exact_nofollow_file\(\) \{/gu) ?? []).length, 1
 assert.ok(
   script.includes('[[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]'),
 );
+const authorizedCustomerReplacementStart = script.indexOf('replace_customer_web_once() {');
+const authorizedCustomerReplacementEnd = script.indexOf(
+  '\n}\n',
+  authorizedCustomerReplacementStart,
+);
+assert.ok(
+  authorizedCustomerReplacementStart >= 0 &&
+    authorizedCustomerReplacementEnd > authorizedCustomerReplacementStart,
+);
+const withoutAuthorizedCustomerReplacement =
+  script.slice(0, authorizedCustomerReplacementStart) +
+  script.slice(authorizedCustomerReplacementEnd + 3);
+assert.ok(script.includes('docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"'));
+assert.ok(
+  script.includes('up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web'),
+);
+assert.ok(script.includes('[[ "$state" == \'running|true|unhealthy\' ]]'));
+assert.ok(script.includes('require_owner_never_restarted'));
+assert.ok(script.includes("capture_non_owner_inventory | awk -F'|' '$2 != \"customer-web\"'"));
 for (const forbiddenMutation of [
   /create --no-build/u,
   /\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm|start|stop|restart)\b/u,
   /docker_local (?:container|network|image|volume) (?:start|create|rm|remove|restart|stop|kill|connect|disconnect|load|tag|prune)\b/u,
 ]) {
   assert.doesNotMatch(
-    script,
+    withoutAuthorizedCustomerReplacement,
     forbiddenMutation,
     `the correction must consume the exact created Owner without a Compose/container lifecycle mutation ${forbiddenMutation}`,
   );
 }
 assert.ok(
   script.includes(
-    'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file',
+    'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof)',
   ),
-  'the post-removal correction must republish the immutable predecessor catalog proof',
+  'the customer-web successor must publish a fresh exact read-only catalog proof',
 );
 assert.doesNotMatch(script, /36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'/);
 assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 10);
@@ -513,7 +732,7 @@ for (const helperConstituent of [
   'require_non_owner_inventory_unchanged || return 1',
   'load_pre_create_docker_inventory || return 1',
   'cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file',
-  'require_owner_endpoint_phase_boundary "$phase"',
+  'require_successor_endpoint_phase_boundary "$phase"',
 ]) {
   assert.ok(
     completeBoundary.includes(helperConstituent),
@@ -522,8 +741,115 @@ for (const helperConstituent of [
 }
 assert.match(
   completeBoundary,
-  /require_owner_endpoint_phase_boundary "\$phase"\s*$/u,
-  'the runtime Docker phase delta must be the final constituent of the complete helper',
+  /require_successor_endpoint_phase_boundary "\$phase"\s*$/u,
+  'the exact successor Docker delta must be the final constituent of the complete helper',
+);
+assert.ok(
+  script.includes(
+    'require_exact_owner_inventory_delta_phase "$before" "$normalized_after" "$new_owner" running',
+  ),
+  'successor comparison must normalize only the customer delta and reuse the full immutable Owner comparator',
+);
+const acceptsSuccessorDeltaFixture = ({
+  addedImages,
+  customerSwaps,
+  extraEndpoint,
+  statusDrift,
+  volumeDrift,
+  holderDrift,
+}) =>
+  addedImages === 1 &&
+  customerSwaps === 1 &&
+  !extraEndpoint &&
+  !statusDrift &&
+  !volumeDrift &&
+  !holderDrift;
+assert.ok(
+  acceptsSuccessorDeltaFixture({
+    addedImages: 1,
+    customerSwaps: 1,
+    extraEndpoint: false,
+    statusDrift: false,
+    volumeDrift: false,
+    holderDrift: false,
+  }),
+  'exact customer image/endpoint successor fixture rejected',
+);
+for (const invalid of [
+  {
+    addedImages: 2,
+    customerSwaps: 1,
+    extraEndpoint: false,
+    statusDrift: false,
+    volumeDrift: false,
+    holderDrift: false,
+  },
+  {
+    addedImages: 1,
+    customerSwaps: 2,
+    extraEndpoint: false,
+    statusDrift: false,
+    volumeDrift: false,
+    holderDrift: false,
+  },
+  {
+    addedImages: 1,
+    customerSwaps: 1,
+    extraEndpoint: true,
+    statusDrift: false,
+    volumeDrift: false,
+    holderDrift: false,
+  },
+  {
+    addedImages: 1,
+    customerSwaps: 1,
+    extraEndpoint: false,
+    statusDrift: true,
+    volumeDrift: false,
+    holderDrift: false,
+  },
+  {
+    addedImages: 1,
+    customerSwaps: 1,
+    extraEndpoint: false,
+    statusDrift: false,
+    volumeDrift: true,
+    holderDrift: false,
+  },
+  {
+    addedImages: 1,
+    customerSwaps: 1,
+    extraEndpoint: false,
+    statusDrift: false,
+    volumeDrift: false,
+    holderDrift: true,
+  },
+])
+  assert.ok(
+    !acceptsSuccessorDeltaFixture(invalid),
+    `extra successor delta fixture accepted: ${JSON.stringify(invalid)}`,
+  );
+const classifyReplacementFixture = ({ source, replacements, exact, healthy }) => {
+  if (source && replacements === 0) return 'source';
+  if (!source && replacements === 0) return 'retry';
+  if (!source && replacements === 1 && exact) return healthy ? 'complete' : 'retry';
+  return 'reject';
+};
+assert.equal(
+  classifyReplacementFixture({ source: false, replacements: 0, exact: false, healthy: false }),
+  'retry',
+);
+assert.equal(
+  classifyReplacementFixture({ source: false, replacements: 1, exact: true, healthy: false }),
+  'retry',
+);
+assert.equal(
+  classifyReplacementFixture({ source: false, replacements: 1, exact: true, healthy: true }),
+  'complete',
+);
+assert.equal(
+  classifyReplacementFixture({ source: true, replacements: 1, exact: true, healthy: false }),
+  'reject',
 );
 assert.equal(
   (script.match(/require_complete_owner_endpoint_phase_boundary created/gu) ?? []).length,
@@ -579,9 +905,11 @@ for (const finalizationGuard of [
     `missing finalization guard ${finalizationGuard}`,
   );
 }
-assert.ok(
-  !script.includes('image load --input'),
-  'the chained correction must never reload the already-present H14 image',
+assert.equal(
+  (script.match(/docker_local image load --input "\$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"/gu) ?? [])
+    .length,
+  1,
+  'the successor must import exactly one attested customer-web archive',
 );
 assert.ok(!script.includes('image tag '), 'the chained correction must never retag an image');
 assert.ok(!script.includes('image rm '), 'the chained correction must never remove an image');
@@ -618,9 +946,11 @@ const intentPublish = execution.indexOf(
 const postIntentValidation = execution.indexOf(
   "require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'",
 );
-const predecessorProof = execution.indexOf('cmp -s -- <(emit_exact_nofollow_file');
+const customerReplacementPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" 0600',
+);
 const republishedProof = execution.indexOf(
-  'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file',
+  'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof)',
 );
 const republishedSnapshot = execution.indexOf(
   'publish_exact_record "$BRIDGE_WORK_ROOT/docker-pre-create-v1" 0600 < <(emit_exact_nofollow_file',
@@ -639,8 +969,14 @@ const completionPublish = execution.indexOf(
 );
 assert.ok(intentPublish > 0, 'intent is not published');
 assert.ok(postIntentValidation > intentPublish, 'intent is not validated after publication');
-assert.ok(predecessorProof > postIntentValidation, 'predecessor proof precedes durable intent');
-assert.ok(republishedProof > predecessorProof, 'predecessor proof is not durably republished');
+assert.ok(
+  customerReplacementPublish > postIntentValidation,
+  'customer replacement record must follow durable intent',
+);
+assert.ok(
+  republishedProof > customerReplacementPublish,
+  'fresh read-only proof must follow customer replacement',
+);
 assert.ok(
   republishedSnapshot > republishedProof && exactSnapshotComparison > republishedSnapshot,
   'the exact 8f pre-create snapshot is not durably republished and byte-compared after the proof',
@@ -662,10 +998,14 @@ assert.ok(
   execution.includes('NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"'),
   'the successor must bind the exact already-running Owner identity',
 );
+const executionWithoutAuthorizedCustomerReplacement = execution.replace(
+  script.slice(authorizedCustomerReplacementStart, authorizedCustomerReplacementEnd + 3),
+  '',
+);
 assert.doesNotMatch(
-  execution,
+  executionWithoutAuthorizedCustomerReplacement,
   /docker_local (?:container|image|network|volume) (?:start|create|rm|remove|restart|stop|kill|prune|connect|disconnect)|\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm|start|stop|restart)\b/u,
-  'the already-running successor must contain no reachable Docker or Compose lifecycle mutation',
+  'outside the exact customer-web replacement, the successor must contain no reachable lifecycle mutation',
 );
 assert.ok(
   execution.includes(
@@ -982,6 +1322,20 @@ for (const needle of [
 }
 
 const rootEmission = workflowRunBlock('Emit exact root-console invocation without execution');
+const preExec020Rehash = rootEmission.lastIndexOf(
+  '# Rehash the exact 020 bundle and empty runtime immediately before execution.',
+);
+const finalExec = rootEmission.lastIndexOf("exec bash '$script'");
+assert.ok(
+  preExec020Rehash >= 0 && finalExec > preExec020Rehash,
+  'exact 020 evidence is not rehashed immediately before execution',
+);
+assert.ok(rootEmission.slice(preExec020Rehash, finalExec).includes('6102977:root:root:700:2'));
+assert.ok(
+  rootEmission
+    .slice(preExec020Rehash, finalExec)
+    .includes('25b5f8e1a6b9fd9c853bbf6f6290b1c516329c85ef5bb57155bae503e1f85d67'),
+);
 for (const state of [
   '"$(basename "$prior_root")" "$(basename "$failed_root")"',
   '"$(basename "$failed_root")" "$(basename "$failed_pg_root")"',
@@ -993,8 +1347,9 @@ for (const state of [
   '"$(basename "$failed_holder_root")" "$(basename "$failed_order_root")"',
   '"$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")"',
   '"$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")"',
-  '"$(basename "$failed_running_status_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_running_status_root")" "$(basename "$root")"',
+  '"$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")"',
+  '"$(basename "$failed_counter_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_counter_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -1002,6 +1357,18 @@ assert.ok(
   !rootEmission.includes('if [[ ! -e "$parent" && ! -L "$parent" ]]'),
   'the chained claim must never create or replace the existing 911 parent',
 );
+for (const finalIdentityGuard of [
+  "require_customer_web_replacement_record || die 'the finalized customer-web replacement record is invalid'",
+  "require_owner_never_restarted || die 'Owner lifecycle changed before final immutable verification'",
+  "require_other_service_inventory_exact || die 'a non-customer service changed before final immutable verification'",
+  "require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'",
+  "require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'",
+  'Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.',
+])
+  assert.ok(
+    script.includes(finalIdentityGuard),
+    `missing final no-money identity guard ${finalIdentityGuard}`,
+  );
 assert.ok(
   rootEmission.indexOf('64769:6102885:root:root:700') <
     rootEmission.indexOf("claim_one '$REMOTE_BUNDLE/"),
@@ -1019,6 +1386,7 @@ const failedHolder = '35d28aaa41cde5a2ccce7c2017dffc7c9d503238';
 const failedOrder = '132603c34afff4e0e6c78d89864c761034c0f3fa';
 const failedEndpointPhase = '51e5170488d720fd04decd1896971ab72cfe9603';
 const failedRunningStatus = '8f1ef460a231fe2c21e2df2d986749400d08c38c';
+const failedCounter = '0202304e3c606d2a7927a5b027d76926c0117189';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
@@ -1037,6 +1405,7 @@ const classifyChain = (children) => {
       failedOrder,
       failedEndpointPhase,
       failedRunningStatus,
+      failedCounter,
     ]
       .sort()
       .join('\n')
@@ -1056,6 +1425,7 @@ const classifyChain = (children) => {
       failedOrder,
       failedEndpointPhase,
       failedRunningStatus,
+      failedCounter,
       installing,
     ]
       .sort()
@@ -1076,6 +1446,7 @@ const classifyChain = (children) => {
       failedOrder,
       failedEndpointPhase,
       failedRunningStatus,
+      failedCounter,
       current,
     ]
       .sort()
@@ -1098,6 +1469,7 @@ for (const [children, expected] of [
       failedOrder,
       failedEndpointPhase,
       failedRunningStatus,
+      failedCounter,
     ],
     'append',
   ],
@@ -1114,6 +1486,7 @@ for (const [children, expected] of [
       failedOrder,
       failedEndpointPhase,
       failedRunningStatus,
+      failedCounter,
       installing,
     ],
     'resume',
@@ -1131,6 +1504,7 @@ for (const [children, expected] of [
       failedOrder,
       failedEndpointPhase,
       failedRunningStatus,
+      failedCounter,
       current,
     ],
     'complete',

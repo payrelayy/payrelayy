@@ -6,10 +6,11 @@
 # profile or cohort, enters Amount, clicks Transfer, enables a financial gate,
 # or moves money.
 #
-# Exact CLI (the workflow first claims the three-file bundle append-only):
+# Exact CLI (the workflow first claims the four-file bundle append-only):
 #   bash /var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles/<recovery-sha>/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh \
 #     <recovery-sha> <recovery-script-sha256> <archive-validator-sha256> \
-#     <recovery-manifest-sha256> <exact-a579-repair-sha> <authorization-sha256>
+#     <recovery-manifest-sha256> <exact-a579-repair-sha> <authorization-sha256> \
+#     <customer-image-archive-sha256> <customer-image-archive-size> <customer-image-id>
 
 set -euo pipefail
 
@@ -296,11 +297,42 @@ readonly FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT_SHA256='6e85eeb5e09ea7941bb5da
 readonly FAILED_RUNNING_STATUS_BRIDGE_START_DEV_INO='64769:6102971'
 readonly FAILED_RUNNING_STATUS_BRIDGE_START_SIZE='927'
 readonly FAILED_RUNNING_STATUS_BRIDGE_START_SHA256='518341dc096934ce1166c68cb09b3ff727587bafa21e3e2e97ce36bc07d03a52'
+readonly FAILED_COUNTER_CORRECTION_RELEASE='0202304e3c606d2a7927a5b027d76926c0117189'
+readonly FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102972'
+readonly FAILED_COUNTER_CORRECTION_SCRIPT_DEV_INO='64769:6102973'
+readonly FAILED_COUNTER_CORRECTION_SCRIPT_SHA256='7e4d1d7cbcc8494b0120ee6477b4a3e355e8bb88c55a68a9f1ca6f02b9d1d244'
+readonly FAILED_COUNTER_CORRECTION_SCRIPT_SIZE='294196'
+readonly FAILED_COUNTER_CORRECTION_VALIDATOR_DEV_INO='64769:6102974'
+readonly FAILED_COUNTER_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_COUNTER_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_COUNTER_CORRECTION_MANIFEST_DEV_INO='64769:6102975'
+readonly FAILED_COUNTER_CORRECTION_MANIFEST_SHA256='25b5f8e1a6b9fd9c853bbf6f6290b1c516329c85ef5bb57155bae503e1f85d67'
+readonly FAILED_COUNTER_CORRECTION_MANIFEST_SIZE='17270'
+readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ID='33258358642'
+readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_COUNTER_BRIDGE_PARENT_DEV_INO='64769:6102976'
+readonly FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO='64769:6102977'
 readonly CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
 readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'
 readonly SOURCE_API_COMPOSE_CONFIG_SHA256='ee42feef7beb518881d5ab726e806ae4a25acf922127be111c016064b54f5591'
+readonly SOURCE_CUSTOMER_WEB_CONTAINER_ID='fb7151ac21d99795939ec0dbbec05676109edabf8fa8a7bb349627fbbdd6dc49'
+readonly SOURCE_CUSTOMER_WEB_IMAGE_ID='sha256:7551b33fd126a47898998dcc5a8a62e751e444e16a854be138abe6fedb35aa82'
+readonly SOURCE_CUSTOMER_WEB_ENV_SHA256='eeaf8dee7d2d4f0bbb849dbe9f48e58b5e762520e06bb9162fd656cca7072f29'
+readonly SOURCE_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256='b176e9d8b8c17796c92bdf1e59ac3b9c588f0b1c6291c86284d5d6c25ab07edd'
+readonly SOURCE_CUSTOMER_WEB_HEALTHY_RUNTIME_SHA256='5e80a968bf1d4450789492d57d87b2099118c1f4c323e0354036f82ed5c50208'
+readonly SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256='b5ce7d0c73ae297c7f92215077ccd6a0a61073034efe23c91f7199fba1869113'
+readonly SOURCE_CUSTOMER_WEB_PID='179321'
+readonly SOURCE_CUSTOMER_WEB_STARTED_AT='2026-08-28T14:49:52.189193639Z'
+readonly SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256='c2d31ec2e32fb27ba760ee28eed24865416a3481693fedf2b7daf803737dc168'
+readonly SOURCE_NON_OWNER_INVENTORY_SHA256='e26ef85318a9e2829b409536cd28043fd0a71f8625cb1afe9968da28895bffd7'
+readonly SOURCE_OTHER_SERVICE_INVENTORY_SHA256='61fab7e78ea2e288a60f73b3683e749ff4a57fc753a7c6c419516cff99766bfd'
+readonly SOURCE_GATEWAY_CONTAINER_ID='4aad462e26441c0d660ffeb2d3f825068522da83ee025caeb6eebb695cf5bc45'
+readonly SOURCE_BOT_CONTAINER_ID='5e2b2eaa85f02f8bcc746415e693c5cbe8e3cd2ee01831ee7facf7d4185b3e52'
+readonly SOURCE_BETA_CONTAINER_ID='c551f228d247c638b7865f739d5422b3e10eeec1534582d3a458daf0b2f56e14'
+readonly SOURCE_OWNER_PID='685566'
+readonly SOURCE_OWNER_STARTED_AT='2026-08-29T13:57:40.258370212Z'
 readonly RECOVERY_BUNDLE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles'
 readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
 readonly EXPECTED_DROPLET_ID='593344964'
@@ -327,7 +359,8 @@ readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-re
 readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'
 readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'
 readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'
+readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -350,6 +383,7 @@ readonly SCRIPT_BASENAME='fetanagent-kemerbet-quarantine-recovery-v14-owner-runt
 readonly VALIDATOR_BASENAME='fetanagent-owner-archive-validator.py'
 readonly RECOVERY_MANIFEST_BASENAME='manifest-v1'
 readonly IMAGE_ARCHIVE_NAME='fetanagent-owner-control-canonical-h14.tar'
+readonly CUSTOMER_WEB_IMAGE_ARCHIVE_NAME='fetanagent-customer-web-self-recovery.tar'
 readonly COMPOSE_NAME='compose.staging-beta.yaml'
 readonly MANIFEST_NAME='manifest-v1'
 
@@ -361,7 +395,7 @@ die() {
   exit 1
 }
 
-[[ $# -eq 6 ]] || die 'expected recovery release, recovery script SHA256, archive validator SHA256, recovery manifest SHA256, exact a579 repair SHA, and authorization digest'
+[[ $# -eq 9 ]] || die 'expected recovery release, recovery script SHA256, archive validator SHA256, recovery manifest SHA256, exact a579 repair SHA, authorization digest, customer-web image archive SHA256, archive size, and exact customer-web image ID'
 readonly RECOVERY_RELEASE="$1"
 readonly PROVIDED_RECOVERY_SCRIPT_SHA256="$2"
 readonly PROVIDED_VALIDATOR_SHA256="$3"
@@ -372,6 +406,9 @@ readonly ATTESTATION_RELEASE="$SOURCE_ATTESTATION_RELEASE"
 readonly STAGED_BUNDLE="$SOURCE_STAGED_BUNDLE"
 readonly PROVIDED_MANIFEST_SHA256="$SOURCE_OWNER_MANIFEST_SHA256"
 readonly PROVIDED_AUTHORIZATION_SHA256="$6"
+readonly PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256="$7"
+readonly PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE="$8"
+readonly PROVIDED_CUSTOMER_WEB_IMAGE_ID="$9"
 readonly STAGING_ROOT="$RECOVERY_BUNDLE_PARENT/$RECOVERY_RELEASE"
 readonly PRIOR_FAILED_RECOVERY_ROOT="$RECOVERY_BUNDLE_PARENT/$PRIOR_FAILED_RECOVERY_RELEASE"
 readonly FAILED_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CORRECTION_RELEASE"
@@ -384,9 +421,11 @@ readonly FAILED_HOLDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_HOLDER_C
 readonly FAILED_ORDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ORDER_CORRECTION_RELEASE"
 readonly FAILED_ENDPOINT_PHASE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE"
 readonly FAILED_RUNNING_STATUS_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_RUNNING_STATUS_CORRECTION_RELEASE"
+readonly FAILED_COUNTER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
+readonly STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE="$STAGING_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"
 readonly REPAIR_ROOT="$REPAIR_PARENT/$REPAIR_RELEASE"
 readonly ATTESTATION_ROOT="$ATTESTATION_PARENT/$ATTESTATION_RELEASE"
 readonly INTERRUPTED_ATTESTATION_INSTALLING="$ATTESTATION_PARENT/.installing-$INTERRUPTED_ATTESTATION_RELEASE"
@@ -430,6 +469,8 @@ readonly FAILED_RUNNING_STATUS_BRIDGE_API_PROOF="$FAILED_RUNNING_STATUS_BRIDGE_I
 readonly FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT="$FAILED_RUNNING_STATUS_BRIDGE_INSTALLING/docker-pre-create-v1"
 readonly FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT="$FAILED_RUNNING_STATUS_BRIDGE_INSTALLING/replacement-owner-v1"
 readonly FAILED_RUNNING_STATUS_BRIDGE_START="$FAILED_RUNNING_STATUS_BRIDGE_INSTALLING/start-owner-v1"
+readonly FAILED_COUNTER_BRIDGE_INSTALLING="$FAILED_COUNTER_BRIDGE_PARENT/.installing-$FAILED_COUNTER_CORRECTION_RELEASE"
+readonly FAILED_COUNTER_BRIDGE_ROOT="$FAILED_COUNTER_BRIDGE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -455,7 +496,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_HOLDER_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_ORDER_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_COUNTER_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -466,6 +508,11 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   die 'the staged manifest digest is invalid'
 [[ "$PROVIDED_AUTHORIZATION_SHA256" == "$AUTHORIZATION_SHA256" ]] ||
   die 'the exact reviewed quarantine-recovery authorization digest is required'
+[[ "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" -le 1073741824 &&
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+  die 'the customer-web image archive contract is malformed'
 [[ "$(id -u)" == '0' && "$(id -un)" == 'root' ]] ||
   die 'run only in a fresh DigitalOcean root console'
 [[ -z "${SUDO_USER:-}" && -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] ||
@@ -512,9 +559,9 @@ require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:14" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:15" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -638,6 +685,13 @@ require_prior_failed_recovery_claim() {
   emit_exact_nofollow_file "$FAILED_RUNNING_STATUS_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_DEV_INO" "$FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_SIZE" "$FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_RUNNING_STATUS_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_RUNNING_STATUS_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_RUNNING_STATUS_CORRECTION_VALIDATOR_SIZE" "$FAILED_RUNNING_STATUS_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_RUNNING_STATUS_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_DEV_INO" "$FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_SIZE" "$FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  [[ ! -L "$FAILED_COUNTER_CORRECTION_ROOT" && -d "$FAILED_COUNTER_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_COUNTER_CORRECTION_ROOT")" == "$FAILED_COUNTER_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COUNTER_CORRECTION_ROOT")" == "$FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_COUNTER_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_COUNTER_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_COUNTER_CORRECTION_SCRIPT_DEV_INO" "$FAILED_COUNTER_CORRECTION_SCRIPT_SIZE" "$FAILED_COUNTER_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_COUNTER_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_COUNTER_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_COUNTER_CORRECTION_VALIDATOR_SIZE" "$FAILED_COUNTER_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_COUNTER_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_COUNTER_CORRECTION_MANIFEST_DEV_INO" "$FAILED_COUNTER_CORRECTION_MANIFEST_SIZE" "$FAILED_COUNTER_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -684,8 +738,11 @@ require_prior_failed_recovery_claim ||
   ! -L "$STAGED_RECOVERY_MANIFEST" && -f "$STAGED_RECOVERY_MANIFEST" &&
   "$(stat --format='%U:%G:%a:%h' "$STAGED_RECOVERY_MANIFEST")" == 'root:root:400:1' &&
   "$(sha256sum -- "$STAGED_RECOVERY_MANIFEST" | awk '{print $1}')" == "$PROVIDED_RECOVERY_MANIFEST_SHA256" &&
+  ! -L "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" && -f "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" &&
+  "$(stat --format='%U:%G:%a:%h:%s' "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE")" == "root:root:400:1:$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" &&
+  "$(sha256sum -- "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" | awk '{print $1}')" == "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" &&
   "$(find -P "$STAGING_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] ||
+    $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] ||
   die 'the exact append-only archive-recovery implementation claim is not sealed'
 
 RECOVERY_WORKFLOW_RUN_ID="$(sed -n 's/^workflow_run_id=//p' "$STAGED_RECOVERY_MANIFEST")"
@@ -921,6 +978,22 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_running_status_bridge_start_dev_ino=$FAILED_RUNNING_STATUS_BRIDGE_START_DEV_INO" \
   "failed_running_status_bridge_start_sha256=$FAILED_RUNNING_STATUS_BRIDGE_START_SHA256" \
   "failed_running_status_bridge_start_size=$FAILED_RUNNING_STATUS_BRIDGE_START_SIZE" \
+  "failed_counter_correction_implementation_sha=$FAILED_COUNTER_CORRECTION_RELEASE" \
+  "failed_counter_correction_bundle_root_dev_ino=$FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_counter_correction_script_dev_ino=$FAILED_COUNTER_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_counter_correction_script_sha256=$FAILED_COUNTER_CORRECTION_SCRIPT_SHA256" \
+  "failed_counter_correction_script_size=$FAILED_COUNTER_CORRECTION_SCRIPT_SIZE" \
+  "failed_counter_correction_validator_dev_ino=$FAILED_COUNTER_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_counter_correction_validator_sha256=$FAILED_COUNTER_CORRECTION_VALIDATOR_SHA256" \
+  "failed_counter_correction_validator_size=$FAILED_COUNTER_CORRECTION_VALIDATOR_SIZE" \
+  "failed_counter_correction_manifest_dev_ino=$FAILED_COUNTER_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_counter_correction_manifest_sha256=$FAILED_COUNTER_CORRECTION_MANIFEST_SHA256" \
+  "failed_counter_correction_manifest_size=$FAILED_COUNTER_CORRECTION_MANIFEST_SIZE" \
+  "failed_counter_correction_workflow_run_id=$FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_counter_correction_workflow_run_attempt=$FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_counter_bridge_parent_dev_ino=$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO" \
+  "failed_counter_bridge_installing_dev_ino=$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO" \
+  'failed_counter_bridge_inventory=empty-no-intent' \
   "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
   'failed_endpoint_phase_owner_state=created-never-started' \
   'failed_running_status_owner_state=running-healthy-no-completion' \
@@ -929,12 +1002,33 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   'docker_inventory_contract=complete-exact-owner-only-phase-delta-v3' \
   'network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1' \
   'owner_lifecycle_mutation=forbidden-already-running' \
+  'customer_web_lifecycle_mutation=exact-single-self-recovery-replacement-v1' \
+  'all_other_lifecycle_mutation=forbidden' \
   'complete_phase_boundary_contract=single-final-phase-aware-command-v1' \
   'migration_catalog_proof=exact-api-player-action-read-only-v1' \
   "source_api_container_id=$SOURCE_API_CONTAINER_ID" \
   "source_api_image_id=$SOURCE_API_IMAGE_ID" \
   "source_api_env_sha256=$SOURCE_API_ENV_SHA256" \
   "source_api_compose_config_sha256=$SOURCE_API_COMPOSE_CONFIG_SHA256" \
+  "source_customer_web_container_id=$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+  "source_customer_web_image_id=$SOURCE_CUSTOMER_WEB_IMAGE_ID" \
+  "source_customer_web_env_sha256=$SOURCE_CUSTOMER_WEB_ENV_SHA256" \
+  "source_customer_web_compose_config_sha256=$SOURCE_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256" \
+  "source_customer_web_healthy_runtime_sha256=$SOURCE_CUSTOMER_WEB_HEALTHY_RUNTIME_SHA256" \
+  "source_customer_web_unhealthy_runtime_sha256=$SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256" \
+  "source_customer_web_pid=$SOURCE_CUSTOMER_WEB_PID" \
+  "source_customer_web_started_at=$SOURCE_CUSTOMER_WEB_STARTED_AT" \
+  "source_customer_web_normalized_sha256=$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" \
+  "source_non_owner_inventory_sha256=$SOURCE_NON_OWNER_INVENTORY_SHA256" \
+  "source_other_service_inventory_sha256=$SOURCE_OTHER_SERVICE_INVENTORY_SHA256" \
+  "source_gateway_container_id=$SOURCE_GATEWAY_CONTAINER_ID" \
+  "source_bot_container_id=$SOURCE_BOT_CONTAINER_ID" \
+  "source_beta_container_id=$SOURCE_BETA_CONTAINER_ID" \
+  "source_owner_pid=$SOURCE_OWNER_PID" \
+  "source_owner_started_at=$SOURCE_OWNER_STARTED_AT" \
+  "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
+  "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
+  "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
   "source_owner_config_id=$SOURCE_OWNER_IMAGE_ID" \
   "loaded_owner_manifest_image_id=$SOURCE_OWNER_LOADED_IMAGE_ID" \
   'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids' \
@@ -1165,6 +1259,21 @@ require_failed_running_status_runtime() {
   emit_exact_nofollow_file "$FAILED_RUNNING_STATUS_BRIDGE_START" \
     "$FAILED_RUNNING_STATUS_BRIDGE_START_DEV_INO" "$FAILED_RUNNING_STATUS_BRIDGE_START_SIZE" \
     "$FAILED_RUNNING_STATUS_BRIDGE_START_SHA256" >/dev/null
+}
+
+require_failed_counter_runtime() {
+  [[ ! -e "$FAILED_COUNTER_BRIDGE_ROOT" && ! -L "$FAILED_COUNTER_BRIDGE_ROOT" &&
+    ! -L "$FAILED_COUNTER_BRIDGE_PARENT" && -d "$FAILED_COUNTER_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_COUNTER_BRIDGE_PARENT")" == "$FAILED_COUNTER_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COUNTER_BRIDGE_PARENT")" == \
+      "$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_COUNTER_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_COUNTER_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_COUNTER_BRIDGE_INSTALLING" && -d "$FAILED_COUNTER_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_COUNTER_BRIDGE_INSTALLING")" == "$FAILED_COUNTER_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COUNTER_BRIDGE_INSTALLING")" == \
+      "$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    -z "$(find -P "$FAILED_COUNTER_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" ]]
 }
 
 emit_owned_nofollow_file() {
@@ -3113,6 +3222,179 @@ except Exception:
 PY
 }
 
+# Post-replacement comparator. The immutable 8f comparator above remains the
+# pre-mutation authority. This successor comparator additionally permits only
+# the attested customer image and exact old->new customer endpoint/holder swap.
+require_exact_successor_inventory_delta_inline_reference() {
+  local before="$1" after="$2" new_owner="$3" old_customer="$4" new_customer="$5" new_image="$6"
+  printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$new_owner" "$OWNER_NETWORK" "$CONTROL_VOLUME" "$PROFILE_VOLUME" \
+      "$old_customer" "$new_customer" "$new_image" "$RECOVERY_RELEASE" 3<<'PY'
+import copy, ipaddress, json, re, sys
+new_owner, owner_network, control_volume, profile_volume, old_customer, new_customer, new_image, release = sys.argv[1:]
+before_raw, after_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
+before = json.loads(before_raw); after = json.loads(after_raw)
+def keyed(items, key):
+    if not isinstance(items, list) or any(not isinstance(item, dict) or key not in item for item in items): raise RuntimeError()
+    result = {item[key]: item for item in items}
+    if len(result) != len(items): raise RuntimeError()
+    return result
+try:
+    if any(not re.fullmatch(r'[0-9a-f]{64}', value) for value in (new_owner, old_customer, new_customer)): raise RuntimeError()
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', new_image): raise RuntimeError()
+    if set(before) != {'images','networks','volumes','holders'} or set(after) != set(before): raise RuntimeError()
+    old_images = keyed(before['images'], 'Id'); new_images = keyed(after['images'], 'Id')
+    if new_image in old_images or set(new_images) != set(old_images) | {new_image}: raise RuntimeError()
+    if any(new_images[key] != old_images[key] for key in old_images): raise RuntimeError()
+    added = new_images[new_image]
+    config = added.get('Config') or {}
+    if added.get('RepoTags') != [f'fetanagent-customer-web:{release[:12]}']: raise RuntimeError()
+    if config.get('User') != '10001:10001' or config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+    if (config.get('Labels') or {}).get('org.opencontainers.image.revision') != release: raise RuntimeError()
+    old_networks = keyed(before['networks'], 'Id'); new_networks = keyed(after['networks'], 'Id')
+    if set(old_networks) != set(new_networks): raise RuntimeError()
+    owner_ids = [key for key, value in old_networks.items() if value.get('Name') == owner_network]
+    if len(owner_ids) != 1 or [key for key, value in new_networks.items() if value.get('Name') == owner_network] != owner_ids: raise RuntimeError()
+    owner_id = owner_ids[0]; customer_swaps = 0
+    for key in old_networks:
+        old = copy.deepcopy(old_networks[key]); new = copy.deepcopy(new_networks[key])
+        old_endpoints = old.pop('Containers', {}) or {}; new_endpoints = new.pop('Containers', {}) or {}
+        old_status = old.pop('Status', None); new_status = new.pop('Status', None)
+        if old != new or not isinstance(old_endpoints, dict) or not isinstance(new_endpoints, dict): raise RuntimeError()
+        if key == owner_id:
+            if new_owner in old_endpoints or set(new_endpoints) != set(old_endpoints) | {new_owner}: raise RuntimeError()
+            if any(new_endpoints[item] != old_endpoints[item] for item in old_endpoints): raise RuntimeError()
+            endpoint = new_endpoints[new_owner]
+            if not isinstance(endpoint, dict) or endpoint.get('Name') != 'fetanagent-staging-beta-owner-control-1': raise RuntimeError()
+            addresses = [ipaddress.ip_interface(endpoint[name]) for name in ('IPv4Address','IPv6Address')]
+            if {address.version for address in addresses} != {4,6}: raise RuntimeError()
+            if not isinstance(old_status, dict) or not isinstance(new_status, dict): raise RuntimeError()
+            old_subnets = (old_status.get('IPAM') or {}).get('Subnets'); new_subnets = (new_status.get('IPAM') or {}).get('Subnets')
+            if not isinstance(old_subnets, dict) or set(old_subnets) != set(new_subnets or {}): raise RuntimeError()
+            changed = []
+            for address in addresses:
+                matches = [name for name in old_subnets if address.ip in ipaddress.ip_network(name)]
+                if len(matches) != 1: raise RuntimeError()
+                changed.append(matches[0])
+            for name in old_subnets:
+                old_count = old_subnets[name]; new_count = new_subnets[name]
+                if name in changed:
+                    if new_count.get('IPsInUse') != old_count.get('IPsInUse') + 1: raise RuntimeError()
+                    if new_count.get('DynamicIPsAvailable') != old_count.get('DynamicIPsAvailable') - 1: raise RuntimeError()
+                elif old_count != new_count: raise RuntimeError()
+        elif old_customer in old_endpoints or new_customer in new_endpoints:
+            if old_customer not in old_endpoints or new_customer not in new_endpoints: raise RuntimeError()
+            if new_customer in old_endpoints or old_customer in new_endpoints: raise RuntimeError()
+            if set(new_endpoints) != (set(old_endpoints) - {old_customer}) | {new_customer}: raise RuntimeError()
+            if any(new_endpoints[item] != old_endpoints[item] for item in old_endpoints if item != old_customer): raise RuntimeError()
+            old_ep = old_endpoints[old_customer]; new_ep = new_endpoints[new_customer]
+            if not isinstance(old_ep, dict) or not isinstance(new_ep, dict): raise RuntimeError()
+            if old_ep.get('Name') != 'fetanagent-staging-beta-customer-web-1' or new_ep.get('Name') != old_ep.get('Name'): raise RuntimeError()
+            if old_status != new_status: raise RuntimeError()
+            customer_swaps += 1
+        elif old_endpoints != new_endpoints or old_status != new_status:
+            raise RuntimeError()
+    if customer_swaps != 1: raise RuntimeError()
+    if keyed(before['volumes'], 'Name') != keyed(after['volumes'], 'Name'): raise RuntimeError()
+    if not isinstance(before['holders'], dict) or set(before['holders']) != set(after['holders']): raise RuntimeError()
+    for name, old_holders in before['holders'].items():
+        new_holders = after['holders'][name]
+        if name == control_volume:
+            if old_holders != [] or new_holders != [new_owner]: raise RuntimeError()
+        elif old_customer in old_holders:
+            if new_holders != sorted((set(old_holders) - {old_customer}) | {new_customer}): raise RuntimeError()
+        elif old_holders != new_holders: raise RuntimeError()
+    if before['holders'].get(profile_volume) != [] or after['holders'].get(profile_volume) != []: raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+require_exact_successor_inventory_delta() {
+  local before="$1" after="$2" new_owner="$3" old_customer="$4" new_customer="$5" new_image="$6" normalized_after
+  normalized_after="$(printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$old_customer" "$new_customer" "$new_image" "$RECOVERY_RELEASE" 3<<'PY'
+import copy, ipaddress, json, re, sys
+old_customer, new_customer, new_image, release = sys.argv[1:]
+before_raw, after_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
+before = json.loads(before_raw); after = json.loads(after_raw)
+def keyed(items, key):
+    if not isinstance(items, list) or any(not isinstance(item, dict) or key not in item for item in items): raise RuntimeError()
+    result = {item[key]: item for item in items}
+    if len(result) != len(items): raise RuntimeError()
+    return result
+try:
+    if any(not re.fullmatch(r'[0-9a-f]{64}', value) for value in (old_customer, new_customer)): raise RuntimeError()
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', new_image): raise RuntimeError()
+    if set(before) != {'images','networks','volumes','holders'} or set(after) != set(before): raise RuntimeError()
+    old_images = keyed(before['images'], 'Id'); new_images = keyed(after['images'], 'Id')
+    if new_image in old_images or set(new_images) != set(old_images) | {new_image}: raise RuntimeError()
+    if any(new_images[key] != old_images[key] for key in old_images): raise RuntimeError()
+    image = new_images[new_image]; config = image.get('Config') or {}
+    if image.get('RepoTags') != [f'fetanagent-customer-web:{release[:12]}']: raise RuntimeError()
+    if config.get('User') != '10001:10001' or config.get('Cmd') != ['node','apps/customer-web/dist/index.js']: raise RuntimeError()
+    if config.get('Entrypoint') not in (None, []): raise RuntimeError()
+    if config.get('WorkingDir') != '/workspace': raise RuntimeError()
+    if config.get('ExposedPorts') not in (None, {}): raise RuntimeError()
+    if config.get('Healthcheck') != {
+        'Test':['CMD','node','-e',"fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"],
+        'Interval':30000000000,'Timeout':3000000000,'StartPeriod':15000000000,'Retries':3,
+    }: raise RuntimeError()
+    if (config.get('Labels') or {}).get('org.opencontainers.image.revision') != release: raise RuntimeError()
+    normalized = copy.deepcopy(after)
+    normalized['images'] = [item for item in normalized['images'] if item.get('Id') != new_image]
+    old_networks = keyed(before['networks'], 'Id'); normalized_networks = keyed(normalized['networks'], 'Id')
+    if set(old_networks) != set(normalized_networks): raise RuntimeError()
+    swaps = 0
+    for network_id, old_network in old_networks.items():
+        old_endpoints = old_network.get('Containers') or {}
+        new_endpoints = normalized_networks[network_id].get('Containers') or {}
+        if old_customer in old_endpoints or new_customer in new_endpoints:
+            if old_customer not in old_endpoints or new_customer not in new_endpoints: raise RuntimeError()
+            if new_customer in old_endpoints or old_customer in new_endpoints: raise RuntimeError()
+            if set(new_endpoints) != (set(old_endpoints) - {old_customer}) | {new_customer}: raise RuntimeError()
+            if any(new_endpoints[item] != old_endpoints[item] for item in old_endpoints if item != old_customer): raise RuntimeError()
+            old_ep = old_endpoints[old_customer]; new_ep = new_endpoints[new_customer]
+            if not isinstance(old_ep, dict) or not isinstance(new_ep, dict): raise RuntimeError()
+            if set(old_ep) != {'Name','EndpointID','MacAddress','IPv4Address','IPv6Address'} or set(new_ep) != set(old_ep): raise RuntimeError()
+            if old_ep.get('Name') != 'fetanagent-staging-beta-customer-web-1' or new_ep.get('Name') != old_ep.get('Name'): raise RuntimeError()
+            if not re.fullmatch(r'[0-9a-f]{64}', new_ep.get('EndpointID') or ''): raise RuntimeError()
+            if not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', new_ep.get('MacAddress') or ''): raise RuntimeError()
+            ipv4 = ipaddress.ip_interface(new_ep.get('IPv4Address') or '')
+            ipv6 = ipaddress.ip_interface(new_ep.get('IPv6Address') or '')
+            if ipv4.version != 4 or ipv6.version != 6: raise RuntimeError()
+            subnets = []
+            for entry in (old_network.get('IPAM') or {}).get('Config') or []:
+                if isinstance(entry, dict) and isinstance(entry.get('Subnet'), str):
+                    subnets.append(ipaddress.ip_network(entry['Subnet']))
+            if not any(ipv4.ip in subnet and ipv4.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 4): raise RuntimeError()
+            if not any(ipv6.ip in subnet and ipv6.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 6): raise RuntimeError()
+            if old_network.get('Status') != normalized_networks[network_id].get('Status'): raise RuntimeError()
+            normalized_networks[network_id]['Containers'].pop(new_customer)
+            normalized_networks[network_id]['Containers'][old_customer] = copy.deepcopy(old_ep)
+            swaps += 1
+    if swaps != 1: raise RuntimeError()
+    if keyed(before['volumes'], 'Name') != keyed(after['volumes'], 'Name'): raise RuntimeError()
+    if not isinstance(before['holders'], dict) or set(before['holders']) != set(after['holders']): raise RuntimeError()
+    for name, old_holders in before['holders'].items():
+        current = normalized['holders'][name]
+        if old_customer in old_holders:
+            if current != sorted((set(old_holders) - {old_customer}) | {new_customer}): raise RuntimeError()
+            normalized['holders'][name] = list(old_holders)
+        elif new_customer in current:
+            raise RuntimeError()
+    print(json.dumps(normalized, sort_keys=True, separators=(',', ':')))
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 1
+  # Reuse the immutable 8f comparator for the complete Owner delta after
+  # removing only the separately attested customer image/endpoint/holder swap.
+  require_exact_owner_inventory_delta_phase "$before" "$normalized_after" "$new_owner" running
+}
+
 load_pre_create_docker_inventory() {
   local path="$BRIDGE_WORK_ROOT/docker-pre-create-v1"
   PRE_CREATE_DOCKER_INVENTORY="$(emit_owned_nofollow_file "$path")" || return 1
@@ -3145,6 +3427,136 @@ require_owner_endpoint_phase_boundary() {
   esac
 }
 
+require_successor_endpoint_phase_boundary() {
+  local phase="$1" current_inventory state
+  [[ "$phase" == 'running' ]] || return 1
+  [[ "$NEW_OWNER_CONTAINER_ID" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
+  require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
+  require_owner_never_restarted || return 1
+  require_replacement_customer_web_boundary || return 1
+  require_other_service_inventory_exact || return 1
+  current_inventory="$(capture_complete_docker_create_inventory)" || return 1
+  require_exact_successor_inventory_delta \
+    "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory" "$NEW_OWNER_CONTAINER_ID" \
+    "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" "$NEW_CUSTOMER_WEB_CONTAINER_ID" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" || return 1
+  state="$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" \
+    --format '{{.State.Status}}|{{.State.Running}}|{{.State.Pid}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
+  [[ "$state" =~ ^running\|true\|[1-9][0-9]*\|0\|healthy$ ]] || return 1
+  [[ "$(ss -ltnH | awk '$4 ~ /:3002$/ {count += 1} END {print count + 0}')" == '1' ]] || return 1
+  require_live_terminal_attestation_boundary "$NEW_OWNER_CONTAINER_ID" running
+}
+
+require_resumed_intent_pre_mutation_boundary() {
+  local customer_inventory mode current_inventory normalized_current
+  [[ "$(container_full_ids_for_service "$OWNER_SERVICE")" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
+  require_owner_contract "$CREATED_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
+  require_owner_never_restarted || return 1
+  require_owner_network || return 1
+  require_other_service_inventory_exact || return 1
+  if [[ -e "$BRIDGE_WORK_ROOT/docker-pre-create-v1" && ! -L "$BRIDGE_WORK_ROOT/docker-pre-create-v1" ]]; then
+    load_pre_create_docker_inventory || return 1
+  else
+    PRE_CREATE_DOCKER_INVENTORY="$(emit_exact_nofollow_file \
+      "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT" "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
+      "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SHA256")" || return 1
+  fi
+  customer_inventory="$(container_full_ids_for_service customer-web)" || return 1
+  if [[ "$customer_inventory" == "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
+    require_source_customer_web_boundary || return 1
+    mode=source
+  elif [[ -z "$customer_inventory" ]]; then
+    mode=absent
+  elif [[ "$customer_inventory" =~ ^[0-9a-f]{64}$ && "$customer_inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
+    [[ "$(docker_local container inspect "$customer_inventory" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.RestartCount}}')" == \
+      "$PROVIDED_CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
+    require_customer_web_security_contract "$customer_inventory" || return 1
+    mode=replacement
+  else
+    return 1
+  fi
+  current_inventory="$(capture_complete_docker_create_inventory)" || return 1
+  normalized_current="$(printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$PRE_CREATE_DOCKER_INVENTORY" "$current_inventory" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$mode" "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+      "$customer_inventory" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" 3<<'PY'
+import copy, ipaddress, json, re, sys
+mode, old_customer, current_customer, expected_image = sys.argv[1:]
+before_raw, current_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
+before = json.loads(before_raw); current = json.loads(current_raw)
+def keyed(items, key):
+    result = {item[key]: item for item in items}
+    if len(result) != len(items): raise RuntimeError()
+    return result
+try:
+    normalized = copy.deepcopy(current)
+    old_images = keyed(before['images'], 'Id'); current_images = keyed(current['images'], 'Id')
+    extras = set(current_images) - set(old_images)
+    if extras not in (set(), {expected_image}) or any(current_images[key] != old_images[key] for key in old_images): raise RuntimeError()
+    normalized['images'] = [item for item in normalized['images'] if item.get('Id') != expected_image]
+    old_networks = keyed(before['networks'], 'Id'); new_networks = keyed(normalized['networks'], 'Id')
+    if set(old_networks) != set(new_networks): raise RuntimeError()
+    seen = 0
+    for network_id, old_network in old_networks.items():
+        old_eps = old_network.get('Containers') or {}; new_eps = new_networks[network_id].get('Containers') or {}
+        if old_customer not in old_eps and (not current_customer or current_customer not in new_eps): continue
+        if old_customer not in old_eps: raise RuntimeError()
+        expected_keys = set(old_eps) if mode == 'source' else set(old_eps) - {old_customer}
+        if mode == 'replacement': expected_keys.add(current_customer)
+        if set(new_eps) != expected_keys: raise RuntimeError()
+        if any(new_eps[key] != old_eps[key] for key in old_eps if key != old_customer): raise RuntimeError()
+        if mode == 'source':
+            if new_eps[old_customer] != old_eps[old_customer] or new_networks[network_id] != old_network: raise RuntimeError()
+        elif mode == 'replacement':
+            endpoint = new_eps[current_customer]
+            if set(endpoint) != {'Name','EndpointID','MacAddress','IPv4Address','IPv6Address'}: raise RuntimeError()
+            if endpoint.get('Name') != 'fetanagent-staging-beta-customer-web-1': raise RuntimeError()
+            if not re.fullmatch(r'[0-9a-f]{64}', endpoint.get('EndpointID') or ''): raise RuntimeError()
+            if not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', endpoint.get('MacAddress') or ''): raise RuntimeError()
+            ipv4 = ipaddress.ip_interface(endpoint['IPv4Address']); ipv6 = ipaddress.ip_interface(endpoint['IPv6Address'])
+            subnets = [ipaddress.ip_network(item['Subnet']) for item in (old_network.get('IPAM') or {}).get('Config') or [] if isinstance(item, dict) and item.get('Subnet')]
+            if ipv4.version != 4 or ipv6.version != 6 or not any(ipv4.ip in subnet and ipv4.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 4) or not any(ipv6.ip in subnet and ipv6.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 6): raise RuntimeError()
+            probe = copy.deepcopy(new_networks[network_id]); probe['Containers'].pop(current_customer); probe['Containers'][old_customer] = copy.deepcopy(old_eps[old_customer])
+            if probe != old_network: raise RuntimeError()
+        else:
+            probe = copy.deepcopy(new_networks[network_id]); probe['Containers'][old_customer] = copy.deepcopy(old_eps[old_customer]); probe['Status'] = copy.deepcopy(old_network.get('Status'))
+            old_base = copy.deepcopy(old_network); old_base.pop('Status', None); probe_base = copy.deepcopy(probe); probe_base.pop('Status', None)
+            if probe_base != old_base: raise RuntimeError()
+            endpoint = old_eps[old_customer]
+            addresses = [ipaddress.ip_interface(endpoint[name]) for name in ('IPv4Address','IPv6Address')]
+            old_subnets = ((old_network.get('Status') or {}).get('IPAM') or {}).get('Subnets')
+            new_subnets = ((new_networks[network_id].get('Status') or {}).get('IPAM') or {}).get('Subnets')
+            if not isinstance(old_subnets, dict) or set(old_subnets) != set(new_subnets or {}): raise RuntimeError()
+            changed = []
+            for address in addresses:
+                matches = [name for name in old_subnets if address.ip in ipaddress.ip_network(name)]
+                if len(matches) != 1: raise RuntimeError()
+                changed.append(matches[0])
+            if len(set(changed)) != 2: raise RuntimeError()
+            for name, old_count in old_subnets.items():
+                new_count = new_subnets[name]
+                if set(old_count) != {'IPsInUse','DynamicIPsAvailable'} or set(new_count) != set(old_count): raise RuntimeError()
+                if name in changed:
+                    if new_count['IPsInUse'] != old_count['IPsInUse'] - 1 or new_count['DynamicIPsAvailable'] != old_count['DynamicIPsAvailable'] + 1: raise RuntimeError()
+                elif new_count != old_count: raise RuntimeError()
+        new_networks[network_id] = copy.deepcopy(old_network); seen += 1
+    if seen != 1: raise RuntimeError()
+    if keyed(before['volumes'], 'Name') != keyed(current['volumes'], 'Name'): raise RuntimeError()
+    if set(before['holders']) != set(current['holders']): raise RuntimeError()
+    for name, old_holders in before['holders'].items():
+        observed = current['holders'][name]
+        if old_customer in old_holders:
+            expected = list(old_holders) if mode == 'source' else sorted(set(old_holders) - {old_customer})
+            if mode == 'replacement': expected = sorted(set(expected) | {current_customer})
+            if observed != expected: raise RuntimeError()
+            normalized['holders'][name] = list(old_holders)
+        elif current_customer and current_customer in observed: raise RuntimeError()
+    print(json.dumps(normalized, sort_keys=True, separators=(',', ':')))
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 1
+  require_exact_owner_inventory_delta_phase "$PRE_CREATE_DOCKER_INVENTORY" "$normalized_current" "$CREATED_OWNER_CONTAINER_ID" running
+}
+
 require_complete_owner_endpoint_phase_boundary() {
   local phase="$1"
   [[ "$phase" == 'created' || "$phase" == 'running' ]] || return 1
@@ -3156,6 +3568,7 @@ require_complete_owner_endpoint_phase_boundary() {
   require_prior_failed_runtime_ledger_absent || return 1
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
+  require_failed_counter_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -3166,7 +3579,7 @@ require_complete_owner_endpoint_phase_boundary() {
   cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file \
     "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT" "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_DEV_INO" \
     "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SHA256") || return 1
-  require_owner_endpoint_phase_boundary "$phase"
+  require_successor_endpoint_phase_boundary "$phase"
 }
 
 require_running_owner_boundary_before_successor_intent() {
@@ -3176,6 +3589,7 @@ require_running_owner_boundary_before_successor_intent() {
   require_prior_failed_runtime_ledger_absent || return 1
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
+  require_failed_counter_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -3188,9 +3602,7 @@ require_running_owner_boundary_before_successor_intent() {
     "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SHA256")" || return 1
   printf '%s' "$PRE_CREATE_DOCKER_INVENTORY" | env -i PATH="$SAFE_PATH" python3 -I -c \
     'import json,sys; value=json.load(sys.stdin); assert set(value)=={"images","networks","volumes","holders"}' || return 1
-  cmp -s -- <(emit_exact_nofollow_file "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF" \
-    "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_DEV_INO" "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SIZE" \
-    "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SHA256") <(expected_api_catalog_proof) || return 1
+  require_pre_customer_web_inventory || return 1
   require_owner_endpoint_phase_boundary running
 }
 
@@ -3705,6 +4117,7 @@ create_or_discover_bridge_ledger() {
   require_prior_failed_runtime_ledger_absent || return 1
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
+  require_failed_counter_runtime || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -3738,16 +4151,28 @@ create_or_discover_bridge_ledger() {
   require_prior_failed_runtime_ledger_absent || return 1
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
+  require_failed_counter_runtime || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
-    [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
+    [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
   else
     case "$entries" in
       ''|'.intent-v1.installing'|'intent-v1'|$'.api-catalog-proof-v1.installing\nintent-v1'|\
+      $'.customer-web-replacement-v1.installing\nintent-v1'|$'customer-web-replacement-v1\nintent-v1'|\
+      $'.api-catalog-proof-v1.installing\ncustomer-web-replacement-v1\nintent-v1'|\
+      $'api-catalog-proof-v1\ncustomer-web-replacement-v1\nintent-v1'|\
       $'api-catalog-proof-v1\nintent-v1'|$'.docker-pre-create-v1.installing\napi-catalog-proof-v1\nintent-v1'|\
+      $'.docker-pre-create-v1.installing\napi-catalog-proof-v1\ncustomer-web-replacement-v1\nintent-v1'|\
+      $'api-catalog-proof-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1'|\
       $'api-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1'|$'.replacement-owner-v1.installing\napi-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1'|\
+      $'.replacement-owner-v1.installing\napi-catalog-proof-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1'|\
+      $'api-catalog-proof-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1'|\
       $'api-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1'|$'.start-owner-v1.installing\napi-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1'|\
+      $'.start-owner-v1.installing\napi-catalog-proof-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1'|\
+      $'api-catalog-proof-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
       $'api-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
+      $'.completed-v1.installing\napi-catalog-proof-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
+      $'api-catalog-proof-v1\ncompleted-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
       $'.completed-v1.installing\napi-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
       $'api-catalog-proof-v1\ncompleted-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1') ;;
       *) return 1 ;;
@@ -3757,6 +4182,13 @@ create_or_discover_bridge_ledger() {
 
 expected_bridge_intent() {
   printf '%s\n' \
+    "failed_counter_correction_implementation_sha=$FAILED_COUNTER_CORRECTION_RELEASE" \
+    "failed_counter_correction_bundle_root_dev_ino=$FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_counter_correction_script_sha256=$FAILED_COUNTER_CORRECTION_SCRIPT_SHA256" \
+    "failed_counter_correction_manifest_sha256=$FAILED_COUNTER_CORRECTION_MANIFEST_SHA256" \
+    "failed_counter_bridge_parent_dev_ino=$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO" \
+    "failed_counter_bridge_installing_dev_ino=$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO" \
+    'failed_counter_bridge_inventory=empty-no-intent' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -3969,8 +4401,13 @@ expected_bridge_intent() {
     "old_owner_container_id=$OLD_OWNER_CONTAINER_ID" \
     "old_owner_semantic_contract_sha256=$OLD_OWNER_SEMANTIC_SHA256" \
     "retired_coordinator_container_id=$RETIRED_COORDINATOR_CONTAINER_ID" \
-    "non_owner_project_container_count=$NON_OWNER_INVENTORY_COUNT" \
-    "non_owner_project_inventory_sha256=$NON_OWNER_INVENTORY_SHA256" \
+    'non_owner_project_container_count=5' \
+    "normalized_pre_replacement_non_owner_inventory_sha256=$SOURCE_NON_OWNER_INVENTORY_SHA256" \
+    "source_customer_web_container_id=$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+    "source_customer_web_image_id=$SOURCE_CUSTOMER_WEB_IMAGE_ID" \
+    "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
+    "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
+    "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
     'migration_attestation=exact-terminal-attestation-completed-v1' \
     "installed_helper_sha256=$H14_HELPER_SHA256" \
     "owner_network=$OWNER_NETWORK" \
@@ -4063,6 +4500,13 @@ require_start_record() {
 
 expected_bridge_completed() {
   printf '%s\n' \
+    "failed_counter_correction_implementation_sha=$FAILED_COUNTER_CORRECTION_RELEASE" \
+    "failed_counter_correction_bundle_root_dev_ino=$FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_counter_correction_script_sha256=$FAILED_COUNTER_CORRECTION_SCRIPT_SHA256" \
+    "failed_counter_correction_manifest_sha256=$FAILED_COUNTER_CORRECTION_MANIFEST_SHA256" \
+    "failed_counter_bridge_parent_dev_ino=$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO" \
+    "failed_counter_bridge_installing_dev_ino=$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO" \
+    'failed_counter_bridge_inventory=empty-no-intent' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -4284,6 +4728,7 @@ expected_bridge_completed() {
     'amount_entry_enabled=false' \
     'money_moved=false' \
     "bridge_intent_sha256=$BRIDGE_INTENT_SHA256" \
+    "customer_web_replacement_record_sha256=$CUSTOMER_WEB_REPLACEMENT_RECORD_SHA256" \
     "replacement_owner_record_sha256=$REPLACEMENT_RECORD_SHA256" \
     "start_owner_record_sha256=$START_RECORD_SHA256" \
     'canonical_h14_evidence_rewritten=false' \
@@ -4293,6 +4738,10 @@ expected_bridge_completed() {
 prepare_record_digests() {
   BRIDGE_INTENT_SHA256="$(sha256sum -- "$BRIDGE_WORK_ROOT/intent-v1" | awk '{print $1}')" || return 1
   [[ "$BRIDGE_INTENT_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
+  if [[ -e "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" && ! -L "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" ]]; then
+    CUSTOMER_WEB_REPLACEMENT_RECORD_SHA256="$(sha256sum -- "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" | awk '{print $1}')" || return 1
+    [[ "$CUSTOMER_WEB_REPLACEMENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
+  fi
   if [[ -e "$BRIDGE_WORK_ROOT/replacement-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/replacement-owner-v1" ]]; then
     REPLACEMENT_RECORD_SHA256="$(sha256sum -- "$BRIDGE_WORK_ROOT/replacement-owner-v1" | awk '{print $1}')" || return 1
     [[ "$REPLACEMENT_RECORD_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
@@ -4423,6 +4872,229 @@ release_staging_mutation_lock() {
 }
 
 require_exact_droplet || die 'the DigitalOcean Droplet identity is not exact'
+customer_web_normalized_contract_digest() {
+  local container_id="$1"
+  [[ "$container_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+  docker_local container inspect "$container_id" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$container_id" 3<<'PY'
+import hashlib
+import json
+import sys
+
+expected = sys.argv[1]
+payload = json.load(sys.stdin)
+if not isinstance(payload, list) or len(payload) != 1 or payload[0].get('Id') != expected:
+    raise SystemExit(1)
+item = payload[0]
+config = item.get('Config'); host = item.get('HostConfig'); mounts = item.get('Mounts')
+if not isinstance(config, dict) or not isinstance(host, dict) or not isinstance(mounts, list):
+    raise SystemExit(1)
+labels = dict(config.get('Labels') or {})
+for key in ('com.docker.compose.config-hash', 'com.docker.compose.image', 'org.opencontainers.image.revision'):
+    labels.pop(key, None)
+contract = {
+    'version': 'fetanagent-customer-web-replacement-normalized-v1',
+    'Name': item.get('Name'),
+    'Config.User': config.get('User'),
+    'Config.Cmd': config.get('Cmd'),
+    'Config.Env': config.get('Env'),
+    'HostConfig': {key: host.get(key) for key in (
+        'ReadonlyRootfs', 'CapAdd', 'CapDrop', 'SecurityOpt', 'RestartPolicy',
+        'NetworkMode', 'PortBindings', 'PidsLimit', 'Memory', 'NanoCpus')},
+    'Mounts': sorted(mounts, key=lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)),
+    'Config.Labels': labels,
+}
+
+encoded = (json.dumps(contract, sort_keys=True, separators=(',', ':'), ensure_ascii=True) + '\n').encode('ascii')
+print(hashlib.sha256(encoded).hexdigest())
+PY
+}
+
+require_customer_web_security_contract() {
+  local container_id="$1"
+  docker_local container inspect "$container_id" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$container_id" 3<<'PY'
+import json, sys
+expected = sys.argv[1]
+try:
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, list) or len(payload) != 1 or payload[0].get('Id') != expected: raise RuntimeError()
+    item = payload[0]; config = item.get('Config') or {}; host = item.get('HostConfig') or {}; networks = (item.get('NetworkSettings') or {}).get('Networks') or {}
+    if config.get('Entrypoint') not in (None, []): raise RuntimeError()
+    if config.get('WorkingDir') != '/workspace' or config.get('ExposedPorts') not in (None, {}): raise RuntimeError()
+    if config.get('Healthcheck') != {
+        'Test':['CMD','node','-e',"fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"],
+        'Interval':30000000000,'Timeout':3000000000,'StartPeriod':15000000000,'Retries':3,
+    }: raise RuntimeError()
+    if host.get('Privileged') is not False or host.get('ReadonlyRootfs') is not True or host.get('Init') is not True: raise RuntimeError()
+    if host.get('CapAdd') not in (None, []) or host.get('CapDrop') != ['ALL']: raise RuntimeError()
+    if host.get('SecurityOpt') != ['no-new-privileges:true']: raise RuntimeError()
+    if host.get('Tmpfs') != {'/tmp':'rw,noexec,nosuid,size=32m,mode=1777'}: raise RuntimeError()
+    if host.get('PidsLimit') != 128 or host.get('Memory') != 268435456 or host.get('NanoCpus') != 500000000: raise RuntimeError()
+    if host.get('PortBindings') not in (None, {}) or len(networks) != 1: raise RuntimeError()
+    if next(iter(networks)) != 'fetanagent-staging-beta_service': raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+capture_other_service_inventory() {
+  # Service identity, rather than the ephemeral source container ID, keeps this
+  # guard stable across the one explicitly authorized customer-web replacement.
+  capture_non_owner_inventory | awk -F'|' '$2 != "customer-web"'
+}
+
+require_other_service_inventory_exact() {
+  local current
+  current="$(capture_other_service_inventory)" || return 1
+  [[ "$(printf '%s\n' "$current" | sha256sum | awk '{print $1}')" == "$SOURCE_OTHER_SERVICE_INVENTORY_SHA256" ]] || return 1
+  [[ "$(container_full_ids_for_service gateway)" == "$SOURCE_GATEWAY_CONTAINER_ID" ]] || return 1
+  [[ "$(container_full_ids_for_service bot)" == "$SOURCE_BOT_CONTAINER_ID" ]] || return 1
+  [[ "$(container_full_ids_for_service beta-admission)" == "$SOURCE_BETA_CONTAINER_ID" ]]
+}
+
+require_owner_never_restarted() {
+  [[ "$(docker_local container inspect "$CREATED_OWNER_CONTAINER_ID" --format '{{.Id}}|{{.State.Pid}}|{{.State.StartedAt}}|{{.RestartCount}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == \
+    "$CREATED_OWNER_CONTAINER_ID|$SOURCE_OWNER_PID|$SOURCE_OWNER_STARTED_AT|0|running|healthy" ]]
+}
+
+require_source_customer_web_boundary() {
+  local normalized state
+  [[ "$(container_full_ids_for_service customer-web)" == "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1
+  normalized="$(customer_web_normalized_contract_digest "$SOURCE_CUSTOMER_WEB_CONTAINER_ID")" || return 1
+  [[ "$normalized" == "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
+  require_customer_web_security_contract "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" || return 1
+  [[ "$(docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.RestartCount}}')" == \
+    "$SOURCE_CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:306818ca812b|10001:10001|0" ]] || return 1
+  state="$(docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" --format '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
+  [[ "$state" == 'running|true|unhealthy' ]] || return 1
+  [[ "$(docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" --format '{{.State.Pid}}|{{.State.StartedAt}}')" == \
+    "$SOURCE_CUSTOMER_WEB_PID|$SOURCE_CUSTOMER_WEB_STARTED_AT" ]] || return 1
+  [[ "$(container_runtime_state_digest "$SOURCE_CUSTOMER_WEB_CONTAINER_ID")" == "$SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256" ]] || return 1
+  [[ "$(docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" --format '{{range .Config.Env}}{{println .}}{{end}}' | LC_ALL=C sort | sha256sum | awk '{print $1}')" == "$SOURCE_CUSTOMER_WEB_ENV_SHA256" ]]
+}
+
+require_pre_customer_web_inventory() {
+  local normalized
+  require_source_customer_web_boundary || return 1
+  require_other_service_inventory_exact || return 1
+  normalized="$(awk -F'|' -v customer="$SOURCE_CUSTOMER_WEB_CONTAINER_ID" -v healthy="$SOURCE_CUSTOMER_WEB_HEALTHY_RUNTIME_SHA256" 'BEGIN{OFS="|"} $1==customer{$4=healthy} {print}' <<<"$NON_OWNER_INVENTORY")" || return 1
+  [[ "$(printf '%s' "$normalized" | sha256sum | awk '{print $1}')" == "$SOURCE_NON_OWNER_INVENTORY_SHA256" ]]
+}
+
+require_loaded_customer_web_image() {
+  local image_id image_tag="fetanagent-customer-web:${RECOVERY_RELEASE:0:12}"
+  image_id="$(docker_local image inspect "$image_tag" --format '{{.Id}}')" || return 1
+  [[ "$image_id" == "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" ]] || return 1
+  [[ "$(docker_local image inspect "$image_id" --format '{{json .RepoTags}}|{{.Config.User}}|{{json .Config.Cmd}}|{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
+    "[\"$image_tag\"]|10001:10001|[\"node\",\"apps/customer-web/dist/index.js\"]|$RECOVERY_RELEASE" ]] || return 1
+  CUSTOMER_WEB_IMAGE_ID="$image_id"
+}
+
+require_replacement_customer_web_boundary() {
+  local customer_id normalized state
+  customer_id="$(container_full_ids_for_service customer-web)" || return 1
+  [[ "$customer_id" =~ ^[0-9a-f]{64}$ && "$customer_id" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1
+  require_loaded_customer_web_image || return 1
+  normalized="$(customer_web_normalized_contract_digest "$customer_id")" || return 1
+  [[ "$normalized" == "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
+  require_customer_web_security_contract "$customer_id" || return 1
+  [[ "$(docker_local container inspect "$customer_id" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.RestartCount}}|{{json .NetworkSettings.Ports}}|{{json .HostConfig.PortBindings}}')" == \
+    "$CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|0|{}|{}" ]] || return 1
+  state="$(docker_local container inspect "$customer_id" --format '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
+  [[ "$state" == 'running|true|healthy' ]] || return 1
+  [[ "$(docker_local container inspect "$customer_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | LC_ALL=C sort | sha256sum | awk '{print $1}')" == "$SOURCE_CUSTOMER_WEB_ENV_SHA256" ]] || return 1
+  NEW_CUSTOMER_WEB_CONTAINER_ID="$customer_id"
+}
+
+expected_customer_web_replacement_record() {
+  printf '%s\n' \
+    'version=1' \
+    'contract=fetanagent-h14-customer-web-self-recovery-replacement-v1' \
+    "recovery_implementation_sha=$RECOVERY_RELEASE" \
+    "source_customer_web_container_id=$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+    "source_customer_web_image_id=$SOURCE_CUSTOMER_WEB_IMAGE_ID" \
+    "replacement_customer_web_container_id=$NEW_CUSTOMER_WEB_CONTAINER_ID" \
+    "replacement_customer_web_image_id=$CUSTOMER_WEB_IMAGE_ID" \
+    "replacement_customer_web_image_tag=fetanagent-customer-web:${RECOVERY_RELEASE:0:12}" \
+    "customer_web_normalized_contract_sha256=$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" \
+    "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
+    "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
+    "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+    'owner_lifecycle_mutation=false' \
+    'other_service_lifecycle_mutation=false' \
+    'financial_actions_mode=dry_run' \
+    'kemerbet_executor_enabled=false' \
+    'kemerbet_final_action_enabled=false' \
+    'provider_action_enabled=false' \
+    'transfer_enabled=false' \
+    'amount_entry_enabled=false' \
+    'money_moved=false'
+}
+
+require_customer_web_replacement_record() {
+  local path="$BRIDGE_WORK_ROOT/customer-web-replacement-v1" line
+  [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+    "$(stat --format='%U:%G:%a:%h' "$path")" == 'root:root:600:1' ]] || return 1
+  line="$(sed -n '6p' "$path")" || return 1
+  [[ "$line" =~ ^replacement_customer_web_container_id=[0-9a-f]{64}$ ]] || return 1
+  NEW_CUSTOMER_WEB_CONTAINER_ID="${line#replacement_customer_web_container_id=}"
+  require_replacement_customer_web_boundary || return 1
+  cmp -s -- "$path" <(expected_customer_web_replacement_record)
+}
+
+classify_customer_web_replacement_state() {
+  local inventory customer_id normalized
+  inventory="$(container_full_ids_for_service customer-web)" || return 1
+  if [[ "$inventory" == "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
+    require_source_customer_web_boundary || return 1
+    printf '%s\n' source
+    return
+  fi
+  if [[ -z "$inventory" ]]; then
+    printf '%s\n' retry
+    return
+  fi
+  [[ "$inventory" =~ ^[0-9a-f]{64}$ && "$inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1
+  customer_id="$inventory"
+  require_loaded_customer_web_image || return 1
+  normalized="$(customer_web_normalized_contract_digest "$customer_id")" || return 1
+  [[ "$normalized" == "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
+  [[ "$(docker_local container inspect "$customer_id" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.RestartCount}}')" == \
+    "$PROVIDED_CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
+  if [[ "$(docker_local container inspect "$customer_id" --format '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == 'running|true|healthy' ]]; then
+    NEW_CUSTOMER_WEB_CONTAINER_ID="$customer_id"
+    printf '%s\n' complete
+  else
+    printf '%s\n' retry
+  fi
+}
+
+replace_customer_web_once() {
+  local before_guard after_guard replacement_state image_tag="fetanagent-customer-web:${RECOVERY_RELEASE:0:12}"
+  require_resumed_intent_pre_mutation_boundary || return 1
+  require_other_service_inventory_exact || return 1
+  before_guard="$(capture_other_service_inventory)" || return 1
+  require_owner_never_restarted || return 1
+  # Always import the attested archive. A pre-existing release tag is never a
+  # substitute for the exact staged archive bytes and expected image ID.
+  docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" >/dev/null || return 1
+  require_loaded_customer_web_image || return 1
+  replacement_state="$(classify_customer_web_replacement_state)" || return 1
+  if [[ "$replacement_state" != complete ]]; then
+    [[ "$replacement_state" == source || "$replacement_state" == retry ]] || return 1
+    env -i "${compose_environment[@]}" FETANAGENT_VCS_REF="$RECOVERY_RELEASE" \
+      FETANAGENT_IMAGE_TAG="${RECOVERY_RELEASE:0:12}" "${compose_command[@]}" \
+      up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web || return 1
+  fi
+  require_replacement_customer_web_boundary || return 1
+  ! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1 || return 1
+  after_guard="$(capture_other_service_inventory)" || return 1
+  [[ "$before_guard" == "$after_guard" ]] || return 1
+  require_other_service_inventory_exact || return 1
+  require_owner_never_restarted
+}
+
 require_exact_recovery_source_anchors || die 'the immutable 001 terminal and Owner bundle source anchors are not exact'
 require_original_bridge_namespace_absent ||
   die 'the immutable 001 Owner bridge namespace is no longer absent'
@@ -4543,6 +5215,7 @@ NON_OWNER_INVENTORY_SHA256="$(printf '%s' "$NON_OWNER_INVENTORY" | sha256sum | a
 require_prior_failed_runtime_ledger_absent || die 'the chained pre-51e failed runtime evidence is not exact'
 require_failed_endpoint_phase_runtime || die 'the immutable 51e created-phase interruption evidence is not exact'
 require_failed_running_status_runtime || die 'the immutable 8f running-phase interruption evidence is not exact'
+require_failed_counter_runtime || die 'the immutable 020 empty pre-intent interruption evidence is not exact'
 NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
@@ -4556,22 +5229,46 @@ else
 fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
-# The exact 8f predecessor preserved the catalog proof, pre-create inventory,
-# replacement identity, and start authorization before failing closed on a
-# Docker-maintained Status counter. Republish those immutable records through
-# stable no-follow reads; never recreate any already-past state.
+# The exact 020 predecessor failed before intent while customer-web remained in
+# its recoverable unhealthy latch. This successor durably authorizes and records
+# exactly one customer-web replacement; Owner and every other service remain
+# byte-for-byte and lifecycle stable.
+if [[ -e "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" &&
+  ! -L "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" ]]; then
+  require_customer_web_replacement_record ||
+    die 'the durable customer-web self-recovery replacement record changed'
+else
+  [[ "$BRIDGE_STATE" == 'installing' ]] ||
+    die 'a completed bridge is missing its customer-web replacement record'
+  replace_customer_web_once ||
+    die 'the exact customer-web-only self-recovery replacement failed closed'
+  publish_exact_record "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" 0600 \
+    < <(expected_customer_web_replacement_record) ||
+    die 'the customer-web self-recovery replacement record could not be published durably'
+  require_customer_web_replacement_record ||
+    die 'the published customer-web self-recovery replacement record is invalid'
+fi
+require_owner_never_restarted || die 'Owner lifecycle changed during customer-web replacement'
+require_other_service_inventory_exact || die 'a non-customer service changed during customer-web replacement'
+NON_OWNER_INVENTORY="$(capture_non_owner_inventory)" ||
+  die 'the successor non-Owner inventory could not be captured'
+NON_OWNER_INVENTORY_COUNT="$(awk 'END { print NR }' <<<"$NON_OWNER_INVENTORY")" ||
+  die 'the successor non-Owner inventory count could not be computed'
+NON_OWNER_INVENTORY_SHA256="$(printf '%s' "$NON_OWNER_INVENTORY" | sha256sum | awk '{print $1}')" ||
+  die 'the successor non-Owner inventory digest could not be computed'
+[[ "$NON_OWNER_INVENTORY_COUNT" == '5' && "$NON_OWNER_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die 'the successor non-Owner inventory is malformed'
+require_non_owner_inventory_unchanged || die 'the successor non-Owner inventory changed after replacement'
+
+# The exact 8f predecessor preserved the pre-create inventory, replacement
+# identity, and start authorization. The API proof is reissued only after the
+# exact customer-web replacement and retains the same read-only catalog query.
 if [[ "$BRIDGE_STATE" != 'complete' ]]; then
-  cmp -s -- <(emit_exact_nofollow_file "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF" \
-    "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_DEV_INO" "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SIZE" \
-    "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SHA256") <(expected_api_catalog_proof) ||
-    die 'the immutable 8f API catalog proof is not exact'
   if [[ ! -e "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" && ! -L "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" ]]; then
-    publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file \
-      "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF" "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_DEV_INO" \
-      "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SIZE" "$FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SHA256") ||
-      die 'the exact 8f API catalog proof could not be republished durably'
+    publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof) ||
+      die 'the successor API catalog proof could not be published durably'
   fi
-  require_api_catalog_proof || die 'the republished durable API catalog proof changed'
+  require_api_catalog_proof || die 'the successor durable API catalog proof changed'
   ! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1 || die 'the removed historical Owner reappeared after durable intent'
   require_owner_image_contract || die 'the exact previously loaded image changed after durable intent'
   require_original_bridge_namespace_absent ||
@@ -4593,6 +5290,7 @@ cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file \
   die 'the republished 8f pre-create Docker snapshot is not byte-exact'
 
 if [[ "$BRIDGE_STATE" == 'complete' ]]; then
+  require_customer_web_replacement_record || die 'the completed customer-web replacement record is invalid'
   load_replacement_record || die 'the completed bridge replacement record is invalid'
   prepare_record_digests || die 'the completed replacement digest is invalid'
   require_start_record || die 'the completed bridge start-intent record is invalid'
@@ -4617,9 +5315,13 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed beside completion'
   require_failed_endpoint_phase_runtime ||
     die 'the immutable 51e created-phase interruption evidence changed beside completion'
+  require_failed_running_status_runtime ||
+    die 'the immutable 8f running-phase interruption evidence changed beside completion'
+  require_failed_counter_runtime ||
+    die 'the immutable 020 empty pre-intent interruption evidence changed beside completion'
   require_complete_owner_endpoint_phase_boundary running ||
     die 'the complete running-phase boundary changed beside completed replay'
-  printf '%s\n' 'FetanAgent H14 Owner runtime bridge already valid: Owner only; no provider action and no money moved.'
+  printf '%s\n' 'FetanAgent H14 customer-web recovery already valid: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'
   exit 0
 fi
 
@@ -4691,5 +5393,10 @@ BRIDGE_WORK_ROOT="$BRIDGE_ROOT"
 require_prior_failed_runtime_ledger_absent || die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed during finalization'
 require_start_record || die 'the finalized Owner-runtime bridge start intent is invalid'
 require_bridge_completed || die 'the finalized Owner-runtime bridge ledger is invalid'
+require_customer_web_replacement_record || die 'the finalized customer-web replacement record is invalid'
+require_owner_never_restarted || die 'Owner lifecycle changed before final immutable verification'
+require_other_service_inventory_exact || die 'a non-customer service changed before final immutable verification'
+require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'
+require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'
 
-printf '%s\n' 'FetanAgent H14 Owner runtime bridge installed: Owner only; no provider action and no money moved.'
+printf '%s\n' 'FetanAgent H14 customer-web recovery installed: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'

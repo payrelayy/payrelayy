@@ -50,6 +50,29 @@ for (const exact020 of [
   "readonly FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO='64769:6102977'",
 ])
   assert.ok(script.includes(exact020), `missing exact 020 pin ${exact020}`);
+for (const exact0110 of [
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_RELEASE='0110d1965d7efdc0436abda8c0bc686fb33c084b'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102978'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO='64769:6102979'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256='986e031158229b7474cc5d31b6a2962b30fbe75497d3bef646c40d228cfeab59'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE='345785'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO='64769:6102980'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO='64769:6102981'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256='80716810b0391e2a00f3b6160529a0359a24035f1199327871290636283e654a'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE='20018'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102982'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256='2bae32658d1d3b4a218a94b1e882e190076a3b2919d33bc92cacfd54de899140'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID='sha256:e49412ee611a12a3ff23022f68f244cae34919038483663a82f45a8e839d35c9'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID='33268571701'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO='64769:6102983'",
+  "readonly FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO='64769:6102984'",
+])
+  assert.ok(script.includes(exact0110), `missing exact 0110 pin ${exact0110}`);
 for (const exactLivePin of [
   "readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'",
   "readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'",
@@ -92,6 +115,45 @@ for (const exactCounterBoundary of [
 assert.ok(
   (script.match(/require_failed_counter_runtime/gu) ?? []).length >= 7,
   '020 boundary is not connected to pre-intent, completion, replay, and finalization paths',
+);
+const failedCustomerStart = script.indexOf('require_failed_customer_web_network_scope_runtime() {');
+const failedCustomerEnd = script.indexOf('\n}\n', failedCustomerStart);
+const failedCustomerHelper = script.slice(failedCustomerStart, failedCustomerEnd);
+for (const exactFailedCustomerBoundary of [
+  '! -e "$FAILED_CUSTOMER_WEB_BRIDGE_ROOT"',
+  '! -L "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT"',
+  '"$FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING"',
+  '"$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  'fetanagent-customer-web:${FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:0:12}',
+  'docker_local image inspect "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID"',
+])
+  assert.ok(
+    failedCustomerHelper.includes(exactFailedCustomerBoundary),
+    `failed-customer-web helper lacks ${exactFailedCustomerBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_customer_web_network_scope_runtime/gu) ?? []).length >= 9,
+  '0110 boundary is not connected to pre-intent, image-load, Compose, replay, and finalization paths',
+);
+for (const streamingArchiveGuard of [
+  'verify_exact_nofollow_file_digest() {',
+  'expected_size > 1024 * 1024 * 1024',
+  'signal.alarm(60)',
+  'os.O_NOFOLLOW',
+  'before_contract != after_contract',
+  'verify_exact_nofollow_file_digest "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+])
+  assert.ok(
+    script.includes(streamingArchiveGuard),
+    `missing bounded archive guard ${streamingArchiveGuard}`,
+  );
+assert.ok(
+  !script.includes(
+    'emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  ),
+  'the 405 MB failed archive must never be buffered into memory',
 );
 for (const transport of [
   'docker image save --output "$customer_archive" "$customer_tag"',
@@ -160,6 +222,8 @@ for (const fixedManifestLine of [
   'customer_web_lifecycle_mutation=exact-single-self-recovery-replacement-v1',
   'all_other_lifecycle_mutation=forbidden',
   'failed_counter_bridge_inventory=empty-no-intent',
+  'failed_customer_web_bridge_inventory=empty-no-intent',
+  'failed_customer_web_network_scope=stale-service-network-name-pre-intent',
   'financial_actions_mode=dry_run',
   'kemerbet_executor_enabled=false',
   'kemerbet_final_action_enabled=false',
@@ -175,7 +239,10 @@ for (const fixedManifestLine of [
   );
 }
 for (const runtimeConnectivityContract of [
-  "if next(iter(networks)) != 'fetanagent-staging-beta_service': raise RuntimeError()",
+  'local container_id="$1" expected_network="$OWNER_NETWORK"',
+  'python3 -I /dev/fd/3 "$container_id" "$expected_network"',
+  'expected, expected_network = sys.argv[1:]',
+  'if next(iter(networks)) != expected_network: raise RuntimeError()',
   "if host.get('PortBindings') not in (None, {}) or len(networks) != 1: raise RuntimeError()",
   "if host.get('Privileged') is not False or host.get('ReadonlyRootfs') is not True or host.get('Init') is not True: raise RuntimeError()",
   "if host.get('SecurityOpt') != ['no-new-privileges:true']: raise RuntimeError()",
@@ -194,6 +261,12 @@ for (const runtimeConnectivityContract of [
     script.includes(runtimeConnectivityContract),
     `missing helper connectivity/negative contract ${runtimeConnectivityContract}`,
   );
+assert.ok(
+  !script.includes(
+    "if next(iter(networks)) != 'fetanagent-staging-beta_service': raise RuntimeError()",
+  ),
+  'the deterministic stale customer-web service-network comparator remains',
+);
 const otherGuard = script.indexOf('replace_customer_web_once() {');
 const preMutationExact = script.indexOf(
   'require_other_service_inventory_exact || return 1',
@@ -351,7 +424,8 @@ for (const needle of [
   "readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
   "readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
   "readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'",
+  "readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -593,7 +667,7 @@ assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
 const nofollowDefinition = script.indexOf('emit_exact_nofollow_file() {');
 const priorClaimDefinition = script.indexOf('require_prior_failed_recovery_claim() {');
 const priorClaimInvocation = script.indexOf(
-  "require_prior_failed_recovery_claim ||\n  die 'the immutable failed 911 recovery bundle claim is not exact or the append-only chain is incomplete'",
+  "require_prior_failed_recovery_claim ||\n  die 'CW-NET-SCOPE-001: the immutable failed 0110 bundle, manifest semantics, or append-only chain is not exact'",
 );
 assert.ok(nofollowDefinition >= 0 && nofollowDefinition < priorClaimDefinition);
 assert.ok(priorClaimDefinition < priorClaimInvocation);
@@ -1357,10 +1431,11 @@ for (const state of [
   '"$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")"',
   '"$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")"',
   '"$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")"',
-  '"$(basename "$failed_counter_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_counter_root")" "$(basename "$root")"',
+  '"$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")"',
+  '"$(basename "$failed_customer_web_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_customer_web_root")" "$(basename "$root")"',
 ]) {
-  assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
+  assert.ok(rootEmission.includes(state), `missing append-only interruption state ${state}`);
 }
 assert.ok(
   !rootEmission.includes('if [[ ! -e "$parent" && ! -L "$parent" ]]'),
@@ -1371,6 +1446,7 @@ for (const finalIdentityGuard of [
   "require_owner_never_restarted || die 'Owner lifecycle changed before final immutable verification'",
   "require_other_service_inventory_exact || die 'a non-customer service changed before final immutable verification'",
   "require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'",
+  "require_failed_customer_web_network_scope_runtime ||\n  die 'CW-NET-SCOPE-005: the immutable failed 0110 empty pre-intent ledger changed during finalization'",
   "require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'",
   'Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.',
 ])
@@ -1396,6 +1472,7 @@ const failedOrder = '132603c34afff4e0e6c78d89864c761034c0f3fa';
 const failedEndpointPhase = '51e5170488d720fd04decd1896971ab72cfe9603';
 const failedRunningStatus = '8f1ef460a231fe2c21e2df2d986749400d08c38c';
 const failedCounter = '0202304e3c606d2a7927a5b027d76926c0117189';
+const failedCustomer = '0110d1965d7efdc0436abda8c0bc686fb33c084b';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
@@ -1415,6 +1492,7 @@ const classifyChain = (children) => {
       failedEndpointPhase,
       failedRunningStatus,
       failedCounter,
+      failedCustomer,
     ]
       .sort()
       .join('\n')
@@ -1435,6 +1513,7 @@ const classifyChain = (children) => {
       failedEndpointPhase,
       failedRunningStatus,
       failedCounter,
+      failedCustomer,
       installing,
     ]
       .sort()
@@ -1456,6 +1535,7 @@ const classifyChain = (children) => {
       failedEndpointPhase,
       failedRunningStatus,
       failedCounter,
+      failedCustomer,
       current,
     ]
       .sort()
@@ -1479,6 +1559,7 @@ for (const [children, expected] of [
       failedEndpointPhase,
       failedRunningStatus,
       failedCounter,
+      failedCustomer,
     ],
     'append',
   ],
@@ -1496,6 +1577,7 @@ for (const [children, expected] of [
       failedEndpointPhase,
       failedRunningStatus,
       failedCounter,
+      failedCustomer,
       installing,
     ],
     'resume',
@@ -1514,6 +1596,7 @@ for (const [children, expected] of [
       failedEndpointPhase,
       failedRunningStatus,
       failedCounter,
+      failedCustomer,
       current,
     ],
     'complete',
@@ -1523,7 +1606,7 @@ for (const [children, expected] of [
   [[prior, installing, current], 'reject'],
   [[prior, 'unexpected'], 'reject'],
 ]) {
-  assert.equal(classifyChain(children), expected, `bad two-claim fixture ${children}`);
+  assert.equal(classifyChain(children), expected, `bad append-only chain fixture ${children}`);
 }
 
 const bash = resolveBash();

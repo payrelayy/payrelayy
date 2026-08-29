@@ -312,6 +312,26 @@ readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ID='33258358642'
 readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
 readonly FAILED_COUNTER_BRIDGE_PARENT_DEV_INO='64769:6102976'
 readonly FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO='64769:6102977'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_RELEASE='0110d1965d7efdc0436abda8c0bc686fb33c084b'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102978'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO='64769:6102979'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256='986e031158229b7474cc5d31b6a2962b30fbe75497d3bef646c40d228cfeab59'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE='345785'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO='64769:6102980'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO='64769:6102981'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256='80716810b0391e2a00f3b6160529a0359a24035f1199327871290636283e654a'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE='20018'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102982'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256='2bae32658d1d3b4a218a94b1e882e190076a3b2919d33bc92cacfd54de899140'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID='sha256:e49412ee611a12a3ff23022f68f244cae34919038483663a82f45a8e839d35c9'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID='33268571701'
+readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO='64769:6102983'
+readonly FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO='64769:6102984'
 readonly CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
@@ -360,7 +380,8 @@ readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-rec
 readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'
 readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'
 readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'
+readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -422,6 +443,7 @@ readonly FAILED_ORDER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ORDER_COR
 readonly FAILED_ENDPOINT_PHASE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE"
 readonly FAILED_RUNNING_STATUS_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_RUNNING_STATUS_CORRECTION_RELEASE"
 readonly FAILED_COUNTER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
+readonly FAILED_CUSTOMER_WEB_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -471,6 +493,8 @@ readonly FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT="$FAILED_RUNNING_STATUS_BRIDGE
 readonly FAILED_RUNNING_STATUS_BRIDGE_START="$FAILED_RUNNING_STATUS_BRIDGE_INSTALLING/start-owner-v1"
 readonly FAILED_COUNTER_BRIDGE_INSTALLING="$FAILED_COUNTER_BRIDGE_PARENT/.installing-$FAILED_COUNTER_CORRECTION_RELEASE"
 readonly FAILED_COUNTER_BRIDGE_ROOT="$FAILED_COUNTER_BRIDGE_PARENT/$FAILED_COUNTER_CORRECTION_RELEASE"
+readonly FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING="$FAILED_CUSTOMER_WEB_BRIDGE_PARENT/.installing-$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
+readonly FAILED_CUSTOMER_WEB_BRIDGE_ROOT="$FAILED_CUSTOMER_WEB_BRIDGE_PARENT/$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -497,7 +521,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_ORDER_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_COUNTER_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_COUNTER_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -555,13 +580,89 @@ except Exception:
 PY
 }
 
+verify_exact_nofollow_file_digest() {
+  local path="$1" expected_dev_ino="$2" expected_size="$3" expected_sha="$4" expected_mode="${5:-0400}"
+  timeout 65s env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+    "$path" "$expected_dev_ino" "$expected_size" "$expected_sha" "$expected_mode" 3<<'PY'
+import hashlib
+import os
+import signal
+import stat
+import sys
+
+path, expected_dev_ino, expected_size_text, expected_sha, expected_mode = sys.argv[1:]
+try:
+    expected_size = int(expected_size_text)
+    expected_device, expected_inode = (int(value) for value in expected_dev_ino.split(':', 1))
+    if (
+        expected_size < 1
+        or expected_size > 1024 * 1024 * 1024
+        or len(expected_sha) != 64
+        or any(value not in '0123456789abcdef' for value in expected_sha)
+        or os.path.islink(path)
+        or not os.path.isfile(path)
+        or os.path.realpath(path) != path
+    ):
+        raise RuntimeError()
+    signal.alarm(60)
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(descriptor)
+        named_before = os.lstat(path)
+        exact = (
+            before.st_dev, before.st_ino, before.st_uid, before.st_gid,
+            stat.S_IMODE(before.st_mode), before.st_nlink, before.st_size,
+        )
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_dev, before.st_ino) != (named_before.st_dev, named_before.st_ino)
+            or exact != (
+                expected_device, expected_inode, 0, 0, int(expected_mode, 8), 1, expected_size,
+            )
+        ):
+            raise RuntimeError()
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > expected_size:
+                raise RuntimeError()
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        before_contract = (
+            before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+            before.st_nlink, before.st_size, before.st_mtime_ns, before.st_ctime_ns,
+        )
+        after_contract = (
+            after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+            after.st_nlink, after.st_size, after.st_mtime_ns, after.st_ctime_ns,
+        )
+        if (
+            total != expected_size
+            or digest.hexdigest() != expected_sha
+            or before_contract != after_contract
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+            or os.path.realpath(path) != path
+        ):
+            raise RuntimeError()
+    finally:
+        os.close(descriptor)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:15" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:16" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -692,6 +793,24 @@ require_prior_failed_recovery_claim() {
   emit_exact_nofollow_file "$FAILED_COUNTER_CORRECTION_ROOT/$SCRIPT_BASENAME" "$FAILED_COUNTER_CORRECTION_SCRIPT_DEV_INO" "$FAILED_COUNTER_CORRECTION_SCRIPT_SIZE" "$FAILED_COUNTER_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_COUNTER_CORRECTION_ROOT/$VALIDATOR_BASENAME" "$FAILED_COUNTER_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_COUNTER_CORRECTION_VALIDATOR_SIZE" "$FAILED_COUNTER_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
   emit_exact_nofollow_file "$FAILED_COUNTER_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" "$FAILED_COUNTER_CORRECTION_MANIFEST_DEV_INO" "$FAILED_COUNTER_CORRECTION_MANIFEST_SIZE" "$FAILED_COUNTER_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  [[ ! -L "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT" && -d "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT")" == "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT")" == \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$SCRIPT_BASENAME" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO" "$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$VALIDATOR_BASENAME" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256" 0400 >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO" "$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256" 0400 >/dev/null || return 1
+  verify_exact_nofollow_file_digest "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO" "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256" 0400 || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -719,11 +838,106 @@ require_prior_failed_recovery_claim() {
     'archive_encoding=oci' 'archive_layer_count=11' 'archive_member_count=30' \
     'financial_actions_mode=dry_run' 'kemerbet_executor_enabled=false' \
     'kemerbet_final_action_enabled=false' 'provider_action_enabled=false' \
-    'transfer_enabled=false' 'amount_entry_enabled=false' 'money_moved=false')
+    'transfer_enabled=false' 'amount_entry_enabled=false' 'money_moved=false') || return 1
+  emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO" "$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256" 0400 |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$REVIEWED_REPAIR_RELEASE" "$AUTHORIZATION_SHA256" \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID" "$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+      "$STAGING_PROJECT_REF" "$EXPECTED_DROPLET_ID" "$CANONICAL_H14" "$SOURCE_ATTESTATION_RELEASE" \
+      "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256" "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID" "$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256" \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE" "$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256" \
+      "$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE" "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
+      "$SOURCE_CUSTOMER_WEB_IMAGE_ID" "$SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256" \
+      "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" "$SOURCE_NON_OWNER_INVENTORY_SHA256" \
+      "$CREATED_OWNER_CONTAINER_ID" 3<<'PY'
+import sys
+
+(
+    release, repair, authorization, workflow_run, workflow_attempt, project_ref,
+    droplet_id, canonical_h14, attestation, failed_counter, bundle_parent,
+    archive_sha, archive_size, image_id, script_sha, script_size, validator_sha,
+    validator_size, source_customer, source_customer_image,
+    source_customer_unhealthy, source_customer_normalized, source_inventory,
+    created_owner,
+) = sys.argv[1:]
+
+try:
+    raw = sys.stdin.buffer.read()
+    text = raw.decode('ascii')
+    if not text.endswith('\n') or '\r' in text or '\x00' in text:
+        raise RuntimeError()
+    lines = text.splitlines()
+    if len(lines) != 304 or any(not line or '=' not in line for line in lines):
+        raise RuntimeError()
+    pairs = [line.split('=', 1) for line in lines]
+    values = dict(pairs)
+    if len(values) != len(pairs):
+        raise RuntimeError()
+    expected = {
+        'version': '1',
+        'contract': 'fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
+        'recovery_implementation_sha': release,
+        'repair_implementation_sha': repair,
+        'authorization_sha256': authorization,
+        'workflow_run_id': workflow_run,
+        'workflow_run_attempt': workflow_attempt,
+        'staging_project_ref': project_ref,
+        'staging_droplet_id': droplet_id,
+        'canonical_h14_sha': canonical_h14,
+        'source_terminal_attestation_sha': attestation,
+        'failed_counter_correction_implementation_sha': failed_counter,
+        'prior_failed_recovery_bundle_parent_dev_ino': bundle_parent,
+        'customer_web_image_archive_sha256': archive_sha,
+        'customer_web_image_archive_size': archive_size,
+        'customer_web_image_id': image_id,
+        'recovery_script_sha256': script_sha,
+        'recovery_script_size': script_size,
+        'archive_validator_sha256': validator_sha,
+        'archive_validator_size': validator_size,
+        'source_customer_web_container_id': source_customer,
+        'source_customer_web_image_id': source_customer_image,
+        'source_customer_web_unhealthy_runtime_sha256': source_customer_unhealthy,
+        'source_customer_web_normalized_sha256': source_customer_normalized,
+        'source_non_owner_inventory_sha256': source_inventory,
+        'created_owner_container_id': created_owner,
+        'owner_lifecycle_mutation': 'forbidden-already-running',
+        'customer_web_lifecycle_mutation': 'exact-single-self-recovery-replacement-v1',
+        'all_other_lifecycle_mutation': 'forbidden',
+        'financial_actions_mode': 'dry_run',
+        'kemerbet_executor_enabled': 'false',
+        'kemerbet_final_action_enabled': 'false',
+        'provider_action_enabled': 'false',
+        'transfer_enabled': 'false',
+        'amount_entry_enabled': 'false',
+        'money_moved': 'false',
+    }
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise RuntimeError()
+    if lines[:11] != [f'{key}={expected[key]}' for key in (
+        'version', 'contract', 'recovery_implementation_sha',
+        'repair_implementation_sha', 'authorization_sha256', 'workflow_run_id',
+        'workflow_run_attempt', 'staging_project_ref', 'staging_droplet_id',
+        'canonical_h14_sha', 'source_terminal_attestation_sha')]:
+        raise RuntimeError()
+    if lines[-10:] != [
+        'archive_encoding=oci', 'archive_layer_count=11',
+        'archive_member_count=30', 'financial_actions_mode=dry_run',
+        'kemerbet_executor_enabled=false', 'kemerbet_final_action_enabled=false',
+        'provider_action_enabled=false', 'transfer_enabled=false',
+        'amount_entry_enabled=false', 'money_moved=false',
+    ]:
+        raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
 }
 
 require_prior_failed_recovery_claim ||
-  die 'the immutable failed 911 recovery bundle claim is not exact or the append-only chain is incomplete'
+  die 'CW-NET-SCOPE-001: the immutable failed 0110 bundle, manifest semantics, or append-only chain is not exact'
 
 [[ ! -L "$STAGED_INSTALLER" && -f "$STAGED_INSTALLER" &&
   "$(realpath -- "$0")" == "$STAGED_INSTALLER" &&
@@ -994,6 +1208,29 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_counter_bridge_parent_dev_ino=$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO" \
   "failed_counter_bridge_installing_dev_ino=$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO" \
   'failed_counter_bridge_inventory=empty-no-intent' \
+  "failed_customer_web_correction_implementation_sha=$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" \
+  "failed_customer_web_correction_bundle_parent_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+  "failed_customer_web_correction_bundle_root_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_customer_web_correction_script_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_customer_web_correction_script_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256" \
+  "failed_customer_web_correction_script_size=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE" \
+  "failed_customer_web_correction_validator_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_customer_web_correction_validator_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256" \
+  "failed_customer_web_correction_validator_size=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE" \
+  "failed_customer_web_correction_manifest_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_customer_web_correction_manifest_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256" \
+  "failed_customer_web_correction_manifest_size=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE" \
+  "failed_customer_web_correction_image_archive_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+  "failed_customer_web_correction_image_archive_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+  "failed_customer_web_correction_image_archive_size=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+  "failed_customer_web_correction_image_id=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID" \
+  "failed_customer_web_correction_workflow_run_id=$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_customer_web_correction_workflow_run_attempt=$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_customer_web_bridge_parent_dev_ino=$FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO" \
+  "failed_customer_web_bridge_installing_dev_ino=$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO" \
+  'failed_customer_web_bridge_inventory=empty-no-intent' \
+  'failed_customer_web_network_scope=stale-service-network-name-pre-intent' \
+  'customer_web_network_contract=exact-owner-control-service-single-endpoint-v1' \
   "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
   'failed_endpoint_phase_owner_state=created-never-started' \
   'failed_running_status_owner_state=running-healthy-no-completion' \
@@ -1274,6 +1511,23 @@ require_failed_counter_runtime() {
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COUNTER_BRIDGE_INSTALLING")" == \
       "$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
     -z "$(find -P "$FAILED_COUNTER_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" ]]
+}
+
+require_failed_customer_web_network_scope_runtime() {
+  [[ ! -e "$FAILED_CUSTOMER_WEB_BRIDGE_ROOT" && ! -L "$FAILED_CUSTOMER_WEB_BRIDGE_ROOT" &&
+    ! -L "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT" && -d "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT")" == "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT")" == \
+      "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING" && -d "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING")" == "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING")" == \
+      "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    -z "$(find -P "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" ]] || return 1
+  ! docker_local image inspect "fetanagent-customer-web:${FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:0:12}" >/dev/null 2>&1 || return 1
+  ! docker_local image inspect "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID" >/dev/null 2>&1
 }
 
 emit_owned_nofollow_file() {
@@ -3448,6 +3702,9 @@ require_successor_endpoint_phase_boundary() {
 
 require_resumed_intent_pre_mutation_boundary() {
   local customer_inventory mode current_inventory normalized_current
+  require_prior_failed_recovery_claim || return 1
+  require_failed_counter_runtime || return 1
+  require_failed_customer_web_network_scope_runtime || return 1
   [[ "$(container_full_ids_for_service "$OWNER_SERVICE")" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
   require_owner_contract "$CREATED_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
   require_owner_never_restarted || return 1
@@ -3569,6 +3826,7 @@ require_complete_owner_endpoint_phase_boundary() {
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
   require_failed_counter_runtime || return 1
+  require_failed_customer_web_network_scope_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -3590,6 +3848,7 @@ require_running_owner_boundary_before_successor_intent() {
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
   require_failed_counter_runtime || return 1
+  require_failed_customer_web_network_scope_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -4118,6 +4377,8 @@ create_or_discover_bridge_ledger() {
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
   require_failed_counter_runtime || return 1
+  require_prior_failed_recovery_claim || return 1
+  require_failed_customer_web_network_scope_runtime || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -4152,6 +4413,8 @@ create_or_discover_bridge_ledger() {
   require_failed_endpoint_phase_runtime || return 1
   require_failed_running_status_runtime || return 1
   require_failed_counter_runtime || return 1
+  require_prior_failed_recovery_claim || return 1
+  require_failed_customer_web_network_scope_runtime || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
@@ -4189,6 +4452,29 @@ expected_bridge_intent() {
     "failed_counter_bridge_parent_dev_ino=$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO" \
     "failed_counter_bridge_installing_dev_ino=$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO" \
     'failed_counter_bridge_inventory=empty-no-intent' \
+    "failed_customer_web_correction_implementation_sha=$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" \
+    "failed_customer_web_correction_bundle_parent_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_customer_web_correction_bundle_root_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_customer_web_correction_script_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_customer_web_correction_script_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256" \
+    "failed_customer_web_correction_script_size=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE" \
+    "failed_customer_web_correction_validator_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_customer_web_correction_validator_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256" \
+    "failed_customer_web_correction_validator_size=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE" \
+    "failed_customer_web_correction_manifest_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_customer_web_correction_manifest_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256" \
+    "failed_customer_web_correction_manifest_size=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE" \
+    "failed_customer_web_correction_image_archive_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_customer_web_correction_image_archive_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_customer_web_correction_image_archive_size=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_customer_web_correction_image_id=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID" \
+    "failed_customer_web_correction_workflow_run_id=$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_customer_web_correction_workflow_run_attempt=$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_customer_web_bridge_parent_dev_ino=$FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO" \
+    "failed_customer_web_bridge_installing_dev_ino=$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO" \
+    'failed_customer_web_bridge_inventory=empty-no-intent' \
+    'failed_customer_web_network_scope=stale-service-network-name-pre-intent' \
+    'customer_web_network_contract=exact-owner-control-service-single-endpoint-v1' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -4507,6 +4793,29 @@ expected_bridge_completed() {
     "failed_counter_bridge_parent_dev_ino=$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO" \
     "failed_counter_bridge_installing_dev_ino=$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO" \
     'failed_counter_bridge_inventory=empty-no-intent' \
+    "failed_customer_web_correction_implementation_sha=$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" \
+    "failed_customer_web_correction_bundle_parent_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_customer_web_correction_bundle_root_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_customer_web_correction_script_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_customer_web_correction_script_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256" \
+    "failed_customer_web_correction_script_size=$FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE" \
+    "failed_customer_web_correction_validator_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_customer_web_correction_validator_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256" \
+    "failed_customer_web_correction_validator_size=$FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE" \
+    "failed_customer_web_correction_manifest_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_customer_web_correction_manifest_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256" \
+    "failed_customer_web_correction_manifest_size=$FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE" \
+    "failed_customer_web_correction_image_archive_dev_ino=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_customer_web_correction_image_archive_sha256=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_customer_web_correction_image_archive_size=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_customer_web_correction_image_id=$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID" \
+    "failed_customer_web_correction_workflow_run_id=$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_customer_web_correction_workflow_run_attempt=$FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_customer_web_bridge_parent_dev_ino=$FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO" \
+    "failed_customer_web_bridge_installing_dev_ino=$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO" \
+    'failed_customer_web_bridge_inventory=empty-no-intent' \
+    'failed_customer_web_network_scope=stale-service-network-name-pre-intent' \
+    'customer_web_network_contract=exact-owner-control-service-single-endpoint-v1' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -4911,11 +5220,11 @@ PY
 }
 
 require_customer_web_security_contract() {
-  local container_id="$1"
+  local container_id="$1" expected_network="$OWNER_NETWORK"
   docker_local container inspect "$container_id" |
-    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$container_id" 3<<'PY'
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$container_id" "$expected_network" 3<<'PY'
 import json, sys
-expected = sys.argv[1]
+expected, expected_network = sys.argv[1:]
 try:
     payload = json.load(sys.stdin)
     if not isinstance(payload, list) or len(payload) != 1 or payload[0].get('Id') != expected: raise RuntimeError()
@@ -4932,7 +5241,7 @@ try:
     if host.get('Tmpfs') != {'/tmp':'rw,noexec,nosuid,size=32m,mode=1777'}: raise RuntimeError()
     if host.get('PidsLimit') != 128 or host.get('Memory') != 268435456 or host.get('NanoCpus') != 500000000: raise RuntimeError()
     if host.get('PortBindings') not in (None, {}) or len(networks) != 1: raise RuntimeError()
-    if next(iter(networks)) != 'fetanagent-staging-beta_service': raise RuntimeError()
+    if next(iter(networks)) != expected_network: raise RuntimeError()
 except Exception:
     raise SystemExit(1)
 PY
@@ -5080,9 +5389,15 @@ replace_customer_web_once() {
   # substitute for the exact staged archive bytes and expected image ID.
   docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" >/dev/null || return 1
   require_loaded_customer_web_image || return 1
+  require_prior_failed_recovery_claim || return 1
+  require_failed_counter_runtime || return 1
+  require_failed_customer_web_network_scope_runtime || return 1
   replacement_state="$(classify_customer_web_replacement_state)" || return 1
   if [[ "$replacement_state" != complete ]]; then
     [[ "$replacement_state" == source || "$replacement_state" == retry ]] || return 1
+    require_prior_failed_recovery_claim || return 1
+    require_failed_counter_runtime || return 1
+    require_failed_customer_web_network_scope_runtime || return 1
     env -i "${compose_environment[@]}" FETANAGENT_VCS_REF="$RECOVERY_RELEASE" \
       FETANAGENT_IMAGE_TAG="${RECOVERY_RELEASE:0:12}" "${compose_command[@]}" \
       up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web || return 1
@@ -5216,6 +5531,8 @@ require_prior_failed_runtime_ledger_absent || die 'the chained pre-51e failed ru
 require_failed_endpoint_phase_runtime || die 'the immutable 51e created-phase interruption evidence is not exact'
 require_failed_running_status_runtime || die 'the immutable 8f running-phase interruption evidence is not exact'
 require_failed_counter_runtime || die 'the immutable 020 empty pre-intent interruption evidence is not exact'
+require_failed_customer_web_network_scope_runtime ||
+  die 'CW-NET-SCOPE-002: the immutable failed 0110 empty pre-intent ledger changed'
 NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
@@ -5229,10 +5546,11 @@ else
 fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
-# The exact 020 predecessor failed before intent while customer-web remained in
-# its recoverable unhealthy latch. This successor durably authorizes and records
-# exactly one customer-web replacement; Owner and every other service remain
-# byte-for-byte and lifecycle stable.
+# The exact 0110 predecessor also failed before intent: its customer-web security
+# comparator named the unrelated service network instead of the exact dedicated
+# Owner-control service network. This successor consumes that empty ledger,
+# durably authorizes exactly one customer-web replacement, and keeps Owner plus
+# every other service byte-for-byte and lifecycle stable.
 if [[ -e "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" &&
   ! -L "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" ]]; then
   require_customer_web_replacement_record ||
@@ -5319,6 +5637,8 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'the immutable 8f running-phase interruption evidence changed beside completion'
   require_failed_counter_runtime ||
     die 'the immutable 020 empty pre-intent interruption evidence changed beside completion'
+  require_failed_customer_web_network_scope_runtime ||
+    die 'CW-NET-SCOPE-003: the immutable failed 0110 empty pre-intent ledger changed beside completion'
   require_complete_owner_endpoint_phase_boundary running ||
     die 'the complete running-phase boundary changed beside completed replay'
   printf '%s\n' 'FetanAgent H14 customer-web recovery already valid: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'
@@ -5397,6 +5717,10 @@ require_customer_web_replacement_record || die 'the finalized customer-web repla
 require_owner_never_restarted || die 'Owner lifecycle changed before final immutable verification'
 require_other_service_inventory_exact || die 'a non-customer service changed before final immutable verification'
 require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'
+require_prior_failed_recovery_claim ||
+  die 'CW-NET-SCOPE-004: the immutable failed 0110 bundle or manifest changed during finalization'
+require_failed_customer_web_network_scope_runtime ||
+  die 'CW-NET-SCOPE-005: the immutable failed 0110 empty pre-intent ledger changed during finalization'
 require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'
 
 printf '%s\n' 'FetanAgent H14 customer-web recovery installed: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'

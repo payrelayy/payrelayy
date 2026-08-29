@@ -367,6 +367,10 @@ jobs:
           docker build --pull=false --target admin \
             --build-arg "VCS_REF=$CANONICAL_H14_COMMIT" \
             --tag "$image" canonical-h14
+          printf 'owner image revision=%q user=%q cmd=%q\n' \
+            "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
+            "$(docker image inspect "$image" --format '{{.Config.User}}')" \
+            "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')"
           [[ "$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$CANONICAL_H14_COMMIT" ]]
           [[ "$(docker image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]]
           [[ "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" == '["node","apps/admin/dist/index.js"]' ]]
@@ -385,6 +389,7 @@ jobs:
           compose_sha="$(sha256sum "$compose_path" | awk '{print $1}')"
           script_sha="$(sha256sum repair/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh | awk '{print $1}')"
           script_size="$(stat --format='%s' repair/infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh)"
+          printf 'owner bundle tar_size=%q script_size=%q\n' "$tar_size" "$script_size"
           [[ "$tar_sha" =~ ^[0-9a-f]{64}$ && "$compose_sha" =~ ^[0-9a-f]{64}$ && "$script_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$tar_size" =~ ^[1-9][0-9]{0,11}$ && "$tar_size" -le 1073741824 ]]
           [[ "$script_size" =~ ^[1-9][0-9]{0,7}$ && "$script_size" -le 2097152 ]]
@@ -404,6 +409,8 @@ jobs:
           terminal_script_size="$(stat --format='%s' "$terminal_script_path")"
           terminal_validator_sha="$(sha256sum "$terminal_validator_path" | awk '{print $1}')"
           terminal_validator_size="$(stat --format='%s' "$terminal_validator_path")"
+          printf 'terminal bundle script_size=%q validator_size=%q\n' \
+            "$terminal_script_size" "$terminal_validator_size"
           [[ "$terminal_script_sha" =~ ^[0-9a-f]{64}$ && "$terminal_validator_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$terminal_script_size" =~ ^[1-9][0-9]{0,7}$ && "$terminal_script_size" -le 2097152 ]]
           [[ "$terminal_validator_size" =~ ^[1-9][0-9]{0,7}$ && "$terminal_validator_size" -le 2097152 ]]
@@ -444,15 +451,19 @@ jobs:
           with tarfile.open(path, mode='r:') as archive:
               members = archive.getmembers()
               if not members or len(members) > 4096:
-                  raise SystemExit(1)
+                  raise SystemExit(f'invalid Docker archive member count: {len(members)}')
               for member in members:
                   target = pathlib.PurePosixPath(member.name)
-                  if target.is_absolute() or '..' in target.parts or not (member.isfile() or member.isdir()):
-                      raise SystemExit(1)
+                  if target.is_absolute() or '..' in target.parts:
+                      raise SystemExit(f'unsafe Docker archive path: {member.name!r}')
+                  if not (member.isfile() or member.isdir()):
+                      raise SystemExit(
+                          f'unsupported Docker archive member type: {member.name!r} type={member.type!r}'
+                      )
               manifest_member = archive.getmember('manifest.json')
               manifest_file = archive.extractfile(manifest_member)
               if manifest_file is None:
-                  raise SystemExit(1)
+                  raise SystemExit('Docker archive manifest.json is not a regular file')
               manifest = json.load(manifest_file)
               if (
                   not isinstance(manifest, list)
@@ -462,7 +473,9 @@ jobs:
                   or not isinstance(manifest[0].get('Layers'), list)
                   or not manifest[0]['Layers']
               ):
-                  raise SystemExit(1)
+                  raise SystemExit(
+                      'Docker archive manifest does not bind the exact image config, tag, and layers'
+                  )
           PY
 
           cat >"$manifest_path" <<EOF

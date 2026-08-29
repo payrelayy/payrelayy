@@ -163,7 +163,10 @@ require_no_other_mutator_processes() {
     [[ -r "$cmdline" ]] || continue
     pid="${cmdline#/proc/}"
     pid="${pid%/cmdline}"
-    [[ "$pid" == "$$" ]] && continue
+    if [[ "$pid" == "$$" ||
+      ( -n "${LOCK_HOLDER_PROCESS_ID:-}" && "$pid" == "$LOCK_HOLDER_PROCESS_ID" ) ]]; then
+      continue
+    fi
     while IFS= read -r -d '' argument; do
       basename="${argument##*/}"
       case "$basename" in

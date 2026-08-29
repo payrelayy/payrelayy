@@ -195,6 +195,75 @@ assert.match(loadSudoers, /deployment_grant_dev_ino/);
 assert.match(loadSudoers, /deployment_grant_sha256/);
 assert.match(loadSudoers, /deployment_grant'\) != 'disabled'/);
 
+const mutatorGate = shellFunction(bridge, 'require_no_other_mutator_processes');
+assert.match(
+  mutatorGate,
+  /-n "\$\{LOCK_HOLDER_PROCESS_ID:-\}" && "\$pid" == "\$LOCK_HOLDER_PROCESS_ID"/,
+  'the exact acquired lock-holder child must not be mistaken for a competing mutator',
+);
+assert.match(
+  mutatorGate,
+  /fetanagent-staging-deploy-helper\|[\s\S]*fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bridge\.sh\) return 1/,
+  'all other helper and recovery processes must remain fail-closed',
+);
+const ownerMutatorGate = shellFunction(ownerBridge, 'require_no_other_mutator_processes');
+assert.match(
+  ownerMutatorGate,
+  /-n "\$\{LOCK_HOLDER_PROCESS_ID:-\}" && "\$pid" == "\$LOCK_HOLDER_PROCESS_ID"/,
+  'the Owner bridge must exclude only its exact acquired lock-holder child',
+);
+assert.match(
+  ownerMutatorGate,
+  /fetanagent-staging-deploy-helper\|[\s\S]*fetanagent-kemerbet-quarantine-recovery-v14-terminal-attestation-bridge\.sh[|)]/,
+  'the Owner bridge must keep all other helper and recovery processes fail-closed',
+);
+
+if (process.platform !== 'win32') {
+  const mutatorFixture = spawnSync(
+    'bash',
+    [
+      '-c',
+      `set -euo pipefail
+${mutatorGate}
+holder=''
+competitor=''
+cleanup() {
+  [[ -z "$competitor" ]] || { kill "$competitor" 2>/dev/null || true; wait "$competitor" 2>/dev/null || true; }
+  [[ -z "$holder" ]] || { kill "$holder" 2>/dev/null || true; wait "$holder" 2>/dev/null || true; }
+}
+wait_for_forbidden_argv() {
+  local pid="$1" attempt
+  for attempt in {1..100}; do
+    if [[ -r "/proc/$pid/cmdline" ]] &&
+      tr '\\0' '\\n' <"/proc/$pid/cmdline" | grep -Fx '/run/fetanagent-staging-deploy-helper' >/dev/null; then
+      return 0
+    fi
+    sleep 0.01
+  done
+  return 1
+}
+trap cleanup EXIT
+python3 -c 'import time; time.sleep(60)' /run/fetanagent-staging-deploy-helper &
+holder=$!
+wait_for_forbidden_argv "$holder"
+LOCK_HOLDER_PROCESS_ID=$holder
+require_no_other_mutator_processes
+python3 -c 'import time; time.sleep(60)' /run/fetanagent-staging-deploy-helper &
+competitor=$!
+wait_for_forbidden_argv "$competitor"
+if require_no_other_mutator_processes; then exit 1; fi
+kill "$competitor"
+wait "$competitor" 2>/dev/null || true
+competitor=''
+unset LOCK_HOLDER_PROCESS_ID
+if require_no_other_mutator_processes; then exit 1; fi
+`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(mutatorFixture.status, 0, mutatorFixture.stderr);
+}
+
 const matrixFunction = shellFunction(bridge, 'require_phase_matrix');
 for (const phase of [
   'absent',

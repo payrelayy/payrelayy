@@ -137,7 +137,8 @@ for (const needle of [
   "readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
   "readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
   "readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
+  "readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -170,6 +171,22 @@ for (const needle of [
   "FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO='64769:6102926'",
   "FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO='64769:6102930'",
   "FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256='7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd'",
+  "FAILED_COMPOSE_CORRECTION_RELEASE='e95ad99122ebf9f7257ea25d7cf215dd38c73b40'",
+  "FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256='163d2adb74912daa8cb3663cefa5220a6e3f4766bd25a07f3bd13a31a077ef63'",
+  "FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256='fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1'",
+  "FAILED_COMPOSE_BRIDGE_INTENT_SHA256='d8566a94851d3b53454b06ad308c71d85ac76c5478dfd5d967e40a17ec71a651'",
+  "FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  'emit_exact_nofollow_file() {',
+  'os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW',
+  'before != after',
+  'os.path.realpath(path) != path',
+  'capture_complete_docker_create_inventory() {',
+  'require_exact_owner_create_inventory_delta() {',
+  'docker_create_inventory_contract=complete-exact-owner-only-delta-v1',
+  'create --no-build --pull never "$OWNER_SERVICE"',
+  'require_exact_compose_create_contract() {',
+  "compose version --short)\" == '5.1.4'",
+  'owner.get("depends_on") not in (None, {})',
   "fs.readFileSync('/run/secrets/player_action_database_url'",
   "fs.existsSync('/run/secrets/owner_control_database_url')",
   "has_function_privilege(\n          'fetanagent_owner_control_runtime'",
@@ -297,6 +314,13 @@ for (const forbidden of [
 }
 
 assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
+assert.doesNotMatch(script, /create --no-build --no-deps/u);
+assert.ok(
+  script.includes(
+    'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file',
+  ),
+  'the post-removal correction must republish the immutable predecessor catalog proof',
+);
 assert.doesNotMatch(script, /36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'/);
 assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 12);
 assert.ok((script.match(/require_prior_failed_runtime_ledger_absent/g) ?? []).length >= 6);
@@ -304,7 +328,7 @@ for (const needle of [
   "FAILED_CORRECTION_RELEASE='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'",
   "FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO='64769:6102893'",
   "FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO='64769:6102894'",
-  'require_owner_contract "$OLD_OWNER_CONTAINER_ID" "$PREDECESSOR_RELEASE" \'-\'',
+  '! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1',
   "'/tmp': 'rw,noexec,nosuid,size=32m,mode=1777'",
   'owner_tmpfs_host_config=required-exact',
   'owner_inspect_mount_inventory=non-tmpfs-eight',
@@ -393,15 +417,12 @@ assert.match(
   /require_post_create_image_boundary\(\) \{[\s\S]*?require_owner_image_contract &&\s+require_loaded_image_used_only_by "\$expected_id"\s*\}/,
 );
 for (const guardedBoundary of [
-  "require_pre_create_image_boundary || die 'the complete pre-create boundary changed before Owner stop'\n      docker_local container stop",
-  "require_pre_create_image_boundary || die 'the complete pre-create boundary changed before Owner removal'\n  docker_local container rm",
-  "require_pre_create_image_boundary || die 'the complete pre-create boundary changed before replacement creation'\n    env -i",
   'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before replacement publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1"',
   'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before start-intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1"',
   'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before replacement startup\'\n    docker_local container start',
   'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before completion publication\'\n\npublish_exact_record "$BRIDGE_WORK_ROOT/completed-v1"',
   'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" || die \'the complete post-create boundary changed before ledger finalization\'\nmv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
-  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" ||\n    die \'the complete post-create boundary changed beside completed replay\'\n  printf',
+  'require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" ||\n    die \'the complete post-create boundary changed beside completed replay\'\n  POST_CREATE_DOCKER_INVENTORY=',
 ]) {
   assert.ok(
     script.includes(guardedBoundary),
@@ -462,42 +483,114 @@ const intentPublish = execution.indexOf(
 const postIntentValidation = execution.indexOf(
   "require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'",
 );
-const migrationProof = execution.indexOf('require_migration_through_api_catalog');
-const postIntentTerminalProof = execution.indexOf(
-  'require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running',
-  migrationProof,
+const predecessorProof = execution.indexOf('cmp -s -- <(emit_exact_nofollow_file');
+const republishedProof = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file',
 );
-const postIntentNamespaceProof = execution.indexOf(
-  'require_original_bridge_namespace_absent ||',
-  postIntentTerminalProof,
-);
-const firstPersistentDockerMutation = Math.min(
-  ...[
-    'docker_local container stop --time',
-    'docker_local container rm "$OLD_OWNER_CONTAINER_ID"',
-    'create --no-build --no-deps "$OWNER_SERVICE"',
-    'docker_local container start "$NEW_OWNER_CONTAINER_ID"',
-  ].map((needle) => {
-    const index = execution.indexOf(needle);
-    assert.ok(index >= 0, `missing persistent Docker mutation ${needle}`);
-    return index;
-  }),
+const firstPersistentDockerMutation = execution.indexOf(
+  'create --no-build --pull never "$OWNER_SERVICE"',
 );
 assert.ok(intentPublish > 0, 'intent is not published');
 assert.ok(postIntentValidation > intentPublish, 'intent is not validated after publication');
-assert.ok(migrationProof > postIntentValidation, 'container-exec proof precedes durable intent');
+assert.ok(predecessorProof > postIntentValidation, 'predecessor proof precedes durable intent');
+assert.ok(republishedProof > predecessorProof, 'predecessor proof is not durably republished');
 assert.ok(
-  postIntentTerminalProof > migrationProof,
-  'terminal proof does not follow container-exec proof',
+  firstPersistentDockerMutation > republishedProof,
+  'Owner create precedes durable proof republication',
 );
+const preInventory = execution.lastIndexOf(
+  'CURRENT_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)"',
+  firstPersistentDockerMutation,
+);
+const postInventory = execution.indexOf(
+  'POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)"',
+  firstPersistentDockerMutation,
+);
+const exactDelta = execution.indexOf(
+  'require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$owner_inventory"',
+  postInventory,
+);
+const uninterruptedPreCreate = `require_pre_create_image_boundary || die 'the complete pre-create boundary changed before replacement creation'
+    CURRENT_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
+      die 'the immediately pre-create Docker inventory could not be captured'
+    [[ "$CURRENT_PRE_CREATE_DOCKER_INVENTORY" == "$PRE_CREATE_DOCKER_INVENTORY" ]] ||
+      die 'an image, network, volume, endpoint, or holder changed since the durable pre-create inventory'
+    env -i "\${compose_environment[@]}" "\${compose_command[@]}" \\
+      create --no-build --pull never "$OWNER_SERVICE"`;
 assert.ok(
-  postIntentNamespaceProof > postIntentTerminalProof,
-  'original-namespace proof does not follow terminal proof',
+  execution.includes(uninterruptedPreCreate),
+  'pre-create boundary, complete inventory proof, and Compose create must be uninterrupted and exact',
 );
-assert.ok(
-  firstPersistentDockerMutation > postIntentNamespaceProof,
-  'persistent Docker mutation precedes the post-intent read-only proof boundary',
-);
+assert.ok(preInventory > republishedProof && preInventory < firstPersistentDockerMutation);
+assert.ok(postInventory > firstPersistentDockerMutation && exactDelta > postInventory);
+
+const acceptsNofollowEvidence = (entry) =>
+  entry.type === 'file' &&
+  entry.symlink === false &&
+  entry.realpathExact === true &&
+  entry.fdStable === true &&
+  entry.mode === 0o600 &&
+  entry.nlink === 1 &&
+  entry.hashExact === true;
+const exactEvidence = {
+  type: 'file',
+  symlink: false,
+  realpathExact: true,
+  fdStable: true,
+  mode: 0o600,
+  nlink: 1,
+  hashExact: true,
+};
+assert.ok(acceptsNofollowEvidence(exactEvidence));
+for (const invalid of [
+  { ...exactEvidence, symlink: true },
+  { ...exactEvidence, type: 'directory' },
+  { ...exactEvidence, realpathExact: false },
+  { ...exactEvidence, fdStable: false },
+  { ...exactEvidence, nlink: 2 },
+  { ...exactEvidence, hashExact: false },
+])
+  assert.ok(
+    !acceptsNofollowEvidence(invalid),
+    `unsafe predecessor evidence accepted: ${JSON.stringify(invalid)}`,
+  );
+
+const acceptsOwnerOnlyDelta = ({
+  imagesSame = true,
+  networkIdsSame = true,
+  volumeIdsSame = true,
+  specsSame = true,
+  oldEndpointsSame = true,
+  addedEndpoints = ['owner'],
+  profileHolders = [[], []],
+  controlHolders = [[], ['owner']],
+  otherHoldersSame = true,
+} = {}) =>
+  imagesSame &&
+  networkIdsSame &&
+  volumeIdsSame &&
+  specsSame &&
+  oldEndpointsSame &&
+  JSON.stringify(addedEndpoints) === JSON.stringify(['owner']) &&
+  JSON.stringify(profileHolders) === JSON.stringify([[], []]) &&
+  JSON.stringify(controlHolders) === JSON.stringify([[], ['owner']]) &&
+  otherHoldersSame;
+assert.ok(acceptsOwnerOnlyDelta());
+for (const invalid of [
+  { networkIdsSame: false },
+  { volumeIdsSame: false },
+  { imagesSame: false },
+  { specsSame: false },
+  { oldEndpointsSame: false },
+  { addedEndpoints: ['owner', 'extra'] },
+  { profileHolders: [[], ['owner']] },
+  { controlHolders: [[], ['other']] },
+  { otherHoldersSame: false },
+])
+  assert.ok(
+    !acceptsOwnerOnlyDelta(invalid),
+    `unsafe Docker delta accepted: ${JSON.stringify(invalid)}`,
+  );
 
 for (const needle of [
   'h14-owner-runtime-bridge-archive-recovery-stage:',
@@ -555,8 +648,9 @@ for (const state of [
   '"$(basename "$failed_pg_root")" "$(basename "$failed_image_root")"',
   '"$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")"',
   '"$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")"',
-  '"$(basename "$failed_oidvector_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_oidvector_root")" "$(basename "$root")"',
+  '"$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")"',
+  '"$(basename "$failed_compose_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_compose_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -575,22 +669,63 @@ const failed = 'ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b';
 const failedPg = 'fa35244c8e8e2b9f10fe7abb2cd2341864b43471';
 const failedImage = '0a2adc0bf3591fe2449379ac2bf76c21538fadf5';
 const failedCatalog = '04f51a521280fed43cd1504107c702940e523688';
+const failedOidvector = 'f67cf783528f090169dbea1ebfdc6c46f90996bb';
+const failedCompose = 'e95ad99122ebf9f7257ea25d7cf215dd38c73b40';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
-  if (exact === [prior, failed, failedPg, failedImage, failedCatalog].sort().join('\n'))
+  if (
+    exact ===
+    [prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose]
+      .sort()
+      .join('\n')
+  )
     return 'append';
-  if (exact === [prior, failed, failedPg, failedImage, failedCatalog, installing].sort().join('\n'))
+  if (
+    exact ===
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      installing,
+    ]
+      .sort()
+      .join('\n')
+  )
     return 'resume';
-  if (exact === [prior, failed, failedPg, failedImage, failedCatalog, current].sort().join('\n'))
+  if (
+    exact ===
+    [prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose, current]
+      .sort()
+      .join('\n')
+  )
     return 'complete';
   return 'reject';
 };
 for (const [children, expected] of [
-  [[prior, failed, failedPg, failedImage, failedCatalog], 'append'],
-  [[prior, failed, failedPg, failedImage, failedCatalog, installing], 'resume'],
-  [[prior, failed, failedPg, failedImage, failedCatalog, current], 'complete'],
+  [[prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose], 'append'],
+  [
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      installing,
+    ],
+    'resume',
+  ],
+  [
+    [prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose, current],
+    'complete',
+  ],
   [[], 'reject'],
   [[current], 'reject'],
   [[prior, installing, current], 'reject'],

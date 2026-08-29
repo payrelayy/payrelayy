@@ -187,6 +187,27 @@ readonly FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO='64769:6102926'
 readonly FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO='64769:6102930'
 readonly FAILED_OIDVECTOR_BRIDGE_INTENT_SIZE='8251'
 readonly FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256='7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd'
+readonly FAILED_COMPOSE_CORRECTION_RELEASE='e95ad99122ebf9f7257ea25d7cf215dd38c73b40'
+readonly FAILED_COMPOSE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102931'
+readonly FAILED_COMPOSE_CORRECTION_SCRIPT_DEV_INO='64769:6102932'
+readonly FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256='163d2adb74912daa8cb3663cefa5220a6e3f4766bd25a07f3bd13a31a077ef63'
+readonly FAILED_COMPOSE_CORRECTION_SCRIPT_SIZE='231577'
+readonly FAILED_COMPOSE_CORRECTION_VALIDATOR_DEV_INO='64769:6102933'
+readonly FAILED_COMPOSE_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_COMPOSE_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_COMPOSE_CORRECTION_MANIFEST_DEV_INO='64769:6102934'
+readonly FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256='fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1'
+readonly FAILED_COMPOSE_CORRECTION_MANIFEST_SIZE='8963'
+readonly FAILED_COMPOSE_CORRECTION_WORKFLOW_RUN_ID='33248215874'
+readonly FAILED_COMPOSE_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_COMPOSE_BRIDGE_PARENT_DEV_INO='64769:6102935'
+readonly FAILED_COMPOSE_BRIDGE_INSTALLING_DEV_INO='64769:6102936'
+readonly FAILED_COMPOSE_BRIDGE_INTENT_DEV_INO='64769:6102937'
+readonly FAILED_COMPOSE_BRIDGE_INTENT_SIZE='9061'
+readonly FAILED_COMPOSE_BRIDGE_INTENT_SHA256='d8566a94851d3b53454b06ad308c71d85ac76c5478dfd5d967e40a17ec71a651'
+readonly FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO='64769:6102938'
+readonly FAILED_COMPOSE_BRIDGE_API_PROOF_SIZE='643'
+readonly FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
 readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'
@@ -212,7 +233,8 @@ readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recove
 readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'
 readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'
 readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'
+readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -264,6 +286,7 @@ readonly FAILED_PG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_PG_CORRECTIO
 readonly FAILED_IMAGE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_IMAGE_CORRECTION_RELEASE"
 readonly FAILED_CATALOG_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CATALOG_CORRECTION_RELEASE"
 readonly FAILED_OIDVECTOR_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OIDVECTOR_CORRECTION_RELEASE"
+readonly FAILED_COMPOSE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COMPOSE_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
@@ -290,6 +313,10 @@ readonly FAILED_CATALOG_BRIDGE_INTENT="$FAILED_CATALOG_BRIDGE_INSTALLING/intent-
 readonly FAILED_OIDVECTOR_BRIDGE_INSTALLING="$FAILED_OIDVECTOR_BRIDGE_PARENT/.installing-$FAILED_OIDVECTOR_CORRECTION_RELEASE"
 readonly FAILED_OIDVECTOR_BRIDGE_ROOT="$FAILED_OIDVECTOR_BRIDGE_PARENT/$FAILED_OIDVECTOR_CORRECTION_RELEASE"
 readonly FAILED_OIDVECTOR_BRIDGE_INTENT="$FAILED_OIDVECTOR_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_COMPOSE_BRIDGE_INSTALLING="$FAILED_COMPOSE_BRIDGE_PARENT/.installing-$FAILED_COMPOSE_CORRECTION_RELEASE"
+readonly FAILED_COMPOSE_BRIDGE_ROOT="$FAILED_COMPOSE_BRIDGE_PARENT/$FAILED_COMPOSE_CORRECTION_RELEASE"
+readonly FAILED_COMPOSE_BRIDGE_INTENT="$FAILED_COMPOSE_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_COMPOSE_BRIDGE_API_PROOF="$FAILED_COMPOSE_BRIDGE_INSTALLING/api-catalog-proof-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -310,7 +337,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_PG_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_IMAGE_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_CATALOG_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_OIDVECTOR_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_OIDVECTOR_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_COMPOSE_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -335,9 +363,9 @@ require_prior_failed_recovery_claim() {
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:9" ]] || return 1
+      "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO:root:root:700:10" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -423,6 +451,16 @@ require_prior_failed_recovery_claim() {
     "$(sha256sum -- "$FAILED_OIDVECTOR_CORRECTION_ROOT/$VALIDATOR_BASENAME" | awk '{print $1}')" == "$FAILED_OIDVECTOR_CORRECTION_VALIDATOR_SHA256" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_OIDVECTOR_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == "$FAILED_OIDVECTOR_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SIZE" &&
     "$(sha256sum -- "$FAILED_OIDVECTOR_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256" ]] || return 1
+  [[ ! -L "$FAILED_COMPOSE_CORRECTION_ROOT" && -d "$FAILED_COMPOSE_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_COMPOSE_CORRECTION_ROOT")" == "$FAILED_COMPOSE_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COMPOSE_CORRECTION_ROOT")" == "$FAILED_COMPOSE_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_COMPOSE_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  [[ "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_COMPOSE_CORRECTION_ROOT/$SCRIPT_BASENAME")" == "$FAILED_COMPOSE_CORRECTION_SCRIPT_DEV_INO:root:root:400:1:$FAILED_COMPOSE_CORRECTION_SCRIPT_SIZE" &&
+    "$(sha256sum -- "$FAILED_COMPOSE_CORRECTION_ROOT/$SCRIPT_BASENAME" | awk '{print $1}')" == "$FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_COMPOSE_CORRECTION_ROOT/$VALIDATOR_BASENAME")" == "$FAILED_COMPOSE_CORRECTION_VALIDATOR_DEV_INO:root:root:400:1:$FAILED_COMPOSE_CORRECTION_VALIDATOR_SIZE" &&
+    "$(sha256sum -- "$FAILED_COMPOSE_CORRECTION_ROOT/$VALIDATOR_BASENAME" | awk '{print $1}')" == "$FAILED_COMPOSE_CORRECTION_VALIDATOR_SHA256" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_COMPOSE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME")" == "$FAILED_COMPOSE_CORRECTION_MANIFEST_DEV_INO:root:root:400:1:$FAILED_COMPOSE_CORRECTION_MANIFEST_SIZE" &&
+    "$(sha256sum -- "$FAILED_COMPOSE_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME" | awk '{print $1}')" == "$FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256" ]] || return 1
   cmp -s -- "$PRIOR_FAILED_RECOVERY_ROOT/$RECOVERY_MANIFEST_BASENAME" <(printf '%s\n' \
     'version=1' \
     'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle' \
@@ -594,6 +632,30 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   "failed_oidvector_bridge_intent_sha256=$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" \
   "failed_oidvector_bridge_intent_size=$FAILED_OIDVECTOR_BRIDGE_INTENT_SIZE" \
   'catalog_argument_contract=exact-zero-based-oidvector-equality' \
+  "failed_compose_correction_implementation_sha=$FAILED_COMPOSE_CORRECTION_RELEASE" \
+  "failed_compose_correction_bundle_root_dev_ino=$FAILED_COMPOSE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_compose_correction_script_dev_ino=$FAILED_COMPOSE_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_compose_correction_script_sha256=$FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256" \
+  "failed_compose_correction_script_size=$FAILED_COMPOSE_CORRECTION_SCRIPT_SIZE" \
+  "failed_compose_correction_validator_dev_ino=$FAILED_COMPOSE_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_compose_correction_validator_sha256=$FAILED_COMPOSE_CORRECTION_VALIDATOR_SHA256" \
+  "failed_compose_correction_validator_size=$FAILED_COMPOSE_CORRECTION_VALIDATOR_SIZE" \
+  "failed_compose_correction_manifest_dev_ino=$FAILED_COMPOSE_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_compose_correction_manifest_sha256=$FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256" \
+  "failed_compose_correction_manifest_size=$FAILED_COMPOSE_CORRECTION_MANIFEST_SIZE" \
+  "failed_compose_correction_workflow_run_id=$FAILED_COMPOSE_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_compose_correction_workflow_run_attempt=$FAILED_COMPOSE_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_compose_bridge_parent_dev_ino=$FAILED_COMPOSE_BRIDGE_PARENT_DEV_INO" \
+  "failed_compose_bridge_installing_dev_ino=$FAILED_COMPOSE_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_compose_bridge_intent_dev_ino=$FAILED_COMPOSE_BRIDGE_INTENT_DEV_INO" \
+  "failed_compose_bridge_intent_sha256=$FAILED_COMPOSE_BRIDGE_INTENT_SHA256" \
+  "failed_compose_bridge_intent_size=$FAILED_COMPOSE_BRIDGE_INTENT_SIZE" \
+  "failed_compose_bridge_api_proof_dev_ino=$FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO" \
+  "failed_compose_bridge_api_proof_sha256=$FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256" \
+  "failed_compose_bridge_api_proof_size=$FAILED_COMPOSE_BRIDGE_API_PROOF_SIZE" \
+  'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
+  'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
+  'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
   'migration_catalog_proof=exact-api-player-action-read-only-v1' \
   "source_api_container_id=$SOURCE_API_CONTAINER_ID" \
   "source_api_image_id=$SOURCE_API_IMAGE_ID" \
@@ -746,7 +808,73 @@ require_prior_failed_runtime_ledger_absent() {
     ! -L "$FAILED_OIDVECTOR_BRIDGE_INTENT" && -f "$FAILED_OIDVECTOR_BRIDGE_INTENT" &&
     "$(realpath -- "$FAILED_OIDVECTOR_BRIDGE_INTENT")" == "$FAILED_OIDVECTOR_BRIDGE_INTENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h:%s' "$FAILED_OIDVECTOR_BRIDGE_INTENT")" == "$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO:root:root:600:1:$FAILED_OIDVECTOR_BRIDGE_INTENT_SIZE" &&
-    "$(sha256sum -- "$FAILED_OIDVECTOR_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" ]]
+    "$(sha256sum -- "$FAILED_OIDVECTOR_BRIDGE_INTENT" | awk '{print $1}')" == "$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" ]] || return 1
+  [[ ! -e "$FAILED_COMPOSE_BRIDGE_ROOT" && ! -L "$FAILED_COMPOSE_BRIDGE_ROOT" &&
+    ! -L "$FAILED_COMPOSE_BRIDGE_PARENT" && -d "$FAILED_COMPOSE_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_COMPOSE_BRIDGE_PARENT")" == "$FAILED_COMPOSE_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COMPOSE_BRIDGE_PARENT")" == "$FAILED_COMPOSE_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_COMPOSE_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == ".installing-$FAILED_COMPOSE_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_COMPOSE_BRIDGE_INSTALLING" && -d "$FAILED_COMPOSE_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_COMPOSE_BRIDGE_INSTALLING")" == "$FAILED_COMPOSE_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_COMPOSE_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'api-catalog-proof-v1:f\nintent-v1:f' ]] || return 1
+  emit_exact_nofollow_file "$FAILED_COMPOSE_BRIDGE_INTENT" "$FAILED_COMPOSE_BRIDGE_INTENT_DEV_INO" \
+    "$FAILED_COMPOSE_BRIDGE_INTENT_SIZE" "$FAILED_COMPOSE_BRIDGE_INTENT_SHA256" >/dev/null || return 1
+  emit_exact_nofollow_file "$FAILED_COMPOSE_BRIDGE_API_PROOF" "$FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO" \
+    "$FAILED_COMPOSE_BRIDGE_API_PROOF_SIZE" "$FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256" >/dev/null
+}
+
+emit_exact_nofollow_file() {
+  local path="$1" expected_dev_ino="$2" expected_size="$3" expected_sha="$4"
+  env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$path" "$expected_dev_ino" "$expected_size" "$expected_sha" 3<<'PY'
+import hashlib, os, stat, sys
+path, expected_dev_ino, expected_size, expected_sha = sys.argv[1:]
+try:
+    if os.path.islink(path) or not os.path.isfile(path) or os.path.realpath(path) != path:
+        raise RuntimeError()
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        data = bytearray()
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk: break
+            data.extend(chunk)
+        after = os.fstat(fd)
+        exact = (before.st_dev, before.st_ino, before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode),
+                 before.st_nlink, before.st_size)
+        if before != after or exact != (int(expected_dev_ino.split(':')[0]), int(expected_dev_ino.split(':')[1]),
+                                        0, 0, 0o600, 1, int(expected_size)):
+            raise RuntimeError()
+        if hashlib.sha256(data).hexdigest() != expected_sha:
+            raise RuntimeError()
+        os.write(1, data)
+    finally:
+        os.close(fd)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+emit_owned_nofollow_file() {
+  local path="$1"
+  env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$path" 3<<'PY'
+import os, stat, sys
+path=sys.argv[1]
+try:
+    if os.path.islink(path) or not os.path.isfile(path) or os.path.realpath(path)!=path: raise RuntimeError()
+    fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW)
+    try:
+        before=os.fstat(fd); data=bytearray()
+        while True:
+            chunk=os.read(fd,1024*1024)
+            if not chunk: break
+            data.extend(chunk)
+        after=os.fstat(fd)
+        if before!=after or before.st_uid!=0 or before.st_gid!=0 or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or before.st_size!=len(data): raise RuntimeError()
+        os.write(1,data)
+    finally: os.close(fd)
+except Exception: raise SystemExit(1)
+PY
 }
 
 require_exact_droplet() {
@@ -2299,6 +2427,21 @@ require_compose_contract_parses() {
   grep -Fxq "$OWNER_IMAGE" <<<"$images"
 }
 
+require_exact_compose_create_contract() {
+  [[ "$(docker_local compose version --short)" == '5.1.4' ]] || return 1
+  env -i "${compose_environment[@]}" "${compose_command[@]}" config --format json |
+    env -i PATH="$SAFE_PATH" python3 -I -c '
+import json, sys
+try:
+    value=json.load(sys.stdin)
+    owner=value["services"]["owner-control"]
+    if owner.get("profiles") != ["staging-manual"]: raise RuntimeError()
+    if owner.get("pull_policy") != "never": raise RuntimeError()
+    if owner.get("depends_on") not in (None, {}): raise RuntimeError()
+except Exception: raise SystemExit(1)
+'
+}
+
 container_full_ids_for_service() {
   local service="$1" short full inventory
   inventory="$(docker_local container ls --all --quiet \
@@ -2529,6 +2672,92 @@ require_loaded_image_used_only_by() {
   [[ "$expected_id" =~ ^[0-9a-f]{64}$ ]] || return 1
   inventory="$(docker_local container ls --all --quiet --no-trunc --filter "ancestor=$OWNER_IMAGE")" || return 1
   [[ "$inventory" == "$expected_id" ]]
+}
+
+capture_complete_docker_create_inventory() {
+  local image_ids network_ids volume_names volume holders
+  image_ids="$(docker_local image ls --all --quiet --no-trunc | LC_ALL=C sort -u)" || return 1
+  network_ids="$(docker_local network ls --quiet --no-trunc | LC_ALL=C sort -u)" || return 1
+  volume_names="$(docker_local volume ls --quiet | LC_ALL=C sort -u)" || return 1
+  {
+    [[ -z "$image_ids" ]] || docker_local image inspect $image_ids
+    printf '\n__FETANAGENT_NETWORKS__\n'
+    [[ -z "$network_ids" ]] || docker_local network inspect $network_ids
+    printf '\n__FETANAGENT_VOLUMES__\n'
+    [[ -z "$volume_names" ]] || docker_local volume inspect $volume_names
+    printf '\n__FETANAGENT_HOLDERS__\n'
+    while IFS= read -r volume; do
+      [[ -n "$volume" ]] || continue
+      holders="$(container_full_ids_for_volume "$volume")" || return 1
+      printf '%s\t%s\n' "$volume" "${holders//$'\n'/,}"
+    done <<<"$volume_names"
+  } | env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 3<<'PY'
+import json, sys
+raw=sys.stdin.read()
+images, rest=raw.split('\n__FETANAGENT_NETWORKS__\n',1)
+networks, rest=rest.split('\n__FETANAGENT_VOLUMES__\n',1)
+volumes, holders=rest.split('\n__FETANAGENT_HOLDERS__\n',1)
+def payload(value):
+    value=value.strip()
+    return [] if not value else json.loads(value)
+holder_map={}
+for line in holders.strip().splitlines():
+    if not line: continue
+    name, ids=line.split('\t',1)
+    holder_map[name]=[] if not ids else ids.split(',')
+result={'images':payload(images),'networks':payload(networks),'volumes':payload(volumes),'holders':holder_map}
+print(json.dumps(result,sort_keys=True,separators=(',',':')))
+PY
+}
+
+require_exact_owner_create_inventory_delta() {
+  local before="$1" after="$2" new_owner="$3"
+  printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$new_owner" "$OWNER_NETWORK" "$PROFILE_VOLUME" "$CONTROL_VOLUME" 3<<'PY'
+import copy,json,sys
+new_owner,owner_network,profile_volume,control_volume=sys.argv[1:]
+before_raw,after_raw=sys.stdin.read().split('\n__FETANAGENT_AFTER__\n',1)
+before=json.loads(before_raw); after=json.loads(after_raw)
+try:
+    if before['images'] != after['images']: raise RuntimeError()
+    def keyed(items,key):
+        result={item[key]:item for item in items}
+        if len(result)!=len(items): raise RuntimeError()
+        return result
+    before_networks=keyed(before['networks'],'Id'); after_networks=keyed(after['networks'],'Id')
+    before_volumes=keyed(before['volumes'],'Name'); after_volumes=keyed(after['volumes'],'Name')
+    if set(before_networks)!=set(after_networks) or set(before_volumes)!=set(after_volumes): raise RuntimeError()
+    owner_ids=[key for key,value in before_networks.items() if value.get('Name')==owner_network]
+    if len(owner_ids)!=1: raise RuntimeError()
+    owner_id=owner_ids[0]
+    for key in before_networks:
+        old=copy.deepcopy(before_networks[key]); new=copy.deepcopy(after_networks[key])
+        old_endpoints=old.pop('Containers',{}) or {}; new_endpoints=new.pop('Containers',{}) or {}
+        if old!=new: raise RuntimeError()
+        if key==owner_id:
+            if new_owner in old_endpoints or set(new_endpoints)!=set(old_endpoints)|{new_owner}: raise RuntimeError()
+            if any(new_endpoints[item]!=old_endpoints[item] for item in old_endpoints): raise RuntimeError()
+            endpoint=new_endpoints[new_owner]
+            if endpoint.get('Name') != 'fetanagent-staging-beta-owner-control-1': raise RuntimeError()
+        elif old_endpoints!=new_endpoints: raise RuntimeError()
+    if before_volumes!=after_volumes: raise RuntimeError()
+    if set(before['holders'])!=set(after['holders']) or set(before['holders'])!=set(before_volumes): raise RuntimeError()
+    for name in before['holders']:
+        old=before['holders'][name]; new=after['holders'][name]
+        if name==control_volume:
+            if old!=[] or new!=[new_owner]: raise RuntimeError()
+        elif old!=new: raise RuntimeError()
+    if before['holders'].get(profile_volume)!=[] or after['holders'].get(profile_volume)!=[]: raise RuntimeError()
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+load_pre_create_docker_inventory() {
+  local path="$BRIDGE_WORK_ROOT/docker-pre-create-v1"
+  PRE_CREATE_DOCKER_INVENTORY="$(emit_owned_nofollow_file "$path")" || return 1
+  printf '%s' "$PRE_CREATE_DOCKER_INVENTORY" | env -i PATH="$SAFE_PATH" python3 -I -c \
+    'import json,sys; value=json.load(sys.stdin); assert set(value)=={"images","networks","volumes","holders"}'
 }
 
 require_pre_create_image_boundary() {
@@ -3071,15 +3300,16 @@ create_or_discover_bridge_ledger() {
   require_prior_failed_runtime_ledger_absent || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
-    [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
+    [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
   else
     case "$entries" in
       ''|'.intent-v1.installing'|'intent-v1'|$'.api-catalog-proof-v1.installing\nintent-v1'|\
-      $'api-catalog-proof-v1\nintent-v1'|$'.replacement-owner-v1.installing\napi-catalog-proof-v1\nintent-v1'|\
-      $'api-catalog-proof-v1\nintent-v1\nreplacement-owner-v1'|$'.start-owner-v1.installing\napi-catalog-proof-v1\nintent-v1\nreplacement-owner-v1'|\
-      $'api-catalog-proof-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
-      $'.completed-v1.installing\napi-catalog-proof-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
-      $'api-catalog-proof-v1\ncompleted-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1') ;;
+      $'api-catalog-proof-v1\nintent-v1'|$'.docker-pre-create-v1.installing\napi-catalog-proof-v1\nintent-v1'|\
+      $'api-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1'|$'.replacement-owner-v1.installing\napi-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1'|\
+      $'api-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1'|$'.start-owner-v1.installing\napi-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1'|\
+      $'api-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
+      $'.completed-v1.installing\napi-catalog-proof-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1'|\
+      $'api-catalog-proof-v1\ncompleted-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1') ;;
       *) return 1 ;;
     esac
   fi
@@ -3116,6 +3346,21 @@ expected_bridge_intent() {
     "failed_oidvector_bridge_intent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO" \
     "failed_oidvector_bridge_intent_sha256=$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" \
     'catalog_argument_contract=exact-zero-based-oidvector-equality' \
+    "failed_compose_correction_implementation_sha=$FAILED_COMPOSE_CORRECTION_RELEASE" \
+    "failed_compose_correction_bundle_root_dev_ino=$FAILED_COMPOSE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_compose_correction_script_dev_ino=$FAILED_COMPOSE_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_compose_correction_script_sha256=$FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256" \
+    "failed_compose_correction_manifest_dev_ino=$FAILED_COMPOSE_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_compose_correction_manifest_sha256=$FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256" \
+    "failed_compose_bridge_parent_dev_ino=$FAILED_COMPOSE_BRIDGE_PARENT_DEV_INO" \
+    "failed_compose_bridge_installing_dev_ino=$FAILED_COMPOSE_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_compose_bridge_intent_dev_ino=$FAILED_COMPOSE_BRIDGE_INTENT_DEV_INO" \
+    "failed_compose_bridge_intent_sha256=$FAILED_COMPOSE_BRIDGE_INTENT_SHA256" \
+    "failed_compose_bridge_api_proof_dev_ino=$FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO" \
+    "failed_compose_bridge_api_proof_sha256=$FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256" \
+    'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
+    'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
+    'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
     'migration_catalog_proof=exact-api-player-action-read-only-v1' \
     "api_catalog_container_id=$(container_full_ids_for_service api)" \
     "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
@@ -3323,6 +3568,21 @@ expected_bridge_completed() {
     "failed_oidvector_bridge_intent_dev_ino=$FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO" \
     "failed_oidvector_bridge_intent_sha256=$FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256" \
     'catalog_argument_contract=exact-zero-based-oidvector-equality' \
+    "failed_compose_correction_implementation_sha=$FAILED_COMPOSE_CORRECTION_RELEASE" \
+    "failed_compose_correction_bundle_root_dev_ino=$FAILED_COMPOSE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_compose_correction_script_dev_ino=$FAILED_COMPOSE_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_compose_correction_script_sha256=$FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256" \
+    "failed_compose_correction_manifest_dev_ino=$FAILED_COMPOSE_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_compose_correction_manifest_sha256=$FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256" \
+    "failed_compose_bridge_parent_dev_ino=$FAILED_COMPOSE_BRIDGE_PARENT_DEV_INO" \
+    "failed_compose_bridge_installing_dev_ino=$FAILED_COMPOSE_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_compose_bridge_intent_dev_ino=$FAILED_COMPOSE_BRIDGE_INTENT_DEV_INO" \
+    "failed_compose_bridge_intent_sha256=$FAILED_COMPOSE_BRIDGE_INTENT_SHA256" \
+    "failed_compose_bridge_api_proof_dev_ino=$FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO" \
+    "failed_compose_bridge_api_proof_sha256=$FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256" \
+    'post_removal_baseline=owner-absent-port-free-volumes-holder-free' \
+    'compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never' \
+    'docker_create_inventory_contract=complete-exact-owner-only-delta-v1' \
     'migration_catalog_proof=exact-api-player-action-read-only-v1' \
     "api_catalog_container_id=$(container_full_ids_for_service api)" \
     "api_catalog_normative_contract_sha256=$(exact_api_catalog_container_contract_digest "$(container_full_ids_for_service api)")" \
@@ -3662,6 +3922,7 @@ require_original_bridge_namespace_absent ||
   die 'the immutable 001 Owner bridge namespace appeared during recovery preflight'
 require_all_compose_inputs || die 'the exact existing staging Compose input files are unavailable or unsafe'
 require_compose_contract_parses || die 'the canonical H14 Compose contract did not parse with the existing staging inputs'
+require_exact_compose_create_contract || die 'Compose v5.1.4 or the exact zero-dependency Owner create contract changed'
 require_owner_network || die 'the existing Owner-only network is not exact'
 require_financial_gates_disabled || die 'a financial, executor, final-action, Amount, or Transfer gate is enabled'
 require_no_host_chromium || die 'a host browser process exists before the Owner bridge'
@@ -3686,15 +3947,12 @@ if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]];
 else
   [[ "$BRIDGE_STATE" == 'installing' ]] || die 'a complete bridge is missing its intent'
   require_non_owner_inventory_unchanged || die 'an unrelated project service changed before durable intent'
-  require_owner_contract "$OLD_OWNER_CONTAINER_ID" "$PREDECESSOR_RELEASE" '-' || die 'the historical H13 Owner contract is not exact'
-  [[ "$(docker_local container inspect "$OLD_OWNER_CONTAINER_ID" --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == 'running|healthy' ]] ||
-    die 'the exact historical H13 Owner is not running and healthy before durable intent'
-  [[ "$(container_semantic_contract_digest "$OLD_OWNER_CONTAINER_ID")" == "$OLD_OWNER_SEMANTIC_SHA256" ]] ||
-    die 'the exact historical H13 Owner semantic contract changed'
+  ! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1 || die 'the removed historical Owner reappeared before durable intent'
+  [[ -z "$(container_full_ids_for_service "$OWNER_SERVICE")" ]] || die 'Owner inventory must be empty before the post-removal intent'
   [[ -z "$(container_full_ids_for_service kemerbet-session-provision)" ]] || die 'the retired coordinator exists'
   [[ -z "$(docker_local container ls --all --quiet --filter "id=$RETIRED_COORDINATOR_CONTAINER_ID")" ]] || die 'the retired coordinator identity still exists'
-  require_runtime_boundary "$OLD_OWNER_CONTAINER_ID" || die 'the pre-bridge Owner/coordinator/volume/gate boundary is not exact'
-  require_container_no_chromium "$OLD_OWNER_CONTAINER_ID" || die 'the historical Owner contains a browser process'
+  [[ -z "$(container_full_ids_for_volume "$PROFILE_VOLUME")" && -z "$(container_full_ids_for_volume "$CONTROL_VOLUME")" ]] || die 'post-removal volumes acquired a holder'
+  [[ "$(ss -ltnH | awk '$4 ~ /:3002$/ {count += 1} END {print count + 0}')" == '0' ]] || die 'port 3002 is occupied before durable intent'
   require_owner_image_contract ||
     die 'the canonical H14 OCI-manifest image must already be exact before the new correction intent is first published'
   require_loaded_image_unused ||
@@ -3704,42 +3962,38 @@ else
 fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
-# No container process may be entered until the exact recovery intent is
-# durable. Publish its catalog-only result before any persistent Docker mutation;
-# interrupted replay after the historical Owner stop consumes the exact durable
-# proof without opening another Owner-role connection.
+# The predecessor already published the exact catalog-only result before it
+# removed the historical Owner. Revalidate that immutable proof and republish it
+# durably into this correction; never reopen the database proof on replay.
 if [[ "$BRIDGE_STATE" != 'complete' ]]; then
-  if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; then
-    post_intent_old_state="$(docker_local container inspect "$OLD_OWNER_CONTAINER_ID" --format '{{.State.Status}}')" ||
-      die 'the post-intent historical Owner state is unavailable'
-    if [[ "$post_intent_old_state" == 'running' ]]; then
-      require_migration_through_api_catalog ||
-        die 'the exact existing API could not prove the claim-bound H14 migration catalogs read-only after durable intent'
-      if [[ ! -e "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" && ! -L "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" ]]; then
-        publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof) ||
-          die 'the exact API catalog proof could not be published durably'
-      fi
-      require_api_catalog_proof || die 'the durable API catalog proof changed'
-      require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
-        die 'the live terminal-attestation boundary changed after durable intent'
-    else
-      require_api_catalog_proof || die 'the interrupted Owner stop is missing its durable API catalog proof'
-      [[ "$post_intent_old_state" == 'exited' ]] ||
-        die 'the post-intent historical Owner is in an unreviewed state'
-      require_owner_image_contract ||
-        die 'an interrupted post-intent Owner stop is missing the exact previously loaded image'
-      require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" exited ||
-        die 'the interrupted post-intent terminal-attestation boundary is not exact'
-    fi
-  else
-    require_api_catalog_proof || die 'the interrupted Owner removal is missing its durable API catalog proof'
-    require_owner_image_contract ||
-      die 'an interrupted post-intent Owner removal is missing the exact previously loaded image'
+  cmp -s -- <(emit_exact_nofollow_file "$FAILED_COMPOSE_BRIDGE_API_PROOF" "$FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO" \
+    "$FAILED_COMPOSE_BRIDGE_API_PROOF_SIZE" "$FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256") <(expected_api_catalog_proof) ||
+    die 'the immutable predecessor API catalog proof is not exact'
+  if [[ ! -e "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" && ! -L "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" ]]; then
+    publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(emit_exact_nofollow_file \
+      "$FAILED_COMPOSE_BRIDGE_API_PROOF" "$FAILED_COMPOSE_BRIDGE_API_PROOF_DEV_INO" \
+      "$FAILED_COMPOSE_BRIDGE_API_PROOF_SIZE" "$FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256") ||
+      die 'the predecessor API catalog proof could not be republished durably'
   fi
+  require_api_catalog_proof || die 'the republished durable API catalog proof changed'
+  ! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1 || die 'the removed historical Owner reappeared after durable intent'
+  require_owner_image_contract || die 'the exact previously loaded image changed after durable intent'
   require_original_bridge_namespace_absent ||
     die 'the immutable 001 Owner bridge namespace appeared after durable recovery intent'
 fi
 prepare_record_digests || die 'the bridge intent digest is invalid'
+
+if [[ -e "$BRIDGE_WORK_ROOT/docker-pre-create-v1" && ! -L "$BRIDGE_WORK_ROOT/docker-pre-create-v1" ]]; then
+  load_pre_create_docker_inventory || die 'the durable pre-create Docker inventory is unsafe or malformed'
+elif [[ "$BRIDGE_STATE" != 'complete' ]]; then
+  [[ -z "$(container_full_ids_for_service "$OWNER_SERVICE")" ]] ||
+    die 'a pre-create Docker inventory may only be published while Owner inventory is empty'
+  PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
+    die 'the complete pre-create Docker inventory could not be captured'
+  publish_exact_record "$BRIDGE_WORK_ROOT/docker-pre-create-v1" 0600 <<<"$PRE_CREATE_DOCKER_INVENTORY" ||
+    die 'the complete pre-create Docker inventory could not be published durably'
+  load_pre_create_docker_inventory || die 'the published pre-create Docker inventory changed'
+fi
 
 if [[ "$BRIDGE_STATE" == 'complete' ]]; then
   load_replacement_record || die 'the completed bridge replacement record is invalid'
@@ -3766,6 +4020,9 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'the immutable 911-absent and ff989-empty-pre-intent runtime evidence changed beside completion'
   require_post_create_image_boundary "$NEW_OWNER_CONTAINER_ID" ||
     die 'the complete post-create boundary changed beside completed replay'
+  POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" || die 'the completed Docker inventory is unavailable'
+  require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$NEW_OWNER_CONTAINER_ID" ||
+    die 'the completed Docker inventory differs beyond the exact Owner-only create delta'
   printf '%s\n' 'FetanAgent H14 Owner runtime bridge already valid: Owner only; no provider action and no money moved.'
   exit 0
 fi
@@ -3780,38 +4037,7 @@ require_non_owner_inventory_unchanged || die 'an unrelated project service chang
 
 owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the Owner inventory could not be inspected'
 if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; then
-  [[ "$owner_inventory" == "$OLD_OWNER_CONTAINER_ID" ]] || die 'another Owner exists beside the historical Owner'
-  require_owner_contract "$OLD_OWNER_CONTAINER_ID" "$PREDECESSOR_RELEASE" '-' || die 'the historical Owner changed after durable intent'
-  [[ "$(container_semantic_contract_digest "$OLD_OWNER_CONTAINER_ID")" == "$OLD_OWNER_SEMANTIC_SHA256" ]] || die 'the historical Owner semantic contract changed after durable intent'
-  old_state="$(docker_local container inspect "$OLD_OWNER_CONTAINER_ID" --format '{{.State.Status}}')" || die 'the historical Owner state is unavailable'
-  case "$old_state" in
-    running)
-      require_non_owner_inventory_unchanged || die 'an unrelated project service changed before the historical Owner stop'
-      require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" running ||
-        die 'the live terminal-attestation boundary changed immediately before historical Owner stop'
-      require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before Owner stop'
-      require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner stop'
-      require_pre_create_image_boundary || die 'the complete pre-create boundary changed before Owner stop'
-      docker_local container stop --time 15 "$OLD_OWNER_CONTAINER_ID" >/dev/null || die 'the exact historical Owner could not be stopped'
-      require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during Owner stop'
-      require_non_owner_inventory_unchanged || die 'an unrelated project service changed during the historical Owner stop'
-      ;;
-    exited) ;;
-    *) die 'the historical Owner is in an unreviewed state' ;;
-  esac
-  [[ "$(docker_local container inspect "$OLD_OWNER_CONTAINER_ID" --format '{{.State.Running}}')" == 'false' ]] || die 'the historical Owner did not stop'
-  require_non_owner_inventory_unchanged || die 'an unrelated project service changed before historical Owner removal'
-  require_live_terminal_attestation_boundary "$OLD_OWNER_CONTAINER_ID" exited ||
-    die 'the live terminal-attestation boundary changed immediately before historical Owner removal'
-  require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before Owner removal'
-  require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before Owner removal'
-  require_pre_create_image_boundary || die 'the complete pre-create boundary changed before Owner removal'
-  docker_local container rm "$OLD_OWNER_CONTAINER_ID" >/dev/null || die 'the exact stopped historical Owner could not be removed'
-  require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during Owner removal'
-  require_non_owner_inventory_unchanged || die 'an unrelated project service changed during historical Owner removal'
-fi
-if docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1; then
-  die 'the historical Owner remains after exact removal'
+  die 'the predecessor-removed historical Owner reappeared; this correction never stops or removes it'
 fi
 [[ -z "$(container_full_ids_for_service kemerbet-session-provision)" ]] || die 'the retired coordinator reappeared'
 [[ -z "$(container_full_ids_for_volume "$PROFILE_VOLUME")" ]] || die 'the profile volume acquired a holder'
@@ -3830,16 +4056,30 @@ else
       die 'the live terminal-attestation boundary changed immediately before replacement creation'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before replacement creation'
     require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before replacement creation'
+    require_exact_compose_create_contract || die 'the exact supported Compose create contract changed before Owner creation'
     require_pre_create_image_boundary || die 'the complete pre-create boundary changed before replacement creation'
+    CURRENT_PRE_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
+      die 'the immediately pre-create Docker inventory could not be captured'
+    [[ "$CURRENT_PRE_CREATE_DOCKER_INVENTORY" == "$PRE_CREATE_DOCKER_INVENTORY" ]] ||
+      die 'an image, network, volume, endpoint, or holder changed since the durable pre-create inventory'
     env -i "${compose_environment[@]}" "${compose_command[@]}" \
-      create --no-build --no-deps "$OWNER_SERVICE" >/dev/null || die 'canonical Compose could not create the Owner-only replacement'
+      create --no-build --pull never "$OWNER_SERVICE" >/dev/null || die 'canonical Compose could not create the Owner-only replacement'
+    owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the created Owner inventory could not be inspected'
+    [[ "$owner_inventory" =~ ^[0-9a-f]{64}$ ]] || die 'Compose did not create exactly one Owner container'
+    POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
+      die 'the immediately post-create Docker inventory could not be captured'
+    require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$owner_inventory" ||
+      die 'Compose changed an image, network, volume, endpoint, or holder outside the exact Owner-only delta'
     require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared during replacement creation'
     require_non_owner_inventory_unchanged || die 'an unrelated project service changed during replacement creation'
-    owner_inventory="$(container_full_ids_for_service "$OWNER_SERVICE")" || die 'the created Owner inventory could not be inspected'
   fi
   [[ "$owner_inventory" =~ ^[0-9a-f]{64}$ && "$owner_inventory" != "$OLD_OWNER_CONTAINER_ID" ]] ||
     die 'interruption recovery accepts only one exact replacement Owner'
   NEW_OWNER_CONTAINER_ID="$owner_inventory"
+  POST_CREATE_DOCKER_INVENTORY="$(capture_complete_docker_create_inventory)" ||
+    die 'the complete post-create Docker inventory could not be captured'
+  require_exact_owner_create_inventory_delta "$PRE_CREATE_DOCKER_INVENTORY" "$POST_CREATE_DOCKER_INVENTORY" "$NEW_OWNER_CONTAINER_ID" ||
+    die 'Compose changed an image, network, volume, endpoint, or holder outside the exact Owner-only delta'
   [[ "$(docker_local container inspect "$NEW_OWNER_CONTAINER_ID" --format '{{.State.Status}}')" == 'created' ]] ||
     die 'an unrecorded replacement Owner must be in its exact never-started created state'
   require_owner_contract "$NEW_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" ||

@@ -951,6 +951,30 @@ jobs:
           failed_oidvector_bridge_intent_sha256=7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd
           failed_oidvector_bridge_intent_size=8251
           catalog_argument_contract=exact-zero-based-oidvector-equality
+          failed_compose_correction_implementation_sha=e95ad99122ebf9f7257ea25d7cf215dd38c73b40
+          failed_compose_correction_bundle_root_dev_ino=64769:6102931
+          failed_compose_correction_script_dev_ino=64769:6102932
+          failed_compose_correction_script_sha256=163d2adb74912daa8cb3663cefa5220a6e3f4766bd25a07f3bd13a31a077ef63
+          failed_compose_correction_script_size=231577
+          failed_compose_correction_validator_dev_ino=64769:6102933
+          failed_compose_correction_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          failed_compose_correction_validator_size=11689
+          failed_compose_correction_manifest_dev_ino=64769:6102934
+          failed_compose_correction_manifest_sha256=fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1
+          failed_compose_correction_manifest_size=8963
+          failed_compose_correction_workflow_run_id=33248215874
+          failed_compose_correction_workflow_run_attempt=1
+          failed_compose_bridge_parent_dev_ino=64769:6102935
+          failed_compose_bridge_installing_dev_ino=64769:6102936
+          failed_compose_bridge_intent_dev_ino=64769:6102937
+          failed_compose_bridge_intent_sha256=d8566a94851d3b53454b06ad308c71d85ac76c5478dfd5d967e40a17ec71a651
+          failed_compose_bridge_intent_size=9061
+          failed_compose_bridge_api_proof_dev_ino=64769:6102938
+          failed_compose_bridge_api_proof_sha256=868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee
+          failed_compose_bridge_api_proof_size=643
+          post_removal_baseline=owner-absent-port-free-volumes-holder-free
+          compose_create_contract=v5.1.4-zero-dep-create-no-build-pull-never
+          docker_create_inventory_contract=complete-exact-owner-only-delta-v1
           migration_catalog_proof=exact-api-player-action-read-only-v1
           source_api_container_id=8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40
           source_api_image_id=sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82
@@ -1054,6 +1078,8 @@ jobs:
           failed_catalog_root="$parent/$failed_catalog_release"
           failed_oidvector_release='f67cf783528f090169dbea1ebfdc6c46f90996bb'
           failed_oidvector_root="$parent/$failed_oidvector_release"
+          failed_compose_release='e95ad99122ebf9f7257ea25d7cf215dd38c73b40'
+          failed_compose_root="$parent/$failed_compose_release"
           installing="$parent/.installing-$CONFIRMED_RECOVERY_RELEASE"
           root="$parent/$CONFIRMED_RECOVERY_RELEASE"
           script="$root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh"
@@ -1076,6 +1102,7 @@ jobs:
             echo "failed_image_root='$failed_image_root'"
             echo "failed_catalog_root='$failed_catalog_root'"
             echo "failed_oidvector_root='$failed_oidvector_root'"
+            echo "failed_compose_root='$failed_compose_root'"
             echo "installing='$installing'"
             echo "root='$root'"
             echo 'set -euo pipefail'
@@ -1132,11 +1159,15 @@ jobs:
             echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_oidvector_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6102920:root:root:400:1:222490 && "$(sha256sum "$failed_oidvector_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 440ed90b8c0987f7d94ab19f4b80513ef6bcf2984dd91c99d4d4caf27b0d077f ]]'
             echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_oidvector_root/fetanagent-owner-archive-validator.py")" == 64769:6102922:root:root:400:1:11689 && "$(sha256sum "$failed_oidvector_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
             echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_oidvector_root/manifest-v1")" == 64769:6102924:root:root:400:1:7692 && "$(sha256sum "$failed_oidvector_root/manifest-v1" | awk '\''{print $1}'\'')" == 8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed ]]'
+            echo '[[ ! -L "$failed_compose_root" && -d "$failed_compose_root" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_compose_root")" == 64769:6102931:root:root:700:2 ]]'
+            echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_compose_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6102932:root:root:400:1:231577 && "$(sha256sum "$failed_compose_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 163d2adb74912daa8cb3663cefa5220a6e3f4766bd25a07f3bd13a31a077ef63 ]]'
+            echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_compose_root/fetanagent-owner-archive-validator.py")" == 64769:6102933:root:root:400:1:11689 && "$(sha256sum "$failed_compose_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
+            echo '[[ "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_compose_root/manifest-v1")" == 64769:6102934:root:root:400:1:8963 && "$(sha256sum "$failed_compose_root/manifest-v1" | awk '\''{print $1}'\'')" == fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1 ]]'
             echo 'children="$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'' | LC_ALL=C sort)"'
             echo 'case "$children" in'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 8 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 9 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 9 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 9 && ! -e "$installing" && ! -L "$installing" ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 9 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 10 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 10 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 10 && ! -e "$installing" && ! -L "$installing" ]] ;;'
             echo '  *) false ;;'
             echo 'esac'
             echo 'if [[ ! -e "$root" && ! -L "$root" ]]; then'
@@ -1158,13 +1189,14 @@ jobs:
             echo "[[ \"\$(sha256sum '$validator' | awk '{print \$1}')\" == '$VALIDATOR_SHA' && \"\$(stat -c %s '$validator')\" == '$VALIDATOR_SIZE' ]]"
             echo "[[ \"\$(sha256sum '$root/manifest-v1' | awk '{print \$1}')\" == '$MANIFEST_SHA' && \"\$(stat -c %s '$root/manifest-v1')\" == '$MANIFEST_SIZE' ]]"
             echo '[[ "$(find -P "$root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
-            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$root")" | LC_ALL=C sort)" ]]'
+            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$root")" | LC_ALL=C sort)" ]]'
             echo '[[ "$(sha256sum "$prior_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d && "$(sha256sum "$prior_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$prior_root/manifest-v1" | awk '\''{print $1}'\'')" == 9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a ]]'
             echo '[[ "$(sha256sum "$failed_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 2a9ce123b931799ba4ee4740789deb4747ba3d4148185c14625e4a430405f373 && "$(sha256sum "$failed_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_root/manifest-v1" | awk '\''{print $1}'\'')" == 1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d ]]'
             echo '[[ "$(sha256sum "$failed_pg_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f && "$(sha256sum "$failed_pg_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_pg_root/manifest-v1" | awk '\''{print $1}'\'')" == ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d ]]'
             echo '[[ "$(sha256sum "$failed_image_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 338ad5f16d4761c9ce1d048eae5d7a38341aa5dee734a2a0c87cf47416564a6b && "$(sha256sum "$failed_image_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_image_root/manifest-v1" | awk '\''{print $1}'\'')" == 845d891088a30878e2162f050aa45f7110fadb9831c5bcd7dddd5cec2e3999d8 ]]'
             echo '[[ "$(sha256sum "$failed_catalog_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 6f2812be35d632c7b9d4430be0de21241b5ad9e57a9b61193d7d360c32bf6e36 && "$(sha256sum "$failed_catalog_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_catalog_root/manifest-v1" | awk '\''{print $1}'\'')" == c2502c5add54b0414d4e0e3d538554ec8e6057f5dbafc537ec8ed8f84a340dc1 ]]'
             echo '[[ "$(sha256sum "$failed_oidvector_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 440ed90b8c0987f7d94ab19f4b80513ef6bcf2984dd91c99d4d4caf27b0d077f && "$(sha256sum "$failed_oidvector_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_oidvector_root/manifest-v1" | awk '\''{print $1}'\'')" == 8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed ]]'
+            echo '[[ "$(sha256sum "$failed_compose_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 163d2adb74912daa8cb3663cefa5220a6e3f4766bd25a07f3bd13a31a077ef63 && "$(sha256sum "$failed_compose_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_compose_root/manifest-v1" | awk '\''{print $1}'\'')" == fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1 ]]'
             echo "exec bash '$script' '$CONFIRMED_RECOVERY_RELEASE' '$SCRIPT_SHA' '$VALIDATOR_SHA' '$MANIFEST_SHA' 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52' '$H14_RECOVERY_AUTHORIZATION_SHA256'"
             echo '```'
             echo

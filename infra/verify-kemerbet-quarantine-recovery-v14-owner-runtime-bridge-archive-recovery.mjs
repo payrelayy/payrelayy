@@ -138,7 +138,8 @@ for (const needle of [
   "readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
   "readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
   "readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
+  "readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -176,6 +177,15 @@ for (const needle of [
   "FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256='fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1'",
   "FAILED_COMPOSE_BRIDGE_INTENT_SHA256='d8566a94851d3b53454b06ad308c71d85ac76c5478dfd5d967e40a17ec71a651'",
   "FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  "FAILED_HOLDER_CORRECTION_RELEASE='35d28aaa41cde5a2ccce7c2017dffc7c9d503238'",
+  "FAILED_HOLDER_CORRECTION_SCRIPT_SHA256='f861a8106b454b43167d46a3dd55ef05a6d586c65ffc2142f90d7272b59f973f'",
+  "FAILED_HOLDER_CORRECTION_MANIFEST_SHA256='3685d5197a39a1805970712eaeae24116fa8b6633f08434622d3e22864a759dd'",
+  "FAILED_HOLDER_BRIDGE_INTENT_SHA256='2b80e49bd0aa3c3060ff09b8b2593f5caf57ea079e0d54a3f897a7317cfbfc6b'",
+  "FAILED_HOLDER_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  'holder_inventory_parser_contract=tab-preserving-exact-complete-v1',
+  'for line in holders.splitlines():',
+  "if line.count('\\t') != 1",
+  'if set(holder_map) != volume_names',
   'emit_exact_nofollow_file() {',
   'os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW',
   'before != after',
@@ -592,6 +602,36 @@ for (const invalid of [
     `unsafe Docker delta accepted: ${JSON.stringify(invalid)}`,
   );
 
+const parseHolderRows = (text, expectedVolumes) => {
+  const result = new Map();
+  for (const line of text.split(/\r?\n/u)) {
+    if (line === '') continue;
+    if ((line.match(/\t/gu) ?? []).length !== 1) throw new Error('malformed');
+    const [name, ids] = line.split('\t');
+    if (!name || result.has(name)) throw new Error('duplicate');
+    const values = ids === '' ? [] : ids.split(',');
+    if (
+      values.some((value) => !/^[0-9a-f]{64}$/u.test(value)) ||
+      JSON.stringify(values) !== JSON.stringify([...new Set(values)].sort())
+    )
+      throw new Error('ids');
+    result.set(name, values);
+  }
+  if (JSON.stringify([...result.keys()].sort()) !== JSON.stringify([...expectedVolumes].sort()))
+    throw new Error('missing');
+  return result;
+};
+const emptyLastHolder = 'control\t' + 'a'.repeat(64) + '\nprofile\t\n';
+assert.deepEqual([...parseHolderRows(emptyLastHolder, ['control', 'profile']).get('profile')], []);
+for (const invalid of [
+  'control\nprofile\t\n',
+  'control\t\ncontrol\t\nprofile\t\n',
+  'control\t\n',
+  'control\tbad\nprofile\t\n',
+  `control\t${'b'.repeat(64)},${'a'.repeat(64)}\nprofile\t\n`,
+])
+  assert.throws(() => parseHolderRows(invalid, ['control', 'profile']));
+
 for (const needle of [
   'h14-owner-runtime-bridge-archive-recovery-stage:',
   'git fetch --no-tags --depth=1 origin 001316f1f65dc7a9976244e8fc01f90aec665a70',
@@ -649,8 +689,9 @@ for (const state of [
   '"$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")"',
   '"$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")"',
   '"$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")"',
-  '"$(basename "$failed_compose_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_compose_root")" "$(basename "$root")"',
+  '"$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")"',
+  '"$(basename "$failed_holder_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_holder_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing two-claim interruption state ${state}`);
 }
@@ -671,13 +712,23 @@ const failedImage = '0a2adc0bf3591fe2449379ac2bf76c21538fadf5';
 const failedCatalog = '04f51a521280fed43cd1504107c702940e523688';
 const failedOidvector = 'f67cf783528f090169dbea1ebfdc6c46f90996bb';
 const failedCompose = 'e95ad99122ebf9f7257ea25d7cf215dd38c73b40';
+const failedHolder = '35d28aaa41cde5a2ccce7c2017dffc7c9d503238';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
   if (
     exact ===
-    [prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose]
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+    ]
       .sort()
       .join('\n')
   )
@@ -692,6 +743,7 @@ const classifyChain = (children) => {
       failedCatalog,
       failedOidvector,
       failedCompose,
+      failedHolder,
       installing,
     ]
       .sort()
@@ -700,7 +752,17 @@ const classifyChain = (children) => {
     return 'resume';
   if (
     exact ===
-    [prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose, current]
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      current,
+    ]
       .sort()
       .join('\n')
   )
@@ -708,7 +770,6 @@ const classifyChain = (children) => {
   return 'reject';
 };
 for (const [children, expected] of [
-  [[prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose], 'append'],
   [
     [
       prior,
@@ -718,12 +779,36 @@ for (const [children, expected] of [
       failedCatalog,
       failedOidvector,
       failedCompose,
+      failedHolder,
+    ],
+    'append',
+  ],
+  [
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
       installing,
     ],
     'resume',
   ],
   [
-    [prior, failed, failedPg, failedImage, failedCatalog, failedOidvector, failedCompose, current],
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      current,
+    ],
     'complete',
   ],
   [[], 'reject'],

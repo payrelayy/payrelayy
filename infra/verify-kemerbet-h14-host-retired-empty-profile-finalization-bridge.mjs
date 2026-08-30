@@ -889,6 +889,11 @@ assert.equal(
 );
 const bridgeJob = workflow.split('  h14-empty-profile-finalization-bridge-stage:\n')[1];
 assert.ok(bridgeJob, 'the registered branch-only bridge job is absent');
+assert.match(
+  bridgeJob,
+  /Check out the exact bridge release[\s\S]*?persist-credentials: false\n\s+fetch-depth: 0\n\s+ref: \$\{\{ env\.CONFIRMED_BRIDGE_IMPLEMENTATION_SHA \}\}/,
+  'the bridge verifier fixtures require the exact historical helper commits',
+);
 const bridgeSteps = bridgeJob.split('    steps:\n')[1];
 assert.ok(bridgeSteps, 'the registered branch-only bridge steps are absent');
 assert.doesNotMatch(

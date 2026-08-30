@@ -45,10 +45,10 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
       PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      PGHOST: ${{ env.STAGING_POOLER_HOST }}
+      PGHOST: aws-1-eu-west-1.pooler.supabase.com
       PGPORT: '5432'
       PGDATABASE: postgres
-      PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+      PGUSER: postgres.spzpiyxheappsfyswewl
       PGSSLMODE: verify-full
       PGSERVICEFILE: /dev/null
       PGPASSFILE: /dev/null

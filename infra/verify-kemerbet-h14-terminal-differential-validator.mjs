@@ -31,6 +31,8 @@ const helperSha = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161
 const claim = '11111111-1111-4111-8111-111111111111';
 const otherClaim = '99999999-9999-4999-8999-999999999999';
 const profile = '22222222-2222-4222-8222-222222222222';
+const replacementProfile = '77777777-7777-4777-8777-777777777777';
+const profileReceipt = '88888888-8888-4888-8888-888888888888';
 const ownerId = '3'.repeat(64);
 const ownerContract = '4'.repeat(64);
 const playerSha = '5'.repeat(64);
@@ -293,6 +295,25 @@ function makeFixture(name) {
     ]),
   );
   writeExact(join(ownerRoot, terminalName), claimData, 0o440);
+  // The compatibility finalizer is intentionally run only after the Owner has
+  // created this exact security-recovery ACK.  The canonical host-retired
+  // differential must continue to pass with the ACK source present while the
+  // terminal source latch remains in place.
+  writeExact(
+    join(controlRoot, profileAckName),
+    record([
+      'version=1',
+      `claim_id=${claim}`,
+      `receipt_id=${profileReceipt}`,
+      'platform_code=kemerbet',
+      `platform_agent_account_id=${replacementProfile}`,
+      'profile_revision=2',
+      'configuration_reason=security_recovery',
+      'transfer_disabled=true',
+      'money_moved=false',
+    ]),
+    0o400,
+  );
 
   return {
     fixture,

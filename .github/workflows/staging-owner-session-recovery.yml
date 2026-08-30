@@ -163,7 +163,10 @@ jobs:
           ssh "${ssh_opts[@]}" "$remote" "test ! -e '$remote_bundle' && install -d -m 0700 '$remote_bundle'"
           scp "${ssh_opts[@]}" "$bundle/owner-database-url" "$bundle/manifest-v1" "$remote:$remote_bundle/"
           ssh "${ssh_opts[@]}" "$remote" \
-            "chmod 0600 '$remote_bundle/owner-database-url' '$remote_bundle/manifest-v1' && test \"\$(sha256sum '$remote_bundle/owner-database-url' | awk '{print \\$1}')\" = '$secret_sha'"
+            "chmod 0600 '$remote_bundle/owner-database-url' '$remote_bundle/manifest-v1'"
+          remote_sha_line="$(ssh "${ssh_opts[@]}" "$remote" \
+            "sha256sum '$remote_bundle/owner-database-url'")"
+          [[ "${remote_sha_line%% *}" == "$secret_sha" ]]
           {
             echo "remote_bundle=$remote_bundle"
             echo "owner_database_url_sha256=$secret_sha"

@@ -463,6 +463,7 @@ let kemerbetSecurityRecoveryRequired = false;
 let kemerbetRecheckSpentFailedTerminal = false;
 let kemerbetSecurityRecoveryCohortRequired = false;
 let kemerbetSecurityRecoveryInProgress = false;
+let kemerbetSecurityRecoverySessionAllowed = false;
 let kemerbetSessionPollTimer;
 let kemerbetSessionPollFailures = 0;
 let kemerbetSessionReconnectNeeded = false;
@@ -591,6 +592,16 @@ function readinessKemerbetMutationAllowed() {
   return ordinaryKemerbetMutationAllowed() || kemerbetSecurityRecoveryCohortRequired;
 }
 
+function privateKemerbetSessionMutationAllowed() {
+  return ordinaryKemerbetMutationAllowed() || (
+    kemerbetSecurityRecoveryRequired &&
+    kemerbetSecurityRecoveryInProgress &&
+    kemerbetSecurityRecoverySessionAllowed &&
+    !kemerbetRecheckSpentFailedTerminal &&
+    !kemerbetSecurityRecoveryCohortRequired
+  );
+}
+
 function applyKemerbetQuarantineMutationBoundary() {
   if (!kemerbetSecurityRecoveryRequired) {
     kemerbetAgentProfileReason.disabled = false;
@@ -627,10 +638,18 @@ function applyKemerbetQuarantineMutationBoundary() {
   for (const element of document.querySelectorAll('[data-kemerbet-state-mutation="ordinary"]')) {
     element.disabled = true;
   }
-  kemerbetSessionConfirmation.checked = false;
-  kemerbetSessionConfirmation.disabled = true;
-  kemerbetSessionStartButton.disabled = true;
-  kemerbetSessionStopButton.disabled = true;
+  if (privateKemerbetSessionMutationAllowed()) {
+    kemerbetSessionConfirmation.disabled = Boolean(currentKemerbetSession?.active);
+    kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
+      currentKemerbetSession?.phase !== 'idle' || !kemerbetSessionConfirmation.checked;
+    kemerbetSessionStopButton.disabled = !currentKemerbetSession?.active ||
+      currentKemerbetSession.phase === 'stopping';
+  } else {
+    kemerbetSessionConfirmation.checked = false;
+    kemerbetSessionConfirmation.disabled = true;
+    kemerbetSessionStartButton.disabled = true;
+    kemerbetSessionStopButton.disabled = true;
+  }
   pilotArmButton.disabled = true;
   pilotStopButton.disabled = true;
   if (
@@ -650,7 +669,20 @@ function requireOrdinaryKemerbetMutation() {
   setNotice(
     kemerbetRecheckSpentFailedTerminal
       ? 'The one-use KemerBet recheck authorization is spent and failed terminally. It cannot be retried; every mutation remains disabled and no money moves.'
-      : 'KemerBet security recovery is required. Only the exact security-recovery profile action and read-only status refreshes are available; no money moves.',
+      : kemerbetSecurityRecoverySessionAllowed
+        ? 'KemerBet security recovery is in progress. Only the exact recovery private sign-in and read-only status refreshes are available; no money moves.'
+        : 'KemerBet security recovery is required. Only the exact security-recovery profile action and read-only status refreshes are available; no money moves.',
+  );
+  return false;
+}
+
+function requirePrivateKemerbetSessionMutation() {
+  if (privateKemerbetSessionMutationAllowed()) return true;
+  applyKemerbetQuarantineMutationBoundary();
+  setNotice(
+    kemerbetRecheckSpentFailedTerminal
+      ? 'The one-use KemerBet recheck authorization is terminally spent. Private sign-in cannot be reopened.'
+      : 'Private KemerBet sign-in is unavailable in this recovery state. Amount, Transfer, final action, and money movement remain disabled.',
   );
   return false;
 }
@@ -859,6 +891,7 @@ function signOut(message = 'Signed out.') {
   kemerbetRecheckSpentFailedTerminal = false;
   kemerbetSecurityRecoveryCohortRequired = false;
   kemerbetSecurityRecoveryInProgress = false;
+  kemerbetSecurityRecoverySessionAllowed = false;
   ownerSessionStatus.textContent = '';
   passwordInput.value = '';
   clearInvite();
@@ -1306,7 +1339,7 @@ function renderKemerbetAgentProfiles(profiles) {
     card.append(title, facts);
     kemerbetAgentProfileList.append(card);
   }
-  kemerbetSessionStartButton.disabled = kemerbetSecurityRecoveryRequired ||
+  kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !activeKemerbetAgentProfileId ||
     Boolean(currentKemerbetSession?.active) || !kemerbetSessionConfirmation.checked;
 }
@@ -1414,10 +1447,10 @@ async function loadKemerbetSessionFrame(session) {
 function scheduleKemerbetSessionPoll() {
   if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
   kemerbetSessionPollTimer = undefined;
-  const recoveryRequired = currentKemerbetSession?.quarantine?.recoveryRequired === true;
+  const recoveryRequired = kemerbetSecurityRecoveryRequired;
   if (!accessToken || !activeKemerbetAgentProfileId ||
       (!recoveryRequired && !currentKemerbetSession?.active && !kemerbetSessionReconnectNeeded)) return;
-  const baseDelay = recoveryRequired ? 15000 :
+  const baseDelay = recoveryRequired && !currentKemerbetSession?.active ? 15000 :
     currentKemerbetSession?.phase === 'authenticated' ? 30000 :
     currentKemerbetSession?.phase === 'faulted' ? 5000 : 1500;
   const delay = kemerbetSessionPollFailures === 0 ? baseDelay :
@@ -1425,33 +1458,38 @@ function scheduleKemerbetSessionPoll() {
   kemerbetSessionPollTimer = window.setTimeout(() => void loadKemerbetSession(), delay);
 }
 
-async function renderKemerbetSession(session) {
+async function renderKemerbetSession(session, securityRecoverySessionAllowed = false) {
   const wasSignedIn = currentKemerbetSession?.signedIn === true;
   currentKemerbetSession = session;
   kemerbetSessionPollFailures = 0;
   kemerbetSessionReconnectNeeded = false;
-  const recoveryRequired = session.quarantine?.recoveryRequired === true;
+  const recoveryRequired = session.quarantine?.recoveryRequired === true ||
+    securityRecoverySessionAllowed;
   const recheckSpentFailedTerminal =
     session.quarantine?.reasonCode === 'recheck_authorization_spent_failed_terminal';
   const securityRecoveryCohortRequired =
     session.quarantine?.reasonCode === 'security_recovery_cohort_required';
   const securityRecoveryInProgress =
-    session.quarantine?.reasonCode === 'security_recovery_in_progress';
+    session.quarantine?.reasonCode === 'security_recovery_in_progress' ||
+    securityRecoverySessionAllowed;
   kemerbetSecurityRecoveryRequired = recoveryRequired;
   kemerbetRecheckSpentFailedTerminal = recheckSpentFailedTerminal;
   kemerbetSecurityRecoveryCohortRequired = securityRecoveryCohortRequired;
   kemerbetSecurityRecoveryInProgress = securityRecoveryInProgress;
-  kemerbetSessionStartButton.disabled = recoveryRequired || !activeKemerbetAgentProfileId || session.phase !== 'idle' ||
+  kemerbetSecurityRecoverySessionAllowed = securityRecoverySessionAllowed;
+  kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
+    !activeKemerbetAgentProfileId || session.phase !== 'idle' ||
     !kemerbetSessionConfirmation.checked;
-  kemerbetSessionStopButton.disabled = recoveryRequired || !session.active || session.phase === 'stopping';
-  kemerbetSessionConfirmation.disabled = recoveryRequired;
+  kemerbetSessionStopButton.disabled = !privateKemerbetSessionMutationAllowed() ||
+    !session.active || session.phase === 'stopping';
+  kemerbetSessionConfirmation.disabled = !privateKemerbetSessionMutationAllowed() || session.active;
   if (session.phase !== 'login_required') clearKemerbetPendingText();
   if (!session.active) {
     kemerbetSessionCanvas.hidden = true;
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
     if (recoveryRequired) {
-      kemerbetSessionConfirmation.checked = false;
+      if (!securityRecoverySessionAllowed) kemerbetSessionConfirmation.checked = false;
       kemerbetSessionCanvas.tabIndex = -1;
       kemerbetAgentProfileConfirmation.checked = false;
       if (recheckSpentFailedTerminal) {
@@ -1465,7 +1503,9 @@ async function renderKemerbetSession(session) {
       } else if (securityRecoveryInProgress) {
         kemerbetSessionStatus.textContent =
           'KemerBet security recovery is in progress with its exact one-use cohort already bound. ' +
-          'Another cohort cannot be prepared. Every mutation, Amount, Transfer, final action, and money movement remains disabled.';
+          (securityRecoverySessionAllowed
+            ? 'The exact recovery-only private sign-in is available below. Another cohort, Amount, Transfer, final action, and money movement remain disabled.'
+            : 'Another cohort cannot be prepared. Every mutation, Amount, Transfer, final action, and money movement remains disabled.');
       } else {
         kemerbetAgentProfileReason.value = 'security_recovery';
         kemerbetSessionStatus.textContent =
@@ -1514,6 +1554,7 @@ async function renderKemerbetSession(session) {
   } else {
     kemerbetSessionStatus.textContent = 'The private browser is faulted and remains locked. Stop it before retrying.';
   }
+  applyKemerbetQuarantineMutationBoundary();
   scheduleKemerbetSessionPoll();
 }
 
@@ -1526,7 +1567,7 @@ async function loadKemerbetSession() {
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
     if (!session) throw new Error('kemerbet_session');
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
   } catch (error) {
     if (!isSignedOutError(error)) {
       kemerbetSessionPollFailures += 1;
@@ -1547,8 +1588,7 @@ function kemerbetSessionMutationHeaders(requestId) {
 }
 
 async function startKemerbetSession() {
-  if (!requireOrdinaryKemerbetMutation() || !activeKemerbetAgentProfileId ||
-      currentKemerbetSession?.quarantine?.recoveryRequired === true ||
+  if (!requirePrivateKemerbetSessionMutation() || !activeKemerbetAgentProfileId ||
       !kemerbetSessionConfirmation.checked) return;
   const requestId = crypto.randomUUID();
   kemerbetSessionStartButton.disabled = true;
@@ -1568,7 +1608,7 @@ async function startKemerbetSession() {
       throw new Error('kemerbet_session');
     }
     kemerbetSessionConfirmation.checked = false;
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
     if (session.phase === 'login_required') {
       kemerbetSessionCanvas.focus();
       setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
@@ -1595,7 +1635,7 @@ async function startKemerbetSession() {
 }
 
 async function stopKemerbetSession({ confirm = true } = {}) {
-  if (!requireOrdinaryKemerbetMutation() || !currentKemerbetSession?.active) return;
+  if (!requirePrivateKemerbetSessionMutation() || !currentKemerbetSession?.active) return;
   if (confirm && !window.confirm('Stop the private KemerBet sign-in browser now?')) return;
   clearKemerbetPendingText();
   const requestId = crypto.randomUUID();
@@ -1611,7 +1651,7 @@ async function stopKemerbetSession({ confirm = true } = {}) {
     if (!session || (session.active && session.phase !== 'stopping')) {
       throw new Error('kemerbet_session');
     }
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
     setNotice(session.phase === 'stopping'
       ? 'Private KemerBet sign-in browser is closing cleanly. This page will confirm when it stops.'
       : 'Private KemerBet sign-in browser stopped.');
@@ -1621,7 +1661,7 @@ async function stopKemerbetSession({ confirm = true } = {}) {
 }
 
 async function sendKemerbetSessionInput(input) {
-  if (!requireOrdinaryKemerbetMutation() || !currentKemerbetSession?.active ||
+  if (!requirePrivateKemerbetSessionMutation() || !currentKemerbetSession?.active ||
       currentKemerbetSession.phase !== 'login_required' ||
       displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
       displayedKemerbetFrameSequence < 1) return;
@@ -1638,7 +1678,7 @@ async function sendKemerbetSessionInput(input) {
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
     if (!session) throw new Error('kemerbet_session');
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
   } catch (error) {
     if (!isSignedOutError(error)) setNotice('Private browser input was rejected. Refresh the session before retrying.');
   } finally {
@@ -2336,8 +2376,10 @@ async function reconcilePendingKemerbetReadinessCohort() {
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
     if (!session) return 'uncertain';
-    await renderKemerbetSession(session);
-    if (session.quarantine?.reasonCode === 'security_recovery_in_progress') {
+    const securityRecoverySessionAllowed = payload.securityRecoverySessionAllowed === true;
+    await renderKemerbetSession(session, securityRecoverySessionAllowed);
+    if (securityRecoverySessionAllowed ||
+        session.quarantine?.reasonCode === 'security_recovery_in_progress') {
       confirmKemerbetReadinessCohortPrepared();
       return 'prepared';
     }
@@ -2761,14 +2803,14 @@ kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
   await prepareKemerbetAgentProfile();
 });
 kemerbetSessionConfirmation.addEventListener('change', () => {
-  kemerbetSessionStartButton.disabled = kemerbetSecurityRecoveryRequired ||
+  kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !activeKemerbetAgentProfileId ||
     currentKemerbetSession?.phase !== 'idle' || !kemerbetSessionConfirmation.checked;
 });
 kemerbetSessionStartButton.addEventListener('click', startKemerbetSession);
 kemerbetSessionStopButton.addEventListener('click', () => stopKemerbetSession());
 kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
-  if (!ordinaryKemerbetMutationAllowed() || !currentKemerbetSession?.active ||
+  if (!privateKemerbetSessionMutationAllowed() || !currentKemerbetSession?.active ||
       currentKemerbetSession.phase !== 'login_required' ||
       displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
       displayedKemerbetFrameSequence < 1) return;
@@ -2783,7 +2825,7 @@ kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
   queueKemerbetSessionInput({ kind: 'pointer', x, y });
 });
 kemerbetSessionCanvas.addEventListener('keydown', (event) => {
-  if (!ordinaryKemerbetMutationAllowed() || !currentKemerbetSession?.active ||
+  if (!privateKemerbetSessionMutationAllowed() || !currentKemerbetSession?.active ||
       currentKemerbetSession.phase !== 'login_required' ||
       displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
       displayedKemerbetFrameSequence < 1 ||

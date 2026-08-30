@@ -310,6 +310,67 @@ describe('Owner dashboard browser authentication boundary', () => {
 });
 
 describe('Owner dashboard readiness mutation transport boundary', () => {
+  it('enables only the exact recovery private-session controls while ordinary mutations stay disabled', async () => {
+    let activeTest = false;
+    let startPosts = 0;
+    const inactiveSession = {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      signedIn: false,
+      transferDisabled: true,
+    };
+    const startingSession = {
+      active: true,
+      expiresAt: '2026-08-30T22:00:00.000Z',
+      frameSequence: 0,
+      generation: '11111111-1111-4111-8111-111111111111',
+      loginRequired: false,
+      phase: 'starting',
+      signedIn: false,
+      transferDisabled: true,
+    };
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) => {
+        if (!activeTest || url !== '/v1/owner/kemerbet-session/start') return undefined;
+        startPosts += 1;
+        expect(init.method).toBe('POST');
+        return response(202, {
+          securityRecoverySessionAllowed: true,
+          session: startingSession,
+        });
+      },
+    });
+    await browser.signIn();
+    activeTest = true;
+    browser.evaluate("activeKemerbetAgentProfileId = '77777777-7777-4777-8777-777777777777';");
+
+    await browser.call('renderKemerbetSession', inactiveSession, true);
+
+    const confirmation = browser.element('#kemerbet-session-confirmation');
+    const start = browser.element('#kemerbet-session-start-button');
+    const stop = browser.element('#kemerbet-session-stop-button');
+    expect(confirmation.disabled).toBe(false);
+    expect(start.disabled).toBe(true);
+    expect(stop.disabled).toBe(true);
+    expect(browser.element('#receiver-form').elements.accountReference!.disabled).toBe(true);
+    expect(
+      browser.element('#kemerbet-agent-profile-form').elements.configurationReason!.disabled,
+    ).toBe(true);
+
+    confirmation.checked = true;
+    await confirmation.listeners.get('change')?.({ preventDefault() {} });
+    expect(start.disabled).toBe(false);
+
+    await browser.call('startKemerbetSession');
+
+    expect(startPosts).toBe(1);
+    expect(confirmation.disabled).toBe(true);
+    expect(start.disabled).toBe(true);
+    expect(stop.disabled).toBe(false);
+    expect(browser.element('#receiver-form').elements.accountReference!.disabled).toBe(true);
+  });
+
   it('does not run a pilot refresh for a non-open-pilot failure', async () => {
     const requestId = '11111111-1111-4111-8111-111111111111';
     let activeTest = false;

@@ -45,6 +45,7 @@ import {
   UnixOwnerKemerbetSessionControl,
   type OwnerKemerbetSessionControl,
   type OwnerKemerbetSessionInput,
+  type OwnerKemerbetSessionStatus,
 } from './owner-kemerbet-session-control.js';
 import {
   OwnerPlayerDepositEligibilityRejectedError,
@@ -514,21 +515,15 @@ export function buildOwnerControlApp(
     return (await kemerbetReadinessCohortControl.rootReceipt())?.event ?? 'empty';
   }
 
-  async function kemerbetSecurityRecoveryPending(): Promise<boolean> {
-    const lifecycle = await kemerbetReadinessLifecycle();
-    return (
-      lifecycle === 'security_recovery_failed_terminal' ||
-      lifecycle === 'security_recovery_profile_finalized' ||
-      lifecycle === 'recheck_authorization_spent_failed_terminal' ||
-      lifecycle === 'security_recovery_cohort_staged' ||
-      lifecycle === 'imported' ||
-      lifecycle === 'retryable_failed'
-    );
-  }
-
-  type KemerbetStateMutationMode = 'ordinary' | 'readiness_cohort' | 'security_recovery';
+  type KemerbetStateMutationMode =
+    'ordinary' | 'private_session' | 'readiness_cohort' | 'security_recovery';
   type KemerbetStateMutationResult<T> =
-    { readonly state: 'blocked' } | { readonly state: 'completed'; readonly value: T };
+    | { readonly state: 'blocked' }
+    | {
+        readonly securityRecoverySessionAllowed: boolean;
+        readonly state: 'completed';
+        readonly value: T;
+      };
 
   async function runKemerbetStateMutation<T>(
     mode: KemerbetStateMutationMode,
@@ -538,10 +533,10 @@ export function buildOwnerControlApp(
       const lifecycle = await kemerbetReadinessLifecycle();
       if (
         lifecycle === 'recheck_authorization_spent_failed_terminal' ||
-        lifecycle === 'security_recovery_cohort_staged' ||
+        (lifecycle === 'security_recovery_cohort_staged' && mode !== 'private_session') ||
         lifecycle === 'imported' ||
         lifecycle === 'retryable_failed' ||
-        (mode === 'ordinary' &&
+        ((mode === 'ordinary' || mode === 'private_session') &&
           (lifecycle === 'security_recovery_failed_terminal' ||
             lifecycle === 'security_recovery_profile_finalized')) ||
         (mode === 'readiness_cohort' && lifecycle === 'security_recovery_failed_terminal') ||
@@ -549,8 +544,25 @@ export function buildOwnerControlApp(
       ) {
         return { state: 'blocked' };
       }
-      return { state: 'completed', value: await mutation() };
+      return {
+        securityRecoverySessionAllowed:
+          mode === 'private_session' && lifecycle === 'security_recovery_cohort_staged',
+        state: 'completed',
+        value: await mutation(),
+      };
     });
+  }
+
+  function kemerbetSessionPayload(
+    session: OwnerKemerbetSessionStatus,
+    securityRecoverySessionAllowed: boolean,
+  ): {
+    readonly securityRecoverySessionAllowed?: true;
+    readonly session: OwnerKemerbetSessionStatus;
+  } {
+    return securityRecoverySessionAllowed && session.quarantine === undefined
+      ? { securityRecoverySessionAllowed: true, session }
+      : { session };
   }
 
   app.post('/v1/owner/telegram-beta-invites', async (request, reply) => {
@@ -1278,29 +1290,28 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const lifecycle = await kemerbetReadinessLifecycle();
-      if (lifecycle === 'recheck_authorization_spent_failed_terminal') {
-        return reply.code(200).send({ session: OWNER_KEMERBET_RECHECK_SPENT_TERMINAL_SESSION });
-      }
-      if (lifecycle === 'security_recovery_failed_terminal') {
-        return reply.code(200).send({ session: OWNER_KEMERBET_SECURITY_RECOVERY_SESSION });
-      }
-      if (lifecycle === 'security_recovery_profile_finalized') {
-        return reply
-          .code(200)
-          .send({ session: OWNER_KEMERBET_SECURITY_RECOVERY_COHORT_REQUIRED_SESSION });
-      }
-      if (
-        lifecycle === 'security_recovery_cohort_staged' ||
-        lifecycle === 'imported' ||
-        lifecycle === 'retryable_failed'
-      ) {
-        return reply
-          .code(200)
-          .send({ session: OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION });
-      }
-      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
-      return reply.code(200).send({ session: await kemerbetSessionControl.status(accountId) });
+      const payload = await serializeKemerbetProfileLifecycle(async () => {
+        const lifecycle = await kemerbetReadinessLifecycle();
+        if (lifecycle === 'recheck_authorization_spent_failed_terminal') {
+          return { session: OWNER_KEMERBET_RECHECK_SPENT_TERMINAL_SESSION };
+        }
+        if (lifecycle === 'security_recovery_failed_terminal') {
+          return { session: OWNER_KEMERBET_SECURITY_RECOVERY_SESSION };
+        }
+        if (lifecycle === 'security_recovery_profile_finalized') {
+          return { session: OWNER_KEMERBET_SECURITY_RECOVERY_COHORT_REQUIRED_SESSION };
+        }
+        if (lifecycle === 'security_recovery_cohort_staged') {
+          const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+          return kemerbetSessionPayload(await kemerbetSessionControl.status(accountId), true);
+        }
+        if (lifecycle === 'imported' || lifecycle === 'retryable_failed') {
+          return { session: OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION };
+        }
+        const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+        return { session: await kemerbetSessionControl.status(accountId) };
+      });
+      return reply.code(200).send(payload);
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1330,11 +1341,14 @@ export function buildOwnerControlApp(
       const after = Number(afterValue);
       if (!Number.isSafeInteger(after)) return reply.code(400).send({ error: 'invalid_request' });
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      if (await kemerbetSecurityRecoveryPending()) {
+      const mutation = await runKemerbetStateMutation('private_session', async () => {
+        const accountId = await interactiveKemerbetAgentProfileId(authUserId);
+        return kemerbetSessionControl.frame(accountId, generation, after);
+      });
+      if (mutation.state === 'blocked') {
         return reply.code(409).send({ error: 'kemerbet_security_recovery_required' });
       }
-      const accountId = await interactiveKemerbetAgentProfileId(authUserId);
-      const frame = await kemerbetSessionControl.frame(accountId, generation, after);
+      const frame = mutation.value;
       if (!frame) return reply.code(204).send();
       return reply
         .header('cache-control', 'no-store, max-age=0')
@@ -1366,13 +1380,15 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const mutation = await runKemerbetStateMutation('ordinary', async () => {
+      const mutation = await runKemerbetStateMutation('private_session', async () => {
         const accountId = await interactiveKemerbetAgentProfileId(authUserId);
         return kemerbetSessionControl.start(accountId, body.requestId as string);
       });
       return mutation.state === 'blocked'
         ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
-        : reply.code(202).send({ session: mutation.value });
+        : reply
+            .code(202)
+            .send(kemerbetSessionPayload(mutation.value, mutation.securityRecoverySessionAllowed));
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1445,7 +1461,7 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const mutation = await runKemerbetStateMutation('ordinary', async () => {
+      const mutation = await runKemerbetStateMutation('private_session', async () => {
         const accountId = await interactiveKemerbetAgentProfileId(authUserId);
         return kemerbetSessionControl.input(
           accountId,
@@ -1454,7 +1470,9 @@ export function buildOwnerControlApp(
       });
       return mutation.state === 'blocked'
         ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
-        : reply.code(200).send({ session: mutation.value });
+        : reply
+            .code(200)
+            .send(kemerbetSessionPayload(mutation.value, mutation.securityRecoverySessionAllowed));
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||
@@ -1478,13 +1496,15 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await interactiveOwnerSubject(request.raw.rawHeaders);
-      const mutation = await runKemerbetStateMutation('ordinary', async () => {
+      const mutation = await runKemerbetStateMutation('private_session', async () => {
         const accountId = await interactiveKemerbetAgentProfileId(authUserId);
         return kemerbetSessionControl.stop(accountId, body.requestId as string);
       });
       return mutation.state === 'blocked'
         ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
-        : reply.code(202).send({ session: mutation.value });
+        : reply
+            .code(202)
+            .send(kemerbetSessionPayload(mutation.value, mutation.securityRecoverySessionAllowed));
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||

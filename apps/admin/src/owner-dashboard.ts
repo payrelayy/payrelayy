@@ -450,6 +450,7 @@ let accessTokenRefreshAt;
 let ownerRefreshTimer;
 let ownerRefreshPromise;
 let ownerAuthGeneration = 0;
+let pendingKemerbetReadinessCohortRequestId;
 let currentInvite;
 let currentPilot;
 let currentPilotLoaded = false;
@@ -476,8 +477,111 @@ const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
 const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
 const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
+const KEMERBET_READINESS_REQUEST_STORAGE_KEY =
+  'fetanagent.owner.kemerbet-readiness-request.v1';
+const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000;
+// Caddy's Owner upstream first-header deadline is 30 seconds. Fail locally first so the UI can
+// reconcile an uncertain mutation using the same idempotency key instead of waiting on a gateway
+// timeout whose response shape is no longer authoritative.
+const OWNER_API_REQUEST_TIMEOUT_MS = 25 * 1_000;
+const OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS = 4 * 1_000;
+const OWNER_REFRESH_RETRY_DELAY_MS = 5 * 1_000;
 const KEMERBET_TEXT_BATCH_DELAY_MS = 180;
 const KEMERBET_TEXT_BATCH_MAX_CHARS = 64;
+
+function ownerTransportTimeoutError() {
+  return new Error('owner_transport_timeout');
+}
+
+function ownerTransportNetworkError() {
+  return new Error('owner_transport_network');
+}
+
+function isOwnerTransportError(error) {
+  return error instanceof Error &&
+    (error.message === 'owner_transport_timeout' ||
+      error.message === 'owner_transport_network');
+}
+
+function createRequestDeadline(timeoutMs) {
+  const controller = new AbortController();
+  let complete = false;
+  let timer;
+  let rejectDeadline;
+  const deadline = new Promise((_resolve, reject) => {
+    rejectDeadline = reject;
+    timer = window.setTimeout(() => {
+      if (complete) return;
+      const error = ownerTransportTimeoutError();
+      rejectDeadline(error);
+      controller.abort();
+    }, timeoutMs);
+  });
+  return {
+    finish() {
+      if (complete) return;
+      complete = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    },
+    async run(operation) {
+      if (complete) throw ownerTransportTimeoutError();
+      try {
+        return await Promise.race([Promise.resolve().then(operation), deadline]);
+      } catch (error) {
+        if (controller.signal.aborted) throw ownerTransportTimeoutError();
+        throw error;
+      }
+    },
+    signal: controller.signal,
+  };
+}
+
+const RESPONSE_BODY_READERS = new Set([
+  'arrayBuffer',
+  'blob',
+  'formData',
+  'json',
+  'text',
+]);
+
+function deadlineBoundResponse(response, deadline) {
+  return new Proxy(response, {
+    get(target, property) {
+      if (property === 'clone') {
+        return () => deadlineBoundResponse(target.clone(), deadline);
+      }
+      if (RESPONSE_BODY_READERS.has(property)) {
+        return async (...args) => {
+          try {
+            return await deadline.run(() => target[property](...args));
+          } finally {
+            deadline.finish();
+          }
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+async function beginDeadlineFetch(input, init, timeoutMs) {
+  const deadline = createRequestDeadline(timeoutMs);
+  try {
+    const response = await deadline.run(() => fetch(input, { ...init, signal: deadline.signal }));
+    return { deadline, response };
+  } catch (error) {
+    deadline.finish();
+    if (isOwnerTransportError(error)) throw error;
+    throw ownerTransportNetworkError();
+  }
+}
+
+async function deadlineFetch(input, init, timeoutMs) {
+  const request = await beginDeadlineFetch(input, init, timeoutMs);
+  if (request.response.status === 204) request.deadline.finish();
+  return deadlineBoundResponse(request.response, request.deadline);
+}
 
 function ordinaryKemerbetMutationAllowed() {
   return !kemerbetSecurityRecoveryRequired;
@@ -700,6 +804,47 @@ function persistOwnerSession() {
   );
 }
 
+function validOwnerMutationRequestId(value) {
+  return typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
+
+function readPendingKemerbetReadinessRequestId() {
+  if (pendingKemerbetReadinessCohortRequestId) {
+    return pendingKemerbetReadinessCohortRequestId;
+  }
+  try {
+    const stored = window.sessionStorage.getItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY);
+    if (!validOwnerMutationRequestId(stored)) {
+      window.sessionStorage.removeItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY);
+      return undefined;
+    }
+    pendingKemerbetReadinessCohortRequestId = stored;
+    return stored;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistPendingKemerbetReadinessRequestId(requestId) {
+  if (!validOwnerMutationRequestId(requestId)) throw new Error('invalid_request_id');
+  pendingKemerbetReadinessCohortRequestId = requestId;
+  try {
+    window.sessionStorage.setItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY, requestId);
+  } catch {
+    // The in-memory request ID still prevents a blind retry in this tab.
+  }
+}
+
+function clearPendingKemerbetReadinessRequestId() {
+  pendingKemerbetReadinessCohortRequestId = undefined;
+  try {
+    window.sessionStorage.removeItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY);
+  } catch {
+    // The in-memory value is already cleared after a terminal response.
+  }
+}
+
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
@@ -767,7 +912,11 @@ function validOwnerAuthSession(value) {
 }
 
 async function loadOwnerAuthConfig() {
-  const response = await fetch('/owner/config.json', { cache: 'no-store', credentials: 'omit' });
+  const response = await deadlineFetch(
+    '/owner/config.json',
+    { cache: 'no-store', credentials: 'omit' },
+    OWNER_API_REQUEST_TIMEOUT_MS,
+  );
   if (!response.ok) throw new Error('config');
   const config = await response.json();
   if (config.supabaseUrl !== expectedSupabaseUrl ||
@@ -786,6 +935,25 @@ function scheduleOwnerRefresh() {
   ownerRefreshTimer = window.setTimeout(
     () => void refreshOwnerSession().catch(() => undefined),
     delay,
+  );
+}
+
+function scheduleOwnerRefreshRetry() {
+  clearOwnerRefreshTimer();
+  if (!refreshToken || !ownerSessionExpiresAt || Date.now() >= ownerSessionExpiresAt) return;
+  ownerRefreshTimer = window.setTimeout(
+    () =>
+      void refreshOwnerSession()
+        .then(() => {
+          if (!loginPanel.hidden && accessToken) {
+            return loadOwnerDashboardAfterAuthentication(
+              'Owner session restored after a temporary connection failure.',
+            );
+          }
+          return undefined;
+        })
+        .catch(() => undefined),
+    OWNER_REFRESH_RETRY_DELAY_MS,
   );
 }
 
@@ -816,7 +984,7 @@ async function refreshOwnerSession() {
       signOut('Your twelve-hour Owner session ended. Sign in again to continue.');
       throw new Error('signed_out');
     }
-    const response = await fetch(
+    const request = await beginDeadlineFetch(
       ownerAuthConfig.supabaseUrl + '/auth/v1/token?grant_type=refresh_token',
       {
         method: 'POST',
@@ -826,17 +994,34 @@ async function refreshOwnerSession() {
         body: JSON.stringify({ refresh_token: refreshToken }),
         referrerPolicy: 'no-referrer',
       },
+      OWNER_TOKEN_REQUEST_TIMEOUT_MS,
     );
-    if (!response.ok || generation !== ownerAuthGeneration) throw new Error('signed_out');
+    if (generation !== ownerAuthGeneration) {
+      request.deadline.finish();
+      throw new Error('signed_out');
+    }
+    if ([400, 401, 403].includes(request.response.status)) {
+      request.deadline.finish();
+      throw new Error('owner_auth_rejected');
+    }
+    if (!request.response.ok) {
+      request.deadline.finish();
+      throw ownerTransportNetworkError();
+    }
+    const response = deadlineBoundResponse(request.response, request.deadline);
     applyOwnerAuthSession(await response.json(), false);
   })();
   try {
     await ownerRefreshPromise;
-  } catch {
-    if (generation === ownerAuthGeneration) {
+  } catch (error) {
+    if (generation !== ownerAuthGeneration) throw new Error('signed_out');
+    if (error instanceof Error &&
+        (error.message === 'owner_auth_rejected' || error.message === 'signed_out')) {
       signOut('Your Owner session could not be renewed. Sign in again to continue.');
+      throw new Error('signed_out');
     }
-    throw new Error('signed_out');
+    scheduleOwnerRefreshRetry();
+    throw isOwnerTransportError(error) ? error : ownerTransportNetworkError();
   } finally {
     if (generation === ownerAuthGeneration) ownerRefreshPromise = undefined;
   }
@@ -853,22 +1038,29 @@ async function ensureFreshOwnerAccessToken() {
   if (Date.now() >= accessTokenRefreshAt) await refreshOwnerSession();
 }
 
-async function ownerRequest(path, init) {
+async function ownerRequest(path, init, timeoutMs = OWNER_API_REQUEST_TIMEOUT_MS) {
   await ensureFreshOwnerAccessToken();
   if (!accessToken) throw new Error('signed_out');
-  const response = await fetch(path, {
-    ...init,
-    cache: 'no-store',
-    credentials: 'omit',
-    headers: { ...init.headers, authorization: 'Bearer ' + accessToken },
-    referrerPolicy: 'no-referrer',
-  });
-  if (response.status === 401 || response.status === 403) {
+  const request = await beginDeadlineFetch(
+    path,
+    {
+      ...init,
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { ...init.headers, authorization: 'Bearer ' + accessToken },
+      referrerPolicy: 'no-referrer',
+    },
+    timeoutMs,
+  );
+  if (request.response.status === 401 || request.response.status === 403) {
+    request.deadline.finish();
     signOut('Your session is unavailable or is not an active Owner.');
     throw new Error('signed_out');
   }
-  if (response.status === 409) {
-    const failure = await response.clone().json().catch(() => undefined);
+  if (request.response.status === 409) {
+    const failure = await request.deadline
+      .run(() => request.response.clone().json())
+      .catch(() => undefined);
     if (failure && typeof failure === 'object' && !Array.isArray(failure) &&
         Object.keys(failure).join(',') === 'error' &&
         failure.error === 'kemerbet_security_recovery_required') {
@@ -876,7 +1068,8 @@ async function ownerRequest(path, init) {
       applyKemerbetQuarantineMutationBoundary();
     }
   }
-  return response;
+  if (request.response.status === 204) request.deadline.finish();
+  return deadlineBoundResponse(request.response, request.deadline);
 }
 
 function validPlayerRequest(value) {
@@ -2120,6 +2313,41 @@ function kemerbetReadinessCohortMutationHeaders(requestId) {
   };
 }
 
+function confirmKemerbetReadinessCohortPrepared() {
+  readinessCohortPrepared = true;
+  kemerbetReadinessCohortConfirmation.checked = false;
+  clearPendingKemerbetReadinessRequestId();
+  setNotice(
+    'One-use readiness cohort prepared for five Players. Identifiers are redacted, ' +
+      'Transfer is disabled, and no money moved.',
+  );
+}
+
+async function reconcilePendingKemerbetReadinessCohort() {
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-session', {
+      method: 'GET',
+      headers: {},
+    }, OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      await response.json().catch(() => undefined);
+      return 'uncertain';
+    }
+    const payload = await response.json();
+    const session = validKemerbetSession(payload && payload.session);
+    if (!session) return 'uncertain';
+    await renderKemerbetSession(session);
+    if (session.quarantine?.reasonCode === 'security_recovery_in_progress') {
+      confirmKemerbetReadinessCohortPrepared();
+      return 'prepared';
+    }
+    return 'retry_same_request';
+  } catch (error) {
+    if (isSignedOutError(error)) throw error;
+    return 'uncertain';
+  }
+}
+
 async function prepareKemerbetReadinessCohort() {
   if (!requireKemerbetReadinessCohortMutation()) return;
   const hasOpenPilot = currentPilot?.pilotStatus === 'draft' ||
@@ -2130,10 +2358,28 @@ async function prepareKemerbetReadinessCohort() {
   if (!window.confirm(
     'Prepare the server-only one-use input from the current exact five eligible KemerBet Players? No identifier or amount is sent by this browser, Transfer remains disabled, and no money moves.',
   )) return;
-  const requestId = crypto.randomUUID();
   setBusy(kemerbetReadinessCohortForm, true);
-  setNotice('Preparing the one-use KemerBet readiness cohort with identifiers redacted…');
   try {
+    let requestId = readPendingKemerbetReadinessRequestId();
+    if (requestId) {
+      setNotice(
+        'Reconciling the previous readiness request before any retry. Transfer remains disabled ' +
+          'and no money moves…',
+      );
+      const reconciliation = await reconcilePendingKemerbetReadinessCohort();
+      if (reconciliation === 'prepared') return;
+      if (reconciliation === 'uncertain') {
+        setNotice(
+          'The previous readiness request is still uncertain. Its same one-use request is ' +
+            'retained; no retry was sent, Transfer remains disabled, and no money moved.',
+        );
+        return;
+      }
+    } else {
+      requestId = crypto.randomUUID();
+      persistPendingKemerbetReadinessRequestId(requestId);
+    }
+    setNotice('Preparing the one-use KemerBet readiness cohort with identifiers redacted…');
     const response = await ownerRequest('/v1/owner/kemerbet-readiness-cohort/prepare', {
       method: 'POST',
       headers: kemerbetReadinessCohortMutationHeaders(requestId),
@@ -2142,30 +2388,44 @@ async function prepareKemerbetReadinessCohort() {
         requestId,
       }),
     });
-    if (response.status === 409) {
-      const failure = await response.json();
-      await loadCurrentPilot();
-      if (failure?.error === 'readiness_cohort_open_pilot') {
+    if (response.status !== 200 && response.status !== 201) {
+      const failure = await response.json().catch(() => undefined);
+      if (response.status === 409 && failure?.error === 'readiness_cohort_open_pilot') {
+        await loadCurrentPilot();
+        clearPendingKemerbetReadinessRequestId();
         setNotice(
           'Stop the current TeleBirr pilot below before preparing the one-use KemerBet readiness cohort. Money remains disabled.',
         );
         return;
       }
-      throw new Error('readiness_cohort_prepare');
-    }
-    if (response.status !== 200 && response.status !== 201) {
+      if (response.status === 400 ||
+          (response.status === 409 && failure?.error === 'readiness_cohort_not_ready')) {
+        clearPendingKemerbetReadinessRequestId();
+      }
       throw new Error('readiness_cohort_prepare');
     }
     const prepared = validKemerbetReadinessCohortReceipt(await response.json());
     if (!prepared || (response.status === 200) !== prepared.alreadyPrepared) {
       throw new Error('readiness_cohort_prepare');
     }
-    readinessCohortPrepared = true;
-    kemerbetReadinessCohortConfirmation.checked = false;
-    setNotice('One-use readiness cohort prepared for five Players. Identifiers are redacted, Transfer is disabled, and no money moved.');
+    confirmKemerbetReadinessCohortPrepared();
   } catch (error) {
     if (!isSignedOutError(error)) {
-      setNotice('Readiness-cohort preparation was rejected or unavailable. Nothing was transferred and no money moved.');
+      if (readPendingKemerbetReadinessRequestId()) {
+        const reconciliation = await reconcilePendingKemerbetReadinessCohort();
+        if (reconciliation === 'prepared') return;
+        setNotice(
+          reconciliation === 'uncertain'
+            ? 'Readiness preparation is temporarily unreachable. The same one-use request is ' +
+                'retained for reconciliation; no retry was sent and no money moved.'
+            : 'No completed readiness cohort was found. The same one-use request is retained ' +
+                'for the next confirmed retry; Transfer remains disabled and no money moved.',
+        );
+      } else {
+        setNotice(
+          'Readiness-cohort preparation was rejected. Nothing was transferred and no money moved.',
+        );
+      }
     }
   } finally {
     setBusy(kemerbetReadinessCohortForm, false);
@@ -2343,14 +2603,18 @@ loginForm.addEventListener('submit', async (event) => {
   let failureNotice = 'Sign-in failed. Check the staging Owner account and try again.';
   try {
     const config = await loadOwnerAuthConfig();
-    const response = await fetch(config.supabaseUrl + '/auth/v1/token?grant_type=password', {
-      method: 'POST',
-      cache: 'no-store',
-      credentials: 'omit',
-      headers: { apikey: config.publishableKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ email: loginForm.elements.email.value, password: passwordInput.value }),
-      referrerPolicy: 'no-referrer',
-    });
+    const response = await deadlineFetch(
+      config.supabaseUrl + '/auth/v1/token?grant_type=password',
+      {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { apikey: config.publishableKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: loginForm.elements.email.value, password: passwordInput.value }),
+        referrerPolicy: 'no-referrer',
+      },
+      OWNER_TOKEN_REQUEST_TIMEOUT_MS,
+    );
     passwordInput.value = '';
     if (!response.ok) throw new Error('login');
     const session = await response.json();
@@ -2386,8 +2650,17 @@ async function restoreOwnerSession() {
     ownerSessionExpiresAt = persisted.expiresAt;
     refreshToken = persisted.refreshToken;
     await refreshOwnerSession();
-  } catch {
-    signOut('Your saved Owner session could not be restored. Sign in again to continue.');
+  } catch (error) {
+    if (isSignedOutError(error)) {
+      if (refreshToken || readPersistedOwnerSession()) {
+        signOut('Your saved Owner session was rejected or expired. Sign in again to continue.');
+      }
+    } else {
+      setNotice(
+        'Your saved Owner session is temporarily unreachable. Its twelve-hour credential remains ' +
+          'saved in this tab; reload or wait for the automatic retry.',
+      );
+    }
     return;
   } finally {
     setBusy(loginForm, false);
@@ -2456,11 +2729,15 @@ logoutButton.addEventListener('click', async () => {
   const config = ownerAuthConfig;
   const token = accessToken;
   if (config && token) {
-    await fetch(config.supabaseUrl + '/auth/v1/logout?scope=local', {
-      method: 'POST', cache: 'no-store', credentials: 'omit',
-      headers: { apikey: config.publishableKey, authorization: 'Bearer ' + token },
-      referrerPolicy: 'no-referrer',
-    }).catch(() => undefined);
+    await deadlineFetch(
+      config.supabaseUrl + '/auth/v1/logout?scope=local',
+      {
+        method: 'POST', cache: 'no-store', credentials: 'omit',
+        headers: { apikey: config.publishableKey, authorization: 'Bearer ' + token },
+        referrerPolicy: 'no-referrer',
+      },
+      OWNER_TOKEN_REQUEST_TIMEOUT_MS,
+    ).catch(() => undefined);
   }
   signOut();
 });

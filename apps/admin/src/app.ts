@@ -35,6 +35,7 @@ import {
   OwnerKemerbetReadinessCohortRejectedError,
   OwnerKemerbetReadinessCohortUnavailableError,
   type OwnerKemerbetReadinessCohortControl,
+  type OwnerKemerbetReadinessCohortReceipt,
   type OwnerKemerbetReadinessLifecycleState,
 } from './owner-kemerbet-readiness-cohort.js';
 import { reconcileOwnerKemerbetReadinessRootReceipt } from './owner-kemerbet-readiness-reconciler.js';
@@ -916,7 +917,9 @@ export function buildOwnerControlApp(
         return reply.code(400).send({ error: 'invalid_request' });
       }
       const authUserId = await ownerSubject(request.raw.rawHeaders);
+      request.log.info({ phase: 'auth_complete' }, 'Owner readiness phase completed.');
       const mutation = await runKemerbetStateMutation('readiness_cohort', async () => {
+        request.log.info({ phase: 'lane_entered' }, 'Owner readiness phase completed.');
         const requestId = body.requestId as string;
         // Reconcile any exact root-owned import/completion receipt before deciding whether the
         // one-use input is still absent. This closes the crash window where root consumed the files
@@ -930,38 +933,63 @@ export function buildOwnerControlApp(
         }
         const openPilot = await dependencies.runtime.privateLivePilot.current(authUserId);
         if (openPilot?.pilotStatus === 'draft' || openPilot?.pilotStatus === 'armed') {
-          return reply.code(409).send({ error: 'readiness_cohort_open_pilot' });
+          return { state: 'open_pilot' as const };
         }
         const claim = await dependencies.runtime.kemerbetReadinessCohorts.claim(
           authUserId,
           requestId,
         );
+        request.log.info({ phase: 'claim_complete' }, 'Owner readiness phase completed.');
         if (claim.state === 'failed_terminal') {
           throw new OwnerKemerbetReadinessCohortRejectedError();
         }
-        const prepared = projectKemerbetReadinessCohortReceipt(
-          claim.state === 'prepared'
-            ? await kemerbetReadinessCohortControl.prepare(claim.players, requestId, claim.claimId)
-            : {
-                alreadyPrepared: true,
-                identifiersRedacted: true,
-                moneyMoved: false,
-                playersPrepared: 5,
-                transferDisabled: true,
-              },
-        );
+        let prepared: OwnerKemerbetReadinessCohortReceipt;
         if (claim.state === 'prepared') {
+          prepared = projectKemerbetReadinessCohortReceipt(
+            await kemerbetReadinessCohortControl.prepare(claim.players, requestId, claim.claimId),
+          );
+          request.log.info({ phase: 'files_published' }, 'Owner readiness phase completed.');
           await dependencies.runtime.kemerbetReadinessCohorts.markExported(
             authUserId,
             requestId,
             claim.claimId,
           );
+          request.log.info({ phase: 'export_marked' }, 'Owner readiness phase completed.');
+        } else {
+          const lifecycle = await kemerbetReadinessLifecycle();
+          if (
+            !new Set<OwnerKemerbetReadinessLifecycleState>([
+              'completed',
+              'imported',
+              'retryable_failed',
+              'security_recovery_cohort_staged',
+              'staged',
+            ]).has(lifecycle)
+          ) {
+            // Never claim that a prior export succeeded when neither the frozen stage nor a root
+            // receipt exists. The same request ID remains safe to reconcile after repair.
+            throw new OwnerKemerbetReadinessCohortUnavailableError();
+          }
+          prepared = projectKemerbetReadinessCohortReceipt({
+            alreadyPrepared: true,
+            identifiersRedacted: true,
+            moneyMoved: false,
+            playersPrepared: 5,
+            transferDisabled: true,
+          });
+          request.log.info({ phase: 'stage_reconciled' }, 'Owner readiness phase completed.');
         }
-        return prepared;
+        return { receipt: prepared, state: 'prepared' as const };
       });
-      return mutation.state === 'blocked' || mutation.value === undefined
-        ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
-        : reply.code(mutation.value.alreadyPrepared ? 200 : 201).send(mutation.value);
+      if (mutation.state === 'blocked' || mutation.value === undefined) {
+        return reply.code(409).send({ error: 'kemerbet_security_recovery_required' });
+      }
+      if (mutation.value.state === 'open_pilot') {
+        return reply.code(409).send({ error: 'readiness_cohort_open_pilot' });
+      }
+      return reply
+        .code(mutation.value.receipt.alreadyPrepared ? 200 : 201)
+        .send(mutation.value.receipt);
     } catch (error) {
       if (
         error instanceof OwnerAuthenticationRejectedError ||

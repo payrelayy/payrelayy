@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const scriptPath = resolve(
@@ -1194,7 +1194,32 @@ try {
     }
   }
 } finally {
-  rmSync(fixtureRoot, { recursive: true, force: true });
+  const resolvedFixtureRoot = resolve(fixtureRoot);
+  const fixtureRelativeToTemp = relative(resolve(tmpdir()), resolvedFixtureRoot);
+  assert.ok(
+    fixtureRelativeToTemp !== '' &&
+      fixtureRelativeToTemp !== '..' &&
+      !fixtureRelativeToTemp.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) &&
+      !isAbsolute(fixtureRelativeToTemp),
+    'the H14 engine fixture cleanup target must remain inside the OS temporary directory',
+  );
+  try {
+    rmSync(resolvedFixtureRoot, { recursive: true, force: true });
+  } catch (error) {
+    if (
+      process.platform === 'win32' ||
+      typeof process.getuid !== 'function' ||
+      process.getuid() === 0 ||
+      !(error instanceof Error && 'code' in error && ['EACCES', 'EPERM'].includes(error.code))
+    ) {
+      throw error;
+    }
+    const removal = spawnSync('sudo', ['-n', 'rm', '-rf', '--', resolvedFixtureRoot], {
+      encoding: 'utf8',
+    });
+    assert.equal(removal.status, 0, removal.stderr || 'root-owned H14 fixture cleanup failed');
+    assert.equal(existsSync(resolvedFixtureRoot), false);
+  }
 }
 
 // Execute the bridge-ledger namespace classifier and append-complete publisher

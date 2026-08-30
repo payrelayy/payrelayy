@@ -421,6 +421,14 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Owner session restored after reload.');
     expect(response.body).toContain('const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000');
     expect(response.body).toContain('const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000');
+    expect(response.body).toContain('const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000');
+    expect(response.body).toContain('const OWNER_API_REQUEST_TIMEOUT_MS = 25 * 1_000');
+    expect(response.body).toContain('const OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS = 4 * 1_000');
+    expect(response.body).toContain('new AbortController()');
+    expect(response.body).toContain('const response = await deadline.run(');
+    expect(response.body).toContain('return await deadline.run(() => target[property](...args))');
+    expect(response.body).toContain("error.message === 'owner_transport_timeout'");
+    expect(response.body).toContain("error.message === 'owner_transport_network'");
     expect(response.body).toContain('body: JSON.stringify({ refresh_token: refreshToken })');
     expect(response.body).toContain('value.refresh_token.length < 12');
     expect(response.body).not.toContain('value.refresh_token.length < 20');
@@ -433,8 +441,11 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toMatch(
       /signOut\(failureNotice\);\s*return;\s*\} finally \{\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\(/u,
     );
-    expect(response.body).toMatch(
-      /signOut\('Your saved Owner session could not be restored\. Sign in again to continue\.'\);\s*return;\s*\} finally \{\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\('Owner session restored after reload\.'\);/u,
+    expect(response.body).toContain(
+      'Your saved Owner session is temporarily unreachable. Its twelve-hour credential remains',
+    );
+    expect(response.body).toContain(
+      'Your saved Owner session was rejected or expired. Sign in again to continue.',
     );
     expect(response.body).not.toMatch(
       /setNotice\('Signed in\.[^']*'\);\s*await loadOwnerPlayerQueues\(\);/u,
@@ -580,6 +591,10 @@ describe('Owner-control HTTP boundary', () => {
     expect(handler).toContain('body: JSON.stringify({');
     expect(handler).not.toMatch(/playerIds|playerId\b|configurationDigest|amountMinor/u);
     expect(handler).toContain('validKemerbetReadinessCohortReceipt');
+    expect(handler).toContain('readPendingKemerbetReadinessRequestId()');
+    expect(handler).toContain('reconcilePendingKemerbetReadinessCohort()');
+    expect(handler).toContain('persistPendingKemerbetReadinessRequestId(requestId)');
+    expect(handler).not.toContain('console.');
     expect(script.body).toContain(
       "'alreadyPrepared,identifiersRedacted,moneyMoved,playersPrepared,transferDisabled'",
     );
@@ -1070,6 +1085,56 @@ describe('Owner-control HTTP boundary', () => {
     },
   );
 
+  it('fails closed when an exported DB claim has neither a staged pair nor a root receipt', async () => {
+    let lifecycleReads = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => false,
+        lifecycle: async () => {
+          lifecycleReads += 1;
+          return 'security_recovery_profile_finalized';
+        },
+        prepare: async () => {
+          throw new Error('an exported claim without files must never be treated as staged');
+        },
+        rootReceipt: async () => undefined,
+      },
+      runtime: runtime({
+        kemerbetReadinessCohorts: {
+          claim: async () => ({
+            alreadyClaimed: true,
+            claimId: '88888888-8888-4888-8888-888888888888',
+            players: readinessEligiblePlayers(),
+            state: 'exported',
+          }),
+          markExported: async () => {
+            throw new Error('export must not repeat');
+          },
+          recordRootReceipt: async () => {
+            throw new Error('no root receipt exists');
+          },
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-readiness-cohort/prepare',
+      headers: kemerbetReadinessCohortMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_kemerbet_readiness_five_player_no_transfer',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(lifecycleReads).toBe(2);
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'owner_control_unavailable' });
+    expect(response.body).not.toContain('PLAYER_');
+    await app.close();
+  });
+
   it('reports an expired open pilot before creating or staging a readiness claim', async () => {
     const events: string[] = [];
     const defaultPrivateLivePilot = runtime().privateLivePilot;
@@ -1251,7 +1316,13 @@ describe('Owner-control HTTP boundary', () => {
         return;
       }
       expect(response.statusCode).toBe(200);
-      expect(order).toEqual(['root-receipt', 'root-receipt', 'record-root-receipt', 'claim']);
+      expect(order).toEqual([
+        'root-receipt',
+        'root-receipt',
+        'record-root-receipt',
+        'claim',
+        'root-receipt',
+      ]);
       expect(observedReceipt?.[0]).toBe(claimId);
       expect(observedReceipt?.[1]).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,

@@ -2317,6 +2317,25 @@ async function loadOwnerPlayerQueues() {
   }
 }
 
+async function loadOwnerDashboardAfterAuthentication(successNotice) {
+  loginPanel.hidden = true;
+  invitePanel.hidden = false;
+  setNotice(successNotice);
+  try {
+    await loadOwnerPlayerQueues();
+  } catch (error) {
+    // Authentication and dashboard hydration are separate boundaries. A transient read failure
+    // must not discard a valid, rotating Owner session or misreport it as a password failure.
+    // ownerRequest already signs out on an actual 401/403 and marks that path with signed_out.
+    if (!isSignedOutError(error)) {
+      setNotice(
+        'Owner authentication succeeded, but dashboard data is temporarily unavailable. ' +
+        'Your session remains active; select Refresh to retry.',
+      );
+    }
+  }
+}
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBusy(loginForm, true);
@@ -2343,16 +2362,16 @@ loginForm.addEventListener('submit', async (event) => {
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
     applyOwnerAuthSession(session, true);
-    loginPanel.hidden = true;
-    invitePanel.hidden = false;
-    setNotice('Signed in. This Owner session survives reloads in this tab for up to twelve hours.');
-    await loadOwnerPlayerQueues();
   } catch {
     passwordInput.value = '';
     signOut(failureNotice);
+    return;
   } finally {
     setBusy(loginForm, false);
   }
+  await loadOwnerDashboardAfterAuthentication(
+    'Signed in. This Owner session survives reloads in this tab for up to twelve hours.',
+  );
 });
 
 async function restoreOwnerSession() {
@@ -2367,15 +2386,13 @@ async function restoreOwnerSession() {
     ownerSessionExpiresAt = persisted.expiresAt;
     refreshToken = persisted.refreshToken;
     await refreshOwnerSession();
-    loginPanel.hidden = true;
-    invitePanel.hidden = false;
-    setNotice('Owner session restored after reload.');
-    await loadOwnerPlayerQueues();
   } catch {
     signOut('Your saved Owner session could not be restored. Sign in again to continue.');
+    return;
   } finally {
     setBusy(loginForm, false);
   }
+  await loadOwnerDashboardAfterAuthentication('Owner session restored after reload.');
 }
 
 inviteForm.addEventListener('submit', async (event) => {

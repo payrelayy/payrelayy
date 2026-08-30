@@ -425,6 +425,23 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('value.refresh_token.length < 12');
     expect(response.body).not.toContain('value.refresh_token.length < 20');
     expect(response.body).toContain('Supabase accepted sign-in but returned an unusable session.');
+    expect(response.body).toContain('async function loadOwnerDashboardAfterAuthentication(');
+    expect(response.body).toContain(
+      'Owner authentication succeeded, but dashboard data is temporarily unavailable.',
+    );
+    expect(response.body).toContain('Your session remains active; select Refresh to retry.');
+    expect(response.body).toMatch(
+      /signOut\(failureNotice\);\s*return;\s*\} finally \{\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\(/u,
+    );
+    expect(response.body).toMatch(
+      /signOut\('Your saved Owner session could not be restored\. Sign in again to continue\.'\);\s*return;\s*\} finally \{\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\('Owner session restored after reload\.'\);/u,
+    );
+    expect(response.body).not.toMatch(
+      /setNotice\('Signed in\.[^']*'\);\s*await loadOwnerPlayerQueues\(\);/u,
+    );
+    expect(response.body).not.toMatch(
+      /setNotice\('Owner session restored after reload\.'\);\s*await loadOwnerPlayerQueues\(\);/u,
+    );
     expect(response.body).toContain(
       'ownerSessionExpiresAt = currentTime + OWNER_SESSION_LIFETIME_MS',
     );

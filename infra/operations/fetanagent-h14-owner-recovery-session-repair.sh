@@ -10,7 +10,6 @@ readonly STAGING_DROPLET_ID='593344964'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly COMPOSE_FILE="/srv/fetanagent/releases/$CANONICAL_H14/infra/compose.staging-beta.yaml"
 readonly PATCH_PARENT='/srv/fetanagent/owner-patches'
-readonly SOURCE_URL='https://github.com/payrelayy/payrelayy.git'
 
 export PATH="$SAFE_PATH"
 
@@ -20,8 +19,11 @@ die() {
 }
 
 [[ "$(id -u)" == '0' ]] || die 'root is required'
-[[ "$#" -eq 1 && "$1" =~ ^[0-9a-f]{40}$ ]] || die 'pass exactly one full lowercase release SHA'
+[[ "$#" -eq 2 && "$1" =~ ^[0-9a-f]{40}$ &&
+  "$2" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$ ]] ||
+  die 'pass exactly one full lowercase release SHA and one HTTPS GitHub repository URL'
 readonly RELEASE_SHA="$1"
+readonly SOURCE_URL="$2"
 readonly RELEASE_TAG="${RELEASE_SHA:0:12}"
 readonly RELEASE_ROOT="$PATCH_PARENT/$RELEASE_SHA"
 readonly OWNER_IMAGE="fetanagent-owner-control:$RELEASE_TAG"

@@ -45,6 +45,10 @@ const helper = readFileSync(
   resolve(root, 'infra/operations/fetanagent-staging-deploy-helper.sh'),
   'utf8',
 );
+const ownerSessionRepairHelper = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-h14-owner-recovery-session-repair.sh'),
+  'utf8',
+);
 const v2V3SuccessorMigration = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v2-v3-successor-migration.sh'),
   'utf8',
@@ -4708,6 +4712,7 @@ assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
 assert.match(workflow, /^\s+- transition-ssh-verify$/m);
 assert.match(workflow, /^\s+- transition-stop-legacy$/m);
 assert.match(workflow, /^\s+- h14-owner-runtime-bridge-stage$/m);
+assert.match(workflow, /^\s+- h14-owner-kemerbet-session-bootstrap-repair-stage$/m);
 assert.match(workflow, /^\s+- h14-owner-runtime-bridge-archive-recovery-stage$/m);
 assert.match(workflow, /^\s+- recover-v1-retirement-after-expiry$/m);
 assert.match(workflow, /^\s+- predecessor-stop-and-disable$/m);
@@ -4718,6 +4723,11 @@ assert.match(workflow, /stop-exact-ecd47f5d-staging-predecessor-runtime/);
 assert.match(
   workflow,
   /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|h14-owner-runtime-bridge-stage\|h14-owner-runtime-bridge-archive-recovery-stage\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
+);
+assert.match(
+  workflow,
+  /if \[\[ "\$REQUESTED_MODE" == 'h14-owner-kemerbet-session-bootstrap-repair-stage' \]\]; then\s+\[\[ "\$CONFIRMED_OWNER_SESSION" == 'owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money' \]\]\s+else\s+\[\[ "\$REQUESTED_MODE" =~ \^\(plan\|transition-ssh-verify/u,
+  'The H15 mode must use its own exact confirmation while the legacy mode allowlist remains unchanged.',
 );
 assert.match(
   workflow,
@@ -4732,6 +4742,313 @@ assert.doesNotMatch(
 );
 assert.match(workflow, /StrictHostKeyChecking=yes/g);
 assert.match(workflow, /UserKnownHostsFile=/g);
+
+const ownerSessionRepairJobStart =
+  /\r?\n  h14-owner-kemerbet-session-bootstrap-repair-stage:\r?\n/u.exec(workflow)?.index;
+const ownerSessionRepairJobEnd =
+  /\r?\n  h14-owner-runtime-bridge-archive-recovery-stage:\r?\n/u.exec(workflow)?.index;
+assert.ok(
+  ownerSessionRepairJobStart !== undefined &&
+    ownerSessionRepairJobEnd !== undefined &&
+    ownerSessionRepairJobEnd > ownerSessionRepairJobStart,
+  'the two-target H14 repair staging job must have an exact isolated workflow boundary',
+);
+const ownerSessionRepairJob = workflow.slice(ownerSessionRepairJobStart, ownerSessionRepairJobEnd);
+assert.match(workflow, /OWNER_SESSION_REPAIR_PARENT: 826aaba79ed3e303452c4a7e04e0f6f90f699898/u);
+for (const protectedRepairContract of [
+  /if: inputs\.mode == 'h14-owner-kemerbet-session-bootstrap-repair-stage'/u,
+  /environment: staging/u,
+  /permissions:\s*\r?\n\s+contents: read\s*\r?\n\s+pull-requests: read/u,
+  /owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money/u,
+  /\.draft == false/u,
+  /\.base\.sha == \\"\$CANONICAL_H14_COMMIT\\"/u,
+  /\.head\.sha == \\"\$GITHUB_SHA\\"/u,
+  /\.head\.repo\.full_name == \\"\$GITHUB_REPOSITORY\\"/u,
+  /git -C repair merge-base --is-ancestor "\$OWNER_SESSION_REPAIR_PARENT" "\$CONFIRMED_REPAIR_IMPLEMENTATION"/u,
+  /git -C repair diff --name-only "\$CANONICAL_H14_COMMIT" "\$CONFIRMED_REPAIR_IMPLEMENTATION" -- Dockerfile infra\/compose\.staging-beta\.yaml/u,
+  /sha256sum repair\/Dockerfile/u,
+  /sha256sum canonical-h14\/Dockerfile/u,
+  /sha256sum repair\/infra\/compose\.staging-beta\.yaml/u,
+  /sha256sum canonical-h14\/infra\/compose\.staging-beta\.yaml/u,
+]) {
+  assert.match(ownerSessionRepairJob, protectedRepairContract);
+}
+for (const exactRepairDelta of [
+  '.github/workflows/staging-beta-deploy-smoke.yml',
+  'apps/admin/src/owner-dashboard-browser.test.ts',
+  'apps/admin/src/owner-dashboard.ts',
+  'apps/admin/src/owner-kemerbet-session-control.test.ts',
+  'apps/admin/src/owner-kemerbet-session-control.ts',
+  'apps/executor/src/kemerbet-session-provision-server.test.ts',
+  'apps/executor/src/kemerbet-session-provision-server.ts',
+  'infra/operations/fetanagent-h14-owner-recovery-session-repair.sh',
+  'infra/verify-executor-deployment.mjs',
+  'infra/verify-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.mjs',
+  'infra/verify-staging-beta-deploy.mjs',
+]) {
+  assert.ok(
+    ownerSessionRepairJob.includes(exactRepairDelta),
+    `the protected repair delta must include exactly reviewed path ${exactRepairDelta}`,
+  );
+}
+assert.equal(
+  (ownerSessionRepairJob.match(/\bdocker build\b/gu) ?? []).length,
+  2,
+  'the repair lane must build exactly two images',
+);
+assert.match(
+  ownerSessionRepairJob,
+  /docker build --pull=false --target admin -f canonical-h14\/Dockerfile/u,
+);
+assert.match(
+  ownerSessionRepairJob,
+  /docker build --pull=false --target executor -f canonical-h14\/Dockerfile/u,
+);
+assert.doesNotMatch(
+  ownerSessionRepairJob,
+  /--target (?:api|beta-admission|bot|customer-web|gateway)\b/u,
+  'the repair lane must never rebuild a non-target service',
+);
+for (const compositeIdentityContract of [
+  /com\.fetanagent\.canonical-release=\$CANONICAL_H14_COMMIT/u,
+  /com\.fetanagent\.repair-parent=\$OWNER_SESSION_REPAIR_PARENT/u,
+  /com\.fetanagent\.provider-action-enabled=false/u,
+  /contract=fetanagent-h14-owner-kemerbet-session-bootstrap-repair-bundle/u,
+  /deployment_order=owner-control,kemerbet-session-provision/u,
+  /rollback_order=kemerbet-session-provision,owner-control/u,
+  /canonical_release_rewritten=false/u,
+  /canonical_release_superseded=false/u,
+  /provider_action_enabled=false/u,
+  /financial_actions_mode=dry_run/u,
+  /kemerbet_executor_enabled=false/u,
+  /kemerbet_final_action_enabled=false/u,
+  /transfer_enabled=false/u,
+  /amount_entry_enabled=false/u,
+  /money_moved=false/u,
+]) {
+  assert.match(ownerSessionRepairJob, compositeIdentityContract);
+}
+assertInOrder(
+  ownerSessionRepairJob,
+  [
+    'fetanagent-owner-control-repair.tar',
+    'fetanagent-deposit-executor-repair.tar',
+    'compose.staging-beta.yaml',
+    'manifest-v1',
+    'Emit the exact root-console repair invocation without executing it',
+  ],
+  'the workflow must seal and stage only the two target images plus canonical Compose and manifest before emitting the root command',
+);
+const ownerSessionRemoteStage = ownerSessionRepairJob.slice(
+  ownerSessionRepairJob.indexOf('- name: Stage the no-secret two-image bundle'),
+  ownerSessionRepairJob.indexOf('- name: Emit the exact root-console repair invocation'),
+);
+assert.doesNotMatch(
+  ownerSessionRemoteStage,
+  /\bdocker\b|\bcurl\b|\bpsql\b|\bsupabase\b|agentsystem\.admindigi\.com|api\.telegram\.org/iu,
+  'the unprivileged remote staging step must only transfer and attest inert files',
+);
+assert.doesNotMatch(
+  ownerSessionRepairJob,
+  /root@|sudo -n|StrictHostKeyChecking=no|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'/u,
+);
+assert.match(
+  ownerSessionRepairJob,
+  /https:\/\/raw\.githubusercontent\.com\/\$GITHUB_REPOSITORY\/\$CONFIRMED_REPAIR_IMPLEMENTATION\/infra\/operations\/fetanagent-h14-owner-recovery-session-repair\.sh/u,
+);
+assert.match(
+  ownerSessionRepairJob,
+  /invocation="bash '\$root_script' '\$CONFIRMED_REPAIR_IMPLEMENTATION' '\$CANONICAL_H14_COMMIT' '\$OWNER_SESSION_REPAIR_PARENT' '\$REMOTE_BUNDLE' '\$MANIFEST_SHA' '\$HELPER_SHA' '\$confirmation'"/u,
+);
+
+for (const fixedRepairHelperContract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly PROJECT_NAME='fetanagent-staging-beta'$/mu,
+  /^readonly CANONICAL_H14='06459511d9330a0e1d956c42529b81aa9970e7a2'$/mu,
+  /^readonly OWNER_SESSION_REPAIR_PARENT='826aaba79ed3e303452c4a7e04e0f6f90f699898'$/mu,
+  /^readonly STAGING_DROPLET_ID='593344964'$/mu,
+  /^readonly CONFIRMATION='owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money'$/mu,
+  /\[\[ "\$#" -eq 7 \]\]/u,
+  /metadata\/v1\/id/u,
+  /fetanagent-h14-owner-session-repair-\[1-9\]\[0-9\]\*-\[1-9\]\[0-9\]\*-\$REPAIR_SHA/u,
+  /repair_helper_sha256/u,
+  /canonical_release_rewritten/u,
+  /canonical_release_superseded/u,
+  /provider_action_enabled=false/u,
+  /financial_actions_mode=dry_run/u,
+  /KEMERBET_EXECUTOR_ENABLED=false/u,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/u,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/u,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/u,
+]) {
+  assert.match(ownerSessionRepairHelper, fixedRepairHelperContract);
+}
+assert.doesNotMatch(
+  ownerSessionRepairHelper,
+  /\bgit\s+(?:clone|fetch|checkout)|\bdocker\s+build\b|gh api|agentsystem\.admindigi\.com|api\.telegram\.org|supabase\.co|FINANCIAL_ACTIONS_MODE=live|KEMERBET_EXECUTOR_ENABLED=true|KEMERBET_FINAL_ACTION_ENABLED=true/iu,
+  'the root helper must consume only the sealed bundle and must contain no build, repository, provider, Telegram, or live-financial path',
+);
+for (const durableRepairContract of [
+  /readonly MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.lock"/u,
+  /flock --exclusive --nonblock 9/u,
+  /readonly LEDGER_ROOT="\$LEDGER_PARENT\/h14-owner-kemerbet-session-bootstrap-repair"/u,
+  /\.installing-\$REPAIR_SHA/u,
+  /intent-v1/u,
+  /outcome-v1/u,
+  /sync -f "\$temporary"/u,
+  /sync -f "\$path"/u,
+  /outcome=recovered-and-rolled-back/u,
+  /outcome=failed-and-rolled-back/u,
+  /outcome=rollback-failed-manual-recovery-required/u,
+  /completed-\$REPAIR_SHA/u,
+]) {
+  assert.match(ownerSessionRepairHelper, durableRepairContract);
+}
+const rollbackToPredecessors = extractShellFunction(
+  ownerSessionRepairHelper,
+  'rollback_to_predecessors',
+  'recover_incomplete_ledger',
+);
+assertInOrder(
+  rollbackToPredecessors,
+  [
+    'compose_target "$CANONICAL_H14" "$SESSION_PREDECESSOR_TAG" "$BINDING_SOURCE"',
+    '"$SESSION_SERVICE"',
+    'require_session_contract "$session" "$CANONICAL_H14" false',
+    'compose_target "$OWNER_SESSION_REPAIR_PARENT" "$OWNER_PREDECESSOR_TAG" "$BINDING_SOURCE"',
+    '"$OWNER_SERVICE"',
+    'require_owner_contract "$owner" "$OWNER_SESSION_REPAIR_PARENT" false',
+    'require_owner_session_socket "$owner"',
+    'require_no_provider_action_runtime',
+    'require_preserved_state "$owner" "$session"',
+  ],
+  'rollback must restore and verify KemerBet session first, then Owner, then the complete preserved state',
+);
+const deployRepairStart = ownerSessionRepairHelper.indexOf('deploy_repair() {');
+const deployRepairEnd = ownerSessionRepairHelper.indexOf(
+  '\n}\n\nacquire_mutation_lock',
+  deployRepairStart,
+);
+assert.ok(deployRepairStart >= 0 && deployRepairEnd > deployRepairStart);
+const deployRepair = ownerSessionRepairHelper.slice(deployRepairStart, deployRepairEnd + 2);
+assertInOrder(
+  deployRepair,
+  [
+    'docker load --input "$OWNER_ARCHIVE"',
+    'docker load --input "$SESSION_ARCHIVE"',
+    'compose_target "$REPAIR_SHA" "$REPAIR_TAG" "$BINDING_SOURCE" staging-manual',
+    '"$OWNER_SERVICE"',
+    'require_owner_contract "$owner" "$REPAIR_SHA" true',
+    'require_session_contract "$session" "$CANONICAL_H14" false',
+    'compose_target "$REPAIR_SHA" "$REPAIR_TAG" "$BINDING_SOURCE" kemerbet-session-provision',
+    '"$SESSION_SERVICE"',
+    'require_owner_contract "$owner" "$REPAIR_SHA" true',
+    'require_session_contract "$session" "$REPAIR_SHA" true',
+    'require_no_provider_action_runtime',
+    'require_preserved_state "$owner" "$session"',
+    'write_outcome completed',
+  ],
+  'deployment must load sealed images, replace and verify Owner first, then replace and verify the inactive KemerBet session',
+);
+const repairSessionContract = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_session_contract',
+  'require_no_provider_action_runtime',
+);
+for (const inactiveSessionContract of [
+  /FINANCIAL_ACTIONS_MODE=dry_run/u,
+  /KEMERBET_EXECUTOR_ENABLED=false/u,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/u,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/u,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/u,
+  /docker container top/u,
+  /chrome\|chromium/u,
+  /playwright/u,
+]) {
+  assert.match(repairSessionContract, inactiveSessionContract);
+}
+const preservedRepairState = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_preserved_state',
+  'rollback_to_predecessors',
+);
+for (const preservationContract of [
+  /non_target_inventory/u,
+  /project_volume_inventory/u,
+  /mount_inventory "\$owner"/u,
+  /mount_inventory "\$session"/u,
+  /require_binding_source "\$BINDING_SOURCE"/u,
+  /sha256sum "\$BINDING_SOURCE"/u,
+]) {
+  assert.match(preservedRepairState, preservationContract);
+}
+const repairMain = ownerSessionRepairHelper.slice(
+  ownerSessionRepairHelper.indexOf('\nacquire_mutation_lock\n') + 1,
+);
+assertInOrder(
+  repairMain,
+  [
+    'acquire_mutation_lock',
+    'require_bundle',
+    'require_manifest',
+    'recover_incomplete_ledger',
+    'preflight',
+    'write_intent',
+    "MUTATION_STARTED='true'",
+    'trap rollback_on_failure EXIT',
+    'deploy_repair',
+    'trap - EXIT INT TERM',
+  ],
+  'the root helper must validate and durably journal before any image or service mutation',
+);
+
+function simulateTwoTargetRepair(failAfter) {
+  const events = ['intent'];
+  try {
+    events.push('deploy-owner', 'verify-owner-and-old-session');
+    if (failAfter === 'owner') throw new Error('synthetic owner boundary failure');
+    events.push('deploy-session', 'verify-owner-and-session');
+    if (failAfter === 'session') throw new Error('synthetic session boundary failure');
+    events.push('outcome-completed');
+  } catch {
+    events.push('rollback-session', 'verify-session-predecessor');
+    events.push('rollback-owner', 'verify-owner-predecessor-and-preserved-state');
+    events.push('outcome-failed-and-rolled-back');
+  }
+  return events;
+}
+assert.deepEqual(simulateTwoTargetRepair(undefined), [
+  'intent',
+  'deploy-owner',
+  'verify-owner-and-old-session',
+  'deploy-session',
+  'verify-owner-and-session',
+  'outcome-completed',
+]);
+assert.deepEqual(simulateTwoTargetRepair('owner'), [
+  'intent',
+  'deploy-owner',
+  'verify-owner-and-old-session',
+  'rollback-session',
+  'verify-session-predecessor',
+  'rollback-owner',
+  'verify-owner-predecessor-and-preserved-state',
+  'outcome-failed-and-rolled-back',
+]);
+assert.deepEqual(simulateTwoTargetRepair('session'), [
+  'intent',
+  'deploy-owner',
+  'verify-owner-and-old-session',
+  'deploy-session',
+  'verify-owner-and-session',
+  'rollback-session',
+  'verify-session-predecessor',
+  'rollback-owner',
+  'verify-owner-predecessor-and-preserved-state',
+  'outcome-failed-and-rolled-back',
+]);
+
 assert.match(workflow, /fetanagent-staging-deploy-helper verify/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper install/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper fresh-start/g);

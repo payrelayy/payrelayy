@@ -82,7 +82,7 @@ const REFRESH_TOKEN_PATH = '/Account/RefreshToken';
 // binding the complete one-use reCAPTCHA ceremony to the reviewed KemerBet integration.
 const KEMERBET_RECAPTCHA_SITE_KEY_SHA256 =
   '644e0617ffba2393c164eef1f93e6810aae887984eee263e7834dcbf1b5a8863';
-const KEMERBET_RECAPTCHA_VERSION = 'GY0lZUzQQgeA0wDxVI-SQEZw';
+const KEMERBET_RECAPTCHA_VERSION = 'ox8dsmiqR62P1bqhciWOn7Fg';
 const KEMERBET_RECAPTCHA_ORIGIN_CO = 'aHR0cHM6Ly9hZ2VudHN5c3RlbS5hZG1pbmRpZ2kuY29tOjQ0Mw..';
 const KEMERBET_RECAPTCHA_RUNTIME_URL = `https://www.gstatic.com/recaptcha/releases/${KEMERBET_RECAPTCHA_VERSION}/recaptcha__en.js`;
 const KEMERBET_RECAPTCHA_STYLES_URL = `https://www.gstatic.com/recaptcha/releases/${KEMERBET_RECAPTCHA_VERSION}/styles__ltr.css`;
@@ -106,7 +106,7 @@ const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
     crossOriginEmbedderPolicy: undefined,
     crossOriginResourcePolicy: 'cross-origin',
     mime: 'text/javascript',
-    sha256: 'c5f10b63d9382d2cc53ebdc907cdcbcc22771368a48c0e55b7efa8d2d0db57b7',
+    sha256: 'e0c02200d83614704ac5381ecb6319282e1f8dfa24e4cc09b6af0a05ee91174a',
   }),
   css: Object.freeze({
     accessControlAllowOrigin: undefined,
@@ -114,7 +114,7 @@ const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
     crossOriginEmbedderPolicy: undefined,
     crossOriginResourcePolicy: 'cross-origin',
     mime: 'text/css',
-    sha256: '49d5532804885413cd5ea22576e15b9a0c155d6a85f3f7a3b2d00e5c33255a20',
+    sha256: '13d2b33f69a7c240b4d8a2825b33d638e42bb00a277f9e590da40eb5e639ccbc',
   }),
   logo: Object.freeze({
     accessControlAllowOrigin: undefined,
@@ -126,11 +126,11 @@ const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
   }),
   runtime: Object.freeze({
     accessControlAllowOrigin: '*',
-    bytes: 801_607,
+    bytes: 843_859,
     crossOriginEmbedderPolicy: undefined,
     crossOriginResourcePolicy: 'cross-origin',
     mime: 'text/javascript',
-    sha256: 'fe188a6a0bd9ff48c40f0f4f06065d21476e9027d0efa2f3af5137122eaebcaf',
+    sha256: '072d298ea24238552d7805174c49bc793d13a12d619d4ceb87c209bbc5c0bd67',
   }),
   webworker: Object.freeze({
     accessControlAllowOrigin: undefined,
@@ -138,7 +138,7 @@ const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
     crossOriginEmbedderPolicy: 'require-corp',
     crossOriginResourcePolicy: 'same-site',
     mime: 'text/javascript',
-    sha256: 'b22eb15171974449a10e031e6e763990e12969226e448524a1d561cf3882c063',
+    sha256: 'a41ae6ba81d8d52bd8763a8ea3004297f960f3cfa3f632c761a19fff1d886196',
   }),
 });
 const KEMERBET_AGENT_WEB_ORIGIN = 'https://agentsystem.admindigi.com';
@@ -152,7 +152,7 @@ const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, string>([
   ['/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js', 'script'],
   ['/prd/agt-admin-client/v84/index-6dvVbeUF.js', 'script'],
 ]);
-const KEMERBET_OPTIONAL_STATIC_ASSETS = new Map<string, string>([
+const KEMERBET_ABORTABLE_STATIC_ASSETS = new Map<string, string>([
   [
     'https://agt-cdn.cdn-digi.com/prd/companies/2093/projects/39803/logo_24e4a06149154c9a956062027baa2fed.png',
     'image',
@@ -174,7 +174,18 @@ const KEMERBET_OPTIONAL_STATIC_ASSETS = new Map<string, string>([
     'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-DYzGJZDb.svg?squmb1',
     'image',
   ],
-  ['https://agentsystem.admindigi.com/src/favicon.svg', 'image'],
+  ['https://agentsystem.admindigi.com/src/favicon.svg', 'other'],
+  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg', 'image'],
+  [
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+    'image',
+  ],
+  [
+    'https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap',
+    'stylesheet',
+  ],
+]);
+const KEMERBET_REQUIRED_STATIC_ASSETS = new Map<string, string>([
   ['https://agt-cdn.cdn-digi.com/prd/system/translations/backoffice_en.json', 'fetch'],
 ]);
 const KEMERBET_AUTHENTICATED_READ_PATHS = new Set([
@@ -341,6 +352,79 @@ export type KemerBetProvisionSessionPhase =
   | 'starting'
   | 'stopping';
 
+export type KemerBetProvisionStartupStage =
+  | 'browser_launch'
+  | 'cleanup'
+  | 'preflight'
+  | 'preview_ready'
+  | 'profile'
+  | 'provider_asset'
+  | 'provider_navigation'
+  | 'recaptcha_asset'
+  | 'recaptcha_ceremony'
+  | 'transport_guard';
+
+export type KemerBetProvisionStartupFailureCode =
+  | 'cleanup_unverified'
+  | 'contract_mismatch'
+  | 'deadline_exceeded'
+  | 'dependency_unavailable'
+  | 'forbidden_request';
+
+export type KemerBetProvisionStartupStatus = Readonly<{
+  readonly detailsRedacted: true;
+  readonly failureCode?: KemerBetProvisionStartupFailureCode;
+  readonly schemaVersion: 1;
+  readonly stage: KemerBetProvisionStartupStage;
+  readonly status: 'failed' | 'ready' | 'starting';
+}>;
+
+export interface KemerBetProvisionStartupFailureEvent {
+  readonly component: 'kemerbet_session_provision';
+  readonly detailsRedacted: true;
+  readonly event: 'startup_failed';
+  readonly failureCode: KemerBetProvisionStartupFailureCode;
+  readonly schemaVersion: 1;
+  readonly stage: KemerBetProvisionStartupStage;
+}
+
+export function createKemerBetProvisionStartupFailureEvent(
+  stage: KemerBetProvisionStartupStage,
+  failureCode: KemerBetProvisionStartupFailureCode,
+): KemerBetProvisionStartupFailureEvent {
+  return Object.freeze({
+    component: 'kemerbet_session_provision',
+    detailsRedacted: true,
+    event: 'startup_failed',
+    failureCode,
+    schemaVersion: 1,
+    stage,
+  });
+}
+
+function createKemerBetProvisionStartupStatus(
+  status: 'ready' | 'starting',
+  stage: KemerBetProvisionStartupStage,
+): KemerBetProvisionStartupStatus;
+function createKemerBetProvisionStartupStatus(
+  status: 'failed',
+  stage: KemerBetProvisionStartupStage,
+  failureCode: KemerBetProvisionStartupFailureCode,
+): KemerBetProvisionStartupStatus;
+function createKemerBetProvisionStartupStatus(
+  status: 'failed' | 'ready' | 'starting',
+  stage: KemerBetProvisionStartupStage,
+  failureCode?: KemerBetProvisionStartupFailureCode,
+): KemerBetProvisionStartupStatus {
+  return Object.freeze({
+    detailsRedacted: true,
+    ...(failureCode === undefined ? {} : { failureCode }),
+    schemaVersion: 1,
+    stage,
+    status,
+  });
+}
+
 export interface KemerBetProvisionSessionStatus {
   readonly active: boolean;
   readonly expiresAt?: string;
@@ -354,6 +438,7 @@ export interface KemerBetProvisionSessionStatus {
     readonly recoveryRequired: true;
   }>;
   readonly signedIn: boolean;
+  readonly startup?: KemerBetProvisionStartupStatus;
   readonly transferDisabled: true;
 }
 
@@ -398,6 +483,7 @@ export interface KemerBetProvisionServerDependencies {
   readonly closePersistentBrowserForCheckpoint?: typeof closeKemerBetPersistentBrowserForRestorableCheckpoint;
   readonly log?: (event: 'profile_quarantined' | 'started' | 'signed_in' | 'stopped') => void;
   readonly logReadinessSealFailure?: (event: KemerBetReadinessSealFailureEvent) => void;
+  readonly logStartupFailure?: (event: KemerBetProvisionStartupFailureEvent) => void;
 }
 
 export interface KemerBetReadinessSealFailureEvent {
@@ -1365,7 +1451,8 @@ export function createKemerBetRecaptchaCeremony(input: {
   readonly expectedSiteKeySha256?: string;
   readonly fetchAsset?: KemerBetRecaptchaAssetFetcher;
   readonly monotonicNow: () => number;
-  readonly onForbiddenRequest: () => void;
+  readonly onForbiddenRequest: (stage: 'recaptcha_asset' | 'recaptcha_ceremony') => void;
+  readonly onStage?: (stage: 'recaptcha_asset' | 'recaptcha_ceremony') => void;
   readonly wallClockNow: () => number;
 }): KemerBetRecaptchaCeremony {
   const assetPins = input.assetPins ?? KEMERBET_RECAPTCHA_ASSET_PINS;
@@ -1413,11 +1500,24 @@ export function createKemerBetRecaptchaCeremony(input: {
   let lane = Promise.resolve();
   const verifiedAssetBodies = new Map<string, Buffer>();
 
+  const observeStage = (stage: 'recaptcha_asset' | 'recaptcha_ceremony'): void => {
+    try {
+      input.onStage?.(stage);
+    } catch {
+      // A privacy-safe progress observer cannot weaken the exact ceremony boundary.
+    }
+  };
+
+  const diagnosticStage = (): 'recaptcha_asset' | 'recaptcha_ceremony' =>
+    step === 'api' || step === 'runtime_main' || step === 'css' || step === 'static_subresources'
+      ? 'recaptcha_asset'
+      : 'recaptcha_ceremony';
+
   const poison = (): void => {
     if (!poisoned) {
       poisoned = true;
       try {
-        input.onForbiddenRequest();
+        input.onForbiddenRequest(diagnosticStage());
       } catch {
         // A redacted attempt counter cannot weaken the local abort boundary.
       }
@@ -1453,6 +1553,7 @@ export function createKemerBetRecaptchaCeremony(input: {
     pin: KemerBetRecaptchaAssetPin,
     userAgent: string,
   ): Promise<boolean> => {
+    observeStage('recaptcha_asset');
     const processCacheKey = useVerifiedProcessCache
       ? verifiedRecaptchaAssetCacheKey(url, pin, userAgent)
       : undefined;
@@ -1679,6 +1780,7 @@ export function createKemerBetRecaptchaCeremony(input: {
       }
 
       if (step === 'anchor') {
+        observeStage('recaptcha_ceremony');
         const query = [...url.searchParams.entries()];
         const expectedKeys = ['ar', 'k', 'co', 'hl', 'v', 'size', 'anchor-ms', 'execute-ms', 'cb'];
         const exactTiming = (value: string | undefined): boolean =>
@@ -1814,6 +1916,7 @@ export function createKemerBetRecaptchaCeremony(input: {
       }
 
       if (step === 'reload') {
+        observeStage('recaptcha_ceremony');
         const bytes = exactDynamicPost(
           request,
           url,
@@ -1837,6 +1940,7 @@ export function createKemerBetRecaptchaCeremony(input: {
       }
 
       if (step === 'clr') {
+        observeStage('recaptcha_ceremony');
         const bytes = exactDynamicPost(
           request,
           url,
@@ -1860,6 +1964,7 @@ export function createKemerBetRecaptchaCeremony(input: {
       }
 
       if (step === 'bcn') {
+        observeStage('recaptcha_ceremony');
         const bytes = exactDynamicPost(
           request,
           url,
@@ -2049,7 +2154,13 @@ export function classifyKemerBetSessionRequest(input: {
   }
   if (
     input.method === 'GET' &&
-    KEMERBET_OPTIONAL_STATIC_ASSETS.get(url.href) === input.resourceType
+    KEMERBET_ABORTABLE_STATIC_ASSETS.get(url.href) === input.resourceType
+  ) {
+    return 'abort_optional';
+  }
+  if (
+    input.method === 'GET' &&
+    KEMERBET_REQUIRED_STATIC_ASSETS.get(url.href) === input.resourceType
   ) {
     return 'allow';
   }
@@ -2101,7 +2212,8 @@ async function guardedRoute(
   recaptchaCeremony: KemerBetRecaptchaCeremony,
   beforeActiveSessionDeadline: () => boolean,
   onActiveSessionDeadlineExceeded: () => void,
-  onForbiddenRequest: () => void,
+  onForbiddenRequest: (stage: 'provider_asset' | 'provider_navigation') => void,
+  onProviderRequest: (stage: 'provider_asset' | 'provider_navigation') => void,
 ): Promise<void> {
   const beforeDeadline = (): boolean => {
     try {
@@ -2139,6 +2251,12 @@ async function guardedRoute(
     route,
   });
   if (recaptchaDecision === 'handled') return;
+  const providerStage = request.isNavigationRequest() ? 'provider_navigation' : 'provider_asset';
+  try {
+    onProviderRequest(providerStage);
+  } catch {
+    // A privacy-safe progress observer cannot weaken the exact request boundary.
+  }
   const decision = requestBelongsToRetainedPage
     ? classifyKemerBetSessionRequest({
         isMainFrame,
@@ -2172,7 +2290,7 @@ async function guardedRoute(
     }
     if (decision === 'forbid') {
       try {
-        onForbiddenRequest();
+        onForbiddenRequest(providerStage);
       } catch {
         // Privacy-safe attempt telemetry cannot weaken the existing local abort boundary.
       }
@@ -2456,6 +2574,9 @@ export function createKemerBetSessionProvisionServer(
   const logReadinessSealFailure =
     dependencies.logReadinessSealFailure ??
     ((event: KemerBetReadinessSealFailureEvent) => console.error(JSON.stringify(event)));
+  const logStartupFailure =
+    dependencies.logStartupFailure ??
+    ((event: KemerBetProvisionStartupFailureEvent) => console.error(JSON.stringify(event)));
   let context: BrowserContext | undefined;
   let page: Page | undefined;
   let profilePath: string | undefined;
@@ -2472,6 +2593,17 @@ export function createKemerBetSessionProvisionServer(
   let generationDeadlineMonotonicMs: number | undefined;
   let expiresAtMonotonicMs: number | undefined;
   let phase: KemerBetProvisionSessionPhase = 'idle';
+  let startupStatus: KemerBetProvisionStartupStatus | undefined;
+  let startupFailureCandidate:
+    | Readonly<{
+        readonly failureCode: KemerBetProvisionStartupFailureCode;
+        readonly generation: string;
+        readonly stage: KemerBetProvisionStartupStage;
+      }>
+    | undefined;
+  let startupFailureLogged = false;
+  let terminalStartupAccountId: string | undefined;
+  let terminalStartupRequestId: string | undefined;
   let sessionGeneration: string | undefined;
   let frameSequence = 0;
   let frameImage: Buffer | undefined;
@@ -2519,6 +2651,74 @@ export function createKemerBetSessionProvisionServer(
     return result;
   };
 
+  const reportStartupStage = (generation: string, stage: KemerBetProvisionStartupStage): void => {
+    if (
+      sessionGeneration !== generation ||
+      phase !== 'starting' ||
+      startupStatus?.status === 'failed' ||
+      startupFailureCandidate !== undefined
+    ) {
+      return;
+    }
+    startupStatus = createKemerBetProvisionStartupStatus('starting', stage);
+  };
+
+  const reportStartupReady = (generation: string): void => {
+    if (
+      sessionGeneration !== generation ||
+      phase !== 'starting' ||
+      startupStatus?.status === 'failed' ||
+      startupFailureCandidate !== undefined
+    ) {
+      return;
+    }
+    startupStatus = createKemerBetProvisionStartupStatus('ready', 'preview_ready');
+  };
+
+  const recordStartupFailure = (
+    generation: string,
+    stage: KemerBetProvisionStartupStage,
+    failureCode: KemerBetProvisionStartupFailureCode,
+  ): void => {
+    if (
+      sessionGeneration !== generation ||
+      startupStatus?.status !== 'starting' ||
+      startupFailureCandidate !== undefined
+    ) {
+      return;
+    }
+    startupFailureCandidate = Object.freeze({ failureCode, generation, stage });
+  };
+
+  const publishStartupFailure = (
+    generation: string,
+    override?: Readonly<{
+      readonly failureCode: KemerBetProvisionStartupFailureCode;
+      readonly stage: KemerBetProvisionStartupStage;
+    }>,
+  ): void => {
+    if (sessionGeneration !== generation || startupStatus?.status === 'failed') return;
+    const candidate = override ?? startupFailureCandidate;
+    if (!candidate) return;
+    startupStatus = createKemerBetProvisionStartupStatus(
+      'failed',
+      candidate.stage,
+      candidate.failureCode,
+    );
+    terminalStartupAccountId = accountId;
+    terminalStartupRequestId = generation;
+    startupFailureCandidate = undefined;
+    if (startupFailureLogged) return;
+    startupFailureLogged = true;
+    try {
+      logStartupFailure(
+        createKemerBetProvisionStartupFailureEvent(candidate.stage, candidate.failureCode),
+      );
+    } catch {
+      // Redacted status and fail-closed cleanup do not depend on diagnostic delivery.
+    }
+  };
+
   const cancelExpiry = (): void => {
     if (expiryTimer !== undefined) clearTimer(expiryTimer);
     expiryTimer = undefined;
@@ -2545,6 +2745,12 @@ export function createKemerBetSessionProvisionServer(
     }
     cancelExpiry();
     cancelHardDeadline();
+    if (startupStatus?.status === 'starting') {
+      publishStartupFailure(generation, {
+        failureCode: 'cleanup_unverified',
+        stage: 'cleanup',
+      });
+    }
     checkpointedForRecheck = true;
     phase = 'faulted';
     frameImage = undefined;
@@ -2588,7 +2794,10 @@ export function createKemerBetSessionProvisionServer(
     }, delayMs);
   };
 
-  const clearRuntimeState = (nextPhase: 'checkpointed' | 'idle'): void => {
+  const clearRuntimeState = (
+    nextPhase: 'checkpointed' | 'idle',
+    preserveStartupFailure = false,
+  ): void => {
     cancelExpiry();
     cancelHardDeadline();
     context = undefined;
@@ -2616,6 +2825,13 @@ export function createKemerBetSessionProvisionServer(
     identityVerificationEpoch += 1;
     contextUnexpectedlyClosed = false;
     faultCleanupGeneration = undefined;
+    if (!preserveStartupFailure) {
+      startupStatus = undefined;
+      startupFailureCandidate = undefined;
+      startupFailureLogged = false;
+      terminalStartupAccountId = undefined;
+      terminalStartupRequestId = undefined;
+    }
     phase = nextPhase;
   };
 
@@ -2626,6 +2842,7 @@ export function createKemerBetSessionProvisionServer(
         loginRequired: false,
         phase,
         signedIn: false,
+        ...(startupStatus === undefined ? {} : { startup: startupStatus }),
         transferDisabled: true,
       } as const;
       if (phase !== 'idle' || quarantineReasonCode === undefined) return inactive;
@@ -2646,6 +2863,7 @@ export function createKemerBetSessionProvisionServer(
       loginRequired: phase === 'login_required',
       phase,
       signedIn: phase === 'authenticated',
+      ...(startupStatus === undefined ? {} : { startup: startupStatus }),
       transferDisabled: true,
     };
   };
@@ -2656,6 +2874,13 @@ export function createKemerBetSessionProvisionServer(
       quarantineReasonCode !== undefined &&
       quarantinedAccountId !== undefined &&
       quarantinedAccountId !== expectedAccountId
+    ) {
+      return unavailable();
+    }
+    if (
+      phase === 'idle' &&
+      startupStatus?.status === 'failed' &&
+      terminalStartupAccountId !== expectedAccountId
     ) {
       return unavailable();
     }
@@ -2800,6 +3025,10 @@ export function createKemerBetSessionProvisionServer(
     if (sessionGeneration !== generation || phase !== 'stopping') return;
     const inFlight = initializationPromise;
     if (inFlight !== undefined) await inFlight;
+    // The initializer may itself finish a proven-clean causal-failure teardown while this stop
+    // operation is waiting for it. Never let the stale continuation clear or close a newer
+    // generation admitted after that terminal result became observable.
+    if (sessionGeneration !== generation || phase !== 'stopping') return;
     const retainedContext = context ?? pendingContext;
     const retainedPage = page ?? pendingPage;
     const retainedProfilePath = profilePath ?? pendingProfilePath;
@@ -2831,6 +3060,12 @@ export function createKemerBetSessionProvisionServer(
         forcedContextClose = true;
       }
     } catch {
+      if (startupFailureCandidate?.generation === generation) {
+        publishStartupFailure(generation, {
+          failureCode: 'cleanup_unverified',
+          stage: 'cleanup',
+        });
+      }
       phase = 'faulted';
       frameImage = undefined;
       frameCapturedAtMs = undefined;
@@ -2840,7 +3075,18 @@ export function createKemerBetSessionProvisionServer(
       return;
     }
     if (forcedContextClose) checkpointedForRecheck = true;
-    clearRuntimeState('idle');
+    if (startupFailureCandidate?.generation === generation) {
+      if (forcedContextClose) {
+        publishStartupFailure(generation, {
+          failureCode: 'cleanup_unverified',
+          stage: 'cleanup',
+        });
+      } else {
+        publishStartupFailure(generation);
+      }
+    }
+    const preserveStartupFailure = startupStatus?.status === 'failed';
+    clearRuntimeState('idle', preserveStartupFailure);
     if (retainedContext) log('stopped');
   };
 
@@ -3100,7 +3346,17 @@ export function createKemerBetSessionProvisionServer(
   const status = async (expectedAccountId?: string): Promise<KemerBetProvisionSessionStatus> => {
     // Once a checkpoint/seal request installs the irreversible terminal latch, a failed
     // Chromium close must not make the still-live context look usable again.
-    if (checkpointedForRecheck && phase !== 'checkpointed' && quarantineReasonCode === undefined) {
+    const exactTerminalStartupFailure =
+      expectedAccountId !== undefined &&
+      phase === 'idle' &&
+      startupStatus?.status === 'failed' &&
+      terminalStartupAccountId === expectedAccountId;
+    if (
+      checkpointedForRecheck &&
+      phase !== 'checkpointed' &&
+      quarantineReasonCode === undefined &&
+      !exactTerminalStartupFailure
+    ) {
       return unavailable();
     }
     if (
@@ -3136,6 +3392,8 @@ export function createKemerBetSessionProvisionServer(
     let profile: string | undefined;
     let generationLease: KemerBetSessionProfileGenerationLease | undefined;
     let identityVerifier: KemerBetProvisionAuthenticatedIdentityVerifier | undefined;
+    let startupStage: KemerBetProvisionStartupStage = 'preflight';
+    reportStartupStage(generation, startupStage);
     try {
       const [, preparedIdentityVerifier] = await Promise.all([
         (
@@ -3145,7 +3403,12 @@ export function createKemerBetSessionProvisionServer(
         prepareAuthenticatedIdentityVerifier(input.platformAgentAccountId, effectiveUserId),
       ]);
       identityVerifier = preparedIdentityVerifier;
-      if (identityVerifier.accountId !== input.platformAgentAccountId) return unavailable();
+      if (identityVerifier.accountId !== input.platformAgentAccountId) {
+        recordStartupFailure(generation, startupStage, 'contract_mismatch');
+        return unavailable();
+      }
+      startupStage = 'profile';
+      reportStartupStage(generation, startupStage);
       profile = await (dependencies.prepareSessionProfile ?? prepareProfile)(
         input.platformAgentAccountId,
         effectiveUserId,
@@ -3169,6 +3432,8 @@ export function createKemerBetSessionProvisionServer(
       // A persistent worker can bypass Playwright HTTP routing. Remove only Chromium's exact
       // service-worker subtree while the profile is offline and before any browser process exists.
       await purgePersistedServiceWorkerState(profile, effectiveUserId);
+      startupStage = 'browser_launch';
+      reportStartupStage(generation, startupStage);
       nextContext = await launch(profile, {
         acceptDownloads: false,
         bypassCSP: false,
@@ -3199,9 +3464,14 @@ export function createKemerBetSessionProvisionServer(
       pendingPage = nextPage;
       const observedContext = nextContext;
       const observedPage = nextPage;
+      startupStage = 'transport_guard';
+      reportStartupStage(generation, startupStage);
       let startupBoundaryViolated = false;
-      const observeForbiddenNetworkAttempt = (): void => {
+      const observeForbiddenNetworkAttempt = (
+        failureStage: KemerBetProvisionStartupStage,
+      ): void => {
         startupBoundaryViolated = true;
+        recordStartupFailure(generation, failureStage, 'forbidden_request');
         blockedRequestCounter += 1n;
         if (checkpointValidationActive) checkpointBlockedForRecheck = true;
         void serialized(async () => {
@@ -3239,6 +3509,7 @@ export function createKemerBetSessionProvisionServer(
         );
       };
       const observeActiveSessionDeadlineExceeded = (): void => {
+        recordStartupFailure(generation, startupStage, 'deadline_exceeded');
         void serialized(async () => {
           if (
             sessionGeneration === generation &&
@@ -3260,29 +3531,23 @@ export function createKemerBetSessionProvisionServer(
           deadlineWallClockMs,
           fetchAsset: fetchRecaptchaAsset,
           monotonicNow: readMonotonicNow,
-          onForbiddenRequest: observeForbiddenNetworkAttempt,
+          onForbiddenRequest: (stage) => observeForbiddenNetworkAttempt(stage),
+          onStage: (stage) => {
+            // Request progress is useful to the Owner, but it is concurrent with the enclosing
+            // startup operation. Do not let an asset callback rewrite the operation-local stage
+            // used if the enclosing navigation itself later fails or crosses its deadline.
+            reportStartupStage(generation, stage);
+          },
           wallClockNow: () => now().getTime(),
         });
       let recaptchaCeremony = newRecaptchaCeremony(expiresAt.getTime(), expiresAtMonotonicMs);
       observedContext.on('page', (candidatePage) => {
         if (candidatePage === observedPage) return;
-        startupBoundaryViolated = true;
-        blockedRequestCounter += 1n;
-        if (checkpointValidationActive) checkpointBlockedForRecheck = true;
+        observeForbiddenNetworkAttempt('transport_guard');
         void candidatePage.close().catch(() => undefined);
-        void serialized(async () => {
-          if (
-            sessionGeneration === generation &&
-            (context === observedContext || pendingContext === observedContext) &&
-            phase !== 'stopping' &&
-            !checkpointedForRecheck
-          ) {
-            markFaulted(generation);
-          }
-        });
       });
       observedContext.on('serviceworker', () => {
-        observeForbiddenNetworkAttempt();
+        observeForbiddenNetworkAttempt('transport_guard');
       });
       await observedContext.route('**/*', (route) =>
         guardedRoute(
@@ -3292,19 +3557,27 @@ export function createKemerBetSessionProvisionServer(
           beforeActiveSessionDeadline,
           observeActiveSessionDeadlineExceeded,
           observeForbiddenNetworkAttempt,
+          (stage) => {
+            // Provider subresources may race one another while the fixed startup navigation is
+            // still in flight. Keep their progress visible without changing the causal fallback
+            // stage for a failure of that navigation operation.
+            reportStartupStage(generation, stage);
+          },
         ),
       );
       await observedContext.routeWebSocket('**/*', async (webSocket: WebSocketRoute) => {
         try {
           await closeKemerBetReadinessGuardedWebSocket({
-            lifecycleBoundary: { observeWebSocket: observeForbiddenNetworkAttempt },
+            lifecycleBoundary: {
+              observeWebSocket: () => observeForbiddenNetworkAttempt('transport_guard'),
+            },
             reportUnexpected: () => undefined,
             webSocket,
           });
         } catch {
           // Failing to close even an exact optional notification socket leaves its transport
           // state uncertain, so poison the whole immutable generation.
-          observeForbiddenNetworkAttempt();
+          observeForbiddenNetworkAttempt('transport_guard');
         }
       });
       nextPage.on('framenavigated', (frame) => {
@@ -3366,7 +3639,7 @@ export function createKemerBetSessionProvisionServer(
                   reauthenticationDeadlineMonotonicMs,
                 );
               } catch {
-                observeForbiddenNetworkAttempt();
+                observeForbiddenNetworkAttempt('transport_guard');
               }
               if (replacement !== undefined) {
                 if (recaptchaCeremony.retireForReauthentication()) {
@@ -3454,19 +3727,31 @@ export function createKemerBetSessionProvisionServer(
         observedContext.serviceWorkers().length !== 0 ||
         startupBoundaryViolated
       ) {
+        recordStartupFailure(generation, startupStage, 'contract_mismatch');
         return unavailable();
       }
+      startupStage = 'provider_navigation';
+      reportStartupStage(generation, startupStage);
       await observedContext.setOffline(false);
       await nextPage.goto(KEMERBET_AGENT_LOGIN_RETRY_URL, {
         waitUntil: 'domcontentloaded',
         timeout: 30_000,
       });
-      if (validPageUrl(nextPage.url()) === undefined) return unavailable();
+      if (
+        validPageUrl(nextPage.url()) === undefined ||
+        startupBoundaryViolated ||
+        startupFailureCandidate !== undefined
+      ) {
+        recordStartupFailure(generation, startupStage, 'contract_mismatch');
+        return unavailable();
+      }
+      reportStartupReady(generation);
     } catch (error) {
       if (error instanceof KemerBetSessionProfileGenerationQuarantinedError) {
         installInactiveQuarantine(generation, input.platformAgentAccountId, error.reasonCode);
         return;
       }
+      recordStartupFailure(generation, startupStage, 'dependency_unavailable');
       let closed = true;
       let forcedContextClose = false;
       try {
@@ -3488,10 +3773,32 @@ export function createKemerBetSessionProvisionServer(
         closed = false;
       }
       if (sessionGeneration === generation) {
-        if (closed && phase === 'starting') {
+        if (closed && !forcedContextClose && phase !== 'starting') {
+          // A transport callback can move the session to faulted/stopping while this initializer
+          // is still unwinding. When this branch has already produced and released an exact clean
+          // checkpoint, publish the original causal failure and retire the in-memory generation
+          // here. Reattaching the now-closed context/lease would make finishStop close it a second
+          // time and falsely convert the result into cleanup_unverified plus a permanent latch.
+          publishStartupFailure(generation);
+          clearRuntimeState('idle', true);
+        } else if (closed && phase === 'starting') {
           if (forcedContextClose) checkpointedForRecheck = true;
-          clearRuntimeState('idle');
+          if (forcedContextClose) {
+            publishStartupFailure(generation, {
+              failureCode: 'cleanup_unverified',
+              stage: 'cleanup',
+            });
+          } else {
+            publishStartupFailure(generation);
+          }
+          clearRuntimeState('idle', true);
         } else {
+          if (!closed) {
+            publishStartupFailure(generation, {
+              failureCode: 'cleanup_unverified',
+              stage: 'cleanup',
+            });
+          }
           context = nextContext;
           page = nextPage;
           profilePath = profile;
@@ -3550,6 +3857,14 @@ export function createKemerBetSessionProvisionServer(
   };
 
   const start = (input: StartInput): KemerBetProvisionSessionStatus => {
+    if (
+      phase === 'idle' &&
+      startupStatus?.status === 'failed' &&
+      terminalStartupRequestId === input.requestId
+    ) {
+      if (terminalStartupAccountId === input.platformAgentAccountId) return snapshot();
+      return unavailable();
+    }
     if (checkpointedForRecheck) {
       if (
         quarantineReasonCode !== undefined &&
@@ -3577,6 +3892,11 @@ export function createKemerBetSessionProvisionServer(
     ) {
       return unavailable();
     }
+    startupStatus = createKemerBetProvisionStartupStatus('starting', 'preflight');
+    startupFailureCandidate = undefined;
+    startupFailureLogged = false;
+    terminalStartupAccountId = undefined;
+    terminalStartupRequestId = undefined;
     phase = 'starting';
     sessionGeneration = input.requestId;
     accountId = input.platformAgentAccountId;

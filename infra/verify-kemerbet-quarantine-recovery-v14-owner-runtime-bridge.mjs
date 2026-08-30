@@ -118,7 +118,7 @@ const validateJob = section(
 const stageJob = section(
   workflow,
   '  h14-owner-runtime-bridge-stage:\n',
-  '\n  h14-owner-runtime-bridge-archive-recovery-stage:\n',
+  '\n  h14-owner-kemerbet-session-bootstrap-repair-stage:\n',
   'Owner-only bridge staging job',
 );
 

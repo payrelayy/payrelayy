@@ -2239,12 +2239,12 @@ assertOrderedFragments(
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /closeKemerBetReadinessGuardedWebSocket\(\{[\s\S]*?observeWebSocket: observeForbiddenNetworkAttempt[\s\S]*?webSocket,/u,
+  /closeKemerBetReadinessGuardedWebSocket\(\{[\s\S]*?observeWebSocket: \(\) => observeForbiddenNetworkAttempt\('transport_guard'\)[\s\S]*?webSocket,/u,
   'every socket must reuse the exact reviewed local-close boundary and unknown sockets must fault the generation',
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /const forceQuarantineAtHardDeadline = \(generation: string\)[\s\S]*?now\(\)\.getTime\(\) < generationDeadline\.getTime\(\)[\s\S]*?readMonotonicNow\(\) < generationDeadlineMonotonicMs[\s\S]*?checkpointedForRecheck = true;[\s\S]*?forceQuarantine\(1\);/u,
+  /const forceQuarantineAtHardDeadline = \(generation: string\)[\s\S]*?now\(\)\.getTime\(\) < generationDeadline\.getTime\(\)[\s\S]*?readMonotonicNow\(\) < generationDeadlineMonotonicMs[\s\S]*?startupStatus\?\.status === 'starting'[\s\S]*?failureCode: 'cleanup_unverified'[\s\S]*?stage: 'cleanup'[\s\S]*?checkpointedForRecheck = true;[\s\S]*?forceQuarantine\(1\);/u,
   'uncertain Chromium cleanup must quarantine the generation no later than its immutable hard deadline',
 );
 assert.match(
@@ -2281,11 +2281,11 @@ const privateSessionRecaptchaFetchSource = privateSessionProvisionServerSource.s
   privateSessionRecaptchaFetchEnd,
 );
 for (const exactPin of [
-  'GY0lZUzQQgeA0wDxVI-SQEZw',
-  'c5f10b63d9382d2cc53ebdc907cdcbcc22771368a48c0e55b7efa8d2d0db57b7',
-  'fe188a6a0bd9ff48c40f0f4f06065d21476e9027d0efa2f3af5137122eaebcaf',
-  'b22eb15171974449a10e031e6e763990e12969226e448524a1d561cf3882c063',
-  '49d5532804885413cd5ea22576e15b9a0c155d6a85f3f7a3b2d00e5c33255a20',
+  'ox8dsmiqR62P1bqhciWOn7Fg',
+  'e0c02200d83614704ac5381ecb6319282e1f8dfa24e4cc09b6af0a05ee91174a',
+  '072d298ea24238552d7805174c49bc793d13a12d619d4ceb87c209bbc5c0bd67',
+  'a41ae6ba81d8d52bd8763a8ea3004297f960f3cfa3f632c761a19fff1d886196',
+  '13d2b33f69a7c240b4d8a2825b33d638e42bb00a277f9e590da40eb5e639ccbc',
   '1b9efb22c938500971aac2b2130a475fa23684dd69e43103894968df83145b8a',
 ]) {
   assert.ok(
@@ -2295,7 +2295,7 @@ for (const exactPin of [
 }
 for (const exactSize of [
   'bytes: 1_582',
-  'bytes: 801_607',
+  'bytes: 843_859',
   'bytes: 102',
   'bytes: 82_980',
   'bytes: 2_228',
@@ -2305,6 +2305,60 @@ for (const exactSize of [
     `private sign-in must retain the reviewed reCAPTCHA byte contract ${exactSize}`,
   );
 }
+for (const startupStage of [
+  'browser_launch',
+  'cleanup',
+  'preflight',
+  'preview_ready',
+  'profile',
+  'provider_asset',
+  'provider_navigation',
+  'recaptcha_asset',
+  'recaptcha_ceremony',
+  'transport_guard',
+]) {
+  assert.ok(
+    privateSessionProvisionServerSource.includes(`| '${startupStage}'`),
+    `private sign-in must retain the fixed redacted startup stage ${startupStage}`,
+  );
+}
+for (const failureCode of [
+  'cleanup_unverified',
+  'contract_mismatch',
+  'deadline_exceeded',
+  'dependency_unavailable',
+  'forbidden_request',
+]) {
+  assert.ok(
+    privateSessionProvisionServerSource.includes(`| '${failureCode}'`),
+    `private sign-in must retain the fixed redacted startup failure code ${failureCode}`,
+  );
+}
+assert.match(
+  privateSessionProvisionServerSource,
+  /createKemerBetProvisionStartupFailureEvent[\s\S]*?detailsRedacted: true[\s\S]*?event: 'startup_failed'[\s\S]*?schemaVersion: 1[\s\S]*?reportStartupStage[\s\S]*?recordStartupFailure[\s\S]*?publishStartupFailure/u,
+  'startup diagnostics must use one fixed redacted event and a separate record-then-publish lifecycle',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /terminalStartupRequestId === input\.requestId[\s\S]*?terminalStartupAccountId === input\.platformAgentAccountId\) return snapshot\(\);[\s\S]*?return unavailable\(\);/u,
+  'a failed Start request id must stay bound to one account and only its exact duplicate may return the terminal diagnostic',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const exactTerminalStartupFailure =[\s\S]*?expectedAccountId !== undefined[\s\S]*?startupStatus\?\.status === 'failed'[\s\S]*?terminalStartupAccountId === expectedAccountId[\s\S]*?!exactTerminalStartupFailure[\s\S]*?return unavailable\(\);/u,
+  'a cleanup quarantine may expose only the exact bound terminal startup failure',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /if \(startupFailureCandidate\?\.generation === generation\) \{[\s\S]*?if \(forcedContextClose\) \{[\s\S]*?failureCode: 'cleanup_unverified'[\s\S]*?stage: 'cleanup'[\s\S]*?\} else \{[\s\S]*?publishStartupFailure\(generation\);/u,
+  'forced startup cleanup must override an earlier causal failure with cleanup uncertainty before publication',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /KEMERBET_ABORTABLE_STATIC_ASSETS[\s\S]*?en-DC_46aZL\.svg[\s\S]*?logo-sign-DirsW9WY\.svg[\s\S]*?fonts\.googleapis\.com\/css2[\s\S]*?return 'abort_optional'[\s\S]*?KEMERBET_REQUIRED_STATIC_ASSETS[\s\S]*?return 'allow'/u,
+  'reviewed cosmetic drift must be locally aborted while the exact required translation remains allowed',
+);
 assert.match(
   privateSessionRecaptchaSource,
   /redirect: 'manual'[\s\S]*?declaredLength[\s\S]*?Number\(declaredLength\) > input\.maxBytes[\s\S]*?reader\.cancel\(\)[\s\S]*?bytes > input\.maxBytes[\s\S]*?reader\.cancel\(\)[\s\S]*?fetched\.finalUrl !== url[\s\S]*?fetched\.status !== 200[\s\S]*?normalizedMime\(fetched\.contentType\) !== pin\.mime[\s\S]*?fetched\.accessControlAllowOrigin[\s\S]*?fetched\.crossOriginEmbedderPolicy[\s\S]*?fetched\.crossOriginResourcePolicy[\s\S]*?body\.byteLength !== pin\.bytes[\s\S]*?createHash\('sha256'\)\.update\(body\)\.digest\('hex'\) !== pin\.sha256[\s\S]*?route\.fulfill/u,
@@ -2576,7 +2630,7 @@ const checkpointForRecheckSource = privateSessionProvisionServerSource.slice(
   checkpointForRecheckEnd,
 );
 const clearRuntimeStateStart = privateSessionProvisionServerSource.indexOf(
-  "const clearRuntimeState = (nextPhase: 'checkpointed' | 'idle'): void => {",
+  'const clearRuntimeState = (',
 );
 const clearRuntimeStateEnd = privateSessionProvisionServerSource.indexOf(
   'const snapshot = (): KemerBetProvisionSessionStatus => {',
@@ -2590,6 +2644,8 @@ const clearRuntimeStateSource = privateSessionProvisionServerSource.slice(
 assertOrderedFragments(
   clearRuntimeStateSource,
   [
+    "nextPhase: 'checkpointed' | 'idle',",
+    'preserveStartupFailure = false,',
     'cancelExpiry();',
     'cancelHardDeadline();',
     'context = undefined;',
@@ -2617,6 +2673,11 @@ assertOrderedFragments(
     'identityVerificationEpoch += 1;',
     'contextUnexpectedlyClosed = false;',
     'faultCleanupGeneration = undefined;',
+    'if (!preserveStartupFailure) {',
+    'startupStatus = undefined;',
+    'startupFailureCandidate = undefined;',
+    'terminalStartupAccountId = undefined;',
+    'terminalStartupRequestId = undefined;',
     'phase = nextPhase;',
   ],
   'central session cleanup must clear every live, pending, preview, generation, and deadline reference',
@@ -2643,8 +2704,8 @@ assert.doesNotMatch(
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /const status = async[\s\S]*?checkpointedForRecheck && phase !== 'checkpointed' && quarantineReasonCode === undefined[\s\S]*?return unavailable\(\);[\s\S]*?return snapshot\(\);[\s\S]*?const initialize = async/,
-  'a terminal checkpoint latch must expose only the exact inactive recovery-required quarantine or suppress metadata entirely',
+  /const status = async[\s\S]*?const exactTerminalStartupFailure =[\s\S]*?checkpointedForRecheck &&[\s\S]*?phase !== 'checkpointed' &&[\s\S]*?quarantineReasonCode === undefined &&[\s\S]*?!exactTerminalStartupFailure[\s\S]*?return unavailable\(\);[\s\S]*?return snapshot\(\);[\s\S]*?const initialize = async/,
+  'a terminal checkpoint latch must expose only an exact bound startup-cleanup diagnostic or suppress ordinary session metadata',
 );
 assert.match(
   privateSessionProvisionServerSource,

@@ -10,10 +10,12 @@ import type { BrowserContext, Frame, Page, Route, WebSocketRoute } from 'playwri
 import {
   KemerBetProvisionServerUnavailableError,
   checkpointKemerBetProvisionSignedInPage,
+  createKemerBetProvisionStartupFailureEvent,
   createKemerBetRecaptchaCeremony,
   createKemerBetReadinessSealFailureEvent,
   createKemerBetReadinessSealFailureTracker,
   createKemerBetSessionProvisionServer as createRawKemerBetSessionProvisionServer,
+  classifyKemerBetSessionRequest,
   isAllowedKemerBetSessionRequest,
   prepareKemerBetProvisionAuthenticatedIdentityVerifier,
   removeStaleChromiumSingletonArtifacts,
@@ -29,7 +31,7 @@ const ACCOUNT_ID = '22222222-2222-4222-8222-222222222222';
 const OTHER_ACCOUNT_ID = '33333333-3333-4333-8333-333333333333';
 const SECOND_REQUEST_ID = '44444444-4444-4444-8444-444444444444';
 const TEST_RECAPTCHA_SITE_KEY = 'a'.repeat(40);
-const TEST_RECAPTCHA_VERSION = 'GY0lZUzQQgeA0wDxVI-SQEZw';
+const TEST_RECAPTCHA_VERSION = 'ox8dsmiqR62P1bqhciWOn7Fg';
 const TEST_RECAPTCHA_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36';
 const TEST_RECAPTCHA_LINUX_USER_AGENT =
@@ -607,7 +609,7 @@ function createTestRecaptchaCeremony(
   input: {
     readonly fetchAsset?: KemerBetRecaptchaAssetFetcher;
     readonly monotonicNow?: () => number;
-    readonly onForbiddenRequest?: () => void;
+    readonly onForbiddenRequest?: (stage: 'recaptcha_asset' | 'recaptcha_ceremony') => void;
     readonly wallClockNow?: () => number;
   } = {},
 ) {
@@ -749,7 +751,9 @@ describe('private KemerBet session provision server', () => {
       source.indexOf('const initialize = async'),
     );
     expect(statusBody).not.toContain('screenshot');
-    expect(statusBody).toContain("checkpointedForRecheck && phase !== 'checkpointed'");
+    expect(statusBody).toContain('checkpointedForRecheck &&');
+    expect(statusBody).toContain("phase !== 'checkpointed' &&");
+    expect(statusBody).toContain('!exactTerminalStartupFailure');
     expect(source).toContain("request.url?.startsWith('/v1/session/frame?')");
     const frameRoute = source.slice(
       source.indexOf("request.url?.startsWith('/v1/session/frame?')"),
@@ -757,6 +761,23 @@ describe('private KemerBet session provision server', () => {
     );
     expect(frameRoute).toContain('checkpointedForRecheck ||');
     expect(source).toContain('sendJson(response, 202, start(candidate))');
+  });
+
+  it('creates only the fixed redacted startup failure event', () => {
+    const event = createKemerBetProvisionStartupFailureEvent(
+      'recaptcha_asset',
+      'contract_mismatch',
+    );
+    expect(event).toEqual({
+      component: 'kemerbet_session_provision',
+      detailsRedacted: true,
+      event: 'startup_failed',
+      failureCode: 'contract_mismatch',
+      schemaVersion: 1,
+      stage: 'recaptcha_asset',
+    });
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(JSON.stringify(event)).not.toMatch(/password|token|request|url|stack/iu);
   });
 
   it('accepts startup immediately, keeps metadata responsive, and deduplicates by generation', async () => {
@@ -789,6 +810,12 @@ describe('private KemerBet session provision server', () => {
         loginRequired: false,
         phase: 'starting',
         signedIn: false,
+        startup: {
+          detailsRedacted: true,
+          schemaVersion: 1,
+          stage: 'preflight',
+          status: 'starting',
+        },
         transferDisabled: true,
       });
       expect(starting).not.toHaveProperty('imageBase64');
@@ -826,12 +853,14 @@ describe('private KemerBet session provision server', () => {
 
   it('refuses to launch when the immutable identity binding is for another active account', async () => {
     const launchPersistentContext = vi.fn();
+    const logStartupFailure = vi.fn();
     const provision = createKemerBetSessionProvisionServer({
       assertBrowserExecutable: async () => undefined,
       clearTimer: vi.fn() as unknown as typeof clearTimeout,
       effectiveUserId: 10_001,
       environment: SAFE_ENVIRONMENT,
       launchPersistentContext,
+      logStartupFailure,
       prepareAuthenticatedIdentityVerifier: async () => ({
         accountId: OTHER_ACCOUNT_ID,
         fingerprintAgentIdentity: createTestIdentityFingerprinter(),
@@ -849,8 +878,356 @@ describe('private KemerBet session provision server', () => {
           )
         ).status,
       ).toBe(202);
-      await waitForSessionPhase(origin, 'idle');
+      const failed = await waitForSessionPhase(origin, 'idle');
+      expect(failed).toMatchObject({
+        active: false,
+        startup: {
+          detailsRedacted: true,
+          failureCode: 'contract_mismatch',
+          schemaVersion: 1,
+          stage: 'preflight',
+          status: 'failed',
+        },
+        transferDisabled: true,
+      });
+      expect(logStartupFailure).toHaveBeenCalledOnce();
+      expect(logStartupFailure).toHaveBeenCalledWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'contract_mismatch',
+        schemaVersion: 1,
+        stage: 'preflight',
+      });
+      const duplicate = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      expect(duplicate.status).toBe(202);
+      expect(await duplicate.json()).toEqual(failed);
+      expect(logStartupFailure).toHaveBeenCalledOnce();
+      const crossAccountDuplicate = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: OTHER_ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      expect(crossAccountDuplicate.status).toBe(503);
+      expect(await crossAccountDuplicate.json()).toEqual({ error: 'session_unavailable' });
+      expect(logStartupFailure).toHaveBeenCalledOnce();
       expect(launchPersistentContext).not.toHaveBeenCalled();
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('preserves one cleanup failure for the exact account and id after forced startup teardown', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    browser.emitPageClose();
+    Object.assign(browser.context, {
+      route: async () => {
+        throw new Error('https://provider.invalid/?password=must-never-appear');
+      },
+    });
+    const launchPersistentContext = vi.fn(async () => browser.context);
+    const logStartupFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext,
+      logStartupFailure,
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      const failed = await waitForSessionPhase(origin, 'idle');
+      expect(failed).toMatchObject({
+        active: false,
+        startup: {
+          detailsRedacted: true,
+          failureCode: 'cleanup_unverified',
+          schemaVersion: 1,
+          stage: 'cleanup',
+          status: 'failed',
+        },
+        transferDisabled: true,
+      });
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'cleanup_unverified',
+        schemaVersion: 1,
+        stage: 'cleanup',
+      });
+      expect(JSON.stringify(logStartupFailure.mock.calls)).not.toMatch(
+        /provider\.invalid|password|must-never-appear/iu,
+      );
+
+      const duplicate = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      expect(duplicate.status).toBe(202);
+      expect(await duplicate.json()).toEqual(failed);
+
+      const crossAccountDuplicate = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: OTHER_ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      expect(crossAccountDuplicate.status).toBe(503);
+      const newRequest = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: SECOND_REQUEST_ID }),
+      );
+      expect(newRequest.status).toBe(503);
+      expect(launchPersistentContext).toHaveBeenCalledOnce();
+      expect(logStartupFailure).toHaveBeenCalledOnce();
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('lets forced cleanup override a racing startup transport failure', async () => {
+    const navigation = deferred<null>();
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    Object.assign(browser.page, { goto: async () => navigation.promise });
+    const logStartupFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      logStartupFailure,
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        if (browser.startupEvents.includes('offline:false')) break;
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+      }
+      expect(browser.startupEvents).toContain('offline:false');
+
+      browser.emitServiceWorker();
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        const current = await sessionStatus(origin);
+        if (current.phase === 'faulted' || current.phase === 'stopping') break;
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+      }
+      browser.emitPageClose();
+      navigation.resolve(null);
+
+      const failed = await waitForSessionPhase(origin, 'idle');
+      expect(failed).toMatchObject({
+        active: false,
+        startup: {
+          failureCode: 'cleanup_unverified',
+          stage: 'cleanup',
+          status: 'failed',
+        },
+        transferDisabled: true,
+      });
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'cleanup_unverified',
+        schemaVersion: 1,
+        stage: 'cleanup',
+      });
+    } finally {
+      navigation.resolve(null);
+      await closeServer(provision.server);
+    }
+  });
+
+  it('keeps the causal startup failure when a stopping race already produced a clean checkpoint', async () => {
+    const navigation = deferred<null>();
+    const firstBrowser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const secondBrowser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    Object.assign(firstBrowser.page, { goto: async () => navigation.promise });
+    const releaseAfterCleanCheckpoint = vi.fn(async () => undefined);
+    const closePersistentBrowserForCheckpoint = vi.fn(async (input) => input.context.close());
+    const launchPersistentContext = vi
+      .fn()
+      .mockResolvedValueOnce(firstBrowser.context)
+      .mockResolvedValueOnce(secondBrowser.context);
+    const logStartupFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      acquireProfileGenerationLease: async () => ({ releaseAfterCleanCheckpoint }),
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext,
+      logStartupFailure,
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        if (firstBrowser.startupEvents.includes('offline:false')) break;
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+      }
+      expect(firstBrowser.startupEvents).toContain('offline:false');
+
+      firstBrowser.emitServiceWorker();
+      await waitForSessionPhase(origin, 'stopping');
+      navigation.resolve(null);
+
+      const failed = await waitForSessionPhase(origin, 'idle');
+      expect(failed).toMatchObject({
+        active: false,
+        startup: {
+          failureCode: 'forbidden_request',
+          stage: 'transport_guard',
+          status: 'failed',
+        },
+        transferDisabled: true,
+      });
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'forbidden_request',
+        schemaVersion: 1,
+        stage: 'transport_guard',
+      });
+      expect(closePersistentBrowserForCheckpoint).toHaveBeenCalledTimes(1);
+      expect(releaseAfterCleanCheckpoint).toHaveBeenCalledTimes(1);
+
+      const restarted = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: SECOND_REQUEST_ID }),
+      );
+      expect(restarted.status).toBe(202);
+      await waitForSessionPhase(origin, 'login_required');
+      expect(launchPersistentContext).toHaveBeenCalledTimes(2);
+      expect((await stopSession(origin, SECOND_REQUEST_ID)).status).toBe(202);
+      await waitForSessionPhase(origin, 'idle');
+    } finally {
+      navigation.resolve(null);
+      await closeServer(provision.server);
+    }
+  });
+
+  it('keeps a navigation failure operation-local after concurrent provider and reCAPTCHA progress', async () => {
+    const sensitive = 'https://provider.invalid/?credential=must-never-escape';
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const abort = vi.fn(async () => undefined);
+    const continueRequest = vi.fn(async () => undefined);
+    const providerAssetRoute = {
+      abort,
+      continue: continueRequest,
+      request: () => ({
+        frame: () => browser.page.mainFrame(),
+        headers: () => ({}),
+        isNavigationRequest: () => false,
+        method: () => 'GET',
+        postData: () => null,
+        redirectedFrom: () => null,
+        resourceType: () => 'image',
+        url: () =>
+          'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+      }),
+    } as unknown as Route;
+    let reportRecaptchaStage:
+      ((stage: 'recaptcha_asset' | 'recaptcha_ceremony') => void) | undefined;
+    const recaptcha = stubProvisionRecaptchaCeremony({ handle: 'not_recaptcha' });
+    Object.assign(browser.page, {
+      goto: async () => {
+        await browser.dispatchRoute(providerAssetRoute);
+        reportRecaptchaStage?.('recaptcha_asset');
+        reportRecaptchaStage?.('recaptcha_ceremony');
+        throw new Error(sensitive);
+      },
+    });
+    const logStartupFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: (input) => {
+        reportRecaptchaStage = input.onStage;
+        return recaptcha.ceremony;
+      },
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      logStartupFailure,
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      const failed = await waitForSessionPhase(origin, 'idle');
+      expect(abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
+      expect(continueRequest).not.toHaveBeenCalled();
+      expect(failed).toMatchObject({
+        active: false,
+        startup: {
+          failureCode: 'dependency_unavailable',
+          stage: 'provider_navigation',
+          status: 'failed',
+        },
+      });
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'dependency_unavailable',
+        schemaVersion: 1,
+        stage: 'provider_navigation',
+      });
+      expect(JSON.stringify({ failed, calls: logStartupFailure.mock.calls })).not.toContain(
+        sensitive,
+      );
     } finally {
       await closeServer(provision.server);
     }
@@ -1328,7 +1705,7 @@ describe('private KemerBet session provision server', () => {
         if (!ceremony) throw new Error('unexpected ceremony rotation');
         if (ceremony === unsafeCeremony) {
           unsafeCeremony.retireForReauthentication.mockImplementation(() => {
-            input.onForbiddenRequest();
+            input.onForbiddenRequest('recaptcha_ceremony');
             return false;
           });
         }
@@ -2192,6 +2569,65 @@ describe('private KemerBet session provision server', () => {
     }
   });
 
+  it('publishes one redacted cleanup failure before a hard deadline quarantines startup', async () => {
+    const browserExecutable = deferred<void>();
+    const timers: Array<{ readonly callback: () => void; readonly delay: number }> = [];
+    const setTimer = ((callback: () => void, delay?: number) => {
+      timers.push({ callback, delay: delay ?? 0 });
+      return timers.length as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout;
+    const forceQuarantine = vi.fn();
+    const logStartupFailure = vi.fn();
+    let timestamp = Date.parse('2026-08-27T00:00:00.000Z');
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => browserExecutable.promise,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      forceQuarantine,
+      logStartupFailure,
+      now: () => new Date(timestamp),
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      setTimer,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      const hardDeadline = Math.max(...timers.map(({ delay }) => delay));
+      expect(hardDeadline).toBe((12 * 60 + 10) * 60 * 1_000);
+      timestamp += hardDeadline;
+      timers.find(({ delay }) => delay === hardDeadline)?.callback();
+
+      expect(forceQuarantine).toHaveBeenCalledExactlyOnceWith(1);
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'cleanup_unverified',
+        schemaVersion: 1,
+        stage: 'cleanup',
+      });
+      browserExecutable.reject(
+        new Error('https://provider.invalid/?credential=must-never-escape-from-hard-deadline'),
+      );
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+      expect(JSON.stringify(logStartupFailure.mock.calls)).not.toMatch(
+        /provider\.invalid|credential|must-never-escape/iu,
+      );
+      expect(logStartupFailure).toHaveBeenCalledOnce();
+    } finally {
+      browserExecutable.reject(new Error('test cleanup'));
+      await closeServer(provision.server);
+    }
+  });
+
   it('enforces the immutable hard deadline with a monotonic clock after wall-clock rollback', async () => {
     const timers: Array<{ readonly callback: () => void; readonly delay: number }> = [];
     const setTimer = ((callback: () => void, delay?: number) => {
@@ -2506,6 +2942,7 @@ describe('private KemerBet session provision server', () => {
     const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     browser.setServiceWorkers([{}]);
     const releaseAfterCleanCheckpoint = vi.fn(async () => undefined);
+    const logStartupFailure = vi.fn();
     const provision = createKemerBetSessionProvisionServer({
       acquireProfileGenerationLease: async () => ({ releaseAfterCleanCheckpoint }),
       assertBrowserExecutable: async () => undefined,
@@ -2514,6 +2951,7 @@ describe('private KemerBet session provision server', () => {
       effectiveUserId: 10_001,
       environment: SAFE_ENVIRONMENT,
       launchPersistentContext: async () => browser.context,
+      logStartupFailure,
       prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
       setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
@@ -2525,7 +2963,22 @@ describe('private KemerBet session provision server', () => {
         origin,
         JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
       );
-      await waitForSessionPhase(origin, 'idle');
+      const failed = await waitForSessionPhase(origin, 'idle');
+      expect(failed).toMatchObject({
+        startup: {
+          failureCode: 'contract_mismatch',
+          stage: 'transport_guard',
+          status: 'failed',
+        },
+      });
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'contract_mismatch',
+        schemaVersion: 1,
+        stage: 'transport_guard',
+      });
       expect(browser.startupEvents).not.toContain('offline:false');
       expect(browser.startupEvents).not.toContain('goto');
       expect(releaseAfterCleanCheckpoint).toHaveBeenCalledTimes(1);
@@ -2537,6 +2990,7 @@ describe('private KemerBet session provision server', () => {
   it('faults and tears down the whole generation on a runtime service worker target', async () => {
     const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     const closePersistentBrowserForCheckpoint = vi.fn(async (input) => input.context.close());
+    const logStartupFailure = vi.fn();
     const provision = createKemerBetSessionProvisionServer({
       assertBrowserExecutable: async () => undefined,
       clearTimer: vi.fn() as unknown as typeof clearTimeout,
@@ -2544,6 +2998,7 @@ describe('private KemerBet session provision server', () => {
       effectiveUserId: 10_001,
       environment: SAFE_ENVIRONMENT,
       launchPersistentContext: async () => browser.context,
+      logStartupFailure,
       prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
       prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
       setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
@@ -2557,9 +3012,68 @@ describe('private KemerBet session provision server', () => {
       );
       await waitForSessionPhase(origin, 'login_required');
       browser.emitServiceWorker();
-      await waitForSessionPhase(origin, 'idle');
+      const stopped = await waitForSessionPhase(origin, 'idle');
+      expect(stopped).not.toHaveProperty('startup');
+      expect(logStartupFailure).not.toHaveBeenCalled();
       expect(closePersistentBrowserForCheckpoint).toHaveBeenCalledTimes(1);
     } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('aborts an exact cosmetic resource without poisoning the ready preview', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const logStartupFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      logStartupFailure,
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      await waitForSessionPhase(origin, 'login_required');
+      const abort = vi.fn(async () => undefined);
+      const continueRequest = vi.fn(async () => undefined);
+      const route = {
+        abort,
+        continue: continueRequest,
+        request: () => ({
+          frame: () => browser.page.mainFrame(),
+          headers: () => ({}),
+          isNavigationRequest: () => false,
+          method: () => 'GET',
+          postData: () => null,
+          redirectedFrom: () => null,
+          resourceType: () => 'image',
+          url: () =>
+            'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+        }),
+      } as unknown as Route;
+
+      await browser.dispatchRoute(route);
+      expect(abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
+      expect(continueRequest).not.toHaveBeenCalled();
+      expect(await sessionStatus(origin)).toMatchObject({
+        phase: 'login_required',
+        startup: { stage: 'preview_ready', status: 'ready' },
+      });
+      expect(logStartupFailure).not.toHaveBeenCalled();
+    } finally {
+      await stopSession(origin, REQUEST_ID);
+      await waitForSessionPhase(origin, 'idle');
+      expect(logStartupFailure).not.toHaveBeenCalled();
       await closeServer(provision.server);
     }
   });
@@ -4399,7 +4913,7 @@ describe('private KemerBet session provision server', () => {
     expect(bootstrap.abort).toHaveBeenCalledOnce();
     expect(bootstrap.fulfill).not.toHaveBeenCalled();
     expect(bootstrap.continue).not.toHaveBeenCalled();
-    expect(forbidden).toHaveBeenCalledOnce();
+    expect(forbidden).toHaveBeenCalledExactlyOnceWith('recaptcha_asset');
     await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(false);
   });
 
@@ -4618,6 +5132,75 @@ describe('private KemerBet session provision server', () => {
         resourceType: 'script',
       }),
     ).toBe(false);
+  });
+
+  it('allows only required bootstrap resources and locally aborts exact cosmetic drift', () => {
+    const base = {
+      isMainFrame: false,
+      isNavigationRequest: false,
+      method: 'GET',
+      pageUrl: LOGIN_PAGE,
+    } as const;
+    for (const [requestUrl, resourceType] of [
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js',
+        'script',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BnOqIDsD.css',
+        'stylesheet',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css',
+        'stylesheet',
+      ],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/ltr-v1RhStcA.js', 'script'],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/ltr-v3JyGz8d.js', 'script'],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js',
+        'script',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-6dvVbeUF.js',
+        'script',
+      ],
+      ['https://agt-cdn.cdn-digi.com/prd/system/translations/backoffice_en.json', 'fetch'],
+    ] as const) {
+      expect(classifyKemerBetSessionRequest({ ...base, requestUrl, resourceType })).toBe('allow');
+    }
+
+    for (const [requestUrl, resourceType] of [
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/auth-bg-Dn8uzDgY.svg',
+        'image',
+      ],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg', 'image'],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+        'image',
+      ],
+      ['https://agentsystem.admindigi.com/src/favicon.svg', 'other'],
+      [
+        'https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap',
+        'stylesheet',
+      ],
+    ] as const) {
+      expect(classifyKemerBetSessionRequest({ ...base, requestUrl, resourceType })).toBe(
+        'abort_optional',
+      );
+    }
+
+    for (const [requestUrl, resourceType] of [
+      ['https://fonts.googleapis.com/css2?family=Roboto&display=swap', 'stylesheet'],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg?changed=1',
+        'image',
+      ],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'image'],
+      ['https://agentsystem.admindigi.comhttps//agentsystem.admindigi.com/unreviewed', 'script'],
+    ] as const) {
+      expect(classifyKemerBetSessionRequest({ ...base, requestUrl, resourceType })).toBe('forbid');
+    }
   });
 
   it('rejects every live, executor, final-action, pilot, or wrong-user environment at construction', () => {

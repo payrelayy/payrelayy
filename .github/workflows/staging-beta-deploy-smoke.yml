@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build, stage the exact H14 Owner-only runtime bridge, verify transition SSH, stop legacy for transition, clean either exact pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
+        description: Build, stage an exact H14 repair lane, verify transition SSH, stop legacy for transition, clean either exact pinned predecessor once, unban and check staging once, deploy and smoke, recover the exact v1 retirement release after expiry, or stop staging
         required: true
         default: plan
         type: choice
@@ -15,6 +15,7 @@ on:
           - unban-and-connectivity-check
           - deploy-and-smoke
           - h14-owner-runtime-bridge-stage
+          - h14-owner-kemerbet-session-bootstrap-repair-stage
           - h14-owner-runtime-bridge-archive-recovery-stage
           - recover-v1-retirement-after-expiry
           - predecessor-stop-and-disable
@@ -62,6 +63,11 @@ on:
         required: false
         default: ''
         type: string
+      confirm_owner_session_no_provider_action:
+        description: For h14-owner-kemerbet-session-bootstrap-repair-stage type owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -76,6 +82,7 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '593344964'
   CANONICAL_H14_COMMIT: 06459511d9330a0e1d956c42529b81aa9970e7a2
+  OWNER_SESSION_REPAIR_PARENT: 826aaba79ed3e303452c4a7e04e0f6f90f699898
   H14_RECOVERY_AUTHORIZATION_SHA256: 6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
@@ -102,6 +109,7 @@ jobs:
       REVIEWED_REPAIR_RELEASE: a579e3bf96c075dde9c36dbe3c66c09aaf84bc52
       CONFIRMED_H14_AUTHORIZATION: ${{ inputs.confirm_quarantine_recovery_authorization_sha256 }}
       CONFIRMED_OWNER_ONLY: ${{ inputs.confirm_owner_only_no_provider_action }}
+      CONFIRMED_OWNER_SESSION: ${{ inputs.confirm_owner_session_no_provider_action }}
       REQUESTED_MODE: ${{ inputs.mode }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -109,7 +117,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$REQUESTED_MODE" =~ ^h14-owner-runtime-bridge(-archive-recovery)?-stage$ ]]; then
+          if [[ "$REQUESTED_MODE" == 'h14-owner-kemerbet-session-bootstrap-repair-stage' ]]; then
+            [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != 'refs/heads/main' ]]
+            [[ "$CONFIRMED_COMMIT" == "$CANONICAL_H14_COMMIT" ]]
+            [[ "$CONFIRMED_REPAIR_IMPLEMENTATION" =~ ^[0-9a-f]{40}$ &&
+              "$CONFIRMED_REPAIR_IMPLEMENTATION" == "$GITHUB_SHA" &&
+              "$CONFIRMED_REPAIR_IMPLEMENTATION" != "$CANONICAL_H14_COMMIT" &&
+              "$CONFIRMED_REPAIR_IMPLEMENTATION" != "$OWNER_SESSION_REPAIR_PARENT" ]]
+            [[ "$CONFIRMED_OWNER_SESSION" == 'owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money' ]]
+            [[ -z "$CONFIRMED_H14_AUTHORIZATION" ]]
+            [[ -z "$CONFIRMED_OWNER_ONLY" ]]
+            branch_name="${GITHUB_REF#refs/heads/}"
+            main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+            [[ "$main_sha" == "$CANONICAL_H14_COMMIT" ]]
+            mapfile -t matching_pulls < <(
+              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+                --jq ".[] | select(.state == \"open\" and .draft == false and .base.ref == \"main\" and .base.sha == \"$CANONICAL_H14_COMMIT\" and .head.sha == \"$GITHUB_SHA\" and .head.ref == \"$branch_name\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\") | .number"
+            )
+            [[ "${#matching_pulls[@]}" -eq 1 && "${matching_pulls[0]}" =~ ^[1-9][0-9]*$ ]]
+          elif [[ "$REQUESTED_MODE" =~ ^h14-owner-runtime-bridge(-archive-recovery)?-stage$ ]]; then
             [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != 'refs/heads/main' ]]
             [[ "$CONFIRMED_COMMIT" == "$CANONICAL_H14_COMMIT" ]]
             [[ "$CONFIRMED_REPAIR_IMPLEMENTATION" =~ ^[0-9a-f]{40}$ &&
@@ -135,11 +161,19 @@ jobs:
             [[ -z "$CONFIRMED_REPAIR_IMPLEMENTATION" ]]
             [[ -z "$CONFIRMED_H14_AUTHORIZATION" ]]
             [[ -z "$CONFIRMED_OWNER_ONLY" ]]
+            [[ -z "$CONFIRMED_OWNER_SESSION" ]]
+          fi
+          if [[ "$REQUESTED_MODE" != 'h14-owner-kemerbet-session-bootstrap-repair-stage' ]]; then
+            [[ -z "$CONFIRMED_OWNER_SESSION" ]]
           fi
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
-          [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|h14-owner-runtime-bridge-stage|h14-owner-runtime-bridge-archive-recovery-stage|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
+          if [[ "$REQUESTED_MODE" == 'h14-owner-kemerbet-session-bootstrap-repair-stage' ]]; then
+            [[ "$CONFIRMED_OWNER_SESSION" == 'owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money' ]]
+          else
+            [[ "$REQUESTED_MODE" =~ ^(plan|transition-ssh-verify|transition-stop-legacy|unban-and-connectivity-check|deploy-and-smoke|h14-owner-runtime-bridge-stage|h14-owner-runtime-bridge-archive-recovery-stage|recover-v1-retirement-after-expiry|predecessor-stop-and-disable|ecd47f5d-predecessor-stop-and-disable|stop-and-disable)$ ]]
+          fi
           if [[ "$REQUESTED_MODE" == 'transition-stop-legacy' ]]; then
             [[ "$CONFIRMED_LEGACY_STOP" == 'stop-legacy-staging-runtime' ]]
             [[ -z "$CONFIRMED_V1_RETIREMENT_RECOVERY" ]]
@@ -742,6 +776,367 @@ jobs:
             echo 'fi'
             echo "[[ \"\$(stat --format='%s' '$root_script')\" == '$SCRIPT_SIZE' ]]"
             echo "[[ \"\$(sha256sum '$root_script' | awk '{print \$1}')\" == '$SCRIPT_SHA' ]]"
+            echo "$invocation"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  h14-owner-kemerbet-session-bootstrap-repair-stage:
+    name: Stage H14 Owner and KemerBet session bootstrap repair
+    if: inputs.mode == 'h14-owner-kemerbet-session-bootstrap-repair-stage'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    environment: staging
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_REPAIR_IMPLEMENTATION: ${{ inputs.confirm_repair_implementation_sha }}
+      CONFIRMED_OWNER_SESSION: ${{ inputs.confirm_owner_session_no_provider_action }}
+      STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+      STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+      STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Re-prove the protected repair PR head and exact staging target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_REPAIR_IMPLEMENTATION" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_COMMIT" == "$CANONICAL_H14_COMMIT" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" && "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$CONFIRMED_OWNER_SESSION" == 'owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money' ]]
+          branch_name="${GITHUB_REF#refs/heads/}"
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" == "$CANONICAL_H14_COMMIT" ]]
+          mapfile -t matching_pulls < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq ".[] | select(.state == \"open\" and .draft == false and .base.ref == \"main\" and .base.sha == \"$CANONICAL_H14_COMMIT\" and .head.sha == \"$GITHUB_SHA\" and .head.ref == \"$branch_name\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\") | .number"
+          )
+          [[ "${#matching_pulls[@]}" -eq 1 && "${matching_pulls[0]}" =~ ^[1-9][0-9]*$ ]]
+
+      - name: Check out the exact repair PR head with ancestry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.confirm_repair_implementation_sha }}
+          path: repair
+
+      - name: Check out canonical H14 separately
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: 06459511d9330a0e1d956c42529b81aa9970e7a2
+          path: canonical-h14
+
+      - name: Verify exact ancestry, scope, and immutable deployment contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C repair rev-parse HEAD)" == "$CONFIRMED_REPAIR_IMPLEMENTATION" ]]
+          [[ "$(git -C canonical-h14 rev-parse HEAD)" == "$CANONICAL_H14_COMMIT" ]]
+          git -C repair merge-base --is-ancestor "$OWNER_SESSION_REPAIR_PARENT" "$CONFIRMED_REPAIR_IMPLEMENTATION"
+          git -C repair cat-file -e "$OWNER_SESSION_REPAIR_PARENT^{commit}"
+          [[ -z "$(git -C repair diff --name-only "$CANONICAL_H14_COMMIT" "$CONFIRMED_REPAIR_IMPLEMENTATION" -- Dockerfile infra/compose.staging-beta.yaml)" ]]
+          expected_delta="$(cat <<'EOF'
+          .github/workflows/staging-beta-deploy-smoke.yml
+          apps/admin/src/owner-dashboard-browser.test.ts
+          apps/admin/src/owner-dashboard.ts
+          apps/admin/src/owner-kemerbet-session-control.test.ts
+          apps/admin/src/owner-kemerbet-session-control.ts
+          apps/executor/src/kemerbet-session-provision-server.test.ts
+          apps/executor/src/kemerbet-session-provision-server.ts
+          infra/operations/fetanagent-h14-owner-recovery-session-repair.sh
+          infra/verify-executor-deployment.mjs
+          infra/verify-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.mjs
+          infra/verify-staging-beta-deploy.mjs
+          EOF
+          )"
+          observed_delta="$(git -C repair diff --name-only "$OWNER_SESSION_REPAIR_PARENT" "$CONFIRMED_REPAIR_IMPLEMENTATION" | LC_ALL=C sort)"
+          [[ "$observed_delta" == "$expected_delta" ]]
+          bash -n repair/infra/operations/fetanagent-h14-owner-recovery-session-repair.sh
+          [[ "$(sha256sum repair/Dockerfile | awk '{print $1}')" == "$(sha256sum canonical-h14/Dockerfile | awk '{print $1}')" ]]
+          [[ "$(sha256sum repair/infra/compose.staging-beta.yaml | awk '{print $1}')" == "$(sha256sum canonical-h14/infra/compose.staging-beta.yaml | awk '{print $1}')" ]]
+
+      - name: Resolve exact Chromium from the canonical pinned executor base
+        id: chromium
+        shell: bash
+        env:
+          EXECUTOR_BASE_IMAGE: node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
+        run: |
+          set -euo pipefail
+          chromium_version="$(
+            docker run --rm --platform linux/amd64 "$EXECUTOR_BASE_IMAGE" \
+              sh -euc "apt-get update >/dev/null; apt-cache policy chromium | awk '/Candidate:/ { print \$2; exit }'"
+          )"
+          [[ "$chromium_version" =~ ^[0-9][0-9A-Za-z.+:~_-]*$ && "$chromium_version" != '(none)' ]]
+          echo "version=$chromium_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build and seal only the Owner and executor repair images
+        id: bundle
+        shell: bash
+        env:
+          CHROMIUM_PACKAGE_VERSION: ${{ steps.chromium.outputs.version }}
+        run: |
+          set -euo pipefail
+          repair_tag="${CONFIRMED_REPAIR_IMPLEMENTATION:0:12}"
+          owner_image="fetanagent-owner-control:$repair_tag"
+          executor_image="fetanagent-deposit-executor:$repair_tag"
+          common_labels=(
+            --label "com.fetanagent.canonical-release=$CANONICAL_H14_COMMIT"
+            --label "com.fetanagent.repair-parent=$OWNER_SESSION_REPAIR_PARENT"
+            --label 'com.fetanagent.provider-action-enabled=false'
+          )
+          docker build --pull=false --target admin -f canonical-h14/Dockerfile \
+            --build-arg "VCS_REF=$CONFIRMED_REPAIR_IMPLEMENTATION" \
+            "${common_labels[@]}" --tag "$owner_image" repair
+          docker build --pull=false --target executor -f canonical-h14/Dockerfile \
+            --build-arg "VCS_REF=$CONFIRMED_REPAIR_IMPLEMENTATION" \
+            --build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=$CHROMIUM_PACKAGE_VERSION" \
+            "${common_labels[@]}" --tag "$executor_image" repair
+          for image in "$owner_image" "$executor_image"; do
+            [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "$CONFIRMED_REPAIR_IMPLEMENTATION" ]]
+            [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "com.fetanagent.canonical-release"}}')" == "$CANONICAL_H14_COMMIT" ]]
+            [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "com.fetanagent.repair-parent"}}')" == "$OWNER_SESSION_REPAIR_PARENT" ]]
+            [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "com.fetanagent.provider-action-enabled"}}')" == 'false' ]]
+          done
+          [[ "$(docker image inspect "$owner_image" --format '{{.Config.User}}|{{json .Config.Cmd}}')" == '10001:10001|["node","apps/admin/dist/index.js"]' ]]
+          [[ "$(docker image inspect "$executor_image" --format '{{.Config.User}}|{{json .Config.Cmd}}')" == '10001:10001|["node","apps/executor/dist/index.js"]' ]]
+          [[ "$(docker image inspect "$executor_image" --format '{{index .Config.Labels "org.opencontainers.image.chromium-package-version"}}')" == "$CHROMIUM_PACKAGE_VERSION" ]]
+
+          checkpoint_smoke_output="$(
+            timeout 150s docker run --rm --network none --read-only --user 10001:10001 \
+              --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 256 \
+              --memory 768m --cpus 2 --shm-size 256m \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=268435456 \
+              --entrypoint node "$executor_image" \
+              apps/executor/dist/kemerbet-persistent-browser-checkpoint-smoke.js 2>/dev/null
+          )"
+          [[ "$checkpoint_smoke_output" == 'KEMERBET_PERSISTENT_BROWSER_CHECKPOINT_SMOKE_OK' ]]
+
+          bundle_root="$RUNNER_TEMP/h14-owner-kemerbet-session-bootstrap-repair"
+          install -d -m 0700 "$bundle_root"
+          owner_tar="$bundle_root/fetanagent-owner-control-repair.tar"
+          executor_tar="$bundle_root/fetanagent-deposit-executor-repair.tar"
+          compose_path="$bundle_root/compose.staging-beta.yaml"
+          manifest_path="$bundle_root/manifest-v1"
+          docker save --output "$owner_tar" "$owner_image"
+          docker save --output "$executor_tar" "$executor_image"
+          install -m 0600 canonical-h14/infra/compose.staging-beta.yaml "$compose_path"
+
+          owner_image_id="$(docker image inspect "$owner_image" --format '{{.Id}}')"
+          executor_image_id="$(docker image inspect "$executor_image" --format '{{.Id}}')"
+          owner_tar_sha="$(sha256sum "$owner_tar" | awk '{print $1}')"
+          executor_tar_sha="$(sha256sum "$executor_tar" | awk '{print $1}')"
+          compose_sha="$(sha256sum "$compose_path" | awk '{print $1}')"
+          helper_sha="$(sha256sum repair/infra/operations/fetanagent-h14-owner-recovery-session-repair.sh | awk '{print $1}')"
+          owner_tar_size="$(stat --format='%s' "$owner_tar")"
+          executor_tar_size="$(stat --format='%s' "$executor_tar")"
+          helper_size="$(stat --format='%s' repair/infra/operations/fetanagent-h14-owner-recovery-session-repair.sh)"
+          [[ "$owner_image_id" =~ ^sha256:[0-9a-f]{64}$ && "$executor_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          for digest in "$owner_tar_sha" "$executor_tar_sha" "$compose_sha" "$helper_sha"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          done
+          [[ "$owner_tar_size" =~ ^[1-9][0-9]{0,12}$ && "$owner_tar_size" -le 2147483648 ]]
+          [[ "$executor_tar_size" =~ ^[1-9][0-9]{0,12}$ && "$executor_tar_size" -le 2147483648 ]]
+          [[ "$helper_size" =~ ^[1-9][0-9]{0,7}$ && "$helper_size" -le 2097152 ]]
+
+          python3 -I - "$owner_tar" "$owner_image" "$owner_image_id" \
+            "$executor_tar" "$executor_image" "$executor_image_id" <<'PY'
+          import json
+          import pathlib
+          import sys
+          import tarfile
+
+          def verify(path, expected_tag, expected_id):
+              expected_config = expected_id.removeprefix('sha256:')
+              accepted_configs = {expected_config + '.json', 'blobs/sha256/' + expected_config}
+              with tarfile.open(path, mode='r:') as archive:
+                  members = archive.getmembers()
+                  if not members or len(members) > 4096:
+                      raise SystemExit('invalid Docker archive member count')
+                  for member in members:
+                      target = pathlib.PurePosixPath(member.name)
+                      if target.is_absolute() or '..' in target.parts or not (member.isfile() or member.isdir()):
+                          raise SystemExit('unsafe Docker archive member')
+                  manifest_file = archive.extractfile(archive.getmember('manifest.json'))
+                  if manifest_file is None:
+                      raise SystemExit('missing Docker archive manifest')
+                  manifest = json.load(manifest_file)
+                  if (
+                      not isinstance(manifest, list)
+                      or len(manifest) != 1
+                      or manifest[0].get('Config') not in accepted_configs
+                      or manifest[0].get('RepoTags') != [expected_tag]
+                      or not manifest[0].get('Layers')
+                  ):
+                      raise SystemExit('Docker archive is not bound to the exact image')
+
+          verify(*sys.argv[1:4])
+          verify(*sys.argv[4:7])
+          PY
+
+          cat >"$manifest_path" <<EOF
+          version=1
+          contract=fetanagent-h14-owner-kemerbet-session-bootstrap-repair-bundle
+          repair_implementation_sha=$CONFIRMED_REPAIR_IMPLEMENTATION
+          repair_parent_sha=$OWNER_SESSION_REPAIR_PARENT
+          canonical_h14_sha=$CANONICAL_H14_COMMIT
+          staging_project_ref=$STAGING_PROJECT_REF
+          staging_droplet_id=$STAGING_DROPLET_ID
+          workflow_run_id=$GITHUB_RUN_ID
+          workflow_run_attempt=$GITHUB_RUN_ATTEMPT
+          owner_predecessor_sha=$OWNER_SESSION_REPAIR_PARENT
+          session_predecessor_sha=$CANONICAL_H14_COMMIT
+          owner_image_tag=$owner_image
+          owner_image_id=$owner_image_id
+          owner_image_tar_sha256=$owner_tar_sha
+          owner_image_tar_size=$owner_tar_size
+          executor_image_tag=$executor_image
+          executor_image_id=$executor_image_id
+          executor_image_tar_sha256=$executor_tar_sha
+          executor_image_tar_size=$executor_tar_size
+          chromium_package_version=$CHROMIUM_PACKAGE_VERSION
+          canonical_compose_sha256=$compose_sha
+          repair_helper_sha256=$helper_sha
+          repair_helper_size=$helper_size
+          deployment_order=owner-control,kemerbet-session-provision
+          rollback_order=kemerbet-session-provision,owner-control
+          canonical_release_rewritten=false
+          canonical_release_superseded=false
+          provider_action_enabled=false
+          financial_actions_mode=dry_run
+          kemerbet_executor_enabled=false
+          kemerbet_final_action_enabled=false
+          transfer_enabled=false
+          amount_entry_enabled=false
+          money_moved=false
+          EOF
+          chmod 0600 "$manifest_path"
+          manifest_sha="$(sha256sum "$manifest_path" | awk '{print $1}')"
+          [[ "$manifest_sha" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "bundle_root=$bundle_root"
+            echo "owner_tar_sha=$owner_tar_sha"
+            echo "owner_tar_size=$owner_tar_size"
+            echo "executor_tar_sha=$executor_tar_sha"
+            echo "executor_tar_size=$executor_tar_size"
+            echo "compose_sha=$compose_sha"
+            echo "helper_sha=$helper_sha"
+            echo "helper_size=$helper_size"
+            echo "manifest_sha=$manifest_sha"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Stage the no-secret two-image bundle as the unprivileged deployment identity
+        id: stage
+        shell: bash
+        env:
+          BUNDLE_ROOT: ${{ steps.bundle.outputs.bundle_root }}
+          OWNER_TAR_SHA: ${{ steps.bundle.outputs.owner_tar_sha }}
+          OWNER_TAR_SIZE: ${{ steps.bundle.outputs.owner_tar_size }}
+          EXECUTOR_TAR_SHA: ${{ steps.bundle.outputs.executor_tar_sha }}
+          EXECUTOR_TAR_SIZE: ${{ steps.bundle.outputs.executor_tar_size }}
+          COMPOSE_SHA: ${{ steps.bundle.outputs.compose_sha }}
+          MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+          secret_dir="$(mktemp -d "$RUNNER_TEMP/h14-owner-session-repair-ssh.XXXXXX")"
+          trap 'rm -rf -- "$secret_dir"' EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$secret_dir/known-hosts"
+          chmod 0600 "$secret_dir/deploy-key" "$secret_dir/known-hosts"
+          ssh-keygen -F "$STAGING_VM_HOST" -f "$secret_dir/known-hosts" >/dev/null
+          remote="fetanagent-admin@$STAGING_VM_HOST"
+          remote_bundle="/tmp/fetanagent-h14-owner-session-repair-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_SHA"
+          [[ "$remote_bundle" =~ ^/tmp/fetanagent-h14-owner-session-repair-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{40}$ ]]
+          ssh_opts=(-F /dev/null -i "$secret_dir/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$secret_dir/known-hosts")
+          ssh "${ssh_opts[@]}" "$remote" bash -s -- "$remote_bundle" <<'REMOTE'
+          set -euo pipefail
+          remote_bundle="$1"
+          test "$(id -u)" -ne 0
+          test ! -e "$remote_bundle"
+          test ! -L "$remote_bundle"
+          umask 077
+          install -d -m 0700 "$remote_bundle"
+          test "$(stat --format='%u:%g:%a' "$remote_bundle")" = "$(id -u):$(id -g):700"
+          REMOTE
+          scp "${ssh_opts[@]}" \
+            "$BUNDLE_ROOT/fetanagent-owner-control-repair.tar" \
+            "$BUNDLE_ROOT/fetanagent-deposit-executor-repair.tar" \
+            "$BUNDLE_ROOT/compose.staging-beta.yaml" \
+            "$BUNDLE_ROOT/manifest-v1" \
+            "$remote:$remote_bundle/"
+          ssh "${ssh_opts[@]}" "$remote" bash -s -- \
+            "$remote_bundle" "$OWNER_TAR_SIZE" "$OWNER_TAR_SHA" \
+            "$EXECUTOR_TAR_SIZE" "$EXECUTOR_TAR_SHA" "$COMPOSE_SHA" "$MANIFEST_SHA" <<'REMOTE'
+          set -euo pipefail
+          remote_bundle="$1"
+          owner_size="$2"
+          owner_sha="$3"
+          executor_size="$4"
+          executor_sha="$5"
+          compose_sha="$6"
+          manifest_sha="$7"
+          test "$(id -u)" -ne 0
+          test "$(find -P "$remote_bundle" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" = "compose.staging-beta.yaml:f
+          fetanagent-deposit-executor-repair.tar:f
+          fetanagent-owner-control-repair.tar:f
+          manifest-v1:f"
+          chmod 0600 "$remote_bundle"/*
+          test "$(stat --format='%s' "$remote_bundle/fetanagent-owner-control-repair.tar")" = "$owner_size"
+          test "$(sha256sum "$remote_bundle/fetanagent-owner-control-repair.tar" | awk '{print $1}')" = "$owner_sha"
+          test "$(stat --format='%s' "$remote_bundle/fetanagent-deposit-executor-repair.tar")" = "$executor_size"
+          test "$(sha256sum "$remote_bundle/fetanagent-deposit-executor-repair.tar" | awk '{print $1}')" = "$executor_sha"
+          test "$(sha256sum "$remote_bundle/compose.staging-beta.yaml" | awk '{print $1}')" = "$compose_sha"
+          test "$(sha256sum "$remote_bundle/manifest-v1" | awk '{print $1}')" = "$manifest_sha"
+          test "$(find -P "$remote_bundle" -mindepth 1 -maxdepth 1 -type f -printf '%U:%G:%m\n' | LC_ALL=C sort -u)" = "$(id -u):$(id -g):600"
+          REMOTE
+          echo "remote_bundle=$remote_bundle" >>"$GITHUB_OUTPUT"
+
+      - name: Emit the exact root-console repair invocation without executing it
+        shell: bash
+        env:
+          REMOTE_BUNDLE: ${{ steps.stage.outputs.remote_bundle }}
+          MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
+          HELPER_SHA: ${{ steps.bundle.outputs.helper_sha }}
+          HELPER_SIZE: ${{ steps.bundle.outputs.helper_size }}
+        run: |
+          set -euo pipefail
+          [[ "$REMOTE_BUNDLE" =~ ^/tmp/fetanagent-h14-owner-session-repair-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{40}$ ]]
+          confirmation='owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money'
+          script_root="/root/fetanagent-h14-owner-session-repair-$CONFIRMED_REPAIR_IMPLEMENTATION"
+          root_script="$script_root/fetanagent-h14-owner-recovery-session-repair.sh"
+          invocation="bash '$root_script' '$CONFIRMED_REPAIR_IMPLEMENTATION' '$CANONICAL_H14_COMMIT' '$OWNER_SESSION_REPAIR_PARENT' '$REMOTE_BUNDLE' '$MANIFEST_SHA' '$HELPER_SHA' '$confirmation'"
+          {
+            echo '### Exact H14 Owner plus KemerBet-session root-console invocation'
+            echo
+            echo 'This run staged only two no-secret image archives and canonical Compose. It did not execute remote Docker, call KemerBet, enable Transfer or Amount, or move money.'
+            echo
+            echo '```bash'
+            echo "script_root='$script_root'"
+            echo "root_script='$root_script'"
+            echo 'if [[ ! -e "$script_root" && ! -L "$script_root" ]]; then'
+            echo '  umask 077'
+            echo '  install -d -o root -g root -m 0700 "$script_root"'
+            echo "  curl --proto '=https' --proto-redir '=https' --tlsv1.2 --fail --silent --show-error --location --output '$root_script' 'https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$CONFIRMED_REPAIR_IMPLEMENTATION/infra/operations/fetanagent-h14-owner-recovery-session-repair.sh'"
+            echo "  chown root:root '$root_script'"
+            echo "  chmod 0600 '$root_script'"
+            echo 'else'
+            echo '  [[ ! -L "$script_root" && -d "$script_root" && "$(realpath -- "$script_root")" == "$script_root" ]]'
+            echo '  [[ "$(stat --format="%U:%G:%a" "$script_root")" == "root:root:700" ]]'
+            echo "  [[ ! -L '$root_script' && -f '$root_script' && \"\$(realpath -- '$root_script')\" == '$root_script' ]]"
+            echo "  [[ \"\$(stat --format='%U:%G:%a:%h' '$root_script')\" == 'root:root:600:1' ]]"
+            echo 'fi'
+            echo "[[ \"\$(stat --format='%s' '$root_script')\" == '$HELPER_SIZE' ]]"
+            echo "[[ \"\$(sha256sum '$root_script' | awk '{print \$1}')\" == '$HELPER_SHA' ]]"
             echo "$invocation"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"

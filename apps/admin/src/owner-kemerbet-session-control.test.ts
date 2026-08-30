@@ -36,6 +36,31 @@ describe('Owner private KemerBet session control', () => {
     ).toMatchObject({ active: true, loginRequired: true, transferDisabled: true });
     expect(
       parseOwnerKemerbetSessionStatus({
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        signedIn: false,
+        startup: {
+          detailsRedacted: true,
+          failureCode: 'contract_mismatch',
+          schemaVersion: 1,
+          stage: 'recaptcha_asset',
+          status: 'failed',
+        },
+        transferDisabled: true,
+      }),
+    ).toMatchObject({
+      active: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'contract_mismatch',
+        schemaVersion: 1,
+        stage: 'recaptcha_asset',
+        status: 'failed',
+      },
+    });
+    expect(
+      parseOwnerKemerbetSessionStatus({
         active: true,
         expiresAt: '2026-08-23T12:10:00.000Z',
         frameSequence: 1,
@@ -83,6 +108,82 @@ describe('Owner private KemerBet session control', () => {
       loginRequired: false,
       phase: 'idle',
       signedIn: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'contract_mismatch',
+        schemaVersion: 1,
+        stage: 'recaptcha_asset',
+        status: 'failed',
+      },
+      transferDisabled: true,
+    },
+    {
+      active: true,
+      expiresAt: '2026-08-23T12:10:00.000Z',
+      frameSequence: 1,
+      generation: '11111111-1111-4111-8111-111111111111',
+      loginRequired: false,
+      phase: 'faulted',
+      signedIn: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'dependency_unavailable',
+        schemaVersion: 1,
+        stage: 'provider_navigation',
+        status: 'failed',
+      },
+      transferDisabled: true,
+    },
+    {
+      active: true,
+      expiresAt: '2026-08-23T12:10:00.000Z',
+      frameSequence: 1,
+      generation: '11111111-1111-4111-8111-111111111111',
+      loginRequired: false,
+      phase: 'stopping',
+      signedIn: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'cleanup_unverified',
+        schemaVersion: 1,
+        stage: 'cleanup',
+        status: 'failed',
+      },
+      transferDisabled: true,
+    },
+  ])('accepts a coherent inactive or active startup failure envelope', (candidate) => {
+    expect(parseOwnerKemerbetSessionStatus(candidate)).toEqual(candidate);
+  });
+
+  it.each([
+    ['cleanup', 'contract_mismatch'],
+    ['recaptcha_asset', 'cleanup_unverified'],
+    ['preview_ready', 'contract_mismatch'],
+  ])('rejects the incoherent failed startup pair %s/%s', (stage, failureCode) => {
+    expect(() =>
+      parseOwnerKemerbetSessionStatus({
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        signedIn: false,
+        startup: {
+          detailsRedacted: true,
+          failureCode,
+          schemaVersion: 1,
+          stage,
+          status: 'failed',
+        },
+        transferDisabled: true,
+      }),
+    ).toThrow(OwnerKemerbetSessionUnavailableError);
+  });
+
+  it.each([
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      signedIn: false,
       transferDisabled: false,
     },
     { active: false, loginRequired: true, phase: 'idle', signedIn: false, transferDisabled: true },
@@ -94,6 +195,35 @@ describe('Owner private KemerBet session control', () => {
       loginRequired: true,
       phase: 'login_required',
       signedIn: false,
+      transferDisabled: true,
+    },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      signedIn: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'contract_mismatch',
+        providerUrl: 'forbidden',
+        schemaVersion: 1,
+        stage: 'recaptcha_asset',
+        status: 'failed',
+      },
+      transferDisabled: true,
+    },
+    {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      signedIn: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'unknown_failure',
+        schemaVersion: 1,
+        stage: 'recaptcha_asset',
+        status: 'failed',
+      },
       transferDisabled: true,
     },
     {

@@ -371,6 +371,117 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     expect(browser.element('#receiver-form').elements.accountReference!.disabled).toBe(true);
   });
 
+  it('renders only a fixed redacted startup failure after clean coordinator shutdown', async () => {
+    const browser = ownerBrowserHarness(503);
+    await browser.signIn();
+    const failedSession = {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      signedIn: false,
+      startup: {
+        detailsRedacted: true,
+        failureCode: 'contract_mismatch',
+        schemaVersion: 1,
+        stage: 'recaptcha_asset',
+        status: 'failed',
+      },
+      transferDisabled: true,
+    };
+
+    expect(await browser.call('validKemerbetSession', failedSession)).toEqual(failedSession);
+    await browser.call('renderKemerbetSession', failedSession, true);
+
+    const status = browser.element('#kemerbet-session-status').textContent;
+    expect(status).toBe(
+      'Private KemerBet sign-in stopped during the reviewed reCAPTCHA assets because ' +
+        'the reviewed public-resource contract changed. Transfer, final action, and money movement remain disabled.',
+    );
+    expect(status).not.toMatch(/https?:|password|token|stack|player/iu);
+  });
+
+  it.each([
+    {
+      failureCode: 'dependency_unavailable',
+      expectedMessage:
+        'Private KemerBet sign-in stopped during KemerBet login navigation because ' +
+        'a required dependency was unavailable. Transfer, final action, and money movement remain disabled.',
+      phase: 'faulted',
+      stage: 'provider_navigation',
+      stopDisabled: false,
+    },
+    {
+      failureCode: 'cleanup_unverified',
+      expectedMessage:
+        'Private KemerBet sign-in stopped during isolated browser cleanup because ' +
+        'clean browser shutdown could not be verified. Transfer, final action, and money movement remain disabled.',
+      phase: 'stopping',
+      stage: 'cleanup',
+      stopDisabled: true,
+    },
+  ])(
+    'renders a fixed redacted $phase startup failure while retaining cleanup controls',
+    async ({ expectedMessage, failureCode, phase, stage, stopDisabled }) => {
+      const browser = ownerBrowserHarness(503);
+      await browser.signIn();
+      browser.evaluate("activeKemerbetAgentProfileId = '77777777-7777-4777-8777-777777777777';");
+      const failedSession = {
+        active: true,
+        expiresAt: '2026-08-30T22:00:00.000Z',
+        frameSequence: 0,
+        generation: '11111111-1111-4111-8111-111111111111',
+        loginRequired: false,
+        phase,
+        signedIn: false,
+        startup: {
+          detailsRedacted: true,
+          failureCode,
+          schemaVersion: 1,
+          stage,
+          status: 'failed',
+        },
+        transferDisabled: true,
+      };
+
+      expect(await browser.call('validKemerbetSession', failedSession)).toEqual(failedSession);
+      await browser.call('renderKemerbetSession', failedSession, true);
+
+      const status = browser.element('#kemerbet-session-status').textContent;
+      expect(status).toBe(expectedMessage);
+      expect(status).not.toMatch(/https?:|password|token|stack|player/iu);
+      expect(browser.element('#kemerbet-session-confirmation').disabled).toBe(true);
+      expect(browser.element('#kemerbet-session-start-button').disabled).toBe(true);
+      expect(browser.element('#kemerbet-session-stop-button').disabled).toBe(stopDisabled);
+      expect(browser.element('#kemerbet-session-canvas').hidden).toBe(true);
+    },
+  );
+
+  it.each([
+    ['cleanup', 'contract_mismatch'],
+    ['recaptcha_asset', 'cleanup_unverified'],
+    ['preview_ready', 'contract_mismatch'],
+  ])('rejects the incoherent browser startup failure pair %s/%s', async (stage, failureCode) => {
+    const browser = ownerBrowserHarness(503);
+    await browser.signIn();
+
+    await expect(
+      browser.call('validKemerbetSession', {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        signedIn: false,
+        startup: {
+          detailsRedacted: true,
+          failureCode,
+          schemaVersion: 1,
+          stage,
+          status: 'failed',
+        },
+        transferDisabled: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('does not run a pilot refresh for a non-open-pilot failure', async () => {
     const requestId = '11111111-1111-4111-8111-111111111111';
     let activeTest = false;

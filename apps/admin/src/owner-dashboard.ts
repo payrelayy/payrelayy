@@ -1366,6 +1366,41 @@ async function loadKemerbetAgentProfiles() {
   }
 }
 
+function validKemerbetStartup(startup, session, quarantined) {
+  if (startup === undefined) return true;
+  if (!startup || typeof startup !== 'object') return false;
+  const stages = ['browser_launch', 'cleanup', 'preflight', 'preview_ready', 'profile',
+    'provider_asset', 'provider_navigation', 'recaptcha_asset', 'recaptcha_ceremony',
+    'transport_guard'];
+  const failureCodes = ['cleanup_unverified', 'contract_mismatch', 'deadline_exceeded',
+    'dependency_unavailable', 'forbidden_request'];
+  const failed = startup.status === 'failed';
+  const expectedKeys = failed
+    ? ['detailsRedacted', 'failureCode', 'schemaVersion', 'stage', 'status']
+    : ['detailsRedacted', 'schemaVersion', 'stage', 'status'];
+  if (Object.keys(startup).sort().join('\\0') !== expectedKeys.sort().join('\\0') ||
+      startup.detailsRedacted !== true || startup.schemaVersion !== 1 ||
+      !stages.includes(startup.stage) ||
+      !['failed', 'ready', 'starting'].includes(startup.status) ||
+      (failed && !failureCodes.includes(startup.failureCode)) ||
+      (!failed && startup.failureCode !== undefined)) return false;
+  if (failed && (startup.stage === 'preview_ready' ||
+      (startup.stage === 'cleanup') !== (startup.failureCode === 'cleanup_unverified'))) {
+    return false;
+  }
+  if (startup.status === 'starting') {
+    return session.active === true && session.phase === 'starting' &&
+      startup.stage !== 'preview_ready';
+  }
+  if (startup.status === 'ready') {
+    return session.active === true && session.phase !== 'starting' &&
+      startup.stage === 'preview_ready';
+  }
+  return !quarantined &&
+    ((session.active === false && session.phase === 'idle') ||
+      (session.active === true && ['faulted', 'stopping'].includes(session.phase)));
+}
+
 function validKemerbetSession(value) {
   if (!value || typeof value !== 'object' || typeof value.active !== 'boolean' ||
       typeof value.loginRequired !== 'boolean' || typeof value.signedIn !== 'boolean' ||
@@ -1377,7 +1412,9 @@ function validKemerbetSession(value) {
     : quarantined
       ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
       : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
+  if (value.startup !== undefined) expectedKeys.push('startup');
   if (Object.keys(value).sort().join('\\0') !== expectedKeys.sort().join('\\0')) return undefined;
+  if (!validKemerbetStartup(value.startup, value, quarantined)) return undefined;
   if (!value.active) {
     if (value.loginRequired || value.signedIn || !['checkpointed', 'idle'].includes(value.phase)) {
       return undefined;
@@ -1458,6 +1495,30 @@ function scheduleKemerbetSessionPoll() {
   kemerbetSessionPollTimer = window.setTimeout(() => void loadKemerbetSession(), delay);
 }
 
+function kemerbetStartupFailureMessage(startup) {
+  const stages = {
+    browser_launch: 'isolated browser launch',
+    cleanup: 'isolated browser cleanup',
+    preflight: 'startup preflight',
+    preview_ready: 'preview readiness',
+    profile: 'secured browser-profile preparation',
+    provider_asset: 'the reviewed KemerBet bootstrap assets',
+    provider_navigation: 'KemerBet login navigation',
+    recaptcha_asset: 'the reviewed reCAPTCHA assets',
+    recaptcha_ceremony: 'the bounded reCAPTCHA request sequence',
+    transport_guard: 'network-guard installation',
+  };
+  const failures = {
+    cleanup_unverified: 'clean browser shutdown could not be verified',
+    contract_mismatch: 'the reviewed public-resource contract changed',
+    deadline_exceeded: 'the bounded startup deadline expired',
+    dependency_unavailable: 'a required dependency was unavailable',
+    forbidden_request: 'an unreviewed request was blocked',
+  };
+  return 'Private KemerBet sign-in stopped during ' + stages[startup.stage] + ' because ' +
+    failures[startup.failureCode] + '. Transfer, final action, and money movement remain disabled.';
+}
+
 async function renderKemerbetSession(session, securityRecoverySessionAllowed = false) {
   const wasSignedIn = currentKemerbetSession?.signedIn === true;
   currentKemerbetSession = session;
@@ -1488,7 +1549,9 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
     kemerbetSessionCanvas.hidden = true;
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
-    if (recoveryRequired) {
+    if (session.startup?.status === 'failed') {
+      kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup);
+    } else if (recoveryRequired) {
       if (!securityRecoverySessionAllowed) kemerbetSessionConfirmation.checked = false;
       kemerbetSessionCanvas.tabIndex = -1;
       kemerbetAgentProfileConfirmation.checked = false;
@@ -1534,7 +1597,9 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
   }
-  if (session.phase === 'authenticated') {
+  if (session.startup?.status === 'failed') {
+    kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup);
+  } else if (session.phase === 'authenticated') {
     kemerbetSessionStatus.textContent = 'KemerBet signed in and retained until ' +
       new Date(session.expiresAt).toLocaleString() +
       '. Input is locked and Transfer remains disabled.';

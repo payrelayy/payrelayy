@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   OWNER_CONTROL_DATABASE_DIRECT_HOST,
+  OWNER_CONTROL_DATABASE_POOLER_HOST,
+  OWNER_CONTROL_DATABASE_RUNTIME_ROLE,
+  OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE,
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
   OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
   loadOwnerControlConfig,
@@ -11,6 +14,7 @@ import {
 } from './owner-control.js';
 
 const databaseUrl = `postgresql://fetanagent_owner_control_runtime:password@${OWNER_CONTROL_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
+const poolerDatabaseUrl = `postgresql://${OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE}:password@${OWNER_CONTROL_DATABASE_POOLER_HOST}:5432/postgres?sslmode=verify-full`;
 const publishableKey = 'sb_publishable_test_key_for_staging_only';
 const receiverReferenceEncryptionMaster = 'c'.repeat(64);
 const receiverReferenceFingerprintMaster = 'd'.repeat(64);
@@ -61,7 +65,7 @@ describe('Owner-control configuration', () => {
     expect(OWNER_CONTROL_TELEGRAM_BOT_USERNAME).toBe('fetanagentbot');
   });
 
-  it('accepts only the exact staging project, role, direct host, and verify-full URL', () => {
+  it('accepts only the exact staging project, dedicated role, pinned database routes, and verify-full URL', () => {
     expect(loadOwnerControlConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
@@ -72,13 +76,28 @@ describe('Owner-control configuration', () => {
         user: 'fetanagent_owner_control_runtime',
       },
     });
+    expect(
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        OWNER_CONTROL_DATABASE_URL: poolerDatabaseUrl,
+      }).runtime,
+    ).toMatchObject({
+      enabled: true,
+      connection: {
+        host: OWNER_CONTROL_DATABASE_POOLER_HOST,
+        user: OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE,
+      },
+    });
     for (const unsafe of [
-      databaseUrl.replace(
-        OWNER_CONTROL_DATABASE_DIRECT_HOST,
-        'aws-1-eu-west-1.pooler.supabase.com',
+      databaseUrl.replace(OWNER_CONTROL_DATABASE_DIRECT_HOST, OWNER_CONTROL_DATABASE_POOLER_HOST),
+      poolerDatabaseUrl.replace(OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE, 'postgres'),
+      poolerDatabaseUrl.replace(
+        OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE,
+        OWNER_CONTROL_DATABASE_RUNTIME_ROLE,
       ),
       databaseUrl.replace('fetanagent_owner_control_runtime', 'postgres'),
       databaseUrl.replace('5432', '6543'),
+      poolerDatabaseUrl.replace('5432', '6543'),
       databaseUrl.replace('verify-full', 'require'),
     ]) {
       expect(() =>

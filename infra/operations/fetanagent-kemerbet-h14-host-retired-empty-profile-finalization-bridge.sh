@@ -30,9 +30,20 @@ readonly RECHECK_RPC_ROOT='/run/fetanagent-kemerbet-readiness-rpc-v1'
 readonly ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
 readonly TERMINAL_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
 readonly FINALIZED_NAME='kemerbet-readiness-cohort-security-recovery-profile-finalized-v1'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-host-retired-empty-profile-finalization-bridge'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-host-retired-profile-tree-finalization-bridge'
+readonly PREDECESSOR_BRIDGE_RELEASE='066572953de652e53634f562b4a63c0d9103865d'
+readonly PREDECESSOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-host-retired-empty-profile-finalization-bridge'
+readonly PREDECESSOR_BUNDLE_ROOT="/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-host-retired-empty-profile-finalization-bridge-bundles/$PREDECESSOR_BRIDGE_RELEASE"
 readonly MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 readonly MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
+readonly EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop.service'
+readonly EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop.timer'
+readonly EXPIRY_STOP_SERVICE_PATH="/etc/systemd/system/$EXPIRY_STOP_SERVICE"
+readonly EXPIRY_STOP_TIMER_PATH="/etc/systemd/system/$EXPIRY_STOP_TIMER"
+readonly EXPIRY_STOP_TIMER_ENABLE_LINK="/etc/systemd/system/timers.target.wants/$EXPIRY_STOP_TIMER"
+readonly EXPIRY_STOP_SERVICE_SHA256='c206af7923aae32743ddf841ee8e673544e963e5a8730c3c6074fa7852dcd063'
+readonly EXPIRY_STOP_TIMER_SHA256='d155578fb560103d3452ba2d489828f29a8a6b8b1d604eb37235f7d5ef07eb48'
+readonly EXPIRY_STOP_ON_CALENDAR='2026-08-29 12:47:49 UTC'
 
 export PATH="$SAFE_PATH"
 
@@ -267,6 +278,8 @@ readonly INSTALLING_ROOT="$BRIDGE_PARENT/.installing-$BRIDGE_RELEASE"
 readonly FINAL_ROOT="$BRIDGE_PARENT/$BRIDGE_RELEASE"
 readonly INTENT="$INSTALLING_ROOT/intent-v1"
 readonly COMPLETED="$INSTALLING_ROOT/completed-v1"
+readonly EXPIRY_RETIREMENT_INTENT="$INSTALLING_ROOT/expiry-guard-retirement-intent-v1"
+readonly EXPIRY_RETIRED="$INSTALLING_ROOT/expiry-guard-retired-v1"
 
 [[ ! -L "$SCRIPT_PATH" && -f "$SCRIPT_PATH" &&
   "$(stat -c '%U:%G:%a:%h' "$SCRIPT_PATH")" == 'root:root:400:1' &&
@@ -303,6 +316,7 @@ expected_bundle_manifest() {
     "engine_sha256=$EXPECTED_ENGINE_SHA256" \
     "engine_size=$(stat -c %s "$ENGINE_PATH")" \
     'execute_after_security_recovery_ack=true' \
+    'retire_exact_expired_runtime_guard=true' \
     'installed_helper_changed=false' \
     'provider_action_enabled=false' \
     'amount_entry_enabled=false' \
@@ -402,34 +416,210 @@ PY
   exec {data_fd}<&-
 }
 
+expected_expiry_retirement_intent() {
+  printf '%s\n' \
+    'version=1' \
+    'contract=fetanagent-staging-expired-runtime-guard-retirement-v1' \
+    'state=authorized' \
+    "bridge_release=$BRIDGE_RELEASE" \
+    "canonical_h14_release=$CANONICAL_H14_RELEASE" \
+    "staging_project_ref=$STAGING_PROJECT_REF" \
+    "staging_droplet_id=$STAGING_DROPLET_ID" \
+    "service_name=$EXPIRY_STOP_SERVICE" \
+    "service_unit_sha256=$EXPIRY_STOP_SERVICE_SHA256" \
+    "timer_name=$EXPIRY_STOP_TIMER" \
+    "timer_unit_sha256=$EXPIRY_STOP_TIMER_SHA256" \
+    "timer_on_calendar=$EXPIRY_STOP_ON_CALENDAR" \
+    'timer_expired=true' \
+    "installed_helper_sha256=$CANONICAL_HELPER_SHA256" \
+    'financial_actions_mode=dry_run' \
+    'provider_action_enabled=false' \
+    'amount_entry_enabled=false' \
+    'transfer_enabled=false' \
+    'money_moved=false'
+}
+
+expected_expiry_retired() {
+  local retirement_intent_sha256
+  retirement_intent_sha256="$(expected_expiry_retirement_intent | sha256sum | awk '{print $1}')"
+  printf '%s\n' \
+    'version=1' \
+    'contract=fetanagent-staging-expired-runtime-guard-retirement-v1' \
+    'state=completed' \
+    "bridge_release=$BRIDGE_RELEASE" \
+    "canonical_h14_release=$CANONICAL_H14_RELEASE" \
+    "retirement_intent_sha256=$retirement_intent_sha256" \
+    'service_load_state=not-found' \
+    'timer_load_state=not-found' \
+    'unit_files_absent=true' \
+    'timer_enablement_link_absent=true' \
+    'service_active_state=inactive' \
+    'service_sub_state=dead' \
+    'service_main_pid=0' \
+    'service_job_absent=true' \
+    'timer_active_state=inactive' \
+    'timer_sub_state=dead' \
+    'timer_job_absent=true' \
+    'installed_helper_changed=false' \
+    'financial_actions_mode=dry_run' \
+    'provider_action_enabled=false' \
+    'amount_entry_enabled=false' \
+    'transfer_enabled=false' \
+    'money_moved=false'
+}
+
+require_exact_bridge_record() {
+  local expected path="$1" producer="$2"
+  expected="$("$producer")"
+  [[ ! -L "$path" && -f "$path" &&
+    "$(realpath -- "$path")" == "$path" &&
+    "$(stat -c '%U:%G:%a:%h' "$path")" == 'root:root:600:1' ]] ||
+    die 'a bridge retirement ledger record is not exact'
+  cmp -s -- "$path" <(printf '%s\n' "$expected") ||
+    die 'a bridge retirement ledger record changed'
+}
+
+systemd_value() {
+  systemctl show --property="$2" --value "$1" 2>/dev/null
+}
+
+require_exact_expired_guard_present() {
+  local restart_count stop_epoch
+  command -v systemctl >/dev/null 2>&1 || die 'systemctl is unavailable for the expired guard retirement'
+  [[ ! -L "$EXPIRY_STOP_SERVICE_PATH" && -f "$EXPIRY_STOP_SERVICE_PATH" &&
+    "$(realpath -- "$EXPIRY_STOP_SERVICE_PATH")" == "$EXPIRY_STOP_SERVICE_PATH" &&
+    "$(stat -c '%U:%G:%a:%h:%s' "$EXPIRY_STOP_SERVICE_PATH")" == 'root:root:644:1:335' &&
+    "$(sha256sum -- "$EXPIRY_STOP_SERVICE_PATH" | awk '{print $1}')" == "$EXPIRY_STOP_SERVICE_SHA256" &&
+    ! -L "$EXPIRY_STOP_TIMER_PATH" && -f "$EXPIRY_STOP_TIMER_PATH" &&
+    "$(realpath -- "$EXPIRY_STOP_TIMER_PATH")" == "$EXPIRY_STOP_TIMER_PATH" &&
+    "$(stat -c '%U:%G:%a:%h:%s' "$EXPIRY_STOP_TIMER_PATH")" == 'root:root:644:1:236' &&
+    "$(sha256sum -- "$EXPIRY_STOP_TIMER_PATH" | awk '{print $1}')" == "$EXPIRY_STOP_TIMER_SHA256" &&
+    -L "$EXPIRY_STOP_TIMER_ENABLE_LINK" &&
+    "$(readlink -- "$EXPIRY_STOP_TIMER_ENABLE_LINK")" == "$EXPIRY_STOP_TIMER_PATH" ]] ||
+    die 'the expired staging guard unit files are not exact'
+  [[ "$(systemd_value "$EXPIRY_STOP_SERVICE" LoadState)" == 'loaded' &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" FragmentPath)" == "$EXPIRY_STOP_SERVICE_PATH" &&
+    -z "$(systemd_value "$EXPIRY_STOP_SERVICE" DropInPaths)" &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" UnitFileState)" == 'static' &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" Restart)" == 'on-failure' &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" RestartUSec)" == '1min' &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" LoadState)" == 'loaded' &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" FragmentPath)" == "$EXPIRY_STOP_TIMER_PATH" &&
+    -z "$(systemd_value "$EXPIRY_STOP_TIMER" DropInPaths)" &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" UnitFileState)" == 'enabled' &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" ActiveState)" == 'active' &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" SubState)" == 'elapsed' ]] ||
+    die 'the expired staging guard systemd state is not exact'
+  restart_count="$(systemd_value "$EXPIRY_STOP_SERVICE" NRestarts)"
+  [[ "$restart_count" =~ ^[1-9][0-9]*$ ]] ||
+    die 'the expired staging guard did not record its recurring failure state'
+  stop_epoch="$(date -u -d "$EXPIRY_STOP_ON_CALENDAR" +%s)" ||
+    die 'the expired staging guard calendar could not be parsed'
+  (( stop_epoch < $(date -u +%s) )) || die 'the staging expiry guard has not expired'
+}
+
+require_expiry_guard_transition_exact() {
+  local path expected_sha expected_size load_state name
+  for name in service timer; do
+    if [[ "$name" == service ]]; then
+      path="$EXPIRY_STOP_SERVICE_PATH"
+      expected_sha="$EXPIRY_STOP_SERVICE_SHA256"
+      expected_size=335
+    else
+      path="$EXPIRY_STOP_TIMER_PATH"
+      expected_sha="$EXPIRY_STOP_TIMER_SHA256"
+      expected_size=236
+    fi
+    if [[ -e "$path" || -L "$path" ]]; then
+      [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+        "$(stat -c '%U:%G:%a:%h:%s' "$path")" == "root:root:644:1:$expected_size" &&
+        "$(sha256sum -- "$path" | awk '{print $1}')" == "$expected_sha" ]] ||
+        die 'an expiry guard unit changed during retirement'
+    fi
+  done
+  if [[ -e "$EXPIRY_STOP_TIMER_ENABLE_LINK" || -L "$EXPIRY_STOP_TIMER_ENABLE_LINK" ]]; then
+    [[ -L "$EXPIRY_STOP_TIMER_ENABLE_LINK" &&
+      "$(readlink -- "$EXPIRY_STOP_TIMER_ENABLE_LINK")" == "$EXPIRY_STOP_TIMER_PATH" ]] ||
+      die 'the expiry guard timer enablement link changed during retirement'
+  fi
+  for name in "$EXPIRY_STOP_SERVICE" "$EXPIRY_STOP_TIMER"; do
+    if [[ "$name" == "$EXPIRY_STOP_SERVICE" ]]; then
+      path="$EXPIRY_STOP_SERVICE_PATH"
+    else
+      path="$EXPIRY_STOP_TIMER_PATH"
+    fi
+    load_state="$(systemd_value "$name" LoadState)"
+    [[ "$load_state" == 'loaded' || "$load_state" == 'not-found' ]] ||
+      die 'an expiry guard unit entered an unexpected load state'
+    if [[ "$load_state" == 'loaded' ]]; then
+      [[ "$(systemd_value "$name" FragmentPath)" == "$path" &&
+        -z "$(systemd_value "$name" DropInPaths)" ]] ||
+        die 'an expiry guard unit gained an unreviewed drop-in'
+    fi
+  done
+}
+
+require_expiry_guard_absent() {
+  [[ ! -e "$EXPIRY_STOP_SERVICE_PATH" && ! -L "$EXPIRY_STOP_SERVICE_PATH" &&
+    ! -e "$EXPIRY_STOP_TIMER_PATH" && ! -L "$EXPIRY_STOP_TIMER_PATH" &&
+    ! -e "$EXPIRY_STOP_TIMER_ENABLE_LINK" && ! -L "$EXPIRY_STOP_TIMER_ENABLE_LINK" &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" LoadState)" == 'not-found' &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" ActiveState)" == 'inactive' &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" SubState)" == 'dead' &&
+    "$(systemd_value "$EXPIRY_STOP_SERVICE" MainPID)" == '0' &&
+    -z "$(systemd_value "$EXPIRY_STOP_SERVICE" Job)" &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" LoadState)" == 'not-found' &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" ActiveState)" == 'inactive' &&
+    "$(systemd_value "$EXPIRY_STOP_TIMER" SubState)" == 'dead' &&
+    -z "$(systemd_value "$EXPIRY_STOP_TIMER" Job)" ]] ||
+    die 'the expired staging guard was not retired completely'
+}
+
+retire_exact_expired_guard() {
+  local service_load timer_load
+  if [[ ! -e "$EXPIRY_RETIREMENT_INTENT" && ! -L "$EXPIRY_RETIREMENT_INTENT" ]]; then
+    [[ ! -e "$EXPIRY_RETIRED" && ! -L "$EXPIRY_RETIRED" ]] ||
+      die 'the expiry guard retirement completion exists without its intent'
+    require_exact_expired_guard_present
+    publish_append_complete "$EXPIRY_RETIREMENT_INTENT" "$(expected_expiry_retirement_intent)"
+    sync -f "$INSTALLING_ROOT"
+    sync -f "$BRIDGE_PARENT"
+  fi
+  require_exact_bridge_record "$EXPIRY_RETIREMENT_INTENT" expected_expiry_retirement_intent
+  if [[ -e "$EXPIRY_RETIRED" || -L "$EXPIRY_RETIRED" ]]; then
+    require_exact_bridge_record "$EXPIRY_RETIRED" expected_expiry_retired
+    require_expiry_guard_absent
+    return 0
+  fi
+  if ! (require_expiry_guard_absent) 2>/dev/null; then
+    require_expiry_guard_transition_exact
+    service_load="$(systemd_value "$EXPIRY_STOP_SERVICE" LoadState)"
+    timer_load="$(systemd_value "$EXPIRY_STOP_TIMER" LoadState)"
+    if [[ "$service_load" == 'loaded' ]]; then
+      systemctl stop "$EXPIRY_STOP_SERVICE" >/dev/null ||
+        die 'the recurring expired staging guard service could not be stopped'
+    fi
+    if [[ "$timer_load" == 'loaded' ]]; then
+      systemctl disable --now "$EXPIRY_STOP_TIMER" >/dev/null ||
+        die 'the expired staging guard timer could not be disabled'
+    fi
+    require_expiry_guard_transition_exact
+    rm -f -- "$EXPIRY_STOP_SERVICE_PATH" "$EXPIRY_STOP_TIMER_PATH"
+    sync -f /etc/systemd/system
+    systemctl daemon-reload || die 'systemd could not reload after retiring the expired staging guard'
+  fi
+  require_expiry_guard_absent
+  publish_append_complete "$EXPIRY_RETIRED" "$(expected_expiry_retired)"
+  sync -f "$INSTALLING_ROOT"
+  sync -f "$BRIDGE_PARENT"
+  require_exact_bridge_record "$EXPIRY_RETIRED" expected_expiry_retired
+}
+
 load_intent() {
   [[ ! -L "$INTENT" && -f "$INTENT" &&
     "$(stat -c '%U:%G:%a:%h' "$INTENT")" == 'root:root:600:1' ]] || return 1
   engine emit-intent "$INTENT" "$COMPLETED" | cmp -s -- "$INTENT" -
 }
-
-if [[ -e "$FINAL_ROOT" || -L "$FINAL_ROOT" ]]; then
-  final_intent="$FINAL_ROOT/intent-v1"
-  final_completed="$FINAL_ROOT/completed-v1"
-  [[ ! -L "$BRIDGE_PARENT" && -d "$BRIDGE_PARENT" &&
-    "$(realpath -- "$BRIDGE_PARENT")" == "$BRIDGE_PARENT" &&
-    "$(stat -c '%U:%G:%a' "$BRIDGE_PARENT")" == 'root:root:700' &&
-    ! -e "$INSTALLING_ROOT" && ! -L "$INSTALLING_ROOT" &&
-    "$(find -P "$BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == "$BRIDGE_RELEASE:d" &&
-    ! -L "$FINAL_ROOT" && -d "$FINAL_ROOT" &&
-    "$(stat -c '%U:%G:%a' "$FINAL_ROOT")" == 'root:root:700' &&
-    "$(find -P "$FINAL_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == $'completed-v1:f\nintent-v1:f' ]] ||
-    die 'the completed one-use bridge ledger namespace is invalid'
-  engine verify-completed "$final_intent" "$final_completed" ||
-    die 'the completed one-use bridge ledger or live post-state is invalid'
-  ready_output="$(env -i PATH="$SAFE_PATH" SUDO_USER='fetanagent-admin' "$HELPER_PATH" \
-    kemerbet-quarantine-recovery-ready "$CANONICAL_H14_RELEASE")" ||
-    die 'the unchanged installed helper rejected the completed boundary'
-  [[ "$ready_output" == 'KemerBet H14 recovery state: runtime-ready; Transfer and Amount disabled.' ]] ||
-    die 'the completed runtime-ready result is not exact'
-  printf '%s\n' 'KemerBet H14 replacement profile prepared: Transfer and Amount disabled.'
-  exit 0
-fi
 
 require_exact_host_retired_diagnostic() {
   diagnostic_output="$(env -i PATH="$SAFE_PATH" python3 -I "$DIAGNOSTIC_PATH" \
@@ -440,6 +630,68 @@ require_exact_host_retired_diagnostic() {
   [[ "$diagnostic_output" == 'PASS H14-D000' ]] ||
     die 'the canonical host-retired predicate was ambiguous'
 }
+
+require_exact_failed_predecessor_evidence() {
+  local predecessor_installing="$PREDECESSOR_BRIDGE_PARENT/.installing-$PREDECESSOR_BRIDGE_RELEASE"
+  [[ ! -L "$PREDECESSOR_BRIDGE_PARENT" && -d "$PREDECESSOR_BRIDGE_PARENT" &&
+    "$(realpath -- "$PREDECESSOR_BRIDGE_PARENT")" == "$PREDECESSOR_BRIDGE_PARENT" &&
+    "$(stat -c '%U:%G:%a' "$PREDECESSOR_BRIDGE_PARENT")" == 'root:root:700' &&
+    "$(find -P "$PREDECESSOR_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == ".installing-$PREDECESSOR_BRIDGE_RELEASE:d" &&
+    ! -L "$predecessor_installing" && -d "$predecessor_installing" &&
+    "$(realpath -- "$predecessor_installing")" == "$predecessor_installing" &&
+    "$(stat -c '%U:%G:%a' "$predecessor_installing")" == 'root:root:700' &&
+    -z "$(find -P "$predecessor_installing" -mindepth 1 -maxdepth 1 -printf x)" ]] ||
+    die 'the failed predecessor bridge ledger is not the exact empty crash prefix'
+  [[ ! -L "$PREDECESSOR_BUNDLE_ROOT" && -d "$PREDECESSOR_BUNDLE_ROOT" &&
+    "$(realpath -- "$PREDECESSOR_BUNDLE_ROOT")" == "$PREDECESSOR_BUNDLE_ROOT" &&
+    "$(stat -c '%U:%G:%a' "$PREDECESSOR_BUNDLE_ROOT")" == 'root:root:700' &&
+    "$(find -P "$PREDECESSOR_BUNDLE_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-kemerbet-h14-empty-profile-finalization-engine.py:f\nfetanagent-kemerbet-h14-host-retired-empty-profile-finalization-bridge.sh:f\nfetanagent-kemerbet-h14-terminal-differential-validator.py:f\nmanifest-v1:f' ]] ||
+    die 'the immutable failed predecessor bundle is not exact'
+  [[ "$(stat -c '%U:%G:%a:%h:%s' "$PREDECESSOR_BUNDLE_ROOT/fetanagent-kemerbet-h14-host-retired-empty-profile-finalization-bridge.sh")" == 'root:root:400:1:26458' &&
+    "$(sha256sum -- "$PREDECESSOR_BUNDLE_ROOT/fetanagent-kemerbet-h14-host-retired-empty-profile-finalization-bridge.sh" | awk '{print $1}')" == 'a0f27007fe5954beb2393f0acbadad6b28931a8eae01fec12bcd64eb995ede65' &&
+    "$(stat -c '%U:%G:%a:%h:%s' "$PREDECESSOR_BUNDLE_ROOT/fetanagent-kemerbet-h14-terminal-differential-validator.py")" == 'root:root:400:1:17941' &&
+    "$(sha256sum -- "$PREDECESSOR_BUNDLE_ROOT/fetanagent-kemerbet-h14-terminal-differential-validator.py" | awk '{print $1}')" == 'd4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542' &&
+    "$(stat -c '%U:%G:%a:%h:%s' "$PREDECESSOR_BUNDLE_ROOT/fetanagent-kemerbet-h14-empty-profile-finalization-engine.py")" == 'root:root:400:1:27047' &&
+    "$(sha256sum -- "$PREDECESSOR_BUNDLE_ROOT/fetanagent-kemerbet-h14-empty-profile-finalization-engine.py" | awk '{print $1}')" == '93ea024cdfa116f81a1ccb99e7145e60f5da012563d1cef33f9036dc25805855' &&
+    "$(stat -c '%U:%G:%a:%h:%s' "$PREDECESSOR_BUNDLE_ROOT/manifest-v1")" == 'root:root:400:1:821' &&
+    "$(sha256sum -- "$PREDECESSOR_BUNDLE_ROOT/manifest-v1" | awk '{print $1}')" == '2e6f683885ff3dda99a7f670cb4f14fe83a054f1055ca20bc178d4e2e673e877' ]] ||
+    die 'the immutable failed predecessor bundle pins changed'
+}
+
+require_exact_failed_predecessor_evidence
+
+if [[ -e "$FINAL_ROOT" || -L "$FINAL_ROOT" ]]; then
+  final_intent="$FINAL_ROOT/intent-v1"
+  final_completed="$FINAL_ROOT/completed-v1"
+  final_expiry_intent="$FINAL_ROOT/expiry-guard-retirement-intent-v1"
+  final_expiry_retired="$FINAL_ROOT/expiry-guard-retired-v1"
+  [[ ! -L "$BRIDGE_PARENT" && -d "$BRIDGE_PARENT" &&
+    "$(realpath -- "$BRIDGE_PARENT")" == "$BRIDGE_PARENT" &&
+    "$(stat -c '%U:%G:%a' "$BRIDGE_PARENT")" == 'root:root:700' &&
+    ! -e "$INSTALLING_ROOT" && ! -L "$INSTALLING_ROOT" &&
+    "$(find -P "$BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == "$BRIDGE_RELEASE:d" &&
+    ! -L "$FINAL_ROOT" && -d "$FINAL_ROOT" &&
+    "$(stat -c '%U:%G:%a' "$FINAL_ROOT")" == 'root:root:700' &&
+    "$(find -P "$FINAL_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'completed-v1:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f\nintent-v1:f' ]] ||
+    die 'the completed one-use bridge ledger namespace is invalid'
+  require_exact_bridge_record "$final_expiry_intent" expected_expiry_retirement_intent
+  require_exact_bridge_record "$final_expiry_retired" expected_expiry_retired
+  require_expiry_guard_absent
+  engine verify-completed "$final_intent" "$final_completed" ||
+    die 'the completed one-use bridge ledger or live post-state is invalid'
+  ready_output="$(env -i PATH="$SAFE_PATH" SUDO_USER='fetanagent-admin' "$HELPER_PATH" \
+    kemerbet-quarantine-recovery-ready "$CANONICAL_H14_RELEASE")" ||
+    die 'the unchanged installed helper rejected the completed boundary'
+  [[ "$ready_output" == 'KemerBet H14 recovery state: runtime-ready; Transfer and Amount disabled.' ]] ||
+    die 'the completed runtime-ready result is not exact'
+  require_live_fail_closed_boundary
+  printf '%s\n' 'KemerBet H14 replacement profile prepared: Transfer and Amount disabled.'
+  exit 0
+fi
+
+require_exact_host_retired_diagnostic
 
 if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
   require_exact_host_retired_diagnostic
@@ -466,12 +718,21 @@ fi
   die 'the installing bridge ledger root is unsafe'
 ledger_entries="$(find -P "$INSTALLING_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)"
 case "$ledger_entries" in
-  ''|'.intent-v1.installing:f'|'intent-v1:f'|$'.completed-v1.installing:f\nintent-v1:f'|$'completed-v1:f\nintent-v1:f') ;;
+  ''|'.expiry-guard-retirement-intent-v1.installing:f'|'expiry-guard-retirement-intent-v1:f'|\
+  $'.expiry-guard-retired-v1.installing:f\nexpiry-guard-retirement-intent-v1:f'|\
+  $'expiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f'|\
+  $'.intent-v1.installing:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f'|\
+  $'expiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f\nintent-v1:f'|\
+  $'.completed-v1.installing:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f\nintent-v1:f'|\
+  $'completed-v1:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f\nintent-v1:f') ;;
   *) die 'the installing bridge ledger has an invalid crash prefix or unexpected entry' ;;
 esac
+retire_exact_expired_guard
+ledger_entries="$(find -P "$INSTALLING_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)"
 expected_intent_data="$(engine emit-intent "$INTENT" "$COMPLETED")" ||
   die 'the exact current H14 pins could not be generated'
-if [[ "$ledger_entries" == '' || "$ledger_entries" == '.intent-v1.installing:f' ]]; then
+if [[ "$ledger_entries" == $'expiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f' ||
+  "$ledger_entries" == $'.intent-v1.installing:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f' ]]; then
   require_exact_host_retired_diagnostic
   publish_append_complete "$INTENT" "$expected_intent_data"
   sync -f "$INSTALLING_ROOT"
@@ -501,7 +762,7 @@ publish_append_complete "$COMPLETED" "$expected_completion_data"
 engine verify-completed "$INTENT" "$COMPLETED" ||
   die 'the exact completion ledger did not bind the live post-state'
 [[ "$(find -P "$INSTALLING_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-  $'completed-v1:f\nintent-v1:f' ]] ||
+  $'completed-v1:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f\nintent-v1:f' ]] ||
   die 'the bridge ledger contains an unexpected entry before publication'
 sync -f "$INSTALLING_ROOT"
 mv -- "$INSTALLING_ROOT" "$FINAL_ROOT"
@@ -509,7 +770,7 @@ sync -f "$BRIDGE_PARENT"
 [[ ! -L "$FINAL_ROOT" && -d "$FINAL_ROOT" &&
   "$(stat -c '%U:%G:%a' "$FINAL_ROOT")" == 'root:root:700' &&
   "$(find -P "$FINAL_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    $'completed-v1:f\nintent-v1:f' ]] ||
+    $'completed-v1:f\nexpiry-guard-retired-v1:f\nexpiry-guard-retirement-intent-v1:f\nintent-v1:f' ]] ||
   die 'the final bridge ledger publication is not exact'
 engine verify-completed "$FINAL_ROOT/intent-v1" "$FINAL_ROOT/completed-v1" ||
   die 'the final bridge ledger replay or live post-state is invalid'

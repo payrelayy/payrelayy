@@ -22,7 +22,7 @@ STAGING_DROPLET_ID = "593344964"
 H14_PARENT = "/var/lib/fetanagent/kemerbet-quarantine-recovery-v14"
 BRIDGE_PARENT = (
     "/var/lib/fetanagent/"
-    "kemerbet-quarantine-recovery-v14-host-retired-empty-profile-finalization-bridge"
+    "kemerbet-quarantine-recovery-v14-host-retired-profile-tree-finalization-bridge"
 )
 HELPER_PATH = "/usr/local/sbin/fetanagent-staging-deploy-helper"
 ACK_SOURCE = (
@@ -39,6 +39,44 @@ MARKER_TARGET = (
     "kemerbet-readiness-cohort-security-recovery-profile-finalized-v1"
 )
 MARKER = b"fetanagent-kemerbet-session-active-v1\n"
+QUARANTINED_PROFILE_MAX_OBJECTS = 512
+QUARANTINED_PROFILE_MAX_FILE_BYTES = 8 * 1024 * 1024
+QUARANTINED_PROFILE_MAX_TOTAL_BYTES = 16 * 1024 * 1024
+QUARANTINED_PROFILE_MAX_DEPTH = 8
+QUARANTINED_PROFILE_MAX_NAME_BYTES = 128
+QUARANTINED_PROFILE_MAX_PATH_BYTES = 256
+QUARANTINED_PROFILE_FILE_MODES = {0o600, 0o644}
+EXPIRY_GUARD_SERVICE_SHA256 = "c206af7923aae32743ddf841ee8e673544e963e5a8730c3c6074fa7852dcd063"
+EXPIRY_GUARD_TIMER_SHA256 = "d155578fb560103d3452ba2d489828f29a8a6b8b1d604eb37235f7d5ef07eb48"
+EXPIRY_GUARD_CALENDAR = "2026-08-29 12:47:49 UTC"
+PREDECESSOR_BRIDGE_RELEASE = "066572953de652e53634f562b4a63c0d9103865d"
+PREDECESSOR_BRIDGE_PARENT = (
+    "/var/lib/fetanagent/"
+    "kemerbet-quarantine-recovery-v14-host-retired-empty-profile-finalization-bridge"
+)
+PREDECESSOR_BUNDLE_ROOT = (
+    "/var/lib/fetanagent/"
+    "kemerbet-quarantine-recovery-v14-host-retired-empty-profile-finalization-bridge-bundles/"
+    + PREDECESSOR_BRIDGE_RELEASE
+)
+PREDECESSOR_BUNDLE_FILES = {
+    "fetanagent-kemerbet-h14-host-retired-empty-profile-finalization-bridge.sh": (
+        26458,
+        "a0f27007fe5954beb2393f0acbadad6b28931a8eae01fec12bcd64eb995ede65",
+    ),
+    "fetanagent-kemerbet-h14-terminal-differential-validator.py": (
+        17941,
+        "d4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542",
+    ),
+    "fetanagent-kemerbet-h14-empty-profile-finalization-engine.py": (
+        27047,
+        "93ea024cdfa116f81a1ccb99e7145e60f5da012563d1cef33f9036dc25805855",
+    ),
+    "manifest-v1": (
+        821,
+        "2e6f683885ff3dda99a7f670cb4f14fe83a054f1055ca20bc178d4e2e673e877",
+    ),
+}
 
 if PORTABLE_FIXTURE:
     # The offline verifier replaces only the literal PORTABLE_FIXTURE value in
@@ -50,6 +88,15 @@ if PORTABLE_FIXTURE:
     ACK_SOURCE = os.environ["FETANAGENT_FIXTURE_ACK_SOURCE"]
     MARKER_SOURCE = os.environ["FETANAGENT_FIXTURE_MARKER_SOURCE"]
     MARKER_TARGET = os.environ["FETANAGENT_FIXTURE_MARKER_TARGET"]
+    PREDECESSOR_BRIDGE_PARENT = os.environ["FETANAGENT_FIXTURE_PREDECESSOR_BRIDGE_PARENT"]
+    PREDECESSOR_BUNDLE_ROOT = os.environ["FETANAGENT_FIXTURE_PREDECESSOR_BUNDLE_ROOT"]
+    PREDECESSOR_BUNDLE_FILES = {
+        name: (
+            int(os.environ[f"FETANAGENT_FIXTURE_PREDECESSOR_SIZE_{index}"]),
+            os.environ[f"FETANAGENT_FIXTURE_PREDECESSOR_SHA256_{index}"],
+        )
+        for index, name in enumerate(PREDECESSOR_BUNDLE_FILES)
+    }
 
 RELEASE = re.compile(r"[0-9a-f]{40}")
 SHA = re.compile(r"[0-9a-f]{64}")
@@ -64,7 +111,27 @@ V3 = re.compile(
 )
 BINARY_FLAG = getattr(os, "O_BINARY", 0)
 READ_FLAGS = (
-    os.O_RDONLY | BINARY_FLAG | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    os.O_RDONLY
+    | BINARY_FLAG
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+)
+DIRECTORY_READ_FLAGS = (
+    os.O_RDONLY
+    | BINARY_FLAG
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+)
+DESCRIPTOR_RELATIVE_TREE = (
+    os.name == "posix"
+    and getattr(os, "O_DIRECTORY", 0) != 0
+    and getattr(os, "O_NOFOLLOW", 0) != 0
+    and os.open in os.supports_dir_fd
+    and os.stat in os.supports_dir_fd
+    and os.listdir in os.supports_fd
 )
 
 BASE_CONTRACT = {
@@ -220,6 +287,454 @@ def pin(value, kind, digest):
     )
 
 
+def exact_failed_predecessor_pins():
+    installing_name = f".installing-{PREDECESSOR_BRIDGE_RELEASE}"
+    parent_value = exact_directory(
+        PREDECESSOR_BRIDGE_PARENT,
+        (0, 0),
+        0o700,
+        [installing_name],
+    )
+    installing_path = os.path.join(PREDECESSOR_BRIDGE_PARENT, installing_name)
+    installing_value = exact_directory(installing_path, (0, 0), 0o700, [])
+    ledger_material = (
+        "\n".join(
+            [
+                f"release={PREDECESSOR_BRIDGE_RELEASE}",
+                f"parent={pin(parent_value, 'directory', hashlib.sha256(installing_name.encode('ascii')).hexdigest())}",
+                f"installing={pin(installing_value, 'directory', hashlib.sha256(b'entries=').hexdigest())}",
+            ]
+        )
+        + "\n"
+    ).encode("ascii")
+
+    bundle_value = exact_directory(
+        PREDECESSOR_BUNDLE_ROOT,
+        (0, 0),
+        0o700,
+        PREDECESSOR_BUNDLE_FILES,
+    )
+    bundle_lines = [
+        f"release={PREDECESSOR_BRIDGE_RELEASE}",
+        "bundle="
+        + pin(
+            bundle_value,
+            "directory",
+            hashlib.sha256(
+                ("entries=" + "\n".join(sorted(PREDECESSOR_BUNDLE_FILES))).encode("ascii")
+            ).hexdigest(),
+        ),
+    ]
+    for name in sorted(PREDECESSOR_BUNDLE_FILES):
+        expected_size, expected_sha = PREDECESSOR_BUNDLE_FILES[name]
+        data, value = exact_file(
+            os.path.join(PREDECESSOR_BUNDLE_ROOT, name),
+            (0, 0),
+            0o400,
+            expected_size,
+            expected_size,
+        )
+        if hashlib.sha256(data).hexdigest() != expected_sha:
+            reject()
+        bundle_lines.append(f"{name}={pin(value, 'file', expected_sha)}")
+    bundle_material = ("\n".join(bundle_lines) + "\n").encode("ascii")
+    return (
+        hashlib.sha256(ledger_material).hexdigest(),
+        hashlib.sha256(bundle_material).hexdigest(),
+    )
+
+
+def exact_expiry_guard_records(ledger_root, bridge_release):
+    retirement_intent = (
+        "\n".join(
+            [
+                "version=1",
+                "contract=fetanagent-staging-expired-runtime-guard-retirement-v1",
+                "state=authorized",
+                f"bridge_release={bridge_release}",
+                f"canonical_h14_release={CANONICAL_RELEASE}",
+                f"staging_project_ref={STAGING_PROJECT_REF}",
+                f"staging_droplet_id={STAGING_DROPLET_ID}",
+                "service_name=fetanagent-staging-runtime-expiry-stop.service",
+                f"service_unit_sha256={EXPIRY_GUARD_SERVICE_SHA256}",
+                "timer_name=fetanagent-staging-runtime-expiry-stop.timer",
+                f"timer_unit_sha256={EXPIRY_GUARD_TIMER_SHA256}",
+                f"timer_on_calendar={EXPIRY_GUARD_CALENDAR}",
+                "timer_expired=true",
+                f"installed_helper_sha256={CANONICAL_HELPER_SHA256}",
+                "financial_actions_mode=dry_run",
+                "provider_action_enabled=false",
+                "amount_entry_enabled=false",
+                "transfer_enabled=false",
+                "money_moved=false",
+            ]
+        )
+        + "\n"
+    ).encode("ascii")
+    intent_sha = hashlib.sha256(retirement_intent).hexdigest()
+    retired = (
+        "\n".join(
+            [
+                "version=1",
+                "contract=fetanagent-staging-expired-runtime-guard-retirement-v1",
+                "state=completed",
+                f"bridge_release={bridge_release}",
+                f"canonical_h14_release={CANONICAL_RELEASE}",
+                f"retirement_intent_sha256={intent_sha}",
+                "service_load_state=not-found",
+                "timer_load_state=not-found",
+                "unit_files_absent=true",
+                "timer_enablement_link_absent=true",
+                "service_active_state=inactive",
+                "service_sub_state=dead",
+                "service_main_pid=0",
+                "service_job_absent=true",
+                "timer_active_state=inactive",
+                "timer_sub_state=dead",
+                "timer_job_absent=true",
+                "installed_helper_changed=false",
+                "financial_actions_mode=dry_run",
+                "provider_action_enabled=false",
+                "amount_entry_enabled=false",
+                "transfer_enabled=false",
+                "money_moved=false",
+            ]
+        )
+        + "\n"
+    ).encode("ascii")
+    for name, expected in (
+        ("expiry-guard-retirement-intent-v1", retirement_intent),
+        ("expiry-guard-retired-v1", retired),
+    ):
+        data, _ = exact_file(
+            os.path.join(ledger_root, name),
+            (0, 0),
+            0o600,
+            len(expected),
+            len(expected),
+        )
+        if data != expected:
+            reject()
+    return hashlib.sha256(retirement_intent).hexdigest(), hashlib.sha256(retired).hexdigest()
+
+
+def reject_nested_mounts(path):
+    if PORTABLE_FIXTURE:
+        return
+    descriptor = os.open(
+        "/proc/self/mountinfo",
+        os.O_RDONLY | BINARY_FLAG | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        data = b""
+        while len(data) <= 1024 * 1024:
+            chunk = os.read(descriptor, min(65536, 1024 * 1024 + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        os.close(descriptor)
+    if not data or len(data) > 1024 * 1024 or not data.endswith(b"\n"):
+        reject()
+    root = os.fsencode(os.path.realpath(path)).rstrip(b"/")
+    escaped = re.compile(rb"\\([0-7]{3})")
+    for line in data.splitlines():
+        fields = line.split()
+        if len(fields) < 10 or b"-" not in fields:
+            reject()
+        mount_point = escaped.sub(lambda match: bytes([int(match.group(1), 8)]), fields[4])
+        if mount_point == root or mount_point.startswith(root + b"/"):
+            reject()
+
+
+def quarantined_metadata_matches(value, mode, links=None):
+    if PORTABLE_FIXTURE:
+        # The Linux fixture exercises the descriptor-relative implementation and
+        # its mode/link invariants without requiring uid 10001.  Windows keeps
+        # the older path-only portability concession because it has neither
+        # openat-style dir_fd traversal nor POSIX mode semantics.
+        return (
+            (not DESCRIPTOR_RELATIVE_TREE or stat.S_IMODE(value.st_mode) == mode)
+            and (links is None or value.st_nlink == links)
+        )
+    return metadata_matches(value, (10001, 10001), mode, links)
+
+
+def reject_descriptor_xattrs(descriptor):
+    if not hasattr(os, "listxattr"):
+        if PORTABLE_FIXTURE:
+            return
+        reject()
+    try:
+        attributes = os.listxattr(f"/proc/self/fd/{descriptor}", follow_symlinks=True)
+    except (OSError, TypeError, ValueError):
+        reject()
+    if attributes:
+        reject()
+
+
+def quarantined_tree_snapshot_descriptor_relative(path):
+    # Every child is named relative to an already-open parent descriptor.  All
+    # descriptors remain open through the final name/identity/xattr recheck, so
+    # an ancestor rename or symlink swap cannot redirect a later read.
+    opened = []
+    bindings = []
+    directories = []
+    records = []
+    object_count = 0
+    total_bytes = 0
+    root_named = os.lstat(path)
+    try:
+        root_descriptor = os.open(path, DIRECTORY_READ_FLAGS)
+        opened.append(root_descriptor)
+        root_value = os.fstat(root_descriptor)
+        if (
+            not stat.S_ISDIR(root_value.st_mode)
+            or object_identity(root_named) != object_identity(root_value)
+            or not quarantined_metadata_matches(root_value, 0o700)
+            or (not PORTABLE_FIXTURE and os.path.realpath(path) != path)
+        ):
+            reject()
+        root_identity = object_identity(root_value)
+        root_device = root_value.st_dev
+        reject_descriptor_xattrs(root_descriptor)
+        reject_nested_mounts(path)
+        pending = [(root_descriptor, tuple())]
+
+        while pending:
+            current_descriptor, parent_parts = pending.pop()
+            try:
+                names = sorted(os.listdir(current_descriptor), key=os.fsencode)
+            except OSError:
+                reject()
+            directories.append((current_descriptor, tuple(names)))
+            for name in names:
+                object_count += 1
+                if object_count > QUARANTINED_PROFILE_MAX_OBJECTS:
+                    reject()
+                name_bytes = os.fsencode(name)
+                relative_parts = (*parent_parts, name)
+                relative_bytes = b"/".join(os.fsencode(part) for part in relative_parts)
+                if (
+                    not name_bytes
+                    or name_bytes in (b".", b"..")
+                    or b"/" in name_bytes
+                    or b"\0" in name_bytes
+                    or len(relative_parts) > QUARANTINED_PROFILE_MAX_DEPTH
+                    or len(name_bytes) > QUARANTINED_PROFILE_MAX_NAME_BYTES
+                    or len(relative_bytes) > QUARANTINED_PROFILE_MAX_PATH_BYTES
+                ):
+                    reject()
+                try:
+                    named = os.stat(
+                        name,
+                        dir_fd=current_descriptor,
+                        follow_symlinks=False,
+                    )
+                except OSError:
+                    reject()
+                if named.st_dev != root_device:
+                    reject()
+
+                if stat.S_ISDIR(named.st_mode):
+                    try:
+                        descriptor = os.open(
+                            name,
+                            DIRECTORY_READ_FLAGS,
+                            dir_fd=current_descriptor,
+                        )
+                    except OSError:
+                        reject()
+                    opened.append(descriptor)
+                    value = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISDIR(value.st_mode)
+                        or object_identity(value) != object_identity(named)
+                        or value.st_dev != root_device
+                        or not quarantined_metadata_matches(value, 0o700)
+                    ):
+                        reject()
+                    reject_descriptor_xattrs(descriptor)
+                    pending.append((descriptor, relative_parts))
+                    content_sha = "-"
+                    kind = "directory"
+                elif stat.S_ISREG(named.st_mode):
+                    mode = stat.S_IMODE(named.st_mode)
+                    if mode not in QUARANTINED_PROFILE_FILE_MODES:
+                        reject()
+                    try:
+                        descriptor = os.open(name, READ_FLAGS, dir_fd=current_descriptor)
+                    except OSError:
+                        reject()
+                    opened.append(descriptor)
+                    before = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISREG(before.st_mode)
+                        or object_identity(before) != object_identity(named)
+                        or before.st_dev != root_device
+                        or not quarantined_metadata_matches(before, mode, 1)
+                        or before.st_size > QUARANTINED_PROFILE_MAX_FILE_BYTES
+                    ):
+                        reject()
+                    reject_descriptor_xattrs(descriptor)
+                    data = read_at(descriptor, QUARANTINED_PROFILE_MAX_FILE_BYTES + 1)
+                    value = os.fstat(descriptor)
+                    if len(data) != before.st_size or object_identity(value) != object_identity(before):
+                        reject()
+                    total_bytes += len(data)
+                    if total_bytes > QUARANTINED_PROFILE_MAX_TOTAL_BYTES:
+                        reject()
+                    content_sha = hashlib.sha256(data).hexdigest()
+                    kind = "file"
+                else:
+                    reject()
+
+                identity = object_identity(value)
+                bindings.append((current_descriptor, name, descriptor, identity))
+                record = "|".join(
+                    [
+                        kind,
+                        relative_bytes.hex(),
+                        f"{value.st_dev}:{value.st_ino}",
+                        f"{value.st_uid}:{value.st_gid}:{stat.S_IMODE(value.st_mode):o}:{value.st_nlink}:{value.st_size}",
+                        str(value.st_mtime_ns),
+                        content_sha,
+                    ]
+                ).encode("ascii")
+                records.append((relative_bytes, record))
+
+        reject_nested_mounts(path)
+        if (
+            object_identity(os.lstat(path)) != root_identity
+            or object_identity(os.fstat(root_descriptor)) != root_identity
+        ):
+            reject()
+        for descriptor, expected_names in directories:
+            try:
+                actual_names = tuple(sorted(os.listdir(descriptor), key=os.fsencode))
+            except OSError:
+                reject()
+            if actual_names != expected_names:
+                reject()
+        for parent_descriptor, name, descriptor, expected_identity in bindings:
+            try:
+                named = os.stat(
+                    name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except OSError:
+                reject()
+            if (
+                object_identity(named) != expected_identity
+                or object_identity(os.fstat(descriptor)) != expected_identity
+            ):
+                reject()
+            reject_descriptor_xattrs(descriptor)
+        reject_descriptor_xattrs(root_descriptor)
+
+        digest = hashlib.sha256()
+        for _, record in sorted(records):
+            digest.update(len(record).to_bytes(8, "big"))
+            digest.update(record)
+        return digest.hexdigest()
+    finally:
+        for descriptor in reversed(opened):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def quarantined_tree_snapshot_portable_path(path):
+    # Windows-only portable verifier fallback.  Production rejects runtimes
+    # without the descriptor-relative POSIX primitives above.
+    root_value = exact_directory(path, (10001, 10001), 0o700)
+    root_device = root_value.st_dev
+    object_count = 0
+    total_bytes = 0
+    records = []
+    evidence_identities = [(path, object_identity(root_value))]
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            names = sorted(os.listdir(current), key=os.fsencode)
+        except OSError:
+            reject()
+        for name in names:
+            object_count += 1
+            if object_count > QUARANTINED_PROFILE_MAX_OBJECTS:
+                reject()
+            current_path = os.path.join(current, name)
+            relative = os.path.relpath(current_path, path)
+            relative_parts = relative.split(os.sep)
+            name_bytes = os.fsencode(name)
+            relative_bytes = b"/".join(os.fsencode(part) for part in relative_parts)
+            if (
+                not relative_bytes
+                or len(relative_parts) > QUARANTINED_PROFILE_MAX_DEPTH
+                or len(name_bytes) > QUARANTINED_PROFILE_MAX_NAME_BYTES
+                or len(relative_bytes) > QUARANTINED_PROFILE_MAX_PATH_BYTES
+                or b"\0" in relative_bytes
+            ):
+                reject()
+            named = os.lstat(current_path)
+            if named.st_dev != root_device:
+                reject()
+            if stat.S_ISDIR(named.st_mode):
+                value = exact_directory(current_path, (10001, 10001), 0o700)
+                content_sha = "-"
+                evidence_identities.append((current_path, object_identity(value)))
+                pending.append(current_path)
+                kind = "directory"
+            elif stat.S_ISREG(named.st_mode):
+                data, value = exact_file(
+                    current_path,
+                    (10001, 10001),
+                    stat.S_IMODE(named.st_mode),
+                    QUARANTINED_PROFILE_MAX_FILE_BYTES,
+                )
+                total_bytes += len(data)
+                if total_bytes > QUARANTINED_PROFILE_MAX_TOTAL_BYTES:
+                    reject()
+                content_sha = hashlib.sha256(data).hexdigest()
+                evidence_identities.append((current_path, object_identity(value)))
+                kind = "file"
+            else:
+                reject()
+            record = "|".join(
+                [
+                    kind,
+                    relative_bytes.hex(),
+                    f"{value.st_dev}:{value.st_ino}",
+                    f"{value.st_uid}:{value.st_gid}:{stat.S_IMODE(value.st_mode):o}:{value.st_nlink}:{value.st_size}",
+                    str(value.st_mtime_ns),
+                    content_sha,
+                ]
+            ).encode("ascii")
+            records.append((relative_bytes, record))
+    digest = hashlib.sha256()
+    for _, record in sorted(records):
+        digest.update(len(record).to_bytes(8, "big"))
+        digest.update(record)
+    for evidence_path, expected_identity in evidence_identities:
+        if object_identity(os.lstat(evidence_path)) != expected_identity:
+            reject()
+    return digest.hexdigest()
+
+
+def quarantined_tree_snapshot(path):
+    # The retired profile is evidence, not an empty scratch directory.  Pin its
+    # complete bounded tree without following links so retained Chromium state
+    # cannot be discarded, replaced, or changed between transaction phases.
+    if DESCRIPTOR_RELATIVE_TREE:
+        return quarantined_tree_snapshot_descriptor_relative(path)
+    if PORTABLE_FIXTURE:
+        return quarantined_tree_snapshot_portable_path(path)
+    reject()
+
+
 def base_pins(root):
     result = []
     for index, name in enumerate(sorted(BASE_CONTRACT)):
@@ -229,12 +744,7 @@ def base_pins(root):
             data, value = exact_file(path, owner, mode, maximum)
             digest = hashlib.sha256(data).hexdigest()
         else:
-            value = exact_directory(
-                path,
-                owner,
-                mode,
-                [".fetanagent-unclean-session-generation-v1"],
-            )
+            value = exact_directory(path, owner, mode)
             marker, _ = exact_file(
                 os.path.join(path, ".fetanagent-unclean-session-generation-v1"),
                 (10001, 10001),
@@ -244,9 +754,12 @@ def base_pins(root):
             )
             if marker != MARKER:
                 reject()
-            digest = hashlib.sha256(
-                b".fetanagent-unclean-session-generation-v1\0" + marker
-            ).hexdigest()
+            first_snapshot = quarantined_tree_snapshot(path)
+            second_snapshot = quarantined_tree_snapshot(path)
+            after = exact_directory(path, owner, mode)
+            if first_snapshot != second_snapshot or object_identity(value) != object_identity(after):
+                reject()
+            digest = first_snapshot
         result.append(f"base_entry_{index:02d}={name}|{pin(value, kind, digest)}")
     return result
 
@@ -292,6 +805,7 @@ def expected_intent(
     ack_source,
     marker_source,
     marker_target,
+    ledger_root,
     bridge_release,
     script_sha,
     diagnostic_sha,
@@ -319,6 +833,11 @@ def expected_intent(
     helper_data, helper_value = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
     if hashlib.sha256(helper_data).hexdigest() != CANONICAL_HELPER_SHA256:
         reject()
+    predecessor_ledger_sha, predecessor_bundle_sha = exact_failed_predecessor_pins()
+    expiry_retirement_sha, expiry_retired_sha = exact_expiry_guard_records(
+        ledger_root,
+        bridge_release,
+    )
     old_claim, old_profile, _ = parse_h14_identity(root)
     old_binding, _, old_match = require_v3(
         os.path.join(root, "retired-binding-v3"), (10001, 10001), 0o600
@@ -383,6 +902,10 @@ def expected_intent(
         f"diagnostic_sha256={diagnostic_sha}",
         f"engine_sha256={engine_sha}",
         f"bundle_manifest_sha256={manifest_sha}",
+        f"failed_predecessor_ledger_pin_sha256={predecessor_ledger_sha}",
+        f"failed_predecessor_bundle_pin_sha256={predecessor_bundle_sha}",
+        f"expiry_guard_retirement_intent_sha256={expiry_retirement_sha}",
+        f"expiry_guard_retired_sha256={expiry_retired_sha}",
         f"canonical_helper_pin={pin(helper_value, 'file', CANONICAL_HELPER_SHA256)}",
         "h14_root_pin="
         + "|".join(
@@ -737,6 +1260,7 @@ def main(argv):
         ack_source,
         marker_source,
         marker_target,
+        os.path.dirname(intent_path),
         bridge_release,
         script_sha,
         diagnostic_sha,
@@ -768,6 +1292,7 @@ def main(argv):
         ack_source,
         marker_source,
         marker_target,
+        os.path.dirname(intent_path),
         bridge_release,
         script_sha,
         diagnostic_sha,

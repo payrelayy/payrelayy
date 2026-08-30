@@ -461,6 +461,7 @@ jobs:
             "engine_sha256=$engine_sha" \
             "engine_size=$engine_size" \
             'execute_after_security_recovery_ack=true' \
+            'retire_exact_expired_runtime_guard=true' \
             'installed_helper_changed=false' \
             'provider_action_enabled=false' \
             'amount_entry_enabled=false' \

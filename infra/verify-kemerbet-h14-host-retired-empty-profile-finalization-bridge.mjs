@@ -5,6 +5,7 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,6 +13,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -73,6 +75,10 @@ assert.match(installer, /sync_directory\(parent\)/);
 assert.match(installer, /fcntl\.flock\(descriptor, fcntl\.LOCK_EX \| fcntl\.LOCK_NB\)/);
 assert.match(installer, /fetanagent-h14-empty-profile-bundle-installer/);
 assert.match(installer, /identity\(after\) != identity\(before\)/);
+assert.match(installer, /def validate_bundle_parent\(/);
+assert.match(installer, /HISTORICAL_RELEASE = "066572953de652e53634f562b4a63c0d9103865d"/);
+assert.match(installer, /HISTORICAL_FILES = \{/);
+assert.match(installer, /expected_sha=expected_sha/);
 assert.doesNotMatch(
   installer,
   /\b(?:subprocess|socket)\b|docker_local|transfer_enabled=true|money_moved=true/i,
@@ -127,7 +133,10 @@ assert.match(script, /publish_append_complete/);
 assert.match(script, /O_CREAT \| os\.O_EXCL \| os\.O_NOFOLLOW/);
 assert.match(script, /data != expected\[:len\(data\)\]/);
 assert.match(script, /sync -f \/var\/lib\/fetanagent/);
-assert.match(script, /''\|'\.intent-v1\.installing:f'\|'intent-v1:f'/);
+assert.match(
+  script,
+  /''\|'\.expiry-guard-retirement-intent-v1\.installing:f'\|'expiry-guard-retirement-intent-v1:f'/,
+);
 assert.match(
   script,
   /the installing bridge ledger has an invalid crash prefix or unexpected entry/,
@@ -137,8 +146,167 @@ assert.ok(
   'host-retired diagnostic is not rerun across ledger publication prefixes',
 );
 assert.match(script, /engine verify-completed/);
+assert.match(script, /PREDECESSOR_BRIDGE_RELEASE='066572953de652e53634f562b4a63c0d9103865d'/);
+assert.match(script, /require_exact_failed_predecessor_evidence/);
+assert.match(script, /host-retired-profile-tree-finalization-bridge/);
+assert.ok(script.includes('c206af7923aae32743ddf841ee8e673544e963e5a8730c3c6074fa7852dcd063'));
+assert.ok(script.includes('d155578fb560103d3452ba2d489828f29a8a6b8b1d604eb37235f7d5ef07eb48'));
+assert.match(script, /expiry-guard-retirement-intent-v1/);
+assert.match(script, /expiry-guard-retired-v1/);
+assert.match(script, /contract=fetanagent-staging-expired-runtime-guard-retirement-v1/);
+assert.match(script, /state=authorized/);
+assert.match(script, /state=completed/);
+assert.match(script, /require_exact_expired_guard_present/);
+assert.match(script, /require_expiry_guard_transition_exact/);
+assert.match(script, /require_expiry_guard_absent/);
+assert.match(script, /systemctl stop "\$EXPIRY_STOP_SERVICE"/);
+assert.match(script, /systemctl disable --now "\$EXPIRY_STOP_TIMER"/);
+assert.match(script, /rm -f -- "\$EXPIRY_STOP_SERVICE_PATH" "\$EXPIRY_STOP_TIMER_PATH"/);
+assert.match(script, /systemctl daemon-reload/);
+assert.match(
+  script,
+  /EXPIRY_STOP_TIMER_ENABLE_LINK="\/etc\/systemd\/system\/timers\.target\.wants\/\$EXPIRY_STOP_TIMER"/,
+);
+assert.match(script, /readlink -- "\$EXPIRY_STOP_TIMER_ENABLE_LINK"/);
+assert.match(
+  script,
+  /! -e "\$EXPIRY_STOP_TIMER_ENABLE_LINK" && ! -L "\$EXPIRY_STOP_TIMER_ENABLE_LINK"/,
+);
+assert.match(script, /systemd_value "\$EXPIRY_STOP_SERVICE" MainPID/);
+assert.match(script, /systemd_value "\$EXPIRY_STOP_SERVICE" ActiveState/);
+assert.match(script, /systemd_value "\$EXPIRY_STOP_SERVICE" Job/);
+assert.match(script, /systemd_value "\$EXPIRY_STOP_TIMER" Job/);
+assert.match(
+  script,
+  /if \[\[ "\$load_state" == 'loaded' \]\]; then\n\s+\[\[ "\$\(systemd_value "\$name" FragmentPath\)" == "\$path"/,
+);
+assert.match(
+  script,
+  /require_exact_failed_predecessor_evidence\n\nif \[\[ -e "\$FINAL_ROOT" \|\| -L "\$FINAL_ROOT" \]\]/,
+  'completed replay can bypass failed-predecessor attestation',
+);
+assert.match(
+  script,
+  /completed-v1:f\\nexpiry-guard-retired-v1:f\\nexpiry-guard-retirement-intent-v1:f\\nintent-v1:f/,
+);
+assert.doesNotMatch(script, /rmdir -- "\$predecessor_installing"/);
+assert.doesNotMatch(script, /rm\s+(?:-[^\n]*r[^\n]*f|--recursive)/);
 assert.match(script, /manifest-v1/);
 assert.doesNotMatch(script, /exec \{mutation_lock_fd\}>"\$MUTATION_LOCK"/);
+
+// Model every durable systemd retirement prefix accepted by the bridge.  The
+// live bridge additionally proves exact root ownership, unit hashes, systemd
+// fragment paths, the expired calendar, and the shared mutation lock.
+const exactUnit = Object.freeze({ present: true, exact: true });
+const absentUnit = Object.freeze({ present: false, exact: false });
+const exactEnableLink = Object.freeze({ present: true, exact: true });
+const absentEnableLink = Object.freeze({ present: false, exact: false });
+const transitionalGuardAccepted = (state) =>
+  [state.serviceFile, state.timerFile].every((entry) => !entry.present || entry.exact) &&
+  (!state.enableLink.present || state.enableLink.exact) &&
+  ['loaded', 'not-found'].includes(state.serviceLoad) &&
+  ['loaded', 'not-found'].includes(state.timerLoad) &&
+  (state.serviceLoad !== 'loaded' || state.serviceFragmentExact) &&
+  (state.timerLoad !== 'loaded' || state.timerFragmentExact);
+const retiredGuardAccepted = (state) =>
+  !state.serviceFile.present &&
+  !state.timerFile.present &&
+  !state.enableLink.present &&
+  state.serviceLoad === 'not-found' &&
+  state.serviceActive === 'inactive' &&
+  state.serviceSub === 'dead' &&
+  state.servicePid === 0 &&
+  state.serviceJob === '' &&
+  state.timerLoad === 'not-found' &&
+  state.timerActive === 'inactive' &&
+  state.timerSub === 'dead' &&
+  state.timerJob === '';
+const guardPresent = {
+  serviceFile: exactUnit,
+  timerFile: exactUnit,
+  enableLink: exactEnableLink,
+  serviceLoad: 'loaded',
+  serviceFragmentExact: true,
+  serviceActive: 'activating',
+  serviceSub: 'auto-restart',
+  servicePid: 0,
+  serviceJob: '',
+  timerLoad: 'loaded',
+  timerFragmentExact: true,
+  timerActive: 'active',
+  timerSub: 'elapsed',
+  timerJob: '',
+};
+assert.equal(transitionalGuardAccepted(guardPresent), true);
+assert.equal(
+  transitionalGuardAccepted({ ...guardPresent, serviceFile: { present: true, exact: false } }),
+  false,
+  'a tampered expiry service unit was accepted',
+);
+assert.equal(
+  transitionalGuardAccepted({ ...guardPresent, serviceFragmentExact: false }),
+  false,
+  'a loaded same-name expiry service with a different FragmentPath was accepted',
+);
+const afterServiceStop = {
+  ...guardPresent,
+  serviceActive: 'inactive',
+  serviceSub: 'dead',
+};
+assert.equal(transitionalGuardAccepted(afterServiceStop), true);
+const afterTimerDisable = {
+  ...afterServiceStop,
+  enableLink: absentEnableLink,
+  timerActive: 'inactive',
+  timerSub: 'dead',
+};
+assert.equal(transitionalGuardAccepted(afterTimerDisable), true);
+assert.equal(
+  transitionalGuardAccepted({ ...afterTimerDisable, serviceFile: absentUnit }),
+  true,
+  'the one-file-removed crash prefix was not recoverable',
+);
+assert.equal(
+  transitionalGuardAccepted({ ...afterTimerDisable, timerFile: absentUnit }),
+  true,
+  'the timer-file-removed crash prefix was not recoverable',
+);
+const afterDaemonReload = {
+  serviceFile: absentUnit,
+  timerFile: absentUnit,
+  enableLink: absentEnableLink,
+  serviceLoad: 'not-found',
+  serviceActive: 'inactive',
+  serviceSub: 'dead',
+  servicePid: 0,
+  serviceJob: '',
+  timerLoad: 'not-found',
+  timerFragmentExact: false,
+  timerActive: 'inactive',
+  timerSub: 'dead',
+  timerJob: '',
+};
+assert.equal(retiredGuardAccepted(afterDaemonReload), true);
+assert.equal(
+  retiredGuardAccepted({ ...afterDaemonReload, enableLink: exactEnableLink }),
+  false,
+  'a dangling expiry-timer enablement link was accepted',
+);
+assert.equal(
+  retiredGuardAccepted({ ...afterDaemonReload, serviceActive: 'active', serviceSub: 'running' }),
+  false,
+  'an active retired expiry service was accepted',
+);
+assert.equal(
+  retiredGuardAccepted({ ...afterDaemonReload, servicePid: 42 }),
+  false,
+  'a retired expiry service with a live PID was accepted',
+);
+assert.equal(
+  retiredGuardAccepted({ ...afterDaemonReload, timerJob: '/org/freedesktop/systemd1/job/42' }),
+  false,
+  'a retired expiry timer with a pending systemd job was accepted',
+);
 
 const baseNames = [
   'claim-stage-consumption-v1',
@@ -156,6 +324,43 @@ const baseNames = [
 ];
 for (const name of baseNames) assert.ok(engine.includes(`"${name}"`), `base pin absent: ${name}`);
 assert.match(engine, /base_entry_\{index:02d\}/);
+assert.match(engine, /def quarantined_tree_snapshot\(/);
+assert.match(engine, /QUARANTINED_PROFILE_MAX_OBJECTS = 512/);
+assert.match(engine, /QUARANTINED_PROFILE_MAX_TOTAL_BYTES = 16 \* 1024 \* 1024/);
+assert.match(engine, /QUARANTINED_PROFILE_MAX_DEPTH = 8/);
+assert.match(engine, /QUARANTINED_PROFILE_MAX_NAME_BYTES = 128/);
+assert.match(engine, /QUARANTINED_PROFILE_MAX_PATH_BYTES = 256/);
+assert.match(engine, /first_snapshot != second_snapshot/);
+assert.match(engine, /DESCRIPTOR_RELATIVE_TREE/);
+assert.match(
+  engine,
+  /if DESCRIPTOR_RELATIVE_TREE:\n\s+return quarantined_tree_snapshot_descriptor_relative\(path\)/,
+);
+assert.match(
+  engine,
+  /if PORTABLE_FIXTURE:\n\s+return quarantined_tree_snapshot_portable_path\(path\)\n\s+reject\(\)/,
+);
+assert.match(engine, /os\.listdir\(current_descriptor\)/);
+assert.match(engine, /dir_fd=current_descriptor/);
+assert.match(engine, /follow_symlinks=False/);
+assert.match(engine, /os\.open\(name, READ_FLAGS, dir_fd=current_descriptor\)/);
+assert.match(engine, /bindings\.append\(\(current_descriptor, name, descriptor, identity\)\)/);
+assert.match(engine, /object_identity\(os\.fstat\(descriptor\)\) != expected_identity/);
+assert.doesNotMatch(engine, /os\.walk\(/);
+assert.match(engine, /except OSError:\n\s+reject\(\)/);
+assert.match(engine, /named\.st_dev != root_device/);
+assert.match(engine, /\/proc\/self\/mountinfo/);
+assert.match(engine, /os\.listxattr\(f"\/proc\/self\/fd\/\{descriptor\}", follow_symlinks=True\)/);
+assert.match(engine, /elif stat\.S_ISREG\(named\.st_mode\):/);
+assert.match(engine, /getattr\(os, "O_NONBLOCK", 0\)/);
+assert.match(engine, /exact_failed_predecessor_pins/);
+assert.match(engine, /failed_predecessor_ledger_pin_sha256/);
+assert.match(engine, /failed_predecessor_bundle_pin_sha256/);
+assert.match(engine, /exact_expiry_guard_records/);
+assert.match(engine, /expiry_guard_retirement_intent_sha256/);
+assert.match(engine, /expiry_guard_retired_sha256/);
+assert.ok(engine.includes('c206af7923aae32743ddf841ee8e673544e963e5a8730c3c6074fa7852dcd063'));
+assert.ok(engine.includes('d155578fb560103d3452ba2d489828f29a8a6b8b1d604eb37235f7d5ef07eb48'));
 assert.match(engine, /profile_revision=\[1-9\]\[0-9\]\{0,8\}/);
 assert.match(engine, /def exact_ledger\(/);
 assert.match(engine, /def expected_completion\(/);
@@ -323,10 +528,14 @@ function runInstallerFixture(name, prefix) {
     ...digestAndSize(bundleNames[2]),
     ...digestAndSize(bundleNames[3]),
   ];
-  const runInstaller = () =>
+  const runInstaller = (environment = {}) =>
     spawnSync(resolvePython(), [installerPathFixture, ...args], {
       encoding: 'utf8',
-      env: { ...process.env, FETANAGENT_FIXTURE_BUNDLE_PARENT: parent },
+      env: {
+        ...process.env,
+        FETANAGENT_FIXTURE_BUNDLE_PARENT: parent,
+        ...environment,
+      },
     });
   return { area, args, completed, installerPathFixture, installing, parent, runInstaller };
 }
@@ -353,6 +562,66 @@ try {
   malformed = runInstallerFixture('reject-prefix', 'empty-installing');
   writeFileSync(join(malformed.installing, `.${bundleNames[0]}.installing`), 'wrong-prefix\n');
   assert.notEqual(malformed.runInstaller().status, 0, 'non-prefix bundle bytes were accepted');
+
+  const historical = runInstallerFixture('preserve-historical-bundle', 'parent-only');
+  const historicalRelease = 'd'.repeat(40);
+  const historicalRoot = join(historical.parent, historicalRelease);
+  const historicalPayloads = bundleNames.map((name) =>
+    Buffer.from(`historical ${name}\n`, 'ascii'),
+  );
+  mkdirSync(historicalRoot);
+  for (const [index, name] of bundleNames.entries())
+    writeFileSync(join(historicalRoot, name), historicalPayloads[index]);
+  const historicalEnvironment = {
+    FETANAGENT_FIXTURE_HISTORICAL_RELEASE: historicalRelease,
+    FETANAGENT_FIXTURE_HISTORICAL_CONTRACT: historicalPayloads
+      .map((data) => `${data.length}:${sha256(data)}`)
+      .join(','),
+  };
+  let historicalResult = historical.runInstaller(historicalEnvironment);
+  assert.equal(
+    historicalResult.status,
+    0,
+    `historical bundle blocked successor install: ${historicalResult.stderr}`,
+  );
+  assert.deepEqual(
+    readdirSync(historical.parent).sort(),
+    [historicalRelease, installerRelease].sort(),
+  );
+
+  const mutatedHistorical = runInstallerFixture('reject-mutated-historical', 'parent-only');
+  const mutatedRoot = join(mutatedHistorical.parent, historicalRelease);
+  mkdirSync(mutatedRoot);
+  for (const [index, name] of bundleNames.entries())
+    writeFileSync(
+      join(mutatedRoot, name),
+      index === 2 ? Buffer.from('mutated historical engine\n', 'ascii') : historicalPayloads[index],
+    );
+  assert.notEqual(
+    mutatedHistorical.runInstaller(historicalEnvironment).status,
+    0,
+    'a content-mutated historical bundle was accepted',
+  );
+
+  const unknownHistorical = runInstallerFixture('reject-unknown-historical', 'parent-only');
+  const unknownRoot = join(unknownHistorical.parent, 'b'.repeat(40));
+  mkdirSync(unknownRoot);
+  for (const [index, name] of bundleNames.entries())
+    writeFileSync(join(unknownRoot, name), historicalPayloads[index]);
+  assert.notEqual(
+    unknownHistorical.runInstaller(historicalEnvironment).status,
+    0,
+    'an unknown historical release was accepted',
+  );
+
+  const malformedHistorical = runInstallerFixture('reject-malformed-historical', 'parent-only');
+  mkdirSync(join(malformedHistorical.parent, 'c'.repeat(40)));
+  writeFileSync(join(malformedHistorical.parent, 'c'.repeat(40), 'foreign-v1'), 'x\n');
+  assert.notEqual(
+    malformedHistorical.runInstaller().status,
+    0,
+    'malformed historical bundle was accepted',
+  );
 
   if (process.platform !== 'win32') {
     const concurrent = runInstallerFixture('concurrent-lock', 'empty-installing');
@@ -443,12 +712,76 @@ const runtimeFixture =
     'transfer_disabled=true',
     'money_moved=false',
   ].join('\n') + '\n';
+const bridgeRelease = 'a'.repeat(40);
+const predecessorBridgeRelease = '066572953de652e53634f562b4a63c0d9103865d';
+const expiryServiceSha = 'c206af7923aae32743ddf841ee8e673544e963e5a8730c3c6074fa7852dcd063';
+const expiryTimerSha = 'd155578fb560103d3452ba2d489828f29a8a6b8b1d604eb37235f7d5ef07eb48';
+const expiryRetirementIntentFixture =
+  [
+    'version=1',
+    'contract=fetanagent-staging-expired-runtime-guard-retirement-v1',
+    'state=authorized',
+    `bridge_release=${bridgeRelease}`,
+    `canonical_h14_release=${canonicalRelease}`,
+    'staging_project_ref=spzpiyxheappsfyswewl',
+    'staging_droplet_id=593344964',
+    'service_name=fetanagent-staging-runtime-expiry-stop.service',
+    `service_unit_sha256=${expiryServiceSha}`,
+    'timer_name=fetanagent-staging-runtime-expiry-stop.timer',
+    `timer_unit_sha256=${expiryTimerSha}`,
+    'timer_on_calendar=2026-08-29 12:47:49 UTC',
+    'timer_expired=true',
+    `installed_helper_sha256=${helperFixtureSha}`,
+    'financial_actions_mode=dry_run',
+    'provider_action_enabled=false',
+    'amount_entry_enabled=false',
+    'transfer_enabled=false',
+    'money_moved=false',
+  ].join('\n') + '\n';
+const expiryRetiredFixture =
+  [
+    'version=1',
+    'contract=fetanagent-staging-expired-runtime-guard-retirement-v1',
+    'state=completed',
+    `bridge_release=${bridgeRelease}`,
+    `canonical_h14_release=${canonicalRelease}`,
+    `retirement_intent_sha256=${sha256(expiryRetirementIntentFixture)}`,
+    'service_load_state=not-found',
+    'timer_load_state=not-found',
+    'unit_files_absent=true',
+    'timer_enablement_link_absent=true',
+    'service_active_state=inactive',
+    'service_sub_state=dead',
+    'service_main_pid=0',
+    'service_job_absent=true',
+    'timer_active_state=inactive',
+    'timer_sub_state=dead',
+    'timer_job_absent=true',
+    'installed_helper_changed=false',
+    'financial_actions_mode=dry_run',
+    'provider_action_enabled=false',
+    'amount_entry_enabled=false',
+    'transfer_enabled=false',
+    'money_moved=false',
+  ].join('\n') + '\n';
+const predecessorPayloads = new Map(
+  bundleNames.map((name) => [name, Buffer.from(`predecessor ${name}\n`, 'ascii')]),
+);
 assert.equal(Buffer.byteLength(authorizationFixture), 389);
 const portableEnginePath = join(fixtureRoot, 'portable-engine.py');
 writeFileSync(
   portableEnginePath,
   engine
     .replace('PORTABLE_FIXTURE = False', 'PORTABLE_FIXTURE = True')
+    .replace('QUARANTINED_PROFILE_MAX_OBJECTS = 512', 'QUARANTINED_PROFILE_MAX_OBJECTS = 32')
+    .replace(
+      'QUARANTINED_PROFILE_MAX_FILE_BYTES = 8 * 1024 * 1024',
+      'QUARANTINED_PROFILE_MAX_FILE_BYTES = 1024',
+    )
+    .replace(
+      'QUARANTINED_PROFILE_MAX_TOTAL_BYTES = 16 * 1024 * 1024',
+      'QUARANTINED_PROFILE_MAX_TOTAL_BYTES = 2048',
+    )
     .replace(
       'except BaseException:\n    raise SystemExit(1)',
       'except BaseException:\n    import traceback\n    traceback.print_exc()\n    raise SystemExit(1)',
@@ -467,10 +800,23 @@ function makeEngineFixture(name) {
   const control = `${area}/control`;
   const receipts = `${area}/receipts`;
   const bridgeParent = `${area}/bridge`;
-  const ledger = `${bridgeParent}/.installing-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`;
+  const ledger = `${bridgeParent}/.installing-${bridgeRelease}`;
   const intentPath = `${ledger}/intent-v1`;
   const completionPath = `${ledger}/completed-v1`;
+  const expiryIntentPath = `${ledger}/expiry-guard-retirement-intent-v1`;
+  const expiryRetiredPath = `${ledger}/expiry-guard-retired-v1`;
+  const predecessorBridgeParent = `${area}/predecessor-bridge`;
+  const predecessorInstalling = `${predecessorBridgeParent}/.installing-${predecessorBridgeRelease}`;
+  const predecessorBundleRoot = `${area}/predecessor-bundle`;
   for (const path of [h14Root, control, receipts, ledger]) mkdirSync(path, { recursive: true });
+  mkdirSync(predecessorInstalling, { recursive: true });
+  mkdirSync(predecessorBundleRoot, { recursive: true });
+  for (const [entry, data] of predecessorPayloads)
+    writeFileSync(`${predecessorBundleRoot}/${entry}`, data);
+  writeFileSync(expiryIntentPath, expiryRetirementIntentFixture);
+  writeFileSync(expiryRetiredPath, expiryRetiredFixture);
+  chmodSync(expiryIntentPath, 0o600);
+  chmodSync(expiryRetiredPath, 0o600);
   writeFileSync(helper, helperFixture);
   const h14Intent =
     [
@@ -506,10 +852,22 @@ function makeEngineFixture(name) {
     writeFileSync(`${h14Root}/${entry}`, data);
   }
   mkdirSync(`${h14Root}/quarantined-profile-v1`);
+  chmodSync(`${h14Root}/quarantined-profile-v1`, 0o700);
   writeFileSync(
     `${h14Root}/quarantined-profile-v1/.fetanagent-unclean-session-generation-v1`,
     'fetanagent-kemerbet-session-active-v1\n',
   );
+  chmodSync(`${h14Root}/quarantined-profile-v1/.fetanagent-unclean-session-generation-v1`, 0o600);
+  mkdirSync(`${h14Root}/quarantined-profile-v1/Default/Session Storage`, { recursive: true });
+  chmodSync(`${h14Root}/quarantined-profile-v1/Default`, 0o700);
+  chmodSync(`${h14Root}/quarantined-profile-v1/Default/Session Storage`, 0o700);
+  writeFileSync(`${h14Root}/quarantined-profile-v1/Local State`, '{"retired":true}\n');
+  chmodSync(`${h14Root}/quarantined-profile-v1/Local State`, 0o600);
+  writeFileSync(
+    `${h14Root}/quarantined-profile-v1/Default/Session Storage/000001.log`,
+    'retained quarantined browser state\n',
+  );
+  chmodSync(`${h14Root}/quarantined-profile-v1/Default/Session Storage/000001.log`, 0o600);
   const ackSource = `${control}/kemerbet-quarantine-recovery-profile-prepared-v1`;
   writeFileSync(ackSource, ackFixture);
   const markerSource = `${receipts}/kemerbet-readiness-cohort-security-recovery-failed-terminal-v1`;
@@ -524,14 +882,20 @@ function makeEngineFixture(name) {
     FETANAGENT_FIXTURE_ACK_SOURCE: ackSource,
     FETANAGENT_FIXTURE_MARKER_SOURCE: markerSource,
     FETANAGENT_FIXTURE_MARKER_TARGET: markerTarget,
+    FETANAGENT_FIXTURE_PREDECESSOR_BRIDGE_PARENT: predecessorBridgeParent,
+    FETANAGENT_FIXTURE_PREDECESSOR_BUNDLE_ROOT: predecessorBundleRoot,
   };
+  for (const [index, data] of [...predecessorPayloads.values()].entries()) {
+    env[`FETANAGENT_FIXTURE_PREDECESSOR_SIZE_${index}`] = String(data.length);
+    env[`FETANAGENT_FIXTURE_PREDECESSOR_SHA256_${index}`] = sha256(data);
+  }
   const common = [
     h14Root,
     helper,
     ackSource,
     markerSource,
     markerTarget,
-    'a'.repeat(40),
+    bridgeRelease,
     '1'.repeat(64),
     '2'.repeat(64),
     '3'.repeat(64),
@@ -547,10 +911,14 @@ function makeEngineFixture(name) {
   return {
     ackSource,
     completionPath,
+    expiryIntentPath,
+    expiryRetiredPath,
     h14Root,
     intentPath,
     markerSource,
     markerTarget,
+    predecessorBridgeParent,
+    predecessorBundleRoot,
     run,
   };
 }
@@ -574,6 +942,24 @@ try {
   assert.equal(normal.run('verify-completed').status, 0, 'second exact replay failed');
   writeFileSync(`${normal.h14Root}/host-retired-v1`, 'tampered\n');
   assert.notEqual(normal.run('verify-completed').status, 0, 'pinned-base tamper was accepted');
+
+  const predecessorReplay = makeEngineFixture('completed-predecessor-replay');
+  result = predecessorReplay.run('emit-intent');
+  assert.equal(result.status, 0, result.stderr?.toString());
+  writeFileSync(predecessorReplay.intentPath, result.stdout);
+  chmodSync(predecessorReplay.intentPath, 0o600);
+  assert.equal(predecessorReplay.run('finalize').status, 0);
+  result = predecessorReplay.run('emit-completion');
+  assert.equal(result.status, 0, result.stderr?.toString());
+  writeFileSync(predecessorReplay.completionPath, result.stdout);
+  chmodSync(predecessorReplay.completionPath, 0o600);
+  assert.equal(predecessorReplay.run('verify-completed').status, 0);
+  rmSync(`${predecessorReplay.predecessorBundleRoot}/${bundleNames[0]}`);
+  assert.notEqual(
+    predecessorReplay.run('verify-completed').status,
+    0,
+    'completed replay ignored missing failed-predecessor evidence',
+  );
 
   const interrupted = makeEngineFixture('p1-short-write');
   result = interrupted.run('emit-intent');
@@ -713,6 +1099,100 @@ try {
       ackFixture.replace(newProfile, '55555555-5555-4555-8555-555555555555'),
     );
   });
+  expectRejected('expiry-retirement-intent-tamper', (fixture) =>
+    writeFileSync(fixture.expiryIntentPath, `${expiryRetirementIntentFixture}unexpected=true\n`),
+  );
+  expectRejected('expiry-retired-tamper', (fixture) =>
+    writeFileSync(fixture.expiryRetiredPath, `${expiryRetiredFixture}unexpected=true\n`),
+  );
+  expectRejected('quarantined-profile-content-tamper', (fixture) =>
+    writeFileSync(`${fixture.h14Root}/quarantined-profile-v1/Local State`, '{"retired":false}\n'),
+  );
+  expectRejected('quarantined-profile-foreign-file', (fixture) =>
+    writeFileSync(`${fixture.h14Root}/quarantined-profile-v1/foreign-v1`, 'unexpected\n'),
+  );
+  expectRejected('quarantined-profile-same-bytes-new-inode', (fixture) => {
+    const path = `${fixture.h14Root}/quarantined-profile-v1/Local State`;
+    const replacement = `${path}.replaced`;
+    const before = statSync(path).ino;
+    const data = readFileSync(path);
+    renameSync(path, replacement);
+    writeFileSync(path, data);
+    assert.notEqual(statSync(path).ino, before);
+  });
+  expectRejected('quarantined-profile-object-limit', (fixture) => {
+    const directory = `${fixture.h14Root}/quarantined-profile-v1/Default/too-many`;
+    mkdirSync(directory);
+    chmodSync(directory, 0o700);
+    for (let index = 0; index < 40; index += 1) {
+      const path = `${directory}/${String(index).padStart(2, '0')}`;
+      writeFileSync(path, 'x');
+      chmodSync(path, 0o600);
+    }
+  });
+  expectRejected('quarantined-profile-file-limit', (fixture) =>
+    writeFileSync(
+      `${fixture.h14Root}/quarantined-profile-v1/Default/oversized`,
+      Buffer.alloc(1025),
+    ),
+  );
+  expectRejected('quarantined-profile-total-limit', (fixture) => {
+    for (let index = 0; index < 3; index += 1)
+      writeFileSync(
+        `${fixture.h14Root}/quarantined-profile-v1/Default/total-${index}`,
+        Buffer.alloc(800, index),
+      );
+  });
+  if (process.platform !== 'win32') {
+    expectRejected('quarantined-profile-hardlink', (fixture) =>
+      linkSync(
+        `${fixture.h14Root}/quarantined-profile-v1/Local State`,
+        `${fixture.h14Root}/quarantined-profile-v1/linked-state`,
+      ),
+    );
+    expectRejected('quarantined-profile-file-mode', (fixture) =>
+      chmodSync(`${fixture.h14Root}/quarantined-profile-v1/Local State`, 0o755),
+    );
+    expectRejected('quarantined-profile-directory-mode', (fixture) =>
+      chmodSync(`${fixture.h14Root}/quarantined-profile-v1/Default`, 0o755),
+    );
+    expectRejected('quarantined-profile-depth-limit', (fixture) => {
+      let directory = `${fixture.h14Root}/quarantined-profile-v1`;
+      for (let depth = 0; depth < 9; depth += 1) {
+        directory = `${directory}/d${depth}`;
+        mkdirSync(directory);
+        chmodSync(directory, 0o700);
+      }
+    });
+    expectRejected('quarantined-profile-name-limit', (fixture) => {
+      const path = `${fixture.h14Root}/quarantined-profile-v1/${'n'.repeat(129)}`;
+      writeFileSync(path, 'x');
+      chmodSync(path, 0o600);
+    });
+    expectRejected('quarantined-profile-path-limit', (fixture) => {
+      const directory = `${fixture.h14Root}/quarantined-profile-v1/${'p'.repeat(128)}`;
+      mkdirSync(directory);
+      chmodSync(directory, 0o700);
+      const path = `${directory}/${'q'.repeat(128)}`;
+      writeFileSync(path, 'x');
+      chmodSync(path, 0o600);
+    });
+    expectRejected('quarantined-profile-symlink', (fixture) =>
+      symlinkSync('Local State', `${fixture.h14Root}/quarantined-profile-v1/profile-state-link`),
+    );
+    expectRejected('quarantined-profile-fifo', (fixture) => {
+      const fifo = `${fixture.h14Root}/quarantined-profile-v1/profile-state-fifo`;
+      assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
+      chmodSync(fifo, 0o600);
+    });
+    if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
+      expectRejected('quarantined-profile-scan-error', (fixture) => {
+        const unreadable = `${fixture.h14Root}/quarantined-profile-v1/unreadable`;
+        mkdirSync(unreadable);
+        chmodSync(unreadable, 0o000);
+      });
+    }
+  }
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });
 }
@@ -746,11 +1226,11 @@ const appendCompletePortable = (target, expected) => {
   renameSync(temporary, target);
 };
 const allowedInstallingEntries = new Set([
-  '',
-  '.intent-v1.installing',
-  'intent-v1',
-  '.completed-v1.installing\nintent-v1',
-  'completed-v1\nintent-v1',
+  'expiry-guard-retired-v1\nexpiry-guard-retirement-intent-v1',
+  '.intent-v1.installing\nexpiry-guard-retired-v1\nexpiry-guard-retirement-intent-v1',
+  'expiry-guard-retired-v1\nexpiry-guard-retirement-intent-v1\nintent-v1',
+  '.completed-v1.installing\nexpiry-guard-retired-v1\nexpiry-guard-retirement-intent-v1\nintent-v1',
+  'completed-v1\nexpiry-guard-retired-v1\nexpiry-guard-retirement-intent-v1\nintent-v1',
 ]);
 const resumeLedgerPortable = (name, prefix) => {
   const parent = join(ledgerFixtureRoot, name);
@@ -763,11 +1243,20 @@ const resumeLedgerPortable = (name, prefix) => {
     writeFileSync(join(installing, 'intent-v1'), portableIntent);
   }
   if (!existsSync(installing)) mkdirSync(installing);
+  writeFileSync(
+    join(installing, 'expiry-guard-retirement-intent-v1'),
+    expiryRetirementIntentFixture,
+  );
+  writeFileSync(join(installing, 'expiry-guard-retired-v1'), expiryRetiredFixture);
   const before = readdirSync(installing).sort().join('\n');
   assert.ok(allowedInstallingEntries.has(before), `${prefix}: invalid initial namespace`);
   appendCompletePortable(join(installing, 'intent-v1'), portableIntent);
   assert.deepEqual(readFileSync(join(installing, 'intent-v1')), portableIntent);
-  assert.deepEqual(readdirSync(installing), ['intent-v1']);
+  assert.deepEqual(readdirSync(installing).sort(), [
+    'expiry-guard-retired-v1',
+    'expiry-guard-retirement-intent-v1',
+    'intent-v1',
+  ]);
   return installing;
 };
 try {

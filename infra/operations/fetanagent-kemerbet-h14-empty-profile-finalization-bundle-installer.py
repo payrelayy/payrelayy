@@ -39,6 +39,13 @@ FILES = (
     "manifest-v1",
 )
 STAGED = tuple(sorted((*FILES, INSTALLER)))
+HISTORICAL_RELEASE = "066572953de652e53634f562b4a63c0d9103865d"
+HISTORICAL_FILES = {
+    FILES[0]: (26458, "a0f27007fe5954beb2393f0acbadad6b28931a8eae01fec12bcd64eb995ede65"),
+    FILES[1]: (17941, "d4e4f91603956e2051d9b77ce8a43392b6d46c062c3d397d28fa18f499b15542"),
+    FILES[2]: (27047, "93ea024cdfa116f81a1ccb99e7145e60f5da012563d1cef33f9036dc25805855"),
+    FILES[3]: (821, "2e6f683885ff3dda99a7f670cb4f14fe83a054f1055ca20bc178d4e2e673e877"),
+}
 BINARY = getattr(os, "O_BINARY", 0)
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 CLOEXEC = getattr(os, "O_CLOEXEC", 0)
@@ -46,6 +53,22 @@ CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 if PORTABLE_FIXTURE:
     SAFE_PARENT = os.environ["FETANAGENT_FIXTURE_BUNDLE_PARENT"]
     LOCK_ROOT = os.environ.get("FETANAGENT_FIXTURE_BUNDLE_LOCK_ROOT", LOCK_ROOT)
+    fixture_historical_release = os.environ.get("FETANAGENT_FIXTURE_HISTORICAL_RELEASE")
+    fixture_historical_contract = os.environ.get("FETANAGENT_FIXTURE_HISTORICAL_CONTRACT")
+    if (fixture_historical_release is None) != (fixture_historical_contract is None):
+        raise SystemExit(1)
+    if fixture_historical_release is not None:
+        fixture_items = fixture_historical_contract.split(",")
+        if RELEASE.fullmatch(fixture_historical_release) is None or len(fixture_items) != len(FILES):
+            raise SystemExit(1)
+        fixture_contract = {}
+        for filename, item in zip(FILES, fixture_items):
+            size_text, digest = item.split(":", 1)
+            if not size_text.isdigit() or SHA.fullmatch(digest) is None:
+                raise SystemExit(1)
+            fixture_contract[filename] = (int(size_text), digest)
+        HISTORICAL_RELEASE = fixture_historical_release
+        HISTORICAL_FILES = fixture_contract
 
 
 class Rejected(Exception):
@@ -133,6 +156,29 @@ def exact_file(path, maximum, expected_sha=None, expected_mode=None, expected_ow
     if expected_sha is not None and digest != expected_sha:
         reject()
     return data, before
+
+
+def validate_bundle_parent(parent, release, current_entries):
+    exact_directory(parent, 0o700)
+    entries = set(os.listdir(parent))
+    if not set(current_entries).issubset(entries):
+        reject()
+    for name in sorted(entries - set(current_entries)):
+        if name != HISTORICAL_RELEASE or name == release:
+            reject()
+        historical = os.path.join(parent, name)
+        exact_directory(historical, 0o700, FILES)
+        for filename in FILES:
+            expected_size, expected_sha = HISTORICAL_FILES[filename]
+            _, value = exact_file(
+                os.path.join(historical, filename),
+                expected_size,
+                expected_sha=expected_sha,
+                expected_mode=0o400,
+                expected_owner=(0, 0),
+            )
+            if value.st_size != expected_size:
+                reject()
 
 
 def create_directory(path, parent):
@@ -396,7 +442,7 @@ def main(argv):
     installing = os.path.join(parent, f".installing-{release}")
     final = os.path.join(parent, release)
     if os.path.lexists(final):
-        exact_directory(parent, 0o700, [release])
+        validate_bundle_parent(parent, release, {release})
         exact_directory(final, 0o700, FILES)
         targets = (
             (FILES[0], script_sha, script_size),
@@ -411,9 +457,9 @@ def main(argv):
             os.close(installer_lock)
         return
     if not os.path.lexists(installing):
-        exact_directory(parent, 0o700, [])
+        validate_bundle_parent(parent, release, set())
         create_directory(installing, parent)
-    exact_directory(parent, 0o700, [f".installing-{release}"])
+    validate_bundle_parent(parent, release, {f".installing-{release}"})
     exact_directory(installing, 0o700)
     if tuple(sorted(os.listdir(installing))) not in allowed_prefixes():
         reject()
@@ -429,7 +475,7 @@ def main(argv):
     sync_directory(installing)
     os.rename(installing, final)
     sync_directory(parent)
-    exact_directory(parent, 0o700, [release])
+    validate_bundle_parent(parent, release, {release})
     exact_directory(final, 0o700, FILES)
     sys.stdout.write(final + "\n")
     if installer_lock is not None:

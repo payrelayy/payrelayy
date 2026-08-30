@@ -35,7 +35,8 @@ const diagnosticPath = resolve(
   root,
   'infra/operations/fetanagent-kemerbet-h14-terminal-differential-validator.py',
 );
-const workflowPath = resolve(
+const workflowPath = resolve(root, '.github/workflows/staging-kemerbet-session-provision.yml');
+const removedStandaloneWorkflowPath = resolve(
   root,
   '.github/workflows/staging-h14-empty-profile-finalization-bridge.yml',
 );
@@ -48,6 +49,11 @@ const helper = read(helperPath);
 const diagnostic = read(diagnosticPath);
 const workflow = read(workflowPath);
 const packageSource = read(packagePath);
+assert.equal(
+  existsSync(removedStandaloneWorkflowPath),
+  false,
+  'the undispatchable standalone workflow must remain removed',
+);
 
 const canonicalRelease = '06459511d9330a0e1d956c42529b81aa9970e7a2';
 const helperSha = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58';
@@ -852,6 +858,45 @@ assert.equal(tamperedLedger.equals(expectedLedger), false, 'ledger tamper fixtur
 assert.deepEqual(Buffer.from(expectedLedger), expectedLedger, 'exact replay fixture failed');
 
 assert.match(workflow, /h14-empty-profile-finalization-bridge-stage/);
+assert.match(
+  workflow,
+  /session-action:\n[\s\S]*?if: inputs\.mode != 'h14-empty-profile-finalization-bridge-stage'\n\s+needs: validate-target/,
+);
+assert.match(
+  workflow,
+  /h14-empty-profile-finalization-bridge-stage:\n\s+name: Stage immutable H14 empty-profile finalization bridge\n\s+if: inputs\.mode == 'h14-empty-profile-finalization-bridge-stage'\n\s+needs: validate-target/,
+);
+assert.match(workflow, /pull-requests: read/);
+assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+assert.match(
+  workflow,
+  /else\n\s+\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]\n\s+\[\[ "\$CONFIRMED_COMMIT" =~ \^\[0-9a-f\]\{40\}\$ && "\$CONFIRMED_COMMIT" == "\$GITHUB_SHA" \]\]\n\s+\[\[ -z "\$CONFIRMED_BRIDGE_IMPLEMENTATION_SHA" && -z "\$CONFIRMED_NO_PROVIDER_ACTION" \]\]/,
+);
+assert.equal(
+  workflow.split('gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main"').length - 1,
+  2,
+  'the exact canonical-main API proof must run before and inside the protected stage job',
+);
+assert.equal(
+  workflow.split('gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls"').length - 1,
+  2,
+  'the exact open-PR relationship must be proved before and inside the protected stage job',
+);
+assert.equal(
+  workflow.split('!= "$CANONICAL_H14_COMMIT"').length - 1,
+  2,
+  'both branch gates must reject the canonical main SHA as the bridge implementation',
+);
+const bridgeJob = workflow.split('  h14-empty-profile-finalization-bridge-stage:\n')[1];
+assert.ok(bridgeJob, 'the registered branch-only bridge job is absent');
+const bridgeSteps = bridgeJob.split('    steps:\n')[1];
+assert.ok(bridgeSteps, 'the registered branch-only bridge steps are absent');
+assert.doesNotMatch(
+  bridgeSteps,
+  /\$\{\{ inputs\./,
+  'a user input is interpolated directly into a bridge shell or action step',
+);
+assert.doesNotMatch(bridgeJob, /^\s+(?:sudo\s|exec bash|\/usr\/bin\/python3 -I)/mu);
 assert.match(workflow, /fetanagent-kemerbet-h14-empty-profile-finalization-engine\.py/);
 assert.match(workflow, /contract=fetanagent-kemerbet-h14-empty-profile-finalization-bundle/);
 assert.match(workflow, /manifest_sha/);
@@ -886,8 +931,7 @@ const emitter = emitterTail
   .split(emitterRunMarker)[1]
   .split('\n')
   .map((line) => line.replace(/^ {10}/u, ''))
-  .join('\n')
-  .replace('${{ inputs.confirm_bridge_implementation_sha }}', 'e'.repeat(40));
+  .join('\n');
 const bash = resolveBash();
 assert.equal(spawnSync(bash, ['-n'], { input: emitter, encoding: 'utf8' }).status, 0);
 const summaryFixture = mkdtempSync(join(tmpdir(), 'fetanagent-h14-workflow-summary-'));
@@ -898,6 +942,7 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
+      CONFIRMED_BRIDGE_IMPLEMENTATION_SHA: 'e'.repeat(40),
       staging: `/tmp/fetanagent-h14-empty-profile-finalization-1-1-${'e'.repeat(40)}`,
       script_sha: '1'.repeat(64),
       diagnostic_sha: '2'.repeat(64),

@@ -803,6 +803,7 @@ jobs:
           git fetch --no-tags --depth=1 origin 0110d1965d7efdc0436abda8c0bc686fb33c084b
           git fetch --no-tags --depth=1 origin 1f27af7f929434b1f40f65901df9ebd683ebe62c
           git fetch --no-tags --depth=1 origin a51b52201a94a669b8dcca38b7abb29d70d0200f
+          git fetch --no-tags --depth=1 origin 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57
           git cat-file -e 001316f1f65dc7a9976244e8fc01f90aec665a70^{commit}
           git cat-file -e 911758fa1407093bee700918d5a663a7735f1658^{commit}
           git cat-file -e ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b^{commit}
@@ -815,6 +816,7 @@ jobs:
           git cat-file -e 0110d1965d7efdc0436abda8c0bc686fb33c084b^{commit}
           git cat-file -e 1f27af7f929434b1f40f65901df9ebd683ebe62c^{commit}
           git cat-file -e a51b52201a94a669b8dcca38b7abb29d70d0200f^{commit}
+          git cat-file -e 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57^{commit}
           test "$(git show 0202304e3c606d2a7927a5b027d76926c0117189:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = 7e4d1d7cbcc8494b0120ee6477b4a3e355e8bb88c55a68a9f1ca6f02b9d1d244
           test "$(git show 0202304e3c606d2a7927a5b027d76926c0117189:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 294196
           test "$(git show 0110d1965d7efdc0436abda8c0bc686fb33c084b:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = 986e031158229b7474cc5d31b6a2962b30fbe75497d3bef646c40d228cfeab59
@@ -829,6 +831,12 @@ jobs:
           test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 393436
           test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-owner-archive-validator.py | sha256sum | awk '{print $1}')" = 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
           test "$(git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-owner-archive-validator.py | wc -c)" = 11689
+          test "$(git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = 7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b
+          test "$(git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 435623
+          test "$(git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -l)" = 6693
+          test "$(git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-owner-archive-validator.py | sha256sum | awk '{print $1}')" = 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          test "$(git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-owner-archive-validator.py | wc -c)" = 11689
+          test "$(git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-owner-archive-validator.py | wc -l)" = 220
           test "$(git show 001316f1f65dc7a9976244e8fc01f90aec665a70:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh | sha256sum | awk '{print $1}')" = b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9
           test "$(git show 911758fa1407093bee700918d5a663a7735f1658:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum | awk '{print $1}')" = d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d
           test "$(git show 911758fa1407093bee700918d5a663a7735f1658:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | wc -c)" = 151404
@@ -871,65 +879,13 @@ jobs:
           validator_size="$(stat -c %s "$validator")"
           [[ "$script_sha" =~ ^[0-9a-f]{64}$ && "$validator_sha" =~ ^[0-9a-f]{64}$ ]]
           [[ "$script_size" -le 2097152 && "$validator_size" -le 2097152 ]]
-          customer_tag="fetanagent-customer-web:${CONFIRMED_RECOVERY_RELEASE:0:12}"
-          docker build --pull=false --target customer-web \
-            --build-arg "VCS_REF=$CONFIRMED_RECOVERY_RELEASE" -t "$customer_tag" .
-          [[ "$(docker image inspect "$customer_tag" --format '{{.Config.User}}|{{json .Config.Cmd}}|{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
-            "10001:10001|[\"node\",\"apps/customer-web/dist/index.js\"]|$CONFIRMED_RECOVERY_RELEASE" ]]
-          image_json="$(docker image inspect "$customer_tag")"
-          printf '%s' "$image_json" | python3 -I /dev/fd/3 "$CONFIRMED_RECOVERY_RELEASE" 3<<'PY'
-          import json, sys
-          release = sys.argv[1]
-          payload = json.load(sys.stdin)
-          assert isinstance(payload, list) and len(payload) == 1
-          image = payload[0]; config = image['Config']
-          assert image['Architecture'] == 'amd64' and image['Os'] == 'linux'
-          assert config['User'] == '10001:10001'
-          assert config['Cmd'] == ['node', 'apps/customer-web/dist/index.js']
-          assert config.get('Entrypoint') == ['docker-entrypoint.sh']
-          assert config['WorkingDir'] == '/workspace'
-          assert config.get('ExposedPorts') in (None, {})
-          assert config['Healthcheck'] == {
-              'Test': ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"],
-              'Interval': 30000000000, 'Timeout': 3000000000,
-              'StartPeriod': 15000000000, 'Retries': 3,
-          }
-          assert config['Labels']['org.opencontainers.image.title'] == 'fetanagent-customer-web'
-          assert config['Labels']['org.opencontainers.image.revision'] == release
-          PY
-          customer_archive="$RUNNER_TEMP/fetanagent-customer-web-self-recovery.tar"
-          docker image save --output "$customer_archive" "$customer_tag"
-          customer_archive_sha="$(sha256sum "$customer_archive" | awk '{print $1}')"
-          customer_archive_size="$(stat -c %s "$customer_archive")"
-          mapfile -t customer_identities < <(python3 -I - "$customer_archive" <<'PY'
-          import json, re, sys, tarfile
-
-          archive_path = sys.argv[1]
-          with tarfile.open(archive_path, mode="r:") as archive:
-              manifest_stream = archive.extractfile("manifest.json")
-              index_stream = archive.extractfile("index.json")
-              assert manifest_stream is not None and index_stream is not None
-              manifest = json.load(manifest_stream)
-              index = json.load(index_stream)
-          assert isinstance(manifest, list) and len(manifest) == 1
-          config_path = manifest[0]["Config"]
-          assert re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", config_path)
-          assert isinstance(index, dict) and isinstance(index.get("manifests"), list) and len(index["manifests"]) == 1
-          descriptor = index["manifests"][0]
-          runtime_descriptor_id = descriptor["digest"]
-          assert re.fullmatch(r"sha256:[0-9a-f]{64}", runtime_descriptor_id)
-          print(f"sha256:{config_path.rsplit('/', 1)[-1]}")
-          print(runtime_descriptor_id)
-          PY
-          )
-          [[ "${#customer_identities[@]}" == 2 ]]
-          customer_image_id="${customer_identities[0]}"
-          customer_runtime_descriptor_id="${customer_identities[1]}"
-          runner_customer_image_id="$(docker image inspect "$customer_tag" --format '{{.Id}}')"
-          [[ "$customer_archive_sha" =~ ^[0-9a-f]{64}$ && "$customer_archive_size" =~ ^[1-9][0-9]*$ ]]
-          [[ "$customer_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$customer_runtime_descriptor_id" =~ ^sha256:[0-9a-f]{64}$ && "$customer_runtime_descriptor_id" != "$customer_image_id" ]]
-          [[ "$runner_customer_image_id" == "$customer_image_id" || "$runner_customer_image_id" == "$customer_runtime_descriptor_id" ]]
+          # This reconciliation release adopts the already sealed and running
+          # 0ffc customer-web image. The runner must not build, save, load, tag,
+          # remove, or otherwise mutate any Docker object.
+          customer_archive_sha=7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c
+          customer_archive_size=404797952
+          customer_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd
+          customer_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b
           manifest="$RUNNER_TEMP/h14-owner-archive-recovery-manifest-v1"
           cat >"$manifest" <<EOF
           version=1
@@ -1258,6 +1214,51 @@ jobs:
           failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent
           failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load
           customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1
+          failed_oci_identity_correction_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57
+          failed_oci_identity_correction_bundle_parent_dev_ino=64769:6102884
+          failed_oci_identity_correction_bundle_root_dev_ino=64769:6103001
+          failed_oci_identity_correction_script_dev_ino=64769:6103002
+          failed_oci_identity_correction_script_sha256=7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b
+          failed_oci_identity_correction_script_size=435623
+          failed_oci_identity_correction_validator_dev_ino=64769:6103003
+          failed_oci_identity_correction_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa
+          failed_oci_identity_correction_validator_size=11689
+          failed_oci_identity_correction_manifest_dev_ino=64769:6103004
+          failed_oci_identity_correction_manifest_sha256=dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45
+          failed_oci_identity_correction_manifest_size=26099
+          failed_oci_identity_correction_manifest_lines=387
+          failed_oci_identity_correction_image_archive_dev_ino=64769:6103005
+          failed_oci_identity_correction_image_archive_sha256=7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c
+          failed_oci_identity_correction_image_archive_size=404797952
+          failed_oci_identity_correction_config_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd
+          failed_oci_identity_correction_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b
+          failed_oci_identity_correction_workflow_run_id=33279465715
+          failed_oci_identity_correction_workflow_run_attempt=1
+          failed_oci_identity_bridge_parent_dev_ino=64769:6103009
+          failed_oci_identity_bridge_installing_dev_ino=64769:6103010
+          failed_oci_identity_bridge_intent_dev_ino=64769:6103011
+          failed_oci_identity_bridge_intent_sha256=f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e
+          failed_oci_identity_bridge_intent_size=22967
+          failed_oci_identity_bridge_intent_lines=325
+          failed_oci_identity_bridge_inventory=single-intent-no-replacement-no-final
+          failed_oci_identity_failure=healthy-replacement-rejected-by-v1-non-invariant-normalized-digest
+          customer_web_replacement_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57
+          customer_web_reconciliation_implementation_sha=$CONFIRMED_RECOVERY_RELEASE
+          adopted_customer_web_container_id=83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521
+          adopted_customer_web_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd
+          adopted_customer_web_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b
+          adopted_customer_web_image_tag=fetanagent-customer-web:0ffc54ab34de
+          adopted_customer_web_pid=911858
+          adopted_customer_web_started_at=2026-08-29T22:56:55.385310072Z
+          adopted_customer_web_runtime_state_sha256=39c0ae0f18e94c0746da78e93a26a12a6daa47a6183bb67437f38c370bbd80b5
+          adopted_customer_web_env_sha256=eeaf8dee7d2d4f0bbb849dbe9f48e58b5e762520e06bb9162fd656cca7072f29
+          adopted_customer_web_v1_normalized_sha256=237bcaedc8f40ac8ed85ae7d9fb3da94e8b9a935a62440b87525d3d122f98bdc
+          adopted_customer_web_semantic_v2_sha256=e1d095c2fa7f7cdd5b9e75f0e2f3bcb2fccbea02f1af46beda5bcdc7f8b49a7b
+          adopted_customer_web_compose_config_sha256=3d618a2e21d3818d603528063815b0ab58b5a72ba2098f95e6321ad6937b73c3
+          source_customer_web_absent=true
+          customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2
+          customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2
+          customer_web_reconciliation_lifecycle_mutation=false
           created_owner_container_id=44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f
           failed_endpoint_phase_owner_state=created-never-started
           failed_running_status_owner_state=running-healthy-no-completion
@@ -1266,7 +1267,7 @@ jobs:
           docker_inventory_contract=complete-exact-owner-only-phase-delta-v3
           network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1
           owner_lifecycle_mutation=forbidden-already-running
-          customer_web_lifecycle_mutation=exact-single-self-recovery-replacement-v1
+          customer_web_lifecycle_mutation=already-completed-exactly-once-by-failed-oci-identity-correction
           all_other_lifecycle_mutation=forbidden
           complete_phase_boundary_contract=single-final-phase-aware-command-v1
           migration_catalog_proof=exact-api-player-action-read-only-v1
@@ -1320,12 +1321,12 @@ jobs:
           amount_entry_enabled=false
           money_moved=false
           EOF
-          [[ "$(wc -l <"$manifest" | tr -d '[:space:]')" == 387 ]]
+          [[ "$(wc -l <"$manifest" | tr -d '[:space:]')" == 432 ]]
           manifest_sha="$(sha256sum "$manifest" | awk '{print $1}')"
           manifest_size="$(stat -c %s "$manifest")"
-          printf 'script_sha=%s\nvalidator_sha=%s\nscript_size=%s\nvalidator_size=%s\nmanifest=%s\nmanifest_sha=%s\nmanifest_size=%s\ncustomer_archive=%s\ncustomer_archive_sha=%s\ncustomer_archive_size=%s\ncustomer_image_id=%s\ncustomer_runtime_descriptor_id=%s\n' "$script_sha" "$validator_sha" "$script_size" "$validator_size" "$manifest" "$manifest_sha" "$manifest_size" "$customer_archive" "$customer_archive_sha" "$customer_archive_size" "$customer_image_id" "$customer_runtime_descriptor_id" >>"$GITHUB_OUTPUT"
+          printf 'script_sha=%s\nvalidator_sha=%s\nscript_size=%s\nvalidator_size=%s\nmanifest=%s\nmanifest_sha=%s\nmanifest_size=%s\ncustomer_archive_sha=%s\ncustomer_archive_size=%s\ncustomer_image_id=%s\ncustomer_runtime_descriptor_id=%s\n' "$script_sha" "$validator_sha" "$script_size" "$validator_size" "$manifest" "$manifest_sha" "$manifest_size" "$customer_archive_sha" "$customer_archive_size" "$customer_image_id" "$customer_runtime_descriptor_id" >>"$GITHUB_OUTPUT"
 
-      - name: Stage only the no-secret archive-recovery bundle
+      - name: Stage only the no-secret reconciliation bundle
         id: stage
         shell: bash
         env:
@@ -1336,10 +1337,6 @@ jobs:
           MANIFEST: ${{ steps.bundle.outputs.manifest }}
           MANIFEST_SHA: ${{ steps.bundle.outputs.manifest_sha }}
           MANIFEST_SIZE: ${{ steps.bundle.outputs.manifest_size }}
-          CUSTOMER_ARCHIVE: ${{ steps.bundle.outputs.customer_archive }}
-          CUSTOMER_ARCHIVE_SHA: ${{ steps.bundle.outputs.customer_archive_sha }}
-          CUSTOMER_ARCHIVE_SIZE: ${{ steps.bundle.outputs.customer_archive_size }}
-          CUSTOMER_IMAGE_ID: ${{ steps.bundle.outputs.customer_image_id }}
         run: |
           set -euo pipefail
           secret_dir="$(mktemp -d "$RUNNER_TEMP/h14-owner-archive-recovery-ssh.XXXXXX")"
@@ -1353,15 +1350,14 @@ jobs:
           bundle="/tmp/fetanagent-h14-owner-runtime-bridge-archive-recovery-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_SHA"
           [[ "$bundle" =~ ^/tmp/fetanagent-h14-owner-runtime-bridge-archive-recovery-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{40}$ ]]
           ssh "${opts[@]}" "$remote" "test \"\$(id -u)\" -ne 0 && test ! -e '$bundle' && install -d -m 0700 '$bundle'"
-          scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$CUSTOMER_ARCHIVE" "$remote:$bundle/"
+          scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$remote:$bundle/"
           ssh "${opts[@]}" "$remote" "mv '$bundle/h14-owner-archive-recovery-manifest-v1' '$bundle/manifest-v1'"
-          ssh "${opts[@]}" "$remote" bash -s -- "$bundle" "$SCRIPT_SHA" "$SCRIPT_SIZE" "$VALIDATOR_SHA" "$VALIDATOR_SIZE" "$MANIFEST_SHA" "$MANIFEST_SIZE" "$CUSTOMER_ARCHIVE_SHA" "$CUSTOMER_ARCHIVE_SIZE" <<'REMOTE'
+          ssh "${opts[@]}" "$remote" bash -s -- "$bundle" "$SCRIPT_SHA" "$SCRIPT_SIZE" "$VALIDATOR_SHA" "$VALIDATOR_SIZE" "$MANIFEST_SHA" "$MANIFEST_SIZE" <<'REMOTE'
           set -euo pipefail
-          bundle="$1"; script_sha="$2"; script_size="$3"; validator_sha="$4"; validator_size="$5"; manifest_sha="$6"; manifest_size="$7"; customer_sha="$8"; customer_size="$9"
+          bundle="$1"; script_sha="$2"; script_size="$3"; validator_sha="$4"; validator_size="$5"; manifest_sha="$6"; manifest_size="$7"
           test "$(id -u)" -ne 0
           chmod 0600 "$bundle"/*
-          test "$(find -P "$bundle" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" = "fetanagent-customer-web-self-recovery.tar:f
-          fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f
+          test "$(find -P "$bundle" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" = "fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f
           fetanagent-owner-archive-validator.py:f
           manifest-v1:f"
           test "$(sha256sum "$bundle/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '{print $1}')" = "$script_sha"
@@ -1370,8 +1366,6 @@ jobs:
           test "$(stat -c %s "$bundle/fetanagent-owner-archive-validator.py")" = "$validator_size"
           test "$(sha256sum "$bundle/manifest-v1" | awk '{print $1}')" = "$manifest_sha"
           test "$(stat -c %s "$bundle/manifest-v1")" = "$manifest_size"
-          test "$(sha256sum "$bundle/fetanagent-customer-web-self-recovery.tar" | awk '{print $1}')" = "$customer_sha"
-          test "$(stat -c %s "$bundle/fetanagent-customer-web-self-recovery.tar")" = "$customer_size"
           REMOTE
           echo "remote_bundle=$bundle" >>"$GITHUB_OUTPUT"
 
@@ -1422,11 +1416,13 @@ jobs:
           failed_network_scope_root="$parent/$failed_network_scope_release"
           failed_owner_delta_release='a51b52201a94a669b8dcca38b7abb29d70d0200f'
           failed_owner_delta_root="$parent/$failed_owner_delta_release"
+          failed_oci_identity_release='0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'
+          failed_oci_identity_root="$parent/$failed_oci_identity_release"
+          adopted_customer_archive="$failed_oci_identity_root/fetanagent-customer-web-self-recovery.tar"
           installing="$parent/.installing-$CONFIRMED_RECOVERY_RELEASE"
           root="$parent/$CONFIRMED_RECOVERY_RELEASE"
           script="$root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh"
           validator="$root/fetanagent-owner-archive-validator.py"
-          customer_archive="$root/fetanagent-customer-web-self-recovery.tar"
           {
             echo '### Exact Owner archive-recovery root-console invocation'
             echo
@@ -1457,6 +1453,8 @@ jobs:
             echo "failed_customer_web_root='$failed_customer_web_root'"
             echo "failed_network_scope_root='$failed_network_scope_root'"
             echo "failed_owner_delta_root='$failed_owner_delta_root'"
+            echo "failed_oci_identity_root='$failed_oci_identity_root'"
+            echo "adopted_customer_archive='$adopted_customer_archive'"
             echo "installing='$installing'"
             echo "root='$root'"
             echo 'set -euo pipefail'
@@ -1481,6 +1479,36 @@ jobs:
             echo '  [[ "$(stat -c %s "$temporary")" == "$size" && "$(sha256sum "$temporary" | awk '\''{print $1}'\'')" == "$digest" ]]'
             echo '  mv "$temporary" "$dst"'
             echo '  sync -f "$(dirname "$dst")"'
+            echo '}'
+            echo 'reprove_0ffc_and_adopted_runtime() {'
+            echo '  local failed_runtime_parent failed_runtime failed_runtime_final failed_runtime_intent project_ids service_map'
+            echo '  failed_runtime_parent=/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'
+            echo '  failed_runtime="$failed_runtime_parent/.installing-0ffc54ab34de6fcde6cd5401ab66dd94025ebd57"'
+            echo '  failed_runtime_final="$failed_runtime_parent/0ffc54ab34de6fcde6cd5401ab66dd94025ebd57"'
+            echo '  failed_runtime_intent="$failed_runtime/intent-v1"'
+            echo '  [[ ! -L "$failed_oci_identity_root" && -d "$failed_oci_identity_root" && "$(realpath "$failed_oci_identity_root")" == "$failed_oci_identity_root" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_oci_identity_root")" == 64769:6103001:root:root:700:2 ]]'
+            echo '  [[ "$(find -P "$failed_oci_identity_root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '  [[ ! -L "$failed_oci_identity_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" && "$(realpath "$failed_oci_identity_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == "$failed_oci_identity_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_oci_identity_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh")" == 64769:6103002:root:root:400:1:435623 && "$(sha256sum "$failed_oci_identity_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b ]]'
+            echo '  [[ ! -L "$failed_oci_identity_root/fetanagent-owner-archive-validator.py" && "$(realpath "$failed_oci_identity_root/fetanagent-owner-archive-validator.py")" == "$failed_oci_identity_root/fetanagent-owner-archive-validator.py" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_oci_identity_root/fetanagent-owner-archive-validator.py")" == 64769:6103003:root:root:400:1:11689 && "$(sha256sum "$failed_oci_identity_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa ]]'
+            echo '  [[ ! -L "$failed_oci_identity_root/manifest-v1" && "$(realpath "$failed_oci_identity_root/manifest-v1")" == "$failed_oci_identity_root/manifest-v1" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_oci_identity_root/manifest-v1")" == 64769:6103004:root:root:400:1:26099 && "$(sha256sum "$failed_oci_identity_root/manifest-v1" | awk '\''{print $1}'\'')" == dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45 && "$(wc -l <"$failed_oci_identity_root/manifest-v1" | tr -d '\''[:space:]'\'')" == 387 ]]'
+            echo '  [[ ! -L "$adopted_customer_archive" && "$(realpath "$adopted_customer_archive")" == "$adopted_customer_archive" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$adopted_customer_archive")" == 64769:6103005:root:root:400:1:404797952 && "$(sha256sum "$adopted_customer_archive" | awk '\''{print $1}'\'')" == 7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c ]]'
+            echo '  [[ "$(grep -Fxc '\''version=1'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''recovery_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''workflow_run_id=33279465715'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''workflow_run_attempt=1'\'' "$failed_oci_identity_root/manifest-v1")" == 1 ]]'
+            echo '  [[ "$(grep -Fxc '\''customer_web_image_archive_sha256=7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_image_archive_size=404797952'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd'\'' "$failed_oci_identity_root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b'\'' "$failed_oci_identity_root/manifest-v1")" == 1 ]]'
+            echo '  [[ "$(tail -n 7 "$failed_oci_identity_root/manifest-v1")" == $'\''financial_actions_mode=dry_run\nkemerbet_executor_enabled=false\nkemerbet_final_action_enabled=false\nprovider_action_enabled=false\ntransfer_enabled=false\namount_entry_enabled=false\nmoney_moved=false'\'' ]]'
+            echo '  [[ ! -L "$failed_runtime_parent" && -d "$failed_runtime_parent" && "$(realpath "$failed_runtime_parent")" == "$failed_runtime_parent" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_runtime_parent")" == 64769:6103009:root:root:700:3 && "$(find -P "$failed_runtime_parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'')" == .installing-0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:d ]]'
+            echo '  [[ ! -e "$failed_runtime_final" && ! -L "$failed_runtime_final" && ! -L "$failed_runtime" && -d "$failed_runtime" && "$(realpath "$failed_runtime")" == "$failed_runtime" && "$(stat -c '\''%d:%i:%U:%G:%a:%h'\'' "$failed_runtime")" == 64769:6103010:root:root:700:2 && "$(find -P "$failed_runtime" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'')" == intent-v1:f ]]'
+            echo '  [[ ! -L "$failed_runtime_intent" && "$(realpath "$failed_runtime_intent")" == "$failed_runtime_intent" && "$(stat -c '\''%d:%i:%U:%G:%a:%h:%s'\'' "$failed_runtime_intent")" == 64769:6103011:root:root:600:1:22967 && "$(sha256sum "$failed_runtime_intent" | awk '\''{print $1}'\'')" == f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e && "$(wc -l <"$failed_runtime_intent" | tr -d '\''[:space:]'\'')" == 325 ]]'
+            echo '  [[ "$(grep -Fxc '\''archive_recovery_implementation_release=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'\'' "$failed_runtime_intent")" == 1 && "$(grep -Fxc '\''customer_web_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd'\'' "$failed_runtime_intent")" == 1 && "$(grep -Fxc '\''customer_web_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b'\'' "$failed_runtime_intent")" == 1 && "$(tail -n 7 "$failed_runtime_intent")" == $'\''financial_actions_mode=dry_run\nkemerbet_executor_enabled=false\nkemerbet_final_action_enabled=false\nprovider_action_enabled=false\ntransfer_enabled=false\namount_entry_enabled=false\nmoney_moved=false'\'' ]]'
+            echo '  [[ "$(docker image inspect fetanagent-customer-web:0ffc54ab34de --format '\''{{.Id}}|{{.Descriptor.digest}}|{{index .Config.Labels "org.opencontainers.image.revision"}}'\'')" == '\''sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'\'' ]]'
+            echo '  ! docker image inspect sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd >/dev/null 2>&1'
+            echo '  [[ "$(docker container inspect 83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521 --format '\''{{.Id}}|{{.State.Pid}}|{{.State.StartedAt}}|{{.RestartCount}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}'\'')" == '\''83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521|911858|2026-08-29T22:56:55.385310072Z|0|running|healthy|sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|fetanagent-customer-web:0ffc54ab34de|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web'\'' ]]'
+            echo '  [[ "$(docker container inspect 83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521 --format '\''{{range .Config.Env}}{{println .}}{{end}}'\'' | LC_ALL=C sort | sha256sum | awk '\''{print $1}'\'')" == eeaf8dee7d2d4f0bbb849dbe9f48e58b5e762520e06bb9162fd656cca7072f29 ]]'
+            echo '  [[ "$(docker container inspect 44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f --format '\''{{.Id}}|{{.State.Pid}}|{{.State.StartedAt}}|{{.RestartCount}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}'\'')" == '\''44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f|685566|2026-08-29T13:57:40.258370212Z|0|running|healthy'\'' ]]'
+            echo '  ! docker container inspect fb7151ac21d99795939ec0dbbec05676109edabf8fa8a7bb349627fbbdd6dc49 >/dev/null 2>&1'
+            echo '  project_ids="$(docker container ls --all --quiet --no-trunc --filter label=com.docker.compose.project=fetanagent-staging-beta | LC_ALL=C sort)"'
+            echo '  [[ "$project_ids" == $'\''44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f\n4aad462e26441c0d660ffeb2d3f825068522da83ee025caeb6eebb695cf5bc45\n5e2b2eaa85f02f8bcc746415e693c5cbe8e3cd2ee01831ee7facf7d4185b3e52\n83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521\n8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40\nc551f228d247c638b7865f739d5422b3e10eeec1534582d3a458daf0b2f56e14'\'' ]]'
+            echo '  service_map="$(for container in $project_ids; do docker container inspect "$container" --format '\''{{.Id}}:{{index .Config.Labels "com.docker.compose.service"}}'\''; done | LC_ALL=C sort)"'
+            echo '  [[ "$service_map" == $'\''44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f:owner-control\n4aad462e26441c0d660ffeb2d3f825068522da83ee025caeb6eebb695cf5bc45:gateway\n5e2b2eaa85f02f8bcc746415e693c5cbe8e3cd2ee01831ee7facf7d4185b3e52:bot\n83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521:customer-web\n8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40:api\nc551f228d247c638b7865f739d5422b3e10eeec1534582d3a458daf0b2f56e14:beta-admission'\'' ]]'
             echo '}'
             echo '[[ ! -L "$parent" && -d "$parent" && "$(realpath "$parent")" == "$parent" && "$(stat -c '\''%d:%i:%U:%G:%a'\'' "$parent")" == 64769:6102884:root:root:700 ]]'
             echo '[[ ! -L "$prior_root" && -d "$prior_root" && "$(stat -c '\''%d:%i:%U:%G:%a'\'' "$prior_root")" == 64769:6102885:root:root:700 ]]'
@@ -1609,36 +1637,37 @@ jobs:
             echo '[[ "$(docker image inspect fetanagent-customer-web:a51b52201a94 --format '\''{{.Id}}|{{.Descriptor.digest}}'\'')" == '\''sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'\'' ]]'
             echo '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a >/dev/null 2>&1'
             echo '[[ -z "$(docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94)" ]]'
+            echo 'reprove_0ffc_and_adopted_runtime'
             echo 'children="$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'' | LC_ALL=C sort)"'
             echo 'case "$children" in'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 17 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 18 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 18 ]] ;;'
-            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 18 && ! -e "$installing" && ! -L "$installing" ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 18 ]]; install -d -o root -g root -m 0700 "$installing"; sync -f "$parent"; [[ "$(stat -c %h "$parent")" == 19 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")" "$(basename "$installing")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 19 ]] ;;'
+            echo '  "$(printf '\''%s\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")" "$(basename "$root")" | LC_ALL=C sort)") [[ "$(stat -c %h "$parent")" == 19 && ! -e "$installing" && ! -L "$installing" ]] ;;'
             echo '  *) false ;;'
             echo 'esac'
             echo 'if [[ ! -e "$root" && ! -L "$root" ]]; then'
             echo '  [[ ! -L "$installing" && -d "$installing" && "$(stat -c '\''%U:%G:%a'\'' "$installing")" == root:root:700 ]]'
             echo '  entries="$(find -P "$installing" -mindepth 1 -maxdepth 1 -printf '\''%f\n'\'' | LC_ALL=C sort)"'
             echo '  while IFS= read -r entry; do'
-            echo '    [[ -z "$entry" || "$entry" =~ ^(fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery\.sh|fetanagent-owner-archive-validator\.py|manifest-v1|fetanagent-customer-web-self-recovery\.tar)(\.installing)?$ ]] || false'
+            echo '    [[ -z "$entry" || "$entry" =~ ^(fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery\.sh|fetanagent-owner-archive-validator\.py|manifest-v1)(\.installing)?$ ]] || false'
             echo '  done <<<"$entries"'
             echo "  claim_one '$REMOTE_BUNDLE/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh' '$installing/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh' '$SCRIPT_SHA' '$SCRIPT_SIZE'"
             echo "  claim_one '$REMOTE_BUNDLE/fetanagent-owner-archive-validator.py' '$installing/fetanagent-owner-archive-validator.py' '$VALIDATOR_SHA' '$VALIDATOR_SIZE'"
             echo "  claim_one '$REMOTE_BUNDLE/manifest-v1' '$installing/manifest-v1' '$MANIFEST_SHA' '$MANIFEST_SIZE'"
-            echo "  claim_one '$REMOTE_BUNDLE/fetanagent-customer-web-self-recovery.tar' '$installing/fetanagent-customer-web-self-recovery.tar' '$CUSTOMER_ARCHIVE_SHA' '$CUSTOMER_ARCHIVE_SIZE'"
-            echo '  [[ "$(find -P "$installing" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '  [[ "$(find -P "$installing" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
             echo '  mv "$installing" "$root"'
             echo '  sync -f "$parent"'
             echo 'fi'
             echo '[[ ! -L "$root" && -d "$root" && "$(stat -c '\''%U:%G:%a'\'' "$root")" == root:root:700 ]]'
             echo "[[ \"\$(sha256sum '$script' | awk '{print \$1}')\" == '$SCRIPT_SHA' && \"\$(stat -c %s '$script')\" == '$SCRIPT_SIZE' ]]"
             echo "[[ \"\$(sha256sum '$validator' | awk '{print \$1}')\" == '$VALIDATOR_SHA' && \"\$(stat -c %s '$validator')\" == '$VALIDATOR_SIZE' ]]"
-            echo "[[ \"\$(sha256sum '$root/manifest-v1' | awk '{print \$1}')\" == '$MANIFEST_SHA' && \"\$(stat -c %s '$root/manifest-v1')\" == '$MANIFEST_SIZE' ]]"
-            echo "[[ \"\$(sha256sum '$customer_archive' | awk '{print \$1}')\" == '$CUSTOMER_ARCHIVE_SHA' && \"\$(stat -c %s '$customer_archive')\" == '$CUSTOMER_ARCHIVE_SIZE' ]]"
+            echo "[[ \"\$(sha256sum '$root/manifest-v1' | awk '{print \$1}')\" == '$MANIFEST_SHA' && \"\$(stat -c %s '$root/manifest-v1')\" == '$MANIFEST_SIZE' && \"\$(wc -l <'$root/manifest-v1' | tr -d '[:space:]')\" == 432 ]]"
+            echo "[[ \"\$(sha256sum '$adopted_customer_archive' | awk '{print \$1}')\" == '$CUSTOMER_ARCHIVE_SHA' && \"\$(stat -c %s '$adopted_customer_archive')\" == '$CUSTOMER_ARCHIVE_SIZE' ]]"
             echo "[[ \"\$(grep -Fxc 'customer_web_image_id=$CUSTOMER_IMAGE_ID' '$root/manifest-v1')\" == 1 && \"\$(grep -Fxc 'customer_web_runtime_descriptor_id=$CUSTOMER_RUNTIME_DESCRIPTOR_ID' '$root/manifest-v1')\" == 1 ]]"
+            echo '[[ "$(grep -Fxc '\''source_customer_web_absent=true'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''customer_web_reconciliation_lifecycle_mutation=false'\'' "$root/manifest-v1")" == 1 ]]'
             echo '[[ "$(grep -Fxc '\''customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''financial_actions_mode=dry_run'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_executor_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''kemerbet_final_action_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''provider_action_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''transfer_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''amount_entry_enabled=false'\'' "$root/manifest-v1")" == 1 && "$(grep -Fxc '\''money_moved=false'\'' "$root/manifest-v1")" == 1 ]]'
-            echo '[[ "$(find -P "$root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
-            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 18 ]]'
+            echo '[[ "$(find -P "$root" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == $'\''fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f'\'' ]]'
+            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 19 ]]'
             echo '[[ "$(sha256sum "$prior_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d && "$(sha256sum "$prior_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$prior_root/manifest-v1" | awk '\''{print $1}'\'')" == 9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a ]]'
             echo '[[ "$(sha256sum "$failed_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 2a9ce123b931799ba4ee4740789deb4747ba3d4148185c14625e4a430405f373 && "$(sha256sum "$failed_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_root/manifest-v1" | awk '\''{print $1}'\'')" == 1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d ]]'
             echo '[[ "$(sha256sum "$failed_pg_root/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh" | awk '\''{print $1}'\'')" == 26a8c3de89e6eae1bdfc4eb1ada70cddf4c0703b968b148ffda78739cd05eb1f && "$(sha256sum "$failed_pg_root/fetanagent-owner-archive-validator.py" | awk '\''{print $1}'\'')" == 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa && "$(sha256sum "$failed_pg_root/manifest-v1" | awk '\''{print $1}'\'')" == ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d ]]'
@@ -1715,7 +1744,9 @@ jobs:
             echo '[[ "$(docker image inspect fetanagent-customer-web:a51b52201a94 --format '\''{{.Id}}|{{.Descriptor.digest}}'\'')" == '\''sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'\'' ]]'
             echo '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a >/dev/null 2>&1'
             echo '[[ -z "$(docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94)" ]]'
-            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 18 ]]'
+            echo '# Re-prove the exact 0ffc checkpoint, healthy adopted customer-web, retired source absence, and unchanged six-service inventory immediately before execution.'
+            echo 'reprove_0ffc_and_adopted_runtime'
+            echo '[[ "$(find -P "$parent" -mindepth 1 -maxdepth 1 -printf '\''%f:%y\n'\'' | LC_ALL=C sort)" == "$(printf '\''%s:d\n'\'' "$(basename "$prior_root")" "$(basename "$failed_root")" "$(basename "$failed_pg_root")" "$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")" "$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")" "$(basename "$root")" | LC_ALL=C sort)" && "$(stat -c %h "$parent")" == 19 ]]'
             echo "exec bash '$script' '$CONFIRMED_RECOVERY_RELEASE' '$SCRIPT_SHA' '$VALIDATOR_SHA' '$MANIFEST_SHA' 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52' '$H14_RECOVERY_AUTHORIZATION_SHA256' '$CUSTOMER_ARCHIVE_SHA' '$CUSTOMER_ARCHIVE_SIZE' '$CUSTOMER_IMAGE_ID'"
             echo '```'
             echo

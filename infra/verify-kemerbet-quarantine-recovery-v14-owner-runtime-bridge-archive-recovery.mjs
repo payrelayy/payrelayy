@@ -130,9 +130,39 @@ for (const exactA51 of [
   "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE='20653'",
   "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES='294'",
   "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
 ])
   assert.ok(script.includes(exactA51), `missing exact a51 pin ${exactA51}`);
+for (const exact0ffc of [
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_RELEASE='0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6103001'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO='64769:6103002'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256='7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE='435623'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO='64769:6103003'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO='64769:6103004'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256='dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE='26099'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES='387'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6103005'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256='7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID='sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID='sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID='33279465715'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO='64769:6103009'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO='64769:6103010'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO='64769:6103011'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256='f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE='22967'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES='325'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-semantic-v2-reconciliation-correction'",
+])
+  assert.ok(script.includes(exact0ffc), `missing exact 0ffc pin ${exact0ffc}`);
 for (const exactLivePin of [
   "readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'",
   "readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'",
@@ -154,6 +184,13 @@ for (const exactLivePin of [
   "readonly SOURCE_BETA_CONTAINER_ID='c551f228d247c638b7865f739d5422b3e10eeec1534582d3a458daf0b2f56e14'",
   "readonly SOURCE_OWNER_PID='685566'",
   "readonly SOURCE_OWNER_STARTED_AT='2026-08-29T13:57:40.258370212Z'",
+  "readonly ADOPTED_CUSTOMER_WEB_CONTAINER_ID='83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521'",
+  "readonly ADOPTED_CUSTOMER_WEB_PID='911858'",
+  "readonly ADOPTED_CUSTOMER_WEB_STARTED_AT='2026-08-29T22:56:55.385310072Z'",
+  "readonly ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256='39c0ae0f18e94c0746da78e93a26a12a6daa47a6183bb67437f38c370bbd80b5'",
+  "readonly ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256='237bcaedc8f40ac8ed85ae7d9fb3da94e8b9a935a62440b87525d3d122f98bdc'",
+  "readonly ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256='e1d095c2fa7f7cdd5b9e75f0e2f3bcb2fccbea02f1af46beda5bcdc7f8b49a7b'",
+  "readonly ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256='3d618a2e21d3818d603528063815b0ab58b5a72ba2098f95e6321ad6937b73c3'",
 ])
   assert.ok(script.includes(exactLivePin), `missing exact live pin ${exactLivePin}`);
 const failedCounterStart = script.indexOf('require_failed_counter_runtime() {');
@@ -269,6 +306,37 @@ assert.ok(
   (script.match(/require_failed_owner_delta_runtime/gu) ?? []).length >= 9,
   'a51 boundary is not connected to resumed, pre-intent, image-load, Compose, replay, and finalization paths',
 );
+const failedOciIdentityStart = script.indexOf('require_failed_oci_identity_runtime() {');
+const failedOciIdentityEnd = script.indexOf('\n}\n', failedOciIdentityStart);
+const failedOciIdentityHelper = script.slice(failedOciIdentityStart, failedOciIdentityEnd);
+for (const exactFailedOciIdentityBoundary of [
+  '! -L "$FAILED_OCI_IDENTITY_CORRECTION_ROOT"',
+  '"$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2"',
+  "$'fetanagent-customer-web-self-recovery.tar:f\\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\\nfetanagent-owner-archive-validator.py:f\\nmanifest-v1:f'",
+  '"$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES"',
+  '! -e "$FAILED_OCI_IDENTITY_BRIDGE_ROOT"',
+  '! -e "$FAILED_OCI_IDENTITY_BRIDGE_REPLACEMENT"',
+  '! -e "$FAILED_OCI_IDENTITY_BRIDGE_FINAL"',
+  '! -L "$FAILED_OCI_IDENTITY_BRIDGE_PARENT"',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_OCI_IDENTITY_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING"',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  "'intent-v1:f'",
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE"',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256" 0600',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES"',
+  'require_adopted_customer_web_boundary',
+  '! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID"',
+])
+  assert.ok(
+    failedOciIdentityHelper.includes(exactFailedOciIdentityBoundary),
+    `failed-0ffc helper lacks ${exactFailedOciIdentityBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_oci_identity_runtime/gu) ?? []).length >= 7,
+  '0ffc boundary is not connected to resumed, pre-intent, reconciliation, replay, and finalization paths',
+);
 for (const exactOciIdentityBridge of [
   'derive_customer_web_archive_identities() {',
   "config_descriptor.get('digest') != expected_config_id",
@@ -298,6 +366,7 @@ for (const streamingArchiveGuard of [
   'before_contract != after_contract',
   'verify_exact_nofollow_file_digest "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
   'verify_exact_nofollow_file_digest "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  'verify_exact_nofollow_file_digest "$ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE"',
 ])
   assert.ok(
     script.includes(streamingArchiveGuard),
@@ -315,27 +384,37 @@ assert.ok(
   ),
   'the 405 MB failed a51 archive must never be buffered into memory',
 );
-for (const transport of [
-  'docker image save --output "$customer_archive" "$customer_tag"',
-  'customer_archive_sha="$(sha256sum "$customer_archive"',
-  'customer_archive_size="$(stat -c %s "$customer_archive")"',
-  'customer_image_id="$(docker image inspect "$customer_tag" --format \'{{.Id}}\')"',
+for (const adoptedTransportPin of [
+  'customer_archive_sha=7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c',
+  'customer_archive_size=404797952',
+  'customer_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd',
+  'customer_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b',
   'CUSTOMER_ARCHIVE_SHA: ${{ steps.bundle.outputs.customer_archive_sha }}',
   'CUSTOMER_ARCHIVE_SIZE: ${{ steps.bundle.outputs.customer_archive_size }}',
   'CUSTOMER_IMAGE_ID: ${{ steps.bundle.outputs.customer_image_id }}',
-  "claim_one '$REMOTE_BUNDLE/fetanagent-customer-web-self-recovery.tar'",
   "'$CUSTOMER_ARCHIVE_SHA' '$CUSTOMER_ARCHIVE_SIZE' '$CUSTOMER_IMAGE_ID'",
+  'scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$remote:$bundle/"',
+])
+  assert.ok(
+    workflow.includes(adoptedTransportPin),
+    `missing adopted 0ffc transport pin ${adoptedTransportPin}`,
+  );
+for (const forbiddenTransport of [
+  'docker image save --output "$customer_archive" "$customer_tag"',
+  "claim_one '$REMOTE_BUNDLE/fetanagent-customer-web-self-recovery.tar'",
   'scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$CUSTOMER_ARCHIVE" "$remote:$bundle/"',
   'sha256sum "$bundle/fetanagent-customer-web-self-recovery.tar"',
   'stat -c %s "$bundle/fetanagent-customer-web-self-recovery.tar"',
 ])
-  assert.ok(workflow.includes(transport), `missing archive/image transport ${transport}`);
+  assert.ok(
+    !workflow.includes(forbiddenTransport),
+    `successor must not transport an image archive: ${forbiddenTransport}`,
+  );
 assert.ok(
   workflow.includes(
-    'fetanagent-customer-web-self-recovery.tar:f\n          fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\n          fetanagent-owner-archive-validator.py:f\n          manifest-v1:f',
+    'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\n          fetanagent-owner-archive-validator.py:f\n          manifest-v1:f',
   ),
 );
-assert.ok(workflow.includes("config.get('Entrypoint') == ['docker-entrypoint.sh']"));
 assert.equal(
   (script.match(/config\.get\('Entrypoint'\) != \['docker-entrypoint\.sh'\]/gu) ?? []).length,
   10,
@@ -345,8 +424,7 @@ assert.ok(
   !script.includes("config.get('Entrypoint') not in (None, [])"),
   'a stale empty customer entrypoint comparator remains',
 );
-assert.ok(workflow.includes("config['WorkingDir'] == '/workspace'"));
-assert.ok(workflow.includes("config['Healthcheck'] =="));
+assert.ok(!workflow.includes('docker build --file "$customer_dockerfile"'));
 
 const workflowManifestStart = workflow.indexOf('cat >"$manifest" <<EOF');
 assert.ok(workflowManifestStart >= 0, 'workflow recovery manifest emitter is missing');
@@ -373,13 +451,25 @@ assert.ok(
 const shellManifestKeys = [
   ...script.slice(shellManifestStart, shellManifestEnd).matchAll(/["']([a-z0-9_]+)=/g),
 ].map((match) => match[1]);
+assert.equal(
+  workflowManifestKeys.length,
+  432,
+  'workflow successor manifest must contain 432 lines',
+);
+assert.equal(
+  new Set(workflowManifestKeys).size,
+  432,
+  'workflow successor manifest keys must be unique',
+);
+assert.equal(shellManifestKeys.length, 432, 'shell successor manifest must contain 432 lines');
+assert.equal(new Set(shellManifestKeys).size, 432, 'shell successor manifest keys must be unique');
 assert.deepEqual(
   shellManifestKeys,
   workflowManifestKeys,
   'workflow recovery manifest key order/schema drifted from the shell exact comparator',
 );
 for (const fixedManifestLine of [
-  'customer_web_lifecycle_mutation=exact-single-self-recovery-replacement-v1',
+  'customer_web_lifecycle_mutation=already-completed-exactly-once-by-failed-oci-identity-correction',
   'all_other_lifecycle_mutation=forbidden',
   'failed_counter_bridge_inventory=empty-no-intent',
   'failed_customer_web_bridge_inventory=empty-no-intent',
@@ -392,6 +482,19 @@ for (const fixedManifestLine of [
   'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent',
   'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load',
   'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1',
+  'failed_oci_identity_correction_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  'failed_oci_identity_bridge_inventory=single-intent-no-replacement-no-final',
+  'failed_oci_identity_failure=healthy-replacement-rejected-by-v1-non-invariant-normalized-digest',
+  'customer_web_replacement_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  'adopted_customer_web_container_id=83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521',
+  'adopted_customer_web_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd',
+  'adopted_customer_web_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b',
+  'adopted_customer_web_image_tag=fetanagent-customer-web:0ffc54ab34de',
+  'adopted_customer_web_semantic_v2_sha256=e1d095c2fa7f7cdd5b9e75f0e2f3bcb2fccbea02f1af46beda5bcdc7f8b49a7b',
+  'source_customer_web_absent=true',
+  'customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2',
+  'customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2',
+  'customer_web_reconciliation_lifecycle_mutation=false',
   'financial_actions_mode=dry_run',
   'kemerbet_executor_enabled=false',
   'kemerbet_final_action_enabled=false',
@@ -401,9 +504,12 @@ for (const fixedManifestLine of [
   'money_moved=false',
 ]) {
   assert.ok(workflow.slice(workflowManifestStart, workflowManifestEnd).includes(fixedManifestLine));
+  const fixedManifestKey = fixedManifestLine.slice(0, fixedManifestLine.indexOf('='));
   assert.ok(
     script.slice(shellManifestStart, shellManifestEnd).includes(`'${fixedManifestLine}'`) ||
-      script.slice(shellManifestStart, shellManifestEnd).includes(`"${fixedManifestLine}"`),
+      script.slice(shellManifestStart, shellManifestEnd).includes(`"${fixedManifestLine}"`) ||
+      script.slice(shellManifestStart, shellManifestEnd).includes(`"${fixedManifestKey}=`),
+    `shell manifest lacks ${fixedManifestLine}`,
   );
 }
 for (const runtimeConnectivityContract of [
@@ -415,15 +521,15 @@ for (const runtimeConnectivityContract of [
   "if host.get('Privileged') is not False or host.get('ReadonlyRootfs') is not True or host.get('Init') is not True: raise RuntimeError()",
   "if host.get('SecurityOpt') != ['no-new-privileges:true']: raise RuntimeError()",
   'classify_customer_web_replacement_state() {',
-  '[[ "$inventory" =~ ^[0-9a-f]{64}$ && "$inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1',
-  'up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web',
-  "ipv4 = ipaddress.ip_interface(new_ep.get('IPv4Address') or '')",
-  "ipv6 = ipaddress.ip_interface(new_ep.get('IPv6Address') or '')",
-  'ipv4.network.prefixlen == subnet.prefixlen',
-  'ipv6.network.prefixlen == subnet.prefixlen',
+  'require_adopted_customer_web_boundary || return 1',
+  "printf '%s\\n' complete",
+  'reconcile_customer_web_once() {',
+  'before_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  'after_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  '[[ "$before_complete" == "$after_complete" ]] || return 1',
+  '! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1 || return 1',
   'require_failed_counter_runtime || return 1',
-  'require_resumed_intent_pre_mutation_boundary || return 1',
-  'PRE_CREATE_DOCKER_INVENTORY="$(emit_exact_nofollow_file',
+  'require_failed_oci_identity_runtime || return 1',
 ])
   assert.ok(
     script.includes(runtimeConnectivityContract),
@@ -435,27 +541,48 @@ assert.ok(
   ),
   'the deterministic stale customer-web service-network comparator remains',
 );
-const otherGuard = script.indexOf('replace_customer_web_once() {');
+const otherGuard = script.indexOf('reconcile_customer_web_once() {');
+const reconciliationEnd = script.indexOf('\n}\n', otherGuard);
+assert.ok(
+  otherGuard >= 0 && reconciliationEnd > otherGuard,
+  'customer-web reconciliation helper is missing',
+);
+const reconciliation = script.slice(otherGuard, reconciliationEnd);
 const preMutationExact = script.indexOf(
   'require_other_service_inventory_exact || return 1',
   otherGuard,
 );
-const archiveLoad = script.indexOf(
-  'docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"',
+const beforeComplete = script.indexOf(
+  'before_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  otherGuard,
+);
+const afterComplete = script.indexOf(
+  'after_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  otherGuard,
+);
+const exactNoMutation = script.indexOf(
+  '[[ "$before_complete" == "$after_complete" ]] || return 1',
   otherGuard,
 );
 assert.ok(
-  otherGuard >= 0 && preMutationExact > otherGuard && archiveLoad > preMutationExact,
-  'unrelated services are not proved exact before archive/load replacement mutation',
+  preMutationExact > otherGuard &&
+    beforeComplete > preMutationExact &&
+    afterComplete > beforeComplete &&
+    exactNoMutation > afterComplete &&
+    exactNoMutation < reconciliationEnd,
+  'complete Docker and unrelated-service inventories are not proved byte-identical across reconciliation',
 );
-const resumedBoundary = script.indexOf(
-  'require_resumed_intent_pre_mutation_boundary || return 1',
-  otherGuard,
-);
-assert.ok(
-  resumedBoundary > otherGuard && resumedBoundary < archiveLoad,
-  'full resumed-intent Docker boundary is not proved before image load',
-);
+for (const forbiddenReconciliationMutation of [
+  /docker_local\s+image\s+load/u,
+  /docker_local\s+container\s+(?:create|rm|start|stop|restart|kill|rename)/u,
+  /docker_local\s+compose/u,
+  /\bcompose_local\b/u,
+])
+  assert.doesNotMatch(
+    reconciliation,
+    forbiddenReconciliationMutation,
+    `reconciliation contains a forbidden Docker/Compose mutation: ${forbiddenReconciliationMutation}`,
+  );
 const resumedHelperStart = script.indexOf('require_resumed_intent_pre_mutation_boundary() {');
 const resumedHelperEnd = script.indexOf(
   '\n}\n\nrequire_complete_owner_endpoint_phase_boundary()',
@@ -595,7 +722,8 @@ for (const needle of [
   "readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'",
   "readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'",
   "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
-  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-semantic-v2-reconciliation-correction'",
   'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
   '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
   'archive_recovery_bundle_parent_dev_ino=',
@@ -845,7 +973,7 @@ assert.equal((script.match(/emit_exact_nofollow_file\(\) \{/gu) ?? []).length, 1
 assert.ok(
   script.includes('[[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]'),
 );
-const authorizedCustomerReplacementStart = script.indexOf('replace_customer_web_once() {');
+const authorizedCustomerReplacementStart = script.indexOf('reconcile_customer_web_once() {');
 const authorizedCustomerReplacementEnd = script.indexOf(
   '\n}\n',
   authorizedCustomerReplacementStart,
@@ -854,12 +982,99 @@ assert.ok(
   authorizedCustomerReplacementStart >= 0 &&
     authorizedCustomerReplacementEnd > authorizedCustomerReplacementStart,
 );
-const withoutAuthorizedCustomerReplacement =
-  script.slice(0, authorizedCustomerReplacementStart) +
-  script.slice(authorizedCustomerReplacementEnd + 3);
-assert.ok(script.includes('docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"'));
-assert.ok(
-  script.includes('up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web'),
+assert.ok(script.includes('require_adopted_customer_web_boundary() {'));
+assert.ok(script.includes('customer_web_semantic_v2_digest() {'));
+assert.ok(script.includes('[[ "$before_complete" == "$after_complete" ]] || return 1'));
+const semanticV2Start = script.indexOf('customer_web_semantic_v2_digest() {');
+const semanticV2End = script.indexOf(
+  '\n}\n\nrequire_customer_web_security_contract() {',
+  semanticV2Start,
+);
+assert.ok(semanticV2Start >= 0 && semanticV2End > semanticV2Start);
+const semanticV2 = script.slice(semanticV2Start, semanticV2End);
+for (const semanticV2Contract of [
+  "'com.docker.compose.container-number'",
+  "'com.docker.compose.depends_on'",
+  "'com.docker.compose.oneoff'",
+  "'com.docker.compose.project'",
+  "'com.docker.compose.service'",
+  "'org.opencontainers.image.title'",
+  "'com.docker.compose.config-hash'",
+  "'com.docker.compose.image'",
+  "'com.docker.compose.project.config_files'",
+  "'com.docker.compose.project.environment_file'",
+  "'com.docker.compose.project.working_dir'",
+  "'com.docker.compose.replace'",
+  "'com.docker.compose.version'",
+  "'org.opencontainers.image.revision'",
+  'if set(labels) != set(stable_label_keys) | set(provenance_label_keys):',
+  'if any(labels.get(key) != value for key, value in (expected_stable | expected_provenance).items()):',
+  "'Config.Env': sorted(environment)",
+  "'Config.Labels': {key: labels[key] for key in stable_label_keys}",
+  "'ReadonlyRootfs', 'Privileged', 'Init', 'CapAdd', 'CapDrop'",
+  "'SecurityOpt', 'RestartPolicy', 'NetworkMode', 'PortBindings'",
+  "'PublishAllPorts', 'PidsLimit', 'Memory', 'NanoCpus', 'Tmpfs'",
+  "'Mounts': sorted(mounts, key=lambda value: json.dumps(",
+  "'NetworkNames': sorted(networks)",
+  "'NetworkPorts': network_settings.get('Ports')",
+])
+  assert.ok(
+    semanticV2.includes(semanticV2Contract),
+    `semantic-v2 comparator lacks ${semanticV2Contract}`,
+  );
+const semanticV2DigestObject = semanticV2.slice(
+  semanticV2.indexOf('contract = {'),
+  semanticV2.indexOf('encoded =', semanticV2.indexOf('contract = {')),
+);
+for (const excludedLifecycleOrProvenance of [
+  'provenance_label_keys',
+  "'State'",
+  "'Created'",
+  "'RestartCount'",
+  "'State.Pid'",
+  "'State.StartedAt'",
+])
+  assert.ok(
+    !semanticV2DigestObject.includes(excludedLifecycleOrProvenance),
+    `semantic-v2 digest includes lifecycle/provenance noise ${excludedLifecycleOrProvenance}`,
+  );
+const semanticV2FixtureDigest = ({ env, stableService, provenanceRevision }) => {
+  // Mirrors the properties guarded in the embedded Python comparator: Env is
+  // canonicalized, stable labels are digested, and validated provenance does
+  // not enter the semantic hash.
+  assert.match(provenanceRevision, /^[0-9a-f]{40}$/u);
+  return createHash('sha256')
+    .update(
+      `${JSON.stringify({
+        version: 'fetanagent-customer-web-reconciliation-semantic-v2',
+        Env: [...env].sort(),
+        Labels: { 'com.docker.compose.service': stableService },
+      })}\n`,
+    )
+    .digest('hex');
+};
+const semanticV2FixtureBase = semanticV2FixtureDigest({
+  env: ['B=2', 'A=1'],
+  stableService: 'customer-web',
+  provenanceRevision: '0'.repeat(40),
+});
+assert.equal(
+  semanticV2FixtureBase,
+  semanticV2FixtureDigest({
+    env: ['A=1', 'B=2'],
+    stableService: 'customer-web',
+    provenanceRevision: 'f'.repeat(40),
+  }),
+  'semantic-v2 must ignore Env order and lifecycle/provenance revision noise',
+);
+assert.notEqual(
+  semanticV2FixtureBase,
+  semanticV2FixtureDigest({
+    env: ['A=1', 'B=2'],
+    stableService: 'wrong-service',
+    provenanceRevision: '0'.repeat(40),
+  }),
+  'semantic-v2 must retain stable-label changes',
 );
 assert.ok(script.includes('[[ "$state" == \'running|true|unhealthy\' ]]'));
 assert.ok(script.includes('require_owner_never_restarted'));
@@ -870,9 +1085,9 @@ for (const forbiddenMutation of [
   /docker_local (?:container|network|image|volume) (?:start|create|rm|remove|restart|stop|kill|connect|disconnect|load|tag|prune)\b/u,
 ]) {
   assert.doesNotMatch(
-    withoutAuthorizedCustomerReplacement,
+    script,
     forbiddenMutation,
-    `the correction must consume the exact created Owner without a Compose/container lifecycle mutation ${forbiddenMutation}`,
+    `the reconciliation release must not contain a Docker/Compose lifecycle mutation ${forbiddenMutation}`,
   );
 }
 assert.ok(
@@ -1000,6 +1215,31 @@ assert.match(
   /require_successor_endpoint_phase_boundary "\$phase"\s*$/u,
   'the exact successor Docker delta must be the final constituent of the complete helper',
 );
+const preIntentBoundaryStart = script.indexOf(
+  'require_running_owner_boundary_before_successor_intent() {',
+);
+const preIntentBoundaryEnd = script.indexOf(
+  '\n}\n\nrequire_pre_create_image_boundary() {',
+  preIntentBoundaryStart,
+);
+assert.ok(
+  preIntentBoundaryStart >= 0 && preIntentBoundaryEnd > preIntentBoundaryStart,
+  'the first-run successor boundary helper is missing or unterminated',
+);
+const preIntentBoundary = script.slice(preIntentBoundaryStart, preIntentBoundaryEnd);
+assert.ok(
+  preIntentBoundary.includes('require_pre_customer_web_inventory || return 1'),
+  'the first-run boundary must prove the exact adopted customer-web before inventory comparison',
+);
+assert.match(
+  preIntentBoundary,
+  /require_successor_endpoint_phase_boundary running\s*$/u,
+  'the first-run boundary must finish with the adoption-aware successor comparator',
+);
+assert.ok(
+  !preIntentBoundary.includes('require_owner_endpoint_phase_boundary running'),
+  'the first-run boundary must not reuse the legacy owner-only comparator after 0ffc replacement',
+);
 assert.ok(
   script.includes(
     'require_exact_owner_inventory_delta_phase "$before" "$normalized_after" "$new_owner" running',
@@ -1024,6 +1264,60 @@ const resumedCustomerNormalizer = extractPythonHeredoc(
   'require_resumed_intent_pre_mutation_boundary',
   'normalized_current="$(printf',
 );
+const successorCustomerNormalizer = extractPythonHeredoc(
+  'require_exact_successor_inventory_delta',
+  'normalized_after="$(printf',
+);
+const successorComparatorStart = script.indexOf('require_exact_successor_inventory_delta() {');
+const successorComparatorEnd = script.indexOf(
+  '\n}\n\nload_pre_create_docker_inventory() {',
+  successorComparatorStart,
+);
+assert.ok(
+  successorComparatorStart >= 0 && successorComparatorEnd > successorComparatorStart,
+  'the successor inventory comparator is missing or unterminated',
+);
+const successorComparator = script.slice(successorComparatorStart, successorComparatorEnd);
+assert.ok(
+  successorComparator.includes(
+    '"$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the successor comparator must validate the adopted image against its exact 0ffc release',
+);
+assert.ok(
+  !successorComparator.includes(
+    '"$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the distinct reconciliation release must never be treated as the adopted image revision',
+);
+const inlineSuccessorComparatorStart = script.indexOf(
+  'require_exact_successor_inventory_delta_inline_reference() {',
+);
+const inlineSuccessorComparatorEnd = script.indexOf(
+  '\n}\n\nrequire_exact_successor_inventory_delta() {',
+  inlineSuccessorComparatorStart,
+);
+assert.ok(
+  inlineSuccessorComparatorStart >= 0 &&
+    inlineSuccessorComparatorEnd > inlineSuccessorComparatorStart,
+  'the inline successor comparator reference is missing or unterminated',
+);
+const inlineSuccessorComparator = script.slice(
+  inlineSuccessorComparatorStart,
+  inlineSuccessorComparatorEnd,
+);
+assert.ok(
+  inlineSuccessorComparator.includes(
+    '"$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the inline comparator must validate the adopted image against its exact 0ffc release',
+);
+assert.ok(
+  !inlineSuccessorComparator.includes(
+    '"$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the inline comparator must not conflate successor provenance with adopted image provenance',
+);
 const exactOwnerDeltaValidator = extractPythonHeredoc(
   'require_exact_owner_inventory_delta_phase',
   "printf '%s\\n__FETANAGENT_AFTER__\\n%s\\n'",
@@ -1036,6 +1330,13 @@ const fixtureFailedImage = `sha256:${'d'.repeat(64)}`;
 const fixtureConfigImage = `sha256:${'e'.repeat(64)}`;
 const fixtureRelease = '1'.repeat(40);
 const fixtureFailedRelease = '2'.repeat(40);
+const fixtureSuccessorRelease = '3'.repeat(40);
+const fixtureReplacementCustomer = 'f'.repeat(64);
+assert.notEqual(
+  fixtureRelease,
+  fixtureSuccessorRelease,
+  'the fixture must keep the adopted image release distinct from the reconciliation successor',
+);
 const fixtureOwnerNetworkName = 'fetanagent-staging-beta_owner_control_service';
 const fixtureOwnerNetworkId = '1'.repeat(64);
 const fixtureCustomerNetworkId = '2'.repeat(64);
@@ -1052,9 +1353,9 @@ const fixtureOwnerEndpoint = {
 const fixtureCustomerEndpoint = {
   Name: 'fetanagent-staging-beta-customer-web-1',
   EndpointID: 'e'.repeat(64),
-  MacAddress: '02:42:ac:19:00:0b',
-  IPv4Address: '172.25.0.11/24',
-  IPv6Address: 'fd19::11/64',
+  MacAddress: '02:42:ac:18:00:0b',
+  IPv4Address: '172.24.0.11/24',
+  IPv6Address: 'fd18::11/64',
 };
 const fixtureNetwork = (Id, Name, subnetNumber) => ({
   Id,
@@ -1095,7 +1396,7 @@ const savedCheckpoint = {
   ],
   holders: {},
 };
-savedCheckpoint.networks[1].Containers[fixtureCustomer] = fixtureCustomerEndpoint;
+savedCheckpoint.networks[0].Containers[fixtureCustomer] = fixtureCustomerEndpoint;
 for (const { Name } of savedCheckpoint.volumes) savedCheckpoint.holders[Name] = [];
 savedCheckpoint.holders[fixtureCustomerVolume] = [fixtureCustomer];
 const currentSourceMode = cloneJson(savedCheckpoint);
@@ -1119,6 +1420,40 @@ for (const counters of Object.values(currentOwnerNetwork.Status.IPAM.Subnets)) {
   counters.DynamicIPsAvailable -= 1;
 }
 currentSourceMode.holders[fixtureControlVolume] = [fixtureOwner];
+const fixtureHealthcheck = {
+  Test: [
+    'CMD',
+    'node',
+    '-e',
+    "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+  ],
+  Interval: 30000000000,
+  Timeout: 3000000000,
+  StartPeriod: 15000000000,
+  Retries: 3,
+};
+const currentReplacementMode = cloneJson(currentSourceMode);
+currentReplacementMode.images.push({
+  Id: fixtureImage,
+  Descriptor: { digest: fixtureImage },
+  RepoTags: [`fetanagent-customer-web:${fixtureRelease.slice(0, 12)}`],
+  RepoDigests: [`fetanagent-customer-web@${fixtureImage}`],
+  Config: {
+    User: '10001:10001',
+    Cmd: ['node', 'apps/customer-web/dist/index.js'],
+    Entrypoint: ['docker-entrypoint.sh'],
+    WorkingDir: '/workspace',
+    ExposedPorts: null,
+    Healthcheck: fixtureHealthcheck,
+    Labels: { 'org.opencontainers.image.revision': fixtureRelease },
+  },
+});
+delete currentReplacementMode.networks[0].Containers[fixtureCustomer];
+currentReplacementMode.networks[0].Containers[fixtureReplacementCustomer] = {
+  ...fixtureCustomerEndpoint,
+  EndpointID: '9'.repeat(64),
+};
+currentReplacementMode.holders[fixtureCustomerVolume] = [fixtureReplacementCustomer];
 assert.deepEqual(
   [
     savedCheckpoint.images.length,
@@ -1130,8 +1465,8 @@ assert.deepEqual(
   'the saved checkpoint fixture must model the exact unchanged 23-item inventories',
 );
 assert.deepEqual(
-  currentSourceMode.networks[1].Containers[fixtureCustomer],
-  savedCheckpoint.networks[1].Containers[fixtureCustomer],
+  currentSourceMode.networks[0].Containers[fixtureCustomer],
+  savedCheckpoint.networks[0].Containers[fixtureCustomer],
   'the source customer endpoint must remain unchanged in the live source-mode fixture',
 );
 const runInventoryPython = (program, args, before, after) =>
@@ -1150,6 +1485,20 @@ const normalizeSourceMode = (current) =>
       fixtureFailedImage,
       fixtureConfigImage,
       fixtureRelease,
+      fixtureFailedRelease,
+    ],
+    savedCheckpoint,
+    current,
+  );
+const normalizeSuccessorMode = (current, adoptedRelease = fixtureRelease) =>
+  runInventoryPython(
+    successorCustomerNormalizer,
+    [
+      fixtureCustomer,
+      fixtureReplacementCustomer,
+      fixtureImage,
+      fixtureFailedImage,
+      adoptedRelease,
       fixtureFailedRelease,
     ],
     savedCheckpoint,
@@ -1190,11 +1539,40 @@ assert.equal(
   0,
   exactOwnerAcceptance.stderr || 'downstream exact Owner validator rejected the preserved delta',
 );
+const normalizedSuccessor = normalizeSuccessorMode(currentReplacementMode);
+assert.equal(
+  normalizedSuccessor.status,
+  0,
+  normalizedSuccessor.stderr ||
+    'the exact first-run 0ffc adopted-image/customer-swap inventory was rejected',
+);
+const normalizedSuccessorInventory = JSON.parse(normalizedSuccessor.stdout);
+assert.deepEqual(
+  normalizedSuccessorInventory,
+  normalizedSourceInventory,
+  'successor normalization must remove only the exact adopted and failed image residues and customer swap',
+);
+const exactFirstRunAcceptance = validateExactOwnerDelta(normalizedSuccessorInventory);
+assert.equal(
+  exactFirstRunAcceptance.status,
+  0,
+  exactFirstRunAcceptance.stderr ||
+    'the downstream immutable Owner comparator rejected the exact first-run current inventory',
+);
+const wrongSuccessorRelease = normalizeSuccessorMode(
+  currentReplacementMode,
+  fixtureSuccessorRelease,
+);
+assert.notEqual(
+  wrongSuccessorRelease.status,
+  0,
+  'the successor comparator incorrectly accepted its own release as the adopted image tag/revision',
+);
 const unrelatedDeltaFixtures = [
   [
     'endpoint',
     (current) => {
-      current.networks[2].Containers['f'.repeat(64)] = {
+      current.networks[2].Containers['8'.repeat(64)] = {
         ...fixtureOwnerEndpoint,
         EndpointID: '9'.repeat(64),
       };
@@ -1209,7 +1587,7 @@ const unrelatedDeltaFixtures = [
   [
     'holder',
     (current) => {
-      current.holders['unchanged-volume-0'] = ['f'.repeat(64)];
+      current.holders['unchanged-volume-0'] = ['8'.repeat(64)];
     },
   ],
 ];
@@ -1224,6 +1602,22 @@ for (const [name, mutate] of unrelatedDeltaFixtures) {
   );
   const rejected = validateExactOwnerDelta(JSON.parse(normalized.stdout));
   assert.notEqual(rejected.status, 0, `unrelated ${name} delta passed the exact Owner validator`);
+
+  const changedSuccessor = cloneJson(currentReplacementMode);
+  mutate(changedSuccessor);
+  const normalizedSuccessorDelta = normalizeSuccessorMode(changedSuccessor);
+  assert.equal(
+    normalizedSuccessorDelta.status,
+    0,
+    normalizedSuccessorDelta.stderr ||
+      `successor normalizer unexpectedly consumed the unrelated ${name} fixture`,
+  );
+  const successorRejected = validateExactOwnerDelta(JSON.parse(normalizedSuccessorDelta.stdout));
+  assert.notEqual(
+    successorRejected.status,
+    0,
+    `unrelated successor ${name} delta passed the immutable Owner validator`,
+  );
 }
 const classifyReplacementFixture = ({ source, replacements, exact, healthy }) => {
   if (source && replacements === 0) return 'source';
@@ -1323,8 +1717,8 @@ for (const failedPredecessorGuard of [
 assert.equal(
   (script.match(/docker_local image load --input "\$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"/gu) ?? [])
     .length,
-  1,
-  'the successor must import exactly one attested customer-web archive',
+  0,
+  'the reconciliation successor must adopt the exact loaded 0ffc image without importing an archive',
 );
 assert.ok(!script.includes('image tag '), 'the chained correction must never retag an image');
 assert.ok(!script.includes('image rm '), 'the chained correction must never remove an image');
@@ -1770,6 +2164,21 @@ for (const exactA51WorkflowPin of [
     workflow.includes(exactA51WorkflowPin),
     `workflow lacks exact failed a51 pin ${exactA51WorkflowPin}`,
   );
+for (const exact0ffcWorkflowPin of [
+  'git fetch --no-tags --depth=1 origin 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  'git cat-file -e 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57^{commit}',
+  'git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum',
+  '= 7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b',
+  '= 435623',
+  'failed_oci_identity_correction_workflow_run_id=33279465715',
+  'failed_oci_identity_correction_workflow_run_attempt=1',
+  'failed_oci_identity_bridge_intent_lines=325',
+  'failed_oci_identity_correction_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b',
+])
+  assert.ok(
+    workflow.includes(exact0ffcWorkflowPin),
+    `workflow lacks exact failed 0ffc pin ${exact0ffcWorkflowPin}`,
+  );
 const preExec020Rehash = rootEmission.lastIndexOf(
   '# Rehash the exact 020 bundle and empty runtime immediately before execution.',
 );
@@ -1778,6 +2187,9 @@ const preExec1f27Rehash = rootEmission.lastIndexOf(
 );
 const preExecA51Rehash = rootEmission.lastIndexOf(
   '# Re-prove the exact failed a51 four-file bundle, manifest semantics, one-intent ledger, loaded descriptor image, and unused-container state immediately before execution.',
+);
+const preExec0ffcRehash = rootEmission.lastIndexOf(
+  '# Re-prove the exact 0ffc checkpoint, healthy adopted customer-web, retired source absence, and unchanged six-service inventory immediately before execution.',
 );
 const finalExec = rootEmission.lastIndexOf("exec bash '$script'");
 assert.ok(
@@ -1860,15 +2272,47 @@ for (const exactA51RootProof of [
   'sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083',
   '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a',
   'docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94',
-  '"$(stat -c %h "$parent")" == 18',
 ])
   assert.ok(
     preExecA51Proof.includes(exactA51RootProof),
     `final root emission lacks exact failed a51 proof ${exactA51RootProof}`,
   );
+assert.ok(
+  preExec0ffcRehash > preExecA51Rehash && finalExec > preExec0ffcRehash,
+  'exact failed 0ffc evidence and adopted customer-web are not re-proved immediately before execution',
+);
+const preExec0ffcProof = rootEmission.slice(preExec0ffcRehash, finalExec);
+assert.ok(
+  preExec0ffcProof.includes('reprove_0ffc_and_adopted_runtime'),
+  'the exact 0ffc/adopted-runtime proof helper is not invoked immediately before execution',
+);
+for (const exact0ffcRootProof of [
+  '64769:6103001:root:root:700:2',
+  '64769:6103002:root:root:400:1:435623',
+  '7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b',
+  '64769:6103003:root:root:400:1:11689',
+  '64769:6103004:root:root:400:1:26099',
+  'dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45',
+  '== 387',
+  '64769:6103005:root:root:400:1:404797952',
+  '7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c',
+  '64769:6103009:root:root:700:3',
+  '64769:6103010:root:root:700:2',
+  '64769:6103011:root:root:600:1:22967',
+  'f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e',
+  '== 325',
+  'sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  '83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521|911858|2026-08-29T22:56:55.385310072Z|0|running|healthy|sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|fetanagent-customer-web:0ffc54ab34de|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web',
+  '! docker container inspect fb7151ac21d99795939ec0dbbec05676109edabf8fa8a7bb349627fbbdd6dc49',
+  '"$(stat -c %h "$parent")" == 19',
+])
+  assert.ok(
+    rootEmission.includes(exact0ffcRootProof),
+    `final root emission lacks exact failed 0ffc/adopted proof ${exact0ffcRootProof}`,
+  );
 for (const chainLinkTransition of [
-  '"$(stat -c %h "$parent")" == 17',
   '"$(stat -c %h "$parent")" == 18',
+  '"$(stat -c %h "$parent")" == 19',
 ])
   assert.ok(
     rootEmission.includes(chainLinkTransition),
@@ -1889,8 +2333,9 @@ for (const state of [
   '"$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")"',
   '"$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")"',
   '"$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")"',
-  '"$(basename "$failed_owner_delta_root")" "$(basename "$installing")"',
-  '"$(basename "$failed_owner_delta_root")" "$(basename "$root")"',
+  '"$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")"',
+  '"$(basename "$failed_oci_identity_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_oci_identity_root")" "$(basename "$root")"',
 ]) {
   assert.ok(rootEmission.includes(state), `missing append-only interruption state ${state}`);
 }
@@ -1905,6 +2350,7 @@ for (const finalIdentityGuard of [
   "require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'",
   "require_failed_customer_web_network_scope_runtime ||\n  die 'CW-NET-SCOPE-005: the immutable failed 0110 empty pre-intent ledger changed during finalization'",
   "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'",
+  "require_failed_oci_identity_runtime ||\n  die 'SEMANTIC-V2-005: the immutable failed 0ffc checkpoint or adopted healthy customer-web changed during finalization'",
   "require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'",
   'Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.',
 ])
@@ -1933,6 +2379,7 @@ const failedCounter = '0202304e3c606d2a7927a5b027d76926c0117189';
 const failedCustomer = '0110d1965d7efdc0436abda8c0bc686fb33c084b';
 const failedNetworkScope = '1f27af7f929434b1f40f65901df9ebd683ebe62c';
 const failedOwnerDelta = 'a51b52201a94a669b8dcca38b7abb29d70d0200f';
+const failedOciIdentity = '0ffc54ab34de6fcde6cd5401ab66dd94025ebd57';
 const current = '0123456789abcdef0123456789abcdef01234567';
 const installing = `.installing-${current}`;
 const exactHistoricalChain = [
@@ -1951,23 +2398,24 @@ const exactHistoricalChain = [
   failedCustomer,
   failedNetworkScope,
   failedOwnerDelta,
+  failedOciIdentity,
 ];
 const directoryLinkCount = (children) => children.length + 2;
-assert.equal(exactHistoricalChain.length, 15, 'the failed a51 chain inventory is incomplete');
+assert.equal(exactHistoricalChain.length, 16, 'the failed 0ffc chain inventory is incomplete');
 assert.equal(
   directoryLinkCount(exactHistoricalChain),
-  17,
-  'the pre-claim append-only bundle parent must have link count 17',
+  18,
+  'the pre-claim append-only bundle parent must have link count 18',
 );
 assert.equal(
   directoryLinkCount([...exactHistoricalChain, installing]),
-  18,
-  'the installing append must move the bundle parent link count from 17 to 18',
+  19,
+  'the installing append must move the bundle parent link count from 18 to 19',
 );
 assert.equal(
   directoryLinkCount([...exactHistoricalChain, current]),
-  18,
-  'the finalized append-only successor must retain bundle parent link count 18',
+  19,
+  'the finalized append-only successor must retain bundle parent link count 19',
 );
 const classifyChain = (children) => {
   const exact = [...children].sort().join('\n');
@@ -1989,6 +2437,7 @@ const classifyChain = (children) => {
       failedCustomer,
       failedNetworkScope,
       failedOwnerDelta,
+      failedOciIdentity,
     ]
       .sort()
       .join('\n')
@@ -2012,6 +2461,7 @@ const classifyChain = (children) => {
       failedCustomer,
       failedNetworkScope,
       failedOwnerDelta,
+      failedOciIdentity,
       installing,
     ]
       .sort()
@@ -2036,6 +2486,7 @@ const classifyChain = (children) => {
       failedCustomer,
       failedNetworkScope,
       failedOwnerDelta,
+      failedOciIdentity,
       current,
     ]
       .sort()
@@ -2062,6 +2513,7 @@ for (const [children, expected] of [
       failedCustomer,
       failedNetworkScope,
       failedOwnerDelta,
+      failedOciIdentity,
     ],
     'append',
   ],
@@ -2082,6 +2534,7 @@ for (const [children, expected] of [
       failedCustomer,
       failedNetworkScope,
       failedOwnerDelta,
+      failedOciIdentity,
       installing,
     ],
     'resume',
@@ -2103,6 +2556,7 @@ for (const [children, expected] of [
       failedCustomer,
       failedNetworkScope,
       failedOwnerDelta,
+      failedOciIdentity,
       current,
     ],
     'complete',

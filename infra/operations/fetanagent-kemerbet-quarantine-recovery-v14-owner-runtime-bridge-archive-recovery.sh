@@ -6,7 +6,7 @@
 # profile or cohort, enters Amount, clicks Transfer, enables a financial gate,
 # or moves money.
 #
-# Exact CLI (the workflow first claims the four-file bundle append-only):
+# Exact CLI (the workflow first claims the three-file reconciliation bundle append-only):
 #   bash /var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-bundles/<recovery-sha>/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh \
 #     <recovery-sha> <recovery-script-sha256> <archive-validator-sha256> \
 #     <recovery-manifest-sha256> <exact-a579-repair-sha> <authorization-sha256> \
@@ -383,6 +383,39 @@ readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO='64769:6103000'
 readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256='efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2'
 readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE='20653'
 readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES='294'
+readonly FAILED_OCI_IDENTITY_CORRECTION_RELEASE='0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'
+readonly FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'
+readonly FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6103001'
+readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO='64769:6103002'
+readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256='7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b'
+readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE='435623'
+readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO='64769:6103003'
+readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'
+readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE='11689'
+readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO='64769:6103004'
+readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256='dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45'
+readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE='26099'
+readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES='387'
+readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6103005'
+readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256='7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c'
+readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'
+readonly FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID='sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd'
+readonly FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID='sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b'
+readonly FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID='33279465715'
+readonly FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'
+readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO='64769:6103009'
+readonly FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO='64769:6103010'
+readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO='64769:6103011'
+readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256='f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e'
+readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE='22967'
+readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES='325'
+readonly ADOPTED_CUSTOMER_WEB_CONTAINER_ID='83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521'
+readonly ADOPTED_CUSTOMER_WEB_PID='911858'
+readonly ADOPTED_CUSTOMER_WEB_STARTED_AT='2026-08-29T22:56:55.385310072Z'
+readonly ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256='39c0ae0f18e94c0746da78e93a26a12a6daa47a6183bb67437f38c370bbd80b5'
+readonly ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256='237bcaedc8f40ac8ed85ae7d9fb3da94e8b9a935a62440b87525d3d122f98bdc'
+readonly ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256='e1d095c2fa7f7cdd5b9e75f0e2f3bcb2fccbea02f1af46beda5bcdc7f8b49a7b'
+readonly ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256='3d618a2e21d3818d603528063815b0ab58b5a72ba2098f95e6321ad6937b73c3'
 readonly CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'
 readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'
 readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'
@@ -434,7 +467,8 @@ readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-r
 readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'
 readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'
 readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'
-readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'
+readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'
+readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-semantic-v2-reconciliation-correction'
 readonly CLAIM_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-bundles'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROFILE_VOLUME="${PROJECT_NAME}_kemerbet_sessions"
@@ -499,10 +533,11 @@ readonly FAILED_COUNTER_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_COUNTER
 readonly FAILED_CUSTOMER_WEB_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE"
 readonly FAILED_NETWORK_SCOPE_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE"
 readonly FAILED_OWNER_DELTA_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OWNER_DELTA_CORRECTION_RELEASE"
+readonly FAILED_OCI_IDENTITY_CORRECTION_ROOT="$RECOVERY_BUNDLE_PARENT/$FAILED_OCI_IDENTITY_CORRECTION_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_VALIDATOR="$STAGING_ROOT/$VALIDATOR_BASENAME"
 readonly STAGED_RECOVERY_MANIFEST="$STAGING_ROOT/$RECOVERY_MANIFEST_BASENAME"
-readonly STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE="$STAGING_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"
+readonly ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE="$FAILED_OCI_IDENTITY_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"
 readonly REPAIR_ROOT="$REPAIR_PARENT/$REPAIR_RELEASE"
 readonly ATTESTATION_ROOT="$ATTESTATION_PARENT/$ATTESTATION_RELEASE"
 readonly INTERRUPTED_ATTESTATION_INSTALLING="$ATTESTATION_PARENT/.installing-$INTERRUPTED_ATTESTATION_RELEASE"
@@ -558,6 +593,11 @@ readonly FAILED_OWNER_DELTA_BRIDGE_INSTALLING="$FAILED_OWNER_DELTA_BRIDGE_PARENT
 readonly FAILED_OWNER_DELTA_BRIDGE_ROOT="$FAILED_OWNER_DELTA_BRIDGE_PARENT/$FAILED_OWNER_DELTA_CORRECTION_RELEASE"
 readonly FAILED_OWNER_DELTA_BRIDGE_INTENT="$FAILED_OWNER_DELTA_BRIDGE_INSTALLING/intent-v1"
 readonly FAILED_OWNER_DELTA_BRIDGE_FINAL="$FAILED_OWNER_DELTA_BRIDGE_INSTALLING/completed-v1"
+readonly FAILED_OCI_IDENTITY_BRIDGE_INSTALLING="$FAILED_OCI_IDENTITY_BRIDGE_PARENT/.installing-$FAILED_OCI_IDENTITY_CORRECTION_RELEASE"
+readonly FAILED_OCI_IDENTITY_BRIDGE_ROOT="$FAILED_OCI_IDENTITY_BRIDGE_PARENT/$FAILED_OCI_IDENTITY_CORRECTION_RELEASE"
+readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT="$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING/intent-v1"
+readonly FAILED_OCI_IDENTITY_BRIDGE_REPLACEMENT="$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING/customer-web-replacement-v1"
+readonly FAILED_OCI_IDENTITY_BRIDGE_FINAL="$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING/completed-v1"
 readonly CLAIM_INSTALLING="$CLAIM_PARENT/.installing-$ATTESTATION_RELEASE"
 readonly CLAIM_ROOT="$CLAIM_PARENT/$ATTESTATION_RELEASE"
 readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
@@ -587,7 +627,8 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
   "$RECOVERY_RELEASE" != "$FAILED_COUNTER_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" &&
   "$RECOVERY_RELEASE" != "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" &&
-  "$RECOVERY_RELEASE" != "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" ]] ||
+  "$RECOVERY_RELEASE" != "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" &&
+  "$RECOVERY_RELEASE" != "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" ]] ||
   die 'the archive-recovery release is not one distinct full lowercase commit SHA'
 [[ "$PROVIDED_RECOVERY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ && "$PROVIDED_VALIDATOR_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_RECOVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
@@ -601,15 +642,18 @@ readonly OWNER_IMAGE="fetanagent-owner-control:$CANONICAL_TAG"
 [[ "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ &&
   "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" =~ ^[1-9][0-9]*$ &&
   "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" -le 1073741824 &&
-  "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] ||
-  die 'the customer-web image archive contract is malformed'
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ &&
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" == "$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" &&
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" == "$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE" &&
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" == "$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" ]] ||
+  die 'the adopted 0ffc customer-web archive contract is not exact'
 [[ "$(id -u)" == '0' && "$(id -un)" == 'root' ]] ||
   die 'run only in a fresh DigitalOcean root console'
 [[ -z "${SUDO_USER:-}" && -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] ||
   die 'sudo and Docker environment overrides are forbidden'
 
 for command in awk bash chmod chown cmp curl dirname docker env find grep head id install \
-  mkdir mv python3 realpath sed seq sha256sum sleep sort ss stat sync tail timeout visudo; do
+  mkdir mv python3 realpath sed seq sha256sum sleep sort ss stat sync tail timeout tr visudo wc; do
   command -v "$command" >/dev/null 2>&1 || die "required command is unavailable: $command"
 done
 
@@ -800,16 +844,18 @@ PY
 }
 
 require_prior_failed_recovery_claim() {
-  [[ "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
+  [[ "$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
+      "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" &&
+    "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
       "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" &&
     "$FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO" == \
     "$PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO" ]] || return 1
   [[ ! -L "$RECOVERY_BUNDLE_PARENT" && -d "$RECOVERY_BUNDLE_PARENT" &&
     "$(realpath -- "$RECOVERY_BUNDLE_PARENT")" == "$RECOVERY_BUNDLE_PARENT" &&
     "$(stat --format='%d:%i:%U:%G:%a:%h' "$RECOVERY_BUNDLE_PARENT")" == \
-      "$FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO:root:root:700:18" ]] || return 1
+      "$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO:root:root:700:19" ]] || return 1
   [[ "$(find -P "$RECOVERY_BUNDLE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
+    "$(printf '%s:d\n' "$PRIOR_FAILED_RECOVERY_RELEASE" "$FAILED_CORRECTION_RELEASE" "$FAILED_PG_CORRECTION_RELEASE" "$FAILED_IMAGE_CORRECTION_RELEASE" "$FAILED_CATALOG_CORRECTION_RELEASE" "$FAILED_OIDVECTOR_CORRECTION_RELEASE" "$FAILED_COMPOSE_CORRECTION_RELEASE" "$FAILED_HOLDER_CORRECTION_RELEASE" "$FAILED_ORDER_CORRECTION_RELEASE" "$FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE" "$FAILED_RUNNING_STATUS_CORRECTION_RELEASE" "$FAILED_COUNTER_CORRECTION_RELEASE" "$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE" "$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$RECOVERY_RELEASE" | LC_ALL=C sort)" ]] || return 1
   [[ ! -L "$PRIOR_FAILED_RECOVERY_ROOT" && -d "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(realpath -- "$PRIOR_FAILED_RECOVERY_ROOT")" == "$PRIOR_FAILED_RECOVERY_ROOT" &&
     "$(stat --format='%d:%i:%U:%G:%a' "$PRIOR_FAILED_RECOVERY_ROOT")" == \
@@ -1329,22 +1375,20 @@ require_prior_failed_recovery_claim ||
   ! -L "$STAGED_RECOVERY_MANIFEST" && -f "$STAGED_RECOVERY_MANIFEST" &&
   "$(stat --format='%U:%G:%a:%h' "$STAGED_RECOVERY_MANIFEST")" == 'root:root:400:1' &&
   "$(sha256sum -- "$STAGED_RECOVERY_MANIFEST" | awk '{print $1}')" == "$PROVIDED_RECOVERY_MANIFEST_SHA256" &&
-  ! -L "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" && -f "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" &&
-  "$(stat --format='%U:%G:%a:%h:%s' "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE")" == "root:root:400:1:$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" &&
-  "$(sha256sum -- "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" | awk '{print $1}')" == "$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" &&
   "$(find -P "$STAGING_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
-    $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] ||
+    $'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] ||
   die 'the exact append-only archive-recovery implementation claim is not sealed'
 
 mapfile -t customer_web_archive_identities < <(derive_customer_web_archive_identities \
-  "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$STAGED_VALIDATOR" \
-  "fetanagent-customer-web:${RECOVERY_RELEASE:0:12}" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" "$RECOVERY_RELEASE") ||
-  die 'the sealed customer-web OCI graph or its split config/runtime identities are invalid'
+  "$ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$STAGED_VALIDATOR" \
+  "fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}" \
+  "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE") ||
+  die 'the sealed adopted 0ffc customer-web OCI graph or its split config/runtime identities are invalid'
 [[ "${#customer_web_archive_identities[@]}" -eq 2 &&
   "${customer_web_archive_identities[0]}" == "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" &&
-  "${customer_web_archive_identities[1]}" =~ ^sha256:[0-9a-f]{64}$ &&
+  "${customer_web_archive_identities[1]}" == "$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" &&
   "${customer_web_archive_identities[1]}" != "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" ]] ||
-  die 'the sealed customer-web OCI config and runtime descriptor identities are ambiguous'
+  die 'the adopted 0ffc customer-web OCI config and runtime descriptor identities are ambiguous'
 readonly CUSTOMER_WEB_CONFIG_IMAGE_ID="${customer_web_archive_identities[0]}"
 readonly CUSTOMER_WEB_RUNTIME_IMAGE_ID="${customer_web_archive_identities[1]}"
 
@@ -1679,6 +1723,51 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent' \
   'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load' \
   'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' \
+  "failed_oci_identity_correction_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+  "failed_oci_identity_correction_bundle_parent_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+  "failed_oci_identity_correction_bundle_root_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+  "failed_oci_identity_correction_script_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO" \
+  "failed_oci_identity_correction_script_sha256=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256" \
+  "failed_oci_identity_correction_script_size=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE" \
+  "failed_oci_identity_correction_validator_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO" \
+  "failed_oci_identity_correction_validator_sha256=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256" \
+  "failed_oci_identity_correction_validator_size=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE" \
+  "failed_oci_identity_correction_manifest_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO" \
+  "failed_oci_identity_correction_manifest_sha256=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256" \
+  "failed_oci_identity_correction_manifest_size=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE" \
+  "failed_oci_identity_correction_manifest_lines=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES" \
+  "failed_oci_identity_correction_image_archive_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+  "failed_oci_identity_correction_image_archive_sha256=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+  "failed_oci_identity_correction_image_archive_size=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+  "failed_oci_identity_correction_config_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+  "failed_oci_identity_correction_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+  "failed_oci_identity_correction_workflow_run_id=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID" \
+  "failed_oci_identity_correction_workflow_run_attempt=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+  "failed_oci_identity_bridge_parent_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO" \
+  "failed_oci_identity_bridge_installing_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO" \
+  "failed_oci_identity_bridge_intent_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO" \
+  "failed_oci_identity_bridge_intent_sha256=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256" \
+  "failed_oci_identity_bridge_intent_size=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE" \
+  "failed_oci_identity_bridge_intent_lines=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES" \
+  'failed_oci_identity_bridge_inventory=single-intent-no-replacement-no-final' \
+  'failed_oci_identity_failure=healthy-replacement-rejected-by-v1-non-invariant-normalized-digest' \
+  "customer_web_replacement_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+  "customer_web_reconciliation_implementation_sha=$RECOVERY_RELEASE" \
+  "adopted_customer_web_container_id=$ADOPTED_CUSTOMER_WEB_CONTAINER_ID" \
+  "adopted_customer_web_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+  "adopted_customer_web_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+  "adopted_customer_web_image_tag=fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}" \
+  "adopted_customer_web_pid=$ADOPTED_CUSTOMER_WEB_PID" \
+  "adopted_customer_web_started_at=$ADOPTED_CUSTOMER_WEB_STARTED_AT" \
+  "adopted_customer_web_runtime_state_sha256=$ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256" \
+  "adopted_customer_web_env_sha256=$SOURCE_CUSTOMER_WEB_ENV_SHA256" \
+  "adopted_customer_web_v1_normalized_sha256=$ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256" \
+  "adopted_customer_web_semantic_v2_sha256=$ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256" \
+  "adopted_customer_web_compose_config_sha256=$ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256" \
+  'source_customer_web_absent=true' \
+  'customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2' \
+  'customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2' \
+  'customer_web_reconciliation_lifecycle_mutation=false' \
   "created_owner_container_id=$CREATED_OWNER_CONTAINER_ID" \
   'failed_endpoint_phase_owner_state=created-never-started' \
   'failed_running_status_owner_state=running-healthy-no-completion' \
@@ -1687,7 +1776,7 @@ cmp -s -- "$STAGED_RECOVERY_MANIFEST" <(printf '%s\n' \
   'docker_inventory_contract=complete-exact-owner-only-phase-delta-v3' \
   'network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1' \
   'owner_lifecycle_mutation=forbidden-already-running' \
-  'customer_web_lifecycle_mutation=exact-single-self-recovery-replacement-v1' \
+  'customer_web_lifecycle_mutation=already-completed-exactly-once-by-failed-oci-identity-correction' \
   'all_other_lifecycle_mutation=forbidden' \
   'complete_phase_boundary_contract=single-final-phase-aware-command-v1' \
   'migration_catalog_proof=exact-api-player-action-read-only-v1' \
@@ -2152,6 +2241,69 @@ PY
     "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" || return 1
   [[ -z "$(docker_local container ls --all --quiet --no-trunc \
     --filter "ancestor=fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}")" ]]
+}
+
+require_failed_oci_identity_runtime() {
+  local manifest="$FAILED_OCI_IDENTITY_CORRECTION_ROOT/$RECOVERY_MANIFEST_BASENAME"
+  [[ ! -L "$FAILED_OCI_IDENTITY_CORRECTION_ROOT" && -d "$FAILED_OCI_IDENTITY_CORRECTION_ROOT" &&
+    "$(realpath -- "$FAILED_OCI_IDENTITY_CORRECTION_ROOT")" == "$FAILED_OCI_IDENTITY_CORRECTION_ROOT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OCI_IDENTITY_CORRECTION_ROOT")" == \
+      "$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_OCI_IDENTITY_CORRECTION_ROOT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n' | LC_ALL=C sort)" == \
+      $'fetanagent-customer-web-self-recovery.tar:f\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\nfetanagent-owner-archive-validator.py:f\nmanifest-v1:f' ]] || return 1
+  verify_exact_nofollow_file_digest "$FAILED_OCI_IDENTITY_CORRECTION_ROOT/$SCRIPT_BASENAME" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO" "$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256" 0400 || return 1
+  verify_exact_nofollow_file_digest "$FAILED_OCI_IDENTITY_CORRECTION_ROOT/$VALIDATOR_BASENAME" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO" "$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256" 0400 || return 1
+  verify_exact_nofollow_file_digest "$manifest" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO" "$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256" 0400 || return 1
+  verify_exact_nofollow_file_digest "$ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" 0400 || return 1
+  [[ "$(wc -l <"$manifest" | tr -d '[:space:]')" == "$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES" &&
+    "$(grep -Fxc "recovery_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$manifest")" == '1' &&
+    "$(grep -Fxc "workflow_run_id=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID" "$manifest")" == '1' &&
+    "$(grep -Fxc "workflow_run_attempt=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT" "$manifest")" == '1' &&
+    "$(grep -Fxc "customer_web_image_archive_sha256=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" "$manifest")" == '1' &&
+    "$(grep -Fxc "customer_web_image_archive_size=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE" "$manifest")" == '1' &&
+    "$(grep -Fxc "customer_web_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" "$manifest")" == '1' &&
+    "$(grep -Fxc "customer_web_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" "$manifest")" == '1' &&
+    "$(grep -Fxc 'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' "$manifest")" == '1' &&
+    "$(tail -n 7 "$manifest")" == $'financial_actions_mode=dry_run\nkemerbet_executor_enabled=false\nkemerbet_final_action_enabled=false\nprovider_action_enabled=false\ntransfer_enabled=false\namount_entry_enabled=false\nmoney_moved=false' ]] || return 1
+  [[ ! -e "$FAILED_OCI_IDENTITY_BRIDGE_ROOT" && ! -L "$FAILED_OCI_IDENTITY_BRIDGE_ROOT" &&
+    ! -e "$FAILED_OCI_IDENTITY_BRIDGE_REPLACEMENT" && ! -L "$FAILED_OCI_IDENTITY_BRIDGE_REPLACEMENT" &&
+    ! -e "$FAILED_OCI_IDENTITY_BRIDGE_FINAL" && ! -L "$FAILED_OCI_IDENTITY_BRIDGE_FINAL" &&
+    ! -L "$FAILED_OCI_IDENTITY_BRIDGE_PARENT" && -d "$FAILED_OCI_IDENTITY_BRIDGE_PARENT" &&
+    "$(realpath -- "$FAILED_OCI_IDENTITY_BRIDGE_PARENT")" == "$FAILED_OCI_IDENTITY_BRIDGE_PARENT" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OCI_IDENTITY_BRIDGE_PARENT")" == \
+      "$FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO:root:root:700:3" &&
+    "$(find -P "$FAILED_OCI_IDENTITY_BRIDGE_PARENT" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == \
+      ".installing-$FAILED_OCI_IDENTITY_CORRECTION_RELEASE:d" &&
+    ! -L "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING" && -d "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING" &&
+    "$(realpath -- "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING")" == "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING" &&
+    "$(stat --format='%d:%i:%U:%G:%a:%h' "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING")" == \
+      "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO:root:root:700:2" &&
+    "$(find -P "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING" -mindepth 1 -maxdepth 1 -printf '%f:%y\n')" == 'intent-v1:f' ]] || return 1
+  verify_exact_nofollow_file_digest "$FAILED_OCI_IDENTITY_BRIDGE_INTENT" \
+    "$FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE" \
+    "$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256" 0600 || return 1
+  [[ "$(wc -l <"$FAILED_OCI_IDENTITY_BRIDGE_INTENT" | tr -d '[:space:]')" == "$FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES" &&
+    "$(grep -Fxc "archive_recovery_implementation_release=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT")" == '1' &&
+    "$(grep -Fxc "customer_web_image_archive_sha256=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT")" == '1' &&
+    "$(grep -Fxc "customer_web_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT")" == '1' &&
+    "$(grep -Fxc "customer_web_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT")" == '1' &&
+    "$(tail -n 7 "$FAILED_OCI_IDENTITY_BRIDGE_INTENT")" == $'financial_actions_mode=dry_run\nkemerbet_executor_enabled=false\nkemerbet_final_action_enabled=false\nprovider_action_enabled=false\ntransfer_enabled=false\namount_entry_enabled=false\nmoney_moved=false' ]] || return 1
+  require_customer_web_runtime_image_contract \
+    "$ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}" \
+    "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" || return 1
+  require_adopted_customer_web_boundary || return 1
+  ! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1
 }
 
 emit_owned_nofollow_file() {
@@ -4190,7 +4342,7 @@ require_exact_successor_inventory_delta_inline_reference() {
     env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
       "$new_owner" "$OWNER_NETWORK" "$CONTROL_VOLUME" "$PROFILE_VOLUME" \
       "$old_customer" "$new_customer" "$new_image" "$failed_image" \
-      "$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
+      "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
 import copy, ipaddress, json, re, sys
 new_owner, owner_network, control_volume, profile_volume, old_customer, new_customer, new_image, failed_image, release, failed_release = sys.argv[1:]
 before_raw, after_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
@@ -4235,8 +4387,19 @@ try:
         old_status = old.pop('Status', None); new_status = new.pop('Status', None)
         if old != new or not isinstance(old_endpoints, dict) or not isinstance(new_endpoints, dict): raise RuntimeError()
         if key == owner_id:
-            if new_owner in old_endpoints or set(new_endpoints) != set(old_endpoints) | {new_owner}: raise RuntimeError()
-            if any(new_endpoints[item] != old_endpoints[item] for item in old_endpoints): raise RuntimeError()
+            expected_endpoints = set(old_endpoints) | {new_owner}
+            if old_customer in old_endpoints or new_customer in new_endpoints:
+                if old_customer not in old_endpoints or new_customer not in new_endpoints: raise RuntimeError()
+                if new_customer in old_endpoints or old_customer in new_endpoints: raise RuntimeError()
+                expected_endpoints = (expected_endpoints - {old_customer}) | {new_customer}
+                old_customer_endpoint = old_endpoints[old_customer]
+                new_customer_endpoint = new_endpoints[new_customer]
+                if not isinstance(old_customer_endpoint, dict) or not isinstance(new_customer_endpoint, dict): raise RuntimeError()
+                if set(old_customer_endpoint) != {'Name','EndpointID','MacAddress','IPv4Address','IPv6Address'} or set(new_customer_endpoint) != set(old_customer_endpoint): raise RuntimeError()
+                if old_customer_endpoint.get('Name') != 'fetanagent-staging-beta-customer-web-1' or new_customer_endpoint.get('Name') != old_customer_endpoint.get('Name'): raise RuntimeError()
+                customer_swaps += 1
+            if new_owner in old_endpoints or set(new_endpoints) != expected_endpoints: raise RuntimeError()
+            if any(new_endpoints[item] != old_endpoints[item] for item in old_endpoints if item != old_customer): raise RuntimeError()
             endpoint = new_endpoints[new_owner]
             if not isinstance(endpoint, dict) or endpoint.get('Name') != 'fetanagent-staging-beta-owner-control-1': raise RuntimeError()
             addresses = [ipaddress.ip_interface(endpoint[name]) for name in ('IPv4Address','IPv6Address')]
@@ -4288,7 +4451,7 @@ require_exact_successor_inventory_delta() {
   normalized_after="$(printf '%s\n__FETANAGENT_AFTER__\n%s\n' "$before" "$after" |
     env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
       "$old_customer" "$new_customer" "$new_image" "$failed_image" \
-      "$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
+      "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
 import copy, ipaddress, json, re, sys
 old_customer, new_customer, new_image, failed_image, release, failed_release = sys.argv[1:]
 before_raw, after_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
@@ -4338,7 +4501,10 @@ try:
         if old_customer in old_endpoints or new_customer in new_endpoints:
             if old_customer not in old_endpoints or new_customer not in new_endpoints: raise RuntimeError()
             if new_customer in old_endpoints or old_customer in new_endpoints: raise RuntimeError()
-            if set(new_endpoints) != (set(old_endpoints) - {old_customer}) | {new_customer}: raise RuntimeError()
+            # Preserve every non-customer endpoint delta for the immutable
+            # downstream Owner comparator; consume only the exact customer
+            # old->new substitution here.
+            if not (set(old_endpoints) - {old_customer}).issubset(set(new_endpoints)): raise RuntimeError()
             if any(new_endpoints[item] != old_endpoints[item] for item in old_endpoints if item != old_customer): raise RuntimeError()
             old_ep = old_endpoints[old_customer]; new_ep = new_endpoints[new_customer]
             if not isinstance(old_ep, dict) or not isinstance(new_ep, dict): raise RuntimeError()
@@ -4355,7 +4521,6 @@ try:
                     subnets.append(ipaddress.ip_network(entry['Subnet']))
             if not any(ipv4.ip in subnet and ipv4.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 4): raise RuntimeError()
             if not any(ipv6.ip in subnet and ipv6.network.prefixlen == subnet.prefixlen for subnet in subnets if subnet.version == 6): raise RuntimeError()
-            if old_network.get('Status') != normalized_networks[network_id].get('Status'): raise RuntimeError()
             normalized_networks[network_id]['Containers'].pop(new_customer)
             normalized_networks[network_id]['Containers'][old_customer] = copy.deepcopy(old_ep)
             swaps += 1
@@ -4457,6 +4622,7 @@ require_successor_endpoint_phase_boundary() {
   require_owner_never_restarted || return 1
   require_replacement_customer_web_boundary || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   require_other_service_inventory_exact || return 1
   current_inventory="$(capture_complete_docker_create_inventory)" || return 1
   require_exact_successor_inventory_delta \
@@ -4477,6 +4643,7 @@ require_resumed_intent_pre_mutation_boundary() {
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   [[ "$(container_full_ids_for_service "$OWNER_SERVICE")" == "$CREATED_OWNER_CONTAINER_ID" ]] || return 1
   require_owner_contract "$CREATED_OWNER_CONTAINER_ID" "$CANONICAL_H14" "$SOURCE_OWNER_LOADED_IMAGE_ID" || return 1
   require_owner_never_restarted || return 1
@@ -4490,15 +4657,10 @@ require_resumed_intent_pre_mutation_boundary() {
       "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SIZE" "$FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SHA256")" || return 1
   fi
   customer_inventory="$(container_full_ids_for_service customer-web)" || return 1
-  if [[ "$customer_inventory" == "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
-    require_source_customer_web_boundary || return 1
-    mode=source
-  elif [[ -z "$customer_inventory" ]]; then
-    mode=absent
-  elif [[ "$customer_inventory" =~ ^[0-9a-f]{64}$ && "$customer_inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
+  if [[ "$customer_inventory" == "$ADOPTED_CUSTOMER_WEB_CONTAINER_ID" ]]; then
     [[ "$(docker_local container inspect "$customer_inventory" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.RestartCount}}')" == \
-      "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
-    require_customer_web_security_contract "$customer_inventory" || return 1
+      "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
+    require_adopted_customer_web_boundary || return 1
     mode=replacement
   else
     return 1
@@ -4508,7 +4670,7 @@ require_resumed_intent_pre_mutation_boundary() {
     env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 "$mode" "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
       "$customer_inventory" "$CUSTOMER_WEB_RUNTIME_IMAGE_ID" \
       "$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
-      "$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
+      "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<'PY'
 import copy, ipaddress, json, re, sys
 mode, old_customer, current_customer, expected_image, failed_image, config_image, release, failed_release = sys.argv[1:]
 before_raw, current_raw = sys.stdin.read().split('\n__FETANAGENT_AFTER__\n', 1)
@@ -4635,6 +4797,7 @@ require_complete_owner_endpoint_phase_boundary() {
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -4659,6 +4822,7 @@ require_running_owner_boundary_before_successor_intent() {
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   require_exact_droplet || return 1
   require_no_other_mutator_processes || return 1
   require_financial_gates_disabled || return 1
@@ -4672,7 +4836,7 @@ require_running_owner_boundary_before_successor_intent() {
   printf '%s' "$PRE_CREATE_DOCKER_INVENTORY" | env -i PATH="$SAFE_PATH" python3 -I -c \
     'import json,sys; value=json.load(sys.stdin); assert set(value)=={"images","networks","volumes","holders"}' || return 1
   require_pre_customer_web_inventory || return 1
-  require_owner_endpoint_phase_boundary running
+  require_successor_endpoint_phase_boundary running
 }
 
 require_pre_create_image_boundary() {
@@ -5191,6 +5355,7 @@ create_or_discover_bridge_ledger() {
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   if [[ ! -e "$BRIDGE_PARENT" && ! -L "$BRIDGE_PARENT" ]]; then
     mkdir --mode=0700 -- "$BRIDGE_PARENT" || return 1
     chown root:root "$BRIDGE_PARENT" || return 1
@@ -5229,6 +5394,7 @@ create_or_discover_bridge_ledger() {
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   entries="$(find -P "$BRIDGE_WORK_ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)" || return 1
   if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     [[ "$entries" == $'api-catalog-proof-v1\ncompleted-v1\ncustomer-web-replacement-v1\ndocker-pre-create-v1\nintent-v1\nreplacement-owner-v1\nstart-owner-v1' ]] || return 1
@@ -5348,6 +5514,51 @@ expected_bridge_intent() {
     'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent' \
     'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load' \
     'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' \
+    "failed_oci_identity_correction_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+    "failed_oci_identity_correction_bundle_parent_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_oci_identity_correction_bundle_root_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_oci_identity_correction_script_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_oci_identity_correction_script_sha256=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256" \
+    "failed_oci_identity_correction_script_size=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE" \
+    "failed_oci_identity_correction_validator_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_oci_identity_correction_validator_sha256=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256" \
+    "failed_oci_identity_correction_validator_size=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE" \
+    "failed_oci_identity_correction_manifest_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_oci_identity_correction_manifest_sha256=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256" \
+    "failed_oci_identity_correction_manifest_size=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE" \
+    "failed_oci_identity_correction_manifest_lines=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES" \
+    "failed_oci_identity_correction_image_archive_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_oci_identity_correction_image_archive_sha256=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_oci_identity_correction_image_archive_size=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_oci_identity_correction_config_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+    "failed_oci_identity_correction_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "failed_oci_identity_correction_workflow_run_id=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_oci_identity_correction_workflow_run_attempt=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_oci_identity_bridge_parent_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO" \
+    "failed_oci_identity_bridge_installing_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_oci_identity_bridge_intent_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO" \
+    "failed_oci_identity_bridge_intent_sha256=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256" \
+    "failed_oci_identity_bridge_intent_size=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE" \
+    "failed_oci_identity_bridge_intent_lines=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES" \
+    'failed_oci_identity_bridge_inventory=single-intent-no-replacement-no-final' \
+    'failed_oci_identity_failure=healthy-replacement-rejected-by-v1-non-invariant-normalized-digest' \
+    "customer_web_replacement_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+    "customer_web_reconciliation_implementation_sha=$RECOVERY_RELEASE" \
+    "adopted_customer_web_container_id=$ADOPTED_CUSTOMER_WEB_CONTAINER_ID" \
+    "adopted_customer_web_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+    "adopted_customer_web_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "adopted_customer_web_image_tag=fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}" \
+    "adopted_customer_web_pid=$ADOPTED_CUSTOMER_WEB_PID" \
+    "adopted_customer_web_started_at=$ADOPTED_CUSTOMER_WEB_STARTED_AT" \
+    "adopted_customer_web_runtime_state_sha256=$ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256" \
+    "adopted_customer_web_env_sha256=$SOURCE_CUSTOMER_WEB_ENV_SHA256" \
+    "adopted_customer_web_v1_normalized_sha256=$ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256" \
+    "adopted_customer_web_semantic_v2_sha256=$ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256" \
+    "adopted_customer_web_compose_config_sha256=$ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256" \
+    'source_customer_web_absent=true' \
+    'customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2' \
+    'customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2' \
+    'customer_web_reconciliation_lifecycle_mutation=false' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -5749,6 +5960,51 @@ expected_bridge_completed() {
     'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent' \
     'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load' \
     'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1' \
+    "failed_oci_identity_correction_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+    "failed_oci_identity_correction_bundle_parent_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO" \
+    "failed_oci_identity_correction_bundle_root_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO" \
+    "failed_oci_identity_correction_script_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO" \
+    "failed_oci_identity_correction_script_sha256=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256" \
+    "failed_oci_identity_correction_script_size=$FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE" \
+    "failed_oci_identity_correction_validator_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO" \
+    "failed_oci_identity_correction_validator_sha256=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256" \
+    "failed_oci_identity_correction_validator_size=$FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE" \
+    "failed_oci_identity_correction_manifest_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO" \
+    "failed_oci_identity_correction_manifest_sha256=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256" \
+    "failed_oci_identity_correction_manifest_size=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE" \
+    "failed_oci_identity_correction_manifest_lines=$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES" \
+    "failed_oci_identity_correction_image_archive_dev_ino=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO" \
+    "failed_oci_identity_correction_image_archive_sha256=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256" \
+    "failed_oci_identity_correction_image_archive_size=$FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE" \
+    "failed_oci_identity_correction_config_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+    "failed_oci_identity_correction_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "failed_oci_identity_correction_workflow_run_id=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID" \
+    "failed_oci_identity_correction_workflow_run_attempt=$FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT" \
+    "failed_oci_identity_bridge_parent_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO" \
+    "failed_oci_identity_bridge_installing_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO" \
+    "failed_oci_identity_bridge_intent_dev_ino=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO" \
+    "failed_oci_identity_bridge_intent_sha256=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256" \
+    "failed_oci_identity_bridge_intent_size=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE" \
+    "failed_oci_identity_bridge_intent_lines=$FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES" \
+    'failed_oci_identity_bridge_inventory=single-intent-no-replacement-no-final' \
+    'failed_oci_identity_failure=healthy-replacement-rejected-by-v1-non-invariant-normalized-digest' \
+    "customer_web_replacement_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+    "customer_web_reconciliation_implementation_sha=$RECOVERY_RELEASE" \
+    "adopted_customer_web_container_id=$ADOPTED_CUSTOMER_WEB_CONTAINER_ID" \
+    "adopted_customer_web_image_id=$FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID" \
+    "adopted_customer_web_runtime_descriptor_id=$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+    "adopted_customer_web_image_tag=fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}" \
+    "adopted_customer_web_pid=$ADOPTED_CUSTOMER_WEB_PID" \
+    "adopted_customer_web_started_at=$ADOPTED_CUSTOMER_WEB_STARTED_AT" \
+    "adopted_customer_web_runtime_state_sha256=$ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256" \
+    "adopted_customer_web_env_sha256=$SOURCE_CUSTOMER_WEB_ENV_SHA256" \
+    "adopted_customer_web_v1_normalized_sha256=$ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256" \
+    "adopted_customer_web_semantic_v2_sha256=$ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256" \
+    "adopted_customer_web_compose_config_sha256=$ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256" \
+    'source_customer_web_absent=true' \
+    'customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2' \
+    'customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2' \
+    'customer_web_reconciliation_lifecycle_mutation=false' \
     "failed_image_correction_implementation_sha=$FAILED_IMAGE_CORRECTION_RELEASE" \
     "failed_image_correction_bundle_root_dev_ino=$FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO" \
     "failed_image_correction_script_sha256=$FAILED_IMAGE_CORRECTION_SCRIPT_SHA256" \
@@ -6152,6 +6408,114 @@ print(hashlib.sha256(encoded).hexdigest())
 PY
 }
 
+customer_web_semantic_v2_digest() {
+  local container_id="$1"
+  [[ "$container_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+  docker_local container inspect "$container_id" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$container_id" "$PROJECT_NAME" "$OWNER_NETWORK" "$CLAIM_ROOT" \
+      "$ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256" \
+      "$FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID" \
+      "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" 3<<'PY'
+import hashlib
+import json
+import sys
+
+(
+    expected_id, project, owner_network, claim_root, compose_config_sha,
+    image_descriptor, replacement_release,
+) = sys.argv[1:]
+try:
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, list) or len(payload) != 1 or payload[0].get('Id') != expected_id:
+        raise RuntimeError()
+    item = payload[0]
+    config = item.get('Config')
+    host = item.get('HostConfig')
+    mounts = item.get('Mounts')
+    network_settings = item.get('NetworkSettings')
+    if not all(isinstance(value, expected) for value, expected in (
+        (config, dict), (host, dict), (mounts, list), (network_settings, dict),
+    )):
+        raise RuntimeError()
+    labels = config.get('Labels') or {}
+    stable_label_keys = (
+        'com.docker.compose.container-number',
+        'com.docker.compose.depends_on',
+        'com.docker.compose.oneoff',
+        'com.docker.compose.project',
+        'com.docker.compose.service',
+        'org.opencontainers.image.title',
+    )
+    provenance_label_keys = (
+        'com.docker.compose.config-hash',
+        'com.docker.compose.image',
+        'com.docker.compose.project.config_files',
+        'com.docker.compose.project.environment_file',
+        'com.docker.compose.project.working_dir',
+        'com.docker.compose.replace',
+        'com.docker.compose.version',
+        'org.opencontainers.image.revision',
+    )
+    if set(labels) != set(stable_label_keys) | set(provenance_label_keys):
+        raise RuntimeError()
+    expected_stable = {
+        'com.docker.compose.container-number': '1',
+        'com.docker.compose.depends_on': '',
+        'com.docker.compose.oneoff': 'False',
+        'com.docker.compose.project': project,
+        'com.docker.compose.service': 'customer-web',
+        'org.opencontainers.image.title': 'fetanagent-customer-web',
+    }
+    expected_provenance = {
+        'com.docker.compose.config-hash': compose_config_sha,
+        'com.docker.compose.image': image_descriptor,
+        'com.docker.compose.project.config_files': f'{claim_root}/compose.staging-beta.yaml',
+        'com.docker.compose.project.environment_file': '/dev/null',
+        'com.docker.compose.project.working_dir': claim_root,
+        'com.docker.compose.replace': 'customer-web-1',
+        'com.docker.compose.version': '5.1.4',
+        'org.opencontainers.image.revision': replacement_release,
+    }
+    if any(labels.get(key) != value for key, value in (expected_stable | expected_provenance).items()):
+        raise RuntimeError()
+    environment = config.get('Env')
+    if not isinstance(environment, list) or any(not isinstance(value, str) or '=' not in value for value in environment):
+        raise RuntimeError()
+    if len(environment) != len(set(value.split('=', 1)[0] for value in environment)):
+        raise RuntimeError()
+    networks = network_settings.get('Networks') or {}
+    if set(networks) != {owner_network} or network_settings.get('Ports') not in ({}, None):
+        raise RuntimeError()
+    contract = {
+        'version': 'fetanagent-customer-web-reconciliation-semantic-v2',
+        'Name': item.get('Name'),
+        'Config.User': config.get('User'),
+        'Config.Cmd': config.get('Cmd'),
+        'Config.Entrypoint': config.get('Entrypoint'),
+        'Config.WorkingDir': config.get('WorkingDir'),
+        'Config.Env': sorted(environment),
+        'Config.Labels': {key: labels[key] for key in stable_label_keys},
+        'HostConfig': {key: host.get(key) for key in (
+            'ReadonlyRootfs', 'Privileged', 'Init', 'CapAdd', 'CapDrop',
+            'SecurityOpt', 'RestartPolicy', 'NetworkMode', 'PortBindings',
+            'PublishAllPorts', 'PidsLimit', 'Memory', 'NanoCpus', 'Tmpfs',
+        )},
+        'Mounts': sorted(mounts, key=lambda value: json.dumps(
+            value, sort_keys=True, separators=(',', ':'), ensure_ascii=True,
+        )),
+        'NetworkNames': sorted(networks),
+        'NetworkPorts': network_settings.get('Ports'),
+    }
+    encoded = (json.dumps(
+        contract, sort_keys=True, separators=(',', ':'), ensure_ascii=True,
+    ) + '\n').encode('ascii')
+    print(hashlib.sha256(encoded).hexdigest())
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 require_customer_web_security_contract() {
   local container_id="$1" expected_network="$OWNER_NETWORK"
   docker_local container inspect "$container_id" |
@@ -6217,55 +6581,72 @@ require_source_customer_web_boundary() {
 }
 
 require_pre_customer_web_inventory() {
-  local normalized
-  require_source_customer_web_boundary || return 1
-  require_other_service_inventory_exact || return 1
-  normalized="$(awk -F'|' -v customer="$SOURCE_CUSTOMER_WEB_CONTAINER_ID" -v healthy="$SOURCE_CUSTOMER_WEB_HEALTHY_RUNTIME_SHA256" 'BEGIN{OFS="|"} $1==customer{$4=healthy} {print}' <<<"$NON_OWNER_INVENTORY")" || return 1
-  [[ "$(printf '%s' "$normalized" | sha256sum | awk '{print $1}')" == "$SOURCE_NON_OWNER_INVENTORY_SHA256" ]]
+  require_adopted_customer_web_boundary || return 1
+  require_other_service_inventory_exact
 }
 
 require_loaded_customer_web_image() {
-  local image_id image_tag="fetanagent-customer-web:${RECOVERY_RELEASE:0:12}"
+  local image_id image_tag="fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}"
   require_customer_web_runtime_image_contract \
-    "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
-    "$CUSTOMER_WEB_RUNTIME_IMAGE_ID" "$image_tag" "$RECOVERY_RELEASE" || return 1
+    "$ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE" "$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
+    "$CUSTOMER_WEB_RUNTIME_IMAGE_ID" "$image_tag" "$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" || return 1
   image_id="$(docker_local image inspect "$image_tag" --format '{{.Id}}|{{.Descriptor.digest}}')" || return 1
   [[ "$image_id" == "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|$CUSTOMER_WEB_RUNTIME_IMAGE_ID" ]] || return 1
   image_id="$CUSTOMER_WEB_RUNTIME_IMAGE_ID"
   CUSTOMER_WEB_IMAGE_ID="$image_id"
 }
 
-require_replacement_customer_web_boundary() {
-  local customer_id normalized state
+require_adopted_customer_web_boundary() {
+  local customer_id normalized semantic state
   customer_id="$(container_full_ids_for_service customer-web)" || return 1
-  [[ "$customer_id" =~ ^[0-9a-f]{64}$ && "$customer_id" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1
+  [[ "$customer_id" == "$ADOPTED_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1
   require_loaded_customer_web_image || return 1
   normalized="$(customer_web_normalized_contract_digest "$customer_id")" || return 1
-  [[ "$normalized" == "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
+  [[ "$normalized" == "$ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256" &&
+    "$normalized" != "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
+  semantic="$(customer_web_semantic_v2_digest "$customer_id")" || return 1
+  [[ "$semantic" == "$ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256" ]] || return 1
   require_customer_web_security_contract "$customer_id" || return 1
   [[ "$(docker_local container inspect "$customer_id" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.RestartCount}}|{{json .NetworkSettings.Ports}}|{{json .HostConfig.PortBindings}}')" == \
-    "$CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|0|{}|{}" ]] || return 1
+    "$CUSTOMER_WEB_IMAGE_ID|fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}|10001:10001|0|{}|{}" ]] || return 1
   state="$(docker_local container inspect "$customer_id" --format '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" || return 1
   [[ "$state" == 'running|true|healthy' ]] || return 1
+  [[ "$(docker_local container inspect "$customer_id" --format '{{.State.Pid}}|{{.State.StartedAt}}')" == \
+    "$ADOPTED_CUSTOMER_WEB_PID|$ADOPTED_CUSTOMER_WEB_STARTED_AT" ]] || return 1
+  [[ "$(container_runtime_state_digest "$customer_id")" == "$ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256" ]] || return 1
   [[ "$(docker_local container inspect "$customer_id" --format '{{range .Config.Env}}{{println .}}{{end}}' | LC_ALL=C sort | sha256sum | awk '{print $1}')" == "$SOURCE_CUSTOMER_WEB_ENV_SHA256" ]] || return 1
+  ! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1 || return 1
   NEW_CUSTOMER_WEB_CONTAINER_ID="$customer_id"
+}
+
+require_replacement_customer_web_boundary() {
+  require_adopted_customer_web_boundary
 }
 
 expected_customer_web_replacement_record() {
   printf '%s\n' \
-    'version=1' \
-    'contract=fetanagent-h14-customer-web-self-recovery-replacement-v1' \
-    "recovery_implementation_sha=$RECOVERY_RELEASE" \
+    'version=2' \
+    'contract=fetanagent-h14-customer-web-self-recovery-reconciliation-v2' \
+    'state=healthy-replacement-adopted-without-lifecycle-mutation' \
+    "replacement_implementation_sha=$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" \
+    "reconciliation_implementation_sha=$RECOVERY_RELEASE" \
     "source_customer_web_container_id=$SOURCE_CUSTOMER_WEB_CONTAINER_ID" \
     "source_customer_web_image_id=$SOURCE_CUSTOMER_WEB_IMAGE_ID" \
     "replacement_customer_web_container_id=$NEW_CUSTOMER_WEB_CONTAINER_ID" \
     "replacement_customer_web_image_id=$CUSTOMER_WEB_IMAGE_ID" \
-    "replacement_customer_web_image_tag=fetanagent-customer-web:${RECOVERY_RELEASE:0:12}" \
-    "customer_web_normalized_contract_sha256=$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" \
+    "replacement_customer_web_image_tag=fetanagent-customer-web:${FAILED_OCI_IDENTITY_CORRECTION_RELEASE:0:12}" \
+    "source_customer_web_v1_normalized_sha256=$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" \
+    "replacement_customer_web_v1_normalized_sha256=$ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256" \
+    "replacement_customer_web_semantic_v2_sha256=$ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256" \
+    'customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2' \
+    'v1_mismatch_classification=compose-lifecycle-provenance-and-ordering-noise' \
     "customer_web_image_archive_sha256=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SHA256" \
     "customer_web_image_archive_size=$PROVIDED_CUSTOMER_WEB_IMAGE_ARCHIVE_SIZE" \
     "customer_web_image_id=$PROVIDED_CUSTOMER_WEB_IMAGE_ID" \
     "customer_web_runtime_descriptor_id=$CUSTOMER_WEB_RUNTIME_IMAGE_ID" \
+    'customer_web_lifecycle_mutation=false-already-completed-by-replacement-implementation' \
+    'docker_image_load_executed=false' \
+    'docker_compose_executed=false' \
     'owner_lifecycle_mutation=false' \
     'other_service_lifecycle_mutation=false' \
     'financial_actions_mode=dry_run' \
@@ -6281,7 +6662,9 @@ require_customer_web_replacement_record() {
   local path="$BRIDGE_WORK_ROOT/customer-web-replacement-v1" line
   [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
     "$(stat --format='%U:%G:%a:%h' "$path")" == 'root:root:600:1' ]] || return 1
-  line="$(sed -n '6p' "$path")" || return 1
+  line="$(sed -n 's/^replacement_customer_web_container_id=//p' "$path")" || return 1
+  [[ "$(grep -c '^replacement_customer_web_container_id=' "$path")" == '1' ]] || return 1
+  line="replacement_customer_web_container_id=$line"
   [[ "$line" =~ ^replacement_customer_web_container_id=[0-9a-f]{64}$ ]] || return 1
   NEW_CUSTOMER_WEB_CONTAINER_ID="${line#replacement_customer_web_container_id=}"
   require_replacement_customer_web_boundary || return 1
@@ -6289,65 +6672,35 @@ require_customer_web_replacement_record() {
 }
 
 classify_customer_web_replacement_state() {
-  local inventory customer_id normalized
-  inventory="$(container_full_ids_for_service customer-web)" || return 1
-  if [[ "$inventory" == "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]]; then
-    require_source_customer_web_boundary || return 1
-    printf '%s\n' source
-    return
-  fi
-  if [[ -z "$inventory" ]]; then
-    printf '%s\n' retry
-    return
-  fi
-  [[ "$inventory" =~ ^[0-9a-f]{64}$ && "$inventory" != "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" ]] || return 1
-  customer_id="$inventory"
-  require_loaded_customer_web_image || return 1
-  normalized="$(customer_web_normalized_contract_digest "$customer_id")" || return 1
-  [[ "$normalized" == "$SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256" ]] || return 1
-  [[ "$(docker_local container inspect "$customer_id" --format '{{.Image}}|{{.Config.Image}}|{{.Config.User}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.RestartCount}}')" == \
-    "$CUSTOMER_WEB_RUNTIME_IMAGE_ID|fetanagent-customer-web:${RECOVERY_RELEASE:0:12}|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web|0" ]] || return 1
-  if [[ "$(docker_local container inspect "$customer_id" --format '{{.State.Status}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == 'running|true|healthy' ]]; then
-    NEW_CUSTOMER_WEB_CONTAINER_ID="$customer_id"
-    printf '%s\n' complete
-  else
-    printf '%s\n' retry
-  fi
+  require_adopted_customer_web_boundary || return 1
+  printf '%s\n' complete
 }
 
-replace_customer_web_once() {
-  local before_guard after_guard replacement_state image_tag="fetanagent-customer-web:${RECOVERY_RELEASE:0:12}"
-  require_resumed_intent_pre_mutation_boundary || return 1
+reconcile_customer_web_once() {
+  local before_guard after_guard before_complete after_complete replacement_state
+  require_bridge_intent || return 1
+  require_failed_oci_identity_runtime || return 1
   require_other_service_inventory_exact || return 1
   before_guard="$(capture_other_service_inventory)" || return 1
+  before_complete="$(capture_complete_docker_create_inventory)" || return 1
   require_owner_never_restarted || return 1
-  # Always import the attested archive. A pre-existing release tag is never a
-  # substitute for the exact staged archive bytes and its paired config and
-  # runtime-manifest identities.
-  docker_local image load --input "$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE" >/dev/null || return 1
   require_loaded_customer_web_image || return 1
   require_prior_failed_recovery_claim || return 1
   require_failed_counter_runtime || return 1
   require_failed_customer_web_network_scope_runtime || return 1
   require_failed_network_scope_runtime || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   replacement_state="$(classify_customer_web_replacement_state)" || return 1
-  if [[ "$replacement_state" != complete ]]; then
-    [[ "$replacement_state" == source || "$replacement_state" == retry ]] || return 1
-    require_prior_failed_recovery_claim || return 1
-    require_failed_counter_runtime || return 1
-    require_failed_customer_web_network_scope_runtime || return 1
-    require_failed_network_scope_runtime || return 1
-    require_failed_owner_delta_runtime || return 1
-    env -i "${compose_environment[@]}" FETANAGENT_VCS_REF="$RECOVERY_RELEASE" \
-      FETANAGENT_IMAGE_TAG="${RECOVERY_RELEASE:0:12}" "${compose_command[@]}" \
-      up --detach --no-deps --no-build --wait --wait-timeout 90 customer-web || return 1
-  fi
+  [[ "$replacement_state" == complete ]] || return 1
   require_replacement_customer_web_boundary || return 1
   require_failed_owner_delta_runtime || return 1
+  require_failed_oci_identity_runtime || return 1
   ! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1 || return 1
   after_guard="$(capture_other_service_inventory)" || return 1
+  after_complete="$(capture_complete_docker_create_inventory)" || return 1
   [[ "$before_guard" == "$after_guard" ]] || return 1
+  [[ "$before_complete" == "$after_complete" ]] || return 1
   require_other_service_inventory_exact || return 1
   require_owner_never_restarted
 }
@@ -6479,6 +6832,8 @@ require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-002: the immutable failed 1f27 single-intent pre-mutation ledger changed'
 require_failed_owner_delta_runtime ||
   die 'OCI-RUNTIME-ID-002: the immutable failed a51 intent-only runtime or loaded descriptor image changed'
+require_failed_oci_identity_runtime ||
+  die 'SEMANTIC-V2-002: the immutable failed 0ffc checkpoint or adopted healthy customer-web changed'
 NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"
 create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'
 if [[ -e "$BRIDGE_WORK_ROOT/intent-v1" && ! -L "$BRIDGE_WORK_ROOT/intent-v1" ]]; then
@@ -6492,29 +6847,28 @@ else
 fi
 require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'
 
-# The exact 1f27 predecessor published only its intent and then failed before
-# image load or container mutation: customer normalization rejected the already
-# authorized Owner endpoint/status/control-holder delta before the strict Owner
-# delta validator could judge it. This successor consumes that intent-only
-# ledger, normalizes only customer/image state, and leaves the Owner delta intact
-# for the unchanged strict downstream validator.
+# The exact 0ffc predecessor durably replaced customer-web and Compose reported
+# it healthy, but the v1 comparator rejected lifecycle/provenance noise before
+# publishing its replacement record. This successor adopts that exact healthy
+# container, reconciles it through the semantic v2 contract, and performs no
+# Docker image, Compose, container, network, volume, or service mutation.
 if [[ -e "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" &&
   ! -L "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" ]]; then
   require_customer_web_replacement_record ||
-    die 'the durable customer-web self-recovery replacement record changed'
+    die 'the durable customer-web replacement reconciliation record changed'
 else
   [[ "$BRIDGE_STATE" == 'installing' ]] ||
-    die 'a completed bridge is missing its customer-web replacement record'
-  replace_customer_web_once ||
-    die 'the exact customer-web-only self-recovery replacement failed closed'
+    die 'a completed bridge is missing its customer-web reconciliation record'
+  reconcile_customer_web_once ||
+    die 'the exact customer-web semantic-v2 reconciliation failed closed'
   publish_exact_record "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" 0600 \
     < <(expected_customer_web_replacement_record) ||
-    die 'the customer-web self-recovery replacement record could not be published durably'
+    die 'the customer-web reconciliation record could not be published durably'
   require_customer_web_replacement_record ||
-    die 'the published customer-web self-recovery replacement record is invalid'
+    die 'the published customer-web reconciliation record is invalid'
 fi
-require_owner_never_restarted || die 'Owner lifecycle changed during customer-web replacement'
-require_other_service_inventory_exact || die 'a non-customer service changed during customer-web replacement'
+require_owner_never_restarted || die 'Owner lifecycle changed during customer-web reconciliation'
+require_other_service_inventory_exact || die 'a non-customer service changed during customer-web reconciliation'
 NON_OWNER_INVENTORY="$(capture_non_owner_inventory)" ||
   die 'the successor non-Owner inventory could not be captured'
 NON_OWNER_INVENTORY_COUNT="$(awk 'END { print NR }' <<<"$NON_OWNER_INVENTORY")" ||
@@ -6523,7 +6877,7 @@ NON_OWNER_INVENTORY_SHA256="$(printf '%s' "$NON_OWNER_INVENTORY" | sha256sum | a
   die 'the successor non-Owner inventory digest could not be computed'
 [[ "$NON_OWNER_INVENTORY_COUNT" == '5' && "$NON_OWNER_INVENTORY_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die 'the successor non-Owner inventory is malformed'
-require_non_owner_inventory_unchanged || die 'the successor non-Owner inventory changed after replacement'
+require_non_owner_inventory_unchanged || die 'the successor non-Owner inventory changed after reconciliation'
 
 # The exact 8f predecessor preserved the pre-create inventory, replacement
 # identity, and start authorization. The API proof is reissued only after the
@@ -6590,6 +6944,8 @@ if [[ "$BRIDGE_STATE" == 'complete' ]]; then
     die 'OWNER-DELTA-003: the immutable failed 1f27 single-intent pre-mutation ledger changed beside completion'
   require_failed_owner_delta_runtime ||
     die 'OCI-RUNTIME-ID-003: the immutable failed a51 intent-only runtime or descriptor residue changed beside completion'
+  require_failed_oci_identity_runtime ||
+    die 'SEMANTIC-V2-003: the immutable failed 0ffc checkpoint or adopted healthy customer-web changed beside completion'
   require_complete_owner_endpoint_phase_boundary running ||
     die 'the complete running-phase boundary changed beside completed replay'
   printf '%s\n' 'FetanAgent H14 customer-web recovery already valid: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'
@@ -6623,6 +6979,8 @@ require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-007: the immutable failed 1f27 intent-only runtime changed before replacement-record replay'
 require_failed_owner_delta_runtime ||
   die 'OCI-RUNTIME-ID-006: the immutable failed a51 intent-only runtime changed before replacement-record replay'
+require_failed_oci_identity_runtime ||
+  die 'SEMANTIC-V2-006: the immutable failed 0ffc checkpoint changed before replacement-record replay'
 if [[ -e "$BRIDGE_WORK_ROOT/replacement-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/replacement-owner-v1" ]]; then
   load_replacement_record || die 'the replacement Owner record is invalid'
 else
@@ -6643,6 +7001,8 @@ require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-009: the immutable failed 1f27 intent-only runtime changed before start-record replay'
 require_failed_owner_delta_runtime ||
   die 'OCI-RUNTIME-ID-007: the immutable failed a51 intent-only runtime changed before start-record replay'
+require_failed_oci_identity_runtime ||
+  die 'SEMANTIC-V2-007: the immutable failed 0ffc checkpoint changed before start-record replay'
 if [[ -e "$BRIDGE_WORK_ROOT/start-owner-v1" && ! -L "$BRIDGE_WORK_ROOT/start-owner-v1" ]]; then
   require_start_record || die 'the durable replacement start intent changed'
 else
@@ -6688,6 +7048,8 @@ require_failed_network_scope_runtime ||
   die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'
 require_failed_owner_delta_runtime ||
   die 'OCI-RUNTIME-ID-005: the immutable failed a51 intent-only runtime or descriptor residue changed during finalization'
+require_failed_oci_identity_runtime ||
+  die 'SEMANTIC-V2-005: the immutable failed 0ffc checkpoint or adopted healthy customer-web changed during finalization'
 require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'
 
 printf '%s\n' 'FetanAgent H14 customer-web recovery installed: Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.'

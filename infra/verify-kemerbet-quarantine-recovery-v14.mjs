@@ -42,10 +42,11 @@ assert.equal(
 );
 
 const helperSha256 = createHash('sha256').update(helper, 'utf8').digest('hex');
+const canonicalH14HelperSha256 = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58';
 assert.match(
   installer,
-  new RegExp(`readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${helperSha256}'`),
-  'the H14 installer must pin the exact LF-normalized reviewed helper',
+  new RegExp(`readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${canonicalH14HelperSha256}'`),
+  'the immutable H14 installer must retain its exact canonical reviewed helper',
 );
 assert.match(installer, new RegExp(`readonly AUTHORIZATION_SHA256='${authorizationSha256}'`));
 assert.match(installer, /readonly PREDECESSOR_RELEASE='306818ca812bd2abce8479396c4eea8383ea00f9'/);
@@ -960,9 +961,33 @@ assert.match(
 assert.match(helper, /seal_match\.group\(1\)\.decode\('ascii'\) != profile_id/);
 assert.match(helper, /seal_match\.group\(2\) == old_match\.group\(2\)/);
 assert.match(helper, /final_data != seal_data/);
+const sessionBindingSelector = helper.slice(
+  helper.indexOf('select_kemerbet_session_binding_source() {'),
+  helper.indexOf('\n\nkemerbet_h14_root() {'),
+);
 assert.match(
-  helper,
+  sessionBindingSelector,
+  /local commit_sha="\$1" purpose="\$\{2:-exact-release\}"/,
+  'the session-binding selector must default to the exact-release purpose',
+);
+assert.match(
+  sessionBindingSelector,
+  /\[\[ "\$purpose" =~ \^\(exact-release\|security-recovery-preview\)\$ \]\] \|\|\s+die 'the private KemerBet session binding purpose is invalid'/,
+  'unknown selector purposes must fail closed',
+);
+assert.match(
+  sessionBindingSelector,
+  /if \[\[ "\$KEMERBET_H14_RECOVERY_RELEASE" != "\$commit_sha" \]\]; then\s+\[\[ "\$purpose" == 'security-recovery-preview' &&\s+"\$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' \]\] \|\|\s+die 'the H14 recovery preview belongs to another reviewed release'\s+require_kemerbet_v3_runtime_bridge\s+\[\[ "\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' \]\] \|\|/s,
+  'a split-release selector may cross the H14 release boundary only for the prepared security-recovery preview behind the active runtime bridge',
+);
+assert.match(
+  sessionBindingSelector,
   /cohort-prepared\)\s+printf '%s\\n'\s+\\?\s*"\$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT\/\$KEMERBET_H14_RECOVERY_RELEASE\/recovery-identity-authorization-v1"/s,
+);
+assert.doesNotMatch(
+  sessionBindingSelector,
+  /KEMERBET_QUARANTINE_RECOVERY_V14_PARENT\/\$commit_sha\/recovery-identity-authorization-v1/,
+  'the descendant runtime must never rewrite the canonical historical H14 authorization path',
 );
 assert.match(
   helper,
@@ -971,6 +996,181 @@ assert.match(
 assert.match(helper, /resealed\).*?printf '%s\\n' "\$KEMERBET_READINESS_BINDING"/s);
 assert.match(helper, /'0:10001:440:1:389'/);
 assert.match(helper, /require_kemerbet_h14_recovery_identity_authorization_content/);
+
+const startSessionHandlerStart = helper.lastIndexOf('\n  start-kemerbet-session-provision)');
+const readySessionHandlerStart = helper.lastIndexOf('\n  kemerbet-session-provision-ready)');
+const readySessionHandlerEnd = helper.indexOf(
+  '\n  kemerbet-v1-retirement-recovery-ready)',
+  readySessionHandlerStart,
+);
+const sealReadinessHandlerStart = helper.lastIndexOf('\n  seal-kemerbet-readiness)');
+const sealReadinessHandlerEnd = helper.indexOf(
+  '\n  recheck-kemerbet-readiness)',
+  sealReadinessHandlerStart,
+);
+assert.ok(
+  startSessionHandlerStart >= 0 &&
+    readySessionHandlerStart > startSessionHandlerStart &&
+    readySessionHandlerEnd > readySessionHandlerStart &&
+    sealReadinessHandlerStart > readySessionHandlerEnd &&
+    sealReadinessHandlerEnd > sealReadinessHandlerStart,
+  'the exact private-preview and readiness-seal command handlers must remain discoverable',
+);
+const startSessionHandler = helper.slice(startSessionHandlerStart, readySessionHandlerStart);
+const readySessionHandler = helper.slice(readySessionHandlerStart, readySessionHandlerEnd);
+const sealReadinessHandler = helper.slice(sealReadinessHandlerStart, sealReadinessHandlerEnd);
+const splitReleasePreviewCall =
+  /select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview/;
+assert.match(startSessionHandler, splitReleasePreviewCall);
+assert.match(readySessionHandler, splitReleasePreviewCall);
+assert.equal(
+  (
+    helper.match(
+      /select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview/g,
+    ) ?? []
+  ).length,
+  2,
+  'only private-preview startup and readiness attestation may request split-release recovery selection',
+);
+assert.doesNotMatch(sealReadinessHandler, /security-recovery-preview/);
+assert.match(
+  sealReadinessHandler,
+  /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha"\)"/,
+  'readiness sealing must retain the default exact-release selector purpose',
+);
+assert.doesNotMatch(
+  [sessionBindingSelector, startSessionHandler, readySessionHandler].join('\n'),
+  /FINANCIAL_ACTIONS_MODE=live|KEMERBET_(?:EXECUTOR|FINAL_ACTION|TRANSFER|AMOUNT_ENTRY)_ENABLED=true|INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=true|KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=true|PlayerEPOSDeposit|\/transfer\b/iu,
+  'the split-release preview surface must not enable Amount, Transfer, a final action, or any live financial runtime',
+);
+
+const historicalH14Release = 'a'.repeat(40);
+const descendantMainRelease = 'b'.repeat(40);
+const canonicalRecoveryAuthorization =
+  `/var/lib/fetanagent/kemerbet-quarantine-recovery-v14/${historicalH14Release}` +
+  '/recovery-identity-authorization-v1';
+const sessionBindingSelectorHarness = `
+set -euo pipefail
+die() {
+  printf '%s\\n' "$*" >&2
+  exit 1
+}
+inspect_kemerbet_v2_v3_successor_gate() { :; }
+require_kemerbet_v3_runtime_bridge() {
+  [[ "$MOCK_RUNTIME_BRIDGE" == 'active' ]] || die 'mock runtime bridge unavailable'
+}
+KEMERBET_QUARANTINE_RECOVERY_V14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
+KEMERBET_H14_RECOVERY_RELEASE="$MOCK_H14_RELEASE"
+KEMERBET_H14_RECOVERY_STATE="$MOCK_H14_STATE"
+KEMERBET_V2_V3_SUCCESSOR_GATE_STATE="$MOCK_SUCCESSOR_STATE"
+KEMERBET_READINESS_BINDING='/unreachable/readiness-binding-v3'
+KEMERBET_AGENT_IDENTITY_BINDINGS='/unreachable/agent-identity-bindings-v3'
+${sessionBindingSelector}
+if [[ "$MOCK_PURPOSE" == '__default__' ]]; then
+  select_kemerbet_session_binding_source "$MOCK_CURRENT_RELEASE"
+else
+  select_kemerbet_session_binding_source "$MOCK_CURRENT_RELEASE" "$MOCK_PURPOSE"
+fi
+`;
+for (const selectorCase of [
+  {
+    description: 'the canonical H14 release remains valid under the default exact-release purpose',
+    currentRelease: historicalH14Release,
+    purpose: '__default__',
+    state: 'cohort-prepared',
+    successorState: 'successor-installed',
+    bridge: 'inactive',
+    expectedSuccess: true,
+    expectedOutput: canonicalRecoveryAuthorization,
+  },
+  {
+    description:
+      'a descendant main runtime may select only the canonical prepared H14 recovery authorization',
+    currentRelease: descendantMainRelease,
+    purpose: 'security-recovery-preview',
+    state: 'cohort-prepared',
+    successorState: 'successor-installed',
+    bridge: 'active',
+    expectedSuccess: true,
+    expectedOutput: canonicalRecoveryAuthorization,
+  },
+  {
+    description: 'a descendant runtime cannot cross the H14 boundary under the default purpose',
+    currentRelease: descendantMainRelease,
+    purpose: '__default__',
+    state: 'cohort-prepared',
+    successorState: 'successor-installed',
+    bridge: 'active',
+    expectedSuccess: false,
+  },
+  {
+    description: 'an unknown selector purpose fails even on the canonical H14 release',
+    currentRelease: historicalH14Release,
+    purpose: 'arbitrary-preview',
+    state: 'cohort-prepared',
+    successorState: 'successor-installed',
+    bridge: 'active',
+    expectedSuccess: false,
+  },
+  ...['runtime-ready', 'resealed', 'completed'].map((state) => ({
+    description: `a descendant recovery preview cannot select H14 state ${state}`,
+    currentRelease: descendantMainRelease,
+    purpose: 'security-recovery-preview',
+    state,
+    successorState: 'successor-installed',
+    bridge: 'active',
+    expectedSuccess: false,
+  })),
+  {
+    description: 'the split-release recovery preview requires the installed successor boundary',
+    currentRelease: descendantMainRelease,
+    purpose: 'security-recovery-preview',
+    state: 'cohort-prepared',
+    successorState: 'successor-completed',
+    bridge: 'active',
+    expectedSuccess: false,
+  },
+  {
+    description: 'the split-release recovery preview requires the active runtime bridge',
+    currentRelease: descendantMainRelease,
+    purpose: 'security-recovery-preview',
+    state: 'cohort-prepared',
+    successorState: 'successor-installed',
+    bridge: 'inactive',
+    expectedSuccess: false,
+  },
+  {
+    description: 'the split-release recovery preview rejects a malformed current release',
+    currentRelease: 'not-a-release',
+    purpose: 'security-recovery-preview',
+    state: 'cohort-prepared',
+    successorState: 'successor-installed',
+    bridge: 'active',
+    expectedSuccess: false,
+  },
+]) {
+  const result = spawnSync('bash', ['-c', sessionBindingSelectorHarness], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      MOCK_CURRENT_RELEASE: selectorCase.currentRelease,
+      MOCK_H14_RELEASE: historicalH14Release,
+      MOCK_H14_STATE: selectorCase.state,
+      MOCK_PURPOSE: selectorCase.purpose,
+      MOCK_RUNTIME_BRIDGE: selectorCase.bridge,
+      MOCK_SUCCESSOR_STATE: selectorCase.successorState,
+    },
+  });
+  assert.equal(
+    result.status === 0,
+    selectorCase.expectedSuccess,
+    `${selectorCase.description}: ${result.stderr || result.stdout}`,
+  );
+  if (selectorCase.expectedSuccess) {
+    assert.equal(result.stdout.trim(), selectorCase.expectedOutput, selectorCase.description);
+  }
+}
 assert.match(
   helper,
   /publish_root_claim_marker\(f'\{root\}\/terminal-recovery-marker-v1', marker_data\)/,

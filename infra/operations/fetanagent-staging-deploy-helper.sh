@@ -56,6 +56,7 @@ readonly KEMERBET_V3_HELPER_ROTATION_V11_PARENT='/var/lib/fetanagent/kemerbet-re
 readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-helper-rotation-v12'
 readonly KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-recheck-bridge-v13'
 readonly KEMERBET_QUARANTINE_RECOVERY_V14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
+readonly KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT='/var/lib/fetanagent/kemerbet-security-recovery-preview-bridge-v16'
 readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_INSTALLING_NAME='.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing'
@@ -3852,9 +3853,177 @@ KEMERBET_H14_RECOVERY_STATE='absent'
 KEMERBET_H14_RECOVERY_RELEASE=''
 KEMERBET_H14_RECOVERY_HELPER_SHA256=''
 KEMERBET_H14_RECOVERY_PROFILE_ID=''
+KEMERBET_H16_PREVIEW_BRIDGE_STATE='absent'
+KEMERBET_H16_PREVIEW_BRIDGE_RELEASE=''
+KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256=''
+KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE=''
+
+inspect_kemerbet_h16_preview_bridge() {
+  local inspection
+  local -a inspection_lines=()
+  KEMERBET_H16_PREVIEW_BRIDGE_STATE='absent'
+  KEMERBET_H16_PREVIEW_BRIDGE_RELEASE=''
+  KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256=''
+  KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+  KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE=''
+  if [[ ! -e "$KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT" &&
+    ! -L "$KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT" ]]; then
+    return 0
+  fi
+  KEMERBET_H16_PREVIEW_BRIDGE_STATE='invalid'
+  inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT" "$HELPER_PATH" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+parent, helper = sys.argv[1:]
+release_pattern = re.compile(r'[0-9a-f]{40}')
+sha_pattern = re.compile(r'[0-9a-f]{64}')
+canonical_h14 = '06459511d9330a0e1d956c42529b81aa9970e7a2'
+canonical_runtime = '30fc8196356d3bb1f6f279c4ff40ad2b4a91a44c'
+canonical_predecessor = 'c36c2b509ef3f560f934dfaf033e34656f36748f4b82e3c0a3398564f8161f58'
+canonical_prompt = '6b242ff02a16e885ea87008e60826c5ee333f3fbfcf30ea0f044ce938568c874'
+canonical_authorization = '192e055032a45c83a5311b769a69dab9d6bacc2f1a256bc2f8bc3cb9395bdb25'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_directory(path, mode, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, mode)
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != entries
+    ):
+        reject()
+
+
+def exact_file(path, mode, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, mode, 1)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_size > maximum
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = bytearray()
+        while len(data) <= maximum:
+            chunk = os.read(descriptor, maximum + 1 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if (
+            len(data) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+                before.st_nlink, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+                after.st_nlink, after.st_size, after.st_mtime_ns)
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+        ):
+            reject()
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
+try:
+    parent_value = os.lstat(parent)
+    if (
+        not stat.S_ISDIR(parent_value.st_mode)
+        or (parent_value.st_uid, parent_value.st_gid, stat.S_IMODE(parent_value.st_mode))
+        != (0, 0, 0o700)
+        or os.path.realpath(parent) != parent
+    ):
+        reject()
+    children = os.listdir(parent)
+    if len(children) != 1 or release_pattern.fullmatch(children[0]) is None:
+        reject()
+    bridge_release = children[0]
+    root = f'{parent}/{bridge_release}'
+    exact_directory(parent, 0o700, [bridge_release])
+    exact_directory(root, 0o700, ['completed-v1', 'intent-v1', 'predecessor-helper'])
+    intent_data = exact_file(f'{root}/intent-v1', 0o600, 4096)
+    completion_data = exact_file(f'{root}/completed-v1', 0o600, 4096)
+    predecessor_data = exact_file(f'{root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
+    helper_data = exact_file(helper, 0o755, 2 * 1024 * 1024)
+    intent = intent_data.decode('ascii').splitlines()
+    completion = completion_data.decode('ascii').splitlines()
+    if (
+        len(intent) != 20
+        or len(completion) != 21
+        or intent[0] != 'contract=fetanagent-kemerbet-security-recovery-preview-bridge-v16'
+        or intent[1] != 'state=authorized'
+        or intent[2] != f'bridge_release={bridge_release}'
+        or intent[3] != f'runtime_release={canonical_runtime}'
+        or intent[4] != f'h14_recovery_release={canonical_h14}'
+        or intent[5] != 'h14_recovery_state=cohort-prepared'
+        or intent[6] != f'predecessor_helper_sha256={canonical_predecessor}'
+        or not intent[7].startswith('successor_helper_sha256=')
+        or sha_pattern.fullmatch(intent[7].split('=', 1)[1]) is None
+        or intent[7].split('=', 1)[1] == canonical_predecessor
+        or intent[8] != f'h14_authorization_prompt_sha256={canonical_prompt}'
+        or intent[9] != f'h14_recovery_authorization_sha256={canonical_authorization}'
+        or intent[10:] != [
+            'financial_actions_mode=dry_run',
+            'kemerbet_executor_enabled=false',
+            'kemerbet_final_action_enabled=false',
+            'internal_execution_runtime_enabled=false',
+            'private_live_deposit_pilot_enabled=false',
+            'amount_entry_enabled=false',
+            'transfer_enabled=false',
+            'lookup_authorized=false',
+            'recheck_authorized=false',
+            'money_moved=false',
+        ]
+        or completion[0] != intent[0]
+        or completion[1] != 'state=preview-bridge-installed'
+        or completion[2:20] != intent[2:20]
+        or completion[20] != f'bridge_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or intent_data != ('\n'.join(intent) + '\n').encode('ascii')
+        or completion_data != ('\n'.join(completion) + '\n').encode('ascii')
+        or hashlib.sha256(predecessor_data).hexdigest() != canonical_predecessor
+        or hashlib.sha256(helper_data).hexdigest() != intent[7].split('=', 1)[1]
+    ):
+        reject()
+    sys.stdout.write(
+        f'active\n{bridge_release}\n{intent[7].split("=", 1)[1]}\n'
+        f'{canonical_predecessor}\n{canonical_h14}\n'
+    )
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 0
+  mapfile -t inspection_lines <<<"$inspection"
+  [[ "${#inspection_lines[@]}" -eq 5 &&
+    "${inspection_lines[0]}" == 'active' &&
+    "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ ]] || return 0
+  KEMERBET_H16_PREVIEW_BRIDGE_STATE="${inspection_lines[0]}"
+  KEMERBET_H16_PREVIEW_BRIDGE_RELEASE="${inspection_lines[1]}"
+  KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256="${inspection_lines[2]}"
+  KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[3]}"
+  KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE="${inspection_lines[4]}"
+}
 
 inspect_kemerbet_h14_recovery_gate() {
-  local control_mountpoint inspection profile_mountpoint
+  local control_mountpoint current_helper_sha inspection profile_mountpoint
   local -a inspection_lines=()
   KEMERBET_H14_RECOVERY_STATE='absent'
   KEMERBET_H14_RECOVERY_RELEASE=''
@@ -4325,7 +4494,8 @@ try:
 
     helper_data, _ = exact_file(helper, (0, 0), 0o755, 2 * 1024 * 1024)
     predecessor_data, _ = exact_file(f'{root}/predecessor-helper', (0, 0), 0o400, 2 * 1024 * 1024)
-    if hashlib.sha256(helper_data).hexdigest() != successor_helper_sha or hashlib.sha256(predecessor_data).hexdigest() != predecessor_helper_sha:
+    current_helper_sha = hashlib.sha256(helper_data).hexdigest()
+    if hashlib.sha256(predecessor_data).hexdigest() != predecessor_helper_sha:
         reject()
 
     old_binding, old_binding_value, old_match = require_v3(f'{root}/retired-binding-v3', (10001, 10001), 0o600)
@@ -4710,22 +4880,43 @@ try:
                     reject()
         state = 'profile-finalization-prefix'
 
-    sys.stdout.write(f'{state}\n{release}\n{successor_helper_sha}\n{profile_id}\n')
+    sys.stdout.write(
+        f'{state}\n{release}\n{successor_helper_sha}\n{profile_id}\n{current_helper_sha}\n'
+    )
 except Exception:
     raise SystemExit(1)
 PY
 )" || return 0
   mapfile -t inspection_lines <<<"$inspection"
-  [[ "${#inspection_lines[@]}" -eq 4 &&
+  [[ "${#inspection_lines[@]}" -eq 5 &&
     "${inspection_lines[0]}" =~ ^(host-retired|profile-finalization-prefix|runtime-ready|cohort-publication-prefix|cohort-latch-retirement-prefix|cohort-freeze-prefix|cohort-prepared|reseal-prefix|reseal-publication-prefix|resealed|completed-prefix|completion-publication-prefix|completed)$ &&
     "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
     "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
-    ( -z "${inspection_lines[3]}" || "${inspection_lines[3]}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ) ]] ||
+    ( -z "${inspection_lines[3]}" || "${inspection_lines[3]}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ) &&
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{64}$ ]] ||
     return 0
   KEMERBET_H14_RECOVERY_STATE="${inspection_lines[0]}"
   KEMERBET_H14_RECOVERY_RELEASE="${inspection_lines[1]}"
   KEMERBET_H14_RECOVERY_HELPER_SHA256="${inspection_lines[2]}"
   KEMERBET_H14_RECOVERY_PROFILE_ID="${inspection_lines[3]}"
+  current_helper_sha="${inspection_lines[4]}"
+  inspect_kemerbet_h16_preview_bridge
+  [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" != 'invalid' ]] || {
+    KEMERBET_H14_RECOVERY_STATE='invalid'
+    return 0
+  }
+  if [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
+    [[ "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' &&
+      "$KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE" == "$KEMERBET_H14_RECOVERY_RELEASE" &&
+      "$KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
+        "$KEMERBET_H14_RECOVERY_HELPER_SHA256" &&
+      "$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256" == "$current_helper_sha" ]] || {
+      KEMERBET_H14_RECOVERY_STATE='invalid'
+      return 0
+    }
+  elif [[ "$current_helper_sha" != "$KEMERBET_H14_RECOVERY_HELPER_SHA256" ]]; then
+    KEMERBET_H14_RECOVERY_STATE='invalid'
+  fi
 }
 
 inspect_kemerbet_v2_v3_successor_gate() {
@@ -4746,6 +4937,9 @@ inspect_kemerbet_v2_v3_successor_gate() {
     fi
     KEMERBET_V2_V3_SUCCESSOR_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
     KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H14_RECOVERY_HELPER_SHA256"
+    if [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
+      KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256"
+    fi
     KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='active'
     KEMERBET_V2_V3_RUNTIME_BRIDGE_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
     KEMERBET_V3_RECHECK_BRIDGE_STATE='active'
@@ -6776,13 +6970,21 @@ require_kemerbet_v3_recheck_bridge() {
 }
 
 select_kemerbet_session_binding_source() {
-  local commit_sha="$1"
+  local commit_sha="$1" purpose="${2:-exact-release}"
   [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
     die 'the private KemerBet session binding release is invalid'
+  [[ "$purpose" =~ ^(exact-release|security-recovery-preview)$ ]] ||
+    die 'the private KemerBet session binding purpose is invalid'
   inspect_kemerbet_v2_v3_successor_gate
   if [[ "$KEMERBET_H14_RECOVERY_STATE" != 'absent' ]]; then
-    [[ "$KEMERBET_H14_RECOVERY_RELEASE" == "$commit_sha" ]] ||
-      die 'the H14 recovery preview belongs to another reviewed release'
+    if [[ "$KEMERBET_H14_RECOVERY_RELEASE" != "$commit_sha" ]]; then
+      [[ "$purpose" == 'security-recovery-preview' &&
+        "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' ]] ||
+        die 'the H14 recovery preview belongs to another reviewed release'
+      require_kemerbet_v3_runtime_bridge
+      [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed' ]] ||
+        die 'the release-neutral H14 recovery preview requires the installed successor boundary'
+    fi
     case "$KEMERBET_H14_RECOVERY_STATE" in
       cohort-prepared)
         printf '%s\n' \
@@ -18170,7 +18372,7 @@ case "$command" in
     require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"
     require_kemerbet_readiness_output_directory
     require_kemerbet_v3_runtime_bridge
-    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"
+    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha" security-recovery-preview)"
     successor_session_state="$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE"
     successor_session_release="$KEMERBET_V2_V3_SUCCESSOR_RELEASE"
     successor_session_helper_sha="$KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256"
@@ -18239,7 +18441,7 @@ case "$command" in
     commit_sha="$2"
     [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
       die 'the reviewed main commit must be 40 lowercase hexadecimal characters'
-    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"
+    session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha" security-recovery-preview)"
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
     require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"
     require_kemerbet_v1_retirement_expiry_guard_armed ||

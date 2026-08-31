@@ -27,6 +27,7 @@ const helperPath = resolve(root, 'infra/operations/fetanagent-staging-deploy-hel
 const normalized = (path) => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 const repair = normalized(repairPath);
 const helper = normalized(helperPath);
+const canonicalH14Installer = normalized(h14Path);
 
 const recoveryRelease = '06459511d9330a0e1d956c42529b81aa9970e7a2';
 const runtimeRelease = '306818ca812bd2abce8479396c4eea8383ea00f9';
@@ -132,11 +133,18 @@ assert.doesNotMatch(
   'the canonical interrupted H14 directory may only finalize under its canonical release',
 );
 
-// The successor helper staged beside the repair must remain the already-reviewed H14 helper.
-assert.equal(
+// Historical H14 repair evidence remains pinned to its original reviewed helper.
+// Later helper promotions use distinct append-only namespaces and must never
+// rewrite this canonical installer chain.
+assert.match(
+  canonicalH14Installer,
+  new RegExp(`readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${successorHelperSha256}'`),
+  'the historical H14 repair must retain its canonical reviewed helper pin',
+);
+assert.notEqual(
   createHash('sha256').update(helper, 'utf8').digest('hex'),
   successorHelperSha256,
-  'the repair must not silently rotate to an unreviewed helper',
+  'the current helper change must be carried by a distinct forward-only promotion',
 );
 assert.match(repair, /require_helper_file "\$TARGET" "\$PREDECESSOR_HELPER_SHA256" 755/);
 assert.match(repair, /require_helper_file "\$STAGED_HELPER" "\$SUCCESSOR_HELPER_SHA256" 600/);

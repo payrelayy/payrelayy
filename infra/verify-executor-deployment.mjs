@@ -2445,8 +2445,8 @@ assert.match(
 );
 assert.match(
   privateSessionRecaptchaSource,
-  /!exactAnchorFrame\(requestFrame, page\)[\s\S]*?exactDynamicPost\([\s\S]*?'\/recaptcha\/api2\/reload'[\s\S]*?'application\/x-protobuffer'[\s\S]*?'\/recaptcha\/api2\/clr'[\s\S]*?undefined[\s\S]*?'\/recaptcha\/api2\/bcn'[\s\S]*?'application\/x-protobuf'/u,
-  'worker imports and all three dynamic POSTs must retain exact provenance, MIME, order, and endpoint contracts',
+  /expectedFrame: 'anchor' \| 'main'[\s\S]*?expectedFrame === 'anchor'[\s\S]*?exactAnchorFrame\(requestFrame, page\)[\s\S]*?: exactMainFrame\(requestFrame, page\)[\s\S]*?exactDynamicPost\([\s\S]*?candidate\.requestFrame,\s*'anchor',\s*'\/recaptcha\/api2\/reload'[\s\S]*?'application\/x-protobuffer'[\s\S]*?exactDynamicPost\([\s\S]*?candidate\.requestFrame,\s*'main',\s*'\/recaptcha\/api2\/clr'[\s\S]*?undefined[\s\S]*?exactDynamicPost\([\s\S]*?candidate\.requestFrame,\s*'anchor',\s*'\/recaptcha\/api2\/bcn'[\s\S]*?'application\/x-protobuf'/u,
+  'the three dynamic POSTs must retain their exact per-step frame provenance, MIME, order, and endpoint contracts',
 );
 assert.match(
   privateSessionRecaptchaSource,

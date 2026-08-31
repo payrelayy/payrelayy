@@ -73,6 +73,48 @@ const CONTROL_SOCKET = `${CONTROL_ROOT}/session.sock`;
 const READINESS_PLAYER_IDS_FILE = `${CONTROL_ROOT}/kemerbet-readiness-player-ids.stage-v1`;
 const PROFILE_ROOT = '/var/lib/fetanagent/kemerbet-sessions';
 const CHROMIUM_PATH = '/usr/bin/chromium';
+// Playwright 1.62.1 is pinned exactly in apps/executor/package.json. Its one combined
+// --disable-features switch must be replaced atomically rather than followed by another switch:
+// duplicate Chromium switches can discard the earlier feature list. Keep this list byte-for-byte
+// aligned with Playwright 1.62.1, then append FetanAgent's browser-owned network suppressions.
+const PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES = Object.freeze([
+  'AvoidUnnecessaryBeforeUnloadCheckSync',
+  'BoundaryEventDispatchTracksNodeRemoval',
+  'DestroyProfileOnBrowserClose',
+  'DialMediaRouteProvider',
+  'GlobalMediaControls',
+  'HttpsUpgrades',
+  'LensOverlay',
+  'MediaRouter',
+  'PaintHolding',
+  'ThirdPartyStoragePartitioning',
+  'BlockOriginHeaderModificationOnRedirect',
+  'Translate',
+  'AutoDeElevate',
+  'OptimizationHints',
+  'msForceBrowserSignIn',
+  'msEdgeUpdateLaunchServicesPreferredVersion',
+] as const);
+const PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES_ARGUMENT = `--disable-features=${PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES.join(',')}`;
+const KEMERBET_DISABLED_CHROMIUM_FEATURES_ARGUMENT = `--disable-features=${[
+  ...PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES,
+  // Chromium Autofill crowdsourcing is browser-owned traffic, not a reviewed KemerBet resource.
+  // Suppress it at source; never allowlist content-autofill.googleapis.com in the fail-closed route.
+  'AutofillServerCommunication',
+  'NetworkPrediction',
+  'PreconnectToSearch',
+  'SpeculationRulesPrefetchFuture',
+  'WebTransport',
+].join(',')}`;
+const KEMERBET_CHROMIUM_NETWORK_REDUCTION_ARGUMENTS = Object.freeze([
+  KEMERBET_DISABLED_CHROMIUM_FEATURES_ARGUMENT,
+  '--disable-quic',
+  '--dns-prefetch-disable',
+  '--disable-network-prediction',
+  '--disable-preconnect',
+  '--disable-webrtc',
+  '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+] as const);
 const API_ORIGIN = 'https://admin-api.agt-digi.com';
 const DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
 const LOGIN_PATH = '/Account/Login';
@@ -88,6 +130,8 @@ const KEMERBET_RECAPTCHA_RUNTIME_URL = `https://www.gstatic.com/recaptcha/releas
 const KEMERBET_RECAPTCHA_STYLES_URL = `https://www.gstatic.com/recaptcha/releases/${KEMERBET_RECAPTCHA_VERSION}/styles__ltr.css`;
 const KEMERBET_RECAPTCHA_LOGO_URL = 'https://www.gstatic.com/recaptcha/api2/logo_48.png';
 const KEMERBET_RECAPTCHA_WEBWORKER_URL = `https://www.google.com/recaptcha/api2/webworker.js?hl=en&v=${KEMERBET_RECAPTCHA_VERSION}`;
+const KEMERBET_RECAPTCHA_OPTIONAL_FONT_URL =
+  'https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2';
 const KEMERBET_RECAPTCHA_ASSET_FETCH_TIMEOUT_MS = 10_000;
 const KEMERBET_RECAPTCHA_VERIFIED_CACHE_TTL_MS = 10 * 60 * 1_000;
 const KEMERBET_RECAPTCHA_VERIFIED_CACHE_MAX_ENTRIES = 5;
@@ -153,6 +197,7 @@ const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, string>([
   ['/prd/agt-admin-client/v84/index-6dvVbeUF.js', 'script'],
 ]);
 const KEMERBET_ABORTABLE_STATIC_ASSETS = new Map<string, string>([
+  [KEMERBET_RECAPTCHA_OPTIONAL_FONT_URL, 'font'],
   [
     'https://agt-cdn.cdn-digi.com/prd/companies/2093/projects/39803/logo_24e4a06149154c9a956062027baa2fed.png',
     'image',
@@ -1276,6 +1321,24 @@ function requestKemerBetChromiumUserAgent(
   return exactKemerBetChromiumUserAgent(value) ? value : undefined;
 }
 
+function requestHeaderCount(
+  headers: Readonly<Record<string, string>>,
+  expectedName: string,
+): number {
+  return Object.keys(headers).filter((name) => name.toLowerCase() === expectedName).length;
+}
+
+function exactRequestHeader(
+  headers: Readonly<Record<string, string>>,
+  expectedName: string,
+  expectedValue: string,
+): boolean {
+  const candidates = Object.entries(headers).filter(
+    ([name]) => name.toLowerCase() === expectedName,
+  );
+  return candidates.length === 1 && candidates[0]?.[1] === expectedValue;
+}
+
 async function fetchKemerBetRecaptchaAsset(
   input: KemerBetRecaptchaAssetFetchInput,
 ): Promise<KemerBetRecaptchaAssetFetchResult> {
@@ -1489,6 +1552,7 @@ export function createKemerBetRecaptchaCeremony(input: {
   let siteKey: string | undefined;
   let chromiumUserAgent: string | undefined;
   let anchorFrame: Frame | undefined;
+  let anchorUrl: string | undefined;
   let anchorRuntimeLoaded = false;
   let logoLoaded = false;
   let webworkerLoaded = false;
@@ -1707,18 +1771,43 @@ export function createKemerBetRecaptchaCeremony(input: {
     ) {
       return forbidden(candidate.route);
     }
-    const requestUserAgent = requestKemerBetChromiumUserAgent(request.headers());
-    if (
-      requestUserAgent === undefined ||
-      (chromiumUserAgent !== undefined && requestUserAgent !== chromiumUserAgent)
-    ) {
-      return forbidden(candidate.route);
-    }
-
     const method = request.method();
     const navigation = request.isNavigationRequest();
     const redirected = request.redirectedFrom() !== null;
     const resourceType = request.resourceType();
+    const requestHeaders = request.headers();
+    const requestUserAgent = requestKemerBetChromiumUserAgent(requestHeaders);
+    // Chromium 152 attributes the exact pinned worker bootstrap to the anchor frame, but
+    // Playwright's routed Request omits its browser-owned User-Agent header. Admit that one
+    // observed omission only after binding every other immutable property and its exact anchor
+    // Referer. The server-side pinned fetch still uses the User-Agent captured from api.js.
+    const exactUserAgentOmittedWebworker =
+      step === 'static_subresources' &&
+      chromiumUserAgent !== undefined &&
+      anchorFrame !== undefined &&
+      anchorUrl !== undefined &&
+      candidate.requestFrame === anchorFrame &&
+      requestHeaderCount(requestHeaders, 'user-agent') === 0 &&
+      exactRequestHeader(requestHeaders, 'referer', anchorUrl) &&
+      exactStaticGet({
+        expectedResourceType: 'script',
+        expectedUrl: KEMERBET_RECAPTCHA_WEBWORKER_URL,
+        method,
+        navigation,
+        redirected,
+        resourceType,
+        url,
+      });
+    const assetFetchUserAgent =
+      requestUserAgent ?? (exactUserAgentOmittedWebworker ? chromiumUserAgent : undefined);
+    if (
+      assetFetchUserAgent === undefined ||
+      (requestUserAgent !== undefined &&
+        chromiumUserAgent !== undefined &&
+        requestUserAgent !== chromiumUserAgent)
+    ) {
+      return forbidden(candidate.route);
+    }
     try {
       if (step === 'api') {
         const query = [...url.searchParams.entries()];
@@ -1739,10 +1828,10 @@ export function createKemerBetRecaptchaCeremony(input: {
         ) {
           return forbidden(candidate.route);
         }
-        chromiumUserAgent = requestUserAgent;
+        chromiumUserAgent = assetFetchUserAgent;
         ceremonyStarted = true;
         if (
-          !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.api, requestUserAgent))
+          !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.api, assetFetchUserAgent))
         ) {
           return forbidden(candidate.route);
         }
@@ -1771,7 +1860,7 @@ export function createKemerBetRecaptchaCeremony(input: {
             candidate.route,
             url.href,
             assetPins.runtime,
-            requestUserAgent,
+            assetFetchUserAgent,
           ))
         ) {
           return forbidden(candidate.route);
@@ -1810,6 +1899,7 @@ export function createKemerBetRecaptchaCeremony(input: {
           return forbidden(candidate.route);
         }
         anchorFrame = candidate.requestFrame;
+        anchorUrl = url.href;
         if (!beforeDeadline()) return forbidden(candidate.route);
         await candidate.route.continue();
         if (poisoned || !beforeDeadline()) {
@@ -1836,7 +1926,7 @@ export function createKemerBetRecaptchaCeremony(input: {
           return forbidden(candidate.route);
         }
         if (
-          !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.css, requestUserAgent))
+          !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.css, assetFetchUserAgent))
         ) {
           return forbidden(candidate.route);
         }
@@ -1857,7 +1947,9 @@ export function createKemerBetRecaptchaCeremony(input: {
             url,
           });
         const exactWebworker =
-          candidate.requestFrame === undefined &&
+          candidate.requestFrame === anchorFrame &&
+          anchorUrl !== undefined &&
+          exactRequestHeader(requestHeaders, 'referer', anchorUrl) &&
           exactStaticGet({
             expectedResourceType: 'script',
             expectedUrl: KEMERBET_RECAPTCHA_WEBWORKER_URL,
@@ -1879,7 +1971,7 @@ export function createKemerBetRecaptchaCeremony(input: {
             url,
           });
         const exactWorkerRuntime =
-          candidate.requestFrame === undefined &&
+          candidate.requestFrame === anchorFrame &&
           exactStaticGet({
             expectedResourceType: 'other',
             expectedUrl: KEMERBET_RECAPTCHA_RUNTIME_URL,
@@ -1895,7 +1987,7 @@ export function createKemerBetRecaptchaCeremony(input: {
               candidate.route,
               url.href,
               assetPins.runtime,
-              requestUserAgent,
+              assetFetchUserAgent,
             ))
           ) {
             return forbidden(candidate.route);
@@ -1907,7 +1999,7 @@ export function createKemerBetRecaptchaCeremony(input: {
               candidate.route,
               url.href,
               assetPins.webworker,
-              requestUserAgent,
+              assetFetchUserAgent,
             ))
           ) {
             return forbidden(candidate.route);
@@ -1915,7 +2007,12 @@ export function createKemerBetRecaptchaCeremony(input: {
           webworkerLoaded = true;
         } else if (exactLogo && !logoLoaded) {
           if (
-            !(await fulfillPinnedAsset(candidate.route, url.href, assetPins.logo, requestUserAgent))
+            !(await fulfillPinnedAsset(
+              candidate.route,
+              url.href,
+              assetPins.logo,
+              assetFetchUserAgent,
+            ))
           ) {
             return forbidden(candidate.route);
           }
@@ -1926,7 +2023,7 @@ export function createKemerBetRecaptchaCeremony(input: {
               candidate.route,
               url.href,
               assetPins.runtime,
-              requestUserAgent,
+              assetFetchUserAgent,
             ))
           ) {
             return forbidden(candidate.route);
@@ -2180,6 +2277,7 @@ export function classifyKemerBetSessionRequest(input: {
   }
   if (
     input.method === 'GET' &&
+    input.redirectedFrom !== true &&
     KEMERBET_ABORTABLE_STATIC_ASSETS.get(url.href) === input.resourceType
   ) {
     return 'abort_optional';
@@ -2708,7 +2806,7 @@ export function createKemerBetSessionProvisionServer(
   ): void => {
     if (
       sessionGeneration !== generation ||
-      startupStatus?.status !== 'starting' ||
+      (startupStatus?.status !== 'starting' && startupStatus?.status !== 'ready') ||
       startupFailureCandidate !== undefined
     ) {
       return;
@@ -3462,6 +3560,7 @@ export function createKemerBetSessionProvisionServer(
       reportStartupStage(generation, startupStage);
       nextContext = await launch(profile, {
         acceptDownloads: false,
+        args: [...KEMERBET_CHROMIUM_NETWORK_REDUCTION_ARGUMENTS],
         bypassCSP: false,
         // This browser runs inside the dedicated non-root Compose sandbox (read-only root,
         // every Linux capability dropped, no-new-privileges, and an isolated network). The
@@ -3472,6 +3571,9 @@ export function createKemerBetSessionProvisionServer(
         chromiumSandbox: false,
         executablePath: CHROMIUM_PATH,
         headless: true,
+        // Remove only Playwright 1.62.1's exact combined feature switch and replace it above with
+        // one strict superset. Every other Playwright default argument remains intact.
+        ignoreDefaultArgs: [PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES_ARGUMENT],
         ignoreHTTPSErrors: false,
         offline: true,
         serviceWorkers: 'block',

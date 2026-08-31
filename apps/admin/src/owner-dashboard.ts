@@ -244,7 +244,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
               OTPs are never sent to chat, Git, Supabase, or FetanAgent logs. Transfer is blocked,
               and all input locks as soon as sign-in is detected.
             </p>
-            <p class="request-meta" id="kemerbet-session-status">
+            <p class="request-meta" id="kemerbet-session-status" role="status"
+              aria-live="polite" aria-atomic="true">
               Load an active KemerBet profile to check sign-in readiness.
             </p>
             <label class="confirmation-row" for="kemerbet-session-confirmation">
@@ -361,7 +362,7 @@ button, .actions a { border: 0; border-radius: 10px; color: #071113; background:
 form button { margin-top: 8px; }
 button.secondary { color: #e4e4e7; background: #27272a; }
 button.danger { color: #fecaca; background: #3f171b; }
-button:disabled { cursor: wait; opacity: 0.55; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
 .receipt { margin-top: 22px; border-top: 1px solid #30303a; padding-top: 20px; }
 .review-section { margin-top: 28px; border-top: 1px solid #30303a; padding-top: 24px; }
 .request-list { display: grid; gap: 14px; margin-top: 16px; }
@@ -641,7 +642,7 @@ function applyKemerbetQuarantineMutationBoundary() {
   if (privateKemerbetSessionMutationAllowed()) {
     kemerbetSessionConfirmation.disabled = Boolean(currentKemerbetSession?.active);
     kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
-      currentKemerbetSession?.phase !== 'idle' || !kemerbetSessionConfirmation.checked;
+      currentKemerbetSession?.phase !== 'idle';
     kemerbetSessionStopButton.disabled = !currentKemerbetSession?.active ||
       currentKemerbetSession.phase === 'stopping';
   } else {
@@ -679,11 +680,11 @@ function requireOrdinaryKemerbetMutation() {
 function requirePrivateKemerbetSessionMutation() {
   if (privateKemerbetSessionMutationAllowed()) return true;
   applyKemerbetQuarantineMutationBoundary();
-  setNotice(
-    kemerbetRecheckSpentFailedTerminal
+  const message = kemerbetRecheckSpentFailedTerminal
       ? 'The one-use KemerBet recheck authorization is terminally spent. Private sign-in cannot be reopened.'
-      : 'Private KemerBet sign-in is unavailable in this recovery state. Amount, Transfer, final action, and money movement remain disabled.',
-  );
+      : 'Private KemerBet sign-in is unavailable in this recovery state. Amount, Transfer, final action, and money movement remain disabled.';
+  kemerbetSessionStatus.textContent = message;
+  setNotice(message);
   return false;
 }
 
@@ -1341,7 +1342,7 @@ function renderKemerbetAgentProfiles(profiles) {
   }
   kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !activeKemerbetAgentProfileId ||
-    Boolean(currentKemerbetSession?.active) || !kemerbetSessionConfirmation.checked;
+    Boolean(currentKemerbetSession?.active);
 }
 
 async function loadKemerbetAgentProfiles() {
@@ -1539,8 +1540,7 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
   kemerbetSecurityRecoveryInProgress = securityRecoveryInProgress;
   kemerbetSecurityRecoverySessionAllowed = securityRecoverySessionAllowed;
   kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
-    !activeKemerbetAgentProfileId || session.phase !== 'idle' ||
-    !kemerbetSessionConfirmation.checked;
+    !activeKemerbetAgentProfileId || session.phase !== 'idle';
   kemerbetSessionStopButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !session.active || session.phase === 'stopping';
   kemerbetSessionConfirmation.disabled = !privateKemerbetSessionMutationAllowed() || session.active;
@@ -1550,7 +1550,8 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
     if (session.startup?.status === 'failed') {
-      kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup);
+      kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup) +
+        ' Check the approval box again before retrying.';
     } else if (recoveryRequired) {
       if (!securityRecoverySessionAllowed) kemerbetSessionConfirmation.checked = false;
       kemerbetSessionCanvas.tabIndex = -1;
@@ -1567,7 +1568,7 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
         kemerbetSessionStatus.textContent =
           'KemerBet security recovery is in progress with its exact one-use cohort already bound. ' +
           (securityRecoverySessionAllowed
-            ? 'The exact recovery-only private sign-in is available below. Another cohort, Amount, Transfer, final action, and money movement remain disabled.'
+            ? 'Check the approval box, then select Start private sign-in. Another cohort, Amount, Transfer, final action, and money movement remain disabled.'
             : 'Another cohort cannot be prepared. Every mutation, Amount, Transfer, final action, and money movement remains disabled.');
       } else {
         kemerbetAgentProfileReason.value = 'security_recovery';
@@ -1584,13 +1585,14 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
       }
       kemerbetAgentProfileReason.disabled = false;
       kemerbetSessionCanvas.tabIndex = 0;
-      kemerbetSessionStatus.textContent = 'Private sign-in service is stopped.';
+      kemerbetSessionStatus.textContent =
+        'Private sign-in service is stopped. Check the approval box, then select Start private sign-in.';
     }
     applyKemerbetQuarantineMutationBoundary();
     scheduleKemerbetSessionPoll();
     return;
   }
-  kemerbetSessionConfirmation.disabled = false;
+  kemerbetSessionConfirmation.disabled = true;
   kemerbetSessionCanvas.tabIndex = 0;
   if (session.phase !== 'login_required') {
     kemerbetSessionCanvas.hidden = true;
@@ -1623,11 +1625,15 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
   scheduleKemerbetSessionPoll();
 }
 
-async function loadKemerbetSession() {
+async function loadKemerbetSession(timeoutMs = OWNER_API_REQUEST_TIMEOUT_MS) {
   if (!activeKemerbetAgentProfileId || !accessToken || kemerbetInputPending) return;
   kemerbetSessionPollTimer = undefined;
   try {
-    const response = await ownerRequest('/v1/owner/kemerbet-session', { method: 'GET', headers: {} });
+    const response = await ownerRequest(
+      '/v1/owner/kemerbet-session',
+      { method: 'GET', headers: {} },
+      timeoutMs,
+    );
     if (!response.ok) throw new Error('kemerbet_session');
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
@@ -1653,8 +1659,21 @@ function kemerbetSessionMutationHeaders(requestId) {
 }
 
 async function startKemerbetSession() {
-  if (!requirePrivateKemerbetSessionMutation() || !activeKemerbetAgentProfileId ||
-      !kemerbetSessionConfirmation.checked) return;
+  if (!requirePrivateKemerbetSessionMutation()) return;
+  if (!activeKemerbetAgentProfileId) {
+    const message = 'No active KemerBet agent profile is available. No private browser was started and no money moved.';
+    kemerbetSessionStatus.textContent = message;
+    setNotice(message);
+    return;
+  }
+  if (!kemerbetSessionConfirmation.checked) {
+    const message =
+      'Check the approval box first. No private browser was started. Transfer remains disabled and no money moved.';
+    kemerbetSessionStatus.textContent = message;
+    setNotice(message);
+    kemerbetSessionConfirmation.focus();
+    return;
+  }
   const requestId = crypto.randomUUID();
   kemerbetSessionStartButton.disabled = true;
   const startingMessage = 'Starting the private KemerBet sign-in browser…';
@@ -1683,7 +1702,7 @@ async function startKemerbetSession() {
       setNotice('Private KemerBet sign-in was accepted. The page will reconnect automatically when the browser is ready.');
     }
   } catch (error) {
-    await loadKemerbetSession();
+    await loadKemerbetSession(OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS);
     if (!isSignedOutError(error)) {
       if (currentKemerbetSession?.active) {
         setNotice(currentKemerbetSession.signedIn
@@ -1691,8 +1710,15 @@ async function startKemerbetSession() {
           : 'The private KemerBet sign-in browser is already open. Click the preview and type there only.');
         return;
       }
+      if (currentKemerbetSession?.startup?.status === 'failed') {
+        const failureMessage = kemerbetStartupFailureMessage(currentKemerbetSession.startup) +
+          ' Check the approval box again before retrying.';
+        kemerbetSessionStatus.textContent = failureMessage;
+        setNotice(failureMessage);
+        return;
+      }
       const failureMessage =
-        'Private KemerBet sign-in could not start. No credential was accepted. Please try once more; if it still fails, contact support.';
+        'Private KemerBet sign-in could not start. No credential was accepted. Check the approval box again before retrying.';
       kemerbetSessionStatus.textContent = failureMessage;
       setNotice(failureMessage);
     }
@@ -2870,7 +2896,7 @@ kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
 kemerbetSessionConfirmation.addEventListener('change', () => {
   kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !activeKemerbetAgentProfileId ||
-    currentKemerbetSession?.phase !== 'idle' || !kemerbetSessionConfirmation.checked;
+    currentKemerbetSession?.phase !== 'idle';
 });
 kemerbetSessionStartButton.addEventListener('click', startKemerbetSession);
 kemerbetSessionStopButton.addEventListener('click', () => stopKemerbetSession());

@@ -454,10 +454,12 @@ function testRecaptchaFrames(): {
   const mainFrame = {
     page: () => page,
     parentFrame: () => null,
+    url: () => LOGIN_PAGE,
   } as unknown as Frame;
   const anchorFrame = {
     page: () => page,
     parentFrame: () => mainFrame,
+    url: () => exactTestAnchorUrl(),
   } as unknown as Frame;
   page = {
     mainFrame: () => mainFrame,
@@ -570,9 +572,11 @@ function exactTestRecaptchaRoutes(
       url: TEST_RECAPTCHA_RUNTIME_URL,
     }),
     testRecaptchaRoute({
-      frameUnavailable: true,
+      extraHeaders: { referer: exactTestAnchorUrl() },
+      frame: frames.anchorFrame,
       resourceType: 'script',
       url: TEST_RECAPTCHA_WORKER_URL,
+      userAgent: null,
     }),
     testRecaptchaRoute({
       frame: frames.anchorFrame,
@@ -580,7 +584,7 @@ function exactTestRecaptchaRoutes(
       url: TEST_RECAPTCHA_LOGO_URL,
     }),
     testRecaptchaRoute({
-      frameUnavailable: true,
+      frame: frames.anchorFrame,
       resourceType: 'other',
       url: TEST_RECAPTCHA_RUNTIME_URL,
     }),
@@ -2822,6 +2826,62 @@ describe('private KemerBet session provision server', () => {
       await waitForSessionPhase(origin, 'login_required');
       expect(launchPersistentContext).toHaveBeenCalledTimes(1);
       expect(observedLaunchOptions).toMatchObject({ offline: true });
+      const launchOptions = observedLaunchOptions as {
+        readonly args?: readonly string[];
+        readonly ignoreDefaultArgs?: readonly string[];
+      };
+      const disabledFeatureArguments =
+        launchOptions.args?.filter((argument) => argument.startsWith('--disable-features=')) ?? [];
+      expect(disabledFeatureArguments).toHaveLength(1);
+      const disabledFeatures = disabledFeatureArguments[0]
+        ?.slice('--disable-features='.length)
+        .split(',');
+      expect(disabledFeatures).toEqual(
+        expect.arrayContaining([
+          'AvoidUnnecessaryBeforeUnloadCheckSync',
+          'BoundaryEventDispatchTracksNodeRemoval',
+          'DestroyProfileOnBrowserClose',
+          'DialMediaRouteProvider',
+          'GlobalMediaControls',
+          'HttpsUpgrades',
+          'LensOverlay',
+          'MediaRouter',
+          'PaintHolding',
+          'ThirdPartyStoragePartitioning',
+          'BlockOriginHeaderModificationOnRedirect',
+          'Translate',
+          'AutoDeElevate',
+          'OptimizationHints',
+          'msForceBrowserSignIn',
+          'msEdgeUpdateLaunchServicesPreferredVersion',
+          'AutofillServerCommunication',
+          'NetworkPrediction',
+          'PreconnectToSearch',
+          'SpeculationRulesPrefetchFuture',
+          'WebTransport',
+        ]),
+      );
+      expect(launchOptions.ignoreDefaultArgs).toEqual([
+        '--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,' +
+          'BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,' +
+          'DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,' +
+          'PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,' +
+          'Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,' +
+          'msEdgeUpdateLaunchServicesPreferredVersion',
+      ]);
+      expect(launchOptions.args).toEqual(
+        expect.arrayContaining([
+          '--disable-quic',
+          '--dns-prefetch-disable',
+          '--disable-network-prediction',
+          '--disable-preconnect',
+          '--disable-webrtc',
+          '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        ]),
+      );
+      expect(JSON.stringify(observedLaunchOptions)).not.toContain(
+        'content-autofill.googleapis.com',
+      );
       expect(browser.startupEvents).toEqual([
         'popup-guard',
         'serviceworker-guard',
@@ -3018,8 +3078,23 @@ describe('private KemerBet session provision server', () => {
       await waitForSessionPhase(origin, 'login_required');
       browser.emitServiceWorker();
       const stopped = await waitForSessionPhase(origin, 'idle');
-      expect(stopped).not.toHaveProperty('startup');
-      expect(logStartupFailure).not.toHaveBeenCalled();
+      expect(stopped).toMatchObject({
+        startup: {
+          detailsRedacted: true,
+          failureCode: 'forbidden_request',
+          schemaVersion: 1,
+          stage: 'transport_guard',
+          status: 'failed',
+        },
+      });
+      expect(logStartupFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'startup_failed',
+        failureCode: 'forbidden_request',
+        schemaVersion: 1,
+        stage: 'transport_guard',
+      });
       expect(closePersistentBrowserForCheckpoint).toHaveBeenCalledTimes(1);
     } finally {
       await closeServer(provision.server);
@@ -4700,6 +4775,85 @@ describe('private KemerBet session provision server', () => {
     expect(forbidden).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    {
+      frame: 'missing',
+      name: 'missing anchor frame',
+      referer: exactTestAnchorUrl(),
+      userAgent: null,
+    },
+    {
+      frame: 'main',
+      name: 'main frame',
+      referer: exactTestAnchorUrl(),
+      userAgent: null,
+    },
+    {
+      frame: 'anchor',
+      name: 'wrong anchor Referer',
+      referer: LOGIN_PAGE,
+      userAgent: TEST_RECAPTCHA_USER_AGENT,
+    },
+    {
+      frame: 'anchor',
+      name: 'malformed routed User-Agent',
+      referer: exactTestAnchorUrl(),
+      userAgent: 'node',
+    },
+  ] as const)(
+    'rejects the Chrome 152 worker bootstrap with a $name',
+    async ({ frame, referer, userAgent }) => {
+      const frames = testRecaptchaFrames();
+      const forbidden = vi.fn();
+      const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+      const routes = exactTestRecaptchaRoutes(frames);
+      for (const candidate of routes.slice(0, 4)) {
+        await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+      }
+      const invalidWorker = testRecaptchaRoute({
+        extraHeaders: { referer },
+        ...(frame === 'anchor'
+          ? { frame: frames.anchorFrame }
+          : frame === 'main'
+            ? { frame: frames.mainFrame }
+            : { frameUnavailable: true }),
+        resourceType: 'script',
+        url: TEST_RECAPTCHA_WORKER_URL,
+        userAgent,
+      });
+
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, invalidWorker);
+
+      expect(invalidWorker.abort).toHaveBeenCalledOnce();
+      expect(invalidWorker.fulfill).not.toHaveBeenCalled();
+      expect(forbidden).toHaveBeenCalledOnce();
+      await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(false);
+    },
+  );
+
+  it('does not extend the worker-bootstrap User-Agent omission to its runtime import', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 6)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+    const missingRuntimeUserAgent = testRecaptchaRoute({
+      frame: frames.anchorFrame,
+      resourceType: 'other',
+      url: TEST_RECAPTCHA_RUNTIME_URL,
+      userAgent: null,
+    });
+
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, missingRuntimeUserAgent);
+
+    expect(missingRuntimeUserAgent.abort).toHaveBeenCalledOnce();
+    expect(missingRuntimeUserAgent.fulfill).not.toHaveBeenCalled();
+    expect(forbidden).toHaveBeenCalledOnce();
+    await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(false);
+  });
+
   it('does not serialize unrelated KemerBet assets behind a pinned reCAPTCHA download', async () => {
     const frames = testRecaptchaFrames();
     const pending = deferred<{
@@ -5238,6 +5392,10 @@ describe('private KemerBet session provision server', () => {
         'https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&display=swap',
         'stylesheet',
       ],
+      [
+        'https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2',
+        'font',
+      ],
     ] as const) {
       expect(classifyKemerBetSessionRequest({ ...base, requestUrl, resourceType })).toBe(
         'abort_optional',
@@ -5247,6 +5405,10 @@ describe('private KemerBet session provision server', () => {
     for (const [requestUrl, resourceType] of [
       ['https://fonts.googleapis.com/css2?family=Roboto&display=swap', 'stylesheet'],
       [
+        'https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2?changed=1',
+        'font',
+      ],
+      [
         'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg?changed=1',
         'image',
       ],
@@ -5255,6 +5417,15 @@ describe('private KemerBet session provision server', () => {
     ] as const) {
       expect(classifyKemerBetSessionRequest({ ...base, requestUrl, resourceType })).toBe('forbid');
     }
+    expect(
+      classifyKemerBetSessionRequest({
+        ...base,
+        redirectedFrom: true,
+        requestUrl:
+          'https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2',
+        resourceType: 'font',
+      }),
+    ).toBe('forbid');
   });
 
   it('rejects every live, executor, final-action, pilot, or wrong-user environment at construction', () => {

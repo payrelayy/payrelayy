@@ -846,6 +846,8 @@ jobs:
           [[ -z "$(git -C repair diff --name-only "$CANONICAL_H14_COMMIT" "$CONFIRMED_REPAIR_IMPLEMENTATION" -- Dockerfile infra/compose.staging-beta.yaml)" ]]
           expected_delta="$(cat <<'EOF'
           .github/workflows/staging-beta-deploy-smoke.yml
+          apps/admin/src/app.test.ts
+          apps/admin/src/app.ts
           apps/admin/src/owner-dashboard-browser.test.ts
           apps/admin/src/owner-dashboard.ts
           apps/admin/src/owner-kemerbet-session-control.test.ts

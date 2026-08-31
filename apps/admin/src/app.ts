@@ -1313,12 +1313,14 @@ export function buildOwnerControlApp(
       });
       return reply.code(200).send(payload);
     } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
       if (
-        error instanceof OwnerAuthenticationRejectedError ||
         error instanceof OwnerKemerbetAgentProfileRejectedError ||
         error instanceof OwnerKemerbetSessionRejectedError
       ) {
-        return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(409).send({ error: 'kemerbet_session_rejected' });
       }
       request.log.warn('Owner KemerBet session status is unavailable.');
       return reply.code(503).send({ error: 'owner_control_unavailable' });
@@ -1358,12 +1360,14 @@ export function buildOwnerControlApp(
         .code(200)
         .send(frame.image);
     } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
       if (
-        error instanceof OwnerAuthenticationRejectedError ||
         error instanceof OwnerKemerbetAgentProfileRejectedError ||
         error instanceof OwnerKemerbetSessionRejectedError
       ) {
-        return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(409).send({ error: 'kemerbet_session_rejected' });
       }
       request.log.warn('Owner KemerBet session frame is unavailable.');
       return reply.code(503).send({ error: 'owner_control_unavailable' });
@@ -1390,12 +1394,14 @@ export function buildOwnerControlApp(
             .code(202)
             .send(kemerbetSessionPayload(mutation.value, mutation.securityRecoverySessionAllowed));
     } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
       if (
-        error instanceof OwnerAuthenticationRejectedError ||
         error instanceof OwnerKemerbetAgentProfileRejectedError ||
         error instanceof OwnerKemerbetSessionRejectedError
       ) {
-        return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(409).send({ error: 'kemerbet_session_rejected' });
       }
       request.log.warn('Owner KemerBet session start is unavailable.');
       return reply.code(503).send({ error: 'owner_control_unavailable' });
@@ -1474,12 +1480,14 @@ export function buildOwnerControlApp(
             .code(200)
             .send(kemerbetSessionPayload(mutation.value, mutation.securityRecoverySessionAllowed));
     } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
       if (
-        error instanceof OwnerAuthenticationRejectedError ||
         error instanceof OwnerKemerbetAgentProfileRejectedError ||
         error instanceof OwnerKemerbetSessionRejectedError
       ) {
-        return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(409).send({ error: 'kemerbet_session_rejected' });
       }
       request.log.warn('Owner KemerBet session input is unavailable.');
       return reply.code(503).send({ error: 'owner_control_unavailable' });
@@ -1506,12 +1514,14 @@ export function buildOwnerControlApp(
             .code(202)
             .send(kemerbetSessionPayload(mutation.value, mutation.securityRecoverySessionAllowed));
     } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
       if (
-        error instanceof OwnerAuthenticationRejectedError ||
         error instanceof OwnerKemerbetAgentProfileRejectedError ||
         error instanceof OwnerKemerbetSessionRejectedError
       ) {
-        return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(409).send({ error: 'kemerbet_session_rejected' });
       }
       if (error instanceof OwnerKemerbetSessionUnavailableError) {
         request.log.warn('Owner KemerBet session stop is unavailable.');

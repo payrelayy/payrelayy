@@ -2391,8 +2391,13 @@ assert.doesNotMatch(
 );
 assert.match(
   privateSessionRecaptchaSource,
-  /requestKemerBetChromiumUserAgent\(request\.headers\(\)\)[\s\S]*?requestUserAgent === undefined[\s\S]*?chromiumUserAgent !== undefined && requestUserAgent !== chromiumUserAgent[\s\S]*?chromiumUserAgent = requestUserAgent[\s\S]*?fulfillPinnedAsset\([\s\S]*?assetPins\.api,[\s\S]*?requestUserAgent/u,
-  'every ceremony request must present one exact stable browser User-Agent and pass only it to the asset fetcher',
+  /const requestHeaders = request\.headers\(\);[\s\S]*?const requestUserAgent = requestKemerBetChromiumUserAgent\(requestHeaders\);[\s\S]*?const exactUserAgentOmittedWebworker =[\s\S]*?step === 'static_subresources'[\s\S]*?chromiumUserAgent !== undefined[\s\S]*?anchorFrame !== undefined[\s\S]*?anchorUrl !== undefined[\s\S]*?candidate\.requestFrame === anchorFrame[\s\S]*?requestHeaderCount\(requestHeaders, 'user-agent'\) === 0[\s\S]*?exactRequestHeader\(requestHeaders, 'referer', anchorUrl\)[\s\S]*?expectedUrl: KEMERBET_RECAPTCHA_WEBWORKER_URL[\s\S]*?const assetFetchUserAgent =[\s\S]*?requestUserAgent \?\? \(exactUserAgentOmittedWebworker \? chromiumUserAgent : undefined\)[\s\S]*?assetFetchUserAgent === undefined[\s\S]*?requestUserAgent !== undefined &&[\s\S]*?requestUserAgent !== chromiumUserAgent[\s\S]*?chromiumUserAgent = assetFetchUserAgent[\s\S]*?fulfillPinnedAsset\([\s\S]*?assetPins\.api,[\s\S]*?assetFetchUserAgent/u,
+  'every ceremony request must retain one exact stable browser User-Agent, except the exact Chrome 152 anchor-frame worker bootstrap which reuses the already verified value',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES[\s\S]*?'AutofillServerCommunication'[\s\S]*?KEMERBET_CHROMIUM_NETWORK_REDUCTION_ARGUMENTS[\s\S]*?args: \[\.\.\.KEMERBET_CHROMIUM_NETWORK_REDUCTION_ARGUMENTS\][\s\S]*?ignoreDefaultArgs: \[PLAYWRIGHT_1_62_1_DISABLED_CHROMIUM_FEATURES_ARGUMENT\][\s\S]*?offline: true/u,
+  'the retained browser must atomically preserve Playwright 1.62.1 safety features while suppressing browser-owned Autofill traffic before leaving offline mode',
 );
 assert.match(
   privateSessionProvisionServerSource,
@@ -2424,8 +2429,8 @@ assertOrderedFragments(
 );
 assert.match(
   privateSessionRecaptchaSource,
-  /exactWebworker[\s\S]*?candidate\.requestFrame === undefined[\s\S]*?exactLogo[\s\S]*?candidate\.requestFrame === anchorFrame[\s\S]*?exactWorkerRuntime[\s\S]*?candidate\.requestFrame === undefined[\s\S]*?exactWebworker && !webworkerLoaded[\s\S]*?exactLogo && !logoLoaded[\s\S]*?exactWorkerRuntime && webworkerLoaded && !workerRuntimeLoaded[\s\S]*?webworkerLoaded && logoLoaded && workerRuntimeLoaded/u,
-  'logo and worker startup may race only inside the exact bounded static-subresource set, while the worker import remains causally ordered',
+  /exactWebworker[\s\S]*?candidate\.requestFrame === anchorFrame[\s\S]*?anchorUrl !== undefined[\s\S]*?exactRequestHeader\(requestHeaders, 'referer', anchorUrl\)[\s\S]*?exactLogo[\s\S]*?candidate\.requestFrame === anchorFrame[\s\S]*?exactWorkerRuntime[\s\S]*?candidate\.requestFrame === anchorFrame[\s\S]*?exactWebworker && !webworkerLoaded[\s\S]*?exactLogo && !logoLoaded[\s\S]*?exactWorkerRuntime && webworkerLoaded && !workerRuntimeLoaded[\s\S]*?webworkerLoaded && logoLoaded && workerRuntimeLoaded/u,
+  'logo and Chrome 152 worker startup may race only inside the exact anchor-frame static-subresource set, while the worker import remains causally ordered',
 );
 assert.ok(
   privateSessionProvisionServerSource.includes(

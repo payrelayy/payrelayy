@@ -4775,6 +4775,8 @@ for (const protectedRepairContract of [
 }
 for (const exactRepairDelta of [
   '.github/workflows/staging-beta-deploy-smoke.yml',
+  'apps/admin/src/app.test.ts',
+  'apps/admin/src/app.ts',
   'apps/admin/src/owner-dashboard-browser.test.ts',
   'apps/admin/src/owner-dashboard.ts',
   'apps/admin/src/owner-kemerbet-session-control.test.ts',

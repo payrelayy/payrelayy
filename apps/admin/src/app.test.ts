@@ -13,9 +13,10 @@ import {
   type OwnerKemerbetReadinessCohortControl,
   type OwnerKemerbetReadinessCohortReceipt,
 } from './owner-kemerbet-readiness-cohort.js';
-import type {
-  OwnerKemerbetSessionControl,
-  OwnerKemerbetSessionStatus,
+import {
+  OwnerKemerbetSessionRejectedError,
+  type OwnerKemerbetSessionControl,
+  type OwnerKemerbetSessionStatus,
 } from './owner-kemerbet-session-control.js';
 import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
@@ -380,6 +381,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('including across Owner-page re-authentication');
     expect(response.body).toContain('id="kemerbet-session-confirmation"');
     expect(response.body).toContain(
+      'id="kemerbet-session-status" role="status"\n              aria-live="polite" aria-atomic="true"',
+    );
+    expect(response.body).toContain(
       'I approve opening a ten-minute private KemerBet sign-in browser.',
     );
     expect(response.body).not.toContain('sb_publishable_');
@@ -535,7 +539,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('if (currentKemerbetSession?.active)');
     expect(response.body).toContain('The private KemerBet sign-in browser is already open.');
     expect(response.body).toContain('KemerBet is already signed in.');
-    expect(response.body).toContain('Please try once more; if it still fails, contact support.');
+    expect(response.body).toContain('Check the approval box again before retrying.');
     expect(response.body).not.toContain(
       "window.confirm(\n    'Start a ten-minute private KemerBet sign-in browser?",
     );
@@ -1691,6 +1695,51 @@ describe('Owner-control HTTP boundary', () => {
       requestId: pilotRequestId,
     });
     expect(prepared.body).not.toMatch(/password|cookie|otp|credential/iu);
+    await app.close();
+  });
+
+  it('returns a domain conflict without invalidating an authenticated Owner session', async () => {
+    const profile = {
+      configuredAt: '2026-08-22T19:30:00.000Z',
+      configurationReason: 'initial_configuration' as const,
+      platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+      platformCode: 'kemerbet' as const,
+      profileContractVersion: 1 as const,
+      profileLabel: 'Primary KemerBet agent revision 1',
+      profileRevision: 1,
+      profileStatus: 'active' as const,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => inactiveKemerbetSession,
+        start: async () => {
+          throw new OwnerKemerbetSessionRejectedError();
+        },
+        status: async () => inactiveKemerbetSession,
+        stop: async () => inactiveKemerbetSession,
+      },
+      runtime: runtime({
+        kemerbetAgentProfiles: {
+          list: async () => [profile],
+          prepare: async () => profile,
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/kemerbet-session/start',
+      headers: kemerbetSessionMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_private_kemerbet_sign_in',
+        requestId: pilotRequestId,
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'kemerbet_session_rejected' });
     await app.close();
   });
 

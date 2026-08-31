@@ -19,6 +19,7 @@ class FakeElement {
   checked = false;
   className = '';
   disabled = false;
+  focused = false;
   height = 720;
   hidden = false;
   href = '';
@@ -34,7 +35,9 @@ class FakeElement {
 
   append(..._children: unknown[]): void {}
 
-  focus(): void {}
+  focus(): void {
+    this.focused = true;
+  }
 
   getBoundingClientRect(): Readonly<{
     height: number;
@@ -222,6 +225,27 @@ describe('Owner dashboard browser authentication boundary', () => {
     },
   );
 
+  it('keeps the valid Owner session when a KemerBet operation returns a domain conflict', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/test-kemerbet-domain-conflict'
+          ? response(409, { error: 'kemerbet_session_rejected' })
+          : undefined,
+    });
+    await browser.signIn();
+
+    const result = await browser.call<Readonly<{ status: number }>>(
+      'ownerRequest',
+      '/v1/owner/test-kemerbet-domain-conflict',
+      { method: 'POST', headers: {} },
+    );
+
+    expect(result.status).toBe(409);
+    expect(browser.element('#login-panel').hidden).toBe(true);
+    expect(browser.element('#invite-panel').hidden).toBe(false);
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
+  });
+
   it('bounds token refresh and preserves the valid twelve-hour credential on timeout', async () => {
     let refreshSignal: AbortSignal | undefined;
     const browser = ownerBrowserHarness(503, {
@@ -351,12 +375,19 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     const start = browser.element('#kemerbet-session-start-button');
     const stop = browser.element('#kemerbet-session-stop-button');
     expect(confirmation.disabled).toBe(false);
-    expect(start.disabled).toBe(true);
+    expect(start.disabled).toBe(false);
     expect(stop.disabled).toBe(true);
     expect(browser.element('#receiver-form').elements.accountReference!.disabled).toBe(true);
     expect(
       browser.element('#kemerbet-agent-profile-form').elements.configurationReason!.disabled,
     ).toBe(true);
+
+    await browser.call('startKemerbetSession');
+    expect(startPosts).toBe(0);
+    expect(confirmation.focused).toBe(true);
+    expect(browser.element('#kemerbet-session-status').textContent).toBe(
+      'Check the approval box first. No private browser was started. Transfer remains disabled and no money moved.',
+    );
 
     confirmation.checked = true;
     await confirmation.listeners.get('change')?.({ preventDefault() {} });
@@ -395,7 +426,8 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     const status = browser.element('#kemerbet-session-status').textContent;
     expect(status).toBe(
       'Private KemerBet sign-in stopped during the reviewed reCAPTCHA assets because ' +
-        'the reviewed public-resource contract changed. Transfer, final action, and money movement remain disabled.',
+        'the reviewed public-resource contract changed. Transfer, final action, and money movement remain disabled. ' +
+        'Check the approval box again before retrying.',
     );
     expect(status).not.toMatch(/https?:|password|token|stack|player/iu);
   });

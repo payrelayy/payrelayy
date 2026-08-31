@@ -930,8 +930,6 @@ jobs:
           docker save --output "$executor_tar" "$executor_image"
           install -m 0600 canonical-h14/infra/compose.staging-beta.yaml "$compose_path"
 
-          owner_source_runtime_id="$(docker image inspect "$owner_image" --format '{{.Id}}')"
-          executor_source_runtime_id="$(docker image inspect "$executor_image" --format '{{.Id}}')"
           owner_tar_sha="$(sha256sum "$owner_tar" | awk '{print $1}')"
           executor_tar_sha="$(sha256sum "$executor_tar" | awk '{print $1}')"
           compose_sha="$(sha256sum "$compose_path" | awk '{print $1}')"
@@ -939,7 +937,6 @@ jobs:
           owner_tar_size="$(stat --format='%s' "$owner_tar")"
           executor_tar_size="$(stat --format='%s' "$executor_tar")"
           helper_size="$(stat --format='%s' repair/infra/operations/fetanagent-h14-owner-recovery-session-repair.sh)"
-          [[ "$owner_source_runtime_id" =~ ^sha256:[0-9a-f]{64}$ && "$executor_source_runtime_id" =~ ^sha256:[0-9a-f]{64}$ ]]
           for digest in "$owner_tar_sha" "$executor_tar_sha" "$compose_sha" "$helper_sha"; do
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
           done
@@ -1106,11 +1103,6 @@ jobs:
             "$executor_image_config_digest" "$executor_image_oci_manifest_digest"; do
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           done
-          [[ "$owner_source_runtime_id" == "$owner_image_config_digest" || \
-            "$owner_source_runtime_id" == "$owner_image_oci_manifest_digest" ]]
-          [[ "$executor_source_runtime_id" == "$executor_image_config_digest" || \
-            "$executor_source_runtime_id" == "$executor_image_oci_manifest_digest" ]]
-
           cat >"$manifest_path" <<EOF
           version=1
           contract=fetanagent-h14-owner-kemerbet-session-bootstrap-repair-bundle

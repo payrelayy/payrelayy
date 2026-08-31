@@ -4903,12 +4903,13 @@ assertInOrder(
     'owner_image_oci_manifest_digest="${archive_oci_manifest_ids[1]}"',
     'executor_image_config_digest="${archive_oci_manifest_ids[2]}"',
     'executor_image_oci_manifest_digest="${archive_oci_manifest_ids[3]}"',
-    '"$owner_source_runtime_id" == "$owner_image_config_digest" ||',
-    '"$owner_source_runtime_id" == "$owner_image_oci_manifest_digest"',
-    '"$executor_source_runtime_id" == "$executor_image_config_digest" ||',
-    '"$executor_source_runtime_id" == "$executor_image_oci_manifest_digest"',
   ],
-  'the archive producer must emit owner C/M then executor C/M and accept either local runtime representation',
+  'the archive producer must emit owner C/M then executor C/M from the portable archive identities',
+);
+assert.doesNotMatch(
+  ownerSessionRepairJob,
+  /(?:owner|executor)_source_runtime_id/u,
+  'the archive producer must not bind portable archive identities to a source Docker storage ID',
 );
 assert.doesNotMatch(ownerSessionRepairJob, /^\s*(?:owner|executor)_image_id=/mu);
 assert.doesNotMatch(ownerSessionRepairHelper, /^(?:owner|executor)_image_id$/mu);

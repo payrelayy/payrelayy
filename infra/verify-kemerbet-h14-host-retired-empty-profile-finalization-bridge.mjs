@@ -395,18 +395,49 @@ for (const source of [script, engine, workflow]) {
 }
 assert.doesNotMatch(script, /(?:cp|mv|install)[^\n]*\$HELPER_PATH/);
 
-const bugNeedle =
+const legacyBugNeedle =
   '  mapfile -t inspection_lines <<<"$inspection"\n  [[ "${#inspection_lines[@]}" -eq 4 &&';
 assert.equal(
-  helper.split(bugNeedle).length - 1,
+  helper.split(legacyBugNeedle).length - 1,
+  0,
+  'the historical trailing-empty-field parser resurfaced',
+);
+const preservedEmptyFieldNeedle =
+  "        f'{state}\\n{release}\\n{successor_helper_sha}\\n{profile_id}\\n{current_helper_sha}\\n'";
+assert.equal(
+  helper.split(preservedEmptyFieldNeedle).length - 1,
   1,
-  'canonical empty-field defect must stay singular',
+  'the H14 inspection must frame the optional Profile ID before the current-helper digest',
+);
+const h14ParserNeedle =
+  '  mapfile -t inspection_lines <<<"$inspection"\n' +
+  '  [[ "${#inspection_lines[@]}" -eq 5 &&\n' +
+  '    "${inspection_lines[0]}" =~ ^(host-retired|profile-finalization-prefix|';
+assert.equal(
+  helper.split(h14ParserNeedle).length - 1,
+  1,
+  'the H14 inspection must consume exactly one five-field result',
+);
+assert.match(
+  helper,
+  /\( -z "\$\{inspection_lines\[3\]\}" \|\| "\$\{inspection_lines\[3\]\}" =~ \^\[0-9a-f\]\{8\}-[\s\S]*?"\$\{inspection_lines\[4\]\}" =~ \^\[0-9a-f\]\{64\}\$ \]\] \|\|\n    return 0\n  KEMERBET_H14_RECOVERY_STATE=/,
+  'the H14 parser must preserve an optional Profile ID and require the current-helper digest',
 );
 const emitted = `host-retired\n${canonicalRelease}\n${helperSha}\n\n`;
 assert.equal(
   emitted.replace(/\n+$/u, '').split('\n').length,
   3,
   'fixture did not reproduce Bash loss',
+);
+const currentHelperSha = 'd'.repeat(64);
+const successorEmitted = `host-retired\n${canonicalRelease}\n${helperSha}\n\n${currentHelperSha}\n`;
+const successorInspectionLines = successorEmitted.replace(/\n+$/u, '').split('\n');
+assert.equal(successorInspectionLines.length, 5, 'successor framing lost an H14 field');
+assert.equal(successorInspectionLines[3], '', 'the empty H14 Profile ID was not preserved');
+assert.equal(
+  successorInspectionLines[4],
+  currentHelperSha,
+  'the current-helper digest did not protect the formerly trailing empty field',
 );
 assert.equal(
   script.includes('source /dev/stdin'),

@@ -11178,6 +11178,38 @@ if (process.platform === 'linux' || process.platform === 'win32') {
   }
 }
 
+const selectKemerbetSessionBindingSource = extractShellFunction(
+  helper,
+  'select_kemerbet_session_binding_source',
+  'kemerbet_h14_root',
+);
+for (const contract of [
+  /local commit_sha="\$1" purpose="\$\{2:-exact-release\}"/,
+  /\[\[ "\$purpose" =~ \^\(exact-release\|security-recovery-preview\)\$ \]\]/,
+  /if \[\[ "\$KEMERBET_H14_RECOVERY_RELEASE" != "\$commit_sha" \]\]; then/,
+  /"\$purpose" == 'security-recovery-preview'/,
+  /"\$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared'/,
+  /require_kemerbet_v3_runtime_bridge/,
+  /"\$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == 'successor-installed'/,
+  /\$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT\/\$KEMERBET_H14_RECOVERY_RELEASE\/recovery-identity-authorization-v1/,
+]) {
+  assert.match(selectKemerbetSessionBindingSource, contract);
+}
+assert.doesNotMatch(
+  selectKemerbetSessionBindingSource,
+  /\$KEMERBET_QUARANTINE_RECOVERY_V14_PARENT\/\$commit_sha\/recovery-identity-authorization-v1/,
+  'the release-neutral preview must always mount the canonical historical H14 authorization',
+);
+assert.equal(
+  (
+    helper.match(
+      /select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview/g,
+    ) ?? []
+  ).length,
+  2,
+  'only private-preview start and readiness attestation may request the release-neutral recovery purpose',
+);
+
 const startKemerbetSession = /\n  start-kemerbet-session-provision\)([\s\S]*?)\n    ;;/u.exec(
   helper,
 )?.[1];
@@ -11193,7 +11225,7 @@ assert.match(
 );
 assert.match(
   startKemerbetSession,
-  /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha"\)"/,
+  /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview\)"/,
 );
 assert.match(
   startKemerbetSession,
@@ -11228,7 +11260,7 @@ assertInOrder(
     'require_kemerbet_identity_key_file "$KEMERBET_AGENT_IDENTITY_HMAC_KEY"',
     'require_immutable_config_file "$KEMERBET_SELECTOR_CONTRACT"',
     'require_kemerbet_v3_runtime_bridge',
-    'session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha")"',
+    'session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha" security-recovery-preview)"',
     'FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE="$session_binding_source"',
     'up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision',
     'require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"',
@@ -11236,6 +11268,18 @@ assertInOrder(
   ],
   'private sign-in must start only the no-transfer coordinator and re-attest the unchanged historical overlay/runtime bridge',
 );
+
+const kemerbetSessionProvisionReady =
+  /\n  kemerbet-session-provision-ready\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(
+  kemerbetSessionProvisionReady,
+  'The helper must define the private KemerBet sign-in readiness attestation.',
+);
+assert.match(
+  kemerbetSessionProvisionReady,
+  /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview\)"/,
+);
+assert.doesNotMatch(kemerbetSessionProvisionReady, /FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
 
 const kemerbetSessionRuntime =
   /require_kemerbet_session_provision_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
@@ -11334,6 +11378,11 @@ for (const contract of [
 ]) {
   assert.match(sealKemerbetReadiness, contract);
 }
+assert.doesNotMatch(
+  sealKemerbetReadiness,
+  /select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview/,
+  'readiness sealing must remain bound to the exact historical H14 release',
+);
 assert.equal(
   (sealKemerbetReadiness.match(/\/v1\/readiness\/seal/g) ?? []).length,
   1,

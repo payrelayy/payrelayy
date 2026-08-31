@@ -1489,6 +1489,7 @@ export function createKemerBetRecaptchaCeremony(input: {
   let siteKey: string | undefined;
   let chromiumUserAgent: string | undefined;
   let anchorFrame: Frame | undefined;
+  let anchorRuntimeLoaded = false;
   let logoLoaded = false;
   let webworkerLoaded = false;
   let workerRuntimeLoaded = false;
@@ -1844,6 +1845,17 @@ export function createKemerBetRecaptchaCeremony(input: {
       }
 
       if (step === 'static_subresources') {
+        const exactAnchorRuntime =
+          candidate.requestFrame === anchorFrame &&
+          exactStaticGet({
+            expectedResourceType: 'script',
+            expectedUrl: KEMERBET_RECAPTCHA_RUNTIME_URL,
+            method,
+            navigation,
+            redirected,
+            resourceType,
+            url,
+          });
         const exactWebworker =
           candidate.requestFrame === undefined &&
           exactStaticGet({
@@ -1877,7 +1889,19 @@ export function createKemerBetRecaptchaCeremony(input: {
             resourceType,
             url,
           });
-        if (exactWebworker && !webworkerLoaded) {
+        if (exactAnchorRuntime && !anchorRuntimeLoaded) {
+          if (
+            !(await fulfillPinnedAsset(
+              candidate.route,
+              url.href,
+              assetPins.runtime,
+              requestUserAgent,
+            ))
+          ) {
+            return forbidden(candidate.route);
+          }
+          anchorRuntimeLoaded = true;
+        } else if (exactWebworker && !webworkerLoaded) {
           if (
             !(await fulfillPinnedAsset(
               candidate.route,
@@ -1911,7 +1935,9 @@ export function createKemerBetRecaptchaCeremony(input: {
         } else {
           return forbidden(candidate.route);
         }
-        if (webworkerLoaded && logoLoaded && workerRuntimeLoaded) step = 'reload';
+        if (anchorRuntimeLoaded && webworkerLoaded && logoLoaded && workerRuntimeLoaded) {
+          step = 'reload';
+        }
         return 'handled';
       }
 

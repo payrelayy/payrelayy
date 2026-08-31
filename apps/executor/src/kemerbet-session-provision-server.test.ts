@@ -565,6 +565,11 @@ function exactTestRecaptchaRoutes(
       url: TEST_RECAPTCHA_CSS_URL,
     }),
     testRecaptchaRoute({
+      frame: frames.anchorFrame,
+      resourceType: 'script',
+      url: TEST_RECAPTCHA_RUNTIME_URL,
+    }),
+    testRecaptchaRoute({
       frameUnavailable: true,
       resourceType: 'script',
       url: TEST_RECAPTCHA_WORKER_URL,
@@ -4390,11 +4395,11 @@ describe('private KemerBet session provision server', () => {
       await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
     }
 
-    for (const index of [0, 1, 3, 4, 5, 6]) {
+    for (const index of [0, 1, 3, 4, 5, 6, 7]) {
       expect(routes[index]?.fulfill).toHaveBeenCalledOnce();
       expect(routes[index]?.continue).not.toHaveBeenCalled();
     }
-    for (const index of [2, 7, 8, 9]) {
+    for (const index of [2, 8, 9, 10]) {
       expect(routes[index]?.continue).toHaveBeenCalledOnce();
       expect(routes[index]?.fulfill).not.toHaveBeenCalled();
     }
@@ -4409,7 +4414,7 @@ describe('private KemerBet session provision server', () => {
 
     const apiHeaders = routes[0]?.fulfill.mock.calls[0]?.[0]?.headers;
     const runtimeHeaders = routes[1]?.fulfill.mock.calls[0]?.[0]?.headers;
-    const workerHeaders = routes[4]?.fulfill.mock.calls[0]?.[0]?.headers;
+    const workerHeaders = routes[5]?.fulfill.mock.calls[0]?.[0]?.headers;
     expect(apiHeaders).toMatchObject({
       'cross-origin-resource-policy': 'cross-origin',
       'x-content-type-options': 'nosniff',
@@ -4499,13 +4504,13 @@ describe('private KemerBet session provision server', () => {
         wallClockNow: () => (clock === 'wall' ? selectedClockValue() : 1_000),
       });
       const routes = exactTestRecaptchaRoutes(frames);
-      for (const candidate of routes.slice(0, 7)) {
+      for (const candidate of routes.slice(0, 8)) {
         await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
       }
       expireImmediatelyBeforeContinue = true;
       selectedClockReads = 0;
 
-      const dynamicRequest = routes[7];
+      const dynamicRequest = routes[8];
       if (!dynamicRequest) throw new Error('dynamic fixture missing');
       await dispatchTestRecaptchaRoute(ceremony, frames.page, dynamicRequest);
       expect(dynamicRequest.abort).toHaveBeenCalledOnce();
@@ -4745,14 +4750,17 @@ describe('private KemerBet session provision server', () => {
   });
 
   it.each([
-    { name: 'logo before worker startup', staticOrder: [5, 4, 6] },
-    { name: 'worker import before logo', staticOrder: [4, 6, 5] },
+    { name: 'observed Chromium 151 order', staticOrder: [4, 5, 6, 7] },
+    { name: 'logo before worker startup', staticOrder: [4, 6, 5, 7] },
+    { name: 'worker import before logo', staticOrder: [4, 5, 7, 6] },
+    { name: 'anchor runtime after worker startup', staticOrder: [5, 4, 6, 7] },
+    { name: 'anchor runtime last', staticOrder: [5, 7, 6, 4] },
   ])('accepts the bounded Chromium static subresource race: $name', async ({ staticOrder }) => {
     const frames = testRecaptchaFrames();
     const forbidden = vi.fn();
     const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
     const routes = exactTestRecaptchaRoutes(frames);
-    const order = [0, 1, 2, 3, ...staticOrder, 7, 8, 9];
+    const order = [0, 1, 2, 3, ...staticOrder, 8, 9, 10];
 
     for (const index of order) {
       const candidate = routes[index];
@@ -4765,9 +4773,10 @@ describe('private KemerBet session provision server', () => {
   });
 
   it.each([
-    { name: 'duplicate logo', first: 5, duplicate: 5 },
-    { name: 'duplicate worker bootstrap', first: 4, duplicate: 4 },
-    { name: 'worker import before worker bootstrap', first: undefined, duplicate: 6 },
+    { name: 'duplicate anchor runtime', first: 4, duplicate: 4 },
+    { name: 'duplicate logo', first: 6, duplicate: 6 },
+    { name: 'duplicate worker bootstrap', first: 5, duplicate: 5 },
+    { name: 'worker import before worker bootstrap', first: undefined, duplicate: 7 },
   ])('poisons a static subresource sequence for $name', async ({ first, duplicate }) => {
     const frames = testRecaptchaFrames();
     const forbidden = vi.fn();
@@ -4789,6 +4798,51 @@ describe('private KemerBet session provision server', () => {
     expect(forbidden).toHaveBeenCalledOnce();
     await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(false);
   });
+
+  it.each([
+    {
+      frame: 'main',
+      name: 'main-frame replay',
+      resourceType: 'script',
+    },
+    {
+      frame: 'missing',
+      name: 'worker-frame replay',
+      resourceType: 'script',
+    },
+    {
+      frame: 'anchor',
+      name: 'anchor-frame non-script replay',
+      resourceType: 'other',
+    },
+  ] as const)(
+    'rejects an otherwise pinned anchor runtime with a $name',
+    async ({ frame, resourceType }) => {
+      const frames = testRecaptchaFrames();
+      const forbidden = vi.fn();
+      const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+      const routes = exactTestRecaptchaRoutes(frames);
+      for (const candidate of routes.slice(0, 4)) {
+        await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+      }
+      const invalidAnchorRuntime = testRecaptchaRoute({
+        ...(frame === 'anchor'
+          ? { frame: frames.anchorFrame }
+          : frame === 'main'
+            ? { frame: frames.mainFrame }
+            : { frameUnavailable: true }),
+        resourceType,
+        url: TEST_RECAPTCHA_RUNTIME_URL,
+      });
+
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, invalidAnchorRuntime);
+
+      expect(invalidAnchorRuntime.abort).toHaveBeenCalledOnce();
+      expect(invalidAnchorRuntime.fulfill).not.toHaveBeenCalled();
+      expect(forbidden).toHaveBeenCalledOnce();
+      await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(false);
+    },
+  );
 
   it('binds the ceremony to one login document and retires it on the expected agents commit', async () => {
     const interruptedFrames = testRecaptchaFrames();

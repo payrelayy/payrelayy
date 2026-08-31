@@ -930,8 +930,8 @@ jobs:
           docker save --output "$executor_tar" "$executor_image"
           install -m 0600 canonical-h14/infra/compose.staging-beta.yaml "$compose_path"
 
-          owner_image_id="$(docker image inspect "$owner_image" --format '{{.Id}}')"
-          executor_image_id="$(docker image inspect "$executor_image" --format '{{.Id}}')"
+          owner_source_runtime_id="$(docker image inspect "$owner_image" --format '{{.Id}}')"
+          executor_source_runtime_id="$(docker image inspect "$executor_image" --format '{{.Id}}')"
           owner_tar_sha="$(sha256sum "$owner_tar" | awk '{print $1}')"
           executor_tar_sha="$(sha256sum "$executor_tar" | awk '{print $1}')"
           compose_sha="$(sha256sum "$compose_path" | awk '{print $1}')"
@@ -939,7 +939,7 @@ jobs:
           owner_tar_size="$(stat --format='%s' "$owner_tar")"
           executor_tar_size="$(stat --format='%s' "$executor_tar")"
           helper_size="$(stat --format='%s' repair/infra/operations/fetanagent-h14-owner-recovery-session-repair.sh)"
-          [[ "$owner_image_id" =~ ^sha256:[0-9a-f]{64}$ && "$executor_image_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$owner_source_runtime_id" =~ ^sha256:[0-9a-f]{64}$ && "$executor_source_runtime_id" =~ ^sha256:[0-9a-f]{64}$ ]]
           for digest in "$owner_tar_sha" "$executor_tar_sha" "$compose_sha" "$helper_sha"; do
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
           done
@@ -947,24 +947,31 @@ jobs:
           [[ "$executor_tar_size" =~ ^[1-9][0-9]{0,12}$ && "$executor_tar_size" -le 2147483648 ]]
           [[ "$helper_size" =~ ^[1-9][0-9]{0,7}$ && "$helper_size" -le 2097152 ]]
 
-          python3 -I - "$owner_tar" "$owner_image" "$owner_image_id" \
-            "$executor_tar" "$executor_image" "$executor_image_id" <<'PY'
+          mapfile -t archive_oci_manifest_ids < <(
+            python3 -I - "$owner_tar" "$owner_image" "$executor_tar" "$executor_image" <<'PY'
+          import hashlib
           import json
           import pathlib
+          import re
           import sys
           import tarfile
 
-          def verify(path, expected_tag, expected_id):
-              expected_config = expected_id.removeprefix('sha256:')
-              accepted_configs = {expected_config + '.json', 'blobs/sha256/' + expected_config}
+          def verify(path, expected_tag):
               with tarfile.open(path, mode='r:') as archive:
                   members = archive.getmembers()
                   if not members or len(members) > 4096:
                       raise SystemExit('invalid Docker archive member count')
+                  names = set()
                   for member in members:
                       target = pathlib.PurePosixPath(member.name)
-                      if target.is_absolute() or '..' in target.parts or not (member.isfile() or member.isdir()):
+                      if (
+                          member.name in names
+                          or target.is_absolute()
+                          or '..' in target.parts
+                          or not (member.isfile() or member.isdir())
+                      ):
                           raise SystemExit('unsafe Docker archive member')
+                      names.add(member.name)
                   manifest_file = archive.extractfile(archive.getmember('manifest.json'))
                   if manifest_file is None:
                       raise SystemExit('missing Docker archive manifest')
@@ -972,19 +979,142 @@ jobs:
                   if (
                       not isinstance(manifest, list)
                       or len(manifest) != 1
-                      or manifest[0].get('Config') not in accepted_configs
+                      or not isinstance(manifest[0], dict)
+                  ):
+                      raise SystemExit('Docker archive manifest is not singular and exact')
+                  config_path = manifest[0].get('Config')
+                  config_match = re.fullmatch(
+                      r'blobs/sha256/([0-9a-f]{64})', config_path or ''
+                  )
+                  if (
+                      config_match is None
                       or manifest[0].get('RepoTags') != [expected_tag]
-                      or not manifest[0].get('Layers')
+                      or not isinstance(manifest[0].get('Layers'), list)
+                      or not manifest[0]['Layers']
+                      or any(not isinstance(layer, str) for layer in manifest[0]['Layers'])
                   ):
                       raise SystemExit('Docker archive is not bound to the exact image')
+                  config_id = 'sha256:' + config_match.group(1)
 
-          verify(*sys.argv[1:4])
-          verify(*sys.argv[4:7])
+                  index_file = archive.extractfile(archive.getmember('index.json'))
+                  if index_file is None:
+                      raise SystemExit('missing OCI archive index')
+                  index = json.load(index_file)
+                  descriptors = index.get('manifests') if isinstance(index, dict) else None
+                  if (
+                      not isinstance(index, dict)
+                      or index.get('schemaVersion') != 2
+                      or index.get('mediaType') != 'application/vnd.oci.image.index.v1+json'
+                      or not isinstance(descriptors, list)
+                      or len(descriptors) != 1
+                  ):
+                      raise SystemExit('OCI archive index is not singular and exact')
+                  descriptor = descriptors[0]
+                  digest = descriptor.get('digest') if isinstance(descriptor, dict) else None
+                  annotations = descriptor.get('annotations') if isinstance(descriptor, dict) else None
+                  expected_ref = expected_tag.rsplit(':', 1)[1]
+                  expected_qualified_tag = 'docker.io/library/' + expected_tag
+                  if (
+                      not isinstance(descriptor, dict)
+                      or descriptor.get('mediaType') != 'application/vnd.oci.image.manifest.v1+json'
+                      or not isinstance(digest, str)
+                      or re.fullmatch(r'sha256:[0-9a-f]{64}', digest) is None
+                      or not isinstance(descriptor.get('size'), int)
+                      or descriptor['size'] < 1
+                      or descriptor['size'] > 16777216
+                      or annotations != {
+                          'io.containerd.image.name': expected_qualified_tag,
+                          'org.opencontainers.image.ref.name': expected_ref,
+                      }
+                  ):
+                      raise SystemExit('OCI archive descriptor is invalid')
+                  descriptor_member = archive.getmember(
+                      'blobs/sha256/' + digest.removeprefix('sha256:')
+                  )
+                  descriptor_file = archive.extractfile(descriptor_member)
+                  if descriptor_file is None:
+                      raise SystemExit('missing OCI image manifest blob')
+                  descriptor_bytes = descriptor_file.read()
+                  if (
+                      descriptor_member.size != descriptor['size']
+                      or hashlib.sha256(descriptor_bytes).hexdigest()
+                      != digest.removeprefix('sha256:')
+                  ):
+                      raise SystemExit('OCI image manifest blob is not digest-bound')
+                  image_manifest = json.loads(descriptor_bytes)
+                  config = image_manifest.get('config')
+                  if (
+                      image_manifest.get('schemaVersion') != 2
+                      or image_manifest.get('mediaType')
+                      != 'application/vnd.oci.image.manifest.v1+json'
+                      or not isinstance(config, dict)
+                      or config.get('digest') != config_id
+                      or config.get('mediaType') != 'application/vnd.oci.image.config.v1+json'
+                      or not isinstance(config.get('size'), int)
+                      or config['size'] < 1
+                      or config['size'] > 16777216
+                      or digest == config_id
+                  ):
+                      raise SystemExit('OCI image manifest is not bound to the exact config')
+                  layer_descriptors = image_manifest.get('layers')
+                  if (
+                      not isinstance(layer_descriptors, list)
+                      or not layer_descriptors
+                      or any(
+                          not isinstance(layer, dict)
+                          or re.fullmatch(r'sha256:[0-9a-f]{64}', layer.get('digest') or '')
+                          is None
+                          for layer in layer_descriptors
+                      )
+                      or manifest[0]['Layers']
+                      != [
+                          'blobs/sha256/' + layer['digest'].removeprefix('sha256:')
+                          for layer in layer_descriptors
+                      ]
+                  ):
+                      raise SystemExit('Docker and OCI archive layers are not exact')
+                  config_member = archive.getmember(
+                      'blobs/sha256/' + config_id.removeprefix('sha256:')
+                  )
+                  config_file = archive.extractfile(config_member)
+                  if config_file is None:
+                      raise SystemExit('missing OCI image config blob')
+                  config_bytes = config_file.read()
+                  if (
+                      config_member.size != config['size']
+                      or hashlib.sha256(config_bytes).hexdigest()
+                      != config_id.removeprefix('sha256:')
+                  ):
+                      raise SystemExit('OCI image config blob is not digest-bound')
+                  if not isinstance(json.loads(config_bytes), dict):
+                      raise SystemExit('OCI image config is invalid')
+                  return config_id, digest
+
+          for archive_path, image_tag in (sys.argv[1:3], sys.argv[3:5]):
+              config_id, manifest_id = verify(archive_path, image_tag)
+              print(config_id)
+              print(manifest_id)
           PY
+          )
+          [[ "${#archive_oci_manifest_ids[@]}" == '4' ]]
+          owner_image_config_digest="${archive_oci_manifest_ids[0]}"
+          owner_image_oci_manifest_digest="${archive_oci_manifest_ids[1]}"
+          executor_image_config_digest="${archive_oci_manifest_ids[2]}"
+          executor_image_oci_manifest_digest="${archive_oci_manifest_ids[3]}"
+          for digest in \
+            "$owner_image_config_digest" "$owner_image_oci_manifest_digest" \
+            "$executor_image_config_digest" "$executor_image_oci_manifest_digest"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          done
+          [[ "$owner_source_runtime_id" == "$owner_image_config_digest" || \
+            "$owner_source_runtime_id" == "$owner_image_oci_manifest_digest" ]]
+          [[ "$executor_source_runtime_id" == "$executor_image_config_digest" || \
+            "$executor_source_runtime_id" == "$executor_image_oci_manifest_digest" ]]
 
           cat >"$manifest_path" <<EOF
           version=1
           contract=fetanagent-h14-owner-kemerbet-session-bootstrap-repair-bundle
+          image_archive_encoding=oci-docker-save-v1
           repair_implementation_sha=$CONFIRMED_REPAIR_IMPLEMENTATION
           repair_parent_sha=$OWNER_SESSION_REPAIR_PARENT
           canonical_h14_sha=$CANONICAL_H14_COMMIT
@@ -995,11 +1125,13 @@ jobs:
           owner_predecessor_sha=$OWNER_SESSION_REPAIR_PARENT
           session_predecessor_sha=$CANONICAL_H14_COMMIT
           owner_image_tag=$owner_image
-          owner_image_id=$owner_image_id
+          owner_image_config_digest=$owner_image_config_digest
+          owner_image_oci_manifest_digest=$owner_image_oci_manifest_digest
           owner_image_tar_sha256=$owner_tar_sha
           owner_image_tar_size=$owner_tar_size
           executor_image_tag=$executor_image
-          executor_image_id=$executor_image_id
+          executor_image_config_digest=$executor_image_config_digest
+          executor_image_oci_manifest_digest=$executor_image_oci_manifest_digest
           executor_image_tar_sha256=$executor_tar_sha
           executor_image_tar_size=$executor_tar_size
           chromium_package_version=$CHROMIUM_PACKAGE_VERSION
@@ -1025,8 +1157,12 @@ jobs:
             echo "bundle_root=$bundle_root"
             echo "owner_tar_sha=$owner_tar_sha"
             echo "owner_tar_size=$owner_tar_size"
+            echo "owner_image_config_digest=$owner_image_config_digest"
+            echo "owner_image_oci_manifest_digest=$owner_image_oci_manifest_digest"
             echo "executor_tar_sha=$executor_tar_sha"
             echo "executor_tar_size=$executor_tar_size"
+            echo "executor_image_config_digest=$executor_image_config_digest"
+            echo "executor_image_oci_manifest_digest=$executor_image_oci_manifest_digest"
             echo "compose_sha=$compose_sha"
             echo "helper_sha=$helper_sha"
             echo "helper_size=$helper_size"

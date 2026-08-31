@@ -129,6 +129,7 @@ require_manifest() {
   LC_ALL=C grep -q $'\r' "$MANIFEST" && die 'the manifest contains carriage returns'
   expected_keys="version
 contract
+image_archive_encoding
 repair_implementation_sha
 repair_parent_sha
 canonical_h14_sha
@@ -139,11 +140,13 @@ workflow_run_attempt
 owner_predecessor_sha
 session_predecessor_sha
 owner_image_tag
-owner_image_id
+owner_image_config_digest
+owner_image_oci_manifest_digest
 owner_image_tar_sha256
 owner_image_tar_size
 executor_image_tag
-executor_image_id
+executor_image_config_digest
+executor_image_oci_manifest_digest
 executor_image_tar_sha256
 executor_image_tar_size
 chromium_package_version
@@ -164,6 +167,7 @@ money_moved"
   [[ "$(cut -d= -f1 "$MANIFEST")" == "$expected_keys" ]] || die 'the staged manifest key order is not exact'
   [[ "$(manifest_value version)" == '1' ]]
   [[ "$(manifest_value contract)" == 'fetanagent-h14-owner-kemerbet-session-bootstrap-repair-bundle' ]]
+  [[ "$(manifest_value image_archive_encoding)" == 'oci-docker-save-v1' ]]
   [[ "$(manifest_value repair_implementation_sha)" == "$REPAIR_SHA" ]]
   [[ "$(manifest_value repair_parent_sha)" == "$OWNER_SESSION_REPAIR_PARENT" ]]
   [[ "$(manifest_value canonical_h14_sha)" == "$CANONICAL_H14" ]]
@@ -175,8 +179,10 @@ money_moved"
   [[ "$(manifest_value session_predecessor_sha)" == "$CANONICAL_H14" ]]
   [[ "$(manifest_value owner_image_tag)" == "$OWNER_REPAIR_IMAGE" ]]
   [[ "$(manifest_value executor_image_tag)" == "$SESSION_REPAIR_IMAGE" ]]
-  [[ "$(manifest_value owner_image_id)" =~ ^sha256:[0-9a-f]{64}$ ]]
-  [[ "$(manifest_value executor_image_id)" =~ ^sha256:[0-9a-f]{64}$ ]]
+  [[ "$(manifest_value owner_image_config_digest)" =~ ^sha256:[0-9a-f]{64}$ ]]
+  [[ "$(manifest_value owner_image_oci_manifest_digest)" =~ ^sha256:[0-9a-f]{64}$ ]]
+  [[ "$(manifest_value executor_image_config_digest)" =~ ^sha256:[0-9a-f]{64}$ ]]
+  [[ "$(manifest_value executor_image_oci_manifest_digest)" =~ ^sha256:[0-9a-f]{64}$ ]]
   [[ "$(manifest_value owner_image_tar_sha256)" =~ ^[0-9a-f]{64}$ ]]
   [[ "$(manifest_value executor_image_tar_sha256)" =~ ^[0-9a-f]{64}$ ]]
   [[ "$(manifest_value canonical_compose_sha256)" =~ ^[0-9a-f]{64}$ ]]
@@ -205,6 +211,14 @@ money_moved"
   [[ "$(sha256sum "$STAGED_COMPOSE" | awk '{print $1}')" == "$compose_sha" ]]
   [[ "$(sha256sum "$CANONICAL_COMPOSE" | awk '{print $1}')" == "$compose_sha" ]]
   [[ "$(manifest_value repair_helper_size)" == "$(stat --format='%s' "$self_path")" ]]
+  require_archive_image_identity \
+    "$OWNER_ARCHIVE" "$OWNER_REPAIR_IMAGE" \
+    "$(manifest_value owner_image_config_digest)" \
+    "$(manifest_value owner_image_oci_manifest_digest)"
+  require_archive_image_identity \
+    "$SESSION_ARCHIVE" "$SESSION_REPAIR_IMAGE" \
+    "$(manifest_value executor_image_config_digest)" \
+    "$(manifest_value executor_image_oci_manifest_digest)"
 }
 
 for file in owner-database-url publishable-key beta-database-url beta-transport-hmac \
@@ -301,6 +315,155 @@ text_digest() {
   printf '%s' "$1" | sha256sum | awk '{print $1}'
 }
 
+require_archive_image_identity() {
+  local archive="$1" expected_tag="$2" expected_config_digest="$3" expected_manifest_digest="$4"
+  env -i PATH="$SAFE_PATH" python3 -I - \
+    "$archive" "$expected_tag" "$expected_config_digest" "$expected_manifest_digest" <<'PY'
+import hashlib
+import json
+import pathlib
+import re
+import sys
+import tarfile
+
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+archive_path, expected_tag, expected_config, expected_manifest = sys.argv[1:]
+
+
+def refuse(message):
+    raise SystemExit(message)
+
+
+def exact_member(archive, members_by_name, name, maximum_size):
+    member = members_by_name.get(name)
+    if member is None or not member.isfile() or member.size < 1 or member.size > maximum_size:
+        refuse("required Docker archive member is missing or unsafe")
+    extracted = archive.extractfile(member)
+    if extracted is None:
+        refuse("required Docker archive member cannot be read")
+    return member, extracted.read()
+
+
+if (
+    DIGEST.fullmatch(expected_config) is None
+    or DIGEST.fullmatch(expected_manifest) is None
+    or expected_config == expected_manifest
+):
+    refuse("expected Docker archive identities are invalid")
+
+with tarfile.open(archive_path, mode="r:") as archive:
+    members = archive.getmembers()
+    if not members or len(members) > 4096:
+        refuse("invalid Docker archive member count")
+    members_by_name = {}
+    for member in members:
+        target = pathlib.PurePosixPath(member.name)
+        if (
+            member.name in members_by_name
+            or target.is_absolute()
+            or ".." in target.parts
+            or not (member.isfile() or member.isdir())
+        ):
+            refuse("unsafe Docker archive member")
+        members_by_name[member.name] = member
+
+    _, docker_manifest_bytes = exact_member(archive, members_by_name, "manifest.json", 1048576)
+    _, index_bytes = exact_member(archive, members_by_name, "index.json", 1048576)
+    docker_manifest = json.loads(docker_manifest_bytes)
+    if not isinstance(docker_manifest, list) or len(docker_manifest) != 1:
+        refuse("Docker archive manifest is not singular")
+    docker_entry = docker_manifest[0]
+    if not isinstance(docker_entry, dict):
+        refuse("Docker archive manifest entry is invalid")
+    expected_config_path = "blobs/sha256/" + expected_config.removeprefix("sha256:")
+    docker_layers = docker_entry.get("Layers")
+    if (
+        docker_entry.get("Config") != expected_config_path
+        or docker_entry.get("RepoTags") != [expected_tag]
+        or not isinstance(docker_layers, list)
+        or not docker_layers
+        or any(not isinstance(layer, str) for layer in docker_layers)
+    ):
+        refuse("Docker archive is not bound to the exact image")
+
+    index = json.loads(index_bytes)
+    descriptors = index.get("manifests") if isinstance(index, dict) else None
+    if (
+        not isinstance(index, dict)
+        or index.get("schemaVersion") != 2
+        or index.get("mediaType") != "application/vnd.oci.image.index.v1+json"
+        or not isinstance(descriptors, list)
+        or len(descriptors) != 1
+    ):
+        refuse("OCI archive index is not singular and exact")
+    descriptor = descriptors[0]
+    annotations = descriptor.get("annotations") if isinstance(descriptor, dict) else None
+    expected_ref = expected_tag.rsplit(":", 1)[1]
+    if (
+        not isinstance(descriptor, dict)
+        or descriptor.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+        or descriptor.get("digest") != expected_manifest
+        or not isinstance(descriptor.get("size"), int)
+        or descriptor["size"] < 1
+        or descriptor["size"] > 16777216
+        or annotations
+        != {
+            "io.containerd.image.name": "docker.io/library/" + expected_tag,
+            "org.opencontainers.image.ref.name": expected_ref,
+        }
+    ):
+        refuse("OCI archive descriptor is invalid")
+
+    manifest_path = "blobs/sha256/" + expected_manifest.removeprefix("sha256:")
+    manifest_member, manifest_bytes = exact_member(
+        archive, members_by_name, manifest_path, 16777216
+    )
+    if (
+        manifest_member.size != descriptor["size"]
+        or hashlib.sha256(manifest_bytes).hexdigest()
+        != expected_manifest.removeprefix("sha256:")
+    ):
+        refuse("OCI image manifest blob is not digest-bound")
+    image_manifest = json.loads(manifest_bytes)
+    config = image_manifest.get("config") if isinstance(image_manifest, dict) else None
+    layers = image_manifest.get("layers") if isinstance(image_manifest, dict) else None
+    if (
+        not isinstance(image_manifest, dict)
+        or image_manifest.get("schemaVersion") != 2
+        or image_manifest.get("mediaType") != "application/vnd.oci.image.manifest.v1+json"
+        or not isinstance(config, dict)
+        or config.get("mediaType") != "application/vnd.oci.image.config.v1+json"
+        or config.get("digest") != expected_config
+        or not isinstance(config.get("size"), int)
+        or config["size"] < 1
+        or config["size"] > 16777216
+        or not isinstance(layers, list)
+        or not layers
+        or any(
+            not isinstance(layer, dict)
+            or DIGEST.fullmatch(layer.get("digest") or "") is None
+            for layer in layers
+        )
+        or docker_layers
+        != ["blobs/sha256/" + layer["digest"].removeprefix("sha256:") for layer in layers]
+    ):
+        refuse("OCI image manifest is not bound to the exact config and layers")
+
+    config_member, config_bytes = exact_member(
+        archive, members_by_name, expected_config_path, 16777216
+    )
+    if (
+        config_member.size != config["size"]
+        or hashlib.sha256(config_bytes).hexdigest()
+        != expected_config.removeprefix("sha256:")
+    ):
+        refuse("OCI image config blob is not digest-bound")
+    parsed_config = json.loads(config_bytes)
+    if not isinstance(parsed_config, dict):
+        refuse("OCI image config is invalid")
+PY
+}
+
 require_image_labels() {
   local image="$1" expected_revision="$2" require_repair_labels="$3"
   [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
@@ -313,6 +476,56 @@ require_image_labels() {
     [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "com.fetanagent.provider-action-enabled"}}')" == \
       'false' ]] || return 1
   fi
+}
+
+require_runtime_image_identity() {
+  local image="$1" config_key="$2" oci_manifest_key="$3" config_id oci_manifest_id statuses
+  config_id="$(manifest_value "$config_key")" || return 1
+  oci_manifest_id="$(manifest_value "$oci_manifest_key")" || return 1
+  set +e
+  docker image inspect "$image" |
+    env -i PATH="$SAFE_PATH" python3 -I /dev/fd/3 \
+      "$image" "$config_id" "$oci_manifest_id" 3<<'PY'
+import json
+import re
+import sys
+
+tag, config_digest, manifest_digest = sys.argv[1:]
+digest = re.compile(r"sha256:[0-9a-f]{64}")
+images = json.load(sys.stdin)
+if (
+    digest.fullmatch(config_digest) is None
+    or digest.fullmatch(manifest_digest) is None
+    or config_digest == manifest_digest
+    or not isinstance(images, list)
+    or len(images) != 1
+    or not isinstance(images[0], dict)
+):
+    raise SystemExit(1)
+image = images[0]
+if image.get("RepoTags") != [tag] or image.get("Id") not in {config_digest, manifest_digest}:
+    raise SystemExit(1)
+descriptor = image.get("Descriptor")
+if descriptor is not None and (
+    not isinstance(descriptor, dict) or descriptor.get("digest") != manifest_digest
+):
+    raise SystemExit(1)
+repo = tag.rsplit(":", 1)[0]
+repo_digests = image.get("RepoDigests")
+if repo_digests not in (None, [], [repo + "@" + manifest_digest]):
+    raise SystemExit(1)
+PY
+  statuses="${PIPESTATUS[*]}"
+  set -e
+  [[ "$statuses" == '0 0' ]]
+}
+
+require_container_image_identity() {
+  local container="$1" image="$2" config_key="$3" oci_manifest_key="$4" runtime_id
+  require_runtime_image_identity "$image" "$config_key" "$oci_manifest_key" || return 1
+  runtime_id="$(docker image inspect "$image" --format '{{.Id}}')" || return 1
+  [[ "$(docker container inspect "$container" --format '{{.Image}}|{{.Config.Image}}')" == \
+    "$runtime_id|$image" ]]
 }
 
 require_owner_contract() {
@@ -521,7 +734,7 @@ session_container_id=$session"
 }
 
 preflight() {
-  local owner session non_targets volumes binding image key pair
+  local owner session non_targets volumes binding image key oci_key pair
   owner="$(container_id_for "$OWNER_SERVICE")" || die 'exactly one Owner container is required'
   session="$(container_id_for "$SESSION_SERVICE")" || die 'exactly one KemerBet session container is required'
   require_owner_contract "$owner" "$OWNER_SESSION_REPAIR_PARENT" false ||
@@ -558,11 +771,12 @@ gateway" ]] || die 'the five non-target services are not exact'
     "$OWNER_SESSION_REPAIR_PARENT" ]] || die 'the exact Owner rollback image is unavailable'
   [[ "$(docker image inspect "$SESSION_PREDECESSOR_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == \
     "$CANONICAL_H14" ]] || die 'the exact session rollback image is unavailable'
-  for pair in "$OWNER_REPAIR_IMAGE:owner_image_id" "$SESSION_REPAIR_IMAGE:executor_image_id"; do
-    image="${pair%:*}"
-    key="${pair##*:}"
+  for pair in \
+    "$OWNER_REPAIR_IMAGE|owner_image_config_digest|owner_image_oci_manifest_digest" \
+    "$SESSION_REPAIR_IMAGE|executor_image_config_digest|executor_image_oci_manifest_digest"; do
+    IFS='|' read -r image key oci_key <<<"$pair"
     if docker image inspect "$image" >/dev/null 2>&1; then
-      [[ "$(docker image inspect "$image" --format '{{.Id}}')" == "$(manifest_value "$key")" ]] ||
+      require_runtime_image_identity "$image" "$key" "$oci_key" ||
         die 'a candidate tag already names a different image'
     fi
   done
@@ -663,8 +877,10 @@ deploy_repair() {
   local owner session
   docker load --input "$OWNER_ARCHIVE" >/dev/null
   docker load --input "$SESSION_ARCHIVE" >/dev/null
-  [[ "$(docker image inspect "$OWNER_REPAIR_IMAGE" --format '{{.Id}}')" == "$(manifest_value owner_image_id)" ]]
-  [[ "$(docker image inspect "$SESSION_REPAIR_IMAGE" --format '{{.Id}}')" == "$(manifest_value executor_image_id)" ]]
+  require_runtime_image_identity \
+    "$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest
+  require_runtime_image_identity \
+    "$SESSION_REPAIR_IMAGE" executor_image_config_digest executor_image_oci_manifest_digest
   require_image_labels "$OWNER_REPAIR_IMAGE" "$REPAIR_SHA" true
   require_image_labels "$SESSION_REPAIR_IMAGE" "$REPAIR_SHA" true
   [[ "$(docker image inspect "$OWNER_REPAIR_IMAGE" --format '{{.Config.User}}|{{json .Config.Cmd}}')" == \
@@ -680,6 +896,8 @@ deploy_repair() {
   owner="$(container_id_for "$OWNER_SERVICE")"
   session="$(container_id_for "$SESSION_SERVICE")"
   require_owner_contract "$owner" "$REPAIR_SHA" true
+  require_container_image_identity \
+    "$owner" "$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest
   require_session_contract "$session" "$CANONICAL_H14" false
   require_owner_session_socket "$owner"
   require_no_provider_action_runtime
@@ -691,6 +909,10 @@ deploy_repair() {
   session="$(container_id_for "$SESSION_SERVICE")"
   require_owner_contract "$owner" "$REPAIR_SHA" true
   require_session_contract "$session" "$REPAIR_SHA" true
+  require_container_image_identity \
+    "$owner" "$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest
+  require_container_image_identity \
+    "$session" "$SESSION_REPAIR_IMAGE" executor_image_config_digest executor_image_oci_manifest_digest
   require_owner_session_socket "$owner"
   require_no_provider_action_runtime
   require_preserved_state "$owner" "$session"

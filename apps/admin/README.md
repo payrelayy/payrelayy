@@ -5,8 +5,10 @@ and record a non-claiming KemerBet Player-ID existence review. It also serves a 
 staging page at `/owner`; it is not a general dashboard
 and it has no browser database grant. The page signs in directly to the exact staging Supabase Auth
 project with the public publishable key, keeps the access token only in JavaScript memory, and sends
-that bearer token to the loopback-only Owner service. It never stores a password, refresh token,
-access token, service-role key, or database credential in browser storage.
+that bearer token to the loopback-only Owner service. It never stores a password, access token,
+service-role key, or database credential in browser storage. A rotating refresh token and the fixed
+twelve-hour deadline are stored only in same-tab session storage; sign-out or closing the tab
+removes them.
 
 The service verifies the bearer token with the exact staging Supabase Auth project, derives the
 Auth user ID from that verified response, and passes it to private database procedures. The
@@ -69,12 +71,12 @@ generic amount/provider/customer preparation routine is not callable by the Owne
 
 The same-origin Owner dashboard renders the eligible Player selector, fixed-policy confirmation,
 redacted current status, dry-run-only arm, and an emergency stop. The current-status route makes the
-stop recoverable after a page reload without browser storage or a copied pilot UUID. The access
-token remains only in JavaScript memory; do not extract it or use ad-hoc `curl`/browser-console
-calls, and do not paste Player IDs into terminal history, logs, screenshots, or chat. The startup
-catalog preflight rejects any missing control routine, additional callable app routine, or direct
-app relation privilege. None of these controls can make provider verification, settlement,
-execution, or a KemerBet final action live.
+stop recoverable after a page reload without persisting or copying the pilot UUID. The access token
+remains only in JavaScript memory; do not extract it or use ad-hoc `curl`/browser-console calls, and
+do not paste Player IDs into terminal history, logs, screenshots, or chat. The startup catalog
+preflight rejects any missing control routine, additional callable app routine, or direct app
+relation privilege. None of these controls can make provider verification, settlement, execution,
+or a KemerBet final action live.
 
 The raw 32-byte invite token is generated in process, returned once in a `Cache-Control: no-store`
 Telegram deep link, and discarded. PostgreSQL stores only its domain-separated SHA-256 digest;

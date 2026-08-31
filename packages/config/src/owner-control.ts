@@ -11,6 +11,9 @@ export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 export const OWNER_CONTROL_DATABASE_RUNTIME_ROLE = 'fetanagent_owner_control_runtime';
 export const OWNER_CONTROL_TELEGRAM_BOT_USERNAME = 'fetanagentbot';
 export const OWNER_CONTROL_DATABASE_DIRECT_HOST = `db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
+export const OWNER_CONTROL_DATABASE_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
+export const OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE =
+  `${OWNER_CONTROL_DATABASE_RUNTIME_ROLE}.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}` as const;
 
 const STAGING_SUPABASE_URL = `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
 const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
@@ -24,10 +27,12 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
 
 export interface OwnerControlDatabaseConnection {
   readonly database: 'postgres';
-  readonly host: typeof OWNER_CONTROL_DATABASE_DIRECT_HOST;
+  readonly host:
+    typeof OWNER_CONTROL_DATABASE_DIRECT_HOST | typeof OWNER_CONTROL_DATABASE_POOLER_HOST;
   readonly password: string;
   readonly port: 5432;
-  readonly user: typeof OWNER_CONTROL_DATABASE_RUNTIME_ROLE;
+  readonly user:
+    typeof OWNER_CONTROL_DATABASE_RUNTIME_ROLE | typeof OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE;
 }
 
 export type OwnerControlRuntimeConfig =
@@ -129,11 +134,17 @@ function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
     throw new Error('OWNER_CONTROL_DATABASE_URL must be a valid PostgreSQL URL.');
   }
   const queryKeys = [...url.searchParams.keys()];
+  const user = decode(url.username);
+  const exactDirectRoute =
+    url.hostname === OWNER_CONTROL_DATABASE_DIRECT_HOST &&
+    user === OWNER_CONTROL_DATABASE_RUNTIME_ROLE;
+  const exactSessionPoolerRoute =
+    url.hostname === OWNER_CONTROL_DATABASE_POOLER_HOST &&
+    user === OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
-    url.hostname !== OWNER_CONTROL_DATABASE_DIRECT_HOST ||
+    (!exactDirectRoute && !exactSessionPoolerRoute) ||
     (url.port !== '' && url.port !== '5432') ||
-    decode(url.username) !== OWNER_CONTROL_DATABASE_RUNTIME_ROLE ||
     decode(url.password) === '' ||
     decode(url.pathname.slice(1)) !== 'postgres' ||
     queryKeys.length !== 1 ||
@@ -142,16 +153,20 @@ function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
     url.hash !== ''
   ) {
     throw new Error(
-      'OWNER_CONTROL_DATABASE_URL must use the dedicated staging Owner-control role through the exact IPv6 direct database endpoint.',
+      'OWNER_CONTROL_DATABASE_URL must use the dedicated staging Owner-control role through the exact direct or session-pooler endpoint.',
     );
   }
 
   return {
     database: 'postgres',
-    host: OWNER_CONTROL_DATABASE_DIRECT_HOST,
+    host: exactDirectRoute
+      ? OWNER_CONTROL_DATABASE_DIRECT_HOST
+      : OWNER_CONTROL_DATABASE_POOLER_HOST,
     password: decode(url.password),
     port: 5432,
-    user: OWNER_CONTROL_DATABASE_RUNTIME_ROLE,
+    user: exactDirectRoute
+      ? OWNER_CONTROL_DATABASE_RUNTIME_ROLE
+      : OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE,
   };
 }
 

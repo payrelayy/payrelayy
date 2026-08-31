@@ -4,6 +4,8 @@ dist/
 coverage/
 .turbo/
 .pnpm-store/
+__pycache__/
+*.py[cod]
 .supabase-home/
 android/**/.gradle/
 android/**/.kotlin/

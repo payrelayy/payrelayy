@@ -244,7 +244,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
               OTPs are never sent to chat, Git, Supabase, or FetanAgent logs. Transfer is blocked,
               and all input locks as soon as sign-in is detected.
             </p>
-            <p class="request-meta" id="kemerbet-session-status">
+            <p class="request-meta" id="kemerbet-session-status" role="status"
+              aria-live="polite" aria-atomic="true">
               Load an active KemerBet profile to check sign-in readiness.
             </p>
             <label class="confirmation-row" for="kemerbet-session-confirmation">
@@ -361,7 +362,7 @@ button, .actions a { border: 0; border-radius: 10px; color: #071113; background:
 form button { margin-top: 8px; }
 button.secondary { color: #e4e4e7; background: #27272a; }
 button.danger { color: #fecaca; background: #3f171b; }
-button:disabled { cursor: wait; opacity: 0.55; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
 .receipt { margin-top: 22px; border-top: 1px solid #30303a; padding-top: 20px; }
 .review-section { margin-top: 28px; border-top: 1px solid #30303a; padding-top: 24px; }
 .request-list { display: grid; gap: 14px; margin-top: 16px; }
@@ -450,6 +451,7 @@ let accessTokenRefreshAt;
 let ownerRefreshTimer;
 let ownerRefreshPromise;
 let ownerAuthGeneration = 0;
+let pendingKemerbetReadinessCohortRequestId;
 let currentInvite;
 let currentPilot;
 let currentPilotLoaded = false;
@@ -462,6 +464,7 @@ let kemerbetSecurityRecoveryRequired = false;
 let kemerbetRecheckSpentFailedTerminal = false;
 let kemerbetSecurityRecoveryCohortRequired = false;
 let kemerbetSecurityRecoveryInProgress = false;
+let kemerbetSecurityRecoverySessionAllowed = false;
 let kemerbetSessionPollTimer;
 let kemerbetSessionPollFailures = 0;
 let kemerbetSessionReconnectNeeded = false;
@@ -476,8 +479,111 @@ const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
 const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
 const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
+const KEMERBET_READINESS_REQUEST_STORAGE_KEY =
+  'fetanagent.owner.kemerbet-readiness-request.v1';
+const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000;
+// Caddy's Owner upstream first-header deadline is 30 seconds. Fail locally first so the UI can
+// reconcile an uncertain mutation using the same idempotency key instead of waiting on a gateway
+// timeout whose response shape is no longer authoritative.
+const OWNER_API_REQUEST_TIMEOUT_MS = 25 * 1_000;
+const OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS = 4 * 1_000;
+const OWNER_REFRESH_RETRY_DELAY_MS = 5 * 1_000;
 const KEMERBET_TEXT_BATCH_DELAY_MS = 180;
 const KEMERBET_TEXT_BATCH_MAX_CHARS = 64;
+
+function ownerTransportTimeoutError() {
+  return new Error('owner_transport_timeout');
+}
+
+function ownerTransportNetworkError() {
+  return new Error('owner_transport_network');
+}
+
+function isOwnerTransportError(error) {
+  return error instanceof Error &&
+    (error.message === 'owner_transport_timeout' ||
+      error.message === 'owner_transport_network');
+}
+
+function createRequestDeadline(timeoutMs) {
+  const controller = new AbortController();
+  let complete = false;
+  let timer;
+  let rejectDeadline;
+  const deadline = new Promise((_resolve, reject) => {
+    rejectDeadline = reject;
+    timer = window.setTimeout(() => {
+      if (complete) return;
+      const error = ownerTransportTimeoutError();
+      rejectDeadline(error);
+      controller.abort();
+    }, timeoutMs);
+  });
+  return {
+    finish() {
+      if (complete) return;
+      complete = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    },
+    async run(operation) {
+      if (complete) throw ownerTransportTimeoutError();
+      try {
+        return await Promise.race([Promise.resolve().then(operation), deadline]);
+      } catch (error) {
+        if (controller.signal.aborted) throw ownerTransportTimeoutError();
+        throw error;
+      }
+    },
+    signal: controller.signal,
+  };
+}
+
+const RESPONSE_BODY_READERS = new Set([
+  'arrayBuffer',
+  'blob',
+  'formData',
+  'json',
+  'text',
+]);
+
+function deadlineBoundResponse(response, deadline) {
+  return new Proxy(response, {
+    get(target, property) {
+      if (property === 'clone') {
+        return () => deadlineBoundResponse(target.clone(), deadline);
+      }
+      if (RESPONSE_BODY_READERS.has(property)) {
+        return async (...args) => {
+          try {
+            return await deadline.run(() => target[property](...args));
+          } finally {
+            deadline.finish();
+          }
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+async function beginDeadlineFetch(input, init, timeoutMs) {
+  const deadline = createRequestDeadline(timeoutMs);
+  try {
+    const response = await deadline.run(() => fetch(input, { ...init, signal: deadline.signal }));
+    return { deadline, response };
+  } catch (error) {
+    deadline.finish();
+    if (isOwnerTransportError(error)) throw error;
+    throw ownerTransportNetworkError();
+  }
+}
+
+async function deadlineFetch(input, init, timeoutMs) {
+  const request = await beginDeadlineFetch(input, init, timeoutMs);
+  if (request.response.status === 204) request.deadline.finish();
+  return deadlineBoundResponse(request.response, request.deadline);
+}
 
 function ordinaryKemerbetMutationAllowed() {
   return !kemerbetSecurityRecoveryRequired;
@@ -485,6 +591,16 @@ function ordinaryKemerbetMutationAllowed() {
 
 function readinessKemerbetMutationAllowed() {
   return ordinaryKemerbetMutationAllowed() || kemerbetSecurityRecoveryCohortRequired;
+}
+
+function privateKemerbetSessionMutationAllowed() {
+  return ordinaryKemerbetMutationAllowed() || (
+    kemerbetSecurityRecoveryRequired &&
+    kemerbetSecurityRecoveryInProgress &&
+    kemerbetSecurityRecoverySessionAllowed &&
+    !kemerbetRecheckSpentFailedTerminal &&
+    !kemerbetSecurityRecoveryCohortRequired
+  );
 }
 
 function applyKemerbetQuarantineMutationBoundary() {
@@ -523,10 +639,18 @@ function applyKemerbetQuarantineMutationBoundary() {
   for (const element of document.querySelectorAll('[data-kemerbet-state-mutation="ordinary"]')) {
     element.disabled = true;
   }
-  kemerbetSessionConfirmation.checked = false;
-  kemerbetSessionConfirmation.disabled = true;
-  kemerbetSessionStartButton.disabled = true;
-  kemerbetSessionStopButton.disabled = true;
+  if (privateKemerbetSessionMutationAllowed()) {
+    kemerbetSessionConfirmation.disabled = Boolean(currentKemerbetSession?.active);
+    kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
+      currentKemerbetSession?.phase !== 'idle';
+    kemerbetSessionStopButton.disabled = !currentKemerbetSession?.active ||
+      currentKemerbetSession.phase === 'stopping';
+  } else {
+    kemerbetSessionConfirmation.checked = false;
+    kemerbetSessionConfirmation.disabled = true;
+    kemerbetSessionStartButton.disabled = true;
+    kemerbetSessionStopButton.disabled = true;
+  }
   pilotArmButton.disabled = true;
   pilotStopButton.disabled = true;
   if (
@@ -546,8 +670,21 @@ function requireOrdinaryKemerbetMutation() {
   setNotice(
     kemerbetRecheckSpentFailedTerminal
       ? 'The one-use KemerBet recheck authorization is spent and failed terminally. It cannot be retried; every mutation remains disabled and no money moves.'
-      : 'KemerBet security recovery is required. Only the exact security-recovery profile action and read-only status refreshes are available; no money moves.',
+      : kemerbetSecurityRecoverySessionAllowed
+        ? 'KemerBet security recovery is in progress. Only the exact recovery private sign-in and read-only status refreshes are available; no money moves.'
+        : 'KemerBet security recovery is required. Only the exact security-recovery profile action and read-only status refreshes are available; no money moves.',
   );
+  return false;
+}
+
+function requirePrivateKemerbetSessionMutation() {
+  if (privateKemerbetSessionMutationAllowed()) return true;
+  applyKemerbetQuarantineMutationBoundary();
+  const message = kemerbetRecheckSpentFailedTerminal
+      ? 'The one-use KemerBet recheck authorization is terminally spent. Private sign-in cannot be reopened.'
+      : 'Private KemerBet sign-in is unavailable in this recovery state. Amount, Transfer, final action, and money movement remain disabled.';
+  kemerbetSessionStatus.textContent = message;
+  setNotice(message);
   return false;
 }
 
@@ -700,6 +837,47 @@ function persistOwnerSession() {
   );
 }
 
+function validOwnerMutationRequestId(value) {
+  return typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
+
+function readPendingKemerbetReadinessRequestId() {
+  if (pendingKemerbetReadinessCohortRequestId) {
+    return pendingKemerbetReadinessCohortRequestId;
+  }
+  try {
+    const stored = window.sessionStorage.getItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY);
+    if (!validOwnerMutationRequestId(stored)) {
+      window.sessionStorage.removeItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY);
+      return undefined;
+    }
+    pendingKemerbetReadinessCohortRequestId = stored;
+    return stored;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistPendingKemerbetReadinessRequestId(requestId) {
+  if (!validOwnerMutationRequestId(requestId)) throw new Error('invalid_request_id');
+  pendingKemerbetReadinessCohortRequestId = requestId;
+  try {
+    window.sessionStorage.setItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY, requestId);
+  } catch {
+    // The in-memory request ID still prevents a blind retry in this tab.
+  }
+}
+
+function clearPendingKemerbetReadinessRequestId() {
+  pendingKemerbetReadinessCohortRequestId = undefined;
+  try {
+    window.sessionStorage.removeItem(KEMERBET_READINESS_REQUEST_STORAGE_KEY);
+  } catch {
+    // The in-memory value is already cleared after a terminal response.
+  }
+}
+
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
@@ -714,6 +892,7 @@ function signOut(message = 'Signed out.') {
   kemerbetRecheckSpentFailedTerminal = false;
   kemerbetSecurityRecoveryCohortRequired = false;
   kemerbetSecurityRecoveryInProgress = false;
+  kemerbetSecurityRecoverySessionAllowed = false;
   ownerSessionStatus.textContent = '';
   passwordInput.value = '';
   clearInvite();
@@ -767,7 +946,11 @@ function validOwnerAuthSession(value) {
 }
 
 async function loadOwnerAuthConfig() {
-  const response = await fetch('/owner/config.json', { cache: 'no-store', credentials: 'omit' });
+  const response = await deadlineFetch(
+    '/owner/config.json',
+    { cache: 'no-store', credentials: 'omit' },
+    OWNER_API_REQUEST_TIMEOUT_MS,
+  );
   if (!response.ok) throw new Error('config');
   const config = await response.json();
   if (config.supabaseUrl !== expectedSupabaseUrl ||
@@ -786,6 +969,25 @@ function scheduleOwnerRefresh() {
   ownerRefreshTimer = window.setTimeout(
     () => void refreshOwnerSession().catch(() => undefined),
     delay,
+  );
+}
+
+function scheduleOwnerRefreshRetry() {
+  clearOwnerRefreshTimer();
+  if (!refreshToken || !ownerSessionExpiresAt || Date.now() >= ownerSessionExpiresAt) return;
+  ownerRefreshTimer = window.setTimeout(
+    () =>
+      void refreshOwnerSession()
+        .then(() => {
+          if (!loginPanel.hidden && accessToken) {
+            return loadOwnerDashboardAfterAuthentication(
+              'Owner session restored after a temporary connection failure.',
+            );
+          }
+          return undefined;
+        })
+        .catch(() => undefined),
+    OWNER_REFRESH_RETRY_DELAY_MS,
   );
 }
 
@@ -816,7 +1018,7 @@ async function refreshOwnerSession() {
       signOut('Your twelve-hour Owner session ended. Sign in again to continue.');
       throw new Error('signed_out');
     }
-    const response = await fetch(
+    const request = await beginDeadlineFetch(
       ownerAuthConfig.supabaseUrl + '/auth/v1/token?grant_type=refresh_token',
       {
         method: 'POST',
@@ -826,17 +1028,34 @@ async function refreshOwnerSession() {
         body: JSON.stringify({ refresh_token: refreshToken }),
         referrerPolicy: 'no-referrer',
       },
+      OWNER_TOKEN_REQUEST_TIMEOUT_MS,
     );
-    if (!response.ok || generation !== ownerAuthGeneration) throw new Error('signed_out');
+    if (generation !== ownerAuthGeneration) {
+      request.deadline.finish();
+      throw new Error('signed_out');
+    }
+    if ([400, 401, 403].includes(request.response.status)) {
+      request.deadline.finish();
+      throw new Error('owner_auth_rejected');
+    }
+    if (!request.response.ok) {
+      request.deadline.finish();
+      throw ownerTransportNetworkError();
+    }
+    const response = deadlineBoundResponse(request.response, request.deadline);
     applyOwnerAuthSession(await response.json(), false);
   })();
   try {
     await ownerRefreshPromise;
-  } catch {
-    if (generation === ownerAuthGeneration) {
+  } catch (error) {
+    if (generation !== ownerAuthGeneration) throw new Error('signed_out');
+    if (error instanceof Error &&
+        (error.message === 'owner_auth_rejected' || error.message === 'signed_out')) {
       signOut('Your Owner session could not be renewed. Sign in again to continue.');
+      throw new Error('signed_out');
     }
-    throw new Error('signed_out');
+    scheduleOwnerRefreshRetry();
+    throw isOwnerTransportError(error) ? error : ownerTransportNetworkError();
   } finally {
     if (generation === ownerAuthGeneration) ownerRefreshPromise = undefined;
   }
@@ -853,22 +1072,29 @@ async function ensureFreshOwnerAccessToken() {
   if (Date.now() >= accessTokenRefreshAt) await refreshOwnerSession();
 }
 
-async function ownerRequest(path, init) {
+async function ownerRequest(path, init, timeoutMs = OWNER_API_REQUEST_TIMEOUT_MS) {
   await ensureFreshOwnerAccessToken();
   if (!accessToken) throw new Error('signed_out');
-  const response = await fetch(path, {
-    ...init,
-    cache: 'no-store',
-    credentials: 'omit',
-    headers: { ...init.headers, authorization: 'Bearer ' + accessToken },
-    referrerPolicy: 'no-referrer',
-  });
-  if (response.status === 401 || response.status === 403) {
+  const request = await beginDeadlineFetch(
+    path,
+    {
+      ...init,
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { ...init.headers, authorization: 'Bearer ' + accessToken },
+      referrerPolicy: 'no-referrer',
+    },
+    timeoutMs,
+  );
+  if (request.response.status === 401 || request.response.status === 403) {
+    request.deadline.finish();
     signOut('Your session is unavailable or is not an active Owner.');
     throw new Error('signed_out');
   }
-  if (response.status === 409) {
-    const failure = await response.clone().json().catch(() => undefined);
+  if (request.response.status === 409) {
+    const failure = await request.deadline
+      .run(() => request.response.clone().json())
+      .catch(() => undefined);
     if (failure && typeof failure === 'object' && !Array.isArray(failure) &&
         Object.keys(failure).join(',') === 'error' &&
         failure.error === 'kemerbet_security_recovery_required') {
@@ -876,7 +1102,8 @@ async function ownerRequest(path, init) {
       applyKemerbetQuarantineMutationBoundary();
     }
   }
-  return response;
+  if (request.response.status === 204) request.deadline.finish();
+  return deadlineBoundResponse(request.response, request.deadline);
 }
 
 function validPlayerRequest(value) {
@@ -1113,9 +1340,9 @@ function renderKemerbetAgentProfiles(profiles) {
     card.append(title, facts);
     kemerbetAgentProfileList.append(card);
   }
-  kemerbetSessionStartButton.disabled = kemerbetSecurityRecoveryRequired ||
+  kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !activeKemerbetAgentProfileId ||
-    Boolean(currentKemerbetSession?.active) || !kemerbetSessionConfirmation.checked;
+    Boolean(currentKemerbetSession?.active);
 }
 
 async function loadKemerbetAgentProfiles() {
@@ -1140,6 +1367,41 @@ async function loadKemerbetAgentProfiles() {
   }
 }
 
+function validKemerbetStartup(startup, session, quarantined) {
+  if (startup === undefined) return true;
+  if (!startup || typeof startup !== 'object') return false;
+  const stages = ['browser_launch', 'cleanup', 'preflight', 'preview_ready', 'profile',
+    'provider_asset', 'provider_navigation', 'recaptcha_asset', 'recaptcha_ceremony',
+    'transport_guard'];
+  const failureCodes = ['cleanup_unverified', 'contract_mismatch', 'deadline_exceeded',
+    'dependency_unavailable', 'forbidden_request'];
+  const failed = startup.status === 'failed';
+  const expectedKeys = failed
+    ? ['detailsRedacted', 'failureCode', 'schemaVersion', 'stage', 'status']
+    : ['detailsRedacted', 'schemaVersion', 'stage', 'status'];
+  if (Object.keys(startup).sort().join('\\0') !== expectedKeys.sort().join('\\0') ||
+      startup.detailsRedacted !== true || startup.schemaVersion !== 1 ||
+      !stages.includes(startup.stage) ||
+      !['failed', 'ready', 'starting'].includes(startup.status) ||
+      (failed && !failureCodes.includes(startup.failureCode)) ||
+      (!failed && startup.failureCode !== undefined)) return false;
+  if (failed && (startup.stage === 'preview_ready' ||
+      (startup.stage === 'cleanup') !== (startup.failureCode === 'cleanup_unverified'))) {
+    return false;
+  }
+  if (startup.status === 'starting') {
+    return session.active === true && session.phase === 'starting' &&
+      startup.stage !== 'preview_ready';
+  }
+  if (startup.status === 'ready') {
+    return session.active === true && session.phase !== 'starting' &&
+      startup.stage === 'preview_ready';
+  }
+  return !quarantined &&
+    ((session.active === false && session.phase === 'idle') ||
+      (session.active === true && ['faulted', 'stopping'].includes(session.phase)));
+}
+
 function validKemerbetSession(value) {
   if (!value || typeof value !== 'object' || typeof value.active !== 'boolean' ||
       typeof value.loginRequired !== 'boolean' || typeof value.signedIn !== 'boolean' ||
@@ -1151,7 +1413,9 @@ function validKemerbetSession(value) {
     : quarantined
       ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
       : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
+  if (value.startup !== undefined) expectedKeys.push('startup');
   if (Object.keys(value).sort().join('\\0') !== expectedKeys.sort().join('\\0')) return undefined;
+  if (!validKemerbetStartup(value.startup, value, quarantined)) return undefined;
   if (!value.active) {
     if (value.loginRequired || value.signedIn || !['checkpointed', 'idle'].includes(value.phase)) {
       return undefined;
@@ -1221,10 +1485,10 @@ async function loadKemerbetSessionFrame(session) {
 function scheduleKemerbetSessionPoll() {
   if (kemerbetSessionPollTimer !== undefined) window.clearTimeout(kemerbetSessionPollTimer);
   kemerbetSessionPollTimer = undefined;
-  const recoveryRequired = currentKemerbetSession?.quarantine?.recoveryRequired === true;
+  const recoveryRequired = kemerbetSecurityRecoveryRequired;
   if (!accessToken || !activeKemerbetAgentProfileId ||
       (!recoveryRequired && !currentKemerbetSession?.active && !kemerbetSessionReconnectNeeded)) return;
-  const baseDelay = recoveryRequired ? 15000 :
+  const baseDelay = recoveryRequired && !currentKemerbetSession?.active ? 15000 :
     currentKemerbetSession?.phase === 'authenticated' ? 30000 :
     currentKemerbetSession?.phase === 'faulted' ? 5000 : 1500;
   const delay = kemerbetSessionPollFailures === 0 ? baseDelay :
@@ -1232,33 +1496,64 @@ function scheduleKemerbetSessionPoll() {
   kemerbetSessionPollTimer = window.setTimeout(() => void loadKemerbetSession(), delay);
 }
 
-async function renderKemerbetSession(session) {
+function kemerbetStartupFailureMessage(startup) {
+  const stages = {
+    browser_launch: 'isolated browser launch',
+    cleanup: 'isolated browser cleanup',
+    preflight: 'startup preflight',
+    preview_ready: 'preview readiness',
+    profile: 'secured browser-profile preparation',
+    provider_asset: 'the reviewed KemerBet bootstrap assets',
+    provider_navigation: 'KemerBet login navigation',
+    recaptcha_asset: 'the reviewed reCAPTCHA assets',
+    recaptcha_ceremony: 'the bounded reCAPTCHA request sequence',
+    transport_guard: 'network-guard installation',
+  };
+  const failures = {
+    cleanup_unverified: 'clean browser shutdown could not be verified',
+    contract_mismatch: 'the reviewed public-resource contract changed',
+    deadline_exceeded: 'the bounded startup deadline expired',
+    dependency_unavailable: 'a required dependency was unavailable',
+    forbidden_request: 'an unreviewed request was blocked',
+  };
+  return 'Private KemerBet sign-in stopped during ' + stages[startup.stage] + ' because ' +
+    failures[startup.failureCode] + '. Transfer, final action, and money movement remain disabled.';
+}
+
+async function renderKemerbetSession(session, securityRecoverySessionAllowed = false) {
   const wasSignedIn = currentKemerbetSession?.signedIn === true;
   currentKemerbetSession = session;
   kemerbetSessionPollFailures = 0;
   kemerbetSessionReconnectNeeded = false;
-  const recoveryRequired = session.quarantine?.recoveryRequired === true;
+  const recoveryRequired = session.quarantine?.recoveryRequired === true ||
+    securityRecoverySessionAllowed;
   const recheckSpentFailedTerminal =
     session.quarantine?.reasonCode === 'recheck_authorization_spent_failed_terminal';
   const securityRecoveryCohortRequired =
     session.quarantine?.reasonCode === 'security_recovery_cohort_required';
   const securityRecoveryInProgress =
-    session.quarantine?.reasonCode === 'security_recovery_in_progress';
+    session.quarantine?.reasonCode === 'security_recovery_in_progress' ||
+    securityRecoverySessionAllowed;
   kemerbetSecurityRecoveryRequired = recoveryRequired;
   kemerbetRecheckSpentFailedTerminal = recheckSpentFailedTerminal;
   kemerbetSecurityRecoveryCohortRequired = securityRecoveryCohortRequired;
   kemerbetSecurityRecoveryInProgress = securityRecoveryInProgress;
-  kemerbetSessionStartButton.disabled = recoveryRequired || !activeKemerbetAgentProfileId || session.phase !== 'idle' ||
-    !kemerbetSessionConfirmation.checked;
-  kemerbetSessionStopButton.disabled = recoveryRequired || !session.active || session.phase === 'stopping';
-  kemerbetSessionConfirmation.disabled = recoveryRequired;
+  kemerbetSecurityRecoverySessionAllowed = securityRecoverySessionAllowed;
+  kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
+    !activeKemerbetAgentProfileId || session.phase !== 'idle';
+  kemerbetSessionStopButton.disabled = !privateKemerbetSessionMutationAllowed() ||
+    !session.active || session.phase === 'stopping';
+  kemerbetSessionConfirmation.disabled = !privateKemerbetSessionMutationAllowed() || session.active;
   if (session.phase !== 'login_required') clearKemerbetPendingText();
   if (!session.active) {
     kemerbetSessionCanvas.hidden = true;
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
-    if (recoveryRequired) {
-      kemerbetSessionConfirmation.checked = false;
+    if (session.startup?.status === 'failed') {
+      kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup) +
+        ' Check the approval box again before retrying.';
+    } else if (recoveryRequired) {
+      if (!securityRecoverySessionAllowed) kemerbetSessionConfirmation.checked = false;
       kemerbetSessionCanvas.tabIndex = -1;
       kemerbetAgentProfileConfirmation.checked = false;
       if (recheckSpentFailedTerminal) {
@@ -1272,7 +1567,9 @@ async function renderKemerbetSession(session) {
       } else if (securityRecoveryInProgress) {
         kemerbetSessionStatus.textContent =
           'KemerBet security recovery is in progress with its exact one-use cohort already bound. ' +
-          'Another cohort cannot be prepared. Every mutation, Amount, Transfer, final action, and money movement remains disabled.';
+          (securityRecoverySessionAllowed
+            ? 'Check the approval box, then select Start private sign-in. Another cohort, Amount, Transfer, final action, and money movement remain disabled.'
+            : 'Another cohort cannot be prepared. Every mutation, Amount, Transfer, final action, and money movement remains disabled.');
       } else {
         kemerbetAgentProfileReason.value = 'security_recovery';
         kemerbetSessionStatus.textContent =
@@ -1288,20 +1585,23 @@ async function renderKemerbetSession(session) {
       }
       kemerbetAgentProfileReason.disabled = false;
       kemerbetSessionCanvas.tabIndex = 0;
-      kemerbetSessionStatus.textContent = 'Private sign-in service is stopped.';
+      kemerbetSessionStatus.textContent =
+        'Private sign-in service is stopped. Check the approval box, then select Start private sign-in.';
     }
     applyKemerbetQuarantineMutationBoundary();
     scheduleKemerbetSessionPoll();
     return;
   }
-  kemerbetSessionConfirmation.disabled = false;
+  kemerbetSessionConfirmation.disabled = true;
   kemerbetSessionCanvas.tabIndex = 0;
   if (session.phase !== 'login_required') {
     kemerbetSessionCanvas.hidden = true;
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
   }
-  if (session.phase === 'authenticated') {
+  if (session.startup?.status === 'failed') {
+    kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup);
+  } else if (session.phase === 'authenticated') {
     kemerbetSessionStatus.textContent = 'KemerBet signed in and retained until ' +
       new Date(session.expiresAt).toLocaleString() +
       '. Input is locked and Transfer remains disabled.';
@@ -1321,19 +1621,24 @@ async function renderKemerbetSession(session) {
   } else {
     kemerbetSessionStatus.textContent = 'The private browser is faulted and remains locked. Stop it before retrying.';
   }
+  applyKemerbetQuarantineMutationBoundary();
   scheduleKemerbetSessionPoll();
 }
 
-async function loadKemerbetSession() {
+async function loadKemerbetSession(timeoutMs = OWNER_API_REQUEST_TIMEOUT_MS) {
   if (!activeKemerbetAgentProfileId || !accessToken || kemerbetInputPending) return;
   kemerbetSessionPollTimer = undefined;
   try {
-    const response = await ownerRequest('/v1/owner/kemerbet-session', { method: 'GET', headers: {} });
+    const response = await ownerRequest(
+      '/v1/owner/kemerbet-session',
+      { method: 'GET', headers: {} },
+      timeoutMs,
+    );
     if (!response.ok) throw new Error('kemerbet_session');
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
     if (!session) throw new Error('kemerbet_session');
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
   } catch (error) {
     if (!isSignedOutError(error)) {
       kemerbetSessionPollFailures += 1;
@@ -1354,9 +1659,21 @@ function kemerbetSessionMutationHeaders(requestId) {
 }
 
 async function startKemerbetSession() {
-  if (!requireOrdinaryKemerbetMutation() || !activeKemerbetAgentProfileId ||
-      currentKemerbetSession?.quarantine?.recoveryRequired === true ||
-      !kemerbetSessionConfirmation.checked) return;
+  if (!requirePrivateKemerbetSessionMutation()) return;
+  if (!activeKemerbetAgentProfileId) {
+    const message = 'No active KemerBet agent profile is available. No private browser was started and no money moved.';
+    kemerbetSessionStatus.textContent = message;
+    setNotice(message);
+    return;
+  }
+  if (!kemerbetSessionConfirmation.checked) {
+    const message =
+      'Check the approval box first. No private browser was started. Transfer remains disabled and no money moved.';
+    kemerbetSessionStatus.textContent = message;
+    setNotice(message);
+    kemerbetSessionConfirmation.focus();
+    return;
+  }
   const requestId = crypto.randomUUID();
   kemerbetSessionStartButton.disabled = true;
   const startingMessage = 'Starting the private KemerBet sign-in browser…';
@@ -1375,7 +1692,7 @@ async function startKemerbetSession() {
       throw new Error('kemerbet_session');
     }
     kemerbetSessionConfirmation.checked = false;
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
     if (session.phase === 'login_required') {
       kemerbetSessionCanvas.focus();
       setNotice('Private KemerBet sign-in is ready. Click the preview and type there only.');
@@ -1385,7 +1702,7 @@ async function startKemerbetSession() {
       setNotice('Private KemerBet sign-in was accepted. The page will reconnect automatically when the browser is ready.');
     }
   } catch (error) {
-    await loadKemerbetSession();
+    await loadKemerbetSession(OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS);
     if (!isSignedOutError(error)) {
       if (currentKemerbetSession?.active) {
         setNotice(currentKemerbetSession.signedIn
@@ -1393,8 +1710,15 @@ async function startKemerbetSession() {
           : 'The private KemerBet sign-in browser is already open. Click the preview and type there only.');
         return;
       }
+      if (currentKemerbetSession?.startup?.status === 'failed') {
+        const failureMessage = kemerbetStartupFailureMessage(currentKemerbetSession.startup) +
+          ' Check the approval box again before retrying.';
+        kemerbetSessionStatus.textContent = failureMessage;
+        setNotice(failureMessage);
+        return;
+      }
       const failureMessage =
-        'Private KemerBet sign-in could not start. No credential was accepted. Please try once more; if it still fails, contact support.';
+        'Private KemerBet sign-in could not start. No credential was accepted. Check the approval box again before retrying.';
       kemerbetSessionStatus.textContent = failureMessage;
       setNotice(failureMessage);
     }
@@ -1402,7 +1726,7 @@ async function startKemerbetSession() {
 }
 
 async function stopKemerbetSession({ confirm = true } = {}) {
-  if (!requireOrdinaryKemerbetMutation() || !currentKemerbetSession?.active) return;
+  if (!requirePrivateKemerbetSessionMutation() || !currentKemerbetSession?.active) return;
   if (confirm && !window.confirm('Stop the private KemerBet sign-in browser now?')) return;
   clearKemerbetPendingText();
   const requestId = crypto.randomUUID();
@@ -1418,7 +1742,7 @@ async function stopKemerbetSession({ confirm = true } = {}) {
     if (!session || (session.active && session.phase !== 'stopping')) {
       throw new Error('kemerbet_session');
     }
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
     setNotice(session.phase === 'stopping'
       ? 'Private KemerBet sign-in browser is closing cleanly. This page will confirm when it stops.'
       : 'Private KemerBet sign-in browser stopped.');
@@ -1428,7 +1752,7 @@ async function stopKemerbetSession({ confirm = true } = {}) {
 }
 
 async function sendKemerbetSessionInput(input) {
-  if (!requireOrdinaryKemerbetMutation() || !currentKemerbetSession?.active ||
+  if (!requirePrivateKemerbetSessionMutation() || !currentKemerbetSession?.active ||
       currentKemerbetSession.phase !== 'login_required' ||
       displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
       displayedKemerbetFrameSequence < 1) return;
@@ -1445,7 +1769,7 @@ async function sendKemerbetSessionInput(input) {
     const payload = await response.json();
     const session = validKemerbetSession(payload && payload.session);
     if (!session) throw new Error('kemerbet_session');
-    await renderKemerbetSession(session);
+    await renderKemerbetSession(session, payload.securityRecoverySessionAllowed === true);
   } catch (error) {
     if (!isSignedOutError(error)) setNotice('Private browser input was rejected. Refresh the session before retrying.');
   } finally {
@@ -2120,6 +2444,43 @@ function kemerbetReadinessCohortMutationHeaders(requestId) {
   };
 }
 
+function confirmKemerbetReadinessCohortPrepared() {
+  readinessCohortPrepared = true;
+  kemerbetReadinessCohortConfirmation.checked = false;
+  clearPendingKemerbetReadinessRequestId();
+  setNotice(
+    'One-use readiness cohort prepared for five Players. Identifiers are redacted, ' +
+      'Transfer is disabled, and no money moved.',
+  );
+}
+
+async function reconcilePendingKemerbetReadinessCohort() {
+  try {
+    const response = await ownerRequest('/v1/owner/kemerbet-session', {
+      method: 'GET',
+      headers: {},
+    }, OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      await response.json().catch(() => undefined);
+      return 'uncertain';
+    }
+    const payload = await response.json();
+    const session = validKemerbetSession(payload && payload.session);
+    if (!session) return 'uncertain';
+    const securityRecoverySessionAllowed = payload.securityRecoverySessionAllowed === true;
+    await renderKemerbetSession(session, securityRecoverySessionAllowed);
+    if (securityRecoverySessionAllowed ||
+        session.quarantine?.reasonCode === 'security_recovery_in_progress') {
+      confirmKemerbetReadinessCohortPrepared();
+      return 'prepared';
+    }
+    return 'retry_same_request';
+  } catch (error) {
+    if (isSignedOutError(error)) throw error;
+    return 'uncertain';
+  }
+}
+
 async function prepareKemerbetReadinessCohort() {
   if (!requireKemerbetReadinessCohortMutation()) return;
   const hasOpenPilot = currentPilot?.pilotStatus === 'draft' ||
@@ -2130,10 +2491,28 @@ async function prepareKemerbetReadinessCohort() {
   if (!window.confirm(
     'Prepare the server-only one-use input from the current exact five eligible KemerBet Players? No identifier or amount is sent by this browser, Transfer remains disabled, and no money moves.',
   )) return;
-  const requestId = crypto.randomUUID();
   setBusy(kemerbetReadinessCohortForm, true);
-  setNotice('Preparing the one-use KemerBet readiness cohort with identifiers redacted…');
   try {
+    let requestId = readPendingKemerbetReadinessRequestId();
+    if (requestId) {
+      setNotice(
+        'Reconciling the previous readiness request before any retry. Transfer remains disabled ' +
+          'and no money moves…',
+      );
+      const reconciliation = await reconcilePendingKemerbetReadinessCohort();
+      if (reconciliation === 'prepared') return;
+      if (reconciliation === 'uncertain') {
+        setNotice(
+          'The previous readiness request is still uncertain. Its same one-use request is ' +
+            'retained; no retry was sent, Transfer remains disabled, and no money moved.',
+        );
+        return;
+      }
+    } else {
+      requestId = crypto.randomUUID();
+      persistPendingKemerbetReadinessRequestId(requestId);
+    }
+    setNotice('Preparing the one-use KemerBet readiness cohort with identifiers redacted…');
     const response = await ownerRequest('/v1/owner/kemerbet-readiness-cohort/prepare', {
       method: 'POST',
       headers: kemerbetReadinessCohortMutationHeaders(requestId),
@@ -2142,30 +2521,44 @@ async function prepareKemerbetReadinessCohort() {
         requestId,
       }),
     });
-    if (response.status === 409) {
-      const failure = await response.json();
-      await loadCurrentPilot();
-      if (failure?.error === 'readiness_cohort_open_pilot') {
+    if (response.status !== 200 && response.status !== 201) {
+      const failure = await response.json().catch(() => undefined);
+      if (response.status === 409 && failure?.error === 'readiness_cohort_open_pilot') {
+        await loadCurrentPilot();
+        clearPendingKemerbetReadinessRequestId();
         setNotice(
           'Stop the current TeleBirr pilot below before preparing the one-use KemerBet readiness cohort. Money remains disabled.',
         );
         return;
       }
-      throw new Error('readiness_cohort_prepare');
-    }
-    if (response.status !== 200 && response.status !== 201) {
+      if (response.status === 400 ||
+          (response.status === 409 && failure?.error === 'readiness_cohort_not_ready')) {
+        clearPendingKemerbetReadinessRequestId();
+      }
       throw new Error('readiness_cohort_prepare');
     }
     const prepared = validKemerbetReadinessCohortReceipt(await response.json());
     if (!prepared || (response.status === 200) !== prepared.alreadyPrepared) {
       throw new Error('readiness_cohort_prepare');
     }
-    readinessCohortPrepared = true;
-    kemerbetReadinessCohortConfirmation.checked = false;
-    setNotice('One-use readiness cohort prepared for five Players. Identifiers are redacted, Transfer is disabled, and no money moved.');
+    confirmKemerbetReadinessCohortPrepared();
   } catch (error) {
     if (!isSignedOutError(error)) {
-      setNotice('Readiness-cohort preparation was rejected or unavailable. Nothing was transferred and no money moved.');
+      if (readPendingKemerbetReadinessRequestId()) {
+        const reconciliation = await reconcilePendingKemerbetReadinessCohort();
+        if (reconciliation === 'prepared') return;
+        setNotice(
+          reconciliation === 'uncertain'
+            ? 'Readiness preparation is temporarily unreachable. The same one-use request is ' +
+                'retained for reconciliation; no retry was sent and no money moved.'
+            : 'No completed readiness cohort was found. The same one-use request is retained ' +
+                'for the next confirmed retry; Transfer remains disabled and no money moved.',
+        );
+      } else {
+        setNotice(
+          'Readiness-cohort preparation was rejected. Nothing was transferred and no money moved.',
+        );
+      }
     }
   } finally {
     setBusy(kemerbetReadinessCohortForm, false);
@@ -2317,6 +2710,25 @@ async function loadOwnerPlayerQueues() {
   }
 }
 
+async function loadOwnerDashboardAfterAuthentication(successNotice) {
+  loginPanel.hidden = true;
+  invitePanel.hidden = false;
+  setNotice(successNotice);
+  try {
+    await loadOwnerPlayerQueues();
+  } catch (error) {
+    // Authentication and dashboard hydration are separate boundaries. A transient read failure
+    // must not discard a valid, rotating Owner session or misreport it as a password failure.
+    // ownerRequest already signs out on an actual 401/403 and marks that path with signed_out.
+    if (!isSignedOutError(error)) {
+      setNotice(
+        'Owner authentication succeeded, but dashboard data is temporarily unavailable. ' +
+        'Your session remains active; select Refresh to retry.',
+      );
+    }
+  }
+}
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBusy(loginForm, true);
@@ -2324,14 +2736,18 @@ loginForm.addEventListener('submit', async (event) => {
   let failureNotice = 'Sign-in failed. Check the staging Owner account and try again.';
   try {
     const config = await loadOwnerAuthConfig();
-    const response = await fetch(config.supabaseUrl + '/auth/v1/token?grant_type=password', {
-      method: 'POST',
-      cache: 'no-store',
-      credentials: 'omit',
-      headers: { apikey: config.publishableKey, 'content-type': 'application/json' },
-      body: JSON.stringify({ email: loginForm.elements.email.value, password: passwordInput.value }),
-      referrerPolicy: 'no-referrer',
-    });
+    const response = await deadlineFetch(
+      config.supabaseUrl + '/auth/v1/token?grant_type=password',
+      {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { apikey: config.publishableKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: loginForm.elements.email.value, password: passwordInput.value }),
+        referrerPolicy: 'no-referrer',
+      },
+      OWNER_TOKEN_REQUEST_TIMEOUT_MS,
+    );
     passwordInput.value = '';
     if (!response.ok) throw new Error('login');
     const session = await response.json();
@@ -2343,16 +2759,16 @@ loginForm.addEventListener('submit', async (event) => {
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
     applyOwnerAuthSession(session, true);
-    loginPanel.hidden = true;
-    invitePanel.hidden = false;
-    setNotice('Signed in. This Owner session survives reloads in this tab for up to twelve hours.');
-    await loadOwnerPlayerQueues();
   } catch {
     passwordInput.value = '';
     signOut(failureNotice);
+    return;
   } finally {
     setBusy(loginForm, false);
   }
+  await loadOwnerDashboardAfterAuthentication(
+    'Signed in. This Owner session survives reloads in this tab for up to twelve hours.',
+  );
 });
 
 async function restoreOwnerSession() {
@@ -2367,15 +2783,22 @@ async function restoreOwnerSession() {
     ownerSessionExpiresAt = persisted.expiresAt;
     refreshToken = persisted.refreshToken;
     await refreshOwnerSession();
-    loginPanel.hidden = true;
-    invitePanel.hidden = false;
-    setNotice('Owner session restored after reload.');
-    await loadOwnerPlayerQueues();
-  } catch {
-    signOut('Your saved Owner session could not be restored. Sign in again to continue.');
+  } catch (error) {
+    if (isSignedOutError(error)) {
+      if (refreshToken || readPersistedOwnerSession()) {
+        signOut('Your saved Owner session was rejected or expired. Sign in again to continue.');
+      }
+    } else {
+      setNotice(
+        'Your saved Owner session is temporarily unreachable. Its twelve-hour credential remains ' +
+          'saved in this tab; reload or wait for the automatic retry.',
+      );
+    }
+    return;
   } finally {
     setBusy(loginForm, false);
   }
+  await loadOwnerDashboardAfterAuthentication('Owner session restored after reload.');
 }
 
 inviteForm.addEventListener('submit', async (event) => {
@@ -2439,11 +2862,15 @@ logoutButton.addEventListener('click', async () => {
   const config = ownerAuthConfig;
   const token = accessToken;
   if (config && token) {
-    await fetch(config.supabaseUrl + '/auth/v1/logout?scope=local', {
-      method: 'POST', cache: 'no-store', credentials: 'omit',
-      headers: { apikey: config.publishableKey, authorization: 'Bearer ' + token },
-      referrerPolicy: 'no-referrer',
-    }).catch(() => undefined);
+    await deadlineFetch(
+      config.supabaseUrl + '/auth/v1/logout?scope=local',
+      {
+        method: 'POST', cache: 'no-store', credentials: 'omit',
+        headers: { apikey: config.publishableKey, authorization: 'Bearer ' + token },
+        referrerPolicy: 'no-referrer',
+      },
+      OWNER_TOKEN_REQUEST_TIMEOUT_MS,
+    ).catch(() => undefined);
   }
   signOut();
 });
@@ -2467,14 +2894,14 @@ kemerbetAgentProfileForm.addEventListener('submit', async (event) => {
   await prepareKemerbetAgentProfile();
 });
 kemerbetSessionConfirmation.addEventListener('change', () => {
-  kemerbetSessionStartButton.disabled = kemerbetSecurityRecoveryRequired ||
+  kemerbetSessionStartButton.disabled = !privateKemerbetSessionMutationAllowed() ||
     !activeKemerbetAgentProfileId ||
-    currentKemerbetSession?.phase !== 'idle' || !kemerbetSessionConfirmation.checked;
+    currentKemerbetSession?.phase !== 'idle';
 });
 kemerbetSessionStartButton.addEventListener('click', startKemerbetSession);
 kemerbetSessionStopButton.addEventListener('click', () => stopKemerbetSession());
 kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
-  if (!ordinaryKemerbetMutationAllowed() || !currentKemerbetSession?.active ||
+  if (!privateKemerbetSessionMutationAllowed() || !currentKemerbetSession?.active ||
       currentKemerbetSession.phase !== 'login_required' ||
       displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
       displayedKemerbetFrameSequence < 1) return;
@@ -2489,7 +2916,7 @@ kemerbetSessionCanvas.addEventListener('pointerdown', (event) => {
   queueKemerbetSessionInput({ kind: 'pointer', x, y });
 });
 kemerbetSessionCanvas.addEventListener('keydown', (event) => {
-  if (!ordinaryKemerbetMutationAllowed() || !currentKemerbetSession?.active ||
+  if (!privateKemerbetSessionMutationAllowed() || !currentKemerbetSession?.active ||
       currentKemerbetSession.phase !== 'login_required' ||
       displayedKemerbetSessionGeneration !== currentKemerbetSession.generation ||
       displayedKemerbetFrameSequence < 1 ||

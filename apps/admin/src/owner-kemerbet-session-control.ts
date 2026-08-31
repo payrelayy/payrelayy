@@ -15,6 +15,33 @@ export type OwnerKemerbetSessionPhase =
   | 'starting'
   | 'stopping';
 
+export type OwnerKemerbetSessionStartupStage =
+  | 'browser_launch'
+  | 'cleanup'
+  | 'preflight'
+  | 'preview_ready'
+  | 'profile'
+  | 'provider_asset'
+  | 'provider_navigation'
+  | 'recaptcha_asset'
+  | 'recaptcha_ceremony'
+  | 'transport_guard';
+
+export type OwnerKemerbetSessionStartupFailureCode =
+  | 'cleanup_unverified'
+  | 'contract_mismatch'
+  | 'deadline_exceeded'
+  | 'dependency_unavailable'
+  | 'forbidden_request';
+
+export interface OwnerKemerbetSessionStartupStatus {
+  readonly detailsRedacted: true;
+  readonly failureCode?: OwnerKemerbetSessionStartupFailureCode;
+  readonly schemaVersion: 1;
+  readonly stage: OwnerKemerbetSessionStartupStage;
+  readonly status: 'failed' | 'ready' | 'starting';
+}
+
 export type OwnerKemerbetSessionQuarantineReason =
   'browser_cleanup_unverified' | 'profile_integrity_unverified' | 'unclean_session_generation';
 
@@ -32,6 +59,7 @@ export interface OwnerKemerbetSessionStatus {
   readonly phase: OwnerKemerbetSessionPhase;
   readonly quarantine?: OwnerKemerbetSessionQuarantine;
   readonly signedIn: boolean;
+  readonly startup?: OwnerKemerbetSessionStartupStatus;
   readonly transferDisabled: true;
 }
 
@@ -100,20 +128,23 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
   }
   const object = value as Record<string, unknown>;
   const quarantined = object.active === false && object.quarantine !== undefined;
-  const exactKeys = object.active
-    ? [
-        'active',
-        'expiresAt',
-        'frameSequence',
-        'generation',
-        'loginRequired',
-        'phase',
-        'signedIn',
-        'transferDisabled',
-      ]
-    : quarantined
-      ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
-      : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
+  const exactKeys = (
+    object.active
+      ? [
+          'active',
+          'expiresAt',
+          'frameSequence',
+          'generation',
+          'loginRequired',
+          'phase',
+          'signedIn',
+          'transferDisabled',
+        ]
+      : quarantined
+        ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
+        : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled']
+  ) as string[];
+  if (object.startup !== undefined) exactKeys.push('startup');
   const activePhases = new Set([
     'authenticated',
     'authenticating',
@@ -129,6 +160,60 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     'unclean_session_generation',
   ]);
   const quarantine = object.quarantine as Record<string, unknown> | undefined;
+  const startup = object.startup as Record<string, unknown> | undefined;
+  const startupStages = new Set<unknown>([
+    'browser_launch',
+    'cleanup',
+    'preflight',
+    'preview_ready',
+    'profile',
+    'provider_asset',
+    'provider_navigation',
+    'recaptcha_asset',
+    'recaptcha_ceremony',
+    'transport_guard',
+  ]);
+  const startupFailureCodes = new Set<unknown>([
+    'cleanup_unverified',
+    'contract_mismatch',
+    'deadline_exceeded',
+    'dependency_unavailable',
+    'forbidden_request',
+  ]);
+  const startupFailed = startup?.status === 'failed';
+  const startupKeys = startupFailed
+    ? ['detailsRedacted', 'failureCode', 'schemaVersion', 'stage', 'status']
+    : ['detailsRedacted', 'schemaVersion', 'stage', 'status'];
+  const startupValid =
+    startup === undefined ||
+    (typeof startup === 'object' &&
+      startup !== null &&
+      !Array.isArray(startup) &&
+      Object.keys(startup).sort().join('\0') === startupKeys.sort().join('\0') &&
+      startup.detailsRedacted === true &&
+      startup.schemaVersion === 1 &&
+      startupStages.has(startup.stage) &&
+      (startup.status === 'starting' ||
+        startup.status === 'ready' ||
+        startup.status === 'failed') &&
+      (startup.status !== 'failed' || startupFailureCodes.has(startup.failureCode)) &&
+      (startup.status === 'failed' || startup.failureCode === undefined) &&
+      (startup.status !== 'failed' ||
+        (startup.stage !== 'preview_ready' &&
+          (startup.stage === 'cleanup') === (startup.failureCode === 'cleanup_unverified'))) &&
+      (startup.status !== 'starting' ||
+        (object.active === true &&
+          object.phase === 'starting' &&
+          startup.stage !== 'preview_ready')) &&
+      (startup.status !== 'ready' ||
+        (object.active === true &&
+          object.phase !== 'starting' &&
+          startup.stage === 'preview_ready')) &&
+      (startup.status !== 'failed' ||
+        (!quarantined &&
+          ((object.active === false && object.phase === 'idle') ||
+            (object.active === true &&
+              (object.phase === 'faulted' || object.phase === 'stopping'))))));
   if (
     Object.keys(object).sort().join('\0') !== exactKeys.sort().join('\0') ||
     typeof object.active !== 'boolean' ||
@@ -136,6 +221,7 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     typeof object.phase !== 'string' ||
     typeof object.signedIn !== 'boolean' ||
     object.transferDisabled !== true ||
+    !startupValid ||
     (object.active &&
       (typeof object.expiresAt !== 'string' ||
         !Number.isFinite(Date.parse(object.expiresAt)) ||

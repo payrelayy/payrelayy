@@ -722,19 +722,22 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     }
   });
 
-  it('executes no operations after a catalog re-preflight makes the pool unhealthy', async () => {
+  it('recovers a failed catalog re-preflight only after the retry delay and a full preflight', async () => {
     let now = 1_000;
     let preflightInvocation = 0;
     const database = fakeDatabase((query) => {
-      if (query !== CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL) {
-        throw new Error('operation query must not execute');
+      if (query === CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL) {
+        preflightInvocation += 1;
+        return [
+          preflightInvocation === 2
+            ? { ...passingPreflightRow, exact_function_surface_allowed: false }
+            : passingPreflightRow,
+        ];
       }
-      preflightInvocation += 1;
-      return [
-        preflightInvocation === 1
-          ? passingPreflightRow
-          : { ...passingPreflightRow, exact_function_surface_allowed: false },
-      ];
+      if (query === ENSURE_CUSTOMER_WEB_ACCOUNT_SQL) {
+        return [{ account_status: 'active', account_created: false }];
+      }
+      throw new Error('unexpected operation query');
     });
     const runtime = await createCustomerWorkspacePostgresRuntime(config, {
       database,
@@ -745,6 +748,16 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     expect(await runtime.ready()).toBe(false);
     expect(database.queries).toHaveLength(2);
     await expectAllOperationsUnavailableWithoutQueries(runtime, database);
+
+    now += 29_999;
+    expect(await runtime.ready()).toBe(false);
+    expect(database.queries).toHaveLength(2);
+    now += 1;
+    expect(await runtime.ready()).toBe(true);
+    expect(preflightInvocation).toBe(3);
+    expect(database.queries).toHaveLength(3);
+    expect(await runtime.ensureAccount({ authUserId })).toEqual({ ok: true, status: 'active' });
+    expect(database.queries).toHaveLength(4);
     await runtime.close();
   });
 
@@ -819,17 +832,94 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
     }
   });
 
-  it('executes no operations after the database pool emits an error', async () => {
-    const database = databaseWithOperations(() => {
-      throw new Error('operation query must not execute');
+  it('coalesces concurrent recovery after a database pool error and blocks work until it passes', async () => {
+    const delayedRecovery = deferred<readonly unknown[]>();
+    let preflightInvocation = 0;
+    const database = fakeDatabase((query) => {
+      if (query !== CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL) {
+        throw new Error('operation query must not execute during recovery');
+      }
+      preflightInvocation += 1;
+      return preflightInvocation === 1 ? [passingPreflightRow] : delayedRecovery.promise;
     });
     const runtime = await createCustomerWorkspacePostgresRuntime(config, { database });
 
     database.emitError();
+    const readiness = Array.from({ length: 25 }, () => runtime.ready());
+    await vi.waitFor(() => expect(database.queries).toHaveLength(2));
+    expect(preflightInvocation).toBe(2);
+    await expectAllOperationsUnavailableWithoutQueries(runtime, database);
+
+    delayedRecovery.resolve([passingPreflightRow]);
+    expect(await Promise.all(readiness)).toEqual(Array.from({ length: 25 }, () => true));
+    expect(preflightInvocation).toBe(2);
+    expect(database.queries).toHaveLength(2);
+    await runtime.close();
+  });
+
+  it('keeps failed recovery false and rate-limits subsequent single-flight attempts', async () => {
+    let now = 1_000;
+    let preflightInvocation = 0;
+    const database = fakeDatabase((query) => {
+      if (query !== CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL) {
+        throw new Error('operation query must not execute while unhealthy');
+      }
+      preflightInvocation += 1;
+      if (preflightInvocation === 1) return [passingPreflightRow];
+      return [{ ...passingPreflightRow, runtime_login_is_safe: false }];
+    });
+    const runtime = await createCustomerWorkspacePostgresRuntime(config, {
+      database,
+      now: () => now,
+    });
+
+    database.emitError();
+    expect(await Promise.all(Array.from({ length: 25 }, () => runtime.ready()))).toEqual(
+      Array.from({ length: 25 }, () => false),
+    );
+    expect(preflightInvocation).toBe(2);
+    expect(database.queries).toHaveLength(2);
+    expect(await Promise.all(Array.from({ length: 25 }, () => runtime.ready()))).toEqual(
+      Array.from({ length: 25 }, () => false),
+    );
+    expect(database.queries).toHaveLength(2);
+
+    now += 29_999;
     expect(await runtime.ready()).toBe(false);
-    expect(database.queries).toHaveLength(1);
+    expect(database.queries).toHaveLength(2);
+    now += 1;
+    expect(await Promise.all(Array.from({ length: 25 }, () => runtime.ready()))).toEqual(
+      Array.from({ length: 25 }, () => false),
+    );
+    expect(preflightInvocation).toBe(3);
+    expect(database.queries).toHaveLength(3);
     await expectAllOperationsUnavailableWithoutQueries(runtime, database);
     await runtime.close();
+  });
+
+  it('cannot revive a recovery preflight that completes after shutdown', async () => {
+    const delayedRecovery = deferred<readonly unknown[]>();
+    let preflightInvocation = 0;
+    const database = fakeDatabase((query) => {
+      if (query !== CUSTOMER_WORKSPACE_CATALOG_PREFLIGHT_SQL) {
+        throw new Error('operation query must not execute');
+      }
+      preflightInvocation += 1;
+      return preflightInvocation === 1 ? [passingPreflightRow] : delayedRecovery.promise;
+    });
+    const runtime = await createCustomerWorkspacePostgresRuntime(config, { database });
+
+    database.emitError();
+    const readiness = runtime.ready();
+    await vi.waitFor(() => expect(database.queries).toHaveLength(2));
+    await Promise.all([runtime.close(), runtime.close()]);
+    delayedRecovery.resolve([passingPreflightRow]);
+
+    expect(await readiness).toBe(false);
+    expect(await runtime.ready()).toBe(false);
+    expect(database.queries).toHaveLength(2);
+    expect(database.end).toHaveBeenCalledTimes(1);
+    await expectAllOperationsUnavailableWithoutQueries(runtime, database);
   });
 
   it('executes no further operations after a malformed successful result', async () => {

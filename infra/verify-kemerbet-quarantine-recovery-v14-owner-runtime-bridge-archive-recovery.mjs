@@ -1,0 +1,2610 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+const root = resolve(import.meta.dirname, '..');
+const operation = resolve(
+  root,
+  'infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh',
+);
+const original = resolve(
+  root,
+  'infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.sh',
+);
+const validator = resolve(root, 'infra/operations/fetanagent-owner-archive-validator.py');
+const fixtures = resolve(root, 'infra/verify-owner-archive-validator-fixtures.py');
+const workflowPath = resolve(root, '.github/workflows/staging-beta-deploy-smoke.yml');
+const normalized = (path) => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
+const script = normalized(operation);
+const workflow = normalized(workflowPath);
+assert.ok(
+  workflow.includes(
+    'For h14-owner-runtime-bridge-stage type owner-only-no-provider-action-no-money; for h14-owner-runtime-bridge-archive-recovery-stage type owner-unchanged-customer-web-only-no-provider-action-no-money',
+  ),
+);
+assert.ok(
+  workflow.includes('[[ "$CONFIRMED_OWNER_ONLY" == \'owner-only-no-provider-action-no-money\' ]]'),
+);
+assert.ok(
+  workflow.includes(
+    '[[ "$CONFIRMED_OWNER_ONLY" == \'owner-unchanged-customer-web-only-no-provider-action-no-money\' ]]',
+  ),
+);
+for (const exact020 of [
+  "readonly FAILED_COUNTER_CORRECTION_RELEASE='0202304e3c606d2a7927a5b027d76926c0117189'",
+  "readonly FAILED_COUNTER_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102972'",
+  "readonly FAILED_COUNTER_CORRECTION_SCRIPT_DEV_INO='64769:6102973'",
+  "readonly FAILED_COUNTER_CORRECTION_SCRIPT_SHA256='7e4d1d7cbcc8494b0120ee6477b4a3e355e8bb88c55a68a9f1ca6f02b9d1d244'",
+  "readonly FAILED_COUNTER_CORRECTION_SCRIPT_SIZE='294196'",
+  "readonly FAILED_COUNTER_CORRECTION_VALIDATOR_DEV_INO='64769:6102974'",
+  "readonly FAILED_COUNTER_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_COUNTER_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_COUNTER_CORRECTION_MANIFEST_DEV_INO='64769:6102975'",
+  "readonly FAILED_COUNTER_CORRECTION_MANIFEST_SHA256='25b5f8e1a6b9fd9c853bbf6f6290b1c516329c85ef5bb57155bae503e1f85d67'",
+  "readonly FAILED_COUNTER_CORRECTION_MANIFEST_SIZE='17270'",
+  "readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ID='33258358642'",
+  "readonly FAILED_COUNTER_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_COUNTER_BRIDGE_PARENT_DEV_INO='64769:6102976'",
+  "readonly FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO='64769:6102977'",
+])
+  assert.ok(script.includes(exact020), `missing exact 020 pin ${exact020}`);
+for (const exact0110 of [
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_RELEASE='0110d1965d7efdc0436abda8c0bc686fb33c084b'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102978'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_DEV_INO='64769:6102979'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SHA256='986e031158229b7474cc5d31b6a2962b30fbe75497d3bef646c40d228cfeab59'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_SCRIPT_SIZE='345785'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_DEV_INO='64769:6102980'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_DEV_INO='64769:6102981'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SHA256='80716810b0391e2a00f3b6160529a0359a24035f1199327871290636283e654a'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_MANIFEST_SIZE='20018'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102982'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SHA256='2bae32658d1d3b4a218a94b1e882e190076a3b2919d33bc92cacfd54de899140'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID='sha256:e49412ee611a12a3ff23022f68f244cae34919038483663a82f45a8e839d35c9'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ID='33268571701'",
+  "readonly FAILED_CUSTOMER_WEB_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO='64769:6102983'",
+  "readonly FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO='64769:6102984'",
+])
+  assert.ok(script.includes(exact0110), `missing exact 0110 pin ${exact0110}`);
+for (const exact1f27 of [
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_RELEASE='1f27af7f929434b1f40f65901df9ebd683ebe62c'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102985'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_DEV_INO='64769:6102986'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SHA256='da8702b24c505790a2f7d7f7eec126a2b5b82e9abb14312b6eb7636b0025b1cc'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_SCRIPT_SIZE='367698'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_DEV_INO='64769:6102987'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_DEV_INO='64769:6102988'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SHA256='2f201ee23bf5cc6c400b5a2f0df226719bfd3462b25749045985b54f14207536'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_SIZE='21701'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_MANIFEST_LINES='327'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102989'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SHA256='3cbc7329952ceb46a236902563ae668551814331b7cca53082c8a1eb5e6d94ba'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID='sha256:103b17a10a678ffa8ae913b50d4daeb121f932113a70b0ce2066f535f553f6e5'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ID='33274184825'",
+  "readonly FAILED_NETWORK_SCOPE_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO='64769:6102990'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO='64769:6102991'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO='64769:6102992'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256='0e9f180d49a7b630a17092e30f8bd1615c513c4cc77daedf34ba136d3c2a5437'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE='18569'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES='265'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'",
+])
+  assert.ok(script.includes(exact1f27), `missing exact 1f27 pin ${exact1f27}`);
+for (const exactA51 of [
+  "readonly FAILED_OWNER_DELTA_CORRECTION_RELEASE='a51b52201a94a669b8dcca38b7abb29d70d0200f'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102993'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_DEV_INO='64769:6102994'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SHA256='b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_SCRIPT_SIZE='393436'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_DEV_INO='64769:6102995'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_DEV_INO='64769:6102996'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SHA256='ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_SIZE='23785'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_MANIFEST_LINES='356'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6102997'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SHA256='d44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID='sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID='sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ID='33277082955'",
+  "readonly FAILED_OWNER_DELTA_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO='64769:6102998'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO='64769:6102999'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO='64769:6103000'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256='efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE='20653'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_INTENT_LINES='294'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
+])
+  assert.ok(script.includes(exactA51), `missing exact a51 pin ${exactA51}`);
+for (const exact0ffc of [
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_RELEASE='0ffc54ab34de6fcde6cd5401ab66dd94025ebd57'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6103001'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_DEV_INO='64769:6103002'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SHA256='7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_SCRIPT_SIZE='435623'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_DEV_INO='64769:6103003'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_VALIDATOR_SIZE='11689'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_DEV_INO='64769:6103004'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SHA256='dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_SIZE='26099'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES='387'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_DEV_INO='64769:6103005'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SHA256='7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_IMAGE_ARCHIVE_SIZE='404797952'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_CONFIG_IMAGE_ID='sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_RUNTIME_DESCRIPTOR_ID='sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ID='33279465715'",
+  "readonly FAILED_OCI_IDENTITY_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO='64769:6103009'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO='64769:6103010'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO='64769:6103011'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256='f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE='22967'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES='325'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-semantic-v2-reconciliation-correction'",
+])
+  assert.ok(script.includes(exact0ffc), `missing exact 0ffc pin ${exact0ffc}`);
+for (const exactLivePin of [
+  "readonly SOURCE_API_CONTAINER_ID='8c1b665a0aa76c18f2bc9b4d5f58eb1f81d65a9b2eb8f75ec2bbd5e585b25f40'",
+  "readonly SOURCE_API_IMAGE_ID='sha256:b78679b7c8bcf0a1ac5a54de980135909bde02d51bb340f19f40f2976a674a82'",
+  "readonly SOURCE_API_ENV_SHA256='8d4492013a9b2759a4c3c6f191232a05b32838ebb4fad916ccc5cf54580d0a0e'",
+  "readonly SOURCE_API_COMPOSE_CONFIG_SHA256='ee42feef7beb518881d5ab726e806ae4a25acf922127be111c016064b54f5591'",
+  "readonly SOURCE_CUSTOMER_WEB_CONTAINER_ID='fb7151ac21d99795939ec0dbbec05676109edabf8fa8a7bb349627fbbdd6dc49'",
+  "readonly SOURCE_CUSTOMER_WEB_IMAGE_ID='sha256:7551b33fd126a47898998dcc5a8a62e751e444e16a854be138abe6fedb35aa82'",
+  "readonly SOURCE_CUSTOMER_WEB_ENV_SHA256='eeaf8dee7d2d4f0bbb849dbe9f48e58b5e762520e06bb9162fd656cca7072f29'",
+  "readonly SOURCE_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256='b176e9d8b8c17796c92bdf1e59ac3b9c588f0b1c6291c86284d5d6c25ab07edd'",
+  "readonly SOURCE_CUSTOMER_WEB_HEALTHY_RUNTIME_SHA256='5e80a968bf1d4450789492d57d87b2099118c1f4c323e0354036f82ed5c50208'",
+  "readonly SOURCE_CUSTOMER_WEB_UNHEALTHY_RUNTIME_SHA256='b5ce7d0c73ae297c7f92215077ccd6a0a61073034efe23c91f7199fba1869113'",
+  "readonly SOURCE_CUSTOMER_WEB_PID='179321'",
+  "readonly SOURCE_CUSTOMER_WEB_STARTED_AT='2026-08-28T14:49:52.189193639Z'",
+  "readonly SOURCE_CUSTOMER_WEB_NORMALIZED_SHA256='c2d31ec2e32fb27ba760ee28eed24865416a3481693fedf2b7daf803737dc168'",
+  "readonly SOURCE_NON_OWNER_INVENTORY_SHA256='e26ef85318a9e2829b409536cd28043fd0a71f8625cb1afe9968da28895bffd7'",
+  "readonly SOURCE_OTHER_SERVICE_INVENTORY_SHA256='61fab7e78ea2e288a60f73b3683e749ff4a57fc753a7c6c419516cff99766bfd'",
+  "readonly SOURCE_GATEWAY_CONTAINER_ID='4aad462e26441c0d660ffeb2d3f825068522da83ee025caeb6eebb695cf5bc45'",
+  "readonly SOURCE_BOT_CONTAINER_ID='5e2b2eaa85f02f8bcc746415e693c5cbe8e3cd2ee01831ee7facf7d4185b3e52'",
+  "readonly SOURCE_BETA_CONTAINER_ID='c551f228d247c638b7865f739d5422b3e10eeec1534582d3a458daf0b2f56e14'",
+  "readonly SOURCE_OWNER_PID='685566'",
+  "readonly SOURCE_OWNER_STARTED_AT='2026-08-29T13:57:40.258370212Z'",
+  "readonly ADOPTED_CUSTOMER_WEB_CONTAINER_ID='83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521'",
+  "readonly ADOPTED_CUSTOMER_WEB_PID='911858'",
+  "readonly ADOPTED_CUSTOMER_WEB_STARTED_AT='2026-08-29T22:56:55.385310072Z'",
+  "readonly ADOPTED_CUSTOMER_WEB_RUNTIME_SHA256='39c0ae0f18e94c0746da78e93a26a12a6daa47a6183bb67437f38c370bbd80b5'",
+  "readonly ADOPTED_CUSTOMER_WEB_V1_NORMALIZED_SHA256='237bcaedc8f40ac8ed85ae7d9fb3da94e8b9a935a62440b87525d3d122f98bdc'",
+  "readonly ADOPTED_CUSTOMER_WEB_SEMANTIC_V2_SHA256='e1d095c2fa7f7cdd5b9e75f0e2f3bcb2fccbea02f1af46beda5bcdc7f8b49a7b'",
+  "readonly ADOPTED_CUSTOMER_WEB_COMPOSE_CONFIG_SHA256='3d618a2e21d3818d603528063815b0ab58b5a72ba2098f95e6321ad6937b73c3'",
+])
+  assert.ok(script.includes(exactLivePin), `missing exact live pin ${exactLivePin}`);
+const failedCounterStart = script.indexOf('require_failed_counter_runtime() {');
+const failedCounterEnd = script.indexOf('\n}\n', failedCounterStart);
+const failedCounterHelper = script.slice(failedCounterStart, failedCounterEnd);
+for (const exactCounterBoundary of [
+  '! -L "$FAILED_COUNTER_BRIDGE_PARENT"',
+  '"$(realpath -- "$FAILED_COUNTER_BRIDGE_PARENT")" == "$FAILED_COUNTER_BRIDGE_PARENT"',
+  '"$FAILED_COUNTER_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_COUNTER_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_COUNTER_BRIDGE_INSTALLING"',
+  '"$(realpath -- "$FAILED_COUNTER_BRIDGE_INSTALLING")" == "$FAILED_COUNTER_BRIDGE_INSTALLING"',
+  '"$FAILED_COUNTER_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+])
+  assert.ok(
+    failedCounterHelper.includes(exactCounterBoundary),
+    `failed-counter helper lacks ${exactCounterBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_counter_runtime/gu) ?? []).length >= 7,
+  '020 boundary is not connected to pre-intent, completion, replay, and finalization paths',
+);
+const failedCustomerStart = script.indexOf('require_failed_customer_web_network_scope_runtime() {');
+const failedCustomerEnd = script.indexOf('\n}\n', failedCustomerStart);
+const failedCustomerHelper = script.slice(failedCustomerStart, failedCustomerEnd);
+for (const exactFailedCustomerBoundary of [
+  '! -e "$FAILED_CUSTOMER_WEB_BRIDGE_ROOT"',
+  '! -L "$FAILED_CUSTOMER_WEB_BRIDGE_PARENT"',
+  '"$FAILED_CUSTOMER_WEB_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING"',
+  '"$FAILED_CUSTOMER_WEB_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  'fetanagent-customer-web:${FAILED_CUSTOMER_WEB_CORRECTION_RELEASE:0:12}',
+  'docker_local image inspect "$FAILED_CUSTOMER_WEB_CORRECTION_IMAGE_ID"',
+])
+  assert.ok(
+    failedCustomerHelper.includes(exactFailedCustomerBoundary),
+    `failed-customer-web helper lacks ${exactFailedCustomerBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_customer_web_network_scope_runtime/gu) ?? []).length >= 9,
+  '0110 boundary is not connected to pre-intent, image-load, Compose, replay, and finalization paths',
+);
+const failedNetworkScopeStart = script.indexOf('require_failed_network_scope_runtime() {');
+const failedNetworkScopeEnd = script.indexOf('\n}\n', failedNetworkScopeStart);
+const failedNetworkScopeHelper = script.slice(failedNetworkScopeStart, failedNetworkScopeEnd);
+for (const exactFailedNetworkScopeBoundary of [
+  '! -e "$FAILED_NETWORK_SCOPE_BRIDGE_ROOT"',
+  '! -e "$FAILED_NETWORK_SCOPE_BRIDGE_FINAL"',
+  '! -L "$FAILED_NETWORK_SCOPE_BRIDGE_PARENT"',
+  '"$FAILED_NETWORK_SCOPE_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING"',
+  '"$FAILED_NETWORK_SCOPE_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  "'intent-v1:f'",
+  '"$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_DEV_INO" "$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SIZE"',
+  '"$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_SHA256" 0600',
+  '"$FAILED_NETWORK_SCOPE_CORRECTION_RELEASE" "$CREATED_OWNER_CONTAINER_ID"',
+  '"$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID"',
+  '"$FAILED_NETWORK_SCOPE_BRIDGE_INTENT_LINES"',
+  "'state': 'authorized'",
+  "'archive_recovery_implementation_release': release",
+  "'running_owner_container_id': owner",
+  "'source_customer_web_container_id': source_customer",
+  "'customer_web_image_id': image_id",
+  "'owner_network': owner_network",
+  "'financial_actions_mode': 'dry_run'",
+  "'transfer_enabled': 'false'",
+  "'amount_entry_enabled': 'false'",
+  "'money_moved': 'false'",
+  'fetanagent-customer-web:${FAILED_NETWORK_SCOPE_CORRECTION_RELEASE:0:12}',
+  'docker_local image inspect "$FAILED_NETWORK_SCOPE_CORRECTION_IMAGE_ID"',
+])
+  assert.ok(
+    failedNetworkScopeHelper.includes(exactFailedNetworkScopeBoundary),
+    `failed-network-scope helper lacks ${exactFailedNetworkScopeBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_network_scope_runtime/gu) ?? []).length >= 9,
+  '1f27 boundary is not connected to resumed, pre-intent, mutation, completion, replay, and finalization paths',
+);
+const failedOwnerDeltaStart = script.indexOf('require_failed_owner_delta_runtime() {');
+const failedOwnerDeltaEnd = script.indexOf('\n}\n', failedOwnerDeltaStart);
+const failedOwnerDeltaHelper = script.slice(failedOwnerDeltaStart, failedOwnerDeltaEnd);
+for (const exactFailedOwnerDeltaBoundary of [
+  '! -e "$FAILED_OWNER_DELTA_BRIDGE_ROOT"',
+  '! -e "$FAILED_OWNER_DELTA_BRIDGE_FINAL"',
+  '! -L "$FAILED_OWNER_DELTA_BRIDGE_PARENT"',
+  '"$FAILED_OWNER_DELTA_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_OWNER_DELTA_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_OWNER_DELTA_BRIDGE_INSTALLING"',
+  '"$FAILED_OWNER_DELTA_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  "'intent-v1:f'",
+  '"$FAILED_OWNER_DELTA_BRIDGE_INTENT_DEV_INO" "$FAILED_OWNER_DELTA_BRIDGE_INTENT_SIZE"',
+  '"$FAILED_OWNER_DELTA_BRIDGE_INTENT_SHA256" 0600',
+  '"$FAILED_OWNER_DELTA_CORRECTION_CONFIG_IMAGE_ID"',
+  '"$FAILED_OWNER_DELTA_CORRECTION_RUNTIME_DESCRIPTOR_ID"',
+  "'archive_recovery_implementation_release': release",
+  "'customer_web_image_id': config_id",
+  "'financial_actions_mode': 'dry_run'",
+  "'transfer_enabled': 'false'",
+  "'amount_entry_enabled': 'false'",
+  "'money_moved': 'false'",
+  'require_customer_web_runtime_image_contract',
+  'fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}',
+  '--filter "ancestor=fetanagent-customer-web:${FAILED_OWNER_DELTA_CORRECTION_RELEASE:0:12}"',
+])
+  assert.ok(
+    failedOwnerDeltaHelper.includes(exactFailedOwnerDeltaBoundary),
+    `failed-owner-delta helper lacks ${exactFailedOwnerDeltaBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_owner_delta_runtime/gu) ?? []).length >= 9,
+  'a51 boundary is not connected to resumed, pre-intent, image-load, Compose, replay, and finalization paths',
+);
+const failedOciIdentityStart = script.indexOf('require_failed_oci_identity_runtime() {');
+const failedOciIdentityEnd = script.indexOf('\n}\n', failedOciIdentityStart);
+const failedOciIdentityHelper = script.slice(failedOciIdentityStart, failedOciIdentityEnd);
+for (const exactFailedOciIdentityBoundary of [
+  '! -L "$FAILED_OCI_IDENTITY_CORRECTION_ROOT"',
+  '"$FAILED_OCI_IDENTITY_CORRECTION_BUNDLE_ROOT_DEV_INO:root:root:700:2"',
+  "$'fetanagent-customer-web-self-recovery.tar:f\\nfetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\\nfetanagent-owner-archive-validator.py:f\\nmanifest-v1:f'",
+  '"$FAILED_OCI_IDENTITY_CORRECTION_MANIFEST_LINES"',
+  '! -e "$FAILED_OCI_IDENTITY_BRIDGE_ROOT"',
+  '! -e "$FAILED_OCI_IDENTITY_BRIDGE_REPLACEMENT"',
+  '! -e "$FAILED_OCI_IDENTITY_BRIDGE_FINAL"',
+  '! -L "$FAILED_OCI_IDENTITY_BRIDGE_PARENT"',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_PARENT_DEV_INO:root:root:700:3"',
+  '".installing-$FAILED_OCI_IDENTITY_CORRECTION_RELEASE:d"',
+  '! -L "$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING"',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INSTALLING_DEV_INO:root:root:700:2"',
+  "'intent-v1:f'",
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INTENT_DEV_INO" "$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SIZE"',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INTENT_SHA256" 0600',
+  '"$FAILED_OCI_IDENTITY_BRIDGE_INTENT_LINES"',
+  'require_adopted_customer_web_boundary',
+  '! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID"',
+])
+  assert.ok(
+    failedOciIdentityHelper.includes(exactFailedOciIdentityBoundary),
+    `failed-0ffc helper lacks ${exactFailedOciIdentityBoundary}`,
+  );
+assert.ok(
+  (script.match(/require_failed_oci_identity_runtime/gu) ?? []).length >= 7,
+  '0ffc boundary is not connected to resumed, pre-intent, reconciliation, replay, and finalization paths',
+);
+for (const exactOciIdentityBridge of [
+  'derive_customer_web_archive_identities() {',
+  "config_descriptor.get('digest') != expected_config_id",
+  "hashlib.sha256(manifest_bytes).hexdigest() != runtime_id.removeprefix('sha256:')",
+  "hashlib.sha256(config_bytes).hexdigest() != expected_config_id.removeprefix('sha256:')",
+  'readonly CUSTOMER_WEB_CONFIG_IMAGE_ID="${customer_web_archive_identities[0]}"',
+  'readonly CUSTOMER_WEB_RUNTIME_IMAGE_ID="${customer_web_archive_identities[1]}"',
+  'require_customer_web_runtime_image_contract() {',
+  "descriptor.get('digest') != expected_runtime_id",
+  "manifest.get('config', {}).get('digest') != expected_config_id",
+  "descriptor != image.get('Descriptor')",
+  "image.get('Id') != expected_runtime_id",
+  '"$runtime_id|$runtime_id"',
+  '! docker_local image inspect "$config_id"',
+  'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1',
+  'customer_web_runtime_descriptor_id=$CUSTOMER_WEB_RUNTIME_IMAGE_ID',
+])
+  assert.ok(
+    script.includes(exactOciIdentityBridge),
+    `missing OCI identity bridge ${exactOciIdentityBridge}`,
+  );
+for (const streamingArchiveGuard of [
+  'verify_exact_nofollow_file_digest() {',
+  'expected_size > 1024 * 1024 * 1024',
+  'signal.alarm(60)',
+  'os.O_NOFOLLOW',
+  'before_contract != after_contract',
+  'verify_exact_nofollow_file_digest "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  'verify_exact_nofollow_file_digest "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  'verify_exact_nofollow_file_digest "$ADOPTED_CUSTOMER_WEB_IMAGE_ARCHIVE"',
+])
+  assert.ok(
+    script.includes(streamingArchiveGuard),
+    `missing bounded archive guard ${streamingArchiveGuard}`,
+  );
+assert.ok(
+  !script.includes(
+    'emit_exact_nofollow_file "$FAILED_CUSTOMER_WEB_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  ),
+  'the 405 MB failed archive must never be buffered into memory',
+);
+assert.ok(
+  !script.includes(
+    'emit_exact_nofollow_file "$FAILED_OWNER_DELTA_CORRECTION_ROOT/$CUSTOMER_WEB_IMAGE_ARCHIVE_NAME"',
+  ),
+  'the 405 MB failed a51 archive must never be buffered into memory',
+);
+for (const adoptedTransportPin of [
+  'customer_archive_sha=7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c',
+  'customer_archive_size=404797952',
+  'customer_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd',
+  'customer_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b',
+  'CUSTOMER_ARCHIVE_SHA: ${{ steps.bundle.outputs.customer_archive_sha }}',
+  'CUSTOMER_ARCHIVE_SIZE: ${{ steps.bundle.outputs.customer_archive_size }}',
+  'CUSTOMER_IMAGE_ID: ${{ steps.bundle.outputs.customer_image_id }}',
+  "'$CUSTOMER_ARCHIVE_SHA' '$CUSTOMER_ARCHIVE_SIZE' '$CUSTOMER_IMAGE_ID'",
+  'scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$remote:$bundle/"',
+])
+  assert.ok(
+    workflow.includes(adoptedTransportPin),
+    `missing adopted 0ffc transport pin ${adoptedTransportPin}`,
+  );
+for (const forbiddenTransport of [
+  'docker image save --output "$customer_archive" "$customer_tag"',
+  "claim_one '$REMOTE_BUNDLE/fetanagent-customer-web-self-recovery.tar'",
+  'scp "${opts[@]}" infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh infra/operations/fetanagent-owner-archive-validator.py "$MANIFEST" "$CUSTOMER_ARCHIVE" "$remote:$bundle/"',
+  'sha256sum "$bundle/fetanagent-customer-web-self-recovery.tar"',
+  'stat -c %s "$bundle/fetanagent-customer-web-self-recovery.tar"',
+])
+  assert.ok(
+    !workflow.includes(forbiddenTransport),
+    `successor must not transport an image archive: ${forbiddenTransport}`,
+  );
+assert.ok(
+  workflow.includes(
+    'fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh:f\n          fetanagent-owner-archive-validator.py:f\n          manifest-v1:f',
+  ),
+);
+assert.equal(
+  (script.match(/config\.get\('Entrypoint'\) != \['docker-entrypoint\.sh'\]/gu) ?? []).length,
+  10,
+  'all customer image, successor-delta, and replacement security comparators must require the exact Node entrypoint',
+);
+assert.ok(
+  !script.includes("config.get('Entrypoint') not in (None, [])"),
+  'a stale empty customer entrypoint comparator remains',
+);
+assert.ok(!workflow.includes('docker build --file "$customer_dockerfile"'));
+
+const workflowManifestStart = workflow.indexOf('cat >"$manifest" <<EOF');
+assert.ok(workflowManifestStart >= 0, 'workflow recovery manifest emitter is missing');
+const workflowManifestEnd = workflow.indexOf('\n          EOF', workflowManifestStart);
+assert.ok(
+  workflowManifestEnd > workflowManifestStart,
+  'workflow recovery manifest terminator is missing',
+);
+const workflowManifestKeys = workflow
+  .slice(workflowManifestStart, workflowManifestEnd)
+  .split('\n')
+  .map((line) => /^\s{10}([a-z0-9_]+)=/.exec(line)?.[1])
+  .filter(Boolean);
+const shellManifestStart = script.indexOf('cmp -s -- "$STAGED_RECOVERY_MANIFEST"');
+assert.ok(shellManifestStart >= 0, 'shell recovery manifest comparator is missing');
+const shellManifestEnd = script.indexOf(
+  "die 'the append-only archive-recovery bundle manifest is not exact'",
+  shellManifestStart,
+);
+assert.ok(
+  shellManifestEnd > shellManifestStart,
+  'shell recovery manifest comparator terminator is missing',
+);
+const shellManifestKeys = [
+  ...script.slice(shellManifestStart, shellManifestEnd).matchAll(/["']([a-z0-9_]+)=/g),
+].map((match) => match[1]);
+assert.equal(
+  workflowManifestKeys.length,
+  432,
+  'workflow successor manifest must contain 432 lines',
+);
+assert.equal(
+  new Set(workflowManifestKeys).size,
+  432,
+  'workflow successor manifest keys must be unique',
+);
+assert.equal(shellManifestKeys.length, 432, 'shell successor manifest must contain 432 lines');
+assert.equal(new Set(shellManifestKeys).size, 432, 'shell successor manifest keys must be unique');
+assert.deepEqual(
+  shellManifestKeys,
+  workflowManifestKeys,
+  'workflow recovery manifest key order/schema drifted from the shell exact comparator',
+);
+for (const fixedManifestLine of [
+  'customer_web_lifecycle_mutation=already-completed-exactly-once-by-failed-oci-identity-correction',
+  'all_other_lifecycle_mutation=forbidden',
+  'failed_counter_bridge_inventory=empty-no-intent',
+  'failed_customer_web_bridge_inventory=empty-no-intent',
+  'failed_customer_web_network_scope=stale-service-network-name-pre-intent',
+  'failed_network_scope_bridge_inventory=single-intent-no-final',
+  'failed_network_scope_image_runtime=tag-and-id-absent',
+  'failed_network_scope_failure=owner-delta-rejected-before-strict-owner-validator',
+  'owner_delta_normalization_contract=customer-and-image-only-preserve-owner-delta-v1',
+  'failed_owner_delta_bridge_inventory=single-intent-no-final',
+  'failed_owner_delta_image_runtime=tag-loaded-manifest-descriptor-config-id-absent',
+  'failed_owner_delta_failure=oci-config-runtime-descriptor-identity-conflation-after-image-load',
+  'customer_web_oci_identity_contract=config-digest-plus-manifest-descriptor-runtime-v1',
+  'failed_oci_identity_correction_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  'failed_oci_identity_bridge_inventory=single-intent-no-replacement-no-final',
+  'failed_oci_identity_failure=healthy-replacement-rejected-by-v1-non-invariant-normalized-digest',
+  'customer_web_replacement_implementation_sha=0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  'adopted_customer_web_container_id=83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521',
+  'adopted_customer_web_image_id=sha256:4e62fe50aca242e8c30fa5cff2a07d0aca8a0e877924589cba176a828b329ddd',
+  'adopted_customer_web_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b',
+  'adopted_customer_web_image_tag=fetanagent-customer-web:0ffc54ab34de',
+  'adopted_customer_web_semantic_v2_sha256=e1d095c2fa7f7cdd5b9e75f0e2f3bcb2fccbea02f1af46beda5bcdc7f8b49a7b',
+  'source_customer_web_absent=true',
+  'customer_web_reconciliation_contract=adopt-exact-healthy-0ffc-without-docker-or-compose-mutation-v2',
+  'customer_web_semantic_v2_contract=sorted-env-exact-fields-stable-label-allowlist-v2',
+  'customer_web_reconciliation_lifecycle_mutation=false',
+  'financial_actions_mode=dry_run',
+  'kemerbet_executor_enabled=false',
+  'kemerbet_final_action_enabled=false',
+  'provider_action_enabled=false',
+  'transfer_enabled=false',
+  'amount_entry_enabled=false',
+  'money_moved=false',
+]) {
+  assert.ok(workflow.slice(workflowManifestStart, workflowManifestEnd).includes(fixedManifestLine));
+  const fixedManifestKey = fixedManifestLine.slice(0, fixedManifestLine.indexOf('='));
+  assert.ok(
+    script.slice(shellManifestStart, shellManifestEnd).includes(`'${fixedManifestLine}'`) ||
+      script.slice(shellManifestStart, shellManifestEnd).includes(`"${fixedManifestLine}"`) ||
+      script.slice(shellManifestStart, shellManifestEnd).includes(`"${fixedManifestKey}=`),
+    `shell manifest lacks ${fixedManifestLine}`,
+  );
+}
+for (const runtimeConnectivityContract of [
+  'local container_id="$1" expected_network="$OWNER_NETWORK"',
+  'python3 -I /dev/fd/3 "$container_id" "$expected_network"',
+  'expected, expected_network = sys.argv[1:]',
+  'if next(iter(networks)) != expected_network: raise RuntimeError()',
+  "if host.get('PortBindings') not in (None, {}) or len(networks) != 1: raise RuntimeError()",
+  "if host.get('Privileged') is not False or host.get('ReadonlyRootfs') is not True or host.get('Init') is not True: raise RuntimeError()",
+  "if host.get('SecurityOpt') != ['no-new-privileges:true']: raise RuntimeError()",
+  'classify_customer_web_replacement_state() {',
+  'require_adopted_customer_web_boundary || return 1',
+  "printf '%s\\n' complete",
+  'reconcile_customer_web_once() {',
+  'before_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  'after_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  '[[ "$before_complete" == "$after_complete" ]] || return 1',
+  '! docker_local container inspect "$SOURCE_CUSTOMER_WEB_CONTAINER_ID" >/dev/null 2>&1 || return 1',
+  'require_failed_counter_runtime || return 1',
+  'require_failed_oci_identity_runtime || return 1',
+])
+  assert.ok(
+    script.includes(runtimeConnectivityContract),
+    `missing helper connectivity/negative contract ${runtimeConnectivityContract}`,
+  );
+assert.ok(
+  !script.includes(
+    "if next(iter(networks)) != 'fetanagent-staging-beta_service': raise RuntimeError()",
+  ),
+  'the deterministic stale customer-web service-network comparator remains',
+);
+const otherGuard = script.indexOf('reconcile_customer_web_once() {');
+const reconciliationEnd = script.indexOf('\n}\n', otherGuard);
+assert.ok(
+  otherGuard >= 0 && reconciliationEnd > otherGuard,
+  'customer-web reconciliation helper is missing',
+);
+const reconciliation = script.slice(otherGuard, reconciliationEnd);
+const preMutationExact = script.indexOf(
+  'require_other_service_inventory_exact || return 1',
+  otherGuard,
+);
+const beforeComplete = script.indexOf(
+  'before_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  otherGuard,
+);
+const afterComplete = script.indexOf(
+  'after_complete="$(capture_complete_docker_create_inventory)" || return 1',
+  otherGuard,
+);
+const exactNoMutation = script.indexOf(
+  '[[ "$before_complete" == "$after_complete" ]] || return 1',
+  otherGuard,
+);
+assert.ok(
+  preMutationExact > otherGuard &&
+    beforeComplete > preMutationExact &&
+    afterComplete > beforeComplete &&
+    exactNoMutation > afterComplete &&
+    exactNoMutation < reconciliationEnd,
+  'complete Docker and unrelated-service inventories are not proved byte-identical across reconciliation',
+);
+for (const forbiddenReconciliationMutation of [
+  /docker_local\s+image\s+load/u,
+  /docker_local\s+container\s+(?:create|rm|start|stop|restart|kill|rename)/u,
+  /docker_local\s+compose/u,
+  /\bcompose_local\b/u,
+])
+  assert.doesNotMatch(
+    reconciliation,
+    forbiddenReconciliationMutation,
+    `reconciliation contains a forbidden Docker/Compose mutation: ${forbiddenReconciliationMutation}`,
+  );
+const resumedHelperStart = script.indexOf('require_resumed_intent_pre_mutation_boundary() {');
+const resumedHelperEnd = script.indexOf(
+  '\n}\n\nrequire_complete_owner_endpoint_phase_boundary()',
+  resumedHelperStart,
+);
+assert.ok(resumedHelperStart >= 0 && resumedHelperEnd > resumedHelperStart);
+const resumedHelper = script.slice(resumedHelperStart, resumedHelperEnd);
+for (const exactReplacementEndpointCheck of [
+  "re.fullmatch(r'[0-9a-f]{64}', endpoint.get('EndpointID') or '')",
+  "re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', endpoint.get('MacAddress') or '')",
+  'ipv4.network.prefixlen == subnet.prefixlen',
+  'ipv6.network.prefixlen == subnet.prefixlen',
+  'ipv4.ip in subnet',
+  'ipv6.ip in subnet',
+])
+  assert.ok(
+    resumedHelper.includes(exactReplacementEndpointCheck),
+    `resumed boundary lacks ${exactReplacementEndpointCheck}`,
+  );
+for (const serviceIdentityCheck of [
+  'container_full_ids_for_service gateway',
+  'container_full_ids_for_service bot',
+  'container_full_ids_for_service beta-admission',
+])
+  assert.ok(
+    script.includes(serviceIdentityCheck),
+    `service identity is not enforced: ${serviceIdentityCheck}`,
+  );
+const acceptsReplacementAddressFixture = (ipv4, ipv6) =>
+  /^172\.2[0-9]\.[0-9]{1,3}\.[0-9]{1,3}\/16$/u.test(ipv4) &&
+  /^fd[0-9a-f]{2}:[0-9a-f:]+\/64$/u.test(ipv6);
+assert.ok(acceptsReplacementAddressFixture('172.20.0.8/16', 'fd00:1234::8/64'));
+for (const pair of [
+  ['not-an-ip', 'fd00:1234::8/64'],
+  ['172.20.0.8/24', 'fd00:1234::8/64'],
+  ['10.0.0.8/16', 'fd00:1234::8/64'],
+  ['172.20.0.8/16', '172.20.0.9/16'],
+  ['172.20.0.8/16', 'fd00:1234::8/48'],
+])
+  assert.ok(
+    !acceptsReplacementAddressFixture(...pair),
+    `invalid endpoint address fixture accepted: ${pair}`,
+  );
+
+function workflowRunBlock(stepName) {
+  const step = workflow.indexOf(`      - name: ${stepName}\n`);
+  assert.ok(step >= 0, `missing workflow step ${stepName}`);
+  const boundaries = [
+    workflow.indexOf('\n      - name:', step + 1),
+    workflow.indexOf('\n  connectivity:\n', step + 1),
+  ].filter((index) => index > step);
+  const next = Math.min(...boundaries);
+  assert.ok(next > step, `unterminated workflow step ${stepName}`);
+  const section = workflow.slice(step, next);
+  const marker = section.indexOf('        run: |\n');
+  assert.ok(marker >= 0, `missing run block for ${stepName}`);
+  return section
+    .slice(marker + '        run: |\n'.length)
+    .split('\n')
+    .map((line) => {
+      assert.ok(line === '' || line.startsWith('          '), `bad run-block indent: ${line}`);
+      return line.slice(10);
+    })
+    .join('\n');
+}
+
+function resolvePython() {
+  const candidates = [
+    process.env.FETANAGENT_TEST_PYTHON,
+    process.platform === 'win32'
+      ? join(
+          process.env.USERPROFILE ?? '',
+          '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe',
+        )
+      : '/usr/bin/python3',
+    'python3',
+    'python',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if ((candidate.includes('/') || candidate.includes('\\')) && !existsSync(candidate)) continue;
+    if (spawnSync(candidate, ['--version'], { encoding: 'utf8' }).status === 0) return candidate;
+  }
+  throw new Error('Python 3 is required for Owner archive fixtures');
+}
+
+function resolveBash() {
+  const candidates = [
+    process.env.FETANAGENT_TEST_BASH,
+    process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : '/bin/bash',
+    'bash',
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if ((candidate.includes('/') || candidate.includes('\\')) && !existsSync(candidate)) continue;
+    if (spawnSync(candidate, ['--version'], { encoding: 'utf8' }).status === 0) return candidate;
+  }
+  throw new Error('Bash is required for Owner archive recovery verification');
+}
+
+assert.equal(
+  createHash('sha256').update(readFileSync(original)).digest('hex'),
+  'b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
+  'the immutable 001 Owner bridge changed',
+);
+
+for (const needle of [
+  "readonly SOURCE_ATTESTATION_RELEASE='001316f1f65dc7a9976244e8fc01f90aec665a70'",
+  "readonly SOURCE_ATTESTATION_INTENT_SHA256='36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245ab'",
+  "readonly SOURCE_OWNER_BRIDGE_SHA256='b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9'",
+  "readonly SOURCE_OWNER_TAR_SHA256='4b6348d76bfef9553fbea799da381cd1b6b27e78237c97386c694d9c9305a80e'",
+  "readonly SOURCE_OWNER_TAR_SIZE='405925888'",
+  "readonly SOURCE_OWNER_IMAGE_ID='sha256:ce2cb11cb28cd1b16411a94dc6f9225aaa37877bb0de688578645c5d296b3ce3'",
+  "readonly SOURCE_OWNER_LOADED_IMAGE_ID='sha256:45932c0e99318e305223bec96c166a82aa0330195e5cdd651c0b435756f7feeb'",
+  "readonly SOURCE_OWNER_CLAIM_PARENT_DEV_INO='64769:6102879'",
+  "readonly SOURCE_OWNER_CLAIM_ROOT_DEV_INO='64769:6102880'",
+  "readonly PRIOR_FAILED_RECOVERY_RELEASE='911758fa1407093bee700918d5a663a7735f1658'",
+  "readonly PRIOR_FAILED_RECOVERY_BUNDLE_PARENT_DEV_INO='64769:6102884'",
+  "readonly PRIOR_FAILED_RECOVERY_BUNDLE_ROOT_DEV_INO='64769:6102885'",
+  "readonly PRIOR_FAILED_RECOVERY_SCRIPT_DEV_INO='64769:6102886'",
+  "readonly PRIOR_FAILED_RECOVERY_SCRIPT_SHA256='d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d'",
+  "readonly PRIOR_FAILED_RECOVERY_SCRIPT_SIZE='151404'",
+  "readonly PRIOR_FAILED_RECOVERY_VALIDATOR_DEV_INO='64769:6102887'",
+  "readonly PRIOR_FAILED_RECOVERY_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "readonly PRIOR_FAILED_RECOVERY_MANIFEST_DEV_INO='64769:6102888'",
+  "readonly PRIOR_FAILED_RECOVERY_MANIFEST_SHA256='9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a'",
+  "readonly ORIGINAL_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge'",
+  "readonly FAILED_CORRECTION_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery'",
+  "readonly FAILED_PG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-docker-inspect-tmpfs-correction'",
+  "readonly FAILED_IMAGE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-admin-pg-resolution-correction'",
+  "readonly FAILED_CATALOG_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oci-manifest-image-id-correction'",
+  "readonly FAILED_OIDVECTOR_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-api-catalog-proof-correction'",
+  "readonly FAILED_COMPOSE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-oidvector-argument-correction'",
+  "readonly FAILED_HOLDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-compose-create-flag-correction'",
+  "readonly FAILED_ORDER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-holder-inventory-parser-correction'",
+  "readonly FAILED_ENDPOINT_PHASE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-nofollow-definition-order-correction'",
+  "readonly FAILED_RUNNING_STATUS_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-created-network-endpoint-phase-correction'",
+  "readonly FAILED_COUNTER_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-running-network-status-counter-correction'",
+  "readonly FAILED_CUSTOMER_WEB_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-self-recovery-correction'",
+  "readonly FAILED_NETWORK_SCOPE_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-network-scope-correction'",
+  "readonly FAILED_OWNER_DELTA_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-owner-delta-normalization-correction'",
+  "readonly FAILED_OCI_IDENTITY_BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-oci-runtime-identity-correction'",
+  "readonly BRIDGE_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery-customer-web-semantic-v2-reconciliation-correction'",
+  'env -i PATH="$SAFE_PATH" python3 -I "$STAGED_VALIDATOR"',
+  '"$CLAIM_ROOT/$IMAGE_ARCHIVE_NAME" "$OWNER_IMAGE" "$OWNER_IMAGE_ID" oci 11 30',
+  'archive_recovery_bundle_parent_dev_ino=',
+  'archive_recovery_manifest_sha256=',
+  'prior_failed_archive_recovery_runtime_ledger_absent=true',
+  'financial_actions_mode=dry_run',
+  'kemerbet_executor_enabled=false',
+  'kemerbet_final_action_enabled=false',
+  'provider_action_enabled=false',
+  'transfer_enabled=false',
+  'amount_entry_enabled=false',
+  'money_moved=false',
+]) {
+  assert.ok(script.includes(needle), `recovery script is missing ${needle}`);
+}
+for (const needle of [
+  "FAILED_CATALOG_CORRECTION_RELEASE='04f51a521280fed43cd1504107c702940e523688'",
+  "FAILED_CATALOG_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102909'",
+  "FAILED_CATALOG_CORRECTION_SCRIPT_SHA256='6f2812be35d632c7b9d4430be0de21241b5ad9e57a9b61193d7d360c32bf6e36'",
+  "FAILED_CATALOG_CORRECTION_MANIFEST_SHA256='c2502c5add54b0414d4e0e3d538554ec8e6057f5dbafc537ec8ed8f84a340dc1'",
+  "FAILED_CATALOG_BRIDGE_PARENT_DEV_INO='64769:6102913'",
+  "FAILED_CATALOG_BRIDGE_INSTALLING_DEV_INO='64769:6102914'",
+  "FAILED_CATALOG_BRIDGE_INTENT_DEV_INO='64769:6102916'",
+  "FAILED_CATALOG_BRIDGE_INTENT_SHA256='994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799'",
+  "FAILED_OIDVECTOR_CORRECTION_RELEASE='f67cf783528f090169dbea1ebfdc6c46f90996bb'",
+  "FAILED_OIDVECTOR_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102918'",
+  "FAILED_OIDVECTOR_CORRECTION_SCRIPT_SHA256='440ed90b8c0987f7d94ab19f4b80513ef6bcf2984dd91c99d4d4caf27b0d077f'",
+  "FAILED_OIDVECTOR_CORRECTION_MANIFEST_SHA256='8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed'",
+  "FAILED_OIDVECTOR_BRIDGE_PARENT_DEV_INO='64769:6102925'",
+  "FAILED_OIDVECTOR_BRIDGE_INSTALLING_DEV_INO='64769:6102926'",
+  "FAILED_OIDVECTOR_BRIDGE_INTENT_DEV_INO='64769:6102930'",
+  "FAILED_OIDVECTOR_BRIDGE_INTENT_SHA256='7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd'",
+  "FAILED_COMPOSE_CORRECTION_RELEASE='e95ad99122ebf9f7257ea25d7cf215dd38c73b40'",
+  "FAILED_COMPOSE_CORRECTION_SCRIPT_SHA256='163d2adb74912daa8cb3663cefa5220a6e3f4766bd25a07f3bd13a31a077ef63'",
+  "FAILED_COMPOSE_CORRECTION_MANIFEST_SHA256='fa1115800d977eedde7a5339414f689e9c65bc417ad5495db7c12a0353829ea1'",
+  "FAILED_COMPOSE_BRIDGE_INTENT_SHA256='d8566a94851d3b53454b06ad308c71d85ac76c5478dfd5d967e40a17ec71a651'",
+  "FAILED_COMPOSE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  "FAILED_HOLDER_CORRECTION_RELEASE='35d28aaa41cde5a2ccce7c2017dffc7c9d503238'",
+  "FAILED_HOLDER_CORRECTION_SCRIPT_SHA256='f861a8106b454b43167d46a3dd55ef05a6d586c65ffc2142f90d7272b59f973f'",
+  "FAILED_HOLDER_CORRECTION_MANIFEST_SHA256='3685d5197a39a1805970712eaeae24116fa8b6633f08434622d3e22864a759dd'",
+  "FAILED_HOLDER_BRIDGE_INTENT_SHA256='2b80e49bd0aa3c3060ff09b8b2593f5caf57ea079e0d54a3f897a7317cfbfc6b'",
+  "FAILED_HOLDER_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  'holder_inventory_parser_contract=tab-preserving-exact-complete-v1',
+  'for line in holders.splitlines():',
+  "if line.count('\\t') != 1",
+  'if set(holder_map) != volume_names',
+  "FAILED_ORDER_CORRECTION_RELEASE='132603c34afff4e0e6c78d89864c761034c0f3fa'",
+  "FAILED_ORDER_CORRECTION_SCRIPT_SHA256='dbea82dc71e3a61ce2c3392ad507eb952c1054c64c07f2145650f7aeac0d0e4e'",
+  "FAILED_ORDER_CORRECTION_MANIFEST_SHA256='1cfa9ddba283f1b6ae053a420aaea0caa2af39791271cd6e936bb109b2f42c4f'",
+  'failed_order_runtime_namespace=exact-absent',
+  'nofollow_helper_definition_order=before-first-top-level-claim',
+  "FAILED_ENDPOINT_PHASE_CORRECTION_RELEASE='51e5170488d720fd04decd1896971ab72cfe9603'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102952'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_DEV_INO='64769:6102953'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SHA256='9cd67e0d820075fd8fac3bf6100ce26cfdc65f67540a8d086fcae8b2bf9f0ac8'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_SCRIPT_SIZE='262609'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_DEV_INO='64769:6102954'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_VALIDATOR_SHA256='6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_DEV_INO='64769:6102955'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SHA256='8c3682673339a7d57740b4890987932eee14013df0a6f05e50bda994cc5aaaac'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_MANIFEST_SIZE='12911'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ID='33252232473'",
+  "FAILED_ENDPOINT_PHASE_CORRECTION_WORKFLOW_RUN_ATTEMPT='1'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_PARENT_DEV_INO='64769:6102956'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_INSTALLING_DEV_INO='64769:6102957'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_DEV_INO='64769:6102958'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_INTENT_SHA256='5eebab9353a3f251020a997706c2c1a85c00209f08ae83a1b32cf9b64e55d5fb'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_DEV_INO='64769:6102959'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_DEV_INO='64769:6102960'",
+  "FAILED_ENDPOINT_PHASE_BRIDGE_DOCKER_SNAPSHOT_SHA256='460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7'",
+  "FAILED_RUNNING_STATUS_CORRECTION_RELEASE='8f1ef460a231fe2c21e2df2d986749400d08c38c'",
+  "FAILED_RUNNING_STATUS_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102961'",
+  "FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_DEV_INO='64769:6102962'",
+  "FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_SHA256='9cd020e2b79d5d53b5686f56ab9a291ae20af3ca700f581ec44f7b5eeb421d0e'",
+  "FAILED_RUNNING_STATUS_CORRECTION_SCRIPT_SIZE='278033'",
+  "FAILED_RUNNING_STATUS_CORRECTION_VALIDATOR_DEV_INO='64769:6102963'",
+  "FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_DEV_INO='64769:6102964'",
+  "FAILED_RUNNING_STATUS_CORRECTION_MANIFEST_SHA256='b58fb16735c70bd4d7f9fd3022d675d11b4e815715fcb3e3804b55daa23364e5'",
+  "FAILED_RUNNING_STATUS_BRIDGE_PARENT_DEV_INO='64769:6102965'",
+  "FAILED_RUNNING_STATUS_BRIDGE_INSTALLING_DEV_INO='64769:6102966'",
+  "FAILED_RUNNING_STATUS_BRIDGE_INTENT_DEV_INO='64769:6102967'",
+  "FAILED_RUNNING_STATUS_BRIDGE_INTENT_SHA256='d02d6076765c789b45b1aa973183fc0c159a6e10c3b928927e7bee72de839e14'",
+  "FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_DEV_INO='64769:6102968'",
+  "FAILED_RUNNING_STATUS_BRIDGE_API_PROOF_SHA256='868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee'",
+  "FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_DEV_INO='64769:6102969'",
+  "FAILED_RUNNING_STATUS_BRIDGE_DOCKER_SNAPSHOT_SHA256='460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7'",
+  "FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT_DEV_INO='64769:6102970'",
+  "FAILED_RUNNING_STATUS_BRIDGE_REPLACEMENT_SHA256='6e85eeb5e09ea7941bb5da4cf27890c37faa956ce81bf0d6e35c59d2c8066be1'",
+  "FAILED_RUNNING_STATUS_BRIDGE_START_DEV_INO='64769:6102971'",
+  "FAILED_RUNNING_STATUS_BRIDGE_START_SHA256='518341dc096934ce1166c68cb09b3ff727587bafa21e3e2e97ce36bc07d03a52'",
+  "CREATED_OWNER_CONTAINER_ID='44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f'",
+  'failed_endpoint_phase_owner_state=created-never-started',
+  'compose_reentry=forbidden',
+  'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1',
+  'failed_running_status_owner_state=running-healthy-no-completion',
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v3',
+  'network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1',
+  'owner_lifecycle_mutation=forbidden-already-running',
+  'complete_phase_boundary_contract=single-final-phase-aware-command-v1',
+  'emit_exact_nofollow_file() {',
+  'os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW',
+  'before != after',
+  'os.path.realpath(path) != path',
+  'capture_complete_docker_create_inventory() {',
+  'require_exact_owner_inventory_delta_phase() {',
+  'require_owner_endpoint_phase_boundary() {',
+  'require_complete_owner_endpoint_phase_boundary() {',
+  'require_exact_compose_create_contract() {',
+  "compose version --short)\" == '5.1.4'",
+  'owner.get("depends_on") not in (None, {})',
+  "fs.readFileSync('/run/secrets/player_action_database_url'",
+  "fs.existsSync('/run/secrets/owner_control_database_url')",
+  "has_function_privilege(\n          'fetanagent_owner_control_runtime'",
+  'not has_function_privilege(\n          current_user',
+  "not has_function_privilege(\n          'public'",
+  'role.rolconnlimit = 2',
+  'role.rolconnlimit = 1',
+  "await client.query('begin transaction read only')",
+  "await client.query('rollback')",
+  'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1"',
+  'require_exact_api_catalog_container_contract() {',
+  "config.get('Image') != f'fetanagent-api:{release[:12]}'",
+  "config.get('Cmd') != ['node','apps/api/dist/index.js']",
+  "'/run/secrets/owner_control_database_url' in destinations",
+  'len(mounts) != 12',
+  "len({m['Destination'] for m in mounts}) != 12",
+  "(m['Type'],m['Source'],m['Mode'],m['RW'],m['Propagation'])",
+  "source_root='/srv/fetanagent/secrets/staging'",
+  "f'{source_root}/player-action-database-url','',False,'rprivate'",
+  "f'{source_root}/api-action-capability-hmac','',False,'rprivate'",
+  "f'{source_root}/cbe-deposit-reference-fingerprint-key','',False,'rprivate'",
+  "f'{source_root}/deposit-proof-reference-fingerprint-master','',False,'rprivate'",
+  "f'{source_root}/api-action-transport-hmac','',False,'rprivate'",
+  "f'{source_root}/cbe-deposit-reference-key-profile.v1.json','',False,'rprivate'",
+  "f'{source_root}/api-action-semantic-hmac','',False,'rprivate'",
+  "f'{source_root}/cbe-deposit-reference-encryption-key','',False,'rprivate'",
+  "f'{source_root}/deposit-proof-reference-encryption-master','',False,'rprivate'",
+  "f'{source_root}/supabase-ca.crt','',False,'rprivate'",
+  "f'{source_root}/api-action-payload-hmac','',False,'rprivate'",
+  "f'{source_root}/deposit-proof-reference-profile.v2.json','',False,'rprivate'",
+  "host.get('NetworkMode') != expected_network",
+  "host.get('PublishAllPorts') is not False",
+  "config.get('ExposedPorts') is not None",
+  'select count(*) = 1',
+  'select count(*) = 2',
+  "count(*) filter (where grantee.rolname = 'postgres') = 1",
+  "count(*) filter (where grantee.rolname = 'fetanagent_owner_control') = 1",
+  'count(*) filter (where grantee.rolname is null) = 0',
+  "p.proconfig = array['search_path=pg_catalog']::text[]",
+  "p.prorettype = 'record'::regtype",
+  "p.proargtypes = array['uuid'::regtype::oid, 'uuid'::regtype::oid, 'uuid'::regtype::oid]::oidvector",
+  "privilege.privilege_type = 'EXECUTE'",
+]) {
+  assert.ok(script.includes(needle), `API catalog correction proof is missing ${needle}`);
+}
+const catalogProofStart = script.indexOf('require_migration_through_api_catalog()');
+const catalogProofEnd = script.indexOf('\n}\n\nexpected_api_catalog_proof()', catalogProofStart);
+const catalogProof = script.slice(catalogProofStart, catalogProofEnd);
+assert.doesNotMatch(
+  catalogProof,
+  /p\.proargtypes::oid\[\]\s*=\s*array\[/u,
+  'zero-based oidvector must not be cast to an array and compared with a one-based array',
+);
+const postgresArrayEqual = (left, right) =>
+  left.lowerBound === right.lowerBound &&
+  left.values.length === right.values.length &&
+  left.values.every((value, index) => value === right.values[index]);
+const oidvectorCast = { lowerBound: 0, values: [2950, 2950, 2950] };
+const ordinaryArray = { lowerBound: 1, values: [2950, 2950, 2950] };
+assert.ok(
+  !postgresArrayEqual(oidvectorCast, ordinaryArray),
+  'fixture must reproduce the zero-based oidvector versus one-based array trap',
+);
+assert.deepEqual(
+  oidvectorCast.values,
+  ordinaryArray.values,
+  'oidvector equality alternative must compare the exact three ordered UUID OIDs',
+);
+const acceptsExactFunctionAcl = (rows) =>
+  rows.length === 2 &&
+  rows.filter(
+    (row) =>
+      row.grantee === 'postgres' &&
+      row.grantor === 'postgres' &&
+      row.privilege === 'EXECUTE' &&
+      row.grantable === false,
+  ).length === 1 &&
+  rows.filter(
+    (row) =>
+      row.grantee === 'fetanagent_owner_control' &&
+      row.grantor === 'postgres' &&
+      row.privilege === 'EXECUTE' &&
+      row.grantable === false,
+  ).length === 1;
+const exactFunctionAcl = [
+  { grantee: 'postgres', grantor: 'postgres', privilege: 'EXECUTE', grantable: false },
+  {
+    grantee: 'fetanagent_owner_control',
+    grantor: 'postgres',
+    privilege: 'EXECUTE',
+    grantable: false,
+  },
+];
+assert.ok(acceptsExactFunctionAcl(exactFunctionAcl), 'exact function ACL fixture rejected');
+for (const invalidAcl of [
+  [exactFunctionAcl[0], exactFunctionAcl[0]],
+  [exactFunctionAcl[1], exactFunctionAcl[1]],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantee: null }],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantee: 'PUBLIC' }],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantable: true }],
+  [exactFunctionAcl[0], { ...exactFunctionAcl[1], grantor: 'other' }],
+]) {
+  assert.ok(
+    !acceptsExactFunctionAcl(invalidAcl),
+    `invalid function ACL fixture accepted: ${JSON.stringify(invalidAcl)}`,
+  );
+}
+for (const forbidden of [
+  /\bcall\b/iu,
+  /\bdo\s+\$/iu,
+  /\bset\s+role\b/iu,
+  /\binsert\b/iu,
+  /\bupdate\b/iu,
+  /\bdelete\b/iu,
+  /\btruncate\b/iu,
+  /\balter\b/iu,
+  /\bdrop\b/iu,
+  /select\s+.+\s+from\s+app\./isu,
+]) {
+  assert.doesNotMatch(
+    catalogProof,
+    forbidden,
+    `catalog proof contains forbidden operation ${forbidden}`,
+  );
+}
+
+assert.equal((script.match(/^#!\/usr\/bin\/env bash$/gm) ?? []).length, 1);
+const nofollowDefinition = script.indexOf('emit_exact_nofollow_file() {');
+const priorClaimDefinition = script.indexOf('require_prior_failed_recovery_claim() {');
+const priorClaimInvocation = script.indexOf(
+  "require_prior_failed_recovery_claim ||\n  die 'OCI-RUNTIME-ID-001: the immutable failed a51 bundle, manifest semantics, or append-only chain is not exact'",
+);
+assert.ok(nofollowDefinition >= 0 && nofollowDefinition < priorClaimDefinition);
+assert.ok(priorClaimDefinition < priorClaimInvocation);
+assert.equal((script.match(/emit_exact_nofollow_file\(\) \{/gu) ?? []).length, 1);
+assert.ok(
+  script.includes('[[ ! -e "$FAILED_ORDER_BRIDGE_PARENT" && ! -L "$FAILED_ORDER_BRIDGE_PARENT" ]]'),
+);
+const authorizedCustomerReplacementStart = script.indexOf('reconcile_customer_web_once() {');
+const authorizedCustomerReplacementEnd = script.indexOf(
+  '\n}\n',
+  authorizedCustomerReplacementStart,
+);
+assert.ok(
+  authorizedCustomerReplacementStart >= 0 &&
+    authorizedCustomerReplacementEnd > authorizedCustomerReplacementStart,
+);
+assert.ok(script.includes('require_adopted_customer_web_boundary() {'));
+assert.ok(script.includes('customer_web_semantic_v2_digest() {'));
+assert.ok(script.includes('[[ "$before_complete" == "$after_complete" ]] || return 1'));
+const semanticV2Start = script.indexOf('customer_web_semantic_v2_digest() {');
+const semanticV2End = script.indexOf(
+  '\n}\n\nrequire_customer_web_security_contract() {',
+  semanticV2Start,
+);
+assert.ok(semanticV2Start >= 0 && semanticV2End > semanticV2Start);
+const semanticV2 = script.slice(semanticV2Start, semanticV2End);
+for (const semanticV2Contract of [
+  "'com.docker.compose.container-number'",
+  "'com.docker.compose.depends_on'",
+  "'com.docker.compose.oneoff'",
+  "'com.docker.compose.project'",
+  "'com.docker.compose.service'",
+  "'org.opencontainers.image.title'",
+  "'com.docker.compose.config-hash'",
+  "'com.docker.compose.image'",
+  "'com.docker.compose.project.config_files'",
+  "'com.docker.compose.project.environment_file'",
+  "'com.docker.compose.project.working_dir'",
+  "'com.docker.compose.replace'",
+  "'com.docker.compose.version'",
+  "'org.opencontainers.image.revision'",
+  'if set(labels) != set(stable_label_keys) | set(provenance_label_keys):',
+  'if any(labels.get(key) != value for key, value in (expected_stable | expected_provenance).items()):',
+  "'Config.Env': sorted(environment)",
+  "'Config.Labels': {key: labels[key] for key in stable_label_keys}",
+  "'ReadonlyRootfs', 'Privileged', 'Init', 'CapAdd', 'CapDrop'",
+  "'SecurityOpt', 'RestartPolicy', 'NetworkMode', 'PortBindings'",
+  "'PublishAllPorts', 'PidsLimit', 'Memory', 'NanoCpus', 'Tmpfs'",
+  "'Mounts': sorted(mounts, key=lambda value: json.dumps(",
+  "'NetworkNames': sorted(networks)",
+  "'NetworkPorts': network_settings.get('Ports')",
+])
+  assert.ok(
+    semanticV2.includes(semanticV2Contract),
+    `semantic-v2 comparator lacks ${semanticV2Contract}`,
+  );
+const semanticV2DigestObject = semanticV2.slice(
+  semanticV2.indexOf('contract = {'),
+  semanticV2.indexOf('encoded =', semanticV2.indexOf('contract = {')),
+);
+for (const excludedLifecycleOrProvenance of [
+  'provenance_label_keys',
+  "'State'",
+  "'Created'",
+  "'RestartCount'",
+  "'State.Pid'",
+  "'State.StartedAt'",
+])
+  assert.ok(
+    !semanticV2DigestObject.includes(excludedLifecycleOrProvenance),
+    `semantic-v2 digest includes lifecycle/provenance noise ${excludedLifecycleOrProvenance}`,
+  );
+const semanticV2FixtureDigest = ({ env, stableService, provenanceRevision }) => {
+  // Mirrors the properties guarded in the embedded Python comparator: Env is
+  // canonicalized, stable labels are digested, and validated provenance does
+  // not enter the semantic hash.
+  assert.match(provenanceRevision, /^[0-9a-f]{40}$/u);
+  return createHash('sha256')
+    .update(
+      `${JSON.stringify({
+        version: 'fetanagent-customer-web-reconciliation-semantic-v2',
+        Env: [...env].sort(),
+        Labels: { 'com.docker.compose.service': stableService },
+      })}\n`,
+    )
+    .digest('hex');
+};
+const semanticV2FixtureBase = semanticV2FixtureDigest({
+  env: ['B=2', 'A=1'],
+  stableService: 'customer-web',
+  provenanceRevision: '0'.repeat(40),
+});
+assert.equal(
+  semanticV2FixtureBase,
+  semanticV2FixtureDigest({
+    env: ['A=1', 'B=2'],
+    stableService: 'customer-web',
+    provenanceRevision: 'f'.repeat(40),
+  }),
+  'semantic-v2 must ignore Env order and lifecycle/provenance revision noise',
+);
+assert.notEqual(
+  semanticV2FixtureBase,
+  semanticV2FixtureDigest({
+    env: ['A=1', 'B=2'],
+    stableService: 'wrong-service',
+    provenanceRevision: '0'.repeat(40),
+  }),
+  'semantic-v2 must retain stable-label changes',
+);
+assert.ok(script.includes('[[ "$state" == \'running|true|unhealthy\' ]]'));
+assert.ok(script.includes('require_owner_never_restarted'));
+assert.ok(script.includes("capture_non_owner_inventory | awk -F'|' '$2 != \"customer-web\"'"));
+for (const forbiddenMutation of [
+  /create --no-build/u,
+  /\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm|start|stop|restart)\b/u,
+  /docker_local (?:container|network|image|volume) (?:start|create|rm|remove|restart|stop|kill|connect|disconnect|load|tag|prune)\b/u,
+]) {
+  assert.doesNotMatch(
+    script,
+    forbiddenMutation,
+    `the reconciliation release must not contain a Docker/Compose lifecycle mutation ${forbiddenMutation}`,
+  );
+}
+assert.ok(
+  script.includes(
+    'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof)',
+  ),
+  'the customer-web successor must publish a fresh exact read-only catalog proof',
+);
+assert.doesNotMatch(script, /36c59fee9df1e0ffcf311e8abba1bef22d17c3bf786b8ba2a2f3f34af14245'/);
+assert.ok((script.match(/require_original_bridge_namespace_absent/g) ?? []).length >= 10);
+assert.ok((script.match(/require_prior_failed_runtime_ledger_absent/g) ?? []).length >= 6);
+assert.ok((script.match(/require_failed_endpoint_phase_runtime/g) ?? []).length >= 9);
+assert.ok((script.match(/require_failed_running_status_runtime/g) ?? []).length >= 6);
+for (const needle of [
+  "FAILED_CORRECTION_RELEASE='ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b'",
+  "FAILED_CORRECTION_BRIDGE_PARENT_DEV_INO='64769:6102893'",
+  "FAILED_CORRECTION_BRIDGE_INSTALLING_DEV_INO='64769:6102894'",
+  '! docker_local container inspect "$OLD_OWNER_CONTAINER_ID" >/dev/null 2>&1',
+  "'/tmp': 'rw,noexec,nosuid,size=32m,mode=1777'",
+  'owner_tmpfs_host_config=required-exact',
+  'owner_inspect_mount_inventory=non-tmpfs-eight',
+]) {
+  assert.ok(script.includes(needle), `correction script is missing ${needle}`);
+}
+for (const needle of [
+  "FAILED_IMAGE_CORRECTION_RELEASE='0a2adc0bf3591fe2449379ac2bf76c21538fadf5'",
+  "FAILED_IMAGE_CORRECTION_BUNDLE_ROOT_DEV_INO='64769:6102902'",
+  "FAILED_IMAGE_CORRECTION_SCRIPT_SHA256='338ad5f16d4761c9ce1d048eae5d7a38341aa5dee734a2a0c87cf47416564a6b'",
+  "FAILED_IMAGE_CORRECTION_MANIFEST_SHA256='845d891088a30878e2162f050aa45f7110fadb9831c5bcd7dddd5cec2e3999d8'",
+  "FAILED_IMAGE_BRIDGE_PARENT_DEV_INO='64769:6102906'",
+  "FAILED_IMAGE_BRIDGE_INSTALLING_DEV_INO='64769:6102907'",
+  "FAILED_IMAGE_BRIDGE_INTENT_DEV_INO='64769:6102908'",
+  "FAILED_IMAGE_BRIDGE_INTENT_SHA256='89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b'",
+  'source_owner_config_id=',
+  'loaded_owner_manifest_image_id=',
+  'oci_import_mapping=manifest-descriptor-id-with-exact-uncompressed-diffids',
+  "docker_local version --format '{{.Server.Version}}|{{.Server.APIVersion}}|{{.Server.Os}}|{{.Server.Arch}}'",
+  '\'overlayfs|[["driver-type","io.containerd.snapshotter.v1"]]|null\'',
+  "image.get('Descriptor')",
+  "image.get('RepoTags') != [expected_tag]",
+  "image.get('RepoDigests')",
+  "image.get('RootFS') != {'Type': 'layers', 'Layers': layers}",
+  "image.get('Config') != config['config']",
+  'require_loaded_image_unused() {',
+  'require_loaded_image_used_only_by() {',
+  'require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID"',
+]) {
+  assert.ok(script.includes(needle), `OCI import identity proof is missing ${needle}`);
+}
+assert.ok(
+  !script.includes("expected_mounts['/tmp']"),
+  'Docker tmpfs must not be conflated with inspect Mounts',
+);
+assert.ok(
+  !script.includes('historical-absent'),
+  'the disproved historical-absent mode must not survive',
+);
+assert.ok(
+  !script.includes('tmpfs_mode'),
+  'all Owner generations must use one exact tmpfs contract',
+);
+for (const needle of [
+  "createRequire('/workspace/apps/api/dist/index.js')",
+  "apiRequire.resolve('pg')",
+  "'/workspace/node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/index.js'",
+  "pgPackage.version !== '8.22.0'",
+  "const { Client } = apiRequire('pg')",
+  "typeof Client !== 'function'",
+]) {
+  assert.ok(script.includes(needle), `immutable admin pg resolution proof is missing ${needle}`);
+}
+assert.ok(
+  !script.includes("const { Client } = require('pg')"),
+  'stdin-relative pg resolution must not return',
+);
+for (const needle of [
+  "FAILED_PG_CORRECTION_RELEASE='fa35244c8e8e2b9f10fe7abb2cd2341864b43471'",
+  "FAILED_PG_BRIDGE_PARENT_DEV_INO='64769:6102899'",
+  "FAILED_PG_BRIDGE_INSTALLING_DEV_INO='64769:6102900'",
+  "FAILED_PG_BRIDGE_INTENT_DEV_INO='64769:6102901'",
+  "FAILED_PG_BRIDGE_INTENT_SHA256='417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72'",
+  'require_prior_failed_runtime_ledger_absent || return 1\n  require_non_owner_inventory_unchanged || return 1',
+]) {
+  assert.ok(script.includes(needle), `failed fa35244 evidence is missing ${needle}`);
+}
+const completeBoundaryStart = script.indexOf('require_complete_owner_endpoint_phase_boundary() {');
+const completeBoundaryEnd = script.indexOf(
+  '\n}\n\nrequire_running_owner_boundary_before_successor_intent()',
+  completeBoundaryStart,
+);
+assert.ok(
+  completeBoundaryStart >= 0 && completeBoundaryEnd > completeBoundaryStart,
+  'complete phase-aware boundary helper is missing or unterminated',
+);
+const completeBoundary = script.slice(completeBoundaryStart, completeBoundaryEnd);
+for (const helperConstituent of [
+  'require_bridge_intent || return 1',
+  'require_api_catalog_proof || return 1',
+  'require_exact_recovery_source_anchors || return 1',
+  'require_prior_failed_recovery_claim || return 1',
+  'require_original_bridge_namespace_absent || return 1',
+  'require_prior_failed_runtime_ledger_absent || return 1',
+  'require_failed_endpoint_phase_runtime || return 1',
+  'require_failed_running_status_runtime || return 1',
+  'require_failed_counter_runtime || return 1',
+  'require_failed_customer_web_network_scope_runtime || return 1',
+  'require_failed_network_scope_runtime || return 1',
+  'require_exact_droplet || return 1',
+  'require_no_other_mutator_processes || return 1',
+  'require_financial_gates_disabled || return 1',
+  'require_owner_image_contract || return 1',
+  'require_loaded_image_used_only_by "$NEW_OWNER_CONTAINER_ID" || return 1',
+  'require_non_owner_inventory_unchanged || return 1',
+  'load_pre_create_docker_inventory || return 1',
+  'cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file',
+  'require_successor_endpoint_phase_boundary "$phase"',
+]) {
+  assert.ok(
+    completeBoundary.includes(helperConstituent),
+    `complete phase-boundary helper is missing ${helperConstituent}`,
+  );
+}
+assert.match(
+  completeBoundary,
+  /require_successor_endpoint_phase_boundary "\$phase"\s*$/u,
+  'the exact successor Docker delta must be the final constituent of the complete helper',
+);
+const preIntentBoundaryStart = script.indexOf(
+  'require_running_owner_boundary_before_successor_intent() {',
+);
+const preIntentBoundaryEnd = script.indexOf(
+  '\n}\n\nrequire_pre_create_image_boundary() {',
+  preIntentBoundaryStart,
+);
+assert.ok(
+  preIntentBoundaryStart >= 0 && preIntentBoundaryEnd > preIntentBoundaryStart,
+  'the first-run successor boundary helper is missing or unterminated',
+);
+const preIntentBoundary = script.slice(preIntentBoundaryStart, preIntentBoundaryEnd);
+assert.ok(
+  preIntentBoundary.includes('require_pre_customer_web_inventory || return 1'),
+  'the first-run boundary must prove the exact adopted customer-web before inventory comparison',
+);
+assert.match(
+  preIntentBoundary,
+  /require_successor_endpoint_phase_boundary running\s*$/u,
+  'the first-run boundary must finish with the adoption-aware successor comparator',
+);
+assert.ok(
+  !preIntentBoundary.includes('require_owner_endpoint_phase_boundary running'),
+  'the first-run boundary must not reuse the legacy owner-only comparator after 0ffc replacement',
+);
+assert.ok(
+  script.includes(
+    'require_exact_owner_inventory_delta_phase "$before" "$normalized_after" "$new_owner" running',
+  ),
+  'successor comparison must normalize only the customer delta and reuse the full immutable Owner comparator',
+);
+const cloneJson = (value) => JSON.parse(JSON.stringify(value));
+const extractPythonHeredoc = (functionName, assignmentNeedle) => {
+  const functionStart = script.indexOf(`${functionName}() {`);
+  const assignmentStart = script.indexOf(assignmentNeedle, functionStart);
+  const bodyStartMarker = "3<<'PY'\n";
+  const bodyStart = script.indexOf(bodyStartMarker, assignmentStart) + bodyStartMarker.length;
+  const bodyEnd = script.indexOf('\nPY\n', bodyStart);
+  assert.ok(
+    functionStart >= 0 && assignmentStart >= functionStart && bodyStart >= bodyStartMarker.length,
+    `missing ${functionName} Python normalizer`,
+  );
+  assert.ok(bodyEnd > bodyStart, `unterminated ${functionName} Python normalizer`);
+  return script.slice(bodyStart, bodyEnd);
+};
+const resumedCustomerNormalizer = extractPythonHeredoc(
+  'require_resumed_intent_pre_mutation_boundary',
+  'normalized_current="$(printf',
+);
+const successorCustomerNormalizer = extractPythonHeredoc(
+  'require_exact_successor_inventory_delta',
+  'normalized_after="$(printf',
+);
+const successorComparatorStart = script.indexOf('require_exact_successor_inventory_delta() {');
+const successorComparatorEnd = script.indexOf(
+  '\n}\n\nload_pre_create_docker_inventory() {',
+  successorComparatorStart,
+);
+assert.ok(
+  successorComparatorStart >= 0 && successorComparatorEnd > successorComparatorStart,
+  'the successor inventory comparator is missing or unterminated',
+);
+const successorComparator = script.slice(successorComparatorStart, successorComparatorEnd);
+assert.ok(
+  successorComparator.includes(
+    '"$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the successor comparator must validate the adopted image against its exact 0ffc release',
+);
+assert.ok(
+  !successorComparator.includes(
+    '"$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the distinct reconciliation release must never be treated as the adopted image revision',
+);
+const inlineSuccessorComparatorStart = script.indexOf(
+  'require_exact_successor_inventory_delta_inline_reference() {',
+);
+const inlineSuccessorComparatorEnd = script.indexOf(
+  '\n}\n\nrequire_exact_successor_inventory_delta() {',
+  inlineSuccessorComparatorStart,
+);
+assert.ok(
+  inlineSuccessorComparatorStart >= 0 &&
+    inlineSuccessorComparatorEnd > inlineSuccessorComparatorStart,
+  'the inline successor comparator reference is missing or unterminated',
+);
+const inlineSuccessorComparator = script.slice(
+  inlineSuccessorComparatorStart,
+  inlineSuccessorComparatorEnd,
+);
+assert.ok(
+  inlineSuccessorComparator.includes(
+    '"$FAILED_OCI_IDENTITY_CORRECTION_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the inline comparator must validate the adopted image against its exact 0ffc release',
+);
+assert.ok(
+  !inlineSuccessorComparator.includes(
+    '"$RECOVERY_RELEASE" "$FAILED_OWNER_DELTA_CORRECTION_RELEASE" 3<<\'PY\'',
+  ),
+  'the inline comparator must not conflate successor provenance with adopted image provenance',
+);
+const exactOwnerDeltaValidator = extractPythonHeredoc(
+  'require_exact_owner_inventory_delta_phase',
+  "printf '%s\\n__FETANAGENT_AFTER__\\n%s\\n'",
+);
+const fixturePython = resolvePython();
+const fixtureOwner = 'a'.repeat(64);
+const fixtureCustomer = 'b'.repeat(64);
+const fixtureImage = `sha256:${'c'.repeat(64)}`;
+const fixtureFailedImage = `sha256:${'d'.repeat(64)}`;
+const fixtureConfigImage = `sha256:${'e'.repeat(64)}`;
+const fixtureRelease = '1'.repeat(40);
+const fixtureFailedRelease = '2'.repeat(40);
+const fixtureSuccessorRelease = '3'.repeat(40);
+const fixtureReplacementCustomer = 'f'.repeat(64);
+assert.notEqual(
+  fixtureRelease,
+  fixtureSuccessorRelease,
+  'the fixture must keep the adopted image release distinct from the reconciliation successor',
+);
+const fixtureOwnerNetworkName = 'fetanagent-staging-beta_owner_control_service';
+const fixtureOwnerNetworkId = '1'.repeat(64);
+const fixtureCustomerNetworkId = '2'.repeat(64);
+const fixtureControlVolume = 'fetanagent-staging-beta_kemerbet_session_control';
+const fixtureProfileVolume = 'fetanagent-staging-beta_kemerbet_sessions';
+const fixtureCustomerVolume = 'fetanagent-staging-beta_customer_web_data';
+const fixtureOwnerEndpoint = {
+  Name: 'fetanagent-staging-beta-owner-control-1',
+  EndpointID: 'd'.repeat(64),
+  MacAddress: '02:42:ac:18:00:0a',
+  IPv4Address: '172.24.0.10/24',
+  IPv6Address: 'fd18::10/64',
+};
+const fixtureCustomerEndpoint = {
+  Name: 'fetanagent-staging-beta-customer-web-1',
+  EndpointID: 'e'.repeat(64),
+  MacAddress: '02:42:ac:18:00:0b',
+  IPv4Address: '172.24.0.11/24',
+  IPv6Address: 'fd18::11/64',
+};
+const fixtureNetwork = (Id, Name, subnetNumber) => ({
+  Id,
+  Name,
+  Driver: 'bridge',
+  IPAM: {
+    Config: [
+      { Subnet: `172.${subnetNumber}.0.0/24` },
+      { Subnet: `fd${subnetNumber.toString(16)}::/64` },
+    ],
+  },
+  Containers: {},
+  Status: {
+    IPAM: {
+      Subnets: {
+        [`172.${subnetNumber}.0.0/24`]: { IPsInUse: 1, DynamicIPsAvailable: 253 },
+        [`fd${subnetNumber.toString(16)}::/64`]: { IPsInUse: 1, DynamicIPsAvailable: 253 },
+      },
+    },
+  },
+});
+const savedCheckpoint = {
+  images: Array.from({ length: 23 }, (_, index) => ({
+    Id: `sha256:${index.toString(16).padStart(64, '0')}`,
+  })),
+  networks: [
+    fixtureNetwork(fixtureOwnerNetworkId, fixtureOwnerNetworkName, 24),
+    fixtureNetwork(fixtureCustomerNetworkId, 'fetanagent-staging-beta_public', 25),
+    ...Array.from({ length: 21 }, (_, index) =>
+      fixtureNetwork((index + 3).toString(16).padStart(64, '0'), `unchanged-${index}`, index + 26),
+    ),
+  ],
+  volumes: [
+    { Name: fixtureControlVolume },
+    { Name: fixtureProfileVolume },
+    { Name: fixtureCustomerVolume },
+    ...Array.from({ length: 20 }, (_, index) => ({ Name: `unchanged-volume-${index}` })),
+  ],
+  holders: {},
+};
+savedCheckpoint.networks[0].Containers[fixtureCustomer] = fixtureCustomerEndpoint;
+for (const { Name } of savedCheckpoint.volumes) savedCheckpoint.holders[Name] = [];
+savedCheckpoint.holders[fixtureCustomerVolume] = [fixtureCustomer];
+const currentSourceMode = cloneJson(savedCheckpoint);
+currentSourceMode.images.push({
+  Id: fixtureFailedImage,
+  Descriptor: { digest: fixtureFailedImage },
+  RepoTags: [`fetanagent-customer-web:${fixtureFailedRelease.slice(0, 12)}`],
+  RepoDigests: [`fetanagent-customer-web@${fixtureFailedImage}`],
+  Config: {
+    User: '10001:10001',
+    Cmd: ['node', 'apps/customer-web/dist/index.js'],
+    Entrypoint: ['docker-entrypoint.sh'],
+    WorkingDir: '/workspace',
+    Labels: { 'org.opencontainers.image.revision': fixtureFailedRelease },
+  },
+});
+const currentOwnerNetwork = currentSourceMode.networks[0];
+currentOwnerNetwork.Containers[fixtureOwner] = fixtureOwnerEndpoint;
+for (const counters of Object.values(currentOwnerNetwork.Status.IPAM.Subnets)) {
+  counters.IPsInUse += 1;
+  counters.DynamicIPsAvailable -= 1;
+}
+currentSourceMode.holders[fixtureControlVolume] = [fixtureOwner];
+const fixtureHealthcheck = {
+  Test: [
+    'CMD',
+    'node',
+    '-e',
+    "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+  ],
+  Interval: 30000000000,
+  Timeout: 3000000000,
+  StartPeriod: 15000000000,
+  Retries: 3,
+};
+const currentReplacementMode = cloneJson(currentSourceMode);
+currentReplacementMode.images.push({
+  Id: fixtureImage,
+  Descriptor: { digest: fixtureImage },
+  RepoTags: [`fetanagent-customer-web:${fixtureRelease.slice(0, 12)}`],
+  RepoDigests: [`fetanagent-customer-web@${fixtureImage}`],
+  Config: {
+    User: '10001:10001',
+    Cmd: ['node', 'apps/customer-web/dist/index.js'],
+    Entrypoint: ['docker-entrypoint.sh'],
+    WorkingDir: '/workspace',
+    ExposedPorts: null,
+    Healthcheck: fixtureHealthcheck,
+    Labels: { 'org.opencontainers.image.revision': fixtureRelease },
+  },
+});
+delete currentReplacementMode.networks[0].Containers[fixtureCustomer];
+currentReplacementMode.networks[0].Containers[fixtureReplacementCustomer] = {
+  ...fixtureCustomerEndpoint,
+  EndpointID: '9'.repeat(64),
+};
+currentReplacementMode.holders[fixtureCustomerVolume] = [fixtureReplacementCustomer];
+assert.deepEqual(
+  [
+    savedCheckpoint.images.length,
+    savedCheckpoint.networks.length,
+    savedCheckpoint.volumes.length,
+    Object.keys(savedCheckpoint.holders).length,
+  ],
+  [23, 23, 23, 23],
+  'the saved checkpoint fixture must model the exact unchanged 23-item inventories',
+);
+assert.deepEqual(
+  currentSourceMode.networks[0].Containers[fixtureCustomer],
+  savedCheckpoint.networks[0].Containers[fixtureCustomer],
+  'the source customer endpoint must remain unchanged in the live source-mode fixture',
+);
+const runInventoryPython = (program, args, before, after) =>
+  spawnSync(fixturePython, ['-I', '-c', program, ...args], {
+    encoding: 'utf8',
+    input: `${JSON.stringify(before)}\n__FETANAGENT_AFTER__\n${JSON.stringify(after)}\n`,
+  });
+const normalizeSourceMode = (current) =>
+  runInventoryPython(
+    resumedCustomerNormalizer,
+    [
+      'source',
+      fixtureCustomer,
+      fixtureCustomer,
+      fixtureImage,
+      fixtureFailedImage,
+      fixtureConfigImage,
+      fixtureRelease,
+      fixtureFailedRelease,
+    ],
+    savedCheckpoint,
+    current,
+  );
+const normalizeSuccessorMode = (current, adoptedRelease = fixtureRelease) =>
+  runInventoryPython(
+    successorCustomerNormalizer,
+    [
+      fixtureCustomer,
+      fixtureReplacementCustomer,
+      fixtureImage,
+      fixtureFailedImage,
+      adoptedRelease,
+      fixtureFailedRelease,
+    ],
+    savedCheckpoint,
+    current,
+  );
+const validateExactOwnerDelta = (normalized) =>
+  runInventoryPython(
+    exactOwnerDeltaValidator,
+    [fixtureOwner, fixtureOwnerNetworkName, fixtureProfileVolume, fixtureControlVolume, 'running'],
+    savedCheckpoint,
+    normalized,
+  );
+const normalizedSource = normalizeSourceMode(currentSourceMode);
+assert.equal(
+  normalizedSource.status,
+  0,
+  normalizedSource.stderr || 'source-mode customer normalization rejected the exact Owner delta',
+);
+const normalizedSourceInventory = JSON.parse(normalizedSource.stdout);
+assert.deepEqual(
+  normalizedSourceInventory.networks[0].Containers[fixtureOwner],
+  fixtureOwnerEndpoint,
+  'customer normalization erased the exact Owner endpoint delta',
+);
+assert.deepEqual(
+  normalizedSourceInventory.networks[0].Status,
+  currentOwnerNetwork.Status,
+  'customer normalization erased the exact Owner network Status delta',
+);
+assert.deepEqual(
+  normalizedSourceInventory.holders[fixtureControlVolume],
+  [fixtureOwner],
+  'customer normalization erased the exact Owner control-volume holder delta',
+);
+const exactOwnerAcceptance = validateExactOwnerDelta(normalizedSourceInventory);
+assert.equal(
+  exactOwnerAcceptance.status,
+  0,
+  exactOwnerAcceptance.stderr || 'downstream exact Owner validator rejected the preserved delta',
+);
+const normalizedSuccessor = normalizeSuccessorMode(currentReplacementMode);
+assert.equal(
+  normalizedSuccessor.status,
+  0,
+  normalizedSuccessor.stderr ||
+    'the exact first-run 0ffc adopted-image/customer-swap inventory was rejected',
+);
+const normalizedSuccessorInventory = JSON.parse(normalizedSuccessor.stdout);
+assert.deepEqual(
+  normalizedSuccessorInventory,
+  normalizedSourceInventory,
+  'successor normalization must remove only the exact adopted and failed image residues and customer swap',
+);
+const exactFirstRunAcceptance = validateExactOwnerDelta(normalizedSuccessorInventory);
+assert.equal(
+  exactFirstRunAcceptance.status,
+  0,
+  exactFirstRunAcceptance.stderr ||
+    'the downstream immutable Owner comparator rejected the exact first-run current inventory',
+);
+const wrongSuccessorRelease = normalizeSuccessorMode(
+  currentReplacementMode,
+  fixtureSuccessorRelease,
+);
+assert.notEqual(
+  wrongSuccessorRelease.status,
+  0,
+  'the successor comparator incorrectly accepted its own release as the adopted image tag/revision',
+);
+const unrelatedDeltaFixtures = [
+  [
+    'endpoint',
+    (current) => {
+      current.networks[2].Containers['8'.repeat(64)] = {
+        ...fixtureOwnerEndpoint,
+        EndpointID: '9'.repeat(64),
+      };
+    },
+  ],
+  [
+    'status',
+    (current) => {
+      current.networks[2].Status.IPAM.Subnets['172.26.0.0/24'].IPsInUse += 1;
+    },
+  ],
+  [
+    'holder',
+    (current) => {
+      current.holders['unchanged-volume-0'] = ['8'.repeat(64)];
+    },
+  ],
+];
+for (const [name, mutate] of unrelatedDeltaFixtures) {
+  const changed = cloneJson(currentSourceMode);
+  mutate(changed);
+  const normalized = normalizeSourceMode(changed);
+  assert.equal(
+    normalized.status,
+    0,
+    normalized.stderr || `customer normalizer unexpectedly consumed the unrelated ${name} fixture`,
+  );
+  const rejected = validateExactOwnerDelta(JSON.parse(normalized.stdout));
+  assert.notEqual(rejected.status, 0, `unrelated ${name} delta passed the exact Owner validator`);
+
+  const changedSuccessor = cloneJson(currentReplacementMode);
+  mutate(changedSuccessor);
+  const normalizedSuccessorDelta = normalizeSuccessorMode(changedSuccessor);
+  assert.equal(
+    normalizedSuccessorDelta.status,
+    0,
+    normalizedSuccessorDelta.stderr ||
+      `successor normalizer unexpectedly consumed the unrelated ${name} fixture`,
+  );
+  const successorRejected = validateExactOwnerDelta(JSON.parse(normalizedSuccessorDelta.stdout));
+  assert.notEqual(
+    successorRejected.status,
+    0,
+    `unrelated successor ${name} delta passed the immutable Owner validator`,
+  );
+}
+const classifyReplacementFixture = ({ source, replacements, exact, healthy }) => {
+  if (source && replacements === 0) return 'source';
+  if (!source && replacements === 0) return 'retry';
+  if (!source && replacements === 1 && exact) return healthy ? 'complete' : 'retry';
+  return 'reject';
+};
+assert.equal(
+  classifyReplacementFixture({ source: false, replacements: 0, exact: false, healthy: false }),
+  'retry',
+);
+assert.equal(
+  classifyReplacementFixture({ source: false, replacements: 1, exact: true, healthy: false }),
+  'retry',
+);
+assert.equal(
+  classifyReplacementFixture({ source: false, replacements: 1, exact: true, healthy: true }),
+  'complete',
+);
+assert.equal(
+  classifyReplacementFixture({ source: true, replacements: 1, exact: true, healthy: false }),
+  'reject',
+);
+assert.equal(
+  (script.match(/require_complete_owner_endpoint_phase_boundary created/gu) ?? []).length,
+  0,
+  'the successor must never re-enter a created-phase execution path',
+);
+assert.equal(
+  (script.match(/require_complete_owner_endpoint_phase_boundary running/gu) ?? []).length,
+  3,
+  'running phase must close on completed replay, pre-completion, and pre-finalization',
+);
+for (const guardedBoundary of [
+  'require_complete_owner_endpoint_phase_boundary running ||\n  die \'the complete running-phase boundary changed before completion publication\'\npublish_exact_record "$BRIDGE_WORK_ROOT/completed-v1"',
+  'require_complete_owner_endpoint_phase_boundary running ||\n  die \'the complete running-phase boundary changed before ledger finalization\'\nmv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"',
+]) {
+  assert.ok(
+    script.includes(guardedBoundary),
+    `missing, reordered, or interposed complete endpoint-phase boundary ${guardedBoundary}`,
+  );
+}
+const acceptsAtomicBoundaryCommands = (commands, phase, target) =>
+  JSON.stringify(commands) === JSON.stringify([`complete:${phase}`, target]);
+assert.ok(
+  acceptsAtomicBoundaryCommands(
+    ['complete:running', 'publish:completion'],
+    'running',
+    'publish:completion',
+  ),
+);
+for (const invalidCommands of [
+  ['phase:running', 'post-image', 'publish:completion'],
+  ['complete:running', 'financial-check', 'publish:completion'],
+  ['complete:running', 'inspect', 'rename:ledger'],
+  ['complete:running', 'publish:completion', 'rename:ledger'],
+]) {
+  assert.ok(
+    !acceptsAtomicBoundaryCommands(invalidCommands, 'running', 'publish:completion'),
+    `an interposed or split boundary fixture was accepted: ${JSON.stringify(invalidCommands)}`,
+  );
+}
+for (const finalizationGuard of [
+  "require_exact_recovery_source_anchors || die 'an immutable 001 terminal or Owner bundle source anchor changed before ledger finalization'",
+  "require_original_bridge_namespace_absent || die 'the immutable 001 Owner bridge namespace appeared before ledger finalization'",
+  "require_prior_failed_runtime_ledger_absent || die 'the chained failed runtime evidence changed before ledger finalization'",
+  "require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed before ledger finalization'",
+  "require_no_other_mutator_processes || die 'another staging mutation appeared before ledger finalization'",
+  "require_exact_droplet || die 'the staging Droplet identity changed before ledger finalization'",
+]) {
+  const guardIndex = script.indexOf(finalizationGuard);
+  const renameIndex = script.indexOf('mv -- "$BRIDGE_INSTALLING" "$BRIDGE_ROOT"');
+  assert.ok(
+    guardIndex >= 0 && guardIndex < renameIndex,
+    `missing finalization guard ${finalizationGuard}`,
+  );
+}
+for (const failedPredecessorGuard of [
+  "require_prior_failed_recovery_claim ||\n  die 'OCI-RUNTIME-ID-001: the immutable failed a51 bundle, manifest semantics, or append-only chain is not exact'",
+  "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-002: the immutable failed 1f27 single-intent pre-mutation ledger changed'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-002: the immutable failed a51 intent-only runtime or loaded descriptor image changed'",
+  "require_failed_network_scope_runtime ||\n    die 'OWNER-DELTA-003: the immutable failed 1f27 single-intent pre-mutation ledger changed beside completion'",
+  "require_failed_owner_delta_runtime ||\n    die 'OCI-RUNTIME-ID-003: the immutable failed a51 intent-only runtime or descriptor residue changed beside completion'",
+  "require_prior_failed_recovery_claim ||\n  die 'OWNER-DELTA-006: the immutable failed 1f27 bundle changed before replacement-record replay'",
+  "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-007: the immutable failed 1f27 intent-only runtime changed before replacement-record replay'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-006: the immutable failed a51 intent-only runtime changed before replacement-record replay'",
+  "require_prior_failed_recovery_claim ||\n  die 'OWNER-DELTA-008: the immutable failed 1f27 bundle changed before start-record replay'",
+  "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-009: the immutable failed 1f27 intent-only runtime changed before start-record replay'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-007: the immutable failed a51 intent-only runtime changed before start-record replay'",
+  "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'",
+  "require_failed_owner_delta_runtime ||\n  die 'OCI-RUNTIME-ID-005: the immutable failed a51 intent-only runtime or descriptor residue changed during finalization'",
+])
+  assert.ok(
+    script.includes(failedPredecessorGuard),
+    `failed predecessor guard is disconnected or reordered: ${failedPredecessorGuard}`,
+  );
+assert.equal(
+  (script.match(/docker_local image load --input "\$STAGED_CUSTOMER_WEB_IMAGE_ARCHIVE"/gu) ?? [])
+    .length,
+  0,
+  'the reconciliation successor must adopt the exact loaded 0ffc image without importing an archive',
+);
+assert.ok(!script.includes('image tag '), 'the chained correction must never retag an image');
+assert.ok(!script.includes('image rm '), 'the chained correction must never remove an image');
+assert.ok(!script.includes('image prune'), 'the chained correction must never prune images');
+const exactTmpfs = { '/tmp': 'rw,noexec,nosuid,size=32m,mode=1777' };
+const acceptsTmpfs = (observed, mountDestinations) =>
+  JSON.stringify(observed) === JSON.stringify(exactTmpfs) &&
+  mountDestinations.length === 8 &&
+  !mountDestinations.includes('/tmp');
+const eightMounts = Array.from({ length: 8 }, (_, index) => `/non-tmpfs-${index}`);
+assert.ok(acceptsTmpfs(exactTmpfs, eightMounts), 'H13 exact HostConfig.Tmpfs fixture rejected');
+assert.ok(acceptsTmpfs(exactTmpfs, eightMounts), 'H14 exact HostConfig.Tmpfs fixture rejected');
+for (const [tmpfs, mounts] of [
+  [null, eightMounts],
+  [{}, eightMounts],
+  [{ '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777' }, eightMounts],
+  [{ ...exactTmpfs, '/extra': 'rw' }, eightMounts],
+  [exactTmpfs, [...eightMounts, '/tmp']],
+]) {
+  assert.ok(
+    !acceptsTmpfs(tmpfs, mounts),
+    `invalid tmpfs fixture accepted: ${JSON.stringify(tmpfs)}`,
+  );
+}
+
+const executionStart = script.indexOf(
+  "create_or_discover_bridge_ledger || die 'the separate Owner-runtime bridge ledger is unsafe'",
+);
+assert.ok(executionStart >= 0, 'missing recovery ledger discovery');
+const execution = script.slice(executionStart);
+const intentPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/intent-v1" 0600 < <(expected_bridge_intent)',
+);
+const postIntentValidation = execution.indexOf(
+  "require_bridge_intent || die 'the published Owner-runtime bridge intent is invalid'",
+);
+const customerReplacementPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/customer-web-replacement-v1" 0600',
+);
+const republishedProof = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/api-catalog-proof-v1" 0600 < <(expected_api_catalog_proof)',
+);
+const republishedSnapshot = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/docker-pre-create-v1" 0600 < <(emit_exact_nofollow_file',
+);
+const exactSnapshotComparison = execution.indexOf(
+  'cmp -s -- "$BRIDGE_WORK_ROOT/docker-pre-create-v1" <(emit_exact_nofollow_file',
+);
+const replacementPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/replacement-owner-v1" 0600 < <(emit_exact_nofollow_file',
+);
+const startIntentPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/start-owner-v1" 0600 < <(emit_exact_nofollow_file',
+);
+const completionPublish = execution.indexOf(
+  'publish_exact_record "$BRIDGE_WORK_ROOT/completed-v1" 0600 < <(expected_bridge_completed)',
+);
+assert.ok(intentPublish > 0, 'intent is not published');
+assert.ok(postIntentValidation > intentPublish, 'intent is not validated after publication');
+assert.ok(
+  customerReplacementPublish > postIntentValidation,
+  'customer replacement record must follow durable intent',
+);
+assert.ok(
+  republishedProof > customerReplacementPublish,
+  'fresh read-only proof must follow customer replacement',
+);
+assert.ok(
+  republishedSnapshot > republishedProof && exactSnapshotComparison > republishedSnapshot,
+  'the exact 8f pre-create snapshot is not durably republished and byte-compared after the proof',
+);
+assert.ok(
+  replacementPublish > exactSnapshotComparison && startIntentPublish > replacementPublish,
+  'replacement identity and start authorization must follow the immutable 8f proof/snapshot publication',
+);
+assert.ok(
+  completionPublish > startIntentPublish,
+  'completion must follow all four exact predecessor record republications',
+);
+assert.equal(
+  (execution.match(/require_complete_owner_endpoint_phase_boundary running/gu) ?? []).length,
+  3,
+  'the execution must use only the three closed already-running boundaries',
+);
+assert.ok(
+  execution.includes('NEW_OWNER_CONTAINER_ID="$CREATED_OWNER_CONTAINER_ID"'),
+  'the successor must bind the exact already-running Owner identity',
+);
+const executionWithoutAuthorizedCustomerReplacement = execution.replace(
+  script.slice(authorizedCustomerReplacementStart, authorizedCustomerReplacementEnd + 3),
+  '',
+);
+assert.doesNotMatch(
+  executionWithoutAuthorizedCustomerReplacement,
+  /docker_local (?:container|image|network|volume) (?:start|create|rm|remove|restart|stop|kill|prune|connect|disconnect)|\$\{compose_command\[@\]\}"\s+(?:create|up|down|rm|start|stop|restart)\b/u,
+  'outside the exact customer-web replacement, the successor must contain no reachable lifecycle mutation',
+);
+assert.ok(
+  execution.includes(
+    'require_running_owner_boundary_before_successor_intent ||\n    die \'the exact already-running Owner boundary changed before successor intent publication\'\n  publish_exact_record "$BRIDGE_WORK_ROOT/intent-v1"',
+  ),
+  'the complete pre-intent running boundary must be adjacent to intent publication',
+);
+
+const acceptsNofollowEvidence = (entry) =>
+  entry.type === 'file' &&
+  entry.symlink === false &&
+  entry.realpathExact === true &&
+  entry.fdStable === true &&
+  entry.mode === 0o600 &&
+  entry.nlink === 1 &&
+  entry.hashExact === true;
+const exactEvidence = {
+  type: 'file',
+  symlink: false,
+  realpathExact: true,
+  fdStable: true,
+  mode: 0o600,
+  nlink: 1,
+  hashExact: true,
+};
+assert.ok(acceptsNofollowEvidence(exactEvidence));
+for (const invalid of [
+  { ...exactEvidence, symlink: true },
+  { ...exactEvidence, type: 'directory' },
+  { ...exactEvidence, realpathExact: false },
+  { ...exactEvidence, fdStable: false },
+  { ...exactEvidence, nlink: 2 },
+  { ...exactEvidence, hashExact: false },
+])
+  assert.ok(
+    !acceptsNofollowEvidence(invalid),
+    `unsafe predecessor evidence accepted: ${JSON.stringify(invalid)}`,
+  );
+
+const exactOwnerEndpoint = {
+  Name: 'fetanagent-staging-beta-owner-control-1',
+  EndpointID: 'a'.repeat(64),
+  MacAddress: '02:42:ac:12:00:02',
+  IPv4Address: '172.18.0.2/16',
+  IPv6Address: 'fd00::2/64',
+};
+const exactStatusBefore = {
+  IPAM: {
+    Subnets: {
+      '172.18.0.0/16': { IPsInUse: 5, DynamicIPsAvailable: 65531 },
+      'fd00::/64': { IPsInUse: 4, DynamicIPsAvailable: 18446744073709551612n },
+    },
+  },
+};
+const exactStatusRunning = {
+  IPAM: {
+    Subnets: {
+      '172.18.0.0/16': { IPsInUse: 6, DynamicIPsAvailable: 65530 },
+      'fd00::/64': { IPsInUse: 5, DynamicIPsAvailable: 18446744073709551611n },
+    },
+  },
+};
+const sameStatus = (left, right) =>
+  JSON.stringify(left, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)) ===
+  JSON.stringify(right, (_key, value) => (typeof value === 'bigint' ? value.toString() : value));
+const stringifyStatusFixture = (value) =>
+  JSON.stringify(value, (_key, item) => (typeof item === 'bigint' ? item.toString() : item));
+const acceptsStatusPhaseDelta = (phase, before, after) => {
+  if (phase === 'created') return sameStatus(before, after);
+  if (phase !== 'running') return false;
+  if (
+    !before ||
+    !after ||
+    JSON.stringify(Object.keys(before)) !== JSON.stringify(['IPAM']) ||
+    JSON.stringify(Object.keys(after)) !== JSON.stringify(['IPAM']) ||
+    JSON.stringify(Object.keys(before.IPAM)) !== JSON.stringify(['Subnets']) ||
+    JSON.stringify(Object.keys(after.IPAM)) !== JSON.stringify(['Subnets'])
+  )
+    return false;
+  const oldSubnets = before.IPAM.Subnets;
+  const newSubnets = after.IPAM.Subnets;
+  if (!sameStatus(Object.keys(oldSubnets), Object.keys(newSubnets))) return false;
+  const changed = new Set(['172.18.0.0/16', 'fd00::/64']);
+  if (![...changed].every((subnet) => Object.hasOwn(oldSubnets, subnet))) return false;
+  return Object.keys(oldSubnets).every((subnet) => {
+    const oldValue = oldSubnets[subnet];
+    const newValue = newSubnets[subnet];
+    if (
+      !oldValue ||
+      !newValue ||
+      !sameStatus(Object.keys(oldValue).sort(), ['DynamicIPsAvailable', 'IPsInUse']) ||
+      !sameStatus(Object.keys(newValue).sort(), ['DynamicIPsAvailable', 'IPsInUse'])
+    )
+      return false;
+    return changed.has(subnet)
+      ? newValue.IPsInUse === oldValue.IPsInUse + 1 &&
+          newValue.DynamicIPsAvailable ===
+            (typeof oldValue.DynamicIPsAvailable === 'bigint'
+              ? oldValue.DynamicIPsAvailable - 1n
+              : oldValue.DynamicIPsAvailable - 1)
+      : sameStatus(oldValue, newValue);
+  });
+};
+const acceptsOwnerOnlyPhaseDelta = ({
+  phase = 'created',
+  imagesSame = true,
+  networkIdsSame = true,
+  volumeIdsSame = true,
+  specsSame = true,
+  oldEndpointsSame = true,
+  addedEndpointIds = phase === 'running' ? ['owner'] : [],
+  ownerEndpoint = phase === 'running' ? exactOwnerEndpoint : null,
+  statusBefore = exactStatusBefore,
+  statusAfter = phase === 'running' ? exactStatusRunning : exactStatusBefore,
+  profileHolders = [[], []],
+  controlHolders = [[], ['owner']],
+  otherHoldersSame = true,
+} = {}) =>
+  ['created', 'running'].includes(phase) &&
+  imagesSame &&
+  networkIdsSame &&
+  volumeIdsSame &&
+  specsSame &&
+  oldEndpointsSame &&
+  acceptsStatusPhaseDelta(phase, statusBefore, statusAfter) &&
+  (phase === 'created'
+    ? addedEndpointIds.length === 0 && ownerEndpoint === null
+    : JSON.stringify(addedEndpointIds) === JSON.stringify(['owner']) &&
+      JSON.stringify(ownerEndpoint) === JSON.stringify(exactOwnerEndpoint)) &&
+  JSON.stringify(profileHolders) === JSON.stringify([[], []]) &&
+  JSON.stringify(controlHolders) === JSON.stringify([[], ['owner']]) &&
+  otherHoldersSame;
+assert.ok(acceptsOwnerOnlyPhaseDelta({ phase: 'created' }), 'exact created-phase delta rejected');
+assert.ok(acceptsOwnerOnlyPhaseDelta({ phase: 'running' }), 'exact running-phase delta rejected');
+for (const invalid of [
+  { phase: 'invalid' },
+  { networkIdsSame: false },
+  { volumeIdsSame: false },
+  { imagesSame: false },
+  { specsSame: false },
+  { oldEndpointsSame: false },
+  { phase: 'created', addedEndpointIds: ['owner'], ownerEndpoint: exactOwnerEndpoint },
+  { phase: 'running', addedEndpointIds: [], ownerEndpoint: null },
+  { phase: 'running', addedEndpointIds: ['owner', 'extra'] },
+  { phase: 'running', addedEndpointIds: ['wrong'], ownerEndpoint: exactOwnerEndpoint },
+  { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, Name: 'wrong-owner' } },
+  { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, EndpointID: 'bad' } },
+  { phase: 'running', ownerEndpoint: { ...exactOwnerEndpoint, Unexpected: true } },
+  { phase: 'created', statusAfter: exactStatusRunning },
+  {
+    phase: 'running',
+    statusAfter: {
+      IPAM: {
+        Subnets: {
+          ...exactStatusRunning.IPAM.Subnets,
+          'extra/24': { IPsInUse: 1, DynamicIPsAvailable: 1 },
+        },
+      },
+    },
+  },
+  {
+    phase: 'running',
+    statusAfter: {
+      IPAM: {
+        Subnets: {
+          ...exactStatusRunning.IPAM.Subnets,
+          '172.18.0.0/16': { IPsInUse: 7, DynamicIPsAvailable: 65530 },
+        },
+      },
+    },
+  },
+  {
+    phase: 'running',
+    statusAfter: {
+      IPAM: {
+        Subnets: {
+          ...exactStatusRunning.IPAM.Subnets,
+          'fd00::/64': { IPsInUse: 5, DynamicIPsAvailable: 18446744073709551612n },
+        },
+      },
+    },
+  },
+  { phase: 'running', statusAfter: { ...exactStatusRunning, Unexpected: true } },
+  { profileHolders: [[], ['owner']] },
+  { controlHolders: [[], ['other']] },
+  { controlHolders: [[], ['owner', 'extra']] },
+  { otherHoldersSame: false },
+])
+  assert.ok(
+    !acceptsOwnerOnlyPhaseDelta(invalid),
+    `unsafe phase-aware Docker delta accepted: ${stringifyStatusFixture(invalid)}`,
+  );
+
+const parseHolderRows = (text, expectedVolumes) => {
+  const result = new Map();
+  for (const line of text.split(/\r?\n/u)) {
+    if (line === '') continue;
+    if ((line.match(/\t/gu) ?? []).length !== 1) throw new Error('malformed');
+    const [name, ids] = line.split('\t');
+    if (!name || result.has(name)) throw new Error('duplicate');
+    const values = ids === '' ? [] : ids.split(',');
+    if (
+      values.some((value) => !/^[0-9a-f]{64}$/u.test(value)) ||
+      JSON.stringify(values) !== JSON.stringify([...new Set(values)].sort())
+    )
+      throw new Error('ids');
+    result.set(name, values);
+  }
+  if (JSON.stringify([...result.keys()].sort()) !== JSON.stringify([...expectedVolumes].sort()))
+    throw new Error('missing');
+  return result;
+};
+const emptyLastHolder = 'control\t' + 'a'.repeat(64) + '\nprofile\t\n';
+assert.deepEqual([...parseHolderRows(emptyLastHolder, ['control', 'profile']).get('profile')], []);
+for (const invalid of [
+  'control\nprofile\t\n',
+  'control\t\ncontrol\t\nprofile\t\n',
+  'control\t\n',
+  'control\tbad\nprofile\t\n',
+  `control\t${'b'.repeat(64)},${'a'.repeat(64)}\nprofile\t\n`,
+])
+  assert.throws(() => parseHolderRows(invalid, ['control', 'profile']));
+
+for (const needle of [
+  'h14-owner-runtime-bridge-archive-recovery-stage:',
+  'git fetch --no-tags --depth=1 origin 001316f1f65dc7a9976244e8fc01f90aec665a70',
+  'git fetch --no-tags --depth=1 origin 911758fa1407093bee700918d5a663a7735f1658',
+  'git fetch --no-tags --depth=1 origin ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
+  'git fetch --no-tags --depth=1 origin 0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
+  'git fetch --no-tags --depth=1 origin 04f51a521280fed43cd1504107c702940e523688',
+  'git fetch --no-tags --depth=1 origin 51e5170488d720fd04decd1896971ab72cfe9603',
+  'git fetch --no-tags --depth=1 origin 8f1ef460a231fe2c21e2df2d986749400d08c38c',
+  'contract=fetanagent-h14-owner-runtime-bridge-archive-recovery-bundle',
+  'failed_owner_bridge_implementation_sha=001316f1f65dc7a9976244e8fc01f90aec665a70',
+  'failed_owner_bridge_script_sha256=b064970bd3b580df14bdb1d9bf5efef2c72c7082b8fe1b76d459df4ef648bea9',
+  'prior_failed_recovery_implementation_sha=911758fa1407093bee700918d5a663a7735f1658',
+  'prior_failed_recovery_bundle_parent_dev_ino=64769:6102884',
+  'prior_failed_recovery_bundle_root_dev_ino=64769:6102885',
+  'prior_failed_recovery_script_dev_ino=64769:6102886',
+  'prior_failed_recovery_script_sha256=d3b61365d07325569089fab80415b595fa7a8b8486ae245fa4f6dcaa50ff5b9d',
+  'prior_failed_archive_validator_dev_ino=64769:6102887',
+  'prior_failed_archive_validator_sha256=6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa',
+  'prior_failed_recovery_manifest_dev_ino=64769:6102888',
+  'prior_failed_recovery_manifest_sha256=9c38e6fe7f5e24fd5309564fd0eda3a469794ab868718bc95ce65ecf64ac028a',
+  'failed_correction_implementation_sha=ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b',
+  'failed_correction_manifest_sha256=1431f2148bda24dd18bc8cf3441f84fc2cad021be9d49e6ff33e8796ca60508d',
+  'failed_correction_bridge_parent_dev_ino=64769:6102893',
+  'failed_correction_bridge_installing_dev_ino=64769:6102894',
+  'failed_pg_correction_implementation_sha=fa35244c8e8e2b9f10fe7abb2cd2341864b43471',
+  'failed_pg_correction_manifest_sha256=ff2e34b97ba5dfaa8228e920ca0290ab9298b43601da94e2477a63047da77f5d',
+  'failed_pg_bridge_intent_sha256=417ee01138b1bef14c6dd44646de66fb60584c439633794fcb02aa3974afae72',
+  'admin_pg_resolution=exact-create-require-admin-dist-pg-8.22.0',
+  'failed_image_correction_implementation_sha=0a2adc0bf3591fe2449379ac2bf76c21538fadf5',
+  'failed_image_correction_manifest_sha256=845d891088a30878e2162f050aa45f7110fadb9831c5bcd7dddd5cec2e3999d8',
+  'failed_image_bridge_intent_sha256=89e94ea533e51d07747cb07324a309ce3cb47f32205c5a7631069fdcc1ad917b',
+  'failed_catalog_correction_implementation_sha=04f51a521280fed43cd1504107c702940e523688',
+  'failed_catalog_bridge_intent_sha256=994082f6fb44d6c667f06c0382a677be5669cce273a62d7e60d6b730b3020799',
+  'failed_oidvector_correction_implementation_sha=f67cf783528f090169dbea1ebfdc6c46f90996bb',
+  'failed_oidvector_correction_manifest_sha256=8a6dcce2ec79854c47f028e630075073b5d35a6922048fce47aea91f745023ed',
+  'failed_oidvector_bridge_intent_sha256=7abf900b8fdf66e1c1d0b735afc25c10965b9cda9c26999e4fdfe01a1c0d80cd',
+  'failed_endpoint_phase_correction_implementation_sha=51e5170488d720fd04decd1896971ab72cfe9603',
+  'failed_endpoint_phase_correction_bundle_root_dev_ino=64769:6102952',
+  'failed_endpoint_phase_correction_script_dev_ino=64769:6102953',
+  'failed_endpoint_phase_correction_script_sha256=9cd67e0d820075fd8fac3bf6100ce26cfdc65f67540a8d086fcae8b2bf9f0ac8',
+  'failed_endpoint_phase_correction_script_size=262609',
+  'failed_endpoint_phase_correction_validator_dev_ino=64769:6102954',
+  'failed_endpoint_phase_correction_manifest_dev_ino=64769:6102955',
+  'failed_endpoint_phase_correction_manifest_sha256=8c3682673339a7d57740b4890987932eee14013df0a6f05e50bda994cc5aaaac',
+  'failed_endpoint_phase_bridge_parent_dev_ino=64769:6102956',
+  'failed_endpoint_phase_bridge_installing_dev_ino=64769:6102957',
+  'failed_endpoint_phase_bridge_intent_dev_ino=64769:6102958',
+  'failed_endpoint_phase_bridge_intent_sha256=5eebab9353a3f251020a997706c2c1a85c00209f08ae83a1b32cf9b64e55d5fb',
+  'failed_endpoint_phase_bridge_api_proof_dev_ino=64769:6102959',
+  'failed_endpoint_phase_bridge_api_proof_sha256=868638d00d56bf4351a63cd4b1cfd48b95b79e9aa50cf330cc930d6b01c320ee',
+  'failed_endpoint_phase_bridge_docker_snapshot_dev_ino=64769:6102960',
+  'failed_endpoint_phase_bridge_docker_snapshot_sha256=460926b641db4c4d5a09151fab780cf7ac215ead736c34c2b1bfb5422ae776c7',
+  'failed_running_status_correction_implementation_sha=8f1ef460a231fe2c21e2df2d986749400d08c38c',
+  'failed_running_status_correction_bundle_root_dev_ino=64769:6102961',
+  'failed_running_status_correction_script_dev_ino=64769:6102962',
+  'failed_running_status_correction_script_sha256=9cd020e2b79d5d53b5686f56ab9a291ae20af3ca700f581ec44f7b5eeb421d0e',
+  'failed_running_status_correction_manifest_dev_ino=64769:6102964',
+  'failed_running_status_correction_manifest_sha256=b58fb16735c70bd4d7f9fd3022d675d11b4e815715fcb3e3804b55daa23364e5',
+  'failed_running_status_bridge_parent_dev_ino=64769:6102965',
+  'failed_running_status_bridge_installing_dev_ino=64769:6102966',
+  'failed_running_status_bridge_intent_dev_ino=64769:6102967',
+  'failed_running_status_bridge_intent_sha256=d02d6076765c789b45b1aa973183fc0c159a6e10c3b928927e7bee72de839e14',
+  'failed_running_status_bridge_api_proof_dev_ino=64769:6102968',
+  'failed_running_status_bridge_docker_snapshot_dev_ino=64769:6102969',
+  'failed_running_status_bridge_replacement_dev_ino=64769:6102970',
+  'failed_running_status_bridge_replacement_sha256=6e85eeb5e09ea7941bb5da4cf27890c37faa956ce81bf0d6e35c59d2c8066be1',
+  'failed_running_status_bridge_start_dev_ino=64769:6102971',
+  'failed_running_status_bridge_start_sha256=518341dc096934ce1166c68cb09b3ff727587bafa21e3e2e97ce36bc07d03a52',
+  'created_owner_container_id=44040e1c0b94f574115b189571af6ca9c9c16cbe32d36cc0ac365654751eba1f',
+  'failed_endpoint_phase_owner_state=created-never-started',
+  'compose_reentry=forbidden',
+  'docker_endpoint_phase_contract=created-no-endpoint-running-one-owner-endpoint-v1',
+  'failed_running_status_owner_state=running-healthy-no-completion',
+  'docker_inventory_contract=complete-exact-owner-only-phase-delta-v3',
+  'network_status_counter_contract=running-owner-dual-stack-plus-one-in-use-minus-one-available-v1',
+  'owner_lifecycle_mutation=forbidden-already-running',
+  'complete_phase_boundary_contract=single-final-phase-aware-command-v1',
+  'catalog_argument_contract=exact-zero-based-oidvector-equality',
+  'canonical_h14_image_initial_state=exact-loaded-before-intent',
+  'owner_tmpfs_host_config=required-exact',
+  'owner_inspect_mount_inventory=non-tmpfs-eight',
+  'archive_encoding=oci',
+  'archive_layer_count=11',
+  'archive_member_count=30',
+  'claim_one() {',
+  '.installing-$CONFIRMED_RECOVERY_RELEASE',
+  "exec bash '$script' '$CONFIRMED_RECOVERY_RELEASE' '$SCRIPT_SHA' '$VALIDATOR_SHA' '$MANIFEST_SHA' 'a579e3bf96c075dde9c36dbe3c66c09aaf84bc52' '$H14_RECOVERY_AUTHORIZATION_SHA256'",
+]) {
+  assert.ok(workflow.includes(needle), `workflow is missing ${needle}`);
+}
+
+const rootEmission = workflowRunBlock('Emit exact root-console invocation without execution');
+for (const exact1f27WorkflowPin of [
+  'git fetch --no-tags --depth=1 origin 1f27af7f929434b1f40f65901df9ebd683ebe62c',
+  'git cat-file -e 1f27af7f929434b1f40f65901df9ebd683ebe62c^{commit}',
+  'git show 1f27af7f929434b1f40f65901df9ebd683ebe62c:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum',
+  '= da8702b24c505790a2f7d7f7eec126a2b5b82e9abb14312b6eb7636b0025b1cc',
+  '= 367698',
+  'git show 1f27af7f929434b1f40f65901df9ebd683ebe62c:infra/operations/fetanagent-owner-archive-validator.py | sha256sum',
+  '= 6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa',
+  '= 11689',
+  'failed_network_scope_correction_workflow_run_id=33274184825',
+  'failed_network_scope_correction_workflow_run_attempt=1',
+  'failed_network_scope_bridge_intent_size=18569',
+  'failed_network_scope_bridge_intent_lines=265',
+])
+  assert.ok(
+    workflow.includes(exact1f27WorkflowPin),
+    `workflow lacks exact failed 1f27 pin ${exact1f27WorkflowPin}`,
+  );
+for (const exactA51WorkflowPin of [
+  'git fetch --no-tags --depth=1 origin a51b52201a94a669b8dcca38b7abb29d70d0200f',
+  'git cat-file -e a51b52201a94a669b8dcca38b7abb29d70d0200f^{commit}',
+  'git show a51b52201a94a669b8dcca38b7abb29d70d0200f:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum',
+  '= b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73',
+  '= 393436',
+  'failed_owner_delta_correction_workflow_run_id=33277082955',
+  'failed_owner_delta_correction_workflow_run_attempt=1',
+  'failed_owner_delta_bridge_intent_lines=294',
+  'failed_owner_delta_correction_runtime_descriptor_id=sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083',
+])
+  assert.ok(
+    workflow.includes(exactA51WorkflowPin),
+    `workflow lacks exact failed a51 pin ${exactA51WorkflowPin}`,
+  );
+for (const exact0ffcWorkflowPin of [
+  'git fetch --no-tags --depth=1 origin 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  'git cat-file -e 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57^{commit}',
+  'git show 0ffc54ab34de6fcde6cd5401ab66dd94025ebd57:infra/operations/fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery.sh | sha256sum',
+  '= 7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b',
+  '= 435623',
+  'failed_oci_identity_correction_workflow_run_id=33279465715',
+  'failed_oci_identity_correction_workflow_run_attempt=1',
+  'failed_oci_identity_bridge_intent_lines=325',
+  'failed_oci_identity_correction_runtime_descriptor_id=sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b',
+])
+  assert.ok(
+    workflow.includes(exact0ffcWorkflowPin),
+    `workflow lacks exact failed 0ffc pin ${exact0ffcWorkflowPin}`,
+  );
+const preExec020Rehash = rootEmission.lastIndexOf(
+  '# Rehash the exact 020 bundle and empty runtime immediately before execution.',
+);
+const preExec1f27Rehash = rootEmission.lastIndexOf(
+  '# Re-prove the exact failed 1f27 four-file bundle, manifest semantics, one-intent ledger, and absent image immediately before execution.',
+);
+const preExecA51Rehash = rootEmission.lastIndexOf(
+  '# Re-prove the exact failed a51 four-file bundle, manifest semantics, one-intent ledger, loaded descriptor image, and unused-container state immediately before execution.',
+);
+const preExec0ffcRehash = rootEmission.lastIndexOf(
+  '# Re-prove the exact 0ffc checkpoint, healthy adopted customer-web, retired source absence, and unchanged six-service inventory immediately before execution.',
+);
+const finalExec = rootEmission.lastIndexOf("exec bash '$script'");
+assert.ok(
+  preExec020Rehash >= 0 && finalExec > preExec020Rehash,
+  'exact 020 evidence is not rehashed immediately before execution',
+);
+assert.ok(rootEmission.slice(preExec020Rehash, finalExec).includes('6102977:root:root:700:2'));
+assert.ok(
+  rootEmission
+    .slice(preExec020Rehash, finalExec)
+    .includes('25b5f8e1a6b9fd9c853bbf6f6290b1c516329c85ef5bb57155bae503e1f85d67'),
+);
+assert.ok(
+  preExec1f27Rehash > preExec020Rehash && finalExec > preExec1f27Rehash,
+  'exact failed 1f27 evidence is not re-proved immediately before execution',
+);
+const preExec1f27Proof = rootEmission.slice(preExec1f27Rehash, finalExec);
+for (const exact1f27RootProof of [
+  '64769:6102985:root:root:700:2',
+  '64769:6102986:root:root:400:1:367698',
+  'da8702b24c505790a2f7d7f7eec126a2b5b82e9abb14312b6eb7636b0025b1cc',
+  '64769:6102987:root:root:400:1:11689',
+  '6814f14708da844167b0f00a2b37c848eebb15eed64b7e1844f6bbeb0a9d36aa',
+  '64769:6102988:root:root:400:1:21701',
+  '2f201ee23bf5cc6c400b5a2f0df226719bfd3462b25749045985b54f14207536',
+  '== 327',
+  '64769:6102989:root:root:400:1:404797952',
+  '3cbc7329952ceb46a236902563ae668551814331b7cca53082c8a1eb5e6d94ba',
+  'recovery_implementation_sha=1f27af7f929434b1f40f65901df9ebd683ebe62c',
+  'workflow_run_id=33274184825',
+  'workflow_run_attempt=1',
+  '64769:6102990:root:root:700:3',
+  '.installing-1f27af7f929434b1f40f65901df9ebd683ebe62c:d',
+  '64769:6102991:root:root:700:2',
+  'intent-v1:f',
+  '64769:6102992:root:root:600:1:18569',
+  '0e9f180d49a7b630a17092e30f8bd1615c513c4cc77daedf34ba136d3c2a5437',
+  '== 265',
+  'version=1',
+  'contract=fetanagent-kemerbet-quarantine-recovery-v14-owner-runtime-bridge-archive-recovery',
+  'archive_recovery_implementation_release=1f27af7f929434b1f40f65901df9ebd683ebe62c',
+  'financial_actions_mode=dry_run',
+  'kemerbet_executor_enabled=false',
+  'kemerbet_final_action_enabled=false',
+  'provider_action_enabled=false',
+  'transfer_enabled=false',
+  'amount_entry_enabled=false',
+  'money_moved=false',
+  '! docker image inspect fetanagent-customer-web:1f27af7f9294',
+  '! docker image inspect sha256:103b17a10a678ffa8ae913b50d4daeb121f932113a70b0ce2066f535f553f6e5',
+])
+  assert.ok(
+    preExec1f27Proof.includes(exact1f27RootProof),
+    `final root emission lacks exact failed 1f27 proof ${exact1f27RootProof}`,
+  );
+assert.ok(
+  preExecA51Rehash > preExec1f27Rehash && finalExec > preExecA51Rehash,
+  'exact failed a51 evidence is not re-proved immediately before execution',
+);
+const preExecA51Proof = rootEmission.slice(preExecA51Rehash, finalExec);
+for (const exactA51RootProof of [
+  '64769:6102993:root:root:700:2',
+  '64769:6102994:root:root:400:1:393436',
+  'b78387312693725be28c7f6527fdd3b54e046cd9bc5635b40464b2aded598d73',
+  '64769:6102995:root:root:400:1:11689',
+  '64769:6102996:root:root:400:1:23785',
+  'ca0d9cc492bc10f5d7df351e3a9f0382ea371fe722c59958e407805bbc3768ad',
+  '== 356',
+  '64769:6102997:root:root:400:1:404797952',
+  'd44c29139290a2306a1684205673adbfa787e6f4703ec70218c6b091b82dfd1f',
+  'recovery_implementation_sha=a51b52201a94a669b8dcca38b7abb29d70d0200f',
+  'workflow_run_id=33277082955',
+  'workflow_run_attempt=1',
+  '64769:6102998:root:root:700:3',
+  '64769:6102999:root:root:700:2',
+  '64769:6103000:root:root:600:1:20653',
+  'efdb3a13ab5ad92a5659e832c5daec3cbe7d957a7958642ad1b01a4a2979efe2',
+  '== 294',
+  'archive_recovery_implementation_release=a51b52201a94a669b8dcca38b7abb29d70d0200f',
+  'sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083|sha256:4013aca7183e1ed3f3cfadf37b6371de0c85195f0564f8b51508d1881fb49083',
+  '! docker image inspect sha256:1b9788bd67b5edc25455ac8e8439600cba75d2c8dd1b03a7d65ce7503cf7c19a',
+  'docker ps -aq --no-trunc --filter ancestor=fetanagent-customer-web:a51b52201a94',
+])
+  assert.ok(
+    preExecA51Proof.includes(exactA51RootProof),
+    `final root emission lacks exact failed a51 proof ${exactA51RootProof}`,
+  );
+assert.ok(
+  preExec0ffcRehash > preExecA51Rehash && finalExec > preExec0ffcRehash,
+  'exact failed 0ffc evidence and adopted customer-web are not re-proved immediately before execution',
+);
+const preExec0ffcProof = rootEmission.slice(preExec0ffcRehash, finalExec);
+assert.ok(
+  preExec0ffcProof.includes('reprove_0ffc_and_adopted_runtime'),
+  'the exact 0ffc/adopted-runtime proof helper is not invoked immediately before execution',
+);
+for (const exact0ffcRootProof of [
+  '64769:6103001:root:root:700:2',
+  '64769:6103002:root:root:400:1:435623',
+  '7b08e81e1cb366e02c0027ec3d5371beb61d44362ffccc79a16b3638c6b9358b',
+  '64769:6103003:root:root:400:1:11689',
+  '64769:6103004:root:root:400:1:26099',
+  'dc53bce57ebd7b6de5bea0ca82bec45f2914e4923a914d6ad7c30d0faba9ec45',
+  '== 387',
+  '64769:6103005:root:root:400:1:404797952',
+  '7c79817c4aba52d96dba168e36a3474d33bb97a55ae69c57928e35e28704bc5c',
+  '64769:6103009:root:root:700:3',
+  '64769:6103010:root:root:700:2',
+  '64769:6103011:root:root:600:1:22967',
+  'f0de0b6c9649e287f0f7334b1ddf01ae31c308e83bc58ac713b8d18f534fa95e',
+  '== 325',
+  'sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|0ffc54ab34de6fcde6cd5401ab66dd94025ebd57',
+  '83d392ee468c077adca44e872c96f141499e2fda7c9c670646e70807b9640521|911858|2026-08-29T22:56:55.385310072Z|0|running|healthy|sha256:569e66b41c7dd9b922166dc62d59fe49850987fdfa7c010fa6518667030c941b|fetanagent-customer-web:0ffc54ab34de|10001:10001|/fetanagent-staging-beta-customer-web-1|customer-web',
+  '! docker container inspect fb7151ac21d99795939ec0dbbec05676109edabf8fa8a7bb349627fbbdd6dc49',
+  '"$(stat -c %h "$parent")" == 19',
+])
+  assert.ok(
+    rootEmission.includes(exact0ffcRootProof),
+    `final root emission lacks exact failed 0ffc/adopted proof ${exact0ffcRootProof}`,
+  );
+for (const chainLinkTransition of [
+  '"$(stat -c %h "$parent")" == 18',
+  '"$(stat -c %h "$parent")" == 19',
+])
+  assert.ok(
+    rootEmission.includes(chainLinkTransition),
+    `root emission lacks append-only parent link transition ${chainLinkTransition}`,
+  );
+for (const state of [
+  '"$(basename "$prior_root")" "$(basename "$failed_root")"',
+  '"$(basename "$failed_root")" "$(basename "$failed_pg_root")"',
+  '"$(basename "$failed_pg_root")" "$(basename "$failed_image_root")"',
+  '"$(basename "$failed_image_root")" "$(basename "$failed_catalog_root")"',
+  '"$(basename "$failed_catalog_root")" "$(basename "$failed_oidvector_root")"',
+  '"$(basename "$failed_oidvector_root")" "$(basename "$failed_compose_root")"',
+  '"$(basename "$failed_compose_root")" "$(basename "$failed_holder_root")"',
+  '"$(basename "$failed_holder_root")" "$(basename "$failed_order_root")"',
+  '"$(basename "$failed_order_root")" "$(basename "$failed_endpoint_phase_root")"',
+  '"$(basename "$failed_endpoint_phase_root")" "$(basename "$failed_running_status_root")"',
+  '"$(basename "$failed_running_status_root")" "$(basename "$failed_counter_root")"',
+  '"$(basename "$failed_counter_root")" "$(basename "$failed_customer_web_root")"',
+  '"$(basename "$failed_customer_web_root")" "$(basename "$failed_network_scope_root")"',
+  '"$(basename "$failed_network_scope_root")" "$(basename "$failed_owner_delta_root")"',
+  '"$(basename "$failed_owner_delta_root")" "$(basename "$failed_oci_identity_root")"',
+  '"$(basename "$failed_oci_identity_root")" "$(basename "$installing")"',
+  '"$(basename "$failed_oci_identity_root")" "$(basename "$root")"',
+]) {
+  assert.ok(rootEmission.includes(state), `missing append-only interruption state ${state}`);
+}
+assert.ok(
+  !rootEmission.includes('if [[ ! -e "$parent" && ! -L "$parent" ]]'),
+  'the chained claim must never create or replace the existing 911 parent',
+);
+for (const finalIdentityGuard of [
+  "require_customer_web_replacement_record || die 'the finalized customer-web replacement record is invalid'",
+  "require_owner_never_restarted || die 'Owner lifecycle changed before final immutable verification'",
+  "require_other_service_inventory_exact || die 'a non-customer service changed before final immutable verification'",
+  "require_failed_counter_runtime || die 'the immutable 020 empty pre-intent evidence changed during finalization'",
+  "require_failed_customer_web_network_scope_runtime ||\n  die 'CW-NET-SCOPE-005: the immutable failed 0110 empty pre-intent ledger changed during finalization'",
+  "require_failed_network_scope_runtime ||\n  die 'OWNER-DELTA-005: the immutable failed 1f27 single-intent pre-mutation ledger changed during finalization'",
+  "require_failed_oci_identity_runtime ||\n  die 'SEMANTIC-V2-005: the immutable failed 0ffc checkpoint or adopted healthy customer-web changed during finalization'",
+  "require_financial_gates_disabled || die 'a financial, executor, provider, Amount, or Transfer gate changed during finalization'",
+  'Owner unchanged; customer-web only; all financial gates disabled; no provider action and no money moved.',
+])
+  assert.ok(
+    script.includes(finalIdentityGuard),
+    `missing final no-money identity guard ${finalIdentityGuard}`,
+  );
+assert.ok(
+  rootEmission.indexOf('64769:6102885:root:root:700') <
+    rootEmission.indexOf("claim_one '$REMOTE_BUNDLE/"),
+  'the prior claim must be proved before appending the new claim',
+);
+
+const prior = '911758fa1407093bee700918d5a663a7735f1658';
+const failed = 'ff989bc5e1a0488ffa34bfa7c2c49ec3225bc51b';
+const failedPg = 'fa35244c8e8e2b9f10fe7abb2cd2341864b43471';
+const failedImage = '0a2adc0bf3591fe2449379ac2bf76c21538fadf5';
+const failedCatalog = '04f51a521280fed43cd1504107c702940e523688';
+const failedOidvector = 'f67cf783528f090169dbea1ebfdc6c46f90996bb';
+const failedCompose = 'e95ad99122ebf9f7257ea25d7cf215dd38c73b40';
+const failedHolder = '35d28aaa41cde5a2ccce7c2017dffc7c9d503238';
+const failedOrder = '132603c34afff4e0e6c78d89864c761034c0f3fa';
+const failedEndpointPhase = '51e5170488d720fd04decd1896971ab72cfe9603';
+const failedRunningStatus = '8f1ef460a231fe2c21e2df2d986749400d08c38c';
+const failedCounter = '0202304e3c606d2a7927a5b027d76926c0117189';
+const failedCustomer = '0110d1965d7efdc0436abda8c0bc686fb33c084b';
+const failedNetworkScope = '1f27af7f929434b1f40f65901df9ebd683ebe62c';
+const failedOwnerDelta = 'a51b52201a94a669b8dcca38b7abb29d70d0200f';
+const failedOciIdentity = '0ffc54ab34de6fcde6cd5401ab66dd94025ebd57';
+const current = '0123456789abcdef0123456789abcdef01234567';
+const installing = `.installing-${current}`;
+const exactHistoricalChain = [
+  prior,
+  failed,
+  failedPg,
+  failedImage,
+  failedCatalog,
+  failedOidvector,
+  failedCompose,
+  failedHolder,
+  failedOrder,
+  failedEndpointPhase,
+  failedRunningStatus,
+  failedCounter,
+  failedCustomer,
+  failedNetworkScope,
+  failedOwnerDelta,
+  failedOciIdentity,
+];
+const directoryLinkCount = (children) => children.length + 2;
+assert.equal(exactHistoricalChain.length, 16, 'the failed 0ffc chain inventory is incomplete');
+assert.equal(
+  directoryLinkCount(exactHistoricalChain),
+  18,
+  'the pre-claim append-only bundle parent must have link count 18',
+);
+assert.equal(
+  directoryLinkCount([...exactHistoricalChain, installing]),
+  19,
+  'the installing append must move the bundle parent link count from 18 to 19',
+);
+assert.equal(
+  directoryLinkCount([...exactHistoricalChain, current]),
+  19,
+  'the finalized append-only successor must retain bundle parent link count 19',
+);
+const classifyChain = (children) => {
+  const exact = [...children].sort().join('\n');
+  if (
+    exact ===
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      failedOrder,
+      failedEndpointPhase,
+      failedRunningStatus,
+      failedCounter,
+      failedCustomer,
+      failedNetworkScope,
+      failedOwnerDelta,
+      failedOciIdentity,
+    ]
+      .sort()
+      .join('\n')
+  )
+    return 'append';
+  if (
+    exact ===
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      failedOrder,
+      failedEndpointPhase,
+      failedRunningStatus,
+      failedCounter,
+      failedCustomer,
+      failedNetworkScope,
+      failedOwnerDelta,
+      failedOciIdentity,
+      installing,
+    ]
+      .sort()
+      .join('\n')
+  )
+    return 'resume';
+  if (
+    exact ===
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      failedOrder,
+      failedEndpointPhase,
+      failedRunningStatus,
+      failedCounter,
+      failedCustomer,
+      failedNetworkScope,
+      failedOwnerDelta,
+      failedOciIdentity,
+      current,
+    ]
+      .sort()
+      .join('\n')
+  )
+    return 'complete';
+  return 'reject';
+};
+for (const [children, expected] of [
+  [
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      failedOrder,
+      failedEndpointPhase,
+      failedRunningStatus,
+      failedCounter,
+      failedCustomer,
+      failedNetworkScope,
+      failedOwnerDelta,
+      failedOciIdentity,
+    ],
+    'append',
+  ],
+  [
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      failedOrder,
+      failedEndpointPhase,
+      failedRunningStatus,
+      failedCounter,
+      failedCustomer,
+      failedNetworkScope,
+      failedOwnerDelta,
+      failedOciIdentity,
+      installing,
+    ],
+    'resume',
+  ],
+  [
+    [
+      prior,
+      failed,
+      failedPg,
+      failedImage,
+      failedCatalog,
+      failedOidvector,
+      failedCompose,
+      failedHolder,
+      failedOrder,
+      failedEndpointPhase,
+      failedRunningStatus,
+      failedCounter,
+      failedCustomer,
+      failedNetworkScope,
+      failedOwnerDelta,
+      failedOciIdentity,
+      current,
+    ],
+    'complete',
+  ],
+  [[], 'reject'],
+  [[current], 'reject'],
+  [[prior, installing, current], 'reject'],
+  [[prior, 'unexpected'], 'reject'],
+]) {
+  assert.equal(classifyChain(children), expected, `bad append-only chain fixture ${children}`);
+}
+
+const bash = resolveBash();
+const bashCheck = spawnSync(bash, ['-n', operation], { encoding: 'utf8' });
+assert.equal(bashCheck.status, 0, bashCheck.stderr || bashCheck.stdout);
+const orderSyntaxOnly = spawnSync(bash, ['-n'], {
+  encoding: 'utf8',
+  input: 'caller() { late_helper; }\ncaller\nlate_helper() { :; }\n',
+});
+assert.equal(orderSyntaxOnly.status, 0, 'bash -n fixture must miss the definition-order hazard');
+const orderExecution = spawnSync(bash, [], {
+  encoding: 'utf8',
+  input: 'set -e\ncaller() { late_helper; }\ncaller\nlate_helper() { :; }\n',
+});
+assert.notEqual(orderExecution.status, 0, 'execution fixture must expose call-before-definition');
+const terminalEmissionCheck = spawnSync(bash, ['-n'], {
+  encoding: 'utf8',
+  input: workflowRunBlock('Emit the exact terminal-attestation root-console invocation'),
+});
+assert.equal(
+  terminalEmissionCheck.status,
+  0,
+  terminalEmissionCheck.stderr || terminalEmissionCheck.stdout,
+);
+const rootEmissionCheck = spawnSync(bash, ['-n'], {
+  encoding: 'utf8',
+  input: rootEmission,
+});
+assert.equal(rootEmissionCheck.status, 0, rootEmissionCheck.stderr || rootEmissionCheck.stdout);
+
+const python = resolvePython();
+const compile = spawnSync(python, ['-m', 'py_compile', validator, fixtures], { encoding: 'utf8' });
+assert.equal(compile.status, 0, compile.stderr || compile.stdout);
+const fixtureResult = spawnSync(python, ['-I', fixtures, validator], {
+  encoding: 'utf8',
+  timeout: 60_000,
+});
+assert.equal(fixtureResult.status, 0, fixtureResult.stderr || fixtureResult.stdout);
+assert.match(fixtureResult.stdout, /classic\/OCI fixtures passed/);
+
+console.log('H14 Owner archive-recovery workflow and fixtures verified');

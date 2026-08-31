@@ -45,6 +45,10 @@ const helper = readFileSync(
   resolve(root, 'infra/operations/fetanagent-staging-deploy-helper.sh'),
   'utf8',
 );
+const ownerSessionRepairHelper = readFileSync(
+  resolve(root, 'infra/operations/fetanagent-h14-owner-recovery-session-repair.sh'),
+  'utf8',
+);
 const v2V3SuccessorMigration = readFileSync(
   resolve(root, 'infra/operations/fetanagent-kemerbet-v2-v3-successor-migration.sh'),
   'utf8',
@@ -4707,6 +4711,9 @@ assert.match(workflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(workflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
 assert.match(workflow, /^\s+- transition-ssh-verify$/m);
 assert.match(workflow, /^\s+- transition-stop-legacy$/m);
+assert.match(workflow, /^\s+- h14-owner-runtime-bridge-stage$/m);
+assert.match(workflow, /^\s+- h14-owner-kemerbet-session-bootstrap-repair-stage$/m);
+assert.match(workflow, /^\s+- h14-owner-runtime-bridge-archive-recovery-stage$/m);
 assert.match(workflow, /^\s+- recover-v1-retirement-after-expiry$/m);
 assert.match(workflow, /^\s+- predecessor-stop-and-disable$/m);
 assert.match(workflow, /^\s+- ecd47f5d-predecessor-stop-and-disable$/m);
@@ -4715,7 +4722,12 @@ assert.match(workflow, /stop-current-staging-predecessor-runtime/);
 assert.match(workflow, /stop-exact-ecd47f5d-staging-predecessor-runtime/);
 assert.match(
   workflow,
-  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
+  /\^\(plan\|transition-ssh-verify\|transition-stop-legacy\|unban-and-connectivity-check\|deploy-and-smoke\|h14-owner-runtime-bridge-stage\|h14-owner-runtime-bridge-archive-recovery-stage\|recover-v1-retirement-after-expiry\|predecessor-stop-and-disable\|ecd47f5d-predecessor-stop-and-disable\|stop-and-disable\)\$/,
+);
+assert.match(
+  workflow,
+  /if \[\[ "\$REQUESTED_MODE" == 'h14-owner-kemerbet-session-bootstrap-repair-stage' \]\]; then\s+\[\[ "\$CONFIRMED_OWNER_SESSION" == 'owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money' \]\]\s+else\s+\[\[ "\$REQUESTED_MODE" =~ \^\(plan\|transition-ssh-verify/u,
+  'The H15 mode must use its own exact confirmation while the legacy mode allowlist remains unchanged.',
 );
 assert.match(
   workflow,
@@ -4730,6 +4742,736 @@ assert.doesNotMatch(
 );
 assert.match(workflow, /StrictHostKeyChecking=yes/g);
 assert.match(workflow, /UserKnownHostsFile=/g);
+
+const ownerSessionRepairJobStart =
+  /\r?\n  h14-owner-kemerbet-session-bootstrap-repair-stage:\r?\n/u.exec(workflow)?.index;
+const ownerSessionRepairJobEnd =
+  /\r?\n  h14-owner-runtime-bridge-archive-recovery-stage:\r?\n/u.exec(workflow)?.index;
+assert.ok(
+  ownerSessionRepairJobStart !== undefined &&
+    ownerSessionRepairJobEnd !== undefined &&
+    ownerSessionRepairJobEnd > ownerSessionRepairJobStart,
+  'the two-target H14 repair staging job must have an exact isolated workflow boundary',
+);
+const ownerSessionRepairJob = workflow.slice(ownerSessionRepairJobStart, ownerSessionRepairJobEnd);
+assert.match(workflow, /OWNER_SESSION_REPAIR_PARENT: 826aaba79ed3e303452c4a7e04e0f6f90f699898/u);
+for (const protectedRepairContract of [
+  /if: inputs\.mode == 'h14-owner-kemerbet-session-bootstrap-repair-stage'/u,
+  /environment: staging/u,
+  /permissions:\s*\r?\n\s+contents: read\s*\r?\n\s+pull-requests: read/u,
+  /owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money/u,
+  /\.draft == false/u,
+  /\.base\.sha == \\"\$CANONICAL_H14_COMMIT\\"/u,
+  /\.head\.sha == \\"\$GITHUB_SHA\\"/u,
+  /\.head\.repo\.full_name == \\"\$GITHUB_REPOSITORY\\"/u,
+  /git -C repair merge-base --is-ancestor "\$OWNER_SESSION_REPAIR_PARENT" "\$CONFIRMED_REPAIR_IMPLEMENTATION"/u,
+  /git -C repair diff --name-only "\$CANONICAL_H14_COMMIT" "\$CONFIRMED_REPAIR_IMPLEMENTATION" -- Dockerfile infra\/compose\.staging-beta\.yaml/u,
+  /sha256sum repair\/Dockerfile/u,
+  /sha256sum canonical-h14\/Dockerfile/u,
+  /sha256sum repair\/infra\/compose\.staging-beta\.yaml/u,
+  /sha256sum canonical-h14\/infra\/compose\.staging-beta\.yaml/u,
+]) {
+  assert.match(ownerSessionRepairJob, protectedRepairContract);
+}
+for (const exactRepairDelta of [
+  '.github/workflows/staging-beta-deploy-smoke.yml',
+  'apps/admin/src/app.test.ts',
+  'apps/admin/src/app.ts',
+  'apps/admin/src/owner-dashboard-browser.test.ts',
+  'apps/admin/src/owner-dashboard.ts',
+  'apps/admin/src/owner-kemerbet-session-control.test.ts',
+  'apps/admin/src/owner-kemerbet-session-control.ts',
+  'apps/executor/src/kemerbet-session-provision-server.test.ts',
+  'apps/executor/src/kemerbet-session-provision-server.ts',
+  'infra/operations/fetanagent-h14-owner-recovery-session-repair.sh',
+  'infra/verify-executor-deployment.mjs',
+  'infra/verify-kemerbet-quarantine-recovery-v14-owner-runtime-bridge.mjs',
+  'infra/verify-staging-beta-deploy.mjs',
+]) {
+  assert.ok(
+    ownerSessionRepairJob.includes(exactRepairDelta),
+    `the protected repair delta must include exactly reviewed path ${exactRepairDelta}`,
+  );
+}
+assert.equal(
+  (ownerSessionRepairJob.match(/\bdocker build\b/gu) ?? []).length,
+  2,
+  'the repair lane must build exactly two images',
+);
+assert.match(
+  ownerSessionRepairJob,
+  /docker build --pull=false --target admin -f canonical-h14\/Dockerfile/u,
+);
+assert.match(
+  ownerSessionRepairJob,
+  /docker build --pull=false --target executor -f canonical-h14\/Dockerfile/u,
+);
+assert.doesNotMatch(
+  ownerSessionRepairJob,
+  /--target (?:api|beta-admission|bot|customer-web|gateway)\b/u,
+  'the repair lane must never rebuild a non-target service',
+);
+for (const compositeIdentityContract of [
+  /com\.fetanagent\.canonical-release=\$CANONICAL_H14_COMMIT/u,
+  /com\.fetanagent\.repair-parent=\$OWNER_SESSION_REPAIR_PARENT/u,
+  /com\.fetanagent\.provider-action-enabled=false/u,
+  /contract=fetanagent-h14-owner-kemerbet-session-bootstrap-repair-bundle/u,
+  /owner_image_config_digest=\$owner_image_config_digest/u,
+  /owner_image_oci_manifest_digest=\$owner_image_oci_manifest_digest/u,
+  /executor_image_config_digest=\$executor_image_config_digest/u,
+  /executor_image_oci_manifest_digest=\$executor_image_oci_manifest_digest/u,
+  /OCI image manifest blob is not digest-bound/u,
+  /OCI image config blob is not digest-bound/u,
+  /deployment_order=owner-control,kemerbet-session-provision/u,
+  /rollback_order=kemerbet-session-provision,owner-control/u,
+  /canonical_release_rewritten=false/u,
+  /canonical_release_superseded=false/u,
+  /provider_action_enabled=false/u,
+  /financial_actions_mode=dry_run/u,
+  /kemerbet_executor_enabled=false/u,
+  /kemerbet_final_action_enabled=false/u,
+  /transfer_enabled=false/u,
+  /amount_entry_enabled=false/u,
+  /money_moved=false/u,
+]) {
+  assert.match(ownerSessionRepairJob, compositeIdentityContract);
+}
+const exactOwnerSessionManifestKeys = [
+  'version',
+  'contract',
+  'image_archive_encoding',
+  'repair_implementation_sha',
+  'repair_parent_sha',
+  'canonical_h14_sha',
+  'staging_project_ref',
+  'staging_droplet_id',
+  'workflow_run_id',
+  'workflow_run_attempt',
+  'owner_predecessor_sha',
+  'session_predecessor_sha',
+  'owner_image_tag',
+  'owner_image_config_digest',
+  'owner_image_oci_manifest_digest',
+  'owner_image_tar_sha256',
+  'owner_image_tar_size',
+  'executor_image_tag',
+  'executor_image_config_digest',
+  'executor_image_oci_manifest_digest',
+  'executor_image_tar_sha256',
+  'executor_image_tar_size',
+  'chromium_package_version',
+  'canonical_compose_sha256',
+  'repair_helper_sha256',
+  'repair_helper_size',
+  'deployment_order',
+  'rollback_order',
+  'canonical_release_rewritten',
+  'canonical_release_superseded',
+  'provider_action_enabled',
+  'financial_actions_mode',
+  'kemerbet_executor_enabled',
+  'kemerbet_final_action_enabled',
+  'transfer_enabled',
+  'amount_entry_enabled',
+  'money_moved',
+];
+const ownerSessionManifestBody = /cat >"\$manifest_path" <<EOF\r?\n([\s\S]*?)\r?\n\s+EOF/u.exec(
+  ownerSessionRepairJob,
+)?.[1];
+assert.ok(ownerSessionManifestBody, 'the H15 workflow manifest heredoc must be exact');
+const ownerSessionWorkflowManifestKeys = ownerSessionManifestBody
+  .split(/\r?\n/u)
+  .map((line) => line.trim().split('=', 1)[0]);
+assert.deepEqual(
+  ownerSessionWorkflowManifestKeys,
+  exactOwnerSessionManifestKeys,
+  'the staged H15 manifest must use the exact ordered dual-identity schema',
+);
+const ownerSessionHelperExpectedKeys =
+  /expected_keys="([\s\S]*?)"\r?\n\s+\[\[ "\$\(cut -d= -f1 "\$MANIFEST"\)"/u.exec(
+    ownerSessionRepairHelper,
+  )?.[1];
+assert.ok(ownerSessionHelperExpectedKeys, 'the root helper manifest schema must be exact');
+assert.deepEqual(
+  ownerSessionHelperExpectedKeys.split(/\r?\n/u),
+  exactOwnerSessionManifestKeys,
+  'the workflow producer and root consumer must share one exact ordered schema',
+);
+assert.match(ownerSessionManifestBody, /^\s*image_archive_encoding=oci-docker-save-v1$/mu);
+assertInOrder(
+  ownerSessionRepairJob,
+  [
+    'owner_image_config_digest="${archive_oci_manifest_ids[0]}"',
+    'owner_image_oci_manifest_digest="${archive_oci_manifest_ids[1]}"',
+    'executor_image_config_digest="${archive_oci_manifest_ids[2]}"',
+    'executor_image_oci_manifest_digest="${archive_oci_manifest_ids[3]}"',
+  ],
+  'the archive producer must emit owner C/M then executor C/M from the portable archive identities',
+);
+assert.doesNotMatch(
+  ownerSessionRepairJob,
+  /(?:owner|executor)_source_runtime_id/u,
+  'the archive producer must not bind portable archive identities to a source Docker storage ID',
+);
+assert.doesNotMatch(ownerSessionRepairJob, /^\s*(?:owner|executor)_image_id=/mu);
+assert.doesNotMatch(ownerSessionRepairHelper, /^(?:owner|executor)_image_id$/mu);
+assertInOrder(
+  ownerSessionRepairJob,
+  [
+    'fetanagent-owner-control-repair.tar',
+    'fetanagent-deposit-executor-repair.tar',
+    'compose.staging-beta.yaml',
+    'manifest-v1',
+    'Emit the exact root-console repair invocation without executing it',
+  ],
+  'the workflow must seal and stage only the two target images plus canonical Compose and manifest before emitting the root command',
+);
+const ownerSessionRemoteStage = ownerSessionRepairJob.slice(
+  ownerSessionRepairJob.indexOf('- name: Stage the no-secret two-image bundle'),
+  ownerSessionRepairJob.indexOf('- name: Emit the exact root-console repair invocation'),
+);
+assert.doesNotMatch(
+  ownerSessionRemoteStage,
+  /\bdocker\b|\bcurl\b|\bpsql\b|\bsupabase\b|agentsystem\.admindigi\.com|api\.telegram\.org/iu,
+  'the unprivileged remote staging step must only transfer and attest inert files',
+);
+assert.doesNotMatch(
+  ownerSessionRepairJob,
+  /root@|sudo -n|StrictHostKeyChecking=no|FINANCIAL_ACTIONS_MODE: live|KEMERBET_EXECUTOR_ENABLED: 'true'|KEMERBET_FINAL_ACTION_ENABLED: 'true'/u,
+);
+assert.match(
+  ownerSessionRepairJob,
+  /https:\/\/raw\.githubusercontent\.com\/\$GITHUB_REPOSITORY\/\$CONFIRMED_REPAIR_IMPLEMENTATION\/infra\/operations\/fetanagent-h14-owner-recovery-session-repair\.sh/u,
+);
+assert.match(
+  ownerSessionRepairJob,
+  /invocation="bash '\$root_script' '\$CONFIRMED_REPAIR_IMPLEMENTATION' '\$CANONICAL_H14_COMMIT' '\$OWNER_SESSION_REPAIR_PARENT' '\$REMOTE_BUNDLE' '\$MANIFEST_SHA' '\$HELPER_SHA' '\$confirmation'"/u,
+);
+assertInOrder(
+  ownerSessionRepairJob.slice(
+    ownerSessionRepairJob.indexOf('- name: Emit the exact root-console repair invocation'),
+  ),
+  [`stat --format='%s' '$root_script'`, `sha256sum '$root_script'`, 'echo "$invocation"'],
+  'the emitted root block must verify exact helper size and SHA-256 before execution',
+);
+
+for (const fixedRepairHelperContract of [
+  /^#!\/usr\/bin\/env bash$/mu,
+  /^set -euo pipefail$/mu,
+  /^readonly PROJECT_NAME='fetanagent-staging-beta'$/mu,
+  /^readonly CANONICAL_H14='06459511d9330a0e1d956c42529b81aa9970e7a2'$/mu,
+  /^readonly OWNER_SESSION_REPAIR_PARENT='826aaba79ed3e303452c4a7e04e0f6f90f699898'$/mu,
+  /^readonly STAGING_DROPLET_ID='593344964'$/mu,
+  /^readonly CONFIRMATION='owner-and-kemerbet-session-only-no-provider-action-no-transfer-no-money'$/mu,
+  /\[\[ "\$#" -eq 7 \]\]/u,
+  /metadata\/v1\/id/u,
+  /fetanagent-h14-owner-session-repair-\[1-9\]\[0-9\]\*-\[1-9\]\[0-9\]\*-\$REPAIR_SHA/u,
+  /repair_helper_sha256/u,
+  /owner_image_config_digest/u,
+  /owner_image_oci_manifest_digest/u,
+  /executor_image_config_digest/u,
+  /executor_image_oci_manifest_digest/u,
+  /canonical_release_rewritten/u,
+  /canonical_release_superseded/u,
+  /provider_action_enabled=false/u,
+  /financial_actions_mode=dry_run/u,
+  /KEMERBET_EXECUTOR_ENABLED=false/u,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/u,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/u,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/u,
+]) {
+  assert.match(ownerSessionRepairHelper, fixedRepairHelperContract);
+}
+const repairRuntimeImageIdentity = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_runtime_image_identity',
+  'require_container_image_identity',
+);
+for (const dualImageIdentityContract of [
+  /config_id="\$\(manifest_value "\$config_key"\)"/u,
+  /oci_manifest_id="\$\(manifest_value "\$oci_manifest_key"\)"/u,
+  /docker image inspect "\$image" \|/u,
+  /images = json\.load\(sys\.stdin\)/u,
+  /image\.get\("RepoTags"\) != \[tag\]/u,
+  /image\.get\("Id"\) not in \{config_digest, manifest_digest\}/u,
+  /descriptor\.get\("digest"\) != manifest_digest/u,
+  /repo_digests not in \(None, \[\], \[repo \+ "@" \+ manifest_digest\]\)/u,
+  /statuses="\$\{PIPESTATUS\[\*\]\}"/u,
+]) {
+  assert.match(repairRuntimeImageIdentity, dualImageIdentityContract);
+}
+const repairArchiveImageIdentity = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_archive_image_identity',
+  'require_image_labels',
+);
+for (const sealedArchiveIdentityContract of [
+  /tarfile\.open\(archive_path, mode="r:"\)/u,
+  /member\.name in members_by_name/u,
+  /target\.is_absolute\(\)/u,
+  /"\.\." in target\.parts/u,
+  /"manifest\.json"/u,
+  /"index\.json"/u,
+  /docker_entry\.get\("Config"\) != expected_config_path/u,
+  /descriptor\.get\("digest"\) != expected_manifest/u,
+  /hashlib\.sha256\(manifest_bytes\)\.hexdigest\(\)/u,
+  /config\.get\("digest"\) != expected_config/u,
+  /hashlib\.sha256\(config_bytes\)\.hexdigest\(\)/u,
+  /docker_layers\s*!= \["blobs\/sha256\/" \+ layer\["digest"\]/u,
+]) {
+  assert.match(repairArchiveImageIdentity, sealedArchiveIdentityContract);
+}
+const repairContainerImageIdentity = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_container_image_identity',
+  'require_owner_contract',
+);
+for (const deployedContainerIdentityContract of [
+  /require_runtime_image_identity "\$image" "\$config_key" "\$oci_manifest_key"/u,
+  /runtime_id="\$\(docker image inspect "\$image" --format '\{\{\.Id\}\}'\)"/u,
+  /docker container inspect "\$container" --format '\{\{\.Image\}\}\|\{\{\.Config\.Image\}\}'/u,
+  /"\$runtime_id\|\$image"/u,
+]) {
+  assert.match(repairContainerImageIdentity, deployedContainerIdentityContract);
+}
+const repairRequireManifestStart = ownerSessionRepairHelper.indexOf('require_manifest() {');
+const repairRequireManifestEnd = ownerSessionRepairHelper.indexOf(
+  '\n}\n\nfor file ',
+  repairRequireManifestStart,
+);
+assert.ok(
+  repairRequireManifestStart >= 0 && repairRequireManifestEnd > repairRequireManifestStart,
+  'the H15 root manifest validator must have an exact boundary',
+);
+const repairRequireManifest = ownerSessionRepairHelper.slice(
+  repairRequireManifestStart,
+  repairRequireManifestEnd + 2,
+);
+assert.equal(
+  (repairRequireManifest.match(/require_archive_image_identity \\/gu) ?? []).length,
+  2,
+  'the root helper must validate exactly both sealed image archives before intent',
+);
+assertInOrder(
+  repairRequireManifest,
+  [
+    'require_archive_image_identity \\',
+    '"$OWNER_ARCHIVE" "$OWNER_REPAIR_IMAGE"',
+    '$(manifest_value owner_image_config_digest)',
+    '$(manifest_value owner_image_oci_manifest_digest)',
+    'require_archive_image_identity \\',
+    '"$SESSION_ARCHIVE" "$SESSION_REPAIR_IMAGE"',
+    '$(manifest_value executor_image_config_digest)',
+    '$(manifest_value executor_image_oci_manifest_digest)',
+  ],
+  'the manifest validator must cross-bind Owner then executor archives to their exact C/M identities',
+);
+
+const runtimeIdentityFixtureTag = 'fetanagent-owner-control:fixture';
+const runtimeIdentityFixtureConfig = `sha256:${'1'.repeat(64)}`;
+const runtimeIdentityFixtureManifest = `sha256:${'2'.repeat(64)}`;
+const runtimeIdentityFixtureForeign = `sha256:${'3'.repeat(64)}`;
+const runtimeIdentityFixtureRepository = runtimeIdentityFixtureTag.slice(
+  0,
+  runtimeIdentityFixtureTag.lastIndexOf(':'),
+);
+const runtimeIdentityAccepted = (image) =>
+  image.RepoTags?.length === 1 &&
+  image.RepoTags[0] === runtimeIdentityFixtureTag &&
+  [runtimeIdentityFixtureConfig, runtimeIdentityFixtureManifest].includes(image.Id) &&
+  (image.Descriptor == null || image.Descriptor?.digest === runtimeIdentityFixtureManifest) &&
+  (image.RepoDigests == null ||
+    image.RepoDigests.length === 0 ||
+    (image.RepoDigests.length === 1 &&
+      image.RepoDigests[0] ===
+        `${runtimeIdentityFixtureRepository}@${runtimeIdentityFixtureManifest}`));
+const runtimeIdentityCases = [
+  [
+    'classic Docker config identity',
+    { RepoTags: [runtimeIdentityFixtureTag], Id: runtimeIdentityFixtureConfig, RepoDigests: [] },
+    true,
+  ],
+  [
+    'containerd OCI manifest identity',
+    {
+      RepoTags: [runtimeIdentityFixtureTag],
+      Id: runtimeIdentityFixtureManifest,
+      Descriptor: { digest: runtimeIdentityFixtureManifest },
+      RepoDigests: [`${runtimeIdentityFixtureRepository}@${runtimeIdentityFixtureManifest}`],
+    },
+    true,
+  ],
+  [
+    'mixed config ID and OCI descriptor',
+    {
+      RepoTags: [runtimeIdentityFixtureTag],
+      Id: runtimeIdentityFixtureConfig,
+      Descriptor: { digest: runtimeIdentityFixtureManifest },
+    },
+    true,
+  ],
+  [
+    'explicit null descriptor and repository digest',
+    {
+      RepoTags: [runtimeIdentityFixtureTag],
+      Id: runtimeIdentityFixtureManifest,
+      Descriptor: null,
+      RepoDigests: null,
+    },
+    true,
+  ],
+  [
+    'foreign runtime ID',
+    { RepoTags: [runtimeIdentityFixtureTag], Id: runtimeIdentityFixtureForeign },
+    false,
+  ],
+  [
+    'config digest incorrectly exposed as descriptor',
+    {
+      RepoTags: [runtimeIdentityFixtureTag],
+      Id: runtimeIdentityFixtureConfig,
+      Descriptor: { digest: runtimeIdentityFixtureConfig },
+    },
+    false,
+  ],
+  [
+    'extra runtime tag',
+    {
+      RepoTags: [runtimeIdentityFixtureTag, 'foreign:tag'],
+      Id: runtimeIdentityFixtureConfig,
+    },
+    false,
+  ],
+  [
+    'foreign repository digest',
+    {
+      RepoTags: [runtimeIdentityFixtureTag],
+      Id: runtimeIdentityFixtureManifest,
+      RepoDigests: [`foreign@${runtimeIdentityFixtureManifest}`],
+    },
+    false,
+  ],
+];
+for (const [name, image, expected] of runtimeIdentityCases) {
+  assert.equal(runtimeIdentityAccepted(image), expected, `${name} fixture must be exact`);
+}
+
+if (process.platform === 'linux') {
+  const runtimeFixtureRoot = mkdtempSync(join(tmpdir(), 'fetanagent-h15-runtime-identity-'));
+  const runtimeValidatorPath = join(runtimeFixtureRoot, 'runtime-validator.py');
+  const archiveValidatorPath = join(runtimeFixtureRoot, 'archive-validator.py');
+  const archiveBuilderPath = join(runtimeFixtureRoot, 'archive-builder.py');
+  try {
+    writeFileSync(
+      runtimeValidatorPath,
+      `${extractSingleQuotedPythonHeredoc(
+        repairRuntimeImageIdentity,
+        'require_runtime_image_identity',
+      )}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      archiveValidatorPath,
+      `${extractSingleQuotedPythonHeredoc(
+        repairArchiveImageIdentity,
+        'require_archive_image_identity',
+      )}\n`,
+      { mode: 0o600 },
+    );
+    const runExactRuntimeValidator = (image) =>
+      spawnSync(
+        '/usr/bin/python3',
+        [
+          '-I',
+          runtimeValidatorPath,
+          runtimeIdentityFixtureTag,
+          runtimeIdentityFixtureConfig,
+          runtimeIdentityFixtureManifest,
+        ],
+        { encoding: 'utf8', input: JSON.stringify([image]) },
+      );
+    for (const [name, image, expected] of runtimeIdentityCases) {
+      const result = runExactRuntimeValidator(image);
+      assert.equal(
+        result.status === 0,
+        expected,
+        `${name} must be enforced by the helper's exact embedded runtime validator: ${result.stderr}`,
+      );
+    }
+
+    writeFileSync(
+      archiveBuilderPath,
+      [
+        'import hashlib, io, json, sys, tarfile',
+        'path, tag, mutation = sys.argv[1:]',
+        'encode = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":")).encode()',
+        'config_bytes = encode({"architecture": "amd64", "os": "linux"})',
+        'config_digest = "sha256:" + hashlib.sha256(config_bytes).hexdigest()',
+        'layer_bytes = b"exact-fixture-layer"',
+        'layer_digest = "sha256:" + hashlib.sha256(layer_bytes).hexdigest()',
+        'pointed_config = "sha256:" + "4" * 64 if mutation == "config-pointer" else config_digest',
+        'image_manifest = {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": pointed_config, "size": len(config_bytes)}, "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar", "digest": layer_digest, "size": len(layer_bytes)}]}',
+        'manifest_bytes = encode(image_manifest)',
+        'manifest_digest = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()',
+        'descriptor_digest = "sha256:" + "5" * 64 if mutation == "foreign-descriptor" else manifest_digest',
+        'archive_tag = tag + "-wrong" if mutation == "wrong-tag" else tag',
+        'ref = archive_tag.rsplit(":", 1)[1]',
+        'index = {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": [{"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": descriptor_digest, "size": len(manifest_bytes), "annotations": {"io.containerd.image.name": "docker.io/library/" + archive_tag, "org.opencontainers.image.ref.name": ref}}]}',
+        'docker_manifest = [{"Config": "blobs/sha256/" + config_digest.removeprefix("sha256:"), "RepoTags": [archive_tag], "Layers": ["blobs/sha256/" + layer_digest.removeprefix("sha256:")]}]',
+        'entries = [("manifest.json", encode(docker_manifest)), ("index.json", encode(index)), ("blobs/sha256/" + manifest_digest.removeprefix("sha256:"), manifest_bytes + (b" " if mutation == "manifest-blob" else b"")), ("blobs/sha256/" + config_digest.removeprefix("sha256:"), config_bytes + (b" " if mutation == "config-blob" else b"")), ("blobs/sha256/" + layer_digest.removeprefix("sha256:"), layer_bytes)]',
+        'if mutation == "duplicate": entries.append(("manifest.json", encode(docker_manifest)))',
+        'if mutation == "unsafe-path": entries.append(("../unsafe", b"unsafe"))',
+        'with tarfile.open(path, "w:") as archive:',
+        '    for name, data in entries:',
+        '        member = tarfile.TarInfo(name)',
+        '        member.size = len(data)',
+        '        member.mode = 0o600',
+        '        archive.addfile(member, io.BytesIO(data))',
+        'print(config_digest)',
+        'print(manifest_digest)',
+      ].join('\n'),
+      { mode: 0o600 },
+    );
+    for (const [name, mutation, expected] of [
+      ['valid OCI Docker-save archive', 'valid', true],
+      ['mutated OCI manifest blob', 'manifest-blob', false],
+      ['mutated OCI config blob', 'config-blob', false],
+      ['foreign config pointer', 'config-pointer', false],
+      ['foreign index descriptor', 'foreign-descriptor', false],
+      ['wrong image tag', 'wrong-tag', false],
+      ['duplicate archive member', 'duplicate', false],
+      ['unsafe archive path', 'unsafe-path', false],
+    ]) {
+      const archivePath = join(runtimeFixtureRoot, `${mutation}.tar`);
+      const built = spawnSync(
+        '/usr/bin/python3',
+        ['-I', archiveBuilderPath, archivePath, runtimeIdentityFixtureTag, mutation],
+        { encoding: 'utf8' },
+      );
+      assert.equal(built.status, 0, `${name} fixture could not be built: ${built.stderr}`);
+      const [configDigest, manifestDigest] = built.stdout.trim().split(/\r?\n/u);
+      const validated = spawnSync(
+        '/usr/bin/python3',
+        [
+          '-I',
+          archiveValidatorPath,
+          archivePath,
+          runtimeIdentityFixtureTag,
+          configDigest,
+          manifestDigest,
+        ],
+        { encoding: 'utf8' },
+      );
+      assert.equal(
+        validated.status === 0,
+        expected,
+        `${name} must be enforced by the helper's exact archive validator: ${validated.stderr}`,
+      );
+    }
+  } finally {
+    rmSync(runtimeFixtureRoot, { recursive: true, force: true });
+  }
+}
+assert.match(
+  ownerSessionRepairHelper,
+  /"\$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest/u,
+);
+assert.match(
+  ownerSessionRepairHelper,
+  /"\$SESSION_REPAIR_IMAGE" executor_image_config_digest executor_image_oci_manifest_digest/u,
+);
+assert.doesNotMatch(
+  ownerSessionRepairHelper,
+  /\bgit\s+(?:clone|fetch|checkout)|\bdocker\s+build\b|gh api|agentsystem\.admindigi\.com|api\.telegram\.org|supabase\.co|FINANCIAL_ACTIONS_MODE=live|KEMERBET_EXECUTOR_ENABLED=true|KEMERBET_FINAL_ACTION_ENABLED=true/iu,
+  'the root helper must consume only the sealed bundle and must contain no build, repository, provider, Telegram, or live-financial path',
+);
+for (const durableRepairContract of [
+  /readonly MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.lock"/u,
+  /flock --exclusive --nonblock 9/u,
+  /readonly LEDGER_ROOT="\$LEDGER_PARENT\/h14-owner-kemerbet-session-bootstrap-repair"/u,
+  /\.installing-\$REPAIR_SHA/u,
+  /intent-v1/u,
+  /outcome-v1/u,
+  /sync -f "\$temporary"/u,
+  /sync -f "\$path"/u,
+  /outcome=recovered-and-rolled-back/u,
+  /outcome=failed-and-rolled-back/u,
+  /outcome=rollback-failed-manual-recovery-required/u,
+  /completed-\$REPAIR_SHA/u,
+]) {
+  assert.match(ownerSessionRepairHelper, durableRepairContract);
+}
+const rollbackToPredecessors = extractShellFunction(
+  ownerSessionRepairHelper,
+  'rollback_to_predecessors',
+  'recover_incomplete_ledger',
+);
+assertInOrder(
+  rollbackToPredecessors,
+  [
+    'compose_target "$CANONICAL_H14" "$SESSION_PREDECESSOR_TAG" "$BINDING_SOURCE"',
+    '"$SESSION_SERVICE"',
+    'require_session_contract "$session" "$CANONICAL_H14" false',
+    'compose_target "$OWNER_SESSION_REPAIR_PARENT" "$OWNER_PREDECESSOR_TAG" "$BINDING_SOURCE"',
+    '"$OWNER_SERVICE"',
+    'require_owner_contract "$owner" "$OWNER_SESSION_REPAIR_PARENT" false',
+    'require_owner_session_socket "$owner"',
+    'require_no_provider_action_runtime',
+    'require_preserved_state "$owner" "$session"',
+  ],
+  'rollback must restore and verify KemerBet session first, then Owner, then the complete preserved state',
+);
+const repairPreflight = extractShellFunction(ownerSessionRepairHelper, 'preflight', 'write_intent');
+assert.equal(
+  (repairPreflight.match(/require_runtime_image_identity "\$image" "\$key" "\$oci_key"/gu) ?? [])
+    .length,
+  1,
+  'the candidate-tag loop must invoke one fail-closed runtime validator over exactly both images',
+);
+assertInOrder(
+  repairPreflight,
+  [
+    '"$OWNER_REPAIR_IMAGE|owner_image_config_digest|owner_image_oci_manifest_digest"',
+    '"$SESSION_REPAIR_IMAGE|executor_image_config_digest|executor_image_oci_manifest_digest"',
+    "IFS='|' read -r image key oci_key",
+    'require_runtime_image_identity "$image" "$key" "$oci_key"',
+  ],
+  'preflight must reject a foreign existing tag for each exact C/M pair before intent',
+);
+const deployRepairStart = ownerSessionRepairHelper.indexOf('deploy_repair() {');
+const deployRepairEnd = ownerSessionRepairHelper.indexOf(
+  '\n}\n\nacquire_mutation_lock',
+  deployRepairStart,
+);
+assert.ok(deployRepairStart >= 0 && deployRepairEnd > deployRepairStart);
+const deployRepair = ownerSessionRepairHelper.slice(deployRepairStart, deployRepairEnd + 2);
+assertInOrder(
+  deployRepair,
+  [
+    'docker load --input "$OWNER_ARCHIVE"',
+    'docker load --input "$SESSION_ARCHIVE"',
+    'require_runtime_image_identity \\',
+    '"$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest',
+    'require_runtime_image_identity \\',
+    '"$SESSION_REPAIR_IMAGE" executor_image_config_digest executor_image_oci_manifest_digest',
+    'compose_target "$REPAIR_SHA" "$REPAIR_TAG" "$BINDING_SOURCE" staging-manual',
+    '"$OWNER_SERVICE"',
+    'require_owner_contract "$owner" "$REPAIR_SHA" true',
+    'require_container_image_identity \\',
+    '"$owner" "$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest',
+    'require_session_contract "$session" "$CANONICAL_H14" false',
+    'compose_target "$REPAIR_SHA" "$REPAIR_TAG" "$BINDING_SOURCE" kemerbet-session-provision',
+    '"$SESSION_SERVICE"',
+    'require_owner_contract "$owner" "$REPAIR_SHA" true',
+    'require_session_contract "$session" "$REPAIR_SHA" true',
+    'require_container_image_identity \\',
+    '"$owner" "$OWNER_REPAIR_IMAGE" owner_image_config_digest owner_image_oci_manifest_digest',
+    'require_container_image_identity \\',
+    '"$session" "$SESSION_REPAIR_IMAGE" executor_image_config_digest executor_image_oci_manifest_digest',
+    'require_no_provider_action_runtime',
+    'require_preserved_state "$owner" "$session"',
+    'write_outcome completed',
+  ],
+  'deployment must load sealed images, replace and verify Owner first, then replace and verify the inactive KemerBet session',
+);
+const repairSessionContract = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_session_contract',
+  'require_no_provider_action_runtime',
+);
+for (const inactiveSessionContract of [
+  /FINANCIAL_ACTIONS_MODE=dry_run/u,
+  /KEMERBET_EXECUTOR_ENABLED=false/u,
+  /KEMERBET_FINAL_ACTION_ENABLED=false/u,
+  /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/u,
+  /INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false/u,
+  /docker container top/u,
+  /chrome\|chromium/u,
+  /playwright/u,
+]) {
+  assert.match(repairSessionContract, inactiveSessionContract);
+}
+const preservedRepairState = extractShellFunction(
+  ownerSessionRepairHelper,
+  'require_preserved_state',
+  'rollback_to_predecessors',
+);
+for (const preservationContract of [
+  /non_target_inventory/u,
+  /project_volume_inventory/u,
+  /mount_inventory "\$owner"/u,
+  /mount_inventory "\$session"/u,
+  /require_binding_source "\$BINDING_SOURCE"/u,
+  /sha256sum "\$BINDING_SOURCE"/u,
+]) {
+  assert.match(preservedRepairState, preservationContract);
+}
+const repairMain = ownerSessionRepairHelper.slice(
+  ownerSessionRepairHelper.indexOf('\nacquire_mutation_lock\n') + 1,
+);
+assertInOrder(
+  repairMain,
+  [
+    'acquire_mutation_lock',
+    'require_bundle',
+    'require_manifest',
+    'recover_incomplete_ledger',
+    'preflight',
+    'write_intent',
+    "MUTATION_STARTED='true'",
+    'trap rollback_on_failure EXIT',
+    'deploy_repair',
+    'trap - EXIT INT TERM',
+  ],
+  'the root helper must validate and durably journal before any image or service mutation',
+);
+
+function simulateTwoTargetRepair(failAfter) {
+  const events = ['intent'];
+  try {
+    events.push('deploy-owner', 'verify-owner-and-old-session');
+    if (failAfter === 'owner') throw new Error('synthetic owner boundary failure');
+    events.push('deploy-session', 'verify-owner-and-session');
+    if (failAfter === 'session') throw new Error('synthetic session boundary failure');
+    events.push('outcome-completed');
+  } catch {
+    events.push('rollback-session', 'verify-session-predecessor');
+    events.push('rollback-owner', 'verify-owner-predecessor-and-preserved-state');
+    events.push('outcome-failed-and-rolled-back');
+  }
+  return events;
+}
+assert.deepEqual(simulateTwoTargetRepair(undefined), [
+  'intent',
+  'deploy-owner',
+  'verify-owner-and-old-session',
+  'deploy-session',
+  'verify-owner-and-session',
+  'outcome-completed',
+]);
+assert.deepEqual(simulateTwoTargetRepair('owner'), [
+  'intent',
+  'deploy-owner',
+  'verify-owner-and-old-session',
+  'rollback-session',
+  'verify-session-predecessor',
+  'rollback-owner',
+  'verify-owner-predecessor-and-preserved-state',
+  'outcome-failed-and-rolled-back',
+]);
+assert.deepEqual(simulateTwoTargetRepair('session'), [
+  'intent',
+  'deploy-owner',
+  'verify-owner-and-old-session',
+  'deploy-session',
+  'verify-owner-and-session',
+  'rollback-session',
+  'verify-session-predecessor',
+  'rollback-owner',
+  'verify-owner-predecessor-and-preserved-state',
+  'outcome-failed-and-rolled-back',
+]);
+
 assert.match(workflow, /fetanagent-staging-deploy-helper verify/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper install/g);
 assert.match(workflow, /fetanagent-staging-deploy-helper fresh-start/g);

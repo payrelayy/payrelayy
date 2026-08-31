@@ -1,0 +1,176 @@
+name: Staging Owner session recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_release_sha:
+        description: Type the exact reviewed pull-request head SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_no_provider_action:
+        description: Type OWNER-SESSION-RECOVERY-NO-PROVIDER-ACTION
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: fetanagent-staging-owner-session-recovery
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_DROPLET_ID: '593344964'
+  CANONICAL_MAIN_COMMIT: 06459511d9330a0e1d956c42529b81aa9970e7a2
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+
+jobs:
+  recover-owner-session:
+    name: Rotate and stage only the Owner session-pooler credential
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+      PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PGHOST: aws-1-eu-west-1.pooler.supabase.com
+      PGPORT: '5432'
+      PGDATABASE: postgres
+      PGUSER: postgres.spzpiyxheappsfyswewl
+      PGSSLMODE: verify-full
+      PGSERVICEFILE: /dev/null
+      PGPASSFILE: /dev/null
+      STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+      STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+      STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+      SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+    steps:
+      - name: Prove the exact staging-only pull-request target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" =~ ^refs/heads/[A-Za-z0-9._/-]+$ && "$GITHUB_REF" != refs/heads/main ]]
+          [[ "${{ inputs.confirm_release_sha }}" == "$GITHUB_SHA" && "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${{ inputs.confirm_staging_project_ref }}" == "$STAGING_PROJECT_REF" ]]
+          [[ "${{ inputs.confirm_staging_project_ref }}" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "${{ inputs.confirm_droplet_id }}" == "$STAGING_DROPLET_ID" ]]
+          [[ "${{ inputs.confirm_no_provider_action }}" == 'OWNER-SESSION-RECOVERY-NO-PROVIDER-ACTION' ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$CANONICAL_MAIN_COMMIT" ]]
+          branch_name="${GITHUB_REF#refs/heads/}"
+          mapfile -t pulls < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq ".[] | select(.state == \"open\" and .base.ref == \"main\" and .base.sha == \"$CANONICAL_MAIN_COMMIT\" and .head.sha == \"$GITHUB_SHA\" and .head.ref == \"$branch_name\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\") | .number"
+          )
+          [[ "${#pulls[@]}" -eq 1 && "${pulls[0]}" =~ ^[1-9][0-9]*$ ]]
+          [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+      - name: Rotate only the dedicated Owner role with SCRAM and a bounded lifetime
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ca_file="$RUNNER_TEMP/supabase-ca.crt"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          export PGSSLROOTCERT="$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          psql -X --set=ON_ERROR_STOP=1 <<'SQL'
+          \getenv owner_runtime_password OWNER_CONTROL_RUNTIME_PASSWORD
+          begin;
+          set local password_encryption = 'scram-sha-256';
+          alter role fetanagent_owner_control_runtime with
+            login noinherit nocreatedb nocreaterole noreplication nobypassrls
+            connection limit 1 password :'owner_runtime_password';
+          do $fetanagent$
+          begin
+            execute pg_catalog.format(
+              'alter role fetanagent_owner_control_runtime valid until %L',
+              pg_catalog.clock_timestamp() + interval '24 hours'
+            );
+          end
+          $fetanagent$;
+          commit;
+          do $fetanagent$
+          declare
+            observed pg_catalog.pg_authid%rowtype;
+          begin
+            select * into strict observed
+            from pg_catalog.pg_authid
+            where rolname = 'fetanagent_owner_control_runtime';
+            if not observed.rolcanlogin
+               or observed.rolbypassrls
+               or observed.rolsuper
+               or observed.rolpassword not like 'SCRAM-SHA-256$%'
+               or observed.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '23 hours 30 minutes'
+               or observed.rolvaliduntil > pg_catalog.clock_timestamp() + interval '24 hours 5 minutes' then
+              raise exception 'The dedicated Owner role rotation did not satisfy its exact contract.';
+            end if;
+          end
+          $fetanagent$;
+          SQL
+
+      - name: Stage one exact no-provider-action Owner pooler secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          bundle="$RUNNER_TEMP/owner-session-recovery"
+          install -d -m 0700 "$bundle"
+          printf 'postgresql://fetanagent_owner_control_runtime.%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$STAGING_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
+            >"$bundle/owner-database-url"
+          chmod 0600 "$bundle/owner-database-url"
+          secret_sha="$(sha256sum "$bundle/owner-database-url" | awk '{print $1}')"
+          [[ "$secret_sha" =~ ^[0-9a-f]{64}$ ]]
+          cat >"$bundle/manifest-v1" <<EOF
+          version=1
+          contract=fetanagent-staging-owner-session-recovery
+          release_sha=$GITHUB_SHA
+          staging_project_ref=$STAGING_PROJECT_REF
+          staging_droplet_id=$STAGING_DROPLET_ID
+          owner_database_url_sha256=$secret_sha
+          provider_action_enabled=false
+          transfer_enabled=false
+          amount_entry_enabled=false
+          money_moved=false
+          EOF
+          chmod 0600 "$bundle/manifest-v1"
+
+          connection="$RUNNER_TEMP/ssh"
+          install -d -m 0700 "$connection"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$connection/key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$connection/known-hosts"
+          chmod 0600 "$connection/key" "$connection/known-hosts"
+          ssh-keygen -F "$STAGING_VM_HOST" -f "$connection/known-hosts" >/dev/null
+          remote="fetanagent-admin@$STAGING_VM_HOST"
+          remote_bundle="/tmp/fetanagent-owner-session-recovery-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          [[ "$remote_bundle" =~ ^/tmp/fetanagent-owner-session-recovery-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          ssh_opts=(-F /dev/null -i "$connection/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$connection/known-hosts")
+          ssh "${ssh_opts[@]}" "$remote" "test ! -e '$remote_bundle' && install -d -m 0700 '$remote_bundle'"
+          scp "${ssh_opts[@]}" "$bundle/owner-database-url" "$bundle/manifest-v1" "$remote:$remote_bundle/"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "chmod 0600 '$remote_bundle/owner-database-url' '$remote_bundle/manifest-v1'"
+          remote_sha_line="$(ssh "${ssh_opts[@]}" "$remote" \
+            "sha256sum '$remote_bundle/owner-database-url'")"
+          [[ "${remote_sha_line%% *}" == "$secret_sha" ]]
+          {
+            echo "remote_bundle=$remote_bundle"
+            echo "owner_database_url_sha256=$secret_sha"
+            echo 'provider_action_enabled=false'
+            echo 'transfer_enabled=false'
+            echo 'money_moved=false'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

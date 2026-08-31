@@ -1709,6 +1709,7 @@ export function createKemerBetRecaptchaCeremony(input: {
     url: URL,
     page: Page,
     requestFrame: Frame | undefined,
+    expectedFrame: 'anchor' | 'main',
     expectedPath: string,
     expectedResourceType: 'fetch' | 'xhr',
     expectedContentType: string | undefined,
@@ -1720,7 +1721,9 @@ export function createKemerBetRecaptchaCeremony(input: {
     if (
       step === 'complete' ||
       !siteKey ||
-      !exactAnchorFrame(requestFrame, page) ||
+      !(expectedFrame === 'anchor'
+        ? exactAnchorFrame(requestFrame, page)
+        : exactMainFrame(requestFrame, page)) ||
       request.method() !== 'POST' ||
       request.isNavigationRequest() ||
       request.redirectedFrom() !== null ||
@@ -2045,6 +2048,7 @@ export function createKemerBetRecaptchaCeremony(input: {
           url,
           candidate.page,
           candidate.requestFrame,
+          'anchor',
           '/recaptcha/api2/reload',
           'xhr',
           'application/x-protobuffer',
@@ -2069,6 +2073,7 @@ export function createKemerBetRecaptchaCeremony(input: {
           url,
           candidate.page,
           candidate.requestFrame,
+          'main',
           '/recaptcha/api2/clr',
           'fetch',
           undefined,
@@ -2093,6 +2098,7 @@ export function createKemerBetRecaptchaCeremony(input: {
           url,
           candidate.page,
           candidate.requestFrame,
+          'anchor',
           '/recaptcha/api2/bcn',
           'xhr',
           'application/x-protobuf',

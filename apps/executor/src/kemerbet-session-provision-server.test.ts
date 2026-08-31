@@ -598,7 +598,7 @@ function exactTestRecaptchaRoutes(
     }),
     testRecaptchaRoute({
       bodyBytes: 2_107,
-      frame: frames.anchorFrame,
+      frame: frames.mainFrame,
       method: 'POST',
       resourceType: 'fetch',
       url: `https://www.google.com/recaptcha/api2/clr?k=${TEST_RECAPTCHA_SITE_KEY}`,
@@ -5185,8 +5185,8 @@ describe('private KemerBet session provision server', () => {
         }),
     })),
     {
-      name: 'main-frame dynamic POST',
-      replaceAt: 7,
+      name: 'main-frame reload',
+      replaceAt: 8,
       replacement: (frames: ReturnType<typeof testRecaptchaFrames>) =>
         testRecaptchaRoute({
           bodyBytes: 10_892,
@@ -5198,8 +5198,57 @@ describe('private KemerBet session provision server', () => {
         }),
     },
     {
+      name: 'anchor-frame clr',
+      replaceAt: 9,
+      replacement: (frames: ReturnType<typeof testRecaptchaFrames>) =>
+        testRecaptchaRoute({
+          bodyBytes: 2_107,
+          frame: frames.anchorFrame,
+          method: 'POST',
+          resourceType: 'fetch',
+          url: `https://www.google.com/recaptcha/api2/clr?k=${TEST_RECAPTCHA_SITE_KEY}`,
+        }),
+    },
+    {
+      name: 'unavailable-frame clr',
+      replaceAt: 9,
+      replacement: () =>
+        testRecaptchaRoute({
+          bodyBytes: 2_107,
+          frameUnavailable: true,
+          method: 'POST',
+          resourceType: 'fetch',
+          url: `https://www.google.com/recaptcha/api2/clr?k=${TEST_RECAPTCHA_SITE_KEY}`,
+        }),
+    },
+    {
+      name: 'foreign-main-frame clr',
+      replaceAt: 9,
+      replacement: () =>
+        testRecaptchaRoute({
+          bodyBytes: 2_107,
+          frame: testRecaptchaFrames().mainFrame,
+          method: 'POST',
+          resourceType: 'fetch',
+          url: `https://www.google.com/recaptcha/api2/clr?k=${TEST_RECAPTCHA_SITE_KEY}`,
+        }),
+    },
+    {
+      name: 'main-frame bcn',
+      replaceAt: 10,
+      replacement: (frames: ReturnType<typeof testRecaptchaFrames>) =>
+        testRecaptchaRoute({
+          bodyBytes: 7_949,
+          contentType: 'application/x-protobuf',
+          frame: frames.mainFrame,
+          method: 'POST',
+          resourceType: 'xhr',
+          url: `https://www.google.com/recaptcha/api2/bcn?k=${TEST_RECAPTCHA_SITE_KEY}`,
+        }),
+    },
+    {
       name: 'duplicate dynamic key',
-      replaceAt: 7,
+      replaceAt: 8,
       replacement: (frames: ReturnType<typeof testRecaptchaFrames>) =>
         testRecaptchaRoute({
           bodyBytes: 10_892,
@@ -5247,12 +5296,12 @@ describe('private KemerBet session provision server', () => {
         candidate: (frames) =>
           testRecaptchaRoute({
             bodyBytes: 2_107,
-            frame: frames.anchorFrame,
+            frame: frames.mainFrame,
             method: 'POST',
             resourceType: 'fetch',
             url: `https://www.google.com/recaptcha/api2/clr?k=${TEST_RECAPTCHA_SITE_KEY}`,
           }),
-        prefix: 7,
+        prefix: 8,
       },
       {
         candidate: (frames) =>
@@ -5264,7 +5313,7 @@ describe('private KemerBet session provision server', () => {
             resourceType: 'xhr',
             url: `https://www.google.com/recaptcha/api2/reload?k=${TEST_RECAPTCHA_SITE_KEY}`,
           }),
-        prefix: 7,
+        prefix: 8,
       },
       {
         candidate: (frames) => exactTestRecaptchaRoutes(frames)[0]!,

@@ -1173,7 +1173,7 @@ describe('private KemerBet session provision server', () => {
         redirectedFrom: () => null,
         resourceType: () => 'image',
         url: () =>
-          'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+          'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/logo-sign-DirsW9WY.svg',
       }),
     } as unknown as Route;
     let reportRecaptchaStage:
@@ -3138,7 +3138,7 @@ describe('private KemerBet session provision server', () => {
           redirectedFrom: () => null,
           resourceType: () => 'image',
           url: () =>
-            'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+            'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/logo-sign-DirsW9WY.svg',
         }),
       } as unknown as Route;
 
@@ -5400,25 +5400,25 @@ describe('private KemerBet session provision server', () => {
     } as const;
     for (const [requestUrl, resourceType] of [
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-Bb0iEF9d.js',
         'script',
       ],
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BnOqIDsD.css',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-CzsfyLxR.css',
         'stylesheet',
       ],
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/_ltrOffset-C2RQMwco.css',
         'stylesheet',
       ],
-      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/ltr-v1RhStcA.js', 'script'],
-      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/ltr-v3JyGz8d.js', 'script'],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/ltr-DYDLRvnG.js', 'script'],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/ltr-Dbx7HiAx.js', 'script'],
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-CPiUBAbk.js',
         'script',
       ],
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-6dvVbeUF.js',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-CQOv3eGS.js',
         'script',
       ],
       ['https://agt-cdn.cdn-digi.com/prd/system/translations/backoffice_en.json', 'fetch'],
@@ -5428,12 +5428,28 @@ describe('private KemerBet session provision server', () => {
 
     for (const [requestUrl, resourceType] of [
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/auth-bg-Dn8uzDgY.svg',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/auth-bg-Dn8uzDgY.svg',
         'image',
       ],
-      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg', 'image'],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/en-DC_46aZL.svg', 'image'],
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/logo-sign-DirsW9WY.svg',
+        'image',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-CAPnnhhN.ttf?squmb1',
+        'font',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-Nwt_l_Rk.eot?squmb1',
+        'font',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-B4fQAYPi.woff?squmb1',
+        'font',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-BdqDhh2R.svg?squmb1',
         'image',
       ],
       ['https://agentsystem.admindigi.com/src/favicon.svg', 'other'],
@@ -5458,14 +5474,31 @@ describe('private KemerBet session provision server', () => {
         'font',
       ],
       [
-        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg?changed=1',
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/en-DC_46aZL.svg?changed=1',
         'image',
       ],
-      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'image'],
+      ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-Bb0iEF9d.js', 'image'],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/index-BUEO7OSf.js',
+        'script',
+      ],
+      [
+        'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-DpF7T6QK.js',
+        'script',
+      ],
       ['https://agentsystem.admindigi.comhttps//agentsystem.admindigi.com/unreviewed', 'script'],
     ] as const) {
       expect(classifyKemerBetSessionRequest({ ...base, requestUrl, resourceType })).toBe('forbid');
     }
+    expect(
+      classifyKemerBetSessionRequest({
+        ...base,
+        redirectedFrom: true,
+        requestUrl:
+          'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/index-Bb0iEF9d.js',
+        resourceType: 'script',
+      }),
+    ).toBe('forbid');
     expect(
       classifyKemerBetSessionRequest({
         ...base,

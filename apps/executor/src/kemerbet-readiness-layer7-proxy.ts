@@ -135,13 +135,13 @@ export const KEMERBET_READINESS_LAYER7_TIMEOUT_CONTRACT = Object.freeze({
 } as const);
 
 export const KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS = Object.freeze([
-  '/prd/agt-admin-client/v84/index-BUEO7OSf.js',
-  '/prd/agt-admin-client/v84/index-BnOqIDsD.css',
-  '/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css',
-  '/prd/agt-admin-client/v84/ltr-v1RhStcA.js',
-  '/prd/agt-admin-client/v84/ltr-v3JyGz8d.js',
-  '/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js',
-  '/prd/agt-admin-client/v84/index-6dvVbeUF.js',
+  '/prd/agt-admin-client/v85/index-Bb0iEF9d.js',
+  '/prd/agt-admin-client/v85/index-CzsfyLxR.css',
+  '/prd/agt-admin-client/v85/_ltrOffset-C2RQMwco.css',
+  '/prd/agt-admin-client/v85/ltr-DYDLRvnG.js',
+  '/prd/agt-admin-client/v85/ltr-Dbx7HiAx.js',
+  '/prd/agt-admin-client/v85/index-CPiUBAbk.js',
+  '/prd/agt-admin-client/v85/index-CQOv3eGS.js',
 ] as const);
 
 export const KEMERBET_READINESS_LAYER7_BOOTSTRAP_PREFETCH_CONTRACT = Object.freeze({

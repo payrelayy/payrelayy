@@ -119,7 +119,7 @@ const API_ORIGIN = 'https://admin-api.agt-digi.com';
 const DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
 const LOGIN_PATH = '/Account/Login';
 const REFRESH_TOKEN_PATH = '/Account/RefreshToken';
-// SHA-256 of the public reCAPTCHA site key embedded in the independently pinned KemerBet v84
+// SHA-256 of the public reCAPTCHA site key embedded in the independently pinned KemerBet v85
 // bundle. Comparing its digest avoids duplicating the key in source or diagnostics while still
 // binding the complete one-use reCAPTCHA ceremony to the reviewed KemerBet integration.
 const KEMERBET_RECAPTCHA_SITE_KEY_SHA256 =
@@ -188,13 +188,13 @@ const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
 const KEMERBET_AGENT_WEB_ORIGIN = 'https://agentsystem.admindigi.com';
 const KEMERBET_AGENT_BOOTSTRAP_ORIGIN = 'https://agt-client-akm.agent-digi.com';
 const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, string>([
-  ['/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'script'],
-  ['/prd/agt-admin-client/v84/index-BnOqIDsD.css', 'stylesheet'],
-  ['/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css', 'stylesheet'],
-  ['/prd/agt-admin-client/v84/ltr-v1RhStcA.js', 'script'],
-  ['/prd/agt-admin-client/v84/ltr-v3JyGz8d.js', 'script'],
-  ['/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js', 'script'],
-  ['/prd/agt-admin-client/v84/index-6dvVbeUF.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-Bb0iEF9d.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-CzsfyLxR.css', 'stylesheet'],
+  ['/prd/agt-admin-client/v85/_ltrOffset-C2RQMwco.css', 'stylesheet'],
+  ['/prd/agt-admin-client/v85/ltr-DYDLRvnG.js', 'script'],
+  ['/prd/agt-admin-client/v85/ltr-Dbx7HiAx.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-CPiUBAbk.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-CQOv3eGS.js', 'script'],
 ]);
 const KEMERBET_ABORTABLE_STATIC_ASSETS = new Map<string, string>([
   [KEMERBET_RECAPTCHA_OPTIONAL_FONT_URL, 'font'],
@@ -202,27 +202,27 @@ const KEMERBET_ABORTABLE_STATIC_ASSETS = new Map<string, string>([
     'https://agt-cdn.cdn-digi.com/prd/companies/2093/projects/39803/logo_24e4a06149154c9a956062027baa2fed.png',
     'image',
   ],
-  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/auth-bg-Dn8uzDgY.svg', 'image'],
+  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/auth-bg-Dn8uzDgY.svg', 'image'],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-BzeA2iFa.ttf?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-CAPnnhhN.ttf?squmb1',
     'font',
   ],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CIUf9UuY.eot?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-Nwt_l_Rk.eot?squmb1',
     'font',
   ],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CTmSmUzv.woff?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-B4fQAYPi.woff?squmb1',
     'font',
   ],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-DYzGJZDb.svg?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-BdqDhh2R.svg?squmb1',
     'image',
   ],
   ['https://agentsystem.admindigi.com/src/favicon.svg', 'other'],
-  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/en-DC_46aZL.svg', 'image'],
+  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/en-DC_46aZL.svg', 'image'],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/logo-sign-DirsW9WY.svg',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/logo-sign-DirsW9WY.svg',
     'image',
   ],
   [
@@ -2275,6 +2275,7 @@ export function classifyKemerBetSessionRequest(input: {
   if (input.isNavigationRequest) return 'forbid';
   if (
     input.method === 'GET' &&
+    input.redirectedFrom !== true &&
     url.origin === KEMERBET_AGENT_BOOTSTRAP_ORIGIN &&
     url.search === '' &&
     KEMERBET_AGENT_BOOTSTRAP_ASSETS.get(url.pathname) === input.resourceType

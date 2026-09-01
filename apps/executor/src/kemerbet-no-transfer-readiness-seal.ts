@@ -78,34 +78,34 @@ const KEMERBET_SERVICE_WORKER_ORIGINS = Object.freeze([
 const CHROMIUM_SPKI_SHA256_PATTERN = /^[A-Za-z0-9+/]{43}=$/u;
 const KEMERBET_RESTORED_PAGE_TIMEOUT_MS = 10_000;
 const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, 'script' | 'stylesheet'>([
-  ['/prd/agt-admin-client/v84/index-BUEO7OSf.js', 'script'],
-  ['/prd/agt-admin-client/v84/index-BnOqIDsD.css', 'stylesheet'],
-  ['/prd/agt-admin-client/v84/_ltrOffset-C2RQMwco.css', 'stylesheet'],
-  ['/prd/agt-admin-client/v84/ltr-v1RhStcA.js', 'script'],
-  ['/prd/agt-admin-client/v84/ltr-v3JyGz8d.js', 'script'],
-  ['/prd/agt-admin-client/v84/index-Bi1Y1r_Z.js', 'script'],
-  ['/prd/agt-admin-client/v84/index-6dvVbeUF.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-Bb0iEF9d.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-CzsfyLxR.css', 'stylesheet'],
+  ['/prd/agt-admin-client/v85/_ltrOffset-C2RQMwco.css', 'stylesheet'],
+  ['/prd/agt-admin-client/v85/ltr-DYDLRvnG.js', 'script'],
+  ['/prd/agt-admin-client/v85/ltr-Dbx7HiAx.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-CPiUBAbk.js', 'script'],
+  ['/prd/agt-admin-client/v85/index-CQOv3eGS.js', 'script'],
 ]);
 const KEMERBET_OPTIONAL_BOOTSTRAP_ASSETS = new Map<string, 'font' | 'image'>([
   [
     'https://agt-cdn.cdn-digi.com/prd/companies/2093/projects/39803/logo_24e4a06149154c9a956062027baa2fed.png',
     'image',
   ],
-  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/auth-bg-Dn8uzDgY.svg', 'image'],
+  ['https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/auth-bg-Dn8uzDgY.svg', 'image'],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-BzeA2iFa.ttf?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-CAPnnhhN.ttf?squmb1',
     'font',
   ],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CIUf9UuY.eot?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-Nwt_l_Rk.eot?squmb1',
     'font',
   ],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-CTmSmUzv.woff?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-B4fQAYPi.woff?squmb1',
     'font',
   ],
   [
-    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v84/icomoon-DYzGJZDb.svg?squmb1',
+    'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-BdqDhh2R.svg?squmb1',
     'image',
   ],
 ]);
@@ -739,11 +739,13 @@ function exactPlayerLookupTransportRequest(input: {
 
 function exactKemerBetBootstrapAsset(input: {
   readonly method: string;
+  readonly redirectedFrom?: boolean | undefined;
   readonly resourceType: string | undefined;
   readonly url: URL;
 }): boolean {
   if (
     input.method !== 'GET' ||
+    input.redirectedFrom === true ||
     input.url.origin !== KEMERBET_AGENT_BOOTSTRAP_ORIGIN ||
     input.url.search !== ''
   ) {
@@ -880,6 +882,7 @@ export function classifyKemerBetReadinessSealRequest(input: {
   if (
     exactKemerBetBootstrapAsset({
       method: input.method,
+      redirectedFrom: input.redirectedFrom,
       resourceType: input.resourceType,
       url,
     })

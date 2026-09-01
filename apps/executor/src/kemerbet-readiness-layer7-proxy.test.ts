@@ -291,7 +291,7 @@ describe('classifyKemerBetReadinessLayer7Request', () => {
     expect(classify({ method: 'POST' })).toEqual({ decision: 'reject' });
   });
 
-  it('permits exactly all seven reviewed v84 bootstrap assets without query strings', () => {
+  it('permits exactly all seven reviewed v85 bootstrap assets without query strings', () => {
     expect(KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS).toHaveLength(7);
     for (const path of KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS) {
       expect(
@@ -318,10 +318,18 @@ describe('classifyKemerBetReadinessLayer7Request', () => {
     expect(
       classify({
         headers: { host: ASSET_HOST },
-        rawTarget: '/prd/agt-admin-client/v84/unreviewed.js',
+        rawTarget: '/prd/agt-admin-client/v85/unreviewed.js',
         sniServername: ASSET_HOST,
       }),
     ).toEqual({ decision: 'reject' });
+    for (const rawTarget of [
+      '/prd/agt-admin-client/v84/index-BUEO7OSf.js',
+      '/prd/agt-admin-client/v85/index-DpF7T6QK.js',
+    ]) {
+      expect(
+        classify({ headers: { host: ASSET_HOST }, rawTarget, sniServername: ASSET_HOST }),
+      ).toEqual({ decision: 'reject' });
+    }
   });
 
   it('admits POST only for the exact bounded startup refresh route and canonical boundary headers', () => {

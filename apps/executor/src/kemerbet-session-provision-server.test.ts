@@ -25,6 +25,7 @@ import {
 } from './kemerbet-session-provision-server.js';
 
 const LOGIN_PAGE = 'https://agentsystem.admindigi.com/login?et=1';
+const POST_LOGIN_ROOT_PAGE = 'https://agentsystem.admindigi.com/';
 const AGENTS_PAGE = 'https://agentsystem.admindigi.com/agents';
 const REQUEST_ID = '11111111-1111-4111-8111-111111111111';
 const ACCOUNT_ID = '22222222-2222-4222-8222-222222222222';
@@ -671,9 +672,30 @@ async function dispatchTestRecaptchaRoute(
   });
 }
 
+function completeTestPostLoginTransition(
+  ceremony: ReturnType<typeof createTestRecaptchaCeremony>,
+  frames: ReturnType<typeof testRecaptchaFrames>,
+  readOrder: readonly ('account_info' | 'available_published')[] = [
+    'account_info',
+    'available_published',
+  ],
+): void {
+  expect(ceremony.consumePostLoginRequestPermit(LOGIN_PAGE, 'login_reload_navigation')).toBe(true);
+  expect(ceremony.observeMainFrameCommit(LOGIN_PAGE)).toBe('post_login_reload');
+  frames.navigate(POST_LOGIN_ROOT_PAGE);
+  expect(ceremony.observeMainFrameCommit(POST_LOGIN_ROOT_PAGE)).toBe('post_login_root');
+  for (const permit of readOrder) {
+    expect(ceremony.consumePostLoginRequestPermit(POST_LOGIN_ROOT_PAGE, permit)).toBe(true);
+  }
+  frames.navigate(AGENTS_PAGE);
+  expect(ceremony.observeMainFrameCommit(AGENTS_PAGE)).toBe('agents');
+}
+
 function stubProvisionRecaptchaCeremony(
   input: {
+    readonly classifyCommittedPage?: KemerBetRecaptchaCeremony['classifyCommittedPage'];
     readonly consumePermit?: boolean;
+    readonly consumePostLoginPermit?: KemerBetRecaptchaCeremony['consumePostLoginRequestPermit'];
     readonly handle?: 'handled' | 'not_recaptcha';
     readonly onConsume?: () => void;
     readonly onHandle?: () => void;
@@ -681,15 +703,26 @@ function stubProvisionRecaptchaCeremony(
   } = {},
 ): {
   readonly ceremony: KemerBetRecaptchaCeremony;
+  readonly classifyCommittedPage: ReturnType<typeof vi.fn>;
   readonly consumeKemerBetLoginPermit: ReturnType<typeof vi.fn>;
+  readonly consumePostLoginRequestPermit: ReturnType<typeof vi.fn>;
   readonly handleRoute: ReturnType<typeof vi.fn>;
   readonly observeMainFrameCommit: ReturnType<typeof vi.fn>;
   readonly retireForReauthentication: ReturnType<typeof vi.fn>;
 } {
+  const classifyCommittedPage = vi.fn(
+    input.classifyCommittedPage ??
+      ((pageUrl: string) => {
+        if (pageUrl === LOGIN_PAGE) return 'login';
+        if (pageUrl === AGENTS_PAGE) return 'agents';
+        return undefined;
+      }),
+  );
   const consumeKemerBetLoginPermit = vi.fn(async () => {
     input.onConsume?.();
     return input.consumePermit ?? true;
   });
+  const consumePostLoginRequestPermit = vi.fn(input.consumePostLoginPermit ?? (() => false));
   const handleRoute = vi.fn(async () => {
     input.onHandle?.();
     return input.handle ?? ('handled' as const);
@@ -698,12 +731,16 @@ function stubProvisionRecaptchaCeremony(
   const retireForReauthentication = vi.fn(() => input.retire ?? true);
   return {
     ceremony: {
+      classifyCommittedPage,
       consumeKemerBetLoginPermit,
+      consumePostLoginRequestPermit,
       handleRoute,
       observeMainFrameCommit,
       retireForReauthentication,
     },
+    classifyCommittedPage,
     consumeKemerBetLoginPermit,
+    consumePostLoginRequestPermit,
     handleRoute,
     observeMainFrameCommit,
     retireForReauthentication,
@@ -1954,15 +1991,17 @@ describe('private KemerBet session provision server', () => {
     }
   });
 
-  it('keeps the exact credential route local until the real ceremony accepts exact clr', async () => {
+  it('locks input and withholds the preview before releasing the exact login request', async () => {
+    const ceremony = stubProvisionRecaptchaCeremony({
+      consumePermit: true,
+      handle: 'not_recaptcha',
+    });
     const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
-    const frames = testRecaptchaFramesForPage(browser.page);
-    const ceremony = createTestRecaptchaCeremony();
     const provision = createKemerBetSessionProvisionServer({
       assertBrowserExecutable: async () => undefined,
       clearTimer: vi.fn() as unknown as typeof clearTimeout,
       closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
-      createRecaptchaCeremony: () => ceremony,
+      createRecaptchaCeremony: () => ceremony.ceremony,
       effectiveUserId: 10_001,
       environment: SAFE_ENVIRONMENT,
       launchPersistentContext: async () => browser.context,
@@ -1984,6 +2023,102 @@ describe('private KemerBet session provision server', () => {
         ).status,
       ).toBe(202);
       await waitForSessionPhase(origin, 'login_required');
+      const displayedFrame = await fetch(sessionFrameUrl(origin, REQUEST_ID, 0), {
+        headers: { connection: 'close' },
+      });
+      expect(displayedFrame.status).toBe(200);
+      const displayedFrameSequence = Number(
+        displayedFrame.headers.get('x-fetanagent-frame-sequence'),
+      );
+      expect(displayedFrameSequence).toBeGreaterThan(0);
+
+      const loginRequest = testRecaptchaRoute({
+        contentType: 'application/json',
+        extraHeaders: { et: '1' },
+        frame: browser.page.mainFrame(),
+        method: 'POST',
+        postData: JSON.stringify({
+          password: 'never-sent-value',
+          token: 'never-forwarded-test-token',
+          userName: 'never-forwarded-test-user',
+        }),
+        resourceType: 'xhr',
+        url: 'https://admin-api.agt-digi.com/Account/Login',
+      });
+      await browser.dispatchRoute(loginRequest.route);
+      expect(loginRequest.continue).toHaveBeenCalledOnce();
+      expect(loginRequest.abort).not.toHaveBeenCalled();
+      expect(await sessionStatus(origin)).toMatchObject({
+        phase: 'authenticating',
+        signedIn: false,
+      });
+
+      const replayedInput = await fetch(`${origin}/v1/session/input`, {
+        method: 'POST',
+        headers: { connection: 'close', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          frameSequence: displayedFrameSequence,
+          kind: 'pointer',
+          platformAgentAccountId: ACCOUNT_ID,
+          requestId: SECOND_REQUEST_ID,
+          sessionGeneration: REQUEST_ID,
+          x: 10,
+          y: 10,
+        }),
+      });
+      expect(replayedInput.status).toBe(503);
+      expect(await replayedInput.json()).toEqual({ error: 'session_unavailable' });
+
+      const postReleaseFrame = await fetch(sessionFrameUrl(origin, REQUEST_ID, 0), {
+        headers: { connection: 'close' },
+      });
+      expect(postReleaseFrame.status).toBe(204);
+      expect(postReleaseFrame.headers.get('content-type')).toBeNull();
+      expect((await postReleaseFrame.arrayBuffer()).byteLength).toBe(0);
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('keeps credentials local through clr and admits the exact v85 post-login transition', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const frames = testRecaptchaFramesForPage(browser.page);
+    const ceremony = createTestRecaptchaCeremony();
+    const identityVerification = deferred<void>();
+    const verifyIdentity = vi.fn(() => identityVerification.promise);
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => ceremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      monotonicNow: () => 1_000,
+      now: () => new Date('2026-09-01T00:00:00.000Z'),
+      prepareAuthenticatedIdentityVerifier: async (accountId) => ({
+        accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
+        verify: verifyIdentity,
+      }),
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      await waitForSessionPhase(origin, 'login_required');
+      // Real Chromium commits the initial login document before its reCAPTCHA requests. The fake
+      // browser keeps navigation explicit so this test can bind the same immutable document.
+      browser.navigate(LOGIN_PAGE);
 
       const recaptchaRoutes = exactTestRecaptchaRoutes(frames);
       for (const candidate of recaptchaRoutes.slice(0, 9)) {
@@ -2020,6 +2155,61 @@ describe('private KemerBet session provision server', () => {
       expect(clr.continue.mock.invocationCallOrder[0]).toBeLessThan(
         loginRequest.continue.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
       );
+
+      const loginReload = testRecaptchaRoute({
+        frame: frames.mainFrame,
+        navigation: true,
+        resourceType: 'document',
+        url: LOGIN_PAGE,
+      });
+      await browser.dispatchRoute(loginReload.route);
+      expect(loginReload.continue).toHaveBeenCalledOnce();
+      expect(loginReload.abort).not.toHaveBeenCalled();
+      browser.navigate(LOGIN_PAGE);
+      await waitForSessionPhase(origin, 'authenticating');
+
+      // KemerBet v85 changes the canonical document to root without necessarily issuing another
+      // routed document request, then sends exactly two read-only bootstrap XHRs in either order.
+      browser.navigate(POST_LOGIN_ROOT_PAGE);
+      const rootHeaders = {
+        accept: 'application/json, text/plain, */*',
+        authorization: 'Bearer reviewed-authentication-token',
+        origin: 'https://agentsystem.admindigi.com',
+        referer: POST_LOGIN_ROOT_PAGE,
+      };
+      const availablePublished = testRecaptchaRoute({
+        extraHeaders: rootHeaders,
+        frame: frames.mainFrame,
+        resourceType: 'xhr',
+        url: 'https://admin-api.agt-digi.com/SystemLanguage/AvailablePublished',
+      });
+      const accountInfo = testRecaptchaRoute({
+        extraHeaders: rootHeaders,
+        frame: frames.mainFrame,
+        resourceType: 'xhr',
+        url: 'https://admin-api.agt-digi.com/Account/Info?languageCode=en',
+      });
+      // Deliberately reverse the observed order to prove concurrent XHR scheduling cannot make
+      // a valid sign-in intermittently fail.
+      await Promise.all([
+        browser.dispatchRoute(availablePublished.route),
+        browser.dispatchRoute(accountInfo.route),
+      ]);
+      expect(availablePublished.continue).toHaveBeenCalledOnce();
+      expect(accountInfo.continue).toHaveBeenCalledOnce();
+      expect(availablePublished.abort).not.toHaveBeenCalled();
+      expect(accountInfo.abort).not.toHaveBeenCalled();
+      expect(verifyIdentity).not.toHaveBeenCalled();
+
+      browser.navigate(AGENTS_PAGE);
+      await vi.waitFor(() => expect(verifyIdentity).toHaveBeenCalledOnce());
+      expect(await sessionStatus(origin)).toMatchObject({
+        phase: 'authenticating',
+        signedIn: false,
+      });
+      identityVerification.resolve();
+      await waitForSessionPhase(origin, 'authenticated');
+      expect(await sessionStatus(origin)).toMatchObject({ phase: 'authenticated', signedIn: true });
     } finally {
       await closeServer(provision.server);
     }
@@ -4738,33 +4928,34 @@ describe('private KemerBet session provision server', () => {
     expect(forbidden).not.toHaveBeenCalled();
   });
 
-  it('accepts the authenticated agents commit when optional post-login bcn is absent', async () => {
+  it('accepts the exact post-login DFA when optional bcn is absent', async () => {
     const frames = testRecaptchaFrames();
     const forbidden = vi.fn();
     const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
     const routes = exactTestRecaptchaRoutes(frames);
+    ceremony.observeMainFrameCommit(LOGIN_PAGE);
     for (const candidate of routes.slice(0, 10)) {
       await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
     }
 
     await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(true);
-    ceremony.observeMainFrameCommit(AGENTS_PAGE);
+    completeTestPostLoginTransition(ceremony, frames, ['available_published', 'account_info']);
 
     expect(forbidden).not.toHaveBeenCalled();
     expect(routes[10]?.continue).not.toHaveBeenCalled();
   });
 
-  it('admits one exact optional bcn tail racing after the authenticated agents commit', async () => {
+  it('admits one exact optional bcn tail racing after the post-login DFA', async () => {
     const frames = testRecaptchaFrames();
     const forbidden = vi.fn();
     const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
     const routes = exactTestRecaptchaRoutes(frames);
+    ceremony.observeMainFrameCommit(LOGIN_PAGE);
     for (const candidate of routes.slice(0, 10)) {
       await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
     }
     await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(true);
-    frames.navigate(AGENTS_PAGE);
-    ceremony.observeMainFrameCommit(AGENTS_PAGE);
+    completeTestPostLoginTransition(ceremony, frames);
 
     const bcn = routes[10];
     if (!bcn) throw new Error('bcn fixture missing');
@@ -5348,7 +5539,7 @@ describe('private KemerBet session provision server', () => {
       await dispatchTestRecaptchaRoute(completed, completedFrames.page, candidate);
     }
     await expect(completed.consumeKemerBetLoginPermit()).resolves.toBe(true);
-    completed.observeMainFrameCommit(AGENTS_PAGE);
+    completeTestPostLoginTransition(completed, completedFrames);
     expect(completedForbidden).not.toHaveBeenCalled();
   });
 

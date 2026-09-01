@@ -2542,8 +2542,130 @@ assert.match(
 );
 assert.match(
   privateSessionRecaptchaSource,
-  /ceremonyStarted = true;[\s\S]*?observeMainFrameCommit: \(pageUrl: string\) => \{[\s\S]*?!ceremonyStarted &&[\s\S]*?step === 'api'[\s\S]*?pageState === 'login' \|\| pageState === 'agents'[\s\S]*?step === 'complete' && pageState === 'agents'[\s\S]*?retired = true;[\s\S]*?poison\(\);/u,
-  'a ceremony may start on one initial document only and must retire after its sole completed agents transition',
+  /let boundLoginDocumentUrl: string \| undefined;[\s\S]*?postLoginCommitState: 'none' \| 'reload' \| 'root' \| 'agents'[\s\S]*?loginReloadNavigationPermitConsumed = false;[\s\S]*?rootNavigationPermitConsumed = false;[\s\S]*?agentsNavigationPermitConsumed = false;[\s\S]*?accountInfoPermitConsumed = false;[\s\S]*?availablePublishedPermitConsumed = false;/u,
+  'the completed login proof must own an explicit one-use same-login, root, bootstrap-read, and agents transition state',
+);
+const recaptchaHandleStart = privateSessionRecaptchaSource.indexOf(
+  'const handle = async (candidate: {',
+);
+const recaptchaHandleEnd = privateSessionRecaptchaSource.indexOf(
+  'const enqueue = <T>',
+  recaptchaHandleStart,
+);
+assert.ok(recaptchaHandleStart >= 0 && recaptchaHandleEnd > recaptchaHandleStart);
+const recaptchaHandleSource = privateSessionRecaptchaSource.slice(
+  recaptchaHandleStart,
+  recaptchaHandleEnd,
+);
+assertOrderedFragments(
+  recaptchaHandleSource,
+  [
+    "if (step === 'api') {",
+    '!exactRecaptchaSiteKey(nextSiteKey, expectedSiteKeySha256)',
+    'chromiumUserAgent = assetFetchUserAgent;',
+    'ceremonyStarted = true;',
+    'await fulfillPinnedAsset(candidate.route, url.href, assetPins.api, assetFetchUserAgent)',
+    'siteKey = nextSiteKey;',
+    "step = 'runtime_main';",
+  ],
+  'the exact pinned API step must irreversibly mark the one-document ceremony started before releasing its asset',
+);
+assert.equal(
+  countMatches(privateSessionRecaptchaSource, /ceremonyStarted = true;/gu),
+  1,
+  'the reCAPTCHA ceremony may be marked started at exactly one reviewed API transition',
+);
+const postLoginPermitImplementationMarker = '    consumePostLoginRequestPermit: (';
+assert.equal(
+  countMatches(privateSessionRecaptchaSource, /^    consumePostLoginRequestPermit: \($/gmu),
+  1,
+  'the post-login permit implementation boundary must be unique',
+);
+const postLoginPermitStart = privateSessionRecaptchaSource.indexOf(
+  postLoginPermitImplementationMarker,
+);
+const postLoginPermitEnd = privateSessionRecaptchaSource.indexOf(
+  'handleRoute: (candidate:',
+  postLoginPermitStart,
+);
+assert.ok(postLoginPermitStart >= 0 && postLoginPermitEnd > postLoginPermitStart);
+const postLoginPermitSource = privateSessionRecaptchaSource.slice(
+  postLoginPermitStart,
+  postLoginPermitEnd,
+);
+assertOrderedFragments(
+  postLoginPermitSource,
+  [
+    'if (poisoned || retired || !beforeDeadline()) return false;',
+    "if (permit === 'login_reload_navigation') {",
+    "postLoginCommitState !== 'none'",
+    "step !== 'complete'",
+    '!loginPermitConsumed',
+    'pageUrl !== boundLoginDocumentUrl',
+    'loginReloadNavigationPermitConsumed',
+    'loginReloadNavigationPermitConsumed = true;',
+    "if (permit === 'root_navigation') {",
+    "postLoginCommitState !== 'reload'",
+    'pageUrl !== boundLoginDocumentUrl',
+    'rootNavigationPermitConsumed',
+    'rootNavigationPermitConsumed = true;',
+    "if (permit === 'agents_navigation') {",
+    "postLoginCommitState !== 'root'",
+    'pageUrl !== KEMERBET_AGENT_POST_LOGIN_ROOT_URL',
+    '!accountInfoPermitConsumed',
+    '!availablePublishedPermitConsumed',
+    'agentsNavigationPermitConsumed',
+    'agentsNavigationPermitConsumed = true;',
+    "postLoginCommitState !== 'root'",
+    'pageUrl !== KEMERBET_AGENT_POST_LOGIN_ROOT_URL',
+    "permit === 'account_info' && accountInfoPermitConsumed",
+    "permit === 'available_published' && availablePublishedPermitConsumed",
+    "if (permit === 'account_info') accountInfoPermitConsumed = true;",
+    'else availablePublishedPermitConsumed = true;',
+  ],
+  'every post-login request permit must be deadline-bound, document-bound, ordered, and consumable only once',
+);
+const postLoginCommitStart = privateSessionRecaptchaSource.indexOf(
+  'observeMainFrameCommit: (pageUrl: string) => {',
+);
+const postLoginCommitEnd = privateSessionRecaptchaSource.indexOf(
+  'retireForReauthentication: () => {',
+  postLoginCommitStart,
+);
+assert.ok(postLoginCommitStart >= 0 && postLoginCommitEnd > postLoginCommitStart);
+const postLoginCommitSource = privateSessionRecaptchaSource.slice(
+  postLoginCommitStart,
+  postLoginCommitEnd,
+);
+assertOrderedFragments(
+  postLoginCommitSource,
+  [
+    "if (!ceremonyStarted && step === 'api' && siteKey === undefined && !poisoned) {",
+    "if (pageState === 'agents') return 'agents';",
+    "if (pageState === 'login') {",
+    'if (boundLoginDocumentUrl === undefined) boundLoginDocumentUrl = pageUrl;',
+    "if (boundLoginDocumentUrl === pageUrl) return 'login';",
+    "if (step === 'complete' && loginPermitConsumed && !poisoned && !retired) {",
+    "pageState === 'agents'",
+    "postLoginCommitState === 'root'",
+    'accountInfoPermitConsumed',
+    'availablePublishedPermitConsumed',
+    "postLoginCommitState = 'agents';",
+    'retired = true;',
+    "return 'agents';",
+    "postLoginCommitState === 'none'",
+    'boundLoginDocumentUrl !== undefined',
+    'pageUrl === boundLoginDocumentUrl',
+    'loginReloadNavigationPermitConsumed',
+    "postLoginCommitState = 'reload';",
+    "return 'post_login_reload';",
+    "postLoginCommitState === 'reload' && pageUrl === KEMERBET_AGENT_POST_LOGIN_ROOT_URL",
+    "postLoginCommitState = 'root';",
+    "return 'post_login_root';",
+    'poison();',
+    'return undefined;',
+  ],
+  'main-frame commits must bind the initial document and follow the exact same-login to root to fully bootstrapped agents DFA or poison the generation',
 );
 assert.match(
   privateSessionRecaptchaSource,
@@ -2585,15 +2707,221 @@ assert.match(
   /const exactGlobalRefreshHeaders =[\s\S]*?headers\.grant_type === undefined && headers\.authorization === undefined;[\s\S]*?const exactNewServiceRefreshHeaders =[\s\S]*?headers\.grant_type === 'refresh_token'[\s\S]*?exactGlobalRefreshHeaders \|\| exactNewServiceRefreshHeaders/u,
   'only the two statically reachable pinned-v85 refresh header variants may pass',
 );
-assert.match(
-  privateSessionProvisionServerSource,
-  /phase = 'authenticating';[\s\S]*?authenticatedIdentityVerifier\.verify\(observedPage\)[\s\S]*?acceptAuthenticatedIdentityProof/u,
-  'an agents URL must expose a non-authenticated verification phase until exact identity proof succeeds',
+const exactPostLoginRootReadStart = privateSessionProvisionServerSource.indexOf(
+  'function exactPostLoginRootRead',
+);
+const exactPostLoginRootReadEnd = privateSessionProvisionServerSource.indexOf(
+  'function exactPostLoginNavigation',
+  exactPostLoginRootReadStart,
+);
+assert.ok(
+  exactPostLoginRootReadStart >= 0 && exactPostLoginRootReadEnd > exactPostLoginRootReadStart,
+);
+const exactPostLoginRootReadSource = privateSessionProvisionServerSource.slice(
+  exactPostLoginRootReadStart,
+  exactPostLoginRootReadEnd,
+);
+assertOrderedFragments(
+  exactPostLoginRootReadSource,
+  [
+    "input.method !== 'GET'",
+    'input.isNavigationRequest',
+    '!input.isMainFrame',
+    "input.resourceType !== 'xhr'",
+    'input.redirectedFrom === true',
+    'input.postData !== null',
+    'headers.origin !== KEMERBET_AGENT_WEB_ORIGIN',
+    'headers.referer !== KEMERBET_AGENT_POST_LOGIN_ROOT_URL',
+    "headers.accept !== 'application/json, text/plain, */*'",
+    "!/^Bearer [A-Za-z0-9._~+\\/-]{16,4096}={0,2}$/u.test(headers.authorization ?? '')",
+    "headers['content-type'] !== undefined",
+    'headers.et !== undefined',
+    "input.url.pathname === '/Account/Info'",
+    "exactAuthenticatedReadUrl({ pageState: 'agents', url: input.url })",
+    "return 'account_info';",
+    "input.url.pathname === '/SystemLanguage/AvailablePublished'",
+    'exactProviderUrl(input.url, API_ORIGIN, input.url.pathname)',
+    "return 'available_published';",
+    'return undefined;',
+  ],
+  'the transient root may release only the two exact observed read-only bootstrap XHR URL and header envelopes',
+);
+assert.equal(
+  countMatches(exactPostLoginRootReadSource, /return '(?:account_info|available_published)';/gu),
+  2,
+  'the post-login root matcher may issue exactly the two reviewed read-only permit kinds',
+);
+const exactPostLoginNavigationStart = exactPostLoginRootReadEnd;
+const exactPostLoginNavigationEnd = privateSessionProvisionServerSource.indexOf(
+  'function exactKemerBetChromiumUserAgent',
+  exactPostLoginNavigationStart,
+);
+assert.ok(exactPostLoginNavigationEnd > exactPostLoginNavigationStart);
+const exactPostLoginNavigationSource = privateSessionProvisionServerSource.slice(
+  exactPostLoginNavigationStart,
+  exactPostLoginNavigationEnd,
+);
+assertOrderedFragments(
+  exactPostLoginNavigationSource,
+  [
+    "input.method === 'GET'",
+    'input.isNavigationRequest',
+    'input.isMainFrame',
+    "input.resourceType === 'document'",
+    'input.redirectedFrom !== true',
+    'input.postData === null',
+    'input.url.href === input.expectedUrl',
+  ],
+  'each post-login DFA document transition must be one exact bodyless main-frame GET navigation',
 );
 assert.match(
   privateSessionProvisionServerSource,
-  /nextPage\.on\('framenavigated'[\s\S]*?phase !== 'stopping'[\s\S]*?phase !== 'faulted'[\s\S]*?recaptchaCeremony\.observeMainFrameCommit\(observedPage\.url\(\)\);[\s\S]*?identityVerificationEpoch \+= 1;[\s\S]*?if \(phase === 'authenticated'\) phase = 'authenticating';/u,
-  'every committed main-frame document must invalidate identity proofs and bind one-use reCAPTCHA to one document epoch',
+  /committedPageState === 'post_login_ready'[\s\S]*?exactPostLoginNavigation[\s\S]*?'login_reload_navigation'[\s\S]*?committedPageState === 'post_login_reload'[\s\S]*?KEMERBET_AGENT_POST_LOGIN_ROOT_URL[\s\S]*?'root_navigation'[\s\S]*?committedPageState === 'post_login_root'[\s\S]*?KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL[\s\S]*?'agents_navigation'[\s\S]*?exactPostLoginRootRead[\s\S]*?consumePostLoginRequestPermit\(pageUrl, permit\)/u,
+  'the route guard must map only exact reviewed navigation and root-read envelopes into the one-use DFA permits',
+);
+const guardedRouteStart = privateSessionProvisionServerSource.indexOf(
+  'async function guardedRoute(',
+);
+const guardedRouteEnd = privateSessionProvisionServerSource.indexOf(
+  'async function readJson(',
+  guardedRouteStart,
+);
+assert.ok(guardedRouteStart >= 0 && guardedRouteEnd > guardedRouteStart);
+const guardedRouteSource = privateSessionProvisionServerSource.slice(
+  guardedRouteStart,
+  guardedRouteEnd,
+);
+assertOrderedFragments(
+  guardedRouteSource,
+  [
+    'if (!beforeDeadline()) {',
+    'await abortForExpiredDeadline();',
+    'if (loginRequest) {',
+    'onKemerBetLoginReleased();',
+    "await route.abort('blockedbyclient');",
+    'return;',
+    'await route.continue();',
+  ],
+  'the sole credential request must synchronously invoke the input lock and fail closed if that lock fails before Chromium continues',
+);
+const loginReleaseLockStart = privateSessionProvisionServerSource.indexOf(
+  'const observeKemerBetLoginReleased = (): void => {',
+);
+const loginReleaseLockEnd = privateSessionProvisionServerSource.indexOf(
+  'const newRecaptchaCeremony = (',
+  loginReleaseLockStart,
+);
+assert.ok(loginReleaseLockStart >= 0 && loginReleaseLockEnd > loginReleaseLockStart);
+const loginReleaseLockSource = privateSessionProvisionServerSource.slice(
+  loginReleaseLockStart,
+  loginReleaseLockEnd,
+);
+assertOrderedFragments(
+  loginReleaseLockSource,
+  [
+    'sessionGeneration !== generation',
+    "phase !== 'login_required'",
+    "validPageUrl(observedPage.url()) !== 'login'",
+    'return unavailable();',
+    'identityVerificationEpoch += 1;',
+    "phase = 'authenticating';",
+    'frameImage = undefined;',
+    'frameCapturedAtMs = undefined;',
+  ],
+  'the credential-release callback must synchronously revoke the displayed login frame and enter a non-input phase',
+);
+const guardedRouteCallStart = privateSessionProvisionServerSource.indexOf(
+  "await observedContext.route('**/*', (route) =>",
+);
+const guardedRouteCallEnd = privateSessionProvisionServerSource.indexOf(
+  "await observedContext.routeWebSocket('**/*'",
+  guardedRouteCallStart,
+);
+assert.ok(guardedRouteCallStart >= 0 && guardedRouteCallEnd > guardedRouteCallStart);
+const guardedRouteCallSource = privateSessionProvisionServerSource.slice(
+  guardedRouteCallStart,
+  guardedRouteCallEnd,
+);
+assertOrderedFragments(
+  guardedRouteCallSource,
+  [
+    'guardedRoute(',
+    'route,',
+    'observedPage,',
+    'recaptchaCeremony,',
+    'beforeActiveSessionDeadline,',
+    'observeActiveSessionDeadlineExceeded,',
+    'observeForbiddenNetworkAttempt,',
+    'observeKemerBetLoginReleased,',
+    '(stage) => {',
+    'reportStartupStage(generation, stage);',
+  ],
+  'the sole context route must wire the concrete synchronous credential-release lock into the guarded request boundary',
+);
+const privateSessionInputLaneStart = privateSessionProvisionServerSource.indexOf(
+  'const input = async (candidate: SessionInput)',
+);
+const privateSessionInputLaneEnd = privateSessionProvisionServerSource.indexOf(
+  'const sealReadiness = async',
+  privateSessionInputLaneStart,
+);
+assert.ok(
+  privateSessionInputLaneStart >= 0 && privateSessionInputLaneEnd > privateSessionInputLaneStart,
+);
+const privateSessionInputLaneSource = privateSessionProvisionServerSource.slice(
+  privateSessionInputLaneStart,
+  privateSessionInputLaneEnd,
+);
+assertOrderedFragments(
+  privateSessionInputLaneSource,
+  [
+    'checkpointedForRecheck ||',
+    "phase !== 'login_required' ||",
+    'candidate.frameSequence !== frameSequence ||',
+    'frameImage === undefined ||',
+    "validPageUrl(page.url()) !== 'login'",
+    'return unavailable();',
+  ],
+  'credential input must remain available only for the displayed frame of an exact login-required document',
+);
+const beginIdentityVerificationStart = privateSessionProvisionServerSource.indexOf(
+  'const beginAuthenticatedIdentityVerification = (',
+);
+const beginIdentityVerificationEnd = privateSessionProvisionServerSource.indexOf(
+  'const updatePagePhase = (',
+  beginIdentityVerificationStart,
+);
+assert.ok(
+  beginIdentityVerificationStart >= 0 &&
+    beginIdentityVerificationEnd > beginIdentityVerificationStart,
+);
+const beginIdentityVerificationSource = privateSessionProvisionServerSource.slice(
+  beginIdentityVerificationStart,
+  beginIdentityVerificationEnd,
+);
+assertOrderedFragments(
+  beginIdentityVerificationSource,
+  [
+    "phase = 'authenticating';",
+    'frameImage = undefined;',
+    'const verificationEpoch = ++identityVerificationEpoch;',
+    'task = authenticatedIdentityVerifier.verify(observedPage);',
+    'identityVerificationPromise = task;',
+    'void task',
+    '.then(',
+    'serialized(async () => {',
+    'acceptAuthenticatedIdentityProof(',
+    'verificationEpoch,',
+    'verificationEpoch === identityVerificationEpoch',
+    "validPageUrl(observedPage.url()) === 'agents'",
+    'markFaulted(generation);',
+  ],
+  'an agents candidate must remain non-authenticated until its exact verifier promise succeeds, while rejection faults the current document epoch',
+);
+assert.equal(
+  countMatches(privateSessionProvisionServerSource, /phase = 'authenticated';/gu),
+  1,
+  'only the exact accepted identity-proof transition may mark a session authenticated',
 );
 const privateSessionFrameNavigationStart = privateSessionProvisionServerSource.indexOf(
   "nextPage.on('framenavigated'",
@@ -2609,6 +2937,29 @@ assert.ok(
 const privateSessionFrameNavigationSource = privateSessionProvisionServerSource.slice(
   privateSessionFrameNavigationStart,
   privateSessionFrameNavigationEnd,
+);
+assertOrderedFragments(
+  privateSessionFrameNavigationSource,
+  [
+    'const committedPageUrl = observedPage.url();',
+    'let ceremonyCommitState: KemerBetRecaptchaCommittedPageState | undefined;',
+    "phase !== 'stopping'",
+    "phase !== 'faulted'",
+    '!checkpointedForRecheck',
+    'ceremonyCommitState = recaptchaCeremony.observeMainFrameCommit(committedPageUrl);',
+    "ceremonyCommitState === 'post_login_reload'",
+    "ceremonyCommitState === 'post_login_root'",
+    "phase = 'authenticating';",
+    'frameImage = undefined;',
+    'identityVerificationEpoch += 1;',
+    "if (phase === 'authenticated') phase = 'authenticating';",
+    'frameImage = undefined;',
+    'frameCapturedAtMs = undefined;',
+    'updatePagePhase(generation, observedContext, observedPage, {',
+    'pageState: ceremonyCommitState,',
+    'pageUrl: committedPageUrl,',
+  ],
+  'every committed main-frame document must synchronously capture and lock its exact DFA epoch before serialized phase evaluation',
 );
 assertOrderedFragments(
   privateSessionFrameNavigationSource,
@@ -2638,10 +2989,16 @@ assertOrderedFragments(
     'reauthenticationDeadlineMonotonicMs,',
     'if (recaptchaCeremony.retireForReauthentication()) {',
     'recaptchaCeremony = replacement;',
+    'activeRecaptchaCeremony = replacement;',
+    'ceremonyCommitState = replacement.observeMainFrameCommit(committedPageUrl);',
     '} else {',
-    'recaptchaCeremony.observeMainFrameCommit(observedPage.url());',
+    "observeForbiddenNetworkAttempt('transport_guard');",
+    'ceremonyCommitState = recaptchaCeremony.observeMainFrameCommit(committedPageUrl);',
     'identityVerificationEpoch += 1;',
     "if (phase === 'authenticated') phase = 'authenticating';",
+    'updatePagePhase(generation, observedContext, observedPage, {',
+    'pageState: ceremonyCommitState,',
+    'pageUrl: committedPageUrl,',
   ],
   'authenticated-to-login reauthentication must synchronously swap a fresh one-document ceremony under both clocks without extending the original lease',
 );
@@ -2967,6 +3324,17 @@ const updatePagePhaseSource = privateSessionProvisionServerSource.slice(
 assertOrderedFragments(
   updatePagePhaseSource,
   [
+    "ceremonyPageState === 'post_login_ready'",
+    "ceremonyPageState === 'post_login_reload'",
+    "ceremonyPageState === 'post_login_root'",
+    "if (phase !== 'authenticating') identityVerificationEpoch += 1;",
+    "phase = 'authenticating';",
+    'frameImage = undefined;',
+    'frameCapturedAtMs = undefined;',
+    "return 'post_login_transition';",
+    'const state = validPageUrl(observedPageUrl);',
+    'if (!state) {',
+    'markFaulted(generation);',
     "if (state === 'agents' && phase !== 'authenticated') {",
     'beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);',
     "} else if (state === 'login' && phase !== 'login_required') {",
@@ -2975,7 +3343,7 @@ assertOrderedFragments(
     'armExpiryAt(',
     'authenticatedDeadline && authenticatedDeadline.getTime() < loginDeadline.getTime()',
   ],
-  'candidate URL must start identity proof, while later login transitions may only retain or shorten the current deadline',
+  'intermediate post-login commits must remain locked and non-faulted until the agents candidate starts identity proof, while later login transitions may only retain or shorten the current deadline',
 );
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /authenticatedDeadline \?\?= new Date/g),

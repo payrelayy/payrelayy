@@ -187,6 +187,8 @@ const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
   }),
 });
 const KEMERBET_AGENT_WEB_ORIGIN = 'https://agentsystem.admindigi.com';
+const KEMERBET_AGENT_POST_LOGIN_ROOT_URL = `${KEMERBET_AGENT_WEB_ORIGIN}/`;
+const KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL = `${KEMERBET_AGENT_WEB_ORIGIN}/agents`;
 const KEMERBET_AGENT_BOOTSTRAP_ORIGIN = 'https://agt-client-akm.agent-digi.com';
 const KEMERBET_AGENT_BOOTSTRAP_ASSETS = new Map<string, string>([
   ['/prd/agt-admin-client/v85/index-Bb0iEF9d.js', 'script'],
@@ -1301,6 +1303,69 @@ function exactAuthenticatedRead(input: {
   );
 }
 
+function exactPostLoginRootRead(input: {
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
+  readonly url: URL;
+}): 'account_info' | 'available_published' | undefined {
+  const headers = normalizedRequestHeaders(input.headers);
+  if (
+    input.method !== 'GET' ||
+    input.isNavigationRequest ||
+    !input.isMainFrame ||
+    input.resourceType !== 'xhr' ||
+    input.redirectedFrom === true ||
+    input.postData !== null ||
+    headers.origin !== KEMERBET_AGENT_WEB_ORIGIN ||
+    headers.referer !== KEMERBET_AGENT_POST_LOGIN_ROOT_URL ||
+    headers.accept !== 'application/json, text/plain, */*' ||
+    !/^Bearer [A-Za-z0-9._~+\/-]{16,4096}={0,2}$/u.test(headers.authorization ?? '') ||
+    headers['content-type'] !== undefined ||
+    headers.et !== undefined
+  ) {
+    return undefined;
+  }
+  if (
+    input.url.pathname === '/Account/Info' &&
+    exactAuthenticatedReadUrl({ pageState: 'agents', url: input.url })
+  ) {
+    return 'account_info';
+  }
+  if (
+    input.url.pathname === '/SystemLanguage/AvailablePublished' &&
+    exactProviderUrl(input.url, API_ORIGIN, input.url.pathname)
+  ) {
+    return 'available_published';
+  }
+  return undefined;
+}
+
+function exactPostLoginNavigation(input: {
+  readonly expectedUrl: string;
+  readonly isMainFrame: boolean;
+  readonly isNavigationRequest: boolean;
+  readonly method: string;
+  readonly postData?: string | null;
+  readonly redirectedFrom?: boolean;
+  readonly resourceType?: string;
+  readonly url: URL;
+}): boolean {
+  return (
+    input.method === 'GET' &&
+    input.isNavigationRequest &&
+    input.isMainFrame &&
+    input.resourceType === 'document' &&
+    input.redirectedFrom !== true &&
+    input.postData === null &&
+    input.url.href === input.expectedUrl
+  );
+}
+
 function exactKemerBetChromiumUserAgent(value: string | undefined): value is string {
   return (
     typeof value === 'string' &&
@@ -1489,14 +1554,33 @@ function exactRecaptchaUrl(url: URL, origin: string, pathname: string): boolean 
 type KemerBetRecaptchaCeremonyStep =
   'api' | 'runtime_main' | 'anchor' | 'css' | 'static_subresources' | 'reload' | 'clr' | 'complete';
 
+type KemerBetRecaptchaCommittedPageState =
+  'agents' | 'login' | 'post_login_ready' | 'post_login_reload' | 'post_login_root';
+
+type KemerBetPostLoginRequestPermit =
+  | 'account_info'
+  | 'agents_navigation'
+  | 'available_published'
+  | 'login_reload_navigation'
+  | 'root_navigation';
+
 export interface KemerBetRecaptchaCeremony {
+  readonly classifyCommittedPage: (
+    pageUrl: string,
+  ) => KemerBetRecaptchaCommittedPageState | undefined;
   readonly consumeKemerBetLoginPermit: () => Promise<boolean>;
+  readonly consumePostLoginRequestPermit: (
+    pageUrl: string,
+    permit: KemerBetPostLoginRequestPermit,
+  ) => boolean;
   readonly handleRoute: (input: {
     readonly page: Page;
     readonly requestFrame?: Frame;
     readonly route: Route;
   }) => Promise<'handled' | 'not_recaptcha'>;
-  readonly observeMainFrameCommit: (pageUrl: string) => void;
+  readonly observeMainFrameCommit: (
+    pageUrl: string,
+  ) => KemerBetRecaptchaCommittedPageState | undefined;
   readonly retireForReauthentication: () => boolean;
 }
 
@@ -1555,6 +1639,13 @@ export function createKemerBetRecaptchaCeremony(input: {
   let ceremonyStarted = false;
   let loginPermitConsumed = false;
   let loginPermitReserved = false;
+  let boundLoginDocumentUrl: string | undefined;
+  let postLoginCommitState: 'none' | 'reload' | 'root' | 'agents' = 'none';
+  let loginReloadNavigationPermitConsumed = false;
+  let rootNavigationPermitConsumed = false;
+  let agentsNavigationPermitConsumed = false;
+  let accountInfoPermitConsumed = false;
+  let availablePublishedPermitConsumed = false;
   let pendingLoginPermit:
     | {
         readonly resolve: (accepted: boolean) => void;
@@ -2223,11 +2314,86 @@ export function createKemerBetRecaptchaCeremony(input: {
     return result;
   };
 
+  const classifyCommittedPage = (
+    pageUrl: string,
+  ): KemerBetRecaptchaCommittedPageState | undefined => {
+    if (poisoned) return undefined;
+    const pageState = validPageUrl(pageUrl);
+    if (postLoginCommitState === 'reload') {
+      return pageUrl === boundLoginDocumentUrl ? 'post_login_reload' : undefined;
+    }
+    if (postLoginCommitState === 'root') {
+      return pageUrl === KEMERBET_AGENT_POST_LOGIN_ROOT_URL ? 'post_login_root' : undefined;
+    }
+    if (postLoginCommitState === 'agents') {
+      return pageState === 'agents' ? 'agents' : undefined;
+    }
+    if (step === 'complete' && loginPermitConsumed && pageUrl === boundLoginDocumentUrl) {
+      return 'post_login_ready';
+    }
+    return pageState;
+  };
+
   return Object.freeze({
     // The permit waiter deliberately stays outside the route lane. A login request may reserve
     // the sole permit after reload, while the exact clr route must still enter the lane and settle
     // that waiter. A second reservation, timeout, invalid tail, or document change poisons both.
+    classifyCommittedPage,
     consumeKemerBetLoginPermit: consumeLoginPermit,
+    consumePostLoginRequestPermit: (
+      pageUrl: string,
+      permit: KemerBetPostLoginRequestPermit,
+    ): boolean => {
+      if (poisoned || retired || !beforeDeadline()) return false;
+      if (permit === 'login_reload_navigation') {
+        if (
+          postLoginCommitState !== 'none' ||
+          step !== 'complete' ||
+          !loginPermitConsumed ||
+          pageUrl !== boundLoginDocumentUrl ||
+          loginReloadNavigationPermitConsumed
+        ) {
+          return false;
+        }
+        loginReloadNavigationPermitConsumed = true;
+        return true;
+      }
+      if (permit === 'root_navigation') {
+        if (
+          postLoginCommitState !== 'reload' ||
+          pageUrl !== boundLoginDocumentUrl ||
+          rootNavigationPermitConsumed
+        ) {
+          return false;
+        }
+        rootNavigationPermitConsumed = true;
+        return true;
+      }
+      if (permit === 'agents_navigation') {
+        if (
+          postLoginCommitState !== 'root' ||
+          pageUrl !== KEMERBET_AGENT_POST_LOGIN_ROOT_URL ||
+          !accountInfoPermitConsumed ||
+          !availablePublishedPermitConsumed ||
+          agentsNavigationPermitConsumed
+        ) {
+          return false;
+        }
+        agentsNavigationPermitConsumed = true;
+        return true;
+      }
+      if (
+        postLoginCommitState !== 'root' ||
+        pageUrl !== KEMERBET_AGENT_POST_LOGIN_ROOT_URL ||
+        (permit === 'account_info' && accountInfoPermitConsumed) ||
+        (permit === 'available_published' && availablePublishedPermitConsumed)
+      ) {
+        return false;
+      }
+      if (permit === 'account_info') accountInfoPermitConsumed = true;
+      else availablePublishedPermitConsumed = true;
+      return true;
+    },
     handleRoute: (candidate: {
       readonly page: Page;
       readonly requestFrame?: Frame;
@@ -2253,13 +2419,39 @@ export function createKemerBetRecaptchaCeremony(input: {
     observeMainFrameCommit: (pageUrl: string) => {
       const pageState = validPageUrl(pageUrl);
       if (!ceremonyStarted && step === 'api' && siteKey === undefined && !poisoned) {
-        if (pageState === 'login' || pageState === 'agents') return;
+        if (pageState === 'agents') return 'agents';
+        if (pageState === 'login') {
+          if (boundLoginDocumentUrl === undefined) boundLoginDocumentUrl = pageUrl;
+          if (boundLoginDocumentUrl === pageUrl) return 'login';
+        }
       }
-      if (step === 'complete' && pageState === 'agents' && !poisoned) {
-        retired = true;
-        return;
+      if (step === 'complete' && loginPermitConsumed && !poisoned && !retired) {
+        if (
+          pageState === 'agents' &&
+          postLoginCommitState === 'root' &&
+          accountInfoPermitConsumed &&
+          availablePublishedPermitConsumed
+        ) {
+          postLoginCommitState = 'agents';
+          retired = true;
+          return 'agents';
+        }
+        if (
+          postLoginCommitState === 'none' &&
+          boundLoginDocumentUrl !== undefined &&
+          pageUrl === boundLoginDocumentUrl &&
+          loginReloadNavigationPermitConsumed
+        ) {
+          postLoginCommitState = 'reload';
+          return 'post_login_reload';
+        }
+        if (postLoginCommitState === 'reload' && pageUrl === KEMERBET_AGENT_POST_LOGIN_ROOT_URL) {
+          postLoginCommitState = 'root';
+          return 'post_login_root';
+        }
       }
       poison();
+      return undefined;
     },
     retireForReauthentication: () => {
       // Reauthentication may replace only a ceremony that never started (a persisted session
@@ -2425,6 +2617,7 @@ async function guardedRoute(
   beforeActiveSessionDeadline: () => boolean,
   onActiveSessionDeadlineExceeded: () => void,
   onForbiddenRequest: (stage: 'provider_asset' | 'provider_navigation') => void,
+  onKemerBetLoginReleased: () => void,
   onProviderRequest: (stage: 'provider_asset' | 'provider_navigation') => void,
 ): Promise<void> {
   const beforeDeadline = (): boolean => {
@@ -2469,7 +2662,7 @@ async function guardedRoute(
   } catch {
     // A privacy-safe progress observer cannot weaken the exact request boundary.
   }
-  const decision = requestBelongsToRetainedPage
+  let decision = requestBelongsToRetainedPage
     ? classifyKemerBetSessionRequest({
         isMainFrame,
         isNavigationRequest: request.isNavigationRequest(),
@@ -2482,6 +2675,60 @@ async function guardedRoute(
         requestUrl: request.url(),
       })
     : 'forbid';
+  if (requestBelongsToRetainedPage) {
+    try {
+      const pageUrl = page.url();
+      const committedPageState = recaptchaCeremony.classifyCommittedPage(pageUrl);
+      const requestUrl = new URL(request.url());
+      const navigationInput = {
+        isMainFrame,
+        isNavigationRequest: request.isNavigationRequest(),
+        method: request.method(),
+        postData: request.postData(),
+        redirectedFrom: request.redirectedFrom() !== null,
+        resourceType: request.resourceType(),
+        url: requestUrl,
+      } as const;
+      if (committedPageState === 'post_login_ready' && request.isNavigationRequest()) {
+        decision =
+          exactPostLoginNavigation({ ...navigationInput, expectedUrl: pageUrl }) &&
+          recaptchaCeremony.consumePostLoginRequestPermit(pageUrl, 'login_reload_navigation')
+            ? 'allow'
+            : 'forbid';
+      } else if (committedPageState === 'post_login_reload' && request.isNavigationRequest()) {
+        decision =
+          exactPostLoginNavigation({
+            ...navigationInput,
+            expectedUrl: KEMERBET_AGENT_POST_LOGIN_ROOT_URL,
+          }) && recaptchaCeremony.consumePostLoginRequestPermit(pageUrl, 'root_navigation')
+            ? 'allow'
+            : 'forbid';
+      } else if (committedPageState === 'post_login_root') {
+        if (request.isNavigationRequest()) {
+          decision =
+            exactPostLoginNavigation({
+              ...navigationInput,
+              expectedUrl: KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL,
+            }) && recaptchaCeremony.consumePostLoginRequestPermit(pageUrl, 'agents_navigation')
+              ? 'allow'
+              : 'forbid';
+        } else if (decision === 'forbid') {
+          const permit = exactPostLoginRootRead({
+            headers: request.headers(),
+            ...navigationInput,
+          });
+          if (
+            permit !== undefined &&
+            recaptchaCeremony.consumePostLoginRequestPermit(pageUrl, permit)
+          ) {
+            decision = 'allow';
+          }
+        }
+      }
+    } catch {
+      decision = 'forbid';
+    }
+  }
   let loginRequest = false;
   try {
     const requestUrl = new URL(request.url());
@@ -2513,6 +2760,23 @@ async function guardedRoute(
   if (!beforeDeadline()) {
     await abortForExpiredDeadline();
     return;
+  }
+  if (loginRequest) {
+    try {
+      // Once the sole reviewed credential request is released, no displayed login frame may
+      // accept another input while Chromium is committing the provider's post-login transition.
+      // Keep this synchronous and immediately adjacent to route.continue(); queuing it behind the
+      // HTTP control lane would leave a replay window against the already-consumed frame.
+      onKemerBetLoginReleased();
+    } catch {
+      try {
+        onForbiddenRequest(providerStage);
+      } catch {
+        // The exact credential request still fails closed if diagnostic bookkeeping fails.
+      }
+      await route.abort('blockedbyclient');
+      return;
+    }
   }
   await route.continue();
 }
@@ -2827,6 +3091,7 @@ export function createKemerBetSessionProvisionServer(
   let profileGenerationLease: KemerBetSessionProfileGenerationLease | undefined;
   let pendingProfileGenerationLease: KemerBetSessionProfileGenerationLease | undefined;
   let authenticatedIdentityVerifier: KemerBetProvisionAuthenticatedIdentityVerifier | undefined;
+  let activeRecaptchaCeremony: KemerBetRecaptchaCeremony | undefined;
   let identityVerificationPromise: Promise<void> | undefined;
   let identityVerificationEpoch = 0;
   let contextUnexpectedlyClosed = false;
@@ -3033,6 +3298,7 @@ export function createKemerBetSessionProvisionServer(
     profileGenerationLease = undefined;
     pendingProfileGenerationLease = undefined;
     authenticatedIdentityVerifier = undefined;
+    activeRecaptchaCeremony = undefined;
     identityVerificationPromise = undefined;
     identityVerificationEpoch += 1;
     contextUnexpectedlyClosed = false;
@@ -3484,7 +3750,11 @@ export function createKemerBetSessionProvisionServer(
     generation: string,
     observedContext: BrowserContext,
     observedPage: Page,
-  ): 'agents' | 'login' | undefined => {
+    committed?: Readonly<{
+      pageState: KemerBetRecaptchaCommittedPageState | undefined;
+      pageUrl: string;
+    }>,
+  ): 'agents' | 'login' | 'post_login_transition' | undefined => {
     if (
       generation !== sessionGeneration ||
       context !== observedContext ||
@@ -3495,7 +3765,23 @@ export function createKemerBetSessionProvisionServer(
     ) {
       return undefined;
     }
-    const state = validPageUrl(observedPage.url());
+    const observedPageUrl = committed?.pageUrl ?? observedPage.url();
+    const ceremonyPageState =
+      committed === undefined
+        ? activeRecaptchaCeremony?.classifyCommittedPage(observedPageUrl)
+        : committed.pageState;
+    if (
+      ceremonyPageState === 'post_login_ready' ||
+      ceremonyPageState === 'post_login_reload' ||
+      ceremonyPageState === 'post_login_root'
+    ) {
+      if (phase !== 'authenticating') identityVerificationEpoch += 1;
+      phase = 'authenticating';
+      frameImage = undefined;
+      frameCapturedAtMs = undefined;
+      return 'post_login_transition';
+    }
+    const state = validPageUrl(observedPageUrl);
     if (!state) {
       markFaulted(generation);
       return undefined;
@@ -3737,6 +4023,26 @@ export function createKemerBetSessionProvisionServer(
           }
         });
       };
+      const observeKemerBetLoginReleased = (): void => {
+        if (
+          sessionGeneration !== generation ||
+          (context !== observedContext && pendingContext !== observedContext) ||
+          (page !== observedPage && pendingPage !== observedPage) ||
+          phase !== 'login_required' ||
+          checkpointedForRecheck ||
+          validPageUrl(observedPage.url()) !== 'login'
+        ) {
+          return unavailable();
+        }
+        // This callback runs synchronously inside the route guard immediately before Chromium is
+        // allowed to release the sole reviewed credential request. Revoke the displayed frame at
+        // that boundary so another control request cannot replay it while the provider's
+        // same-login post-authentication document is still committing.
+        identityVerificationEpoch += 1;
+        phase = 'authenticating';
+        frameImage = undefined;
+        frameCapturedAtMs = undefined;
+      };
       if (expiresAt === undefined || expiresAtMonotonicMs === undefined) return unavailable();
       const newRecaptchaCeremony = (
         deadlineWallClockMs: number,
@@ -3757,6 +4063,7 @@ export function createKemerBetSessionProvisionServer(
           wallClockNow: () => now().getTime(),
         });
       let recaptchaCeremony = newRecaptchaCeremony(expiresAt.getTime(), expiresAtMonotonicMs);
+      activeRecaptchaCeremony = recaptchaCeremony;
       observedContext.on('page', (candidatePage) => {
         if (candidatePage === observedPage) return;
         observeForbiddenNetworkAttempt('transport_guard');
@@ -3773,6 +4080,7 @@ export function createKemerBetSessionProvisionServer(
           beforeActiveSessionDeadline,
           observeActiveSessionDeadlineExceeded,
           observeForbiddenNetworkAttempt,
+          observeKemerBetLoginReleased,
           (stage) => {
             // Provider subresources may race one another while the fixed startup navigation is
             // still in flight. Keep their progress visible without changing the causal fallback
@@ -3798,6 +4106,8 @@ export function createKemerBetSessionProvisionServer(
       });
       nextPage.on('framenavigated', (frame) => {
         if (frame === observedPage.mainFrame()) {
+          const committedPageUrl = observedPage.url();
+          let ceremonyCommitState: KemerBetRecaptchaCommittedPageState | undefined;
           if (
             sessionGeneration === generation &&
             (context === observedContext || pendingContext === observedContext) &&
@@ -3806,7 +4116,7 @@ export function createKemerBetSessionProvisionServer(
             phase !== 'faulted' &&
             !checkpointedForRecheck
           ) {
-            const committedState = validPageUrl(observedPage.url());
+            const committedState = validPageUrl(committedPageUrl);
             const returningToLogin = committedState === 'login' && phase === 'authenticated';
             if (returningToLogin) {
               // A provider-side session expiry may return an otherwise retained authenticated
@@ -3860,13 +4170,25 @@ export function createKemerBetSessionProvisionServer(
               if (replacement !== undefined) {
                 if (recaptchaCeremony.retireForReauthentication()) {
                   recaptchaCeremony = replacement;
+                  activeRecaptchaCeremony = replacement;
+                  ceremonyCommitState = replacement.observeMainFrameCommit(committedPageUrl);
+                } else {
+                  observeForbiddenNetworkAttempt('transport_guard');
                 }
               }
             } else {
-              // The one-use reCAPTCHA proof belongs to exactly one committed login document. A
-              // same-URL reload is still a different document and therefore poisons an in-flight
-              // ceremony; the sole post-ceremony transition is the expected /agents commit.
-              recaptchaCeremony.observeMainFrameCommit(observedPage.url());
+              // The completed one-use proof owns the exact provider transition as a DFA:
+              // same-login reload, transient root, then an identity-verified /agents candidate.
+              // Any commit outside that order poisons the immutable generation synchronously.
+              ceremonyCommitState = recaptchaCeremony.observeMainFrameCommit(committedPageUrl);
+              if (
+                ceremonyCommitState === 'post_login_reload' ||
+                ceremonyCommitState === 'post_login_root'
+              ) {
+                phase = 'authenticating';
+                frameImage = undefined;
+                frameCapturedAtMs = undefined;
+              }
             }
             // An identity proof (including one still in flight) is bound to one committed
             // main-frame document. Revoke its epoch synchronously at every commit, even when both
@@ -3877,7 +4199,10 @@ export function createKemerBetSessionProvisionServer(
             frameCapturedAtMs = undefined;
           }
           void serialized(async () => {
-            updatePagePhase(generation, observedContext, observedPage);
+            updatePagePhase(generation, observedContext, observedPage, {
+              pageState: ceremonyCommitState,
+              pageUrl: committedPageUrl,
+            });
           });
         }
       });

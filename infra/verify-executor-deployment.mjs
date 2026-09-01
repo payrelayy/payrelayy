@@ -2456,10 +2456,13 @@ assertOrderedFragments(
     "if (step === 'static_subresources')",
     "if (step === 'reload')",
     "if (step === 'clr')",
-    "if (step === 'bcn')",
     "step = 'complete'",
+    'settlePendingLoginPermit(true)',
+    "if (step === 'complete')",
+    "'/recaptcha/api2/bcn'",
+    'optionalBcnObserved = true',
   ],
-  'the cold-fresh reCAPTCHA ceremony must preserve the one-use reviewed request order',
+  'the cold-fresh reCAPTCHA ceremony must gate login on reload plus clr and admit only one exact optional post-login bcn tail',
 );
 assert.match(
   privateSessionRecaptchaSource,
@@ -2480,7 +2483,7 @@ assert.match(
 assert.match(
   privateSessionRecaptchaSource,
   /expectedFrame: 'anchor' \| 'main'[\s\S]*?expectedFrame === 'anchor'[\s\S]*?exactAnchorFrame\(requestFrame, page\)[\s\S]*?: exactMainFrame\(requestFrame, page\)[\s\S]*?exactDynamicPost\([\s\S]*?candidate\.requestFrame,\s*'anchor',\s*'\/recaptcha\/api2\/reload'[\s\S]*?'application\/x-protobuffer'[\s\S]*?exactDynamicPost\([\s\S]*?candidate\.requestFrame,\s*'main',\s*'\/recaptcha\/api2\/clr'[\s\S]*?undefined[\s\S]*?exactDynamicPost\([\s\S]*?candidate\.requestFrame,\s*'anchor',\s*'\/recaptcha\/api2\/bcn'[\s\S]*?'application\/x-protobuf'/u,
-  'the three dynamic POSTs must retain their exact per-step frame provenance, MIME, order, and endpoint contracts',
+  'the two required dynamic POSTs and optional bcn tail must retain exact frame provenance, MIME, order, and endpoint contracts',
 );
 assert.match(
   privateSessionRecaptchaSource,
@@ -2492,7 +2495,7 @@ assert.match(
   /verifiedAssetBodies\.set\(url, Buffer\.from\(body\)\);[\s\S]*?if \(poisoned \|\| !beforeDeadline\(\)\) return false;[\s\S]*?await route\.fulfill/u,
   'a pinned asset may be fulfilled only after an immediate dual-clock deadline check',
 );
-for (const dynamicStep of ['anchor', 'reload', 'clr', 'bcn']) {
+for (const dynamicStep of ['anchor', 'reload', 'clr']) {
   const dynamicStepStart = privateSessionRecaptchaSource.indexOf(`if (step === '${dynamicStep}')`);
   const dynamicStepEnd = privateSessionRecaptchaSource.indexOf(
     dynamicStep === 'bcn' ? "step = 'complete'" : "return 'handled';",
@@ -2506,15 +2509,36 @@ for (const dynamicStep of ['anchor', 'reload', 'clr', 'bcn']) {
     `${dynamicStep} may release its request only after an immediate dual-clock deadline check`,
   );
 }
+const optionalBcnStepStart = privateSessionRecaptchaSource.indexOf("if (step === 'complete')");
+const optionalBcnStepEnd = privateSessionRecaptchaSource.indexOf(
+  'optionalBcnObserved = true',
+  optionalBcnStepStart,
+);
+assert.ok(optionalBcnStepStart >= 0 && optionalBcnStepEnd > optionalBcnStepStart);
+assert.match(
+  privateSessionRecaptchaSource.slice(optionalBcnStepStart, optionalBcnStepEnd),
+  /optionalBcnObserved[\s\S]*?'\/recaptcha\/api2\/bcn'[\s\S]*?'application\/x-protobuf'[\s\S]*?if \(!beforeDeadline\(\)\) return forbidden\(candidate\.route\);[\s\S]*?await candidate\.route\.continue\(\)/u,
+  'at most one exact optional bcn tail may be released after the core ceremony completes',
+);
 assert.match(
   privateSessionProvisionServerSource,
   /decision !== 'allow' \|\| !loginRequest[\s\S]*?await recaptchaCeremony\.consumeKemerBetLoginPermit\(\)[\s\S]*?const activeSessionDeadlineAccepted = beforeDeadline\(\);[\s\S]*?if \(decision !== 'allow' \|\| !loginPermitAccepted \|\| !activeSessionDeadlineAccepted\)[\s\S]*?if \(!beforeDeadline\(\)\)[\s\S]*?await abortForExpiredDeadline\(\);[\s\S]*?await route\.continue\(\)/u,
-  'KemerBet credentials must remain local until one exact lane-serialized login permit and an immediate active-session dual-clock check succeed',
+  'KemerBet credentials must remain local until one exact bounded login permit and an immediate active-session dual-clock check succeed',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /KEMERBET_RECAPTCHA_LOGIN_PERMIT_SETTLE_TIMEOUT_MS = 5_000/u,
+  'the interleaved provider login permit must have a fixed five-second settlement ceiling',
 );
 assert.match(
   privateSessionRecaptchaSource,
-  /const consumeLoginPermit = \(\): boolean => \{[\s\S]*?loginPermitConsumed[\s\S]*?step !== 'complete'[\s\S]*?!beforeDeadline\(\)[\s\S]*?poison\(\);[\s\S]*?loginPermitConsumed = true;[\s\S]*?consumeKemerBetLoginPermit: \(\) => enqueue\(consumeLoginPermit\)[\s\S]*?return enqueue\(\(\) => handle\(candidate\)\)/u,
-  'the one-use login permit and all ceremony requests must share one replay-proof lane',
+  /let loginPermitReserved = false[\s\S]*?let pendingLoginPermit[\s\S]*?const settlePendingLoginPermit = \(accepted: boolean\)[\s\S]*?clearTimeout\(pending\.timeout\)[\s\S]*?loginPermitReserved = false[\s\S]*?pending\.resolve\(accepted\)[\s\S]*?const poison = \(\): void => \{[\s\S]*?settlePendingLoginPermit\(false\)[\s\S]*?if \(step === 'clr'\)[\s\S]*?dynamicBodyBytes \+= bytes;[\s\S]*?step = 'complete';[\s\S]*?settlePendingLoginPermit\(true\)[\s\S]*?const consumeLoginPermit = \(\): Promise<boolean> => \{[\s\S]*?loginPermitConsumed[\s\S]*?loginPermitReserved[\s\S]*?step === 'complete'[\s\S]*?step !== 'clr'[\s\S]*?KEMERBET_RECAPTCHA_LOGIN_PERMIT_SETTLE_TIMEOUT_MS[\s\S]*?loginPermitReserved = true[\s\S]*?new Promise<boolean>[\s\S]*?pendingLoginPermit\?\.resolve === resolve[\s\S]*?consumeKemerBetLoginPermit: consumeLoginPermit[\s\S]*?return enqueue\(\(\) => handle\(candidate\)\)/u,
+  'the sole login permit must wait outside the request lane for exact clr completion, settle within five seconds, and fail closed on replay or invalid proof',
+);
+assert.match(
+  privateSessionRecaptchaSource,
+  /const lateAuthenticatedOptionalBcn =[\s\S]*?retired &&[\s\S]*?step === 'complete'[\s\S]*?loginPermitConsumed[\s\S]*?!optionalBcnObserved[\s\S]*?pageState === 'agents'[\s\S]*?\(retired && !lateAuthenticatedOptionalBcn\)[\s\S]*?if \(lateAuthenticatedOptionalBcn\)[\s\S]*?exactDynamicPost\([\s\S]*?'anchor',[\s\S]*?'\/recaptcha\/api2\/bcn',[\s\S]*?'xhr',[\s\S]*?'application\/x-protobuf'[\s\S]*?await candidate\.route\.continue\(\)[\s\S]*?optionalBcnObserved = true/u,
+  'one exact optional bcn racing after the authenticated agents commit must remain bounded and must not fault the valid generation',
 );
 assert.match(
   privateSessionRecaptchaSource,
@@ -2524,12 +2548,12 @@ assert.match(
 assert.match(
   privateSessionRecaptchaSource,
   /poisoned \|\|[\s\S]*?retired \|\|[\s\S]*?retireForReauthentication: \(\) => \{[\s\S]*?poisoned \|\|[\s\S]*?!ceremonyStarted && step === 'api' && siteKey === undefined[\s\S]*?step === 'complete' && loginPermitConsumed[\s\S]*?poison\(\);[\s\S]*?return false;[\s\S]*?retired = true;[\s\S]*?return true;/u,
-  'reauthentication may retire only an unused or consumed ceremony, and every retired ceremony must reject later routing',
+  'reauthentication may retire only an unused or consumed ceremony, and retired routing remains closed except for the separately verified exact one-use late bcn tail',
 );
 assert.match(
   privateSessionRecaptchaSource,
   /!recaptchaAuthority && !kemerBetLogin[\s\S]*?Promise\.resolve\('not_recaptcha' as const\)/u,
-  'unrelated KemerBet requests must bypass the large-asset ceremony lane while the exact login POST remains ordered behind its final beacon',
+  'unrelated KemerBet requests must bypass the large-asset ceremony lane while the exact login POST remains ordered behind reload and clr',
 );
 assert.match(
   privateSessionProvisionServerSource,

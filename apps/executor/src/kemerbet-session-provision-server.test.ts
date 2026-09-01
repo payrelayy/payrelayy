@@ -448,8 +448,10 @@ interface TestRecaptchaRoute {
 function testRecaptchaFrames(): {
   readonly anchorFrame: Frame;
   readonly mainFrame: Frame;
+  readonly navigate: (url: string) => void;
   readonly page: Page;
 } {
+  let currentUrl = LOGIN_PAGE;
   let page: Page;
   const mainFrame = {
     page: () => page,
@@ -463,8 +465,29 @@ function testRecaptchaFrames(): {
   } as unknown as Frame;
   page = {
     mainFrame: () => mainFrame,
-    url: () => LOGIN_PAGE,
+    url: () => currentUrl,
   } as unknown as Page;
+  return {
+    anchorFrame,
+    mainFrame,
+    navigate: (url: string) => {
+      currentUrl = url;
+    },
+    page,
+  };
+}
+
+function testRecaptchaFramesForPage(page: Page): {
+  readonly anchorFrame: Frame;
+  readonly mainFrame: Frame;
+  readonly page: Page;
+} {
+  const mainFrame = page.mainFrame();
+  const anchorFrame = {
+    page: () => page,
+    parentFrame: () => mainFrame,
+    url: () => exactTestAnchorUrl(),
+  } as unknown as Frame;
   return { anchorFrame, mainFrame, page };
 }
 
@@ -541,9 +564,11 @@ function exactTestAnchorUrl(
   return `https://www.google.com/recaptcha/api2/anchor?${query.toString()}`;
 }
 
-function exactTestRecaptchaRoutes(
-  frames: ReturnType<typeof testRecaptchaFrames>,
-): readonly TestRecaptchaRoute[] {
+function exactTestRecaptchaRoutes(frames: {
+  readonly anchorFrame: Frame;
+  readonly mainFrame: Frame;
+  readonly page: Page;
+}): readonly TestRecaptchaRoute[] {
   return [
     testRecaptchaRoute({
       frame: frames.mainFrame,
@@ -1925,6 +1950,150 @@ describe('private KemerBet session provision server', () => {
       expect(loginRequest.continue).not.toHaveBeenCalled();
       await waitForSessionPhase(origin, 'idle');
     } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('keeps the exact credential route local until the real ceremony accepts exact clr', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const frames = testRecaptchaFramesForPage(browser.page);
+    const ceremony = createTestRecaptchaCeremony();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => ceremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      monotonicNow: () => 1_000,
+      now: () => new Date('2026-09-01T00:00:00.000Z'),
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      await waitForSessionPhase(origin, 'login_required');
+
+      const recaptchaRoutes = exactTestRecaptchaRoutes(frames);
+      for (const candidate of recaptchaRoutes.slice(0, 9)) {
+        await browser.dispatchRoute(candidate.route);
+      }
+      const loginRequest = testRecaptchaRoute({
+        contentType: 'application/json',
+        extraHeaders: { et: '1' },
+        frame: frames.mainFrame,
+        method: 'POST',
+        postData: JSON.stringify({
+          password: 'never-sent-value',
+          token: 'never-forwarded-test-token',
+          userName: 'never-forwarded-test-user',
+        }),
+        resourceType: 'xhr',
+        url: 'https://admin-api.agt-digi.com/Account/Login',
+      });
+      const pendingLogin = browser.dispatchRoute(loginRequest.route);
+
+      await vi.waitFor(() => {
+        expect(loginRequest.continue).not.toHaveBeenCalled();
+        expect(loginRequest.abort).not.toHaveBeenCalled();
+      });
+
+      const clr = recaptchaRoutes[9];
+      if (!clr) throw new Error('clr fixture missing');
+      await browser.dispatchRoute(clr.route);
+      await pendingLogin;
+
+      expect(clr.continue).toHaveBeenCalledOnce();
+      expect(loginRequest.continue).toHaveBeenCalledOnce();
+      expect(loginRequest.abort).not.toHaveBeenCalled();
+      expect(clr.continue.mock.invocationCallOrder[0]).toBeLessThan(
+        loginRequest.continue.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
+      );
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('aborts the pending exact credential route when its bounded clr wait expires', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const frames = testRecaptchaFramesForPage(browser.page);
+    const ceremony = createTestRecaptchaCeremony();
+    const permitRequested = deferred<void>();
+    const observedCeremony: KemerBetRecaptchaCeremony = {
+      ...ceremony,
+      consumeKemerBetLoginPermit: () => {
+        const result = ceremony.consumeKemerBetLoginPermit();
+        permitRequested.resolve();
+        return result;
+      },
+    };
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => observedCeremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      monotonicNow: () => 1_000,
+      now: () => new Date('2026-09-01T00:00:00.000Z'),
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      expect(
+        (
+          await postSessionStart(
+            origin,
+            JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+          )
+        ).status,
+      ).toBe(202);
+      await waitForSessionPhase(origin, 'login_required');
+      for (const candidate of exactTestRecaptchaRoutes(frames).slice(0, 9)) {
+        await browser.dispatchRoute(candidate.route);
+      }
+
+      vi.useFakeTimers();
+      const loginRequest = testRecaptchaRoute({
+        contentType: 'application/json',
+        extraHeaders: { et: '1' },
+        frame: frames.mainFrame,
+        method: 'POST',
+        postData: JSON.stringify({
+          password: 'never-sent-value',
+          token: 'never-forwarded-test-token',
+          userName: 'never-forwarded-test-user',
+        }),
+        resourceType: 'xhr',
+        url: 'https://admin-api.agt-digi.com/Account/Login',
+      });
+      const pendingLogin = browser.dispatchRoute(loginRequest.route);
+      await permitRequested.promise;
+      expect(loginRequest.continue).not.toHaveBeenCalled();
+      expect(loginRequest.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await pendingLogin;
+
+      expect(loginRequest.abort).toHaveBeenCalledOnce();
+      expect(loginRequest.continue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
       await closeServer(provision.server);
     }
   });
@@ -4519,6 +4688,162 @@ describe('private KemerBet session provision server', () => {
     expect(replay.abort).toHaveBeenCalledOnce();
     expect(forbidden).toHaveBeenCalledOnce();
     await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(false);
+  });
+
+  it('holds the live interleaved login permit locally until the exact clr proof completes', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 9)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+
+    let settled: boolean | undefined;
+    const pendingPermit = ceremony.consumeKemerBetLoginPermit().then((accepted) => {
+      settled = accepted;
+      return accepted;
+    });
+    await Promise.resolve();
+    expect(settled).toBeUndefined();
+
+    const clr = routes[9];
+    if (!clr) throw new Error('clr fixture missing');
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, clr);
+    await expect(pendingPermit).resolves.toBe(true);
+    expect(clr.continue).toHaveBeenCalledOnce();
+    expect(forbidden).not.toHaveBeenCalled();
+
+    const bcn = routes[10];
+    if (!bcn) throw new Error('bcn fixture missing');
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, bcn);
+    expect(bcn.continue).toHaveBeenCalledOnce();
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('allows the exact login permit immediately when clr already completed before the login route', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 10)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+
+    await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(true);
+    const bcn = routes[10];
+    if (!bcn) throw new Error('bcn fixture missing');
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, bcn);
+    expect(bcn.continue).toHaveBeenCalledOnce();
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('accepts the authenticated agents commit when optional post-login bcn is absent', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 10)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+
+    await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(true);
+    ceremony.observeMainFrameCommit(AGENTS_PAGE);
+
+    expect(forbidden).not.toHaveBeenCalled();
+    expect(routes[10]?.continue).not.toHaveBeenCalled();
+  });
+
+  it('admits one exact optional bcn tail racing after the authenticated agents commit', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 10)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+    await expect(ceremony.consumeKemerBetLoginPermit()).resolves.toBe(true);
+    frames.navigate(AGENTS_PAGE);
+    ceremony.observeMainFrameCommit(AGENTS_PAGE);
+
+    const bcn = routes[10];
+    if (!bcn) throw new Error('bcn fixture missing');
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, bcn);
+    expect(bcn.continue).toHaveBeenCalledOnce();
+    expect(forbidden).not.toHaveBeenCalled();
+
+    const duplicateBcn = testRecaptchaRoute({
+      bodyBytes: 7_949,
+      contentType: 'application/x-protobuf',
+      frame: frames.anchorFrame,
+      method: 'POST',
+      resourceType: 'xhr',
+      url: `https://www.google.com/recaptcha/api2/bcn?k=${TEST_RECAPTCHA_SITE_KEY}`,
+    });
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, duplicateBcn);
+    expect(duplicateBcn.abort).toHaveBeenCalledOnce();
+    expect(forbidden).toHaveBeenCalledExactlyOnceWith('recaptcha_ceremony');
+  });
+
+  it('settles a reserved login permit false for an invalid clr tail', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 9)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+    const pendingPermit = ceremony.consumeKemerBetLoginPermit();
+    const invalidClr = testRecaptchaRoute({
+      bodyBytes: 2_107,
+      frame: frames.anchorFrame,
+      method: 'POST',
+      resourceType: 'fetch',
+      url: `https://www.google.com/recaptcha/api2/clr?k=${TEST_RECAPTCHA_SITE_KEY}`,
+    });
+
+    await dispatchTestRecaptchaRoute(ceremony, frames.page, invalidClr);
+
+    await expect(pendingPermit).resolves.toBe(false);
+    expect(invalidClr.abort).toHaveBeenCalledOnce();
+    expect(forbidden).toHaveBeenCalledExactlyOnceWith('recaptcha_ceremony');
+  });
+
+  it('poisons both callers when a second login request races one reserved permit', async () => {
+    const frames = testRecaptchaFrames();
+    const forbidden = vi.fn();
+    const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+    const routes = exactTestRecaptchaRoutes(frames);
+    for (const candidate of routes.slice(0, 9)) {
+      await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+    }
+
+    const first = ceremony.consumeKemerBetLoginPermit();
+    const second = ceremony.consumeKemerBetLoginPermit();
+
+    await expect(Promise.all([first, second])).resolves.toEqual([false, false]);
+    expect(forbidden).toHaveBeenCalledExactlyOnceWith('recaptcha_ceremony');
+  });
+
+  it('times out a reserved login permit without releasing credentials', async () => {
+    vi.useFakeTimers();
+    try {
+      const frames = testRecaptchaFrames();
+      const forbidden = vi.fn();
+      const ceremony = createTestRecaptchaCeremony({ onForbiddenRequest: forbidden });
+      const routes = exactTestRecaptchaRoutes(frames);
+      for (const candidate of routes.slice(0, 9)) {
+        await dispatchTestRecaptchaRoute(ceremony, frames.page, candidate);
+      }
+      const pendingPermit = ceremony.consumeKemerBetLoginPermit();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(pendingPermit).resolves.toBe(false);
+      expect(forbidden).toHaveBeenCalledExactlyOnceWith('recaptcha_ceremony');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retires only an unused ceremony or a ceremony whose sole login permit was consumed', async () => {

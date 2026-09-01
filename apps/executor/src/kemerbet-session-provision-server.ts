@@ -141,6 +141,7 @@ const KEMERBET_CHROMIUM_USER_AGENT_PATTERN =
 const MAX_RECAPTCHA_RELOAD_BODY_BYTES = 16_384;
 const MAX_RECAPTCHA_CLR_BODY_BYTES = 4_096;
 const MAX_RECAPTCHA_BCN_BODY_BYTES = 12_288;
+const KEMERBET_RECAPTCHA_LOGIN_PERMIT_SETTLE_TIMEOUT_MS = 5_000;
 const MAX_RECAPTCHA_DYNAMIC_BODY_BYTES =
   MAX_RECAPTCHA_RELOAD_BODY_BYTES + MAX_RECAPTCHA_CLR_BODY_BYTES + MAX_RECAPTCHA_BCN_BODY_BYTES;
 const KEMERBET_RECAPTCHA_ASSET_PINS = Object.freeze({
@@ -1486,15 +1487,7 @@ function exactRecaptchaUrl(url: URL, origin: string, pathname: string): boolean 
 }
 
 type KemerBetRecaptchaCeremonyStep =
-  | 'api'
-  | 'runtime_main'
-  | 'anchor'
-  | 'css'
-  | 'static_subresources'
-  | 'reload'
-  | 'clr'
-  | 'bcn'
-  | 'complete';
+  'api' | 'runtime_main' | 'anchor' | 'css' | 'static_subresources' | 'reload' | 'clr' | 'complete';
 
 export interface KemerBetRecaptchaCeremony {
   readonly consumeKemerBetLoginPermit: () => Promise<boolean>;
@@ -1557,9 +1550,17 @@ export function createKemerBetRecaptchaCeremony(input: {
   let logoLoaded = false;
   let webworkerLoaded = false;
   let workerRuntimeLoaded = false;
+  let optionalBcnObserved = false;
   let dynamicBodyBytes = 0;
   let ceremonyStarted = false;
   let loginPermitConsumed = false;
+  let loginPermitReserved = false;
+  let pendingLoginPermit:
+    | {
+        readonly resolve: (accepted: boolean) => void;
+        readonly timeout: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
   let poisoned = false;
   let retired = false;
   let lane = Promise.resolve();
@@ -1578,6 +1579,16 @@ export function createKemerBetRecaptchaCeremony(input: {
       ? 'recaptcha_asset'
       : 'recaptcha_ceremony';
 
+  const settlePendingLoginPermit = (accepted: boolean): void => {
+    const pending = pendingLoginPermit;
+    if (pending === undefined) return;
+    pendingLoginPermit = undefined;
+    clearTimeout(pending.timeout);
+    loginPermitReserved = false;
+    if (accepted) loginPermitConsumed = true;
+    pending.resolve(accepted);
+  };
+
   const poison = (): void => {
     if (!poisoned) {
       poisoned = true;
@@ -1587,6 +1598,7 @@ export function createKemerBetRecaptchaCeremony(input: {
         // A redacted attempt counter cannot weaken the local abort boundary.
       }
     }
+    settlePendingLoginPermit(false);
   };
 
   const forbidden = async (route: Route): Promise<'handled'> => {
@@ -1719,7 +1731,6 @@ export function createKemerBetRecaptchaCeremony(input: {
     const query = [...url.searchParams.entries()];
     const body = request.postDataBuffer();
     if (
-      step === 'complete' ||
       !siteKey ||
       !(expectedFrame === 'anchor'
         ? exactAnchorFrame(requestFrame, page)
@@ -1761,11 +1772,22 @@ export function createKemerBetRecaptchaCeremony(input: {
     const recaptchaAuthority =
       url.origin === 'https://www.google.com' || url.origin === 'https://www.gstatic.com';
     if (!recaptchaAuthority) return 'not_recaptcha';
+    const method = request.method();
+    const navigation = request.isNavigationRequest();
+    const redirected = request.redirectedFrom() !== null;
+    const resourceType = request.resourceType();
+    const pageState = validPageUrl(candidate.page.url());
+    const lateAuthenticatedOptionalBcn =
+      retired &&
+      step === 'complete' &&
+      loginPermitConsumed &&
+      !optionalBcnObserved &&
+      pageState === 'agents';
     if (
       poisoned ||
-      retired ||
+      (retired && !lateAuthenticatedOptionalBcn) ||
       !beforeDeadline() ||
-      validPageUrl(candidate.page.url()) !== 'login' ||
+      (pageState !== 'login' && !lateAuthenticatedOptionalBcn) ||
       request.url() !== url.href ||
       url.username !== '' ||
       url.password !== '' ||
@@ -1774,10 +1796,6 @@ export function createKemerBetRecaptchaCeremony(input: {
     ) {
       return forbidden(candidate.route);
     }
-    const method = request.method();
-    const navigation = request.isNavigationRequest();
-    const redirected = request.redirectedFrom() !== null;
-    const resourceType = request.resourceType();
     const requestHeaders = request.headers();
     const requestUserAgent = requestKemerBetChromiumUserAgent(requestHeaders);
     // Chromium 152 attributes the exact pinned worker bootstrap to the anchor frame, but
@@ -1812,6 +1830,34 @@ export function createKemerBetRecaptchaCeremony(input: {
       return forbidden(candidate.route);
     }
     try {
+      // A browser may schedule its one optional bcn telemetry tail after the exact provider login
+      // has already committed /agents. Admit only that already-bound, exact, one-use request. Any
+      // other post-authentication Google traffic remains forbidden and faults the generation.
+      if (lateAuthenticatedOptionalBcn) {
+        observeStage('recaptcha_ceremony');
+        const bytes = exactDynamicPost(
+          request,
+          url,
+          candidate.page,
+          candidate.requestFrame,
+          'anchor',
+          '/recaptcha/api2/bcn',
+          'xhr',
+          'application/x-protobuf',
+          MAX_RECAPTCHA_BCN_BODY_BYTES,
+        );
+        if (bytes === undefined) return forbidden(candidate.route);
+        if (!beforeDeadline()) return forbidden(candidate.route);
+        await candidate.route.continue();
+        if (poisoned || !beforeDeadline()) {
+          poison();
+          return 'handled';
+        }
+        dynamicBodyBytes += bytes;
+        optionalBcnObserved = true;
+        return 'handled';
+      }
+
       if (step === 'api') {
         const query = [...url.searchParams.entries()];
         const nextSiteKey = query.length === 1 && query[0]?.[0] === 'render' ? query[0][1] : '';
@@ -2087,12 +2133,18 @@ export function createKemerBetRecaptchaCeremony(input: {
           return 'handled';
         }
         dynamicBodyBytes += bytes;
-        step = 'bcn';
+        step = 'complete';
+        // The live provider emits its exact Account/Login request after reload and before the
+        // trailing clr request. Holding that provider route until clr completes keeps credentials
+        // local. Chromium may emit bcn only after that provider route is released, so bcn remains
+        // an exact, one-use optional telemetry tail and cannot gate credential transport.
+        settlePendingLoginPermit(true);
         return 'handled';
       }
 
-      if (step === 'bcn') {
+      if (step === 'complete') {
         observeStage('recaptcha_ceremony');
+        if (optionalBcnObserved) return forbidden(candidate.route);
         const bytes = exactDynamicPost(
           request,
           url,
@@ -2112,7 +2164,7 @@ export function createKemerBetRecaptchaCeremony(input: {
           return 'handled';
         }
         dynamicBodyBytes += bytes;
-        step = 'complete';
+        optionalBcnObserved = true;
         return 'handled';
       }
       return forbidden(candidate.route);
@@ -2121,20 +2173,45 @@ export function createKemerBetRecaptchaCeremony(input: {
     }
   };
 
-  const consumeLoginPermit = (): boolean => {
+  const consumeLoginPermit = (): Promise<boolean> => {
     if (
       poisoned ||
       retired ||
       loginPermitConsumed ||
-      step !== 'complete' ||
+      loginPermitReserved ||
       !beforeDeadline() ||
       dynamicBodyBytes < 1
     ) {
       poison();
-      return false;
+      return Promise.resolve(false);
     }
-    loginPermitConsumed = true;
-    return true;
+    if (step === 'complete') {
+      loginPermitConsumed = true;
+      return Promise.resolve(true);
+    }
+    if (step !== 'clr') {
+      poison();
+      return Promise.resolve(false);
+    }
+    const monotonicRemainingMs = input.deadlineMonotonicMs - input.monotonicNow();
+    const wallRemainingMs = input.deadlineWallClockMs - input.wallClockNow();
+    const settleTimeoutMs = Math.min(
+      KEMERBET_RECAPTCHA_LOGIN_PERMIT_SETTLE_TIMEOUT_MS,
+      monotonicRemainingMs,
+      wallRemainingMs,
+    );
+    if (!Number.isFinite(settleTimeoutMs) || settleTimeoutMs <= 0) {
+      poison();
+      return Promise.resolve(false);
+    }
+    loginPermitReserved = true;
+    return new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (pendingLoginPermit?.resolve === resolve) poison();
+      }, Math.ceil(settleTimeoutMs));
+      timeout.unref?.();
+      pendingLoginPermit = Object.freeze({ resolve, timeout });
+    });
   };
 
   const enqueue = <T>(operation: () => Promise<T> | T): Promise<T> => {
@@ -2147,15 +2224,19 @@ export function createKemerBetRecaptchaCeremony(input: {
   };
 
   return Object.freeze({
-    consumeKemerBetLoginPermit: () => enqueue(consumeLoginPermit),
+    // The permit waiter deliberately stays outside the route lane. A login request may reserve
+    // the sole permit after reload, while the exact clr route must still enter the lane and settle
+    // that waiter. A second reservation, timeout, invalid tail, or document change poisons both.
+    consumeKemerBetLoginPermit: consumeLoginPermit,
     handleRoute: (candidate: {
       readonly page: Page;
       readonly requestFrame?: Frame;
       readonly route: Route;
     }) => {
       // Do not place unrelated KemerBet application/static traffic behind a large pinned asset
-      // download. The exact KemerBet login POST still joins this lane so it cannot overtake the
-      // final CAPTCHA beacon that makes the one-use ceremony complete.
+      // download. The exact KemerBet login POST joins this lane only long enough to observe an
+      // already accepted reload. Its one-use permit is then reserved outside the lane until clr;
+      // otherwise the waiting login request would prevent Chromium from emitting the proof tail.
       try {
         const request = candidate.route.request();
         const url = new URL(request.url());

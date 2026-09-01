@@ -121,7 +121,7 @@ identity HMAC key, and write-only proof output—never the Player cohort.
 Chromium maps only the three reviewed KemerBet hosts to the fixed proxy and resolves every other
 hostname to `~NOTFOUND`; QUIC, WebRTC, DNS prefetch, preconnect, prediction, speculative prefetch,
 and WebTransport are disabled. Before Compose may report the proxy healthy, the proxy sequentially
-prefetches the exact `/agents` HTML plus seven pinned v84 assets using fixed headers. It requires
+prefetches the exact `/agents` HTML plus seven pinned v85 assets using fixed headers. It requires
 HTTP 200, no redirect, absent or exact `identity` encoding, no entry over 8 MiB, and no aggregate over
 32 MiB. Renderer bootstrap requests are then served only from that private in-memory cache and never
 produce further upstream bootstrap traffic. Only after the cache, listening socket, and post-listen

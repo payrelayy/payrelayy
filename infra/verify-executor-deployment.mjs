@@ -1331,11 +1331,29 @@ assert.match(
 );
 assert.match(readinessLayer7ProxySource, /const MAX_UPSTREAM_RESPONSE_BYTES = 8 \* 1024 \* 1024/);
 assert.match(readinessLayer7ProxySource, /const MAX_BOOTSTRAP_CACHE_BYTES = 32 \* 1024 \* 1024/);
+const reviewedKemerBetV85BootstrapAssetPaths = Object.freeze([
+  '/prd/agt-admin-client/v85/index-Bb0iEF9d.js',
+  '/prd/agt-admin-client/v85/index-CzsfyLxR.css',
+  '/prd/agt-admin-client/v85/_ltrOffset-C2RQMwco.css',
+  '/prd/agt-admin-client/v85/ltr-DYDLRvnG.js',
+  '/prd/agt-admin-client/v85/ltr-Dbx7HiAx.js',
+  '/prd/agt-admin-client/v85/index-CPiUBAbk.js',
+  '/prd/agt-admin-client/v85/index-CQOv3eGS.js',
+]);
 assert.equal(
-  countMatches(readinessLayer7ProxySource, /^  '\/prd\/agt-admin-client\/v84\//gm),
-  7,
-  'the proxy must allow exactly the seven reviewed immutable bootstrap assets',
+  countMatches(readinessLayer7ProxySource, /^  '\/prd\/agt-admin-client\/v85\//gm),
+  reviewedKemerBetV85BootstrapAssetPaths.length,
+  'the proxy must allow exactly the seven reviewed immutable v85 bootstrap assets',
 );
+for (const [source, label] of [
+  [privateSessionProvisionServerSource, 'private preview'],
+  [noTransferReadinessSealSource, 'readiness seal'],
+  [readinessLayer7ProxySource, 'Layer-7 proxy'],
+]) {
+  for (const assetPath of reviewedKemerBetV85BootstrapAssetPaths) {
+    assert.ok(source.includes(assetPath), `${label} must include the exact reviewed ${assetPath}`);
+  }
+}
 assert.match(
   readinessLayer7ProxySource,
   /KEMERBET_READINESS_LAYER7_BOOTSTRAP_PREFETCH_CONTRACT = Object\.freeze\(\{[\s\S]*?maximumEntryBytes: MAX_UPSTREAM_RESPONSE_BYTES,[\s\S]*?maximumTotalBytes: MAX_BOOTSTRAP_CACHE_BYTES,[\s\S]*?Object\.freeze\(\{ hostname: AGENT_WEB_HOSTNAME, path: AGENT_WEB_PATH \}\),[\s\S]*?\.\.\.KEMERBET_READINESS_LAYER7_BOOTSTRAP_ASSET_PATHS\.map/,
@@ -2250,7 +2268,7 @@ assert.match(
 assert.match(
   privateSessionProvisionServerSource,
   /exactObject\(decoded, \['password', 'token', 'userName'\]\)[\s\S]*?userName\.length <= 30[\s\S]*?password\.length >= 8[\s\S]*?password\.length <= 24[\s\S]*?token\.length >= 16/u,
-  'login authority must be limited to the exact pinned v84 three-field credential envelope',
+  'login authority must be limited to the exact pinned v85 three-field credential envelope',
 );
 assert.match(
   privateSessionProvisionServerSource,
@@ -2359,6 +2377,22 @@ assert.match(
   /KEMERBET_ABORTABLE_STATIC_ASSETS[\s\S]*?en-DC_46aZL\.svg[\s\S]*?logo-sign-DirsW9WY\.svg[\s\S]*?fonts\.googleapis\.com\/css2[\s\S]*?return 'abort_optional'[\s\S]*?KEMERBET_REQUIRED_STATIC_ASSETS[\s\S]*?return 'allow'/u,
   'reviewed cosmetic drift must be locally aborted while the exact required translation remains allowed',
 );
+for (const optionalAssetUrl of [
+  'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/auth-bg-Dn8uzDgY.svg',
+  'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-CAPnnhhN.ttf?squmb1',
+  'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-Nwt_l_Rk.eot?squmb1',
+  'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-B4fQAYPi.woff?squmb1',
+  'https://agt-client-akm.agent-digi.com/prd/agt-admin-client/v85/icomoon-BdqDhh2R.svg?squmb1',
+]) {
+  assert.ok(
+    privateSessionProvisionServerSource.includes(optionalAssetUrl),
+    `private preview must include the exact reviewed optional asset ${optionalAssetUrl}`,
+  );
+  assert.ok(
+    noTransferReadinessSealSource.includes(optionalAssetUrl),
+    `readiness seal must include the exact reviewed optional asset ${optionalAssetUrl}`,
+  );
+}
 assert.match(
   privateSessionRecaptchaSource,
   /redirect: 'manual'[\s\S]*?declaredLength[\s\S]*?Number\(declaredLength\) > input\.maxBytes[\s\S]*?reader\.cancel\(\)[\s\S]*?bytes > input\.maxBytes[\s\S]*?reader\.cancel\(\)[\s\S]*?fetched\.finalUrl !== url[\s\S]*?fetched\.status !== 200[\s\S]*?normalizedMime\(fetched\.contentType\) !== pin\.mime[\s\S]*?fetched\.accessControlAllowOrigin[\s\S]*?fetched\.crossOriginEmbedderPolicy[\s\S]*?fetched\.crossOriginResourcePolicy[\s\S]*?body\.byteLength !== pin\.bytes[\s\S]*?createHash\('sha256'\)\.update\(body\)\.digest\('hex'\) !== pin\.sha256[\s\S]*?route\.fulfill/u,
@@ -2515,17 +2549,17 @@ assert.doesNotMatch(
 assert.match(
   privateSessionProvisionServerSource,
   /https:\/\/agt-cdn\.cdn-digi\.com\/prd\/system\/translations\/backoffice_en\.json/u,
-  'the exact pinned-v84 default translation fetch must remain available',
+  'the exact pinned-v85 default translation fetch must remain available',
 );
 assert.doesNotMatch(
   privateSessionProvisionServerSource,
   /['"]\/Project\/Balance['"]/u,
-  'an endpoint with no pinned-v84 landing call site must not enter the authenticated allowlist',
+  'an endpoint with no pinned-v85 landing call site must not enter the authenticated allowlist',
 );
 assert.match(
   privateSessionProvisionServerSource,
   /const exactGlobalRefreshHeaders =[\s\S]*?headers\.grant_type === undefined && headers\.authorization === undefined;[\s\S]*?const exactNewServiceRefreshHeaders =[\s\S]*?headers\.grant_type === 'refresh_token'[\s\S]*?exactGlobalRefreshHeaders \|\| exactNewServiceRefreshHeaders/u,
-  'only the two statically reachable pinned-v84 refresh header variants may pass',
+  'only the two statically reachable pinned-v85 refresh header variants may pass',
 );
 assert.match(
   privateSessionProvisionServerSource,

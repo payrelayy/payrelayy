@@ -435,7 +435,7 @@ or noncanonical restored pages—or any unexpected navigation, WebSocket, servic
 topology change—fail closed.
 
 Before it can become application-ready, the trusted proxy fetches the exact `/agents` document and
-the seven pinned v84 bootstrap assets sequentially in one fixed, data-independent order with fixed
+the seven pinned v85 bootstrap assets sequentially in one fixed, data-independent order with fixed
 headers. Every response must be HTTP 200 without a redirect, absent or exact `identity` content
 encoding, at most 8 MiB per entry, and at most 32 MiB in aggregate. The isolated renderer receives
 those eight resources only from the proxy's private in-memory cache; repeated, reordered, or

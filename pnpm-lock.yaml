@@ -175,6 +175,15 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  apps/windows-companion:
+    dependencies:
+      '@fetanagent/agent-platform-kemerbet':
+        specifier: workspace:*
+        version: link:../../packages/agent-platform-kemerbet
+      playwright-core:
+        specifier: 1.62.1
+        version: 1.62.1
+
   apps/worker:
     dependencies:
       '@fetanagent/config':
@@ -183,6 +192,8 @@ importers:
       '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+
+  packages/agent-platform-companion-contracts: {}
 
   packages/agent-platform-contracts: {}
 

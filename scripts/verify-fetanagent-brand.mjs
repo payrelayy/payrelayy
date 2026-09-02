@@ -14,6 +14,14 @@ const legacyTransitionFiles = new Set([
   'infra/verify-fetanagent-vm-transition.mjs',
 ]);
 
+// The product download uses the repository's existing, externally assigned owner/name. This is
+// an exact URL exception, not permission to reintroduce the former product name into UI copy.
+const repositorySlug = ['pay', 'relayy'].join('');
+const companionReleaseAssetUrl =
+  `https://github.com/${repositorySlug}/${repositorySlug}/releases/latest/download/` +
+  'FetanAgent-Windows-Companion.zip';
+const exactCompanionReleaseLinks = [companionReleaseAssetUrl + '.sha256', companionReleaseAssetUrl];
+
 const files = execFileSync(
   'git',
   ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -52,7 +60,11 @@ for (const file of files) {
 
   const lines = contents.toString('utf8').split(/\r?\n/u);
   for (const [index, line] of lines.entries()) {
-    if (legacyPattern.test(line)) {
+    const productText =
+      normalizedFile === 'apps/admin/src/owner-dashboard.ts'
+        ? exactCompanionReleaseLinks.reduce((text, url) => text.replaceAll(url, ''), line)
+        : line;
+    if (legacyPattern.test(productText)) {
       violations.push(`${normalizedFile}:${index + 1}: legacy brand in content`);
     }
   }

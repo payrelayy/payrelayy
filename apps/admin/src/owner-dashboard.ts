@@ -202,7 +202,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </form>
         </section>
 
-        <section class="review-section" aria-labelledby="kemerbet-agent-title">
+        <section class="review-section" aria-labelledby="kemerbet-companion-title">
+          <div id="kemerbet-legacy-profile-controls" hidden inert>
           <div class="panel-heading">
             <div>
               <p class="status-ok">Credential-free profile control</p>
@@ -235,7 +236,38 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
             </label>
             <button type="submit">Prepare new KemerBet agent profile</button>
           </form>
-          <div class="kemerbet-session" aria-labelledby="kemerbet-session-title">
+          </div>
+          <div class="kemerbet-session" aria-labelledby="kemerbet-companion-title">
+            <p class="status-ok">Local sign-in validation</p>
+            <h2 id="kemerbet-companion-title">KemerBet Windows companion</h2>
+            <p class="receipt-label">
+              Use a separate Chrome window on this computer for KemerBet sign-in. This
+              moves sign-in off the datacenter and remote preview. Complete any CAPTCHA normally
+              in Chrome. The dedicated profile stays on your computer, and the companion keeps
+              the guarded window open for up to twelve hours after a candidate sign-in response.
+              KemerBet can end its own session earlier. Credentials,
+              CAPTCHA values, cookies, and browser storage never pass through this Owner page.
+            </p>
+            <p class="pilot-warning">
+              This first companion release is for local sign-in validation only. It has no payment
+              execution capability. Provider financial requests are blocked even if KemerBet shows
+              a Transfer button. The account connection still needs validation; server pairing
+              and exact-five lookup are not enabled yet.
+            </p>
+            <div class="actions companion-actions">
+              <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
+                rel="noopener noreferrer">Download Windows companion</a>
+              <a class="secondary-link"
+                href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip.sha256"
+                rel="noopener noreferrer">Download SHA-256 checksum</a>
+            </div>
+            <ol class="companion-steps">
+              <li>Extract the ZIP once.</li>
+              <li>Double-click <strong>Start FetanAgent Companion.vbs</strong>.</li>
+              <li>Sign in only in the separate Chrome window and leave it open.</li>
+            </ol>
+          </div>
+          <div class="kemerbet-session" aria-labelledby="kemerbet-session-title" hidden inert>
             <h3 id="kemerbet-session-title">Private KemerBet sign-in</h3>
             <p class="receipt-label">
               Open a ten-minute isolated sign-in window, then click the preview and type directly
@@ -388,10 +420,13 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 #kemerbet-session-canvas:focus { outline: 3px solid rgba(103, 232, 249, 0.55); outline-offset: 2px; }
 output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #cffafe; background: #0c1d20; padding: 14px; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.companion-actions { grid-template-columns: repeat(2, 1fr); }
+.actions a.secondary-link { color: #e4e4e7; background: #27272a; }
+.companion-steps { color: #d4d4d8; line-height: 1.65; padding-left: 24px; }
 .notice { min-height: 24px; color: #fcd34d; font-weight: 700; }
 footer { margin-top: 30px; font-size: 0.85rem; }
 [hidden] { display: none !important; }
-@media (max-width: 640px) { .shell { padding-top: 36px; } .actions, .review-actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
+@media (max-width: 640px) { .shell { padding-top: 36px; } .actions, .review-actions, .companion-actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
 `;
 
 export const OWNER_DASHBOARD_JAVASCRIPT = `const loginPanel = document.querySelector('#login-panel');

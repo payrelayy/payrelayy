@@ -30,31 +30,37 @@ Public product live
   -> separate production/public launch review
 ```
 
-## Current truthful status — 2026-09-02
+## Current truthful status — 2026-09-03
 
-The last independently verified deployed baseline is
-`4545dafda19c80ac4a596ca777ad415c9edda282`. Public reachability remains separate from financial
-readiness and must not be used as evidence that payment or execution authority is enabled. The
-hosted KemerBet private-preview design is retired as the production connection path and hidden from
-the Owner workflow. Its historical results remain evidence about the portal contract, not current
-authority to operate a KemerBet account.
+The verified Owner/backend deployed baseline is
+`a0e23939def3b41be1e31a870c422a75c08dd8cf`. The Owner page returned HTTP 200 with the new companion
+card and the old hosted preview hidden; the Telegram smoke check passed. The
+Windows companion v0.1.2 release (Git tag `windows-companion-v0.1.2`),
+built from `de960b4b63e4a832f8681aebb9537482ca6b0d42`, is published and installed on the Owner's
+`D:` drive. The latest direct-SSH check found all six staging containers running, five health-checked
+services healthy, public/Owner pages returning HTTP 200, and the bot running. The download returned
+HTTP 200 and GitHub's uploaded digest matched the local SHA-256. Public reachability and a working
+local window remain separate from financial readiness.
+The retired hosted preview's historical results are portal-contract evidence, not current authority
+to operate a KemerBet account.
 
-| Capability                                          | Status                            | Current evidence                                                                                                                                                                                              |
-| --------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fetanagent.com` public home and account entry      | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                                                                                                            |
-| `@FetanAgentBot` reachability and public onboarding | **COMPLETE**                      | Bot is online; `/start`, menu, and Player-ID submission respond                                                                                                                                               |
-| Five private KemerBet test Player IDs               | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                                                                                                   |
-| Owner fixed-pilot dashboard and server boundary     | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                                                                                                           |
-| Private pilot database boundary                     | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                                                                                                          |
-| Trusted TeleBirr backend foundation                 | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                                                                                                           |
-| Owner-adjustable TeleBirr/CBE receiver revisions    | **DEPLOYED; STATE CHECK NEXT**    | Owner reports both receivers saved through the authenticated UI; active revision/profile state still requires a redacted read-only check                                                                      |
-| KemerBet executor safety foundation                 | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                                                                                                 |
-| Historical hosted KemerBet preview and seal         | **RETIRED / HIDDEN**              | Repeated headless, CAPTCHA, request-transition, and session-retention failures make the Droplet-hosted preview unsuitable as the production connection path                                                   |
-| Local KemerBet Windows companion                    | **IN VALIDATION — NO-MONEY**      | A normal headed Chrome window and persistent local profile launch successfully; HTTP 200 account-info is only a candidate, and exact account/session validation and an observed Owner sign-in remain unproved |
-| Signed exact-five companion pairing and lookup      | **NEXT — NOT WIRED**              | Provider-neutral signed contracts exist, but Owner-device pairing, assignment execution, and signed-result acceptance are not wired into the companion/server path                                            |
-| TeleBirr receiver/profile/signer/device             | **NEXT — VERIFY/PROVISION**       | Verify the Owner-saved receiver revision, then provision the exact profile, signer, and dedicated verifier device                                                                                             |
-| Payment verification, settlement, and execution     | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                                                                                                                 |
-| Public real-money processing                        | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                                                                                                                |
+| Capability                                        | Status                            | Current evidence                                                                                                                                                                                  |
+| ------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetanagent.com` public home and account entry    | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                                                                                                |
+| `@FetanAgentBot` deployment and runtime           | **COMPLETE**                      | Deployment smoke passed and the bot is running; this final runtime check did not send a fresh `/start`                                                                                            |
+| Five private KemerBet test Player IDs             | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                                                                                       |
+| Owner fixed-pilot dashboard and server boundary   | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                                                                                               |
+| Private pilot database boundary                   | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                                                                                              |
+| Trusted TeleBirr backend foundation               | **COMPLETE, unprovisioned**       | Least-privilege database boundary installed; runtime remains `NOLOGIN`, unconfigured, and unstarted                                                                                               |
+| Owner-adjustable TeleBirr/CBE receiver revisions  | **DEPLOYED; STATE CHECK NEXT**    | Owner reports both receivers saved through the authenticated UI; active revision/profile state still requires a redacted read-only check                                                          |
+| KemerBet executor safety foundation               | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                                                                                     |
+| Historical hosted KemerBet preview and seal       | **RETIRED / HIDDEN**              | Repeated headless, CAPTCHA, request-transition, and session-retention failures make the Droplet-hosted preview unsuitable as the production connection path                                       |
+| Windows companion v0.1.2 package and installation | **COMPLETE — NO-MONEY**           | Published exact-release package installed on D:; extracted-ZIP imports, 64 companion tests, 36 dependency tests, and all GitHub checks passed                                                     |
+| Local KemerBet session validation                 | **NEXT — PAGE CANDIDATE ONLY**    | Sandboxed dedicated Chrome displayed the agent page/account header and survived one refresh; the exact `/agents` main frame is only a candidate, not exact account or authenticated-session proof |
+| Signed exact-five companion pairing and lookup    | **NEXT — NOT WIRED**              | Provider-neutral signed contracts exist, but Owner-device pairing, assignment execution, and signed-result acceptance are not wired into the companion/server path                                |
+| TeleBirr receiver/profile/signer/device           | **NEXT — VERIFY/PROVISION**       | Verify the Owner-saved receiver revision, then provision the exact profile, signer, and dedicated verifier device                                                                                 |
+| Payment verification, settlement, and execution   | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                                                                                                     |
+| Public real-money processing                      | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                                                                                                    |
 
 The current release is still financially disabled. In particular,
 `FINANCIAL_ACTIONS_MODE=dry_run`, `KEMERBET_EXECUTOR_ENABLED=false`,
@@ -113,7 +119,7 @@ can be created by an ordinary user.
 
 ## Phase 1 — Correct and connect the KemerBet agent workflow
 
-**Status: IN PROGRESS — HOSTED PREVIEW RETIRED; LOCAL WINDOWS COMPANION IN VALIDATION**
+**Status: IN PROGRESS — v0.1.2 PUBLISHED/INSTALLED; EXACT SESSION PROOF AND PAIRING NEXT**
 
 ### Purpose
 
@@ -200,7 +206,7 @@ must not be revived by another timeout, selector, or recovery-profile patch.
 
 ### Current engineering work
 
-Implemented for validation on 2026-09-02:
+Released and observed on 2026-09-03:
 
 1. A Windows-only companion launches normal headed Chrome with a dedicated persistent local
    profile, a single-instance lock, and explicit local data storage. It has no reason to send a
@@ -211,40 +217,42 @@ Implemented for validation on 2026-09-02:
    and every other provider mutation. Chrome starts offline until context-wide routing is installed;
    local forwarding checks redirects before following them. Service workers and provider WebSockets
    are blocked, and HTTP caching is disabled while routing is active.
-3. It treats the `/agents` URL and an HTTP 200 `GET /Account/Info` response only as signed-in
-   candidates. The response schema/body and exact account identity are not validated, so
-   `signed_in_candidate` is not authentication proof. Application code does not parse, log, or save
-   the response body.
-4. The interactive login window is bounded to ten minutes. After a signed-in candidate, the local
-   companion may remain open for up to twelve hours, but KemerBet may still end its own session
-   earlier because of provider policy or concurrent-device use. Twelve hours is therefore a local
-   lifetime ceiling, not a promise about KemerBet's server session.
-5. The companion and request guard build and pass local automated tests. A real local smoke test
-   opened the normal KemerBet login page in Chrome from a dedicated local profile with mutations
-   blocked.
+3. Its page-candidate state is based only on the exact `/agents` main-frame URL, not an
+   `Account/Info` response. Neither that URL nor a displayed account header proves the exact account
+   or authenticated session. No reviewed exact-identity validation is wired into this release.
+4. The interactive login window is bounded to ten minutes; its login timer is cancelled at the
+   page-candidate transition. The candidate has a non-sliding twelve-hour local lifetime, subject
+   to an overall twelve-hour-ten-minute guarded-session cap. No twelve-hour session observation
+   has been completed, and KemerBet can still end its own session earlier under provider policy or
+   concurrent-device use. These timers are local ceilings, not provider-session guarantees.
+5. v0.1.2 is published and installed from the exact release above. All 64 companion tests, 36
+   dependency tests, and GitHub checks passed; imports from the extracted ZIP passed. The live
+   dedicated Chrome window used `chromiumSandbox: true` without `--no-sandbox`, displayed the agent
+   page/account header, and survived one refresh. The table displayed `No Data`. This is visible
+   page-candidate evidence only; no lookup or money action occurred.
 6. Provider-neutral P-256 pairing, signed-envelope, exact-five assignment, replay, expiry, and
    redacted-result contracts exist and pass tests, but they are not wired into a running
    companion/server connection.
 
-Not yet proved:
+Still NEXT / not yet proved:
 
-- the Owner has not yet completed a sign-in during an observed companion validation run;
-- exact account/session validation is not yet implemented; HTTP 200 `/Account/Info` is not proof;
-- authenticated persistence across the required validation interval has not passed;
+- exact account/session validation is not yet implemented; the observed page candidate is not proof;
+- authenticated persistence across the required validation interval, including twelve hours, has not
+  passed;
 - the local device has not yet been paired to the server with its public identity;
 - no server-signed exact-five find-only assignment has been executed by the paired companion; and
 - no device-signed, replay-protected, redacted exact-five result has been accepted by the server.
 
 ### Required provisioning and validation work
 
-1. Publish and install one exact-release Windows companion package with its checksum. The package
-   must identify the exact reviewed Git release from which it was built.
-2. Launch it on the Owner's Windows device. The Owner signs in only in the separate normal Chrome
-   window and completes any CAPTCHA or provider challenge directly; FetanAgent must neither solve
-   nor relay that challenge.
-3. Implement and pass reviewed, local-only validation of the exact account and authenticated session.
-   An HTTP 200 `GET /Account/Info` response alone must not pass. Return only a redacted outcome;
-   never upload or log the raw response body or identity.
+1. **COMPLETE:** v0.1.2 is published with its exact source revision, installed on D:, and its
+   extracted package imports are verified. Repeat package and checksum verification for each release.
+2. **CANDIDATE OBSERVED:** the separate dedicated Chrome window displayed the agent page/account
+   header and survived one refresh. The Owner enters credentials and completes any provider
+   challenge only in that window; FetanAgent must neither solve nor relay that challenge.
+3. **NEXT:** implement and pass reviewed, local-only validation of the exact account and authenticated
+   session. The `/agents` URL, account header, or HTTP 200 response alone must not pass. Return only
+   a redacted outcome; never upload or log the raw response body or identity.
 4. Demonstrate that the dedicated local profile resumes the authenticated provider session for the
    validation interval, while acknowledging that KemerBet can invalidate its own session.
 5. Enroll one device-held P-256 identity and install only its public certificate and revocation

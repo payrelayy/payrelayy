@@ -1,0 +1,62 @@
+name: Windows companion package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/windows-companion-package.yml'
+      - 'apps/windows-companion/**'
+      - 'packages/agent-platform-contracts/**'
+      - 'packages/agent-platform-kemerbet/**'
+      - 'scripts/build-windows-companion-package.ps1'
+      - 'pnpm-lock.yaml'
+  push:
+    tags:
+      - 'windows-companion-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build no-transfer Windows companion
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Enable Corepack and verify pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          if ((pnpm --version) -ne '11.16.0') { throw 'Unexpected pnpm version.' }
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build, test, and package
+        shell: pwsh
+        run: |
+          .\scripts\build-windows-companion-package.ps1 `
+            -ReleaseSha '${{ github.sha }}' `
+            -OutputDirectory '${{ runner.temp }}\fetanagent-companion-output'
+
+      - name: Upload immutable package
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: FetanAgent-Windows-Companion-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}\fetanagent-companion-output\*.zip
+            ${{ runner.temp }}\fetanagent-companion-output\*.sha256
+          if-no-files-found: error
+          retention-days: 30

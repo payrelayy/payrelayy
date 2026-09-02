@@ -1,0 +1,523 @@
+import { resolve } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { WindowsCompanionConfig } from './config.js';
+import {
+  startLocalKemerBetSession,
+  type LocalKemerBetSession,
+  type LocalKemerBetSessionEvent,
+} from './local-kemerbet-session.js';
+
+const dependencies = vi.hoisted(() => ({
+  acquireSessionLock: vi.fn(),
+  launchPersistentContext: vi.fn(),
+  mkdir: vi.fn(),
+  realpath: vi.fn(),
+  releaseSessionLock: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  mkdir: dependencies.mkdir,
+  realpath: dependencies.realpath,
+}));
+vi.mock('playwright-core', () => ({
+  chromium: { launchPersistentContext: dependencies.launchPersistentContext },
+}));
+vi.mock('./session-lock.js', () => ({
+  acquireSessionLock: dependencies.acquireSessionLock,
+  releaseSessionLock: dependencies.releaseSessionLock,
+}));
+
+const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
+const LOGIN_URL = 'https://agentsystem.admindigi.com/login';
+const LOGIN_RETRY_URL = 'https://agentsystem.admindigi.com/login?et=1';
+const ACCOUNT_INFO_URL = 'https://admin-api.agt-digi.com/Account/Info';
+const DEPOSIT_URL = 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit';
+const TEN_MINUTES = 10 * 60 * 1_000;
+const TWELVE_HOURS = 12 * 60 * 60 * 1_000;
+const config: WindowsCompanionConfig = {
+  dataRoot: resolve('test-fixtures', 'local-companion'),
+  profileRoot: resolve('test-fixtures', 'local-companion', 'profile'),
+  releaseSha: 'local-development',
+};
+
+type Listener = (...args: unknown[]) => unknown;
+type RouteMatcher = string | RegExp | ((url: URL) => boolean);
+
+class FakeEvents {
+  private readonly listeners = new Map<string, Listener[]>();
+
+  on(event: string, listener: Listener): this {
+    const listeners = this.listeners.get(event) ?? [];
+    listeners.push(listener);
+    this.listeners.set(event, listeners);
+    return this;
+  }
+
+  emit(event: string, ...args: unknown[]): void {
+    for (const listener of this.listeners.get(event) ?? []) listener(...args);
+  }
+}
+
+class FakePage extends FakeEvents {
+  private currentUrl = 'about:blank';
+  private readonly frame = {};
+  readonly close = vi.fn(async () => undefined);
+  readonly goto = vi.fn(async (url: string) => {
+    this.order.push('page:goto');
+    this.navigate(url);
+    return null;
+  });
+
+  constructor(private readonly order: string[]) {
+    super();
+  }
+
+  url(): string {
+    return this.currentUrl;
+  }
+
+  mainFrame(): object {
+    return this.frame;
+  }
+
+  navigate(url: string): void {
+    this.currentUrl = url;
+    this.emit('framenavigated', this.frame);
+  }
+}
+
+function matchesRoute(matcher: RouteMatcher, rawUrl: string): boolean {
+  if (typeof matcher === 'function') return matcher(new URL(rawUrl));
+  if (matcher instanceof RegExp) return matcher.test(rawUrl);
+  const escaped = matcher.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replace(/\*/gu, '.*');
+  return new RegExp(`^${escaped}$`, 'u').test(rawUrl);
+}
+
+interface FakeRouteOptions {
+  readonly responseStatus?: number;
+  readonly responseHeaders?: Record<string, string>;
+  readonly navigation?: boolean;
+}
+
+function fakeRoute(url: string, method: string, options: FakeRouteOptions = {}) {
+  const request = {
+    url: () => url,
+    method: () => method,
+    headerValue: vi.fn(async () => null),
+    isNavigationRequest: () => options.navigation ?? false,
+  };
+  const response = {
+    status: () => options.responseStatus ?? 200,
+    headers: () => options.responseHeaders ?? {},
+    url: () => url,
+    dispose: vi.fn(async () => undefined),
+    body: vi.fn(() => {
+      throw new Error('The session must not read response bodies.');
+    }),
+  };
+  return {
+    request: () => request,
+    response,
+    abort: vi.fn(async () => undefined),
+    continue: vi.fn(async () => undefined),
+    fetch: vi.fn(async () => response),
+    fulfill: vi.fn(async () => undefined),
+  };
+}
+
+type FakeRoute = ReturnType<typeof fakeRoute>;
+type RouteHandler = (route: FakeRoute, request: ReturnType<FakeRoute['request']>) => unknown;
+
+class FakeContext extends FakeEvents {
+  readonly registrations: { matcher: RouteMatcher; handler: RouteHandler }[] = [];
+  readonly socketRegistrations: { matcher: RouteMatcher; handler: Listener }[] = [];
+  readonly page: FakePage;
+  readonly route = vi.fn(async (matcher: RouteMatcher, handler: RouteHandler) => {
+    this.order.push('context:route');
+    this.registrations.push({ matcher, handler });
+  });
+  readonly routeWebSocket = vi.fn(async (matcher: RouteMatcher, handler: Listener) => {
+    this.order.push('context:websocket');
+    this.socketRegistrations.push({ matcher, handler });
+  });
+  readonly setOffline = vi.fn(async (offline: boolean) => {
+    this.order.push(`context:offline:${String(offline)}`);
+  });
+  readonly pages = vi.fn(() => [this.page]);
+  readonly newPage = vi.fn(async () => this.page);
+  readonly unroute = vi.fn(async () => undefined);
+  readonly unrouteAll = vi.fn(async () => undefined);
+  readonly close = vi.fn(async () => {
+    this.order.push('context:close');
+    this.emit('close');
+  });
+
+  constructor(readonly order: string[]) {
+    super();
+    this.page = new FakePage(order);
+  }
+
+  async dispatch(url: string, method: string, options: FakeRouteOptions = {}): Promise<FakeRoute> {
+    const registration = this.registrations.find((entry) => matchesRoute(entry.matcher, url));
+    if (!registration) throw new Error('The provider request has no context guard.');
+    const route = fakeRoute(url, method, options);
+    await registration.handler(route, route.request());
+    return route;
+  }
+}
+
+function fakeAccountInfoResponse({
+  url = ACCOUNT_INFO_URL,
+  method = 'GET',
+  status = 200,
+}: { url?: string; method?: string; status?: number } = {}) {
+  const forbiddenRead = () => {
+    throw new Error('The session must not inspect provider response content.');
+  };
+  return {
+    url: () => url,
+    request: () => ({ method: () => method }),
+    status: () => status,
+    body: vi.fn(forbiddenRead),
+    json: vi.fn(forbiddenRead),
+    text: vi.fn(forbiddenRead),
+    headers: vi.fn(forbiddenRead),
+    allHeaders: vi.fn(forbiddenRead),
+  };
+}
+
+const sessions: LocalKemerBetSession[] = [];
+
+async function start() {
+  const order: string[] = [];
+  const context = new FakeContext(order);
+  const events: LocalKemerBetSessionEvent[] = [];
+  dependencies.launchPersistentContext.mockImplementation(async () => {
+    order.push('context:launch');
+    return context;
+  });
+  const session = await startLocalKemerBetSession(config, (event) => events.push(event));
+  // Expected deadline failures are consumed before timers run, avoiding unhandled test promises.
+  void session.done.catch(() => undefined);
+  sessions.push(session);
+  return { context, events, order, page: context.page, session };
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'));
+  vi.resetAllMocks();
+  dependencies.mkdir.mockResolvedValue(undefined);
+  dependencies.realpath.mockImplementation(async (path: string) => path);
+  dependencies.acquireSessionLock.mockResolvedValue({
+    path: resolve(config.dataRoot, 'companion.lock'),
+    handle: { close: vi.fn(async () => undefined) },
+  });
+  dependencies.releaseSessionLock.mockResolvedValue(undefined);
+});
+
+afterEach(async () => {
+  for (const session of sessions.splice(0)) {
+    await session.stop();
+    await session.done.catch(() => undefined);
+  }
+  vi.useRealTimers();
+});
+
+describe('local KemerBet enrollment session', () => {
+  it('starts Chrome offline and guards HTTP and WebSockets before enabling its network', async () => {
+    const { context, order, page } = await start();
+
+    expect(dependencies.launchPersistentContext).toHaveBeenCalledWith(
+      config.profileRoot,
+      expect.objectContaining({
+        headless: false,
+        offline: true,
+        serviceWorkers: 'block',
+        acceptDownloads: false,
+      }),
+    );
+    expect(order.indexOf('context:route')).toBeGreaterThan(order.indexOf('context:launch'));
+    expect(order.indexOf('context:route')).toBeLessThan(order.indexOf('context:offline:false'));
+    expect(order.indexOf('context:websocket')).toBeLessThan(order.indexOf('context:offline:false'));
+    expect(order.indexOf('context:offline:false')).toBeLessThan(order.indexOf('page:goto'));
+    expect(context.setOffline).toHaveBeenCalledExactlyOnceWith(false);
+    expect(page.goto).toHaveBeenCalledWith(
+      AGENTS_URL,
+      expect.objectContaining({ waitUntil: 'commit', timeout: 45_000 }),
+    );
+    for (const url of [ACCOUNT_INFO_URL, LOGIN_URL]) {
+      expect(context.registrations.some((entry) => matchesRoute(entry.matcher, url))).toBe(true);
+    }
+    for (const url of [
+      'wss://admin-api.agt-digi.com/socket',
+      'wss://agentsystem.admindigi.com/socket',
+    ]) {
+      const registration = context.socketRegistrations.find((entry) =>
+        matchesRoute(entry.matcher, url),
+      );
+      expect(registration).toBeDefined();
+      const close = vi.fn();
+      await registration!.handler({ close });
+      expect(close).toHaveBeenCalledWith(expect.objectContaining({ code: 1008 }));
+    }
+  });
+
+  it.each(['', '?languageCode=en', '?languageCode=am', '?languageCode=en-US'])(
+    'treats an exact GET Account/Info HTTP 200%s only as a candidate and never reads its content',
+    async (query) => {
+      const { events, page } = await start();
+      expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
+      const response = fakeAccountInfoResponse({ url: `${ACCOUNT_INFO_URL}${query}` });
+
+      page.emit('response', response);
+
+      expect(events.at(-1)).toEqual({
+        state: 'signed_in_candidate',
+        transferDisabled: true,
+        detailsRedacted: true,
+      });
+      expect(events.map((event) => event.state)).not.toContain('authenticated');
+      for (const read of [
+        response.body,
+        response.json,
+        response.text,
+        response.headers,
+        response.allHeaders,
+      ]) {
+        expect(read).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each([
+    { status: 201 },
+    { status: 204 },
+    { status: 400 },
+    { status: 401 },
+    { status: 403 },
+    { status: 500 },
+    { method: 'POST' },
+    { method: 'HEAD' },
+    { url: `${ACCOUNT_INFO_URL}?unexpected=1` },
+    { url: `${ACCOUNT_INFO_URL}?languageCode=` },
+    { url: `${ACCOUNT_INFO_URL}?languageCode=english` },
+    { url: `${ACCOUNT_INFO_URL}?languageCode=en&languageCode=am` },
+    { url: `${ACCOUNT_INFO_URL}?languageCode=en&extra=1` },
+    { url: `${ACCOUNT_INFO_URL}#unexpected` },
+    { url: `${ACCOUNT_INFO_URL}/` },
+    { url: 'https://example.invalid/Account/Info' },
+  ])('does not promote rejected or non-exact Account/Info evidence: %j', async (options) => {
+    const { events, page } = await start();
+    page.emit('response', fakeAccountInfoResponse(options));
+    expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
+  });
+
+  it('ignores Account/Info evidence on the login page', async () => {
+    const { events, page } = await start();
+    page.navigate(LOGIN_URL);
+    page.emit('response', fakeAccountInfoResponse());
+    expect(events.at(-1)?.state).toBe('login_required');
+    expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
+  });
+
+  it('does not extend the twelve-hour candidate deadline on repeated HTTP 200 responses', async () => {
+    const { context, events, page, session } = await start();
+    page.emit('response', fakeAccountInfoResponse());
+    await vi.advanceTimersByTimeAsync(TWELVE_HOURS - 60 * 60 * 1_000);
+    page.emit('response', fakeAccountInfoResponse());
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1_000 - 1);
+    expect(context.close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(session.done).resolves.toBeUndefined();
+    expect(events.filter((event) => event.state === 'signed_in_candidate')).toHaveLength(1);
+    expect(events.at(-1)).toEqual({
+      state: 'stopped',
+      reason: 'candidate_lifetime_complete',
+      transferDisabled: true,
+      detailsRedacted: true,
+    });
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets a returned candidate to a fresh ten-minute login window without sliding on reload', async () => {
+    const { context, events, page, session } = await start();
+    await vi.advanceTimersByTimeAsync(8 * 60 * 1_000);
+    page.emit('response', fakeAccountInfoResponse());
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1_000);
+    page.navigate(LOGIN_URL);
+    expect(events.at(-1)?.state).toBe('login_required');
+    // A delayed account response cannot restore candidate state after returning to login.
+    page.emit('response', fakeAccountInfoResponse());
+    expect(events.filter((event) => event.state === 'signed_in_candidate')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(9 * 60 * 1_000);
+    page.navigate(LOGIN_RETRY_URL);
+    await vi.advanceTimersByTimeAsync(60 * 1_000 - 1);
+    expect(context.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)).toEqual({
+      state: 'failed',
+      reason: 'login_lifetime_expired',
+      transferDisabled: true,
+      detailsRedacted: true,
+    });
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not extend the initial ten-minute login deadline on repeated login navigation', async () => {
+    const { context, events, page, session } = await start();
+    page.navigate(LOGIN_URL);
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES - 1);
+    page.navigate(LOGIN_RETRY_URL);
+    expect(context.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)?.reason).toBe('login_lifetime_expired');
+  });
+
+  it('aborts a denied provider mutation without sending it or destroying the login browser', async () => {
+    const { context, events, page } = await start();
+    page.navigate(LOGIN_URL);
+
+    const route = await context.dispatch(DEPOSIT_URL, 'POST');
+
+    expect(route.abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
+    expect(route.continue).not.toHaveBeenCalled();
+    expect(route.fetch).not.toHaveBeenCalled();
+    expect(route.fulfill).not.toHaveBeenCalled();
+    expect(context.close).not.toHaveBeenCalled();
+    expect(context.unroute).not.toHaveBeenCalled();
+    expect(context.unrouteAll).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual({
+      state: 'login_required',
+      reason: 'mutation_attempt_blocked',
+      transferDisabled: true,
+      detailsRedacted: true,
+    });
+    const second = await context.dispatch(DEPOSIT_URL, 'GET');
+    expect(second.abort).toHaveBeenCalledTimes(1);
+    expect(second.fetch).not.toHaveBeenCalled();
+  });
+
+  it('forwards an approved provider read with redirects and retries disabled, without reading its body', async () => {
+    const { context } = await start();
+
+    const route = await context.dispatch(ACCOUNT_INFO_URL, 'GET');
+
+    expect(route.fetch).toHaveBeenCalledExactlyOnceWith({
+      url: ACCOUNT_INFO_URL,
+      maxRedirects: 0,
+      maxRetries: 0,
+      timeout: 30_000,
+    });
+    expect(route.fulfill).toHaveBeenCalledExactlyOnceWith({ response: route.response });
+    expect(route.response.dispose).toHaveBeenCalledTimes(1);
+    expect(route.response.body).not.toHaveBeenCalled();
+    expect(route.abort).not.toHaveBeenCalled();
+    expect(route.continue).not.toHaveBeenCalled();
+  });
+
+  it.each([307, 308])(
+    'does not follow a permitted login POST redirected with HTTP %i to a deposit',
+    async (responseStatus) => {
+      const { context, events, page } = await start();
+      page.navigate(LOGIN_URL);
+      const loginUrl = 'https://admin-api.agt-digi.com/Account/Login';
+
+      const route = await context.dispatch(loginUrl, 'POST', {
+        responseStatus,
+        responseHeaders: { location: DEPOSIT_URL },
+      });
+
+      expect(route.fetch).toHaveBeenCalledExactlyOnceWith({
+        url: loginUrl,
+        maxRedirects: 0,
+        maxRetries: 0,
+        timeout: 30_000,
+      });
+      expect(route.abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
+      expect(route.continue).not.toHaveBeenCalled();
+      expect(route.fulfill).not.toHaveBeenCalled();
+      expect(route.response.body).not.toHaveBeenCalled();
+      expect(route.response.dispose).toHaveBeenCalledTimes(1);
+      expect(context.close).not.toHaveBeenCalled();
+      expect(events.at(-1)?.reason).toBe('mutation_attempt_blocked');
+    },
+  );
+
+  it('turns a safe navigation redirect into a new guarded navigation rather than fetching its target', async () => {
+    const { context } = await start();
+
+    const route = await context.dispatch(AGENTS_URL, 'GET', {
+      navigation: true,
+      responseStatus: 302,
+      responseHeaders: { location: '/login?et=1' },
+    });
+
+    expect(route.fetch).toHaveBeenCalledExactlyOnceWith({
+      url: AGENTS_URL,
+      maxRedirects: 0,
+      maxRetries: 0,
+      timeout: 30_000,
+    });
+    expect(route.fulfill).toHaveBeenCalledExactlyOnceWith({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      headers: { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' },
+      body: expect.stringContaining(`url=${LOGIN_RETRY_URL}`),
+    });
+    expect(route.response.body).not.toHaveBeenCalled();
+    expect(route.response.dispose).toHaveBeenCalledTimes(1);
+    expect(route.continue).not.toHaveBeenCalled();
+    expect(route.abort).not.toHaveBeenCalled();
+  });
+
+  it('keeps the context request guard installed until browser shutdown is confirmed', async () => {
+    const { context, session } = await start();
+    let resolveClose!: () => void;
+    context.close.mockImplementationOnce(
+      () => new Promise<void>((resolvePromise) => (resolveClose = resolvePromise)),
+    );
+
+    const stopping = session.stop();
+    try {
+      expect(context.close).toHaveBeenCalledTimes(1);
+      expect(dependencies.releaseSessionLock).not.toHaveBeenCalled();
+      const route = await context.dispatch(DEPOSIT_URL, 'POST');
+      expect(route.abort).toHaveBeenCalledTimes(1);
+      expect(route.continue).not.toHaveBeenCalled();
+      expect(route.fetch).not.toHaveBeenCalled();
+      expect(context.unroute).not.toHaveBeenCalled();
+      expect(context.unrouteAll).not.toHaveBeenCalled();
+    } finally {
+      resolveClose();
+      await stopping;
+    }
+    await expect(session.done).resolves.toBeUndefined();
+    expect(dependencies.releaseSessionLock).toHaveBeenCalledTimes(1);
+    expect(context.unroute).not.toHaveBeenCalled();
+    expect(context.unrouteAll).not.toHaveBeenCalled();
+  });
+
+  it('retains the request guard and profile lock when browser closure fails', async () => {
+    const { context, events, session } = await start();
+    context.close.mockRejectedValueOnce(new Error('Synthetic close failure'));
+
+    await session.stop();
+
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)?.reason).toBe('shutdown_unconfirmed');
+    expect(dependencies.releaseSessionLock).not.toHaveBeenCalled();
+    expect(context.unroute).not.toHaveBeenCalled();
+    expect(context.unrouteAll).not.toHaveBeenCalled();
+    const route = await context.dispatch(DEPOSIT_URL, 'POST');
+    expect(route.abort).toHaveBeenCalledTimes(1);
+    expect(route.fetch).not.toHaveBeenCalled();
+  });
+});

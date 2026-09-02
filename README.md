@@ -204,6 +204,7 @@ environment file.
 | `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner             |
 | `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command         |
 | `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
+| `apps/windows-companion`                                    | Local headed-Chrome KemerBet enrollment; read-only and no-transfer                  |
 | `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
@@ -215,6 +216,7 @@ environment file.
 | `packages/customer-web-workspace-runtime`                   | Seven-function account, Player-ID, deposit, status, and durable throttle BFF        |
 | `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
 | `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                        |
+| `packages/agent-platform-companion-contracts`               | Signed pairing and exact-five no-transfer companion protocol contracts              |
 | `packages/config`                                           | Safe environment parsing and feature switches                                       |
 | `packages/i18n`                                             | Shared English message keys and safe locale normalization                           |
 

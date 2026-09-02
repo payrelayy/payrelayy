@@ -2191,6 +2191,16 @@ assert.doesNotMatch(privateSessionProvisionServerSource, /chromiumSandbox: true/
 assert.match(privateSessionProvisionServerSource, /const LOGIN_LIFETIME_MS = 10 \* 60 \* 1_000/);
 assert.match(
   privateSessionProvisionServerSource,
+  /const POST_LOGIN_TRANSITION_LIFETIME_MS = 60 \* 1_000/,
+  'the credential-release transition must have one fixed sixty-second watchdog budget',
+);
+assert.match(
+  privateSessionProvisionServerSource,
+  /const IDENTITY_VERIFICATION_LIFETIME_MS = 30 \* 1_000/,
+  'the exact identity observation must have one fixed thirty-second watchdog budget',
+);
+assert.match(
+  privateSessionProvisionServerSource,
   /const MAX_GENERATION_LIFETIME_MS = LOGIN_LIFETIME_MS \+ AUTHENTICATED_SESSION_LIFETIME_MS/,
 );
 const provisionCheckpointIdentityVerifierSource = privateSessionProvisionServerSource.slice(
@@ -2213,6 +2223,11 @@ const provisionAuthenticatedIdentityVerifierSource = privateSessionProvisionServ
   privateSessionProvisionServerSource.indexOf('export type KemerBetSessionRequestDecision'),
 );
 assert.match(
+  privateSessionProvisionServerSource,
+  /verify\(\s*page: Page,\s*options\?: Readonly<\{[\s\S]*?monotonicNow\?: \(\) => number;[\s\S]*?reportStage\?: \(stage: KemerBetAgentIdentityObservationStage\) => void;[\s\S]*?timeoutMs\?: number;[\s\S]*?\}\s*>?,?\s*\): Promise<void>/u,
+  'the authenticated identity verifier contract must accept one bounded clock and redacted stage reporter',
+);
+assert.match(
   provisionAuthenticatedIdentityVerifierSource,
   /loadKemerBetSessionIdentityAuthorization\(\{[\s\S]*?filePath: KEMERBET_AGENT_IDENTITY_BINDINGS_FILE,[\s\S]*?authorization\.platformAgentAccountId !== accountId/u,
   'initial authentication must load one exact ordinary-or-recovery identity authorization for the requested Profile',
@@ -2223,6 +2238,11 @@ assert.match(
   'recovery authentication must prove the raw observation under the retired UUID before deriving its fresh UUID-bound digest',
 );
 assert.match(
+  provisionAuthenticatedIdentityVerifierSource,
+  /async verify\([\s\S]*?options:[\s\S]*?monotonicNow\?: \(\) => number;[\s\S]*?reportStage\?: \(stage: KemerBetAgentIdentityObservationStage\) => void;[\s\S]*?timeoutMs\?: number;[\s\S]*?observeKemerBetAgentIdentityFingerprint\)\(\{[\s\S]*?monotonicNow: options\.monotonicNow[\s\S]*?reportStage: options\.reportStage[\s\S]*?timeoutMs: options\.timeoutMs \?\? IDENTITY_VERIFICATION_LIFETIME_MS/u,
+  'the production verifier must forward the injected monotonic clock and redacted stages under the bounded identity timeout',
+);
+assert.match(
   privateSessionProvisionServerSource,
   /createAgentIdentityFingerprinter: async \(\) =>\s*retainedAuthenticatedIdentityVerifier\.fingerprintAgentIdentity/u,
   'the readiness seal must reuse the authenticated identity wrapper so its exact DOM observation is continuity-checked before publication',
@@ -2231,6 +2251,52 @@ assert.doesNotMatch(
   provisionAuthenticatedIdentityVerifierSource,
   /console\.(?:debug|error|info|log|warn)\([^\n]*rawIdentity/u,
   'the recovery identity verifier must never log the raw signed-in identity',
+);
+const provisionAuthenticationStatusSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('export type KemerBetProvisionAuthenticationStage ='),
+  privateSessionProvisionServerSource.indexOf(
+    'export interface KemerBetProvisionStartupFailureEvent',
+  ),
+);
+assertOrderedFragments(
+  provisionAuthenticationStatusSource,
+  [
+    'export type KemerBetProvisionAuthenticationStage =',
+    "| 'credential_released'",
+    "| 'post_login_reload'",
+    "| 'post_login_root'",
+    "| 'post_login_ready'",
+    "| 'agents_candidate'",
+    "| 'session_guard'",
+    "| 'identity_marker'",
+    "| 'identity_value'",
+    "| 'identity_stability';",
+    'export type KemerBetProvisionAuthenticationFailureCode =',
+    "'transition_deadline_exceeded'",
+    "'identity_deadline_exceeded'",
+    "'identity_unavailable';",
+    'readonly detailsRedacted: true;',
+    'readonly failureCode?: KemerBetProvisionAuthenticationFailureCode;',
+    'readonly schemaVersion: 1;',
+    'readonly stage: KemerBetProvisionAuthenticationStage;',
+    "readonly status: 'failed' | 'verifying';",
+  ],
+  'Owner authentication progress must use only the fixed redacted v1 stage and failure vocabulary',
+);
+assert.match(
+  provisionAuthenticationStatusSource,
+  /readonly component: 'kemerbet_session_provision';[\s\S]*?readonly detailsRedacted: true;[\s\S]*?readonly event: 'authentication_failed';[\s\S]*?readonly failureCode: KemerBetProvisionAuthenticationFailureCode;[\s\S]*?readonly schemaVersion: 1;[\s\S]*?readonly stage: KemerBetProvisionAuthenticationStage;/u,
+  'authentication failure diagnostics must expose only the fixed redacted v1 contract',
+);
+assert.match(
+  provisionAuthenticationStatusSource,
+  /function createKemerBetProvisionAuthenticationStatus\(\s*status: 'verifying',[\s\S]*?function createKemerBetProvisionAuthenticationStatus\(\s*status: 'failed',[\s\S]*?failureCode: KemerBetProvisionAuthenticationFailureCode,[\s\S]*?return Object\.freeze\(\{\s*detailsRedacted: true,\s*\.\.\.\(failureCode === undefined \? \{\} : \{ failureCode \}\),\s*schemaVersion: 1,\s*stage,\s*status,/u,
+  'only failed authentication status may carry a failure code, and every status object must be immutable and redacted',
+);
+assert.doesNotMatch(
+  provisionAuthenticationStatusSource,
+  /password|credentialValue|rawIdentity|selector|pageUrl|accountId|platformAgentAccountId/u,
+  'the Owner authentication status and failure contracts must not expose credentials, identifiers, selectors, or URLs',
 );
 assert.match(
   privateSessionProvisionServerSource,
@@ -2824,11 +2890,12 @@ assertOrderedFragments(
     "validPageUrl(observedPage.url()) !== 'login'",
     'return unavailable();',
     'identityVerificationEpoch += 1;',
-    "phase = 'authenticating';",
+    "beginPostLoginAuthenticationWindow(generation, 'credential_released')",
+    'return unavailable();',
     'frameImage = undefined;',
     'frameCapturedAtMs = undefined;',
   ],
-  'the credential-release callback must synchronously revoke the displayed login frame and enter a non-input phase',
+  'the credential-release callback must synchronously revoke the displayed login frame and arm the fixed post-login watchdog before Chromium continues',
 );
 const guardedRouteCallStart = privateSessionProvisionServerSource.indexOf(
   "await observedContext.route('**/*', (route) =>",
@@ -2884,6 +2951,162 @@ assertOrderedFragments(
   ],
   'credential input must remain available only for the displayed frame of an exact login-required document',
 );
+const authenticationWatchdogStateSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('let identityVerificationPromise:'),
+  privateSessionProvisionServerSource.indexOf('let contextUnexpectedlyClosed'),
+);
+assertOrderedFragments(
+  authenticationWatchdogStateSource,
+  [
+    'let identityVerificationEpoch = 0;',
+    'let authenticationStatus: KemerBetProvisionAuthenticationStatus | undefined;',
+    'let postLoginDeadline: Date | undefined;',
+    'let postLoginDeadlineMonotonicMs: number | undefined;',
+    'let postLoginWatchdogTimer: ReturnType<typeof setTimeout> | undefined;',
+    'let postLoginWatchdogEpoch = 0;',
+    'let identityVerificationDeadline: Date | undefined;',
+    'let identityVerificationDeadlineMonotonicMs: number | undefined;',
+    'let identityVerificationWatchdogTimer: ReturnType<typeof setTimeout> | undefined;',
+    'let identityVerificationWatchdogEpoch = 0;',
+  ],
+  'post-login transition and identity verification must retain independent dual-clock deadlines, timers, and cancellation epochs',
+);
+const authenticationWatchdogCancellationSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const cancelPostLoginWatchdog ='),
+  privateSessionProvisionServerSource.indexOf('const clearRuntimeState = ('),
+);
+assertOrderedFragments(
+  authenticationWatchdogCancellationSource,
+  [
+    'const cancelPostLoginWatchdog = (): void => {',
+    'clearTimer(postLoginWatchdogTimer);',
+    'postLoginWatchdogTimer = undefined;',
+    'postLoginWatchdogEpoch += 1;',
+    'postLoginDeadline = undefined;',
+    'postLoginDeadlineMonotonicMs = undefined;',
+    'const cancelIdentityVerificationWatchdog = (): void => {',
+    'clearTimer(identityVerificationWatchdogTimer);',
+    'identityVerificationWatchdogTimer = undefined;',
+    'identityVerificationWatchdogEpoch += 1;',
+    'identityVerificationDeadline = undefined;',
+    'identityVerificationDeadlineMonotonicMs = undefined;',
+    'const cancelAuthenticationWatchdogs = (): void => {',
+    'cancelPostLoginWatchdog();',
+    'cancelIdentityVerificationWatchdog();',
+  ],
+  'both independent authentication watchdogs must have one central cancellation boundary that also clears their deadlines',
+);
+const authenticationWatchdogSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const reportAuthenticationStage = ('),
+  privateSessionProvisionServerSource.indexOf('const acceptAuthenticatedIdentityProof = ('),
+);
+const authenticationFailureLoggerSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const safelyLogAuthenticationFailure = ('),
+  privateSessionProvisionServerSource.indexOf('let context: BrowserContext | undefined;'),
+);
+assert.match(
+  authenticationFailureLoggerSource,
+  /const safelyLogAuthenticationFailure = \([\s\S]*?try \{[\s\S]*?logAuthenticationFailure\(event\);[\s\S]*?\} catch \{[\s\S]*?\}/u,
+  'authentication diagnostics must never be able to interrupt fail-closed cleanup',
+);
+assert.match(
+  authenticationWatchdogSource,
+  /const failAuthentication = \([\s\S]*?authenticationStatus\?\.status === 'failed'[\s\S]*?const stage = authenticationStatus\?\.stage \?\? fallbackStage;[\s\S]*?cancelAuthenticationWatchdogs\(\);[\s\S]*?identityVerificationEpoch \+= 1;[\s\S]*?createKemerBetProvisionAuthenticationStatus\(\s*'failed',\s*stage,\s*failureCode,[\s\S]*?safelyLogAuthenticationFailure\([\s\S]*?createKemerBetProvisionAuthenticationFailureEvent\(stage, failureCode\),[\s\S]*?\);[\s\S]*?markFaulted\(generation\);/u,
+  'an authentication failure must atomically cancel both watchdogs, revoke late proof epochs, publish only redacted status, and enter fail-closed cleanup',
+);
+const postLoginWatchdogSource = authenticationWatchdogSource.slice(
+  authenticationWatchdogSource.indexOf('const schedulePostLoginWatchdog ='),
+  authenticationWatchdogSource.indexOf('const scheduleIdentityVerificationWatchdog ='),
+);
+assertOrderedFragments(
+  postLoginWatchdogSource,
+  [
+    'postLoginWatchdogEpoch !== timerEpoch',
+    "authenticationStatus?.status !== 'verifying'",
+    "phase !== 'authenticating'",
+    'now().getTime() < deadlineWallMs',
+    'readMonotonicNow() < deadlineMonotonicMs',
+    'schedulePostLoginWatchdog(generation);',
+    "failAuthentication(generation, 'transition_deadline_exceeded', 'credential_released');",
+    'const beginPostLoginAuthenticationWindow = (',
+    "phase = 'authenticating';",
+    'reportAuthenticationStage(generation, stage);',
+    'if (postLoginDeadline !== undefined && postLoginDeadlineMonotonicMs !== undefined) return true;',
+    'wallTimestamp + POST_LOGIN_TRANSITION_LIFETIME_MS',
+    'generationDeadline.getTime()',
+    'authenticatedDeadline?.getTime() ?? Number.POSITIVE_INFINITY',
+    'monotonicTimestamp + POST_LOGIN_TRANSITION_LIFETIME_MS',
+    'generationDeadlineMonotonicMs',
+    'authenticatedDeadlineMonotonicMs ?? Number.POSITIVE_INFINITY',
+    "failAuthentication(generation, 'transition_deadline_exceeded', stage);",
+    'postLoginDeadline = new Date(deadlineWallMs);',
+    'postLoginDeadlineMonotonicMs = deadlineMonotonicMs;',
+    'cancelExpiry();',
+    'expiresAt = postLoginDeadline;',
+    'expiresAtMonotonicMs = postLoginDeadlineMonotonicMs;',
+    'schedulePostLoginWatchdog(generation);',
+  ],
+  'credential release must replace the login timer with one non-sliding dual-clock transition watchdog capped by immutable generation and authenticated deadlines',
+);
+assert.doesNotMatch(
+  postLoginWatchdogSource,
+  /armExpiryAt\(postLoginDeadline/u,
+  'generic expiry must not race the sole post-login watchdog at the same immutable deadline',
+);
+assert.equal(
+  countMatches(postLoginWatchdogSource, /postLoginDeadline = new Date\(deadlineWallMs\);/gu),
+  1,
+  'the post-login deadline may be installed once but never extended by later navigation progress',
+);
+const identityWatchdogSource = authenticationWatchdogSource.slice(
+  authenticationWatchdogSource.indexOf('const scheduleIdentityVerificationWatchdog ='),
+);
+assertOrderedFragments(
+  identityWatchdogSource,
+  [
+    'identityVerificationWatchdogEpoch !== timerEpoch',
+    "authenticationStatus?.status !== 'verifying'",
+    "phase !== 'authenticating'",
+    'now().getTime() < deadlineWallMs',
+    'readMonotonicNow() < deadlineMonotonicMs',
+    'scheduleIdentityVerificationWatchdog(generation);',
+    "failAuthentication(generation, 'identity_deadline_exceeded', 'agents_candidate');",
+    'const beginIdentityVerificationWindow = (generation: string): number | undefined => {',
+    "beginPostLoginAuthenticationWindow(generation, 'agents_candidate')",
+    'identityVerificationDeadline === undefined',
+    'identityVerificationDeadlineMonotonicMs === undefined',
+    'wallTimestamp + IDENTITY_VERIFICATION_LIFETIME_MS',
+    'postLoginDeadline.getTime()',
+    'expiresAt.getTime()',
+    'generationDeadline.getTime()',
+    'authenticatedDeadline?.getTime() ?? Number.POSITIVE_INFINITY',
+    'monotonicTimestamp + IDENTITY_VERIFICATION_LIFETIME_MS',
+    'postLoginDeadlineMonotonicMs',
+    'expiresAtMonotonicMs',
+    'generationDeadlineMonotonicMs',
+    'authenticatedDeadlineMonotonicMs ?? Number.POSITIVE_INFINITY',
+    'identityVerificationDeadline = new Date(deadlineWallMs);',
+    'identityVerificationDeadlineMonotonicMs = deadlineMonotonicMs;',
+    'scheduleIdentityVerificationWatchdog(generation);',
+    'identityVerificationDeadline.getTime() - now().getTime()',
+    'identityVerificationDeadlineMonotonicMs - readMonotonicNow()',
+    'return Math.min(IDENTITY_VERIFICATION_LIFETIME_MS, remainingMs);',
+  ],
+  'the first exact agents candidate must arm one non-sliding thirty-second dual-clock identity deadline capped by every enclosing lease',
+);
+assert.equal(
+  countMatches(
+    identityWatchdogSource,
+    /identityVerificationDeadline = new Date\(deadlineWallMs\);/gu,
+  ),
+  1,
+  'stale-proof retries must reuse the first identity deadline rather than slide it forward',
+);
+assert.doesNotMatch(
+  authenticationWatchdogSource,
+  /createKemerBetDeposit|enqueueVerifiedDeposit|\.click\(|\.fill\(|Amount|Transfer/u,
+  'authentication watchdog and proof handling must remain incapable of a KemerBet final action or money movement',
+);
 const beginIdentityVerificationStart = privateSessionProvisionServerSource.indexOf(
   'const beginAuthenticatedIdentityVerification = (',
 );
@@ -2902,10 +3125,14 @@ const beginIdentityVerificationSource = privateSessionProvisionServerSource.slic
 assertOrderedFragments(
   beginIdentityVerificationSource,
   [
-    "phase = 'authenticating';",
+    'const timeoutMs = beginIdentityVerificationWindow(generation);',
+    'if (timeoutMs === undefined) return;',
     'frameImage = undefined;',
     'const verificationEpoch = ++identityVerificationEpoch;',
-    'task = authenticatedIdentityVerifier.verify(observedPage);',
+    'task = authenticatedIdentityVerifier.verify(observedPage, {',
+    'monotonicNow: readMonotonicNow,',
+    'reportStage: (stage) => reportAuthenticationStage(generation, stage),',
+    'timeoutMs,',
     'identityVerificationPromise = task;',
     'void task',
     '.then(',
@@ -2914,9 +3141,22 @@ assertOrderedFragments(
     'verificationEpoch,',
     'verificationEpoch === identityVerificationEpoch',
     "validPageUrl(observedPage.url()) === 'agents'",
-    'markFaulted(generation);',
+    "failAuthentication(generation, 'identity_unavailable', 'agents_candidate');",
+    'if (identityVerificationPromise !== task) return;',
+    'identityVerificationPromise = undefined;',
+    "phase !== 'authenticated'",
+    "phase !== 'stopping'",
+    "phase !== 'faulted'",
+    "validPageUrl(observedPage.url()) === 'agents'",
+    "log('identity_verification_retry_stale');",
+    'beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);',
   ],
-  'an agents candidate must remain non-authenticated until its exact verifier promise succeeds, while rejection faults the current document epoch',
+  'an agents candidate must receive the bounded observer controls and may retry stale proof only inside the original non-sliding deadline',
+);
+assert.match(
+  beginIdentityVerificationSource,
+  /acceptAuthenticatedIdentityProof\([\s\S]*?verificationEpoch,[\s\S]*?verificationEpoch === identityVerificationEpoch[\s\S]*?failAuthentication\(generation, 'identity_unavailable', 'agents_candidate'\)/u,
+  'both success and rejection must remain bound to the exact verifier epoch so a late promise cannot authenticate a replaced document',
 );
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /phase = 'authenticated';/gu),
@@ -3061,13 +3301,45 @@ const clearRuntimeStateSource = privateSessionProvisionServerSource.slice(
   clearRuntimeStateStart,
   clearRuntimeStateEnd,
 );
+const provisionSessionStatusContractSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('export interface KemerBetProvisionSessionStatus'),
+  privateSessionProvisionServerSource.indexOf(
+    'export interface KemerBetProvisionServerDependencies',
+  ),
+);
+assert.match(
+  provisionSessionStatusContractSource,
+  /readonly authentication\?: KemerBetProvisionAuthenticationStatus;[\s\S]*?readonly signedIn: boolean;[\s\S]*?readonly transferDisabled: true;/u,
+  'every session snapshot that exposes redacted authentication progress must retain the compile-time no-transfer invariant',
+);
+const provisionSessionSnapshotSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf(
+    'const snapshot = (): KemerBetProvisionSessionStatus => {',
+  ),
+  privateSessionProvisionServerSource.indexOf('const requireExpectedAccountId = ('),
+);
+assert.equal(
+  countMatches(provisionSessionSnapshotSource, /transferDisabled: true,/gu),
+  2,
+  'both inactive and active Owner snapshots must explicitly report Transfer disabled',
+);
+assert.equal(
+  countMatches(
+    provisionSessionSnapshotSource,
+    /authenticationStatus === undefined \? \{\} : \{ authentication: authenticationStatus \}/gu,
+  ),
+  2,
+  'both inactive failure and active verification snapshots must expose only the fixed redacted authentication status object',
+);
 assertOrderedFragments(
   clearRuntimeStateSource,
   [
     "nextPhase: 'checkpointed' | 'idle',",
     'preserveStartupFailure = false,',
+    'preserveAuthenticationFailure = false,',
     'cancelExpiry();',
     'cancelHardDeadline();',
+    'cancelAuthenticationWatchdogs();',
     'context = undefined;',
     'page = undefined;',
     'profilePath = undefined;',
@@ -3089,8 +3361,11 @@ assertOrderedFragments(
     'profileGenerationLease = undefined;',
     'pendingProfileGenerationLease = undefined;',
     'authenticatedIdentityVerifier = undefined;',
+    'activeRecaptchaCeremony = undefined;',
     'identityVerificationPromise = undefined;',
     'identityVerificationEpoch += 1;',
+    "if (!preserveAuthenticationFailure || authenticationStatus?.status !== 'failed') {",
+    'authenticationStatus = undefined;',
     'contextUnexpectedlyClosed = false;',
     'faultCleanupGeneration = undefined;',
     'if (!preserveStartupFailure) {',
@@ -3100,7 +3375,44 @@ assertOrderedFragments(
     'terminalStartupRequestId = undefined;',
     'phase = nextPhase;',
   ],
-  'central session cleanup must clear every live, pending, preview, generation, and deadline reference',
+  'central session cleanup must cancel every watchdog, revoke late proofs, clear every live reference, and preserve only an explicit terminal redacted authentication failure',
+);
+const beginStopSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const beginStop = (): void => {'),
+  privateSessionProvisionServerSource.indexOf('const queueFaultCleanup = ('),
+);
+assertOrderedFragments(
+  beginStopSource,
+  [
+    "phase = 'stopping';",
+    'frameImage = undefined;',
+    'cancelExpiry();',
+    'cancelAuthenticationWatchdogs();',
+    "if (authenticationStatus?.status === 'verifying') authenticationStatus = undefined;",
+    'queueStopCleanup(generation);',
+  ],
+  'Stop must cancel both watchdogs and remove only in-progress status while retaining any terminal redacted failure for Owner diagnosis',
+);
+const finishStopSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const finishStop = async'),
+  privateSessionProvisionServerSource.indexOf('const queueStopCleanup = ('),
+);
+assertOrderedFragments(
+  finishStopSource,
+  [
+    "const preserveAuthenticationFailure = authenticationStatus?.status === 'failed';",
+    "clearRuntimeState('idle', preserveStartupFailure, preserveAuthenticationFailure);",
+  ],
+  'clean shutdown must carry an exact failed authentication diagnosis into the inactive status snapshot',
+);
+const startSessionSource = privateSessionProvisionServerSource.slice(
+  privateSessionProvisionServerSource.indexOf('const start = (input: StartInput)'),
+  privateSessionProvisionServerSource.indexOf('const checkpointForRecheck = async'),
+);
+assertOrderedFragments(
+  startSessionSource,
+  ['cancelAuthenticationWatchdogs();', 'authenticationStatus = undefined;', "phase = 'starting';"],
+  'a genuinely new generation must clear any preserved authentication diagnosis before startup',
 );
 assertOrderedFragments(
   checkpointForRecheckSource,
@@ -3277,18 +3589,28 @@ const acceptIdentityProofSource = privateSessionProvisionServerSource.slice(
 assertOrderedFragments(
   acceptIdentityProofSource,
   [
+    'verificationEpoch !== identityVerificationEpoch',
     'timestamp >= expiresAt.getTime()',
     'monotonicTimestamp >= expiresAtMonotonicMs',
     'timestamp >= generationDeadline.getTime()',
     'monotonicTimestamp >= generationDeadlineMonotonicMs',
+    'timestamp >= postLoginDeadline.getTime()',
+    'monotonicTimestamp >= postLoginDeadlineMonotonicMs',
+    'timestamp >= identityVerificationDeadline.getTime()',
+    'monotonicTimestamp >= identityVerificationDeadlineMonotonicMs',
+    "failAuthentication(generation, 'identity_deadline_exceeded', 'agents_candidate');",
+    'return;',
+    'cancelAuthenticationWatchdogs();',
+    'authenticationStatus = undefined;',
     "phase = 'authenticated';",
     'authenticatedDeadline ??= new Date(',
     'Math.min(timestamp + AUTHENTICATED_SESSION_LIFETIME_MS, generationDeadline.getTime()),',
     'armExpiryAt(authenticatedDeadline, authenticatedDeadlineMonotonicMs, generation);',
     'if (!signedInLogged) {',
+    "log('identity_verification_succeeded');",
     "log('signed_in');",
   ],
-  'only an unexpired exact identity proof may install one hard-capped immutable twelve-hour deadline',
+  'only the current-epoch proof inside both independent watchdog deadlines may clear redacted progress and install one hard-capped immutable twelve-hour session',
 );
 assert.match(
   privateSessionProfileGenerationLeaseSource,
@@ -3328,7 +3650,7 @@ assertOrderedFragments(
     "ceremonyPageState === 'post_login_reload'",
     "ceremonyPageState === 'post_login_root'",
     "if (phase !== 'authenticating') identityVerificationEpoch += 1;",
-    "phase = 'authenticating';",
+    'beginPostLoginAuthenticationWindow(generation, ceremonyPageState);',
     'frameImage = undefined;',
     'frameCapturedAtMs = undefined;',
     "return 'post_login_transition';",
@@ -3337,13 +3659,15 @@ assertOrderedFragments(
     'markFaulted(generation);',
     "if (state === 'agents' && phase !== 'authenticated') {",
     'beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);',
+    "} else if (state === 'login' && authenticationStatus?.status === 'verifying') {",
+    "failAuthentication(generation, 'identity_unavailable', authenticationStatus.stage);",
     "} else if (state === 'login' && phase !== 'login_required') {",
     'const currentDeadline = expiresAt?.getTime() ?? Number.POSITIVE_INFINITY;',
     'Math.min(now().getTime() + LOGIN_LIFETIME_MS, currentDeadline),',
     'armExpiryAt(',
     'authenticatedDeadline && authenticatedDeadline.getTime() < loginDeadline.getTime()',
   ],
-  'intermediate post-login commits must remain locked and non-faulted until the agents candidate starts identity proof, while later login transitions may only retain or shorten the current deadline',
+  'intermediate post-login commits must reuse the fixed watchdog, an unexpected return to login must fail closed, and only an agents candidate may begin exact identity proof',
 );
 assert.equal(
   countMatches(privateSessionProvisionServerSource, /authenticatedDeadline \?\?= new Date/g),

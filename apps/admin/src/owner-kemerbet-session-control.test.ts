@@ -156,6 +156,143 @@ describe('Owner private KemerBet session control', () => {
   });
 
   it.each([
+    'credential_released',
+    'post_login_reload',
+    'post_login_root',
+    'post_login_ready',
+    'agents_candidate',
+    'session_guard',
+    'identity_marker',
+    'identity_value',
+    'identity_stability',
+  ])('accepts the redacted %s authentication progress envelope', (stage) => {
+    const candidate = {
+      active: true,
+      authentication: {
+        detailsRedacted: true,
+        schemaVersion: 1,
+        stage,
+        status: 'verifying',
+      },
+      expiresAt: '2026-08-23T12:10:00.000Z',
+      frameSequence: 1,
+      generation: '11111111-1111-4111-8111-111111111111',
+      loginRequired: false,
+      phase: 'authenticating',
+      signedIn: false,
+      transferDisabled: true,
+    };
+
+    expect(parseOwnerKemerbetSessionStatus(candidate)).toEqual(candidate);
+  });
+
+  it.each([
+    { active: true, phase: 'faulted' },
+    { active: true, phase: 'stopping' },
+    { active: false, phase: 'idle' },
+  ])('accepts a redacted failed authentication envelope for $phase', ({ active, phase }) => {
+    const candidate = {
+      active,
+      authentication: {
+        detailsRedacted: true,
+        failureCode: 'identity_unavailable',
+        schemaVersion: 1,
+        stage: 'identity_value',
+        status: 'failed',
+      },
+      ...(active
+        ? {
+            expiresAt: '2026-08-23T12:10:00.000Z',
+            frameSequence: 1,
+            generation: '11111111-1111-4111-8111-111111111111',
+          }
+        : {}),
+      loginRequired: false,
+      phase,
+      signedIn: false,
+      transferDisabled: true,
+    };
+
+    expect(parseOwnerKemerbetSessionStatus(candidate)).toEqual(candidate);
+  });
+
+  it.each([
+    {
+      detailsRedacted: true,
+      failureCode: 'identity_unavailable',
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'verifying',
+    },
+    {
+      detailsRedacted: true,
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'failed',
+    },
+    {
+      detailsRedacted: true,
+      failureCode: 'unknown_failure',
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'failed',
+    },
+    {
+      detailsRedacted: true,
+      failureCode: 'identity_unavailable',
+      providerDetail: 'forbidden',
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'failed',
+    },
+  ])('rejects a malformed or authority-bearing authentication object', (authentication) => {
+    expect(() =>
+      parseOwnerKemerbetSessionStatus({
+        active: true,
+        authentication,
+        expiresAt: '2026-08-23T12:10:00.000Z',
+        frameSequence: 1,
+        generation: '11111111-1111-4111-8111-111111111111',
+        loginRequired: false,
+        phase: authentication.status === 'verifying' ? 'authenticating' : 'faulted',
+        signedIn: false,
+        transferDisabled: true,
+      }),
+    ).toThrow(OwnerKemerbetSessionUnavailableError);
+  });
+
+  it.each([
+    ['verifying', 'faulted', true],
+    ['verifying', 'idle', false],
+    ['failed', 'authenticating', true],
+    ['failed', 'checkpointed', false],
+  ])('rejects authentication status %s in the incoherent %s phase', (status, phase, active) => {
+    expect(() =>
+      parseOwnerKemerbetSessionStatus({
+        active,
+        authentication: {
+          detailsRedacted: true,
+          ...(status === 'failed' ? { failureCode: 'transition_deadline_exceeded' } : {}),
+          schemaVersion: 1,
+          stage: 'post_login_reload',
+          status,
+        },
+        ...(active
+          ? {
+              expiresAt: '2026-08-23T12:10:00.000Z',
+              frameSequence: 1,
+              generation: '11111111-1111-4111-8111-111111111111',
+            }
+          : {}),
+        loginRequired: false,
+        phase,
+        signedIn: false,
+        transferDisabled: true,
+      }),
+    ).toThrow(OwnerKemerbetSessionUnavailableError);
+  });
+
+  it.each([
     ['cleanup', 'contract_mismatch'],
     ['recaptcha_asset', 'cleanup_unverified'],
     ['preview_ready', 'contract_mismatch'],

@@ -64,6 +64,7 @@ import {
   assertKemerBetAgentPageSelectorContractV2,
   createPlaywrightKemerBetAgentPage,
   observeKemerBetAgentIdentityFingerprint,
+  type KemerBetAgentIdentityObservationStage,
   type KemerBetAgentPageSelectorContractV2,
   type KemerBetAgentWorkflowControl,
 } from './playwright-kemerbet-agent-page.js';
@@ -257,6 +258,8 @@ const MAX_PROVIDER_LOGIN_BODY_BYTES = 16_384;
 const LOGIN_LIFETIME_MS = 10 * 60 * 1_000;
 const AUTHENTICATED_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const MAX_GENERATION_LIFETIME_MS = LOGIN_LIFETIME_MS + AUTHENTICATED_SESSION_LIFETIME_MS;
+const POST_LOGIN_TRANSITION_LIFETIME_MS = 60 * 1_000;
+const IDENTITY_VERIFICATION_LIFETIME_MS = 30 * 1_000;
 const FRAME_CAPTURE_TIMEOUT_MS = 4_000;
 const FRAME_REFRESH_INTERVAL_MS = 1_000;
 const FAULT_CLEANUP_RETRY_MS = 5_000;
@@ -288,7 +291,14 @@ interface KemerBetSessionCheckpointInput {
 export interface KemerBetProvisionAuthenticatedIdentityVerifier {
   readonly accountId: string;
   readonly fingerprintAgentIdentity: KemerBetAgentIdentityFingerprinter;
-  verify(page: Page): Promise<void>;
+  verify(
+    page: Page,
+    options?: Readonly<{
+      monotonicNow?: () => number;
+      reportStage?: (stage: KemerBetAgentIdentityObservationStage) => void;
+      timeoutMs?: number;
+    }>,
+  ): Promise<void>;
 }
 
 export interface KemerBetProvisionAuthenticatedIdentityVerifierDependencies {
@@ -427,6 +437,74 @@ export type KemerBetProvisionStartupStatus = Readonly<{
   readonly status: 'failed' | 'ready' | 'starting';
 }>;
 
+export type KemerBetProvisionAuthenticationStage =
+  | 'credential_released'
+  | 'post_login_reload'
+  | 'post_login_root'
+  | 'post_login_ready'
+  | 'agents_candidate'
+  | 'session_guard'
+  | 'identity_marker'
+  | 'identity_value'
+  | 'identity_stability';
+
+export type KemerBetProvisionAuthenticationFailureCode =
+  'transition_deadline_exceeded' | 'identity_deadline_exceeded' | 'identity_unavailable';
+
+export type KemerBetProvisionAuthenticationStatus = Readonly<{
+  readonly detailsRedacted: true;
+  readonly failureCode?: KemerBetProvisionAuthenticationFailureCode;
+  readonly schemaVersion: 1;
+  readonly stage: KemerBetProvisionAuthenticationStage;
+  readonly status: 'failed' | 'verifying';
+}>;
+
+export interface KemerBetProvisionAuthenticationFailureEvent {
+  readonly component: 'kemerbet_session_provision';
+  readonly detailsRedacted: true;
+  readonly event: 'authentication_failed';
+  readonly failureCode: KemerBetProvisionAuthenticationFailureCode;
+  readonly schemaVersion: 1;
+  readonly stage: KemerBetProvisionAuthenticationStage;
+}
+
+export function createKemerBetProvisionAuthenticationFailureEvent(
+  stage: KemerBetProvisionAuthenticationStage,
+  failureCode: KemerBetProvisionAuthenticationFailureCode,
+): KemerBetProvisionAuthenticationFailureEvent {
+  return Object.freeze({
+    component: 'kemerbet_session_provision',
+    detailsRedacted: true,
+    event: 'authentication_failed',
+    failureCode,
+    schemaVersion: 1,
+    stage,
+  });
+}
+
+function createKemerBetProvisionAuthenticationStatus(
+  status: 'verifying',
+  stage: KemerBetProvisionAuthenticationStage,
+): KemerBetProvisionAuthenticationStatus;
+function createKemerBetProvisionAuthenticationStatus(
+  status: 'failed',
+  stage: KemerBetProvisionAuthenticationStage,
+  failureCode: KemerBetProvisionAuthenticationFailureCode,
+): KemerBetProvisionAuthenticationStatus;
+function createKemerBetProvisionAuthenticationStatus(
+  status: 'failed' | 'verifying',
+  stage: KemerBetProvisionAuthenticationStage,
+  failureCode?: KemerBetProvisionAuthenticationFailureCode,
+): KemerBetProvisionAuthenticationStatus {
+  return Object.freeze({
+    detailsRedacted: true,
+    ...(failureCode === undefined ? {} : { failureCode }),
+    schemaVersion: 1,
+    stage,
+    status,
+  });
+}
+
 export interface KemerBetProvisionStartupFailureEvent {
   readonly component: 'kemerbet_session_provision';
   readonly detailsRedacted: true;
@@ -475,6 +553,7 @@ function createKemerBetProvisionStartupStatus(
 
 export interface KemerBetProvisionSessionStatus {
   readonly active: boolean;
+  readonly authentication?: KemerBetProvisionAuthenticationStatus;
   readonly expiresAt?: string;
   readonly frameSequence?: number;
   readonly generation?: string;
@@ -529,7 +608,17 @@ export interface KemerBetProvisionServerDependencies {
   readonly createRecaptchaCeremony?: typeof createKemerBetRecaptchaCeremony;
   readonly fetchRecaptchaAsset?: KemerBetRecaptchaAssetFetcher;
   readonly closePersistentBrowserForCheckpoint?: typeof closeKemerBetPersistentBrowserForRestorableCheckpoint;
-  readonly log?: (event: 'profile_quarantined' | 'started' | 'signed_in' | 'stopped') => void;
+  readonly log?: (
+    event:
+      | 'identity_verification_retry_stale'
+      | 'identity_verification_started'
+      | 'identity_verification_succeeded'
+      | 'profile_quarantined'
+      | 'started'
+      | 'signed_in'
+      | 'stopped',
+  ) => void;
+  readonly logAuthenticationFailure?: (event: KemerBetProvisionAuthenticationFailureEvent) => void;
   readonly logReadinessSealFailure?: (event: KemerBetReadinessSealFailureEvent) => void;
   readonly logStartupFailure?: (event: KemerBetProvisionStartupFailureEvent) => void;
 }
@@ -1062,12 +1151,22 @@ export async function prepareKemerBetProvisionAuthenticatedIdentityVerifier(
   return Object.freeze({
     accountId,
     fingerprintAgentIdentity,
-    async verify(page: Page): Promise<void> {
+    async verify(
+      page: Page,
+      options: Readonly<{
+        monotonicNow?: () => number;
+        reportStage?: (stage: KemerBetAgentIdentityObservationStage) => void;
+        timeoutMs?: number;
+      }> = {},
+    ): Promise<void> {
       await (dependencies.observeIdentityFingerprint ?? observeKemerBetAgentIdentityFingerprint)({
         fingerprintAgentIdentity,
+        ...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
         page,
         platformAgentAccountId: accountId,
+        ...(options.reportStage === undefined ? {} : { reportStage: options.reportStage }),
         selectorContract,
+        timeoutMs: options.timeoutMs ?? IDENTITY_VERIFICATION_LIFETIME_MS,
       });
     },
   });
@@ -3045,8 +3144,29 @@ export function createKemerBetSessionProvisionServer(
     });
   const log =
     dependencies.log ??
-    ((event: 'profile_quarantined' | 'started' | 'signed_in' | 'stopped') =>
-      console.info({ component: 'kemerbet_session_provision', event, detailsRedacted: true }));
+    ((
+      event:
+        | 'identity_verification_retry_stale'
+        | 'identity_verification_started'
+        | 'identity_verification_succeeded'
+        | 'profile_quarantined'
+        | 'started'
+        | 'signed_in'
+        | 'stopped',
+    ) => console.info({ component: 'kemerbet_session_provision', event, detailsRedacted: true }));
+  const logAuthenticationFailure =
+    dependencies.logAuthenticationFailure ??
+    ((event: KemerBetProvisionAuthenticationFailureEvent) => console.error(JSON.stringify(event)));
+  const safelyLogAuthenticationFailure = (
+    event: KemerBetProvisionAuthenticationFailureEvent,
+  ): void => {
+    try {
+      logAuthenticationFailure(event);
+    } catch {
+      // Authentication failure reporting is diagnostic only. A broken logger must never prevent
+      // the browser generation from entering the same fail-closed cleanup path.
+    }
+  };
   const logReadinessSealFailure =
     dependencies.logReadinessSealFailure ??
     ((event: KemerBetReadinessSealFailureEvent) => console.error(JSON.stringify(event)));
@@ -3094,6 +3214,15 @@ export function createKemerBetSessionProvisionServer(
   let activeRecaptchaCeremony: KemerBetRecaptchaCeremony | undefined;
   let identityVerificationPromise: Promise<void> | undefined;
   let identityVerificationEpoch = 0;
+  let authenticationStatus: KemerBetProvisionAuthenticationStatus | undefined;
+  let postLoginDeadline: Date | undefined;
+  let postLoginDeadlineMonotonicMs: number | undefined;
+  let postLoginWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  let postLoginWatchdogEpoch = 0;
+  let identityVerificationDeadline: Date | undefined;
+  let identityVerificationDeadlineMonotonicMs: number | undefined;
+  let identityVerificationWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  let identityVerificationWatchdogEpoch = 0;
   let contextUnexpectedlyClosed = false;
   const expectedContextClosures = new WeakSet<BrowserContext>();
   let checkpointedForRecheck = false;
@@ -3271,12 +3400,37 @@ export function createKemerBetSessionProvisionServer(
     }, delayMs);
   };
 
+  const cancelPostLoginWatchdog = (): void => {
+    if (postLoginWatchdogTimer !== undefined) clearTimer(postLoginWatchdogTimer);
+    postLoginWatchdogTimer = undefined;
+    postLoginWatchdogEpoch += 1;
+    postLoginDeadline = undefined;
+    postLoginDeadlineMonotonicMs = undefined;
+  };
+
+  const cancelIdentityVerificationWatchdog = (): void => {
+    if (identityVerificationWatchdogTimer !== undefined) {
+      clearTimer(identityVerificationWatchdogTimer);
+    }
+    identityVerificationWatchdogTimer = undefined;
+    identityVerificationWatchdogEpoch += 1;
+    identityVerificationDeadline = undefined;
+    identityVerificationDeadlineMonotonicMs = undefined;
+  };
+
+  const cancelAuthenticationWatchdogs = (): void => {
+    cancelPostLoginWatchdog();
+    cancelIdentityVerificationWatchdog();
+  };
+
   const clearRuntimeState = (
     nextPhase: 'checkpointed' | 'idle',
     preserveStartupFailure = false,
+    preserveAuthenticationFailure = false,
   ): void => {
     cancelExpiry();
     cancelHardDeadline();
+    cancelAuthenticationWatchdogs();
     context = undefined;
     page = undefined;
     profilePath = undefined;
@@ -3301,6 +3455,9 @@ export function createKemerBetSessionProvisionServer(
     activeRecaptchaCeremony = undefined;
     identityVerificationPromise = undefined;
     identityVerificationEpoch += 1;
+    if (!preserveAuthenticationFailure || authenticationStatus?.status !== 'failed') {
+      authenticationStatus = undefined;
+    }
     contextUnexpectedlyClosed = false;
     faultCleanupGeneration = undefined;
     if (!preserveStartupFailure) {
@@ -3320,6 +3477,7 @@ export function createKemerBetSessionProvisionServer(
         loginRequired: false,
         phase,
         signedIn: false,
+        ...(authenticationStatus === undefined ? {} : { authentication: authenticationStatus }),
         ...(startupStatus === undefined ? {} : { startup: startupStatus }),
         transferDisabled: true,
       } as const;
@@ -3341,6 +3499,7 @@ export function createKemerBetSessionProvisionServer(
       loginRequired: phase === 'login_required',
       phase,
       signedIn: phase === 'authenticated',
+      ...(authenticationStatus === undefined ? {} : { authentication: authenticationStatus }),
       ...(startupStatus === undefined ? {} : { startup: startupStatus }),
       transferDisabled: true,
     };
@@ -3564,7 +3723,8 @@ export function createKemerBetSessionProvisionServer(
       }
     }
     const preserveStartupFailure = startupStatus?.status === 'failed';
-    clearRuntimeState('idle', preserveStartupFailure);
+    const preserveAuthenticationFailure = authenticationStatus?.status === 'failed';
+    clearRuntimeState('idle', preserveStartupFailure, preserveAuthenticationFailure);
     if (retainedContext) log('stopped');
   };
 
@@ -3590,6 +3750,8 @@ export function createKemerBetSessionProvisionServer(
       frameImage = undefined;
       frameCapturedAtMs = undefined;
       cancelExpiry();
+      cancelAuthenticationWatchdogs();
+      if (authenticationStatus?.status === 'verifying') authenticationStatus = undefined;
     }
     queueStopCleanup(generation);
   };
@@ -3612,12 +3774,243 @@ export function createKemerBetSessionProvisionServer(
     ) {
       return;
     }
+    if (authenticationStatus?.status === 'verifying') {
+      const stage = authenticationStatus.stage;
+      cancelAuthenticationWatchdogs();
+      identityVerificationEpoch += 1;
+      authenticationStatus = createKemerBetProvisionAuthenticationStatus(
+        'failed',
+        stage,
+        'identity_unavailable',
+      );
+      safelyLogAuthenticationFailure(
+        createKemerBetProvisionAuthenticationFailureEvent(stage, 'identity_unavailable'),
+      );
+    }
     phase = 'faulted';
     frameImage = undefined;
     frameCapturedAtMs = undefined;
     // Preserve the already-armed immutable deadline. Cleanup is attempted immediately, and a
     // failed clean close remains bounded by that original deadline rather than extending it.
     queueFaultCleanup(generation);
+  };
+
+  const reportAuthenticationStage = (
+    generation: string,
+    stage: KemerBetProvisionAuthenticationStage,
+  ): void => {
+    if (
+      sessionGeneration !== generation ||
+      phase !== 'authenticating' ||
+      authenticationStatus?.status === 'failed'
+    ) {
+      return;
+    }
+    authenticationStatus = createKemerBetProvisionAuthenticationStatus('verifying', stage);
+  };
+
+  const failAuthentication = (
+    generation: string,
+    failureCode: KemerBetProvisionAuthenticationFailureCode,
+    fallbackStage: KemerBetProvisionAuthenticationStage,
+  ): void => {
+    if (
+      sessionGeneration !== generation ||
+      phase === 'idle' ||
+      phase === 'checkpointed' ||
+      phase === 'stopping' ||
+      authenticationStatus?.status === 'failed'
+    ) {
+      return;
+    }
+    const stage = authenticationStatus?.stage ?? fallbackStage;
+    cancelAuthenticationWatchdogs();
+    identityVerificationEpoch += 1;
+    authenticationStatus = createKemerBetProvisionAuthenticationStatus(
+      'failed',
+      stage,
+      failureCode,
+    );
+    safelyLogAuthenticationFailure(
+      createKemerBetProvisionAuthenticationFailureEvent(stage, failureCode),
+    );
+    markFaulted(generation);
+  };
+
+  const schedulePostLoginWatchdog = (generation: string): void => {
+    if (
+      generation !== sessionGeneration ||
+      !postLoginDeadline ||
+      postLoginDeadlineMonotonicMs === undefined ||
+      phase !== 'authenticating'
+    ) {
+      return;
+    }
+    if (postLoginWatchdogTimer !== undefined) clearTimer(postLoginWatchdogTimer);
+    const timerEpoch = ++postLoginWatchdogEpoch;
+    const deadlineWallMs = postLoginDeadline.getTime();
+    const deadlineMonotonicMs = postLoginDeadlineMonotonicMs;
+    const delayMs = Math.max(
+      1,
+      Math.min(deadlineWallMs - now().getTime(), deadlineMonotonicMs - readMonotonicNow()),
+    );
+    postLoginWatchdogTimer = setTimer(() => {
+      if (
+        sessionGeneration !== generation ||
+        postLoginWatchdogEpoch !== timerEpoch ||
+        authenticationStatus?.status !== 'verifying' ||
+        phase !== 'authenticating'
+      ) {
+        return;
+      }
+      if (now().getTime() < deadlineWallMs && readMonotonicNow() < deadlineMonotonicMs) {
+        schedulePostLoginWatchdog(generation);
+        return;
+      }
+      failAuthentication(generation, 'transition_deadline_exceeded', 'credential_released');
+    }, delayMs);
+  };
+
+  const beginPostLoginAuthenticationWindow = (
+    generation: string,
+    stage: KemerBetProvisionAuthenticationStage,
+  ): boolean => {
+    if (
+      sessionGeneration !== generation ||
+      phase === 'stopping' ||
+      phase === 'faulted' ||
+      checkpointedForRecheck
+    ) {
+      return false;
+    }
+    phase = 'authenticating';
+    reportAuthenticationStage(generation, stage);
+    if (postLoginDeadline !== undefined && postLoginDeadlineMonotonicMs !== undefined) return true;
+    const wallTimestamp = now().getTime();
+    const monotonicTimestamp = readMonotonicNow();
+    if (
+      !Number.isFinite(wallTimestamp) ||
+      !generationDeadline ||
+      generationDeadlineMonotonicMs === undefined
+    ) {
+      failAuthentication(generation, 'identity_unavailable', stage);
+      return false;
+    }
+    const deadlineWallMs = Math.min(
+      wallTimestamp + POST_LOGIN_TRANSITION_LIFETIME_MS,
+      generationDeadline.getTime(),
+      authenticatedDeadline?.getTime() ?? Number.POSITIVE_INFINITY,
+    );
+    const deadlineMonotonicMs = Math.min(
+      monotonicTimestamp + POST_LOGIN_TRANSITION_LIFETIME_MS,
+      generationDeadlineMonotonicMs,
+      authenticatedDeadlineMonotonicMs ?? Number.POSITIVE_INFINITY,
+    );
+    if (deadlineWallMs <= wallTimestamp || deadlineMonotonicMs <= monotonicTimestamp) {
+      failAuthentication(generation, 'transition_deadline_exceeded', stage);
+      return false;
+    }
+    postLoginDeadline = new Date(deadlineWallMs);
+    postLoginDeadlineMonotonicMs = deadlineMonotonicMs;
+    // The authentication watchdog is the sole timer for this boundary. Retire the login timer and
+    // publish the same bounded expiry in status without arming a second callback at the identical
+    // instant; otherwise generic Stop could win the race and erase the terminal failure reason.
+    cancelExpiry();
+    expiresAt = postLoginDeadline;
+    expiresAtMonotonicMs = postLoginDeadlineMonotonicMs;
+    schedulePostLoginWatchdog(generation);
+    return true;
+  };
+
+  const scheduleIdentityVerificationWatchdog = (generation: string): void => {
+    if (
+      generation !== sessionGeneration ||
+      !identityVerificationDeadline ||
+      identityVerificationDeadlineMonotonicMs === undefined ||
+      phase !== 'authenticating'
+    ) {
+      return;
+    }
+    if (identityVerificationWatchdogTimer !== undefined) {
+      clearTimer(identityVerificationWatchdogTimer);
+    }
+    const timerEpoch = ++identityVerificationWatchdogEpoch;
+    const deadlineWallMs = identityVerificationDeadline.getTime();
+    const deadlineMonotonicMs = identityVerificationDeadlineMonotonicMs;
+    const delayMs = Math.max(
+      1,
+      Math.min(deadlineWallMs - now().getTime(), deadlineMonotonicMs - readMonotonicNow()),
+    );
+    identityVerificationWatchdogTimer = setTimer(() => {
+      if (
+        sessionGeneration !== generation ||
+        identityVerificationWatchdogEpoch !== timerEpoch ||
+        authenticationStatus?.status !== 'verifying' ||
+        phase !== 'authenticating'
+      ) {
+        return;
+      }
+      if (now().getTime() < deadlineWallMs && readMonotonicNow() < deadlineMonotonicMs) {
+        scheduleIdentityVerificationWatchdog(generation);
+        return;
+      }
+      failAuthentication(generation, 'identity_deadline_exceeded', 'agents_candidate');
+    }, delayMs);
+  };
+
+  const beginIdentityVerificationWindow = (generation: string): number | undefined => {
+    if (!beginPostLoginAuthenticationWindow(generation, 'agents_candidate')) return undefined;
+    if (
+      identityVerificationDeadline === undefined ||
+      identityVerificationDeadlineMonotonicMs === undefined
+    ) {
+      const wallTimestamp = now().getTime();
+      const monotonicTimestamp = readMonotonicNow();
+      if (
+        !postLoginDeadline ||
+        postLoginDeadlineMonotonicMs === undefined ||
+        !expiresAt ||
+        expiresAtMonotonicMs === undefined ||
+        !generationDeadline ||
+        generationDeadlineMonotonicMs === undefined
+      ) {
+        failAuthentication(generation, 'identity_unavailable', 'agents_candidate');
+        return undefined;
+      }
+      const deadlineWallMs = Math.min(
+        wallTimestamp + IDENTITY_VERIFICATION_LIFETIME_MS,
+        postLoginDeadline.getTime(),
+        expiresAt.getTime(),
+        generationDeadline.getTime(),
+        authenticatedDeadline?.getTime() ?? Number.POSITIVE_INFINITY,
+      );
+      const deadlineMonotonicMs = Math.min(
+        monotonicTimestamp + IDENTITY_VERIFICATION_LIFETIME_MS,
+        postLoginDeadlineMonotonicMs,
+        expiresAtMonotonicMs,
+        generationDeadlineMonotonicMs,
+        authenticatedDeadlineMonotonicMs ?? Number.POSITIVE_INFINITY,
+      );
+      if (deadlineWallMs <= wallTimestamp || deadlineMonotonicMs <= monotonicTimestamp) {
+        failAuthentication(generation, 'identity_deadline_exceeded', 'agents_candidate');
+        return undefined;
+      }
+      identityVerificationDeadline = new Date(deadlineWallMs);
+      identityVerificationDeadlineMonotonicMs = deadlineMonotonicMs;
+      scheduleIdentityVerificationWatchdog(generation);
+      log('identity_verification_started');
+    }
+    const remainingMs = Math.floor(
+      Math.min(
+        identityVerificationDeadline.getTime() - now().getTime(),
+        identityVerificationDeadlineMonotonicMs - readMonotonicNow(),
+      ),
+    );
+    if (remainingMs < 100) {
+      failAuthentication(generation, 'identity_deadline_exceeded', 'agents_candidate');
+      return undefined;
+    }
+    return Math.min(IDENTITY_VERIFICATION_LIFETIME_MS, remainingMs);
   };
 
   const acceptAuthenticatedIdentityProof = (
@@ -3648,14 +4041,24 @@ export function createKemerBetSessionProvisionServer(
       timestamp >= expiresAt.getTime() ||
       monotonicTimestamp >= expiresAtMonotonicMs ||
       timestamp >= generationDeadline.getTime() ||
-      monotonicTimestamp >= generationDeadlineMonotonicMs
+      monotonicTimestamp >= generationDeadlineMonotonicMs ||
+      !postLoginDeadline ||
+      postLoginDeadlineMonotonicMs === undefined ||
+      timestamp >= postLoginDeadline.getTime() ||
+      monotonicTimestamp >= postLoginDeadlineMonotonicMs ||
+      !identityVerificationDeadline ||
+      identityVerificationDeadlineMonotonicMs === undefined ||
+      timestamp >= identityVerificationDeadline.getTime() ||
+      monotonicTimestamp >= identityVerificationDeadlineMonotonicMs
     ) {
-      beginStop();
+      failAuthentication(generation, 'identity_deadline_exceeded', 'agents_candidate');
       return;
     }
     // This is the sole transition that accepts authentication. A candidate URL by itself never
     // sets signedIn; the exact immutable authorization has already been re-observed through the
     // UUID-bound fingerprinter in the reviewed selector contract before this deadline check.
+    cancelAuthenticationWatchdogs();
+    authenticationStatus = undefined;
     phase = 'authenticated';
     frameImage = undefined;
     frameCapturedAtMs = undefined;
@@ -3669,6 +4072,7 @@ export function createKemerBetSessionProvisionServer(
     armExpiryAt(authenticatedDeadline, authenticatedDeadlineMonotonicMs, generation);
     if (!signedInLogged) {
       signedInLogged = true;
+      log('identity_verification_succeeded');
       log('signed_in');
     }
   };
@@ -3678,23 +4082,25 @@ export function createKemerBetSessionProvisionServer(
     observedContext: BrowserContext,
     observedPage: Page,
   ): void => {
-    if (
-      identityVerificationPromise !== undefined ||
-      !authenticatedIdentityVerifier ||
-      authenticatedIdentityVerifier.accountId !== accountId
-    ) {
-      if (!authenticatedIdentityVerifier) markFaulted(generation);
+    if (!authenticatedIdentityVerifier || authenticatedIdentityVerifier.accountId !== accountId) {
+      failAuthentication(generation, 'identity_unavailable', 'agents_candidate');
       return;
     }
-    phase = 'authenticating';
+    if (identityVerificationPromise !== undefined) return;
+    const timeoutMs = beginIdentityVerificationWindow(generation);
+    if (timeoutMs === undefined) return;
     frameImage = undefined;
     frameCapturedAtMs = undefined;
     const verificationEpoch = ++identityVerificationEpoch;
     let task: Promise<void>;
     try {
-      task = authenticatedIdentityVerifier.verify(observedPage);
+      task = authenticatedIdentityVerifier.verify(observedPage, {
+        monotonicNow: readMonotonicNow,
+        reportStage: (stage) => reportAuthenticationStage(generation, stage),
+        timeoutMs,
+      });
     } catch {
-      markFaulted(generation);
+      failAuthentication(generation, 'identity_unavailable', 'agents_candidate');
       return;
     }
     identityVerificationPromise = task;
@@ -3718,7 +4124,7 @@ export function createKemerBetSessionProvisionServer(
               verificationEpoch === identityVerificationEpoch &&
               validPageUrl(observedPage.url()) === 'agents'
             ) {
-              markFaulted(generation);
+              failAuthentication(generation, 'identity_unavailable', 'agents_candidate');
             }
           }),
       )
@@ -3740,6 +4146,7 @@ export function createKemerBetSessionProvisionServer(
             !checkpointedForRecheck &&
             validPageUrl(observedPage.url()) === 'agents'
           ) {
+            log('identity_verification_retry_stale');
             beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);
           }
         }).catch(() => undefined);
@@ -3776,7 +4183,7 @@ export function createKemerBetSessionProvisionServer(
       ceremonyPageState === 'post_login_root'
     ) {
       if (phase !== 'authenticating') identityVerificationEpoch += 1;
-      phase = 'authenticating';
+      beginPostLoginAuthenticationWindow(generation, ceremonyPageState);
       frameImage = undefined;
       frameCapturedAtMs = undefined;
       return 'post_login_transition';
@@ -3788,6 +4195,8 @@ export function createKemerBetSessionProvisionServer(
     }
     if (state === 'agents' && phase !== 'authenticated') {
       beginAuthenticatedIdentityVerification(generation, observedContext, observedPage);
+    } else if (state === 'login' && authenticationStatus?.status === 'verifying') {
+      failAuthentication(generation, 'identity_unavailable', authenticationStatus.stage);
     } else if (state === 'login' && phase !== 'login_required') {
       identityVerificationEpoch += 1;
       phase = 'login_required';
@@ -4039,7 +4448,9 @@ export function createKemerBetSessionProvisionServer(
         // that boundary so another control request cannot replay it while the provider's
         // same-login post-authentication document is still committing.
         identityVerificationEpoch += 1;
-        phase = 'authenticating';
+        if (!beginPostLoginAuthenticationWindow(generation, 'credential_released')) {
+          return unavailable();
+        }
         frameImage = undefined;
         frameCapturedAtMs = undefined;
       };
@@ -4438,6 +4849,8 @@ export function createKemerBetSessionProvisionServer(
     startupFailureLogged = false;
     terminalStartupAccountId = undefined;
     terminalStartupRequestId = undefined;
+    cancelAuthenticationWatchdogs();
+    authenticationStatus = undefined;
     phase = 'starting';
     sessionGeneration = input.requestId;
     accountId = input.platformAgentAccountId;

@@ -19,6 +19,7 @@ import {
   isAllowedKemerBetSessionRequest,
   prepareKemerBetProvisionAuthenticatedIdentityVerifier,
   removeStaleChromiumSingletonArtifacts,
+  type KemerBetProvisionAuthenticatedIdentityVerifier,
   type KemerBetReadinessSealFailureEvent,
   type KemerBetRecaptchaAssetFetcher,
   type KemerBetRecaptchaCeremony,
@@ -200,6 +201,82 @@ async function waitForSessionPhase(
     await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
   }
   throw new Error(`Session did not reach ${expectedPhase}.`);
+}
+
+async function waitForAuthenticationStatus(
+  origin: string,
+  expectedStatus: 'failed' | 'verifying',
+  expectedStage?: string,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const status = await sessionStatus(origin);
+    const authentication = status.authentication as Record<string, unknown> | undefined;
+    if (
+      authentication?.status === expectedStatus &&
+      (expectedStage === undefined || authentication.stage === expectedStage)
+    ) {
+      return status;
+    }
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+  }
+  throw new Error(`Authentication did not reach ${expectedStatus}/${expectedStage ?? '*'}.`);
+}
+
+function controlledProvisionTimers(startedAt = Date.parse('2026-09-02T00:00:00.000Z')): {
+  readonly activeTimersWithDelay: (delay: number) => readonly {
+    readonly callback: () => void;
+    readonly delay: number;
+    readonly handle: number;
+  }[];
+  readonly advanceTo: (elapsedMs: number) => void;
+  readonly clearTimer: typeof clearTimeout;
+  readonly fireOnlyActiveTimerWithDelay: (delay: number) => void;
+  readonly monotonicNow: () => number;
+  readonly now: () => Date;
+  readonly setTimer: typeof setTimeout;
+} {
+  type ControlledTimer = {
+    callback: () => void;
+    cleared: boolean;
+    readonly delay: number;
+    readonly handle: number;
+  };
+  const timers: ControlledTimer[] = [];
+  let wallTimestamp = startedAt;
+  let monotonicTimestamp = 1_000;
+  let nextHandle = 1;
+  const setTimer = ((callback: () => void, delay?: number) => {
+    const handle = nextHandle++;
+    timers.push({ callback, cleared: false, delay: delay ?? 0, handle });
+    return handle as unknown as ReturnType<typeof setTimeout>;
+  }) as unknown as typeof setTimeout;
+  const clearTimer = ((handle: ReturnType<typeof setTimeout>) => {
+    const selected = timers.find(
+      (timer) => timer.handle === (handle as unknown as number) && !timer.cleared,
+    );
+    if (selected) selected.cleared = true;
+  }) as typeof clearTimeout;
+  const activeTimersWithDelay = (delay: number) =>
+    timers.filter((timer) => !timer.cleared && timer.delay === delay);
+  return {
+    activeTimersWithDelay,
+    advanceTo: (elapsedMs: number) => {
+      wallTimestamp = startedAt + elapsedMs;
+      monotonicTimestamp = 1_000 + elapsedMs;
+    },
+    clearTimer,
+    fireOnlyActiveTimerWithDelay: (delay: number) => {
+      const candidates = activeTimersWithDelay(delay);
+      expect(candidates).toHaveLength(1);
+      const selected = candidates[0];
+      if (!selected) throw new Error(`Active ${delay}ms timer missing.`);
+      selected.cleared = true;
+      selected.callback();
+    },
+    monotonicNow: () => monotonicTimestamp,
+    now: () => new Date(wallTimestamp),
+    setTimer,
+  };
 }
 
 function fakeLoginBrowser(screenshot: () => Promise<Buffer>): {
@@ -745,6 +822,25 @@ function stubProvisionRecaptchaCeremony(
     observeMainFrameCommit,
     retireForReauthentication,
   };
+}
+
+async function releaseExactTestLogin(browser: ReturnType<typeof fakeLoginBrowser>): Promise<void> {
+  const loginRequest = testRecaptchaRoute({
+    contentType: 'application/json',
+    extraHeaders: { et: '1' },
+    frame: browser.page.mainFrame(),
+    method: 'POST',
+    postData: JSON.stringify({
+      password: 'never-sent-value',
+      token: 'never-forwarded-test-token',
+      userName: 'never-forwarded-test-user',
+    }),
+    resourceType: 'xhr',
+    url: 'https://admin-api.agt-digi.com/Account/Login',
+  });
+  await browser.dispatchRoute(loginRequest.route);
+  expect(loginRequest.continue).toHaveBeenCalledOnce();
+  expect(loginRequest.abort).not.toHaveBeenCalled();
 }
 
 describe('private KemerBet session provision server', () => {
@@ -2215,6 +2311,447 @@ describe('private KemerBet session provision server', () => {
     }
   });
 
+  it('publishes only fixed redacted post-login and identity stages and bounds the verifier explicitly', async () => {
+    const timers = controlledProvisionTimers();
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const baseCeremony = stubProvisionRecaptchaCeremony({
+      consumePermit: true,
+      handle: 'not_recaptcha',
+    });
+    type CommitState = ReturnType<KemerBetRecaptchaCeremony['observeMainFrameCommit']>;
+    const commitStates: CommitState[] = [
+      'post_login_ready',
+      'post_login_reload',
+      'post_login_root',
+      'agents',
+    ];
+    const ceremony: KemerBetRecaptchaCeremony = {
+      ...baseCeremony.ceremony,
+      observeMainFrameCommit: vi.fn(() => commitStates.shift()),
+    };
+    const identityProof = deferred<void>();
+    type VerifyOptions = Parameters<KemerBetProvisionAuthenticatedIdentityVerifier['verify']>[1];
+    let verifyOptions: VerifyOptions;
+    const verifyIdentity = vi.fn((_page: Page, options?: VerifyOptions) => {
+      verifyOptions = options;
+      return identityProof.promise;
+    });
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: timers.clearTimer,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => ceremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      monotonicNow: timers.monotonicNow,
+      now: timers.now,
+      prepareAuthenticatedIdentityVerifier: async (accountId) => ({
+        accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
+        verify: verifyIdentity,
+      }),
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: timers.setTimer,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      await waitForSessionPhase(origin, 'login_required');
+      await releaseExactTestLogin(browser);
+      expect(
+        await waitForAuthenticationStatus(origin, 'verifying', 'credential_released'),
+      ).toMatchObject({
+        authentication: {
+          detailsRedacted: true,
+          schemaVersion: 1,
+          stage: 'credential_released',
+          status: 'verifying',
+        },
+        phase: 'authenticating',
+        signedIn: false,
+      });
+
+      for (const [url, stage] of [
+        [LOGIN_PAGE, 'post_login_ready'],
+        [LOGIN_PAGE, 'post_login_reload'],
+        [POST_LOGIN_ROOT_PAGE, 'post_login_root'],
+      ] as const) {
+        browser.navigate(url);
+        const status = await waitForAuthenticationStatus(origin, 'verifying', stage);
+        expect(status.authentication).toEqual({
+          detailsRedacted: true,
+          schemaVersion: 1,
+          stage,
+          status: 'verifying',
+        });
+      }
+
+      browser.navigate(AGENTS_PAGE);
+      await vi.waitFor(() => expect(verifyIdentity).toHaveBeenCalledOnce());
+      expect(
+        await waitForAuthenticationStatus(origin, 'verifying', 'agents_candidate'),
+      ).toMatchObject({
+        authentication: {
+          detailsRedacted: true,
+          schemaVersion: 1,
+          stage: 'agents_candidate',
+          status: 'verifying',
+        },
+      });
+      expect(verifyOptions).toEqual({
+        monotonicNow: expect.any(Function),
+        reportStage: expect.any(Function),
+        timeoutMs: 30_000,
+      });
+
+      for (const stage of [
+        'session_guard',
+        'identity_marker',
+        'identity_value',
+        'identity_stability',
+      ] as const) {
+        verifyOptions?.reportStage?.(stage);
+        const status = await waitForAuthenticationStatus(origin, 'verifying', stage);
+        expect(status.authentication).toEqual({
+          detailsRedacted: true,
+          schemaVersion: 1,
+          stage,
+          status: 'verifying',
+        });
+        expect(JSON.stringify(status.authentication)).not.toMatch(
+          /22222222|admin-api|reviewed-authentication-token|test-only/iu,
+        );
+      }
+
+      identityProof.resolve();
+      const authenticated = await waitForSessionPhase(origin, 'authenticated');
+      expect(authenticated).toMatchObject({ phase: 'authenticated', signedIn: true });
+      expect(authenticated).not.toHaveProperty('authentication');
+    } finally {
+      await stopSession(origin, REQUEST_ID);
+      await waitForSessionPhase(origin, 'idle');
+      await closeServer(provision.server);
+    }
+  });
+
+  it('uses one non-sliding sixty-second transition watchdog and clears its failure only for a new generation', async () => {
+    const timers = controlledProvisionTimers();
+    const firstBrowser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const secondBrowser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const firstBaseCeremony = stubProvisionRecaptchaCeremony({
+      consumePermit: true,
+      handle: 'not_recaptcha',
+    });
+    const firstCeremony: KemerBetRecaptchaCeremony = {
+      ...firstBaseCeremony.ceremony,
+      observeMainFrameCommit: vi.fn(
+        (): ReturnType<KemerBetRecaptchaCeremony['observeMainFrameCommit']> => 'post_login_root',
+      ),
+    };
+    const secondCeremony = stubProvisionRecaptchaCeremony();
+    const launchPersistentContext = vi
+      .fn()
+      .mockResolvedValueOnce(firstBrowser.context)
+      .mockResolvedValueOnce(secondBrowser.context);
+    const createRecaptchaCeremony = vi
+      .fn()
+      .mockReturnValueOnce(firstCeremony)
+      .mockReturnValueOnce(secondCeremony.ceremony);
+    const logAuthenticationFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: timers.clearTimer,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext,
+      logAuthenticationFailure,
+      monotonicNow: timers.monotonicNow,
+      now: timers.now,
+      prepareAuthenticatedIdentityVerifier: prepareVerifiedIdentity,
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: timers.setTimer,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      await waitForSessionPhase(origin, 'login_required');
+      await releaseExactTestLogin(firstBrowser);
+      const transitionTimerHandles = timers
+        .activeTimersWithDelay(60_000)
+        .map(({ handle }) => handle);
+      // Authentication owns this exact boundary. A second generic expiry callback must not race
+      // it and erase the persisted terminal reason before the Owner can observe it.
+      expect(transitionTimerHandles).toHaveLength(1);
+
+      timers.advanceTo(59_000);
+      firstBrowser.navigate(POST_LOGIN_ROOT_PAGE);
+      await waitForAuthenticationStatus(origin, 'verifying', 'post_login_root');
+      expect(timers.activeTimersWithDelay(60_000).map(({ handle }) => handle)).toEqual(
+        transitionTimerHandles,
+      );
+
+      timers.advanceTo(60_000);
+      timers.fireOnlyActiveTimerWithDelay(60_000);
+      const failed = await waitForAuthenticationStatus(origin, 'failed', 'post_login_root');
+      expect(failed.authentication).toEqual({
+        detailsRedacted: true,
+        failureCode: 'transition_deadline_exceeded',
+        schemaVersion: 1,
+        stage: 'post_login_root',
+        status: 'failed',
+      });
+      expect(logAuthenticationFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'authentication_failed',
+        failureCode: 'transition_deadline_exceeded',
+        schemaVersion: 1,
+        stage: 'post_login_root',
+      });
+      await waitForSessionPhase(origin, 'idle');
+      expect((await sessionStatus(origin)).authentication).toEqual(failed.authentication);
+
+      const restarted = await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: SECOND_REQUEST_ID }),
+      );
+      expect(restarted.status).toBe(202);
+      expect(await restarted.json()).not.toHaveProperty('authentication');
+      expect(await waitForSessionPhase(origin, 'login_required')).not.toHaveProperty(
+        'authentication',
+      );
+    } finally {
+      await stopSession(origin, SECOND_REQUEST_ID);
+      await waitForSessionPhase(origin, 'idle');
+      await closeServer(provision.server);
+    }
+  });
+
+  it('keeps the first thirty-second identity deadline across a stale document retry and rejects late proof', async () => {
+    const timers = controlledProvisionTimers();
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const ceremony = stubProvisionRecaptchaCeremony({
+      consumePermit: true,
+      handle: 'not_recaptcha',
+    });
+    const firstProof = deferred<void>();
+    const secondProof = deferred<void>();
+    type VerifyOptions = Parameters<KemerBetProvisionAuthenticatedIdentityVerifier['verify']>[1];
+    const observedOptions: VerifyOptions[] = [];
+    const verifyIdentity = vi.fn((_page: Page, options?: VerifyOptions) => {
+      observedOptions.push(options);
+      return observedOptions.length === 1 ? firstProof.promise : secondProof.promise;
+    });
+    const log = vi.fn();
+    const logAuthenticationFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: timers.clearTimer,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => ceremony.ceremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      log,
+      logAuthenticationFailure,
+      monotonicNow: timers.monotonicNow,
+      now: timers.now,
+      prepareAuthenticatedIdentityVerifier: async (accountId) => ({
+        accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
+        verify: verifyIdentity,
+      }),
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: timers.setTimer,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      await waitForSessionPhase(origin, 'login_required');
+      await releaseExactTestLogin(browser);
+      browser.navigate(AGENTS_PAGE);
+      await vi.waitFor(() => expect(verifyIdentity).toHaveBeenCalledOnce());
+      expect(observedOptions[0]?.timeoutMs).toBe(30_000);
+      expect(observedOptions[0]?.monotonicNow).toBeTypeOf('function');
+      expect(observedOptions[0]?.reportStage).toBeTypeOf('function');
+      expect(timers.activeTimersWithDelay(30_000)).toHaveLength(1);
+
+      timers.advanceTo(20_000);
+      browser.navigate(AGENTS_PAGE);
+      expect(verifyIdentity).toHaveBeenCalledOnce();
+      firstProof.resolve();
+      await vi.waitFor(() => expect(verifyIdentity).toHaveBeenCalledTimes(2));
+      expect(observedOptions[1]?.timeoutMs).toBe(10_000);
+      expect(timers.activeTimersWithDelay(30_000)).toHaveLength(1);
+      observedOptions[1]?.reportStage?.('identity_value');
+      await waitForAuthenticationStatus(origin, 'verifying', 'identity_value');
+
+      timers.advanceTo(30_000);
+      timers.fireOnlyActiveTimerWithDelay(30_000);
+      const failed = await waitForAuthenticationStatus(origin, 'failed', 'identity_value');
+      expect(failed.authentication).toEqual({
+        detailsRedacted: true,
+        failureCode: 'identity_deadline_exceeded',
+        schemaVersion: 1,
+        stage: 'identity_value',
+        status: 'failed',
+      });
+      expect(logAuthenticationFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'authentication_failed',
+        failureCode: 'identity_deadline_exceeded',
+        schemaVersion: 1,
+        stage: 'identity_value',
+      });
+
+      secondProof.resolve();
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 0));
+      await waitForSessionPhase(origin, 'idle');
+      expect(await sessionStatus(origin)).toMatchObject({
+        active: false,
+        authentication: failed.authentication,
+        phase: 'idle',
+        signedIn: false,
+      });
+      expect(log).not.toHaveBeenCalledWith('identity_verification_succeeded');
+      expect(log).not.toHaveBeenCalledWith('signed_in');
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('persists one redacted identity-unavailable failure when the bounded verifier rejects', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const ceremony = stubProvisionRecaptchaCeremony({
+      consumePermit: true,
+      handle: 'not_recaptcha',
+    });
+    const logAuthenticationFailure = vi.fn();
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => ceremony.ceremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      logAuthenticationFailure,
+      prepareAuthenticatedIdentityVerifier: async (accountId) => ({
+        accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
+        verify: async () => {
+          throw new Error('provider.test/raw-identity-must-stay-redacted');
+        },
+      }),
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      await waitForSessionPhase(origin, 'login_required');
+      await releaseExactTestLogin(browser);
+      browser.navigate(AGENTS_PAGE);
+      const failed = await waitForAuthenticationStatus(origin, 'failed', 'agents_candidate');
+      expect(failed.authentication).toEqual({
+        detailsRedacted: true,
+        failureCode: 'identity_unavailable',
+        schemaVersion: 1,
+        stage: 'agents_candidate',
+        status: 'failed',
+      });
+      expect(JSON.stringify(failed)).not.toMatch(/provider\.test|raw-identity/iu);
+      expect(logAuthenticationFailure).toHaveBeenCalledExactlyOnceWith({
+        component: 'kemerbet_session_provision',
+        detailsRedacted: true,
+        event: 'authentication_failed',
+        failureCode: 'identity_unavailable',
+        schemaVersion: 1,
+        stage: 'agents_candidate',
+      });
+      await waitForSessionPhase(origin, 'idle');
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
+  it('keeps authentication cleanup fail-closed when the diagnostic logger throws', async () => {
+    const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const ceremony = stubProvisionRecaptchaCeremony({
+      consumePermit: true,
+      handle: 'not_recaptcha',
+    });
+    const logAuthenticationFailure = vi.fn(() => {
+      throw new Error('diagnostic sink unavailable');
+    });
+    const provision = createKemerBetSessionProvisionServer({
+      assertBrowserExecutable: async () => undefined,
+      clearTimer: vi.fn() as unknown as typeof clearTimeout,
+      closePersistentBrowserForCheckpoint: async (input) => input.context.close(),
+      createRecaptchaCeremony: () => ceremony.ceremony,
+      effectiveUserId: 10_001,
+      environment: SAFE_ENVIRONMENT,
+      launchPersistentContext: async () => browser.context,
+      logAuthenticationFailure,
+      prepareAuthenticatedIdentityVerifier: async (accountId) => ({
+        accountId,
+        fingerprintAgentIdentity: createTestIdentityFingerprinter(),
+        verify: async () => Promise.reject(new Error('identity unavailable')),
+      }),
+      prepareSessionProfile: async () => resolve('validated-kemerbet-profile'),
+      setTimer: vi.fn(() => ({}) as ReturnType<typeof setTimeout>) as unknown as typeof setTimeout,
+      validateSessionProfile: async () => undefined,
+    });
+    const origin = await listenOnLoopback(provision.server);
+    try {
+      await postSessionStart(
+        origin,
+        JSON.stringify({ platformAgentAccountId: ACCOUNT_ID, requestId: REQUEST_ID }),
+      );
+      await waitForSessionPhase(origin, 'login_required');
+      await releaseExactTestLogin(browser);
+      browser.navigate(AGENTS_PAGE);
+
+      await waitForSessionPhase(origin, 'idle');
+      expect(await sessionStatus(origin)).toMatchObject({
+        active: false,
+        authentication: {
+          detailsRedacted: true,
+          failureCode: 'identity_unavailable',
+          schemaVersion: 1,
+          stage: 'agents_candidate',
+          status: 'failed',
+        },
+        phase: 'idle',
+        signedIn: false,
+        transferDisabled: true,
+      });
+      expect(logAuthenticationFailure).toHaveBeenCalledOnce();
+    } finally {
+      await closeServer(provision.server);
+    }
+  });
+
   it('aborts the pending exact credential route when its bounded clr wait expires', async () => {
     const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     const frames = testRecaptchaFramesForPage(browser.page);
@@ -2348,7 +2885,8 @@ describe('private KemerBet session provision server', () => {
 
   it('keeps an agents URL unauthenticated until the exact immutable identity proof succeeds', async () => {
     const identityProof = deferred<void>();
-    const verifyIdentity = vi.fn(() => identityProof.promise);
+    type VerifyOptions = Parameters<KemerBetProvisionAuthenticatedIdentityVerifier['verify']>[1];
+    const verifyIdentity = vi.fn((_page: Page, _options?: VerifyOptions) => identityProof.promise);
     const browser = fakeLoginBrowser(async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     const provision = createKemerBetSessionProvisionServer({
       assertBrowserExecutable: async () => undefined,
@@ -2402,7 +2940,19 @@ describe('private KemerBet session provision server', () => {
         phase: 'authenticating',
         signedIn: false,
       });
-      expect(verifyIdentity).toHaveBeenCalledExactlyOnceWith(browser.page);
+      expect(verifyIdentity).toHaveBeenCalledOnce();
+      expect(verifyIdentity.mock.calls[0]?.[0]).toBe(browser.page);
+      const verifyOptions = verifyIdentity.mock.calls[0]?.[1] as
+        | {
+            readonly monotonicNow?: () => number;
+            readonly reportStage?: (stage: string) => void;
+            readonly timeoutMs?: number;
+          }
+        | undefined;
+      expect(verifyOptions?.monotonicNow).toBeTypeOf('function');
+      expect(verifyOptions?.reportStage).toBeTypeOf('function');
+      expect(verifyOptions?.timeoutMs).toBeGreaterThanOrEqual(29_900);
+      expect(verifyOptions?.timeoutMs).toBeLessThanOrEqual(30_000);
 
       identityProof.resolve(undefined);
       expect(await waitForSessionPhase(origin, 'authenticated')).toMatchObject({

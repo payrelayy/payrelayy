@@ -152,6 +152,7 @@ export async function startLocalKemerBetSession(
     context = await chromium.launchPersistentContext(config.profileRoot, {
       acceptDownloads: false,
       channel: 'chrome',
+      chromiumSandbox: true,
       headless: false,
       offline: true,
       serviceWorkers: 'block',
@@ -207,6 +208,10 @@ export async function startLocalKemerBetSession(
       }
       if (kind === 'authenticated_candidate') {
         phase = 'signed_in_read_only';
+        // This is an agent-page candidate, not proof of authentication or account identity.
+        // Retaining the guarded window must not depend on a background response that may have
+        // already arrived, used a different locale, or been restored from the local profile.
+        markSignedInCandidate();
         return;
       }
       if (kind === 'login') {
@@ -221,30 +226,6 @@ export async function startLocalKemerBetSession(
 
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) observePage(page);
-    });
-    page.on('response', (response) => {
-      let url: URL;
-      try {
-        url = new URL(response.url());
-      } catch {
-        return;
-      }
-      if (
-        phase === 'signed_in_read_only' &&
-        response.request().method() === 'GET' &&
-        url.origin === 'https://admin-api.agt-digi.com' &&
-        url.pathname === '/Account/Info' &&
-        url.username === '' &&
-        url.password === '' &&
-        url.hash === '' &&
-        (url.search === '' || /^\?languageCode=[a-z]{2}(?:-[A-Z]{2})?$/u.test(url.search)) &&
-        response.status() === 200
-      ) {
-        // The body can contain the private agent identity, so the companion intentionally does not
-        // read, persist, or log it here. HTTP 200 is a candidate only, not authenticated account
-        // identity proof: the provider can return a business-level error in a successful response.
-        markSignedInCandidate();
-      }
     });
     context.on('page', (candidate) => {
       if (candidate !== page && !stopping) {

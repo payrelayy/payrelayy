@@ -11,7 +11,7 @@ function report(event: LocalKemerBetSessionEvent): void {
     starting: 'Opening the protected local KemerBet browser…',
     login_required: 'KemerBet is ready. Sign in directly in the Chrome window.',
     signed_in_candidate:
-      'KemerBet returned an account-info response. This is a sign-in candidate, not verified account identity. Financial requests remain blocked.',
+      'KemerBet agent page detected; account and session identity have not been verified. Financial requests remain blocked.',
     stopping: 'Stopping the local KemerBet browser…',
     stopped: 'The local KemerBet browser stopped.',
     failed: 'The local KemerBet browser could not continue. Financial requests remain blocked.',

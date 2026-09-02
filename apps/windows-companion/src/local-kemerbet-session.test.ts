@@ -189,10 +189,15 @@ function fakeAccountInfoResponse({
 
 const sessions: LocalKemerBetSession[] = [];
 
-async function start() {
+async function start(landingUrl = AGENTS_URL) {
   const order: string[] = [];
   const context = new FakeContext(order);
   const events: LocalKemerBetSessionEvent[] = [];
+  context.page.goto.mockImplementationOnce(async () => {
+    order.push('page:goto');
+    context.page.navigate(landingUrl);
+    return null;
+  });
   dependencies.launchPersistentContext.mockImplementation(async () => {
     order.push('context:launch');
     return context;
@@ -232,6 +237,7 @@ describe('local KemerBet enrollment session', () => {
     expect(dependencies.launchPersistentContext).toHaveBeenCalledWith(
       config.profileRoot,
       expect.objectContaining({
+        chromiumSandbox: true,
         headless: false,
         offline: true,
         serviceWorkers: 'block',
@@ -264,13 +270,76 @@ describe('local KemerBet enrollment session', () => {
     }
   });
 
-  it.each(['', '?languageCode=en', '?languageCode=am', '?languageCode=en-US'])(
-    'treats an exact GET Account/Info HTTP 200%s only as a candidate and never reads its content',
+  it('retains a restored agent-page candidate beyond ten minutes without any Account/Info response', async () => {
+    const { context, events } = await start();
+
+    expect(events.at(-1)).toEqual({
+      state: 'signed_in_candidate',
+      transferDisabled: true,
+      detailsRedacted: true,
+    });
+    expect(events.map((event) => event.state)).not.toContain('authenticated');
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES + 1);
+    expect(context.close).not.toHaveBeenCalled();
+    expect(events.filter((event) => event.state === 'signed_in_candidate')).toHaveLength(1);
+  });
+
+  it.each([AGENTS_URL, `${AGENTS_URL}/`])(
+    'recognizes only a page candidate on the reviewed main-frame URL %s, without API evidence',
+    async (url) => {
+      const { events, page } = await start(LOGIN_URL);
+      page.navigate(url);
+      expect(events.at(-1)).toEqual({
+        state: 'signed_in_candidate',
+        transferDisabled: true,
+        detailsRedacted: true,
+      });
+      expect(events.map((event) => event.state)).not.toContain('authenticated');
+    },
+  );
+
+  it.each([
+    `${AGENTS_URL}?unexpected=1`,
+    `${AGENTS_URL}#unexpected`,
+    `${AGENTS_URL}-other`,
+    'https://agentsystem.admindigi.com/Agents',
+    'https://example.invalid/agents',
+  ])('does not classify a non-reviewed agent URL as a candidate: %s', async (url) => {
+    const { events, page } = await start(LOGIN_URL);
+    page.navigate(url);
+    expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
+  });
+
+  it('ignores child-frame navigation when determining the main agent-page candidate', async () => {
+    const { events, page } = await start(LOGIN_URL);
+    const eventsBeforeChildFrame = events.length;
+    page.emit('framenavigated', { url: () => AGENTS_URL });
+    expect(events).toHaveLength(eventsBeforeChildFrame);
+    expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
+
+    page.navigate(AGENTS_URL);
+    expect(events.at(-1)?.state).toBe('signed_in_candidate');
+  });
+
+  it.each([
+    '',
+    '?languageCode=en',
+    '?languageCode=am',
+    '?languageCode=en-US',
+    '?languageCode=EN',
+    '?languageCode=ENG',
+    '?languageCode=am_ET',
+  ])(
+    'does not depend on Account/Info ordering or locale %s and never reads its content',
     async (query) => {
-      const { events, page } = await start();
+      const { events, page } = await start(LOGIN_URL);
       expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
       const response = fakeAccountInfoResponse({ url: `${ACCOUNT_INFO_URL}${query}` });
 
+      page.emit('response', response);
+      expect(events.at(-1)?.state).toBe('login_required');
+      expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
+      page.navigate(AGENTS_URL);
       page.emit('response', response);
 
       expect(events.at(-1)).toEqual({
@@ -278,6 +347,7 @@ describe('local KemerBet enrollment session', () => {
         transferDisabled: true,
         detailsRedacted: true,
       });
+      expect(events.filter((event) => event.state === 'signed_in_candidate')).toHaveLength(1);
       expect(events.map((event) => event.state)).not.toContain('authenticated');
       for (const read of [
         response.body,
@@ -309,23 +379,24 @@ describe('local KemerBet enrollment session', () => {
     { url: `${ACCOUNT_INFO_URL}/` },
     { url: 'https://example.invalid/Account/Info' },
   ])('does not promote rejected or non-exact Account/Info evidence: %j', async (options) => {
-    const { events, page } = await start();
+    const { events, page } = await start(LOGIN_URL);
     page.emit('response', fakeAccountInfoResponse(options));
     expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
   });
 
   it('ignores Account/Info evidence on the login page', async () => {
-    const { events, page } = await start();
-    page.navigate(LOGIN_URL);
+    const { events, page } = await start(LOGIN_URL);
     page.emit('response', fakeAccountInfoResponse());
     expect(events.at(-1)?.state).toBe('login_required');
     expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
   });
 
-  it('does not extend the twelve-hour candidate deadline on repeated HTTP 200 responses', async () => {
+  it('does not extend the twelve-hour candidate deadline on repeated agent navigation or response events', async () => {
     const { context, events, page, session } = await start();
     page.emit('response', fakeAccountInfoResponse());
     await vi.advanceTimersByTimeAsync(TWELVE_HOURS - 60 * 60 * 1_000);
+    page.navigate(AGENTS_URL);
+    page.navigate(`${AGENTS_URL}/`);
     page.emit('response', fakeAccountInfoResponse());
     await vi.advanceTimersByTimeAsync(60 * 60 * 1_000 - 1);
     expect(context.close).not.toHaveBeenCalled();
@@ -371,8 +442,7 @@ describe('local KemerBet enrollment session', () => {
   });
 
   it('does not extend the initial ten-minute login deadline on repeated login navigation', async () => {
-    const { context, events, page, session } = await start();
-    page.navigate(LOGIN_URL);
+    const { context, events, page, session } = await start(LOGIN_URL);
     await vi.advanceTimersByTimeAsync(TEN_MINUTES - 1);
     page.navigate(LOGIN_RETRY_URL);
     expect(context.close).not.toHaveBeenCalled();
@@ -381,29 +451,47 @@ describe('local KemerBet enrollment session', () => {
     expect(events.at(-1)?.reason).toBe('login_lifetime_expired');
   });
 
-  it('aborts a denied provider mutation without sending it or destroying the login browser', async () => {
-    const { context, events, page } = await start();
+  it('keeps the twelve-hour-ten-minute process cap when login and candidate states repeat', async () => {
+    const { context, events, page, session } = await start();
+    await vi.advanceTimersByTimeAsync(TWELVE_HOURS - TEN_MINUTES);
     page.navigate(LOGIN_URL);
-
-    const route = await context.dispatch(DEPOSIT_URL, 'POST');
-
-    expect(route.abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
-    expect(route.continue).not.toHaveBeenCalled();
-    expect(route.fetch).not.toHaveBeenCalled();
-    expect(route.fulfill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60 * 1_000);
+    page.navigate(AGENTS_URL);
+    await vi.advanceTimersByTimeAsync(19 * 60 * 1_000 - 1);
     expect(context.close).not.toHaveBeenCalled();
-    expect(context.unroute).not.toHaveBeenCalled();
-    expect(context.unrouteAll).not.toHaveBeenCalled();
-    expect(events.at(-1)).toEqual({
-      state: 'login_required',
-      reason: 'mutation_attempt_blocked',
-      transferDisabled: true,
-      detailsRedacted: true,
-    });
-    const second = await context.dispatch(DEPOSIT_URL, 'GET');
-    expect(second.abort).toHaveBeenCalledTimes(1);
-    expect(second.fetch).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(session.done).resolves.toBeUndefined();
+    expect(events.at(-1)?.reason).toBe('session_lifetime_complete');
+    expect(context.close).toHaveBeenCalledTimes(1);
   });
+
+  it.each([LOGIN_URL, AGENTS_URL])(
+    'aborts a denied provider mutation without sending it or destroying the browser at %s',
+    async (landingUrl) => {
+      const { context, events } = await start(landingUrl);
+
+      const route = await context.dispatch(DEPOSIT_URL, 'POST');
+
+      expect(route.abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
+      expect(route.continue).not.toHaveBeenCalled();
+      expect(route.fetch).not.toHaveBeenCalled();
+      expect(route.fulfill).not.toHaveBeenCalled();
+      expect(context.close).not.toHaveBeenCalled();
+      expect(context.unroute).not.toHaveBeenCalled();
+      expect(context.unrouteAll).not.toHaveBeenCalled();
+      expect(events.at(-1)).toEqual({
+        state: landingUrl === AGENTS_URL ? 'signed_in_candidate' : 'login_required',
+        reason: 'mutation_attempt_blocked',
+        transferDisabled: true,
+        detailsRedacted: true,
+      });
+      const second = await context.dispatch(DEPOSIT_URL, 'GET');
+      expect(second.abort).toHaveBeenCalledTimes(1);
+      expect(second.fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it('forwards an approved provider read with redirects and retries disabled, without reading its body', async () => {
     const { context } = await start();

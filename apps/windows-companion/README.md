@@ -17,13 +17,16 @@ The first slice is deliberately enrollment/read-only:
   requests are forwarded locally, with every redirect checked before it is followed;
 - provider service workers and provider WebSockets are disabled so they cannot bypass the HTTP
   enrollment boundary;
-- the guarded browser stops after ten minutes without a signed-in candidate or twelve hours after
-  a candidate account-info response. KemerBet may end its own server session earlier.
+- the guarded browser stops after ten minutes on the login page or twelve hours after detecting
+  the exact reviewed agent page. Repeated agent-page events do not extend that deadline, and each
+  guarded session has an overall twelve-hour-ten-minute cap. KemerBet may end its own server
+  session earlier.
 
-An HTTP 200 `Account/Info` response produces only `signed_in_candidate`, not authentication proof.
-The companion does not validate the response schema or exact account identity yet, and the Owner's
-sign-in has not been observed in a companion validation run. Exact account/session validation,
-signed device pairing, and exact-five lookup remain unwired.
+The exact reviewed main-frame `/agents` page produces only `signed_in_candidate`, not authentication
+or identity proof. Window retention does not depend on a particular background `Account/Info`
+response or locale. Returning to the actual login page resets the candidate state and starts a new
+non-sliding ten-minute login window within the overall session cap. Exact account/session
+validation, signed device pairing, and exact-five lookup remain unwired.
 
 Sensitive request data may pass through the companion's local Node process memory during forwarding;
 it remains on this device and is not retained in logs or sent to remote FetanAgent services. Browser

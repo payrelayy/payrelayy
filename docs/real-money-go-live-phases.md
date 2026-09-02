@@ -1,12 +1,114 @@
 # FetanAgent real-money go-live phases
 
-This document is the single progress map for taking FetanAgent from the current public, financially
-disabled release to a supervised five-account real-money pilot and, only after that pilot succeeds,
-to a separate public real-money launch.
+This document is the single progress map for taking FetanAgent from the current financially
+disabled release to a Telegram-first, supervised five-account real-money pilot and, only after that
+pilot succeeds, to a separate public Telegram real-money launch.
 
 It is written for the Owner as well as engineers. Each phase has one purpose, concrete work, a
 visible result, and an exit gate. A later phase must not be treated as complete because an earlier
 screen, service, or database object merely exists.
+
+## Telegram-first release scope — 2026-09-03
+
+The Owner has made Telegram the only customer channel for the initial release. Customers should
+start, select a Player ID, submit payment references, track results, and get help inside
+`@FetanAgentBot`. Customer website/PWA, app, email signup, and web-to-Telegram account linking are
+deferred until the bot's agreed workflows are complete and reliable. Earlier web-first and
+Telegram-as-legacy-only descriptions are future design history, not prerequisites for this release.
+
+Use the existing backend, private Owner controls, local KemerBet companion, and verifier as the
+bot's operational support. This scope change does not require shutting down existing services or
+rebuilding Owner administration inside Telegram. Prioritize work that completes a customer
+transaction or removes a demonstrated blocker to it.
+
+The immediate milestone is one fully reconciled TeleBirr deposit initiated and completed through
+Telegram, followed by the existing five-Player pilot. TeleBirr is the first integration to finish;
+CBE Birr and withdrawals remain planned bot capabilities with their own completion requirements.
+A working TeleBirr deposit pilot is not completion of the entire bot.
+
+## Next delivery milestone — Telegram deposit from submission to confirmed result
+
+Three workstreams can proceed together while the existing financial gates remain in force:
+
+1. **Telegram deposit conversation and result tracking.** Build a guided Deposit flow, explicit
+   Player-ID selection, TeleBirr receiver instructions, reference submission, cancellation before
+   financial commitment, Help, and a customer-safe status view. The verified receipt supplies the
+   amount; do not restore the historical customer-entered amount flow. Start with a direct
+   transaction reference, then add the other agreed URL/SMS/file inputs. Keep one durable request
+   identity from submission through verification and execution, and deliver the confirmed or
+   review-required outcome back to the originating private chat.
+2. **KemerBet account connection and execution.** Complete Phase 1's exact local-session validation,
+   device pairing, and five sequential read-only Player lookups. Then connect the existing guarded
+   execution/reconciliation core to the selected local companion path for the later pilot. A
+   successful sign-in or lookup alone does not complete automatic execution.
+3. **TeleBirr verification.** Complete Phase 2's receiver/profile/device provisioning and fresh
+   official-receipt verification, then connect the validated result to the existing atomic
+   settlement path. Receipt amount, receiver, freshness, and duplicate checks must decide the
+   outcome before a KemerBet job can be created.
+
+The first bounded coding slice is Telegram proof-request tracking. The implementation now returns
+a `p1.` tracking reference and Check status button from proof intake, handles its command/callback
+through an authenticated same-identity lookup, and reports the immutable simulation status after
+runtime restarts. The migration and API's eleven-function preflight must ship together; this source
+change is not deployment or live-processing evidence. Details are in
+[`telegram-deposit-proof-tracking.md`](telegram-deposit-proof-tracking.md).
+
+The remaining guided-flow baseline is:
+`apps/bot/src/index.ts` wires `/start`, `/menu`, Player-ID actions, the amount-free
+`/deposit <provider> <Player ID> <transaction reference>` command, and `/deposit_status`.
+`apps/bot/src/private-menu.ts` renders only Add KemerBet Player ID. The proof command reaches a
+dry-run-only API capture; its new status operation is separate from the legacy deposit-intent
+lookup. Preserve that explicit distinction when implementing live proof lineage, guided buttons,
+and durable completion notifications. Do not promote old simulation records into live payments.
+
+The milestone passes when a pilot customer uses Telegram to submit one fresh reference, sees its
+progress, and receives completion only after exactly one verified payment and one matching KemerBet
+credit reconcile. Duplicate updates/references must not create another credit; restart, session
+expiry, and an uncertain browser outcome must preserve the request and show an honest pending or
+review status. Exercise failure cases with fixtures or read-only checks, not deliberate real-money
+faults. Continue to the remaining four pilot transactions using the existing bounded sequence.
+
+Bot feature completion additionally requires the agreed CBE Birr path, receipt input formats,
+saved Player-ID management, transaction history, support/review handling, and the separately
+validated withdrawal workflow. Establish withdrawal completion evidence and distinguish the
+KemerBet action from external payout. Any initial manual payout step must be visible to the Owner
+and reflected honestly in customer status. Resume customer app/web work only after the agreed bot
+scope is working and its operational defects are resolved.
+
+## Settled KemerBet integration requirement — 2026-09-03
+
+The Owner currently performs deposits and withdrawals manually through their own KemerBet agent
+account. The intended product is for FetanAgent to perform those routine agent operations after
+launch, within the workflows and limits the Owner enables. The Owner will authorize that use and
+supply their KemerBet agent username and password through the private local sign-in flow. In this
+document, **Owner means the FetanAgent operator who controls the agent account**, not the owner of
+the KemerBet company.
+
+The selected integration is automation of that existing agent-system workflow using the Owner's
+authenticated local browser session. Contacting KemerBet's company, obtaining its owner's
+involvement, or obtaining an official integration API is not a project prerequisite. An official
+API is not needed to implement the demonstrated browser workflow. Payment-provider verification
+below refers to checking incoming TeleBirr or CBE Birr payments; it is a separate part of the
+deposit flow.
+
+The earlier manual deposit demonstration is recorded in
+[`kemerbet-agent-deposit-observation.md`](kemerbet-agent-deposit-observation.md). The production
+deposit target is: verify the incoming payment, resolve the exact Player ID and ETB currency, enter
+the verified amount, submit Transfer once, reconcile the exact player credit against agent history,
+and update the customer's status automatically. Routine successful deposits should not require the
+Owner to repeat those steps or approve each browser click. Reauthentication, changed pages, and
+uncertain outcomes may still require the Owner's attention. The supervised pilot is a rollout
+stage, not the permanent fulfillment model.
+
+KemerBet agent-side withdrawal automation is also part of the intended product. The checked-in
+observation currently records deposit mechanics and explicitly defers withdrawal testing; it does
+not establish a tested withdrawal workflow. Recover or document the exact withdrawal steps and
+their completion evidence before implementing that later phase. Agent-side withdrawal completion
+and sending an external TeleBirr/CBE Birr payout are separate operations.
+
+This records the product direction and the Owner's intent to provide runtime authorization. It does
+not claim that the companion already executes transfers or that live processing has been activated.
+The remaining connection, verification, pilot, and launch work below still applies.
 
 ## Status legend
 
@@ -19,15 +121,16 @@ screen, service, or database object merely exists.
 ## The whole path in one line
 
 ```text
-Public product live
-  -> KemerBet agent connected on the Owner's Windows device without transferring
-  -> TeleBirr official receipt authority connected
+Telegram bot reachable
+  -> Telegram deposit flow + local KemerBet connection + TeleBirr verification prepared in parallel
   -> five-Player pilot prepared in dry-run
   -> provider shadow proof passes
   -> one 25 ETB payment is claimed and reserved
   -> one 25 ETB KemerBet transfer is fenced and reconciled
   -> four more Players pass sequentially
-  -> separate production/public launch review
+  -> remaining bot workflows and operations validated
+  -> separate production/public Telegram launch review
+  -> customer app/web later
 ```
 
 ## Current truthful status — 2026-09-03
@@ -86,19 +189,20 @@ The first real-money pilot is fixed and cannot be expanded from an operator form
 Changing the provider, amount, count, duration, or cohort model requires a new reviewed contract and
 cannot be done by flipping an environment variable.
 
-## Phase 0 — Keep the visible public product healthy
+## Phase 0 — Keep the Telegram bot and its supporting services healthy
 
 **Status: COMPLETE, then REPEATED for every deployment**
 
 ### Purpose
 
-Keep the website and Telegram bot available so the Owner can see product progress while every money
-action remains disabled.
+Keep the Telegram bot and its existing backend/Owner controls available while every money action
+remains disabled. Customer website/app development is deferred.
 
 ### Required work
 
 1. Deploy one exact reviewed GitHub `main` commit to the staging Supabase project and Droplet.
-2. Start the API, customer web, Owner control, beta admission, Telegram bot, and HTTPS gateway.
+2. Keep the API, Owner control, required admission service, Telegram bot, and HTTPS gateway healthy.
+   The existing customer web service is not a new Telegram launch deliverable.
 3. Verify exact image revision, health, TLS, DNS, firewall, bot identity, zero bot restarts, and the
    dry-run runtime contract.
 4. Confirm the executor, trusted verifier, and every financial switch remain disabled.
@@ -107,15 +211,14 @@ action remains disabled.
 
 ### Owner-visible proof
 
-- `https://fetanagent.com/` loads over valid HTTPS.
-- Sign in and Create account are visible.
 - `@FetanAgentBot` answers `/start` and `/menu`.
 - Adding a Player ID produces a safe pending/validation response.
+- The existing private Owner controls remain accessible for provisioning and operations.
 
 ### Exit gate
 
-Public product reachable; no payment lookup, claim, reservation, execution job, or KemerBet transfer
-can be created by an ordinary user.
+Telegram is reachable; no payment lookup, claim, reservation, execution job, or KemerBet transfer can
+be created by an ordinary user.
 
 ## Phase 1 — Correct and connect the KemerBet agent workflow
 
@@ -178,16 +281,16 @@ login. Those failures are retained here to prevent repeating the same approach.
 
 The production direction is now:
 
-1. Prefer an official KemerBet integration API if KemerBet makes one available to this agent
-   account.
-2. Until then, run a FetanAgent Windows companion on the Owner's device using normal headed Chrome
-   and a persistent local browser profile.
-3. Keep passwords, OTPs, cookies, CAPTCHA interaction, and the signed-in session on that device.
-4. Pair the companion cryptographically with FetanAgent and accept only server-signed, expiring,
+1. Run a FetanAgent Windows companion on the Owner's device using normal headed Chrome and a
+   persistent local browser profile to automate the authorized agent workflow. This is the selected
+   integration path and does not wait for an official KemerBet API or company involvement.
+2. Keep passwords, OTPs, cookies, CAPTCHA interaction, and the signed-in session on that device.
+3. Pair the companion cryptographically with FetanAgent and accept only server-signed, expiring,
    replay-protected, exact-scope assignments.
-5. Return only a signed, redacted aggregate lookup result. No raw Player ID, account identity,
-   credential, cookie, or balance may enter normal logs or documentation.
-6. Keep the old hosted preview hidden and retired from the Owner's operational path. It may be used
+4. For this no-money connection phase, return only a signed, redacted aggregate lookup result. No
+   raw Player ID, account identity, credential, cookie, or balance may enter normal logs or
+   documentation.
+5. Keep the old hosted preview hidden and retired from the Owner's operational path. It may be used
    only as explicit diagnostic evidence, never as production session authority.
 
 ### Historical portal work — evidence only
@@ -415,7 +518,8 @@ remain impossible.
 
 ### Required work
 
-1. Submit a fresh pilot proof through the intended website or Telegram flow.
+1. Submit a fresh pilot proof through the intended Telegram flow and retain its customer tracking
+   handle through the proof and deposit lifecycle.
 2. Lease it only to the enrolled verifier device.
 3. Retrieve and authenticate the official TeleBirr observation.
 4. Recompute protected-reference, receiver, policy, database-snapshot, assignment, device, and
@@ -502,8 +606,9 @@ Run the first genuine end-to-end transaction with a maximum external exposure of
 
 ### Owner-visible proof
 
-The website and Telegram status show one completed 25 ETB deposit for the intended test Player. The
-Owner separately sees the matching official TeleBirr observation and KemerBet history entry.
+The Telegram status and completion message show one completed 25 ETB deposit for the intended test
+Player. The Owner separately sees the matching official TeleBirr observation and KemerBet history
+entry.
 
 ### Exit gate
 
@@ -579,7 +684,7 @@ blocker remains. The decision is still private-pilot-only unless Phase 9 is sepa
 
 ### Purpose
 
-Move from a five-account staging pilot to a separately controlled production system.
+Move from a five-account staging pilot to a separately controlled production Telegram service.
 
 ### Required work
 
@@ -596,8 +701,9 @@ Move from a five-account staging pilot to a separately controlled production sys
 
 ### Owner-visible proof
 
-The public product clearly distinguishes pending, verified, credited, rejected, and review states;
-support and legal disclosures are published; monitored production transactions reconcile exactly.
+The Telegram bot clearly distinguishes pending, verified, credited, rejected, and review states;
+support and legal disclosures are accessible from the bot; monitored production transactions
+reconcile exactly. Customers do not need a web/PWA account to use the launched bot.
 
 ### Exit gate
 
@@ -630,10 +736,13 @@ Keep the live system correct after launch rather than treating deployment as com
 
 To move quickly without skipping safety:
 
-- Phase 1 (KemerBet connection) and Phase 2 (TeleBirr authority) should proceed in parallel.
+- Telegram proof/status continuity and guided deposit work, Phase 1 (KemerBet connection), and
+  Phase 2 (TeleBirr authority) should proceed in parallel.
 - Phase 3 begins only after both no-money readiness proofs pass.
-- Phases 4–7 are strictly sequential because each one adds financial authority.
-- Public web/bot maintenance continues in parallel but never counts as financial progress.
+- Phases 4–7 are strictly sequential and exercise the completed Telegram customer flow.
+- Bot/backend maintenance continues in parallel but never counts as financial progress.
+- Customer app/web work is deferred. CBE Birr, withdrawals, remaining input formats, history, and
+  support must each have completion evidence before the bot is described as fully functional.
 - Compliance and operational preparation should begin during Phases 1–4; it remains a launch gate
   even if the technical pilot succeeds.
 

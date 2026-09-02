@@ -1,5 +1,11 @@
 # Player-ID request and ownership-association boundary
 
+The [Telegram-first release scope](real-money-go-live-phases.md#telegram-first-release-scope--2026-09-03)
+supersedes this document's earlier web-first delivery order. The bot is the initial customer entry;
+web signup, web Player-ID proof, and web account linking are deferred. The historical boundaries
+below describe their named components, not a current deployment inventory. The approved
+provider-specific deposit contracts still determine which target and eligibility checks apply.
+
 ## Status: web request capture plus legacy staged ownership-association boundary
 
 The private staging bot can record a Player-ID request through the reviewed conversation-action
@@ -10,7 +16,7 @@ it no longer grants deposit eligibility. This is existing Telegram staging behav
 canonical standalone web/PWA customer experience. No path calls KemerBet automatically, promotes
 financial eligibility, opens a deposit, displays payment instructions, or enables a payment switch.
 
-## Canonical standalone customer flow
+## Deferred standalone customer flow
 
 The responsive web/PWA uses `Add a Player ID`, not `Player-ID registration` or `pending validation`,
 in customer copy:

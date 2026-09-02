@@ -1,20 +1,32 @@
-# Standalone responsive web/PWA product boundary
+# Deferred standalone responsive web/PWA product boundary
 
-## Settled product direction
+## Current release scope — 2026-09-03
 
-FetanAgent's canonical customer product is a standalone, responsive website and installable
-progressive web app at the public FetanAgent domain. A customer may create and use a FetanAgent
+The initial customer release is Telegram-bot-only. Customer app/web work is deferred until the bot
+is complete and reliable. The [phase map](real-money-go-live-phases.md) is the canonical release plan.
+Existing private Owner controls and the local KemerBet companion remain operational support; this
+decision does not stop, deploy, or enable any service.
+
+The remaining sections preserve the earlier web-first design and source status for a future phase.
+Web account creation, email/password sign-in, PWA deployment, web ownership proof, and a
+Telegram-to-web history link are not requirements for the initial Telegram release. References below
+to a canonical web surface describe that deferred design, not the current launch priority.
+
+## Deferred web product direction
+
+The earlier design calls for a standalone, responsive website and installable progressive web app
+at the public FetanAgent domain. In that future surface, a customer may create and use a FetanAgent
 account through the intended self-service email-and-password flow without Telegram. Email ownership
 confirmation is requested only during forgot-password recovery, not during account creation or
 routine sign-in. The same generic public sign-in leads to a neutral workspace; URLs and
 customer-visible copy must not reveal internal `Owner`, `Admin`, or manual-verification roles.
 
 The product is English-only. A customer may associate multiple KemerBet Player IDs and must choose
-the intended association for each transaction. Telegram is optional and may be used only through a
-controlled legacy-history link. It is not required for sign-in, recovery, deposits, withdrawals, or
-support.
+the intended association for each transaction. In the deferred web design, an optional controlled
+history link would connect the customer's existing Telegram identity. The initial bot release uses
+Telegram directly and does not depend on this future account link.
 
-## Current implementation status
+## Preserved web implementation status
 
 These are product decisions, not claims about deployed capability. The repository now contains a
 disabled-by-default `apps/customer-web` SSR/PWA foundation with the canonical public account pages,
@@ -41,10 +53,11 @@ seed, backfill, promotion procedure, writer grant, route, UI, or runtime can cre
 This is a financial quarantine only; it does not add proof, `Ready`, deposit UI, provider access, or
 financial runtime capability.
 
-The existing Telegram admission, `/owner` route, `Owner/Admin` labels, `pending validation` copy,
-and manual Player-ID review wording are implementation history and private staging behavior. They
-must not be presented as the settled customer experience. No financial, recovery, linking, or
-session capability becomes enabled merely because this product boundary is documented.
+The existing Telegram admission and customer interaction are the foundation for the initial bot
+release; completing its customer experience is active work. The private `/owner` route and
+`Owner/Admin` controls remain operational support. The web vocabulary below belongs to the deferred
+web design. No financial, recovery, linking, or session capability becomes enabled merely because
+this product boundary is documented.
 
 The pure `@fetanagent/customer-web-access-foundation` package remains a historical, fail-closed,
 non-runtime product-decision record. Its advisory `customer_web_access_runtime_not_implemented`

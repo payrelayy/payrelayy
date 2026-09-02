@@ -1,7 +1,11 @@
 import { formatTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { presentTelegramPlayerIdFlowResult } from './telegram-player-id-flow.js';
+import {
+  TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
+  presentTelegramPlayerIdFlowResult,
+  telegramDepositHelpText,
+} from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
   it('renders only the opaque API capability in the one-button menu', () => {
@@ -65,8 +69,9 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each([
-    ['deposit_input_invalid', 'Use /deposit cbe_birr PLAYER_ID TRANSACTION_ID'],
+    ['deposit_input_invalid', '/deposit cbe_birr PLAYER_ID TRANSACTION_ID'],
     ['deposit_unavailable', 'No payment action was started'],
+    ['deposit_status_unavailable', TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
     expect(presentation.kind).toBe('message');
@@ -114,26 +119,41 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — Preparing deposit.' });
   });
 
-  it('renders a proof receipt without exposing a reference, amount, or destination', () => {
-    const presentation = presentTelegramPlayerIdFlowResult({
-      version: 1,
-      outcome: 'deposit_proof_received',
-      proofToken: 'A'.repeat(22),
-      providerCode: 'telebirr',
-      providerName: 'TeleBirr',
-      proofStatus: 'proof_received',
-      financialMode: 'dry_run',
-    });
+  it.each(['deposit_proof_received', 'deposit_proof_status'] as const)(
+    'renders %s with tracking and a button without exposing payment or destination facts',
+    (outcome) => {
+      const presentation = presentTelegramPlayerIdFlowResult({
+        version: 1,
+        outcome,
+        proofToken: 'A'.repeat(22),
+        providerCode: 'telebirr',
+        providerName: 'TeleBirr',
+        proofStatus: 'proof_received',
+        financialMode: 'dry_run',
+      });
 
-    expect(presentation).toEqual({
-      kind: 'message',
-      text: [
-        'SIMULATION ONLY — proof received.',
-        'Provider: TeleBirr.',
-        'No payment was verified or credited.',
-      ].join('\n'),
-    });
-    expect(JSON.stringify(presentation)).not.toContain('AAAAAAAAAAAAAAAAAAAAAA');
-    expect(JSON.stringify(presentation)).not.toMatch(/amount|player/i);
+      expect(presentation).toEqual({
+        kind: 'menu',
+        menu: {
+          text: [
+            'SIMULATION ONLY — proof received.',
+            'Provider: TeleBirr.',
+            'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
+            'Check progress with /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
+            'No payment was verified or credited. Do not send money for this simulation.',
+          ].join('\n'),
+          buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
+        },
+      });
+      expect(JSON.stringify(presentation)).not.toMatch(/amount|player/i);
+    },
+  );
+
+  it('explains the available proof and tracking commands without requesting money', () => {
+    expect(telegramDepositHelpText()).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+    expect(telegramDepositHelpText()).toContain('/deposit telebirr PLAYER_ID TRANSACTION_ID');
+    expect(telegramDepositHelpText()).toContain('/deposit cbe_birr PLAYER_ID TRANSACTION_ID');
+    expect(telegramDepositHelpText()).toContain('/deposit_status');
+    expect(telegramDepositHelpText()).toContain('No payment is verified or credited');
   });
 });

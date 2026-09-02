@@ -145,12 +145,18 @@ Provider readiness is independent:
 A provider can be enabled for the pilot only after its own complete source/parser/receiver test
 matrix passes. Success for one provider cannot enable the other.
 
-## External authority and eligibility
+## Operator authorization and eligibility
 
-Technical ability to sign in or automate a browser is not permission to operate a KemerBet agent.
-Before any real-money click, the Owner must independently document that the selected KemerBet agent
-account is active, belongs to the Owner, permits this exact deposit workflow, and may be accessed by
-the controlled automation profile. No ordinary player account may be treated as an agent account.
+The Owner is the FetanAgent operator who controls the KemerBet agent account, not the owner of the
+KemerBet company. The Owner intends to authorize FetanAgent to perform the existing manual agent
+workflow and to supply the account login through the private local connection flow. The selected
+integration does not require contacting KemerBet's company or obtaining an official API; see the
+[settled integration requirement](real-money-go-live-phases.md#settled-kemerbet-integration-requirement--2026-09-03).
+
+Before live execution, establish that the selected account is an active agent account controlled by
+the Owner, that the local session is bound to that exact account, and that the Owner has enabled the
+bounded workflow being executed. An ordinary player account cannot serve as the agent account.
+Signing in alone does not arm the pilot or enable its financial switches.
 
 The pilot is limited to adult, legally eligible Owner-controlled testers. Before any later public
 real-money launch, the Owner must obtain current Ethiopian licensing/compliance review for the

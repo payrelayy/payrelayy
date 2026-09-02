@@ -52,7 +52,7 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires public action onboarding and only non-live deposit procedures in the exact 10-function surface', () => {
+  it('requires public action onboarding and only non-live deposit procedures in the exact 11-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
     );
@@ -77,6 +77,9 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 10');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.get_telegram_customer_deposit_proof(uuid,uuid)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 11');
   });
 });

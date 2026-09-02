@@ -3,6 +3,7 @@ import type { EtbAmount, VerificationReasonCode } from '@fetanagent/domain';
 export * from './telegram-private-inbound.js';
 export * from './telegram-action-capability.js';
 export * from './telegram-private-action.js';
+export * from './telegram-deposit-proof-tracking.js';
 export * from './telegram-beta-invite-admission.js';
 export * from './cbe-birr-authoritative-shadow.js';
 export * from './cbe-birr-authoritative-adapter.js';

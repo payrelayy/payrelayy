@@ -27,6 +27,8 @@ type ProofRow = {
   readonly submitted_at: Date;
 };
 
+type ProofStatusRow = Omit<ProofRow, 'request_replayed'>;
+
 type FinancialLedgerSnapshot = {
   readonly cbe_shadow_jobs: number;
   readonly cbe_shadow_results: number;
@@ -367,6 +369,43 @@ async function captureWebProof(
   );
 }
 
+async function getTelegramProofStatus(
+  client: Client,
+  eventId: string | null,
+  proofRequestId: string | null,
+): Promise<readonly ProofStatusRow[]> {
+  return queryAsRole<ProofStatusRow>(
+    client,
+    'fetanagent_player_actions',
+    `select * from app.get_telegram_customer_deposit_proof($1::uuid, $2::uuid)`,
+    [eventId, proofRequestId],
+  );
+}
+
+async function createAdditionalTelegramIdentity(
+  client: Client,
+  actor: ActorFixture,
+  telegramUserId: number,
+): Promise<ActorFixture> {
+  const identity = await client.query<{ readonly id: string }>(
+    `insert into app.customer_identities (
+       customer_id, identity_kind, external_subject, status
+     ) values ($1::uuid, 'telegram', $2::text, 'active') returning id`,
+    [actor.customerId, telegramUserId.toString()],
+  );
+  const telegramIdentityId = identity.rows[0]!.id;
+  await client.query(
+    `insert into app.telegram_identities (
+       customer_identity_id, telegram_user_id, private_chat_id, preferred_locale
+     ) values ($1::uuid, $2::bigint, $2::bigint, 'en')`,
+    [telegramIdentityId, telegramUserId],
+  );
+  await client.query(`insert into app.bot_conversations (telegram_identity_id) values ($1::uuid)`, [
+    telegramIdentityId,
+  ]);
+  return { ...actor, telegramIdentityId };
+}
+
 async function readFinancialLedgerSnapshot(client: Client): Promise<FinancialLedgerSnapshot> {
   const result = await client.query<FinancialLedgerSnapshot>(`
     select
@@ -394,6 +433,325 @@ async function readFinancialLedgerSnapshot(client: Client): Promise<FinancialLed
 }
 
 export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client): void {
+  describe('private Telegram dry-run deposit proof tracking', () => {
+    it('exposes only the four safe status fields through the isolated Player-action role', async () => {
+      const client = getClient();
+      const procedure = await client.query<{
+        readonly direct_grantees: readonly string[];
+        readonly hardened: boolean;
+        readonly output_names: readonly string[];
+        readonly public_execute: boolean;
+        readonly stable: boolean;
+      }>(`
+        select procedure.prosecdef
+                 and procedure.proowner = 'postgres'::regrole
+                 and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+                   as hardened,
+               procedure.provolatile = 's' as stable,
+               procedure.proargnames[3:6] as output_names,
+               exists (
+                 select 1
+                   from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                  where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+               ) as public_execute,
+               coalesce((
+                 select array_agg(role.rolname::text order by role.rolname)::text[]
+                   from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                   join pg_roles role on role.oid = acl.grantee
+                  where acl.grantee <> procedure.proowner and acl.privilege_type = 'EXECUTE'
+               ), array[]::text[]) as direct_grantees
+          from pg_proc procedure
+         where procedure.oid = 'app.get_telegram_customer_deposit_proof(uuid,uuid)'::regprocedure
+      `);
+      expect(procedure.rows).toEqual([
+        {
+          direct_grantees: ['fetanagent_player_actions'],
+          hardened: true,
+          output_names: [
+            'deposit_proof_request_id',
+            'provider_code',
+            'proof_status',
+            'submitted_at',
+          ],
+          public_execute: false,
+          stable: true,
+        },
+      ]);
+      const privileges = await client.query<{ readonly allowed: boolean }>(`
+        select has_function_privilege(
+                 role_name, 'app.get_telegram_customer_deposit_proof(uuid,uuid)', 'EXECUTE'
+               ) as allowed
+          from unnest(array[
+            'anon', 'authenticated', 'service_role', 'fetanagent_api', 'fetanagent_api_runtime',
+            'fetanagent_customer_web', 'fetanagent_customer_web_runtime', 'fetanagent_worker',
+            'fetanagent_beta_admission', 'fetanagent_nonce_retention', 'fetanagent_owner_control',
+            'fetanagent_deposit_executor', 'fetanagent_verification_settlement'
+          ]) role_name
+      `);
+      expect(privileges.rows.every((row) => !row.allowed)).toBe(true);
+      await withRollback(client, async () => {
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_customer_web',
+            `select * from app.get_telegram_customer_deposit_proof(null::uuid, null::uuid)`,
+          ),
+        ).rejects.toMatchObject({ code: '42501' });
+      });
+    });
+
+    it('returns one owned proof after capture replay and leaves all state unchanged during repeated reads', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createFixture(client, '120');
+        const captureEvent = await createInboundEvent(client, fixture.actorA, 9_120_000_001, 'a');
+        const input = {
+          eventId: captureEvent,
+          fingerprint: 'a'.repeat(64),
+          hmac: payloadHmac('a'),
+          masked: '***A120',
+          playerId: fixture.playerId,
+          providerCode: 'telebirr' as const,
+        };
+        const proof = (await captureTelegramProof(client, input))[0]!;
+        expect(await captureTelegramProof(client, input)).toEqual([
+          { ...proof, request_replayed: true },
+        ]);
+        const duplicateEvent = await createInboundEvent(client, fixture.actorA, 9_120_000_002, 'b');
+        expect(
+          await captureTelegramProof(client, {
+            ...input,
+            eventId: duplicateEvent,
+            hmac: payloadHmac('b'),
+          }),
+        ).toEqual([{ ...proof, request_replayed: true }]);
+        const statusEvent = await createInboundEvent(client, fixture.actorA, 9_120_000_003, 'c');
+        const beforeFinancial = await readFinancialLedgerSnapshot(client);
+        const readTrackingState = async () =>
+          client.query(`
+            select
+              (select jsonb_agg(to_jsonb(snapshot_row) order by id)
+                 from app.deposit_proof_requests snapshot_row) as proofs,
+              (select jsonb_agg(to_jsonb(snapshot_row) order by origin_inbound_event_id)
+                 from app.telegram_dry_run_deposit_proof_receipts snapshot_row) as receipts,
+              (select jsonb_agg(to_jsonb(snapshot_row) order by id)
+                 from app.inbound_events snapshot_row) as inbounds,
+              (select jsonb_agg(to_jsonb(snapshot_row) order by id)
+                 from app.bot_conversations snapshot_row) as conversations,
+              (select count(*)::integer from app.audit_events) as audits,
+              (select jsonb_agg(to_jsonb(snapshot_row) order by feature_key)
+                 from app.feature_switches snapshot_row) as switches
+          `);
+        const beforeTracking = await readTrackingState();
+        const expected = [
+          {
+            deposit_proof_request_id: proof.deposit_proof_request_id,
+            proof_status: 'proof_received',
+            provider_code: 'telebirr',
+            submitted_at: proof.submitted_at,
+          },
+        ];
+        for (const eventId of [statusEvent, statusEvent, captureEvent, duplicateEvent]) {
+          expect(
+            await getTelegramProofStatus(client, eventId, proof.deposit_proof_request_id),
+          ).toEqual(expected);
+        }
+        expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
+        expect((await readTrackingState()).rows).toEqual(beforeTracking.rows);
+      });
+    });
+
+    it('hides foreign, missing, web-origin, unbound, and same-customer other-identity proofs identically', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createFixture(client, '121');
+        const captureEvent = await createInboundEvent(client, fixture.actorA, 9_121_000_001, 'a');
+        const proof = (
+          await captureTelegramProof(client, {
+            eventId: captureEvent,
+            fingerprint: 'a'.repeat(64),
+            hmac: payloadHmac('a'),
+            masked: '***A121',
+            playerId: fixture.playerId,
+            providerCode: 'cbe_birr',
+          })
+        )[0]!;
+        const ownerEvent = await createInboundEvent(client, fixture.actorA, 9_121_000_002, 'b');
+        const foreignEvent = await createInboundEvent(client, fixture.actorB, 9_121_000_003, 'c');
+        const additionalIdentity = await createAdditionalTelegramIdentity(
+          client,
+          fixture.actorA,
+          981_210_004,
+        );
+        const otherIdentityEvent = await createInboundEvent(
+          client,
+          additionalIdentity,
+          9_121_000_004,
+          'd',
+        );
+        const uninvitedForeignIdentity = await createAdditionalTelegramIdentity(
+          client,
+          fixture.actorB,
+          981_210_005,
+        );
+        const uninvitedForeignEvent = await createInboundEvent(
+          client,
+          uninvitedForeignIdentity,
+          9_121_000_005,
+          'e',
+        );
+        const webProof = (
+          await captureWebProof(client, {
+            actorAuthUserId: fixture.actorA.authUserId,
+            fingerprint: 'b'.repeat(64),
+            masked: '***B121',
+            playerId: fixture.playerId,
+            providerCode: 'telebirr',
+            requestKey: '78000000-0000-4000-8000-000000000121',
+          })
+        )[0]!;
+        const unboundProof = await client.query<ProofRow>(
+          `select * from app.create_or_reuse_dry_run_deposit_proof(
+             $1::uuid, 'telegram', $2::text, 'telebirr', $3::text,
+             $4::text, '***C121', 2::smallint, 2::smallint
+           )`,
+          [
+            fixture.actorA.customerId,
+            fixture.playerId,
+            referenceCiphertext('telebirr', 'u', 'v'),
+            'c'.repeat(64),
+          ],
+        );
+        for (const [eventId, proofId] of [
+          [foreignEvent, proof.deposit_proof_request_id],
+          [uninvitedForeignEvent, proof.deposit_proof_request_id],
+          [otherIdentityEvent, proof.deposit_proof_request_id],
+          [ownerEvent, '78000000-0000-4000-8000-999999999999'],
+          [ownerEvent, webProof.deposit_proof_request_id],
+          [ownerEvent, unboundProof.rows[0]!.deposit_proof_request_id],
+        ] as const) {
+          expect(await getTelegramProofStatus(client, eventId, proofId)).toEqual([]);
+        }
+        expect(
+          await getTelegramProofStatus(client, ownerEvent, proof.deposit_proof_request_id),
+        ).toEqual([
+          {
+            deposit_proof_request_id: proof.deposit_proof_request_id,
+            proof_status: 'proof_received',
+            provider_code: 'cbe_birr',
+            submitted_at: proof.submitted_at,
+          },
+        ]);
+      });
+    });
+
+    it('rejects invalid, wrong-channel, non-Telegram, and deactivated actors with the same generic error', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createFixture(client, '122');
+        const captureEvent = await createInboundEvent(client, fixture.actorA, 9_122_000_001, 'a');
+        const proof = (
+          await captureTelegramProof(client, {
+            eventId: captureEvent,
+            fingerprint: 'a'.repeat(64),
+            hmac: payloadHmac('a'),
+            masked: '***A122',
+            playerId: fixture.playerId,
+            providerCode: 'telebirr',
+          })
+        )[0]!;
+        const statusEvent = await createInboundEvent(client, fixture.actorA, 9_122_000_002, 'b');
+        const invalidEvents = await client.query<{ readonly id: string }>(
+          `insert into app.inbound_events (
+             channel, external_event_id, customer_identity_id, payload_digest
+           ) values
+             ('customer_web', 'proof-status-wrong-channel', $1::uuid, $2::text),
+             ('telegram', 'update:9122000003', null, $2::text),
+             ('telegram', 'update:9122000004',
+               (select customer_identity_id from app.customer_auth_identities where auth_user_id = $3::uuid),
+               $2::text)
+           returning id`,
+          [fixture.actorA.telegramIdentityId, payloadHmac('c'), fixture.actorA.authUserId],
+        );
+        const genericError = {
+          code: 'P0001',
+          message: 'The Telegram deposit proof status request is unavailable.',
+        };
+        for (const eventId of [
+          null,
+          '78000000-0000-4000-8000-999999999998',
+          ...invalidEvents.rows.map((row) => row.id),
+        ]) {
+          await expect(
+            getTelegramProofStatus(client, eventId, proof.deposit_proof_request_id),
+          ).rejects.toMatchObject(genericError);
+        }
+        await expect(getTelegramProofStatus(client, statusEvent, null)).rejects.toMatchObject(
+          genericError,
+        );
+        for (const [relation, actorId] of [
+          ['customer_identities', fixture.actorA.telegramIdentityId],
+          ['customers', fixture.actorA.customerId],
+        ] as const) {
+          await client.query(`update app.${relation} set status = 'inactive' where id = $1::uuid`, [
+            actorId,
+          ]);
+          for (const eventId of [statusEvent, captureEvent]) {
+            await expect(
+              getTelegramProofStatus(client, eventId, proof.deposit_proof_request_id),
+            ).rejects.toMatchObject(genericError);
+          }
+          await client.query(`update app.${relation} set status = 'active' where id = $1::uuid`, [
+            actorId,
+          ]);
+        }
+      });
+    });
+
+    it('requires the exact Telegram subject, private chat, and original processed receipt binding', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createFixture(client, '123');
+        const captureEvent = await createInboundEvent(client, fixture.actorA, 9_123_000_001, 'a');
+        const proof = (
+          await captureTelegramProof(client, {
+            eventId: captureEvent,
+            fingerprint: 'a'.repeat(64),
+            hmac: payloadHmac('a'),
+            masked: '***A123',
+            playerId: fixture.playerId,
+            providerCode: 'telebirr',
+          })
+        )[0]!;
+        const statusEvent = await createInboundEvent(client, fixture.actorA, 9_123_000_002, 'b');
+        for (const mutation of [
+          `update app.customer_identities set external_subject = 'malformed-subject' where id = $1::uuid`,
+          `update app.telegram_identities set private_chat_id = 981230009 where customer_identity_id = $1::uuid`,
+        ]) {
+          await client.query('savepoint malformed_tracking_identity');
+          // Inject corrupt fixtures as the disposable superuser; production bindings remain immutable.
+          await client.query('set local session_replication_role = replica');
+          await client.query(mutation, [fixture.actorA.telegramIdentityId]);
+          await client.query('set local session_replication_role = origin');
+          await expect(
+            getTelegramProofStatus(client, statusEvent, proof.deposit_proof_request_id),
+          ).rejects.toMatchObject({ code: 'P0001' });
+          await client.query('rollback to savepoint malformed_tracking_identity');
+          await client.query('release savepoint malformed_tracking_identity');
+        }
+        await client.query('set local session_replication_role = replica');
+        await client.query(
+          `update app.inbound_events set processed_at = null where id = $1::uuid`,
+          [captureEvent],
+        );
+        await client.query('set local session_replication_role = origin');
+        expect(
+          await getTelegramProofStatus(client, statusEvent, proof.deposit_proof_request_id),
+        ).toEqual([]);
+      });
+    });
+  });
+
   describe('private amount-free dry-run deposit proof intake', () => {
     it('pins the private schema, exact wrappers, disabled switch, and least-privilege ACLs', async () => {
       const client = getClient();

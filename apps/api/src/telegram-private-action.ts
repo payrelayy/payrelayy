@@ -14,6 +14,7 @@ import {
   TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
+  isTelegramDepositProofToken,
   parseTelegramPlayerRegistrationCapabilityCallback,
   redactTelegramPrivateActionForLog,
   telegramPrivateActionNonceDigestInput,
@@ -112,6 +113,7 @@ const DEPOSIT_PROOF_KEYS = new Set([
   'transactionReference',
 ]);
 const DEPOSIT_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken']);
+const DEPOSIT_PROOF_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'proofToken']);
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
 const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const DIRECT_PROOF_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
@@ -323,6 +325,12 @@ export function parseTelegramPrivateActionEnvelope(
         playerId: parsed.playerId,
         transactionReference: parsed.transactionReference,
       };
+    }
+    case 'deposit_proof_status_command': {
+      if (!hasOnlyKeys(parsed, DEPOSIT_PROOF_STATUS_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (!identity || !isTelegramDepositProofToken(parsed.proofToken)) return undefined;
+      return { ...identity, kind: 'deposit_proof_status_command', proofToken: parsed.proofToken };
     }
     case 'deposit_status_command': {
       if (!hasOnlyKeys(parsed, DEPOSIT_STATUS_KEYS)) return undefined;

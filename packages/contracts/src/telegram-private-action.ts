@@ -87,6 +87,11 @@ export type TelegramPrivateActionEnvelope =
       readonly transactionReference: string;
     })
   | (TelegramPrivateActionIdentity & {
+      readonly kind: 'deposit_proof_status_command';
+      /** Compact proof UUID presentation; the API separately authorizes the submitting customer. */
+      readonly proofToken: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'deposit_status_command';
       /** Compact opaque UUID presentation. It is not authority and is never logged. */
       readonly depositToken: string;
@@ -143,6 +148,16 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      readonly outcome: 'deposit_proof_status';
+      /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
+      readonly proofToken: string;
+      readonly providerCode: DepositProofProviderCode;
+      readonly providerName: 'CBE Birr' | 'TeleBirr';
+      readonly proofStatus: 'proof_received';
+      readonly financialMode: 'dry_run';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'deposit_status';
       readonly amountMinor: string;
       readonly currencyCode: 'ETB';
@@ -155,6 +170,7 @@ export type TelegramPrivateActionResult =
         | 'restart_required'
         | 'menu_required'
         | 'deposit_input_invalid'
+        | 'deposit_status_unavailable'
         | 'deposit_unavailable';
     };
 

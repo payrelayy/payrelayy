@@ -6,6 +6,7 @@ import {
   TELEGRAM_PRIVATE_ACTION_KEY_ID,
   TELEGRAM_PRIVATE_ACTION_PATH,
   isCustomerDepositStatusProjection,
+  isTelegramDepositProofToken,
   parseTelegramPlayerRegistrationCapabilityCallback,
   telegramPrivateActionSignatureInput,
   type TelegramPrivateActionEnvelope,
@@ -75,10 +76,9 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
-    value.outcome === 'deposit_proof_received' &&
+    (value.outcome === 'deposit_proof_received' || value.outcome === 'deposit_proof_status') &&
     keys.length === 7 &&
-    typeof value.proofToken === 'string' &&
-    /^[A-Za-z0-9_-]{22}$/u.test(value.proofToken) &&
+    isTelegramDepositProofToken(value.proofToken) &&
     (value.providerCode === 'cbe_birr' || value.providerCode === 'telebirr') &&
     ((value.providerCode === 'cbe_birr' && value.providerName === 'CBE Birr') ||
       (value.providerCode === 'telebirr' && value.providerName === 'TeleBirr')) &&
@@ -107,6 +107,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       'restart_required',
       'menu_required',
       'deposit_input_invalid',
+      'deposit_status_unavailable',
       'deposit_unavailable',
     ].includes(value.outcome)
   ) {

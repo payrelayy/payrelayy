@@ -1,4 +1,8 @@
-import type { TelegramPrivateActionResult } from '@fetanagent/contracts';
+import {
+  formatTelegramDepositProofStatusCallback,
+  formatTelegramDepositProofTrackingHandle,
+  type TelegramPrivateActionResult,
+} from '@fetanagent/contracts';
 import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
@@ -7,9 +11,13 @@ export type TelegramPlayerIdFlowPresentation =
   | { readonly kind: 'menu'; readonly menu: PrivateTelegramMenu }
   | { readonly kind: 'message'; readonly text: string };
 
+export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
+  'Deposit status is unavailable. Use the tracking reference from your proof receipt in this private chat, or try again shortly.';
+
 /**
  * Maps the API's deliberately small, non-sensitive result union to English-only Telegram copy.
- * No database identifier, Player ID, or capability value is interpolated into customer text.
+ * Only the compact tracking handle is shown; raw database UUIDs, Player IDs and credentials are
+ * excluded from customer text.
  */
 export function presentTelegramPlayerIdFlowResult(
   result: TelegramPrivateActionResult,
@@ -57,13 +65,24 @@ export function presentTelegramPlayerIdFlowResult(
             : `Simulation reference received. Status: ${result.depositStatus.label}.`,
       };
     case 'deposit_proof_received':
+    case 'deposit_proof_status':
       return {
-        kind: 'message',
-        text: [
-          'SIMULATION ONLY — proof received.',
-          `Provider: ${result.providerName}.`,
-          'No payment was verified or credited.',
-        ].join('\n'),
+        kind: 'menu',
+        menu: {
+          text: [
+            'SIMULATION ONLY — proof received.',
+            `Provider: ${result.providerName}.`,
+            `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
+            `Check progress with /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
+            'No payment was verified or credited. Do not send money for this simulation.',
+          ].join('\n'),
+          buttons: [
+            {
+              text: 'Check status',
+              callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
+            },
+          ],
+        },
       };
     case 'deposit_status':
       return {
@@ -71,7 +90,12 @@ export function presentTelegramPlayerIdFlowResult(
         text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${result.depositStatus.label}.`,
       };
     case 'deposit_input_invalid':
-      return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositInputInvalid') };
+      return { kind: 'message', text: telegramDepositHelpText() };
+    case 'deposit_status_unavailable':
+      return {
+        kind: 'message',
+        text: TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
+      };
     case 'deposit_unavailable':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'depositUnavailable') };
     case 'invalid_player_id':
@@ -81,6 +105,16 @@ export function presentTelegramPlayerIdFlowResult(
     case 'menu_required':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerActionMenuRequired') };
   }
+}
+
+export function telegramDepositHelpText(): string {
+  return [
+    'SIMULATION ONLY — DO NOT SEND MONEY.',
+    'Use /deposit telebirr PLAYER_ID TRANSACTION_ID or /deposit cbe_birr PLAYER_ID TRANSACTION_ID.',
+    'Use the destination KemerBet Player ID and one test transaction ID of 8–32 letters or digits. Do not include an amount.',
+    'After submission, choose Check status or send /deposit_status followed by the p1. tracking reference from your proof receipt.',
+    'Use /menu to add a Player ID. No payment is verified or credited in this simulation.',
+  ].join('\n');
 }
 
 function formatMinorEtb(value: string): string {

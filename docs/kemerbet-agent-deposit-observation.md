@@ -3,8 +3,17 @@
 This document records only the reusable interface workflow learned during a controlled,
 user-authorized test using accounts owned by the operator. It deliberately does not record the test
 transaction, its amount, balances, identifiers, or account details. It guides the reviewed executor
-safety core and the missing production integration. It is not a public API contract, permission for
-unattended automation, or evidence that the private agent UI will remain stable.
+safety core and the missing production integration. It is an observation of the agent UI, not a
+public API contract or evidence that the private interface will remain stable. The historical test
+did not activate unattended processing.
+
+The Owner clarified on 2026-09-03 that FetanAgent should automate the work they currently perform
+manually through their own KemerBet agent account, using their authorization and privately supplied
+login. Contacting KemerBet's company or obtaining an official API is not an implementation
+prerequisite. The canonical
+[`real-money-go-live-phases.md`](real-money-go-live-phases.md#settled-kemerbet-integration-requirement--2026-09-03)
+records this product requirement, the local-session connection path, and the remaining launch work.
+The deposit steps below are the automation reference for that requirement.
 
 Account usernames, Player IDs, agent identifiers, transaction IDs, request IDs, and session data
 are deliberately omitted. No credential, cookie, token, raw response body, or withdrawal code was
@@ -102,10 +111,11 @@ Login expiry, CAPTCHA, a changed label or layout, multiple matching history rows
 row, a non-`Approved` state, or a lost browser response must stop execution. The worker must never
 guess whether a transfer failed.
 
-The agent system is an undocumented private UI. Browser-observed routes and raw payloads are not a
-supported provider contract and are not copied into this repository. A later adapter review must
-separately establish allowed access, session handling, host/TLS policy, selector/version drift,
-timeouts, and incident recovery.
+The agent system is an undocumented private UI. Browser-observed routes and raw payloads do not
+constitute a supported public API contract. Production integration must bind the Owner-authorized
+agent account and workflow to the local session and establish session handling, host/TLS policy,
+selector/version drift, timeouts, and incident recovery. This work does not depend on company
+involvement or an official API.
 
 ## Remaining deposit tests
 

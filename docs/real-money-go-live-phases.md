@@ -35,7 +35,7 @@ Public product live
 The verified Owner/backend deployed baseline is
 `a0e23939def3b41be1e31a870c422a75c08dd8cf`. The Owner page returned HTTP 200 with the new companion
 card and the old hosted preview hidden; the Telegram smoke check passed. The
-[Windows companion v0.1.2 release](https://github.com/payrelayy/payrelayy/releases/tag/windows-companion-v0.1.2),
+Windows companion v0.1.2 release (Git tag `windows-companion-v0.1.2`),
 built from `de960b4b63e4a832f8681aebb9537482ca6b0d42`, is published and installed on the Owner's
 `D:` drive. The latest direct-SSH check found all six staging containers running, five health-checked
 services healthy, public/Owner pages returning HTTP 200, and the bot running. The download returned

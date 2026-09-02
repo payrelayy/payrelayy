@@ -1402,6 +1402,32 @@ function validKemerbetStartup(startup, session, quarantined) {
       (session.active === true && ['faulted', 'stopping'].includes(session.phase)));
 }
 
+function validKemerbetAuthentication(authentication, session) {
+  if (authentication === undefined) return true;
+  if (!authentication || typeof authentication !== 'object') return false;
+  const stages = ['agents_candidate', 'credential_released', 'identity_marker',
+    'identity_stability', 'identity_value', 'post_login_ready', 'post_login_reload',
+    'post_login_root', 'session_guard'];
+  const failureCodes = ['identity_deadline_exceeded', 'identity_unavailable',
+    'transition_deadline_exceeded'];
+  const failed = authentication.status === 'failed';
+  const expectedKeys = failed
+    ? ['detailsRedacted', 'failureCode', 'schemaVersion', 'stage', 'status']
+    : ['detailsRedacted', 'schemaVersion', 'stage', 'status'];
+  if (Object.keys(authentication).sort().join('\\0') !== expectedKeys.sort().join('\\0') ||
+      authentication.detailsRedacted !== true || authentication.schemaVersion !== 1 ||
+      !stages.includes(authentication.stage) ||
+      !['failed', 'verifying'].includes(authentication.status) ||
+      (failed && !failureCodes.includes(authentication.failureCode)) ||
+      (!failed && authentication.failureCode !== undefined)) return false;
+  if (authentication.status === 'verifying') {
+    return session.active === true && session.phase === 'authenticating';
+  }
+  return session.active === false
+    ? session.phase === 'idle'
+    : ['faulted', 'stopping'].includes(session.phase);
+}
+
 function validKemerbetSession(value) {
   if (!value || typeof value !== 'object' || typeof value.active !== 'boolean' ||
       typeof value.loginRequired !== 'boolean' || typeof value.signedIn !== 'boolean' ||
@@ -1413,8 +1439,10 @@ function validKemerbetSession(value) {
     : quarantined
       ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
       : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled'];
+  if (value.authentication !== undefined) expectedKeys.push('authentication');
   if (value.startup !== undefined) expectedKeys.push('startup');
   if (Object.keys(value).sort().join('\\0') !== expectedKeys.sort().join('\\0')) return undefined;
+  if (!validKemerbetAuthentication(value.authentication, value)) return undefined;
   if (!validKemerbetStartup(value.startup, value, quarantined)) return undefined;
   if (!value.active) {
     if (value.loginRequired || value.signedIn || !['checkpointed', 'idle'].includes(value.phase)) {
@@ -1520,6 +1548,51 @@ function kemerbetStartupFailureMessage(startup) {
     failures[startup.failureCode] + '. Transfer, final action, and money movement remain disabled.';
 }
 
+function kemerbetAuthenticationProgressMessage(authentication) {
+  const messages = {
+    agents_candidate:
+      'KemerBet opened the signed-in Agents candidate page. Verifying the sealed agent identity…',
+    credential_released:
+      'Credential input was released after submission. Waiting for the bounded post-login reload…',
+    identity_marker:
+      'KemerBet agent identity marker was found. Verifying the sealed identity value…',
+    identity_stability:
+      'KemerBet sealed agent identity is stable. Finalizing the retained session…',
+    identity_value:
+      'KemerBet sealed agent identity value matched. Confirming identity stability…',
+    post_login_ready:
+      'KemerBet completed the reviewed post-login bootstrap. Waiting for the Agents page…',
+    post_login_reload:
+      'KemerBet completed the post-login reload. Verifying the reviewed root transition…',
+    post_login_root:
+      'KemerBet reached the reviewed post-login root. Verifying the bounded read-only bootstrap…',
+    session_guard:
+      'KemerBet signed-in session guard passed. Verifying the sealed agent identity marker…',
+  };
+  return messages[authentication.stage];
+}
+
+function kemerbetAuthenticationFailureMessage(authentication) {
+  const stages = {
+    agents_candidate: 'the signed-in Agents candidate page',
+    credential_released: 'the credential-release transition',
+    identity_marker: 'sealed identity-marker verification',
+    identity_stability: 'sealed identity-stability verification',
+    identity_value: 'sealed identity-value verification',
+    post_login_ready: 'the reviewed post-login bootstrap',
+    post_login_reload: 'the post-login reload',
+    post_login_root: 'the post-login root transition',
+    session_guard: 'the signed-in session guard',
+  };
+  const failures = {
+    identity_deadline_exceeded: 'the bounded sealed-identity deadline expired',
+    identity_unavailable: 'the sealed agent identity could not be verified',
+    transition_deadline_exceeded: 'the bounded signed-in transition deadline expired',
+  };
+  return 'Private KemerBet sign-in stopped during ' + stages[authentication.stage] + ' because ' +
+    failures[authentication.failureCode] + '. No credential was retained. Transfer remains disabled and no money moved.';
+}
+
 async function renderKemerbetSession(session, securityRecoverySessionAllowed = false) {
   const wasSignedIn = currentKemerbetSession?.signedIn === true;
   currentKemerbetSession = session;
@@ -1549,7 +1622,11 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
     kemerbetSessionCanvas.hidden = true;
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
-    if (session.startup?.status === 'failed') {
+    if (session.authentication?.status === 'failed') {
+      kemerbetSessionStatus.textContent = kemerbetAuthenticationFailureMessage(
+        session.authentication,
+      ) + ' Check the approval box again before retrying.';
+    } else if (session.startup?.status === 'failed') {
       kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup) +
         ' Check the approval box again before retrying.';
     } else if (recoveryRequired) {
@@ -1599,7 +1676,11 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
     displayedKemerbetSessionGeneration = undefined;
     displayedKemerbetFrameSequence = 0;
   }
-  if (session.startup?.status === 'failed') {
+  if (session.authentication?.status === 'failed') {
+    kemerbetSessionStatus.textContent = kemerbetAuthenticationFailureMessage(
+      session.authentication,
+    );
+  } else if (session.startup?.status === 'failed') {
     kemerbetSessionStatus.textContent = kemerbetStartupFailureMessage(session.startup);
   } else if (session.phase === 'authenticated') {
     kemerbetSessionStatus.textContent = 'KemerBet signed in and retained until ' +
@@ -1613,7 +1694,9 @@ async function renderKemerbetSession(session, securityRecoverySessionAllowed = f
     kemerbetSessionStatus.textContent = 'Private KemerBet login is open until ' +
       new Date(session.expiresAt).toLocaleTimeString() + '. Click the preview, then type your password or OTP.';
   } else if (session.phase === 'authenticating') {
-    kemerbetSessionStatus.textContent = 'KemerBet opened the signed-in candidate page. Verifying the exact sealed agent identity…';
+    kemerbetSessionStatus.textContent = session.authentication?.status === 'verifying'
+      ? kemerbetAuthenticationProgressMessage(session.authentication)
+      : 'KemerBet opened the signed-in candidate page. Verifying the exact sealed agent identity…';
   } else if (session.phase === 'starting') {
     kemerbetSessionStatus.textContent = 'Starting the isolated KemerBet browser. This page will reconnect automatically…';
   } else if (session.phase === 'stopping') {

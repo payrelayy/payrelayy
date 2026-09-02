@@ -42,6 +42,28 @@ export interface OwnerKemerbetSessionStartupStatus {
   readonly status: 'failed' | 'ready' | 'starting';
 }
 
+export type OwnerKemerbetSessionAuthenticationStage =
+  | 'agents_candidate'
+  | 'credential_released'
+  | 'identity_marker'
+  | 'identity_stability'
+  | 'identity_value'
+  | 'post_login_ready'
+  | 'post_login_reload'
+  | 'post_login_root'
+  | 'session_guard';
+
+export type OwnerKemerbetSessionAuthenticationFailureCode =
+  'identity_deadline_exceeded' | 'identity_unavailable' | 'transition_deadline_exceeded';
+
+export interface OwnerKemerbetSessionAuthenticationStatus {
+  readonly detailsRedacted: true;
+  readonly failureCode?: OwnerKemerbetSessionAuthenticationFailureCode;
+  readonly schemaVersion: 1;
+  readonly stage: OwnerKemerbetSessionAuthenticationStage;
+  readonly status: 'failed' | 'verifying';
+}
+
 export type OwnerKemerbetSessionQuarantineReason =
   'browser_cleanup_unverified' | 'profile_integrity_unverified' | 'unclean_session_generation';
 
@@ -52,6 +74,7 @@ export interface OwnerKemerbetSessionQuarantine {
 
 export interface OwnerKemerbetSessionStatus {
   readonly active: boolean;
+  readonly authentication?: OwnerKemerbetSessionAuthenticationStatus;
   readonly expiresAt?: string;
   readonly frameSequence?: number;
   readonly generation?: string;
@@ -144,6 +167,7 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
         ? ['active', 'loginRequired', 'phase', 'quarantine', 'signedIn', 'transferDisabled']
         : ['active', 'loginRequired', 'phase', 'signedIn', 'transferDisabled']
   ) as string[];
+  if (object.authentication !== undefined) exactKeys.push('authentication');
   if (object.startup !== undefined) exactKeys.push('startup');
   const activePhases = new Set([
     'authenticated',
@@ -160,7 +184,47 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     'unclean_session_generation',
   ]);
   const quarantine = object.quarantine as Record<string, unknown> | undefined;
+  const authentication = object.authentication as Record<string, unknown> | undefined;
   const startup = object.startup as Record<string, unknown> | undefined;
+  const authenticationStages = new Set<unknown>([
+    'agents_candidate',
+    'credential_released',
+    'identity_marker',
+    'identity_stability',
+    'identity_value',
+    'post_login_ready',
+    'post_login_reload',
+    'post_login_root',
+    'session_guard',
+  ]);
+  const authenticationFailureCodes = new Set<unknown>([
+    'identity_deadline_exceeded',
+    'identity_unavailable',
+    'transition_deadline_exceeded',
+  ]);
+  const authenticationFailed = authentication?.status === 'failed';
+  const authenticationKeys = authenticationFailed
+    ? ['detailsRedacted', 'failureCode', 'schemaVersion', 'stage', 'status']
+    : ['detailsRedacted', 'schemaVersion', 'stage', 'status'];
+  const authenticationValid =
+    authentication === undefined ||
+    (typeof authentication === 'object' &&
+      authentication !== null &&
+      !Array.isArray(authentication) &&
+      Object.keys(authentication).sort().join('\0') === authenticationKeys.sort().join('\0') &&
+      authentication.detailsRedacted === true &&
+      authentication.schemaVersion === 1 &&
+      authenticationStages.has(authentication.stage) &&
+      (authentication.status === 'verifying' || authentication.status === 'failed') &&
+      (authentication.status !== 'failed' ||
+        authenticationFailureCodes.has(authentication.failureCode)) &&
+      (authentication.status === 'failed' || authentication.failureCode === undefined) &&
+      (authentication.status !== 'verifying' ||
+        (object.active === true && object.phase === 'authenticating')) &&
+      (authentication.status !== 'failed' ||
+        (object.active === false
+          ? object.phase === 'idle'
+          : object.phase === 'faulted' || object.phase === 'stopping')));
   const startupStages = new Set<unknown>([
     'browser_launch',
     'cleanup',
@@ -221,6 +285,7 @@ export function parseOwnerKemerbetSessionStatus(value: unknown): OwnerKemerbetSe
     typeof object.phase !== 'string' ||
     typeof object.signedIn !== 'boolean' ||
     object.transferDisabled !== true ||
+    !authenticationValid ||
     !startupValid ||
     (object.active &&
       (typeof object.expiresAt !== 'string' ||

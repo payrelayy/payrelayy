@@ -433,6 +433,183 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
   });
 
   it.each([
+    [
+      'credential_released',
+      'Credential input was released after submission. Waiting for the bounded post-login reload…',
+    ],
+    [
+      'post_login_reload',
+      'KemerBet completed the post-login reload. Verifying the reviewed root transition…',
+    ],
+    [
+      'post_login_root',
+      'KemerBet reached the reviewed post-login root. Verifying the bounded read-only bootstrap…',
+    ],
+    [
+      'post_login_ready',
+      'KemerBet completed the reviewed post-login bootstrap. Waiting for the Agents page…',
+    ],
+    [
+      'agents_candidate',
+      'KemerBet opened the signed-in Agents candidate page. Verifying the sealed agent identity…',
+    ],
+    [
+      'session_guard',
+      'KemerBet signed-in session guard passed. Verifying the sealed agent identity marker…',
+    ],
+    [
+      'identity_marker',
+      'KemerBet agent identity marker was found. Verifying the sealed identity value…',
+    ],
+    [
+      'identity_value',
+      'KemerBet sealed agent identity value matched. Confirming identity stability…',
+    ],
+    [
+      'identity_stability',
+      'KemerBet sealed agent identity is stable. Finalizing the retained session…',
+    ],
+  ])('renders fixed redacted authentication progress for %s', async (stage, expectedMessage) => {
+    const browser = ownerBrowserHarness(503);
+    await browser.signIn();
+    const verifyingSession = {
+      active: true,
+      authentication: {
+        detailsRedacted: true,
+        schemaVersion: 1,
+        stage,
+        status: 'verifying',
+      },
+      expiresAt: '2026-08-30T22:00:00.000Z',
+      frameSequence: 0,
+      generation: '11111111-1111-4111-8111-111111111111',
+      loginRequired: false,
+      phase: 'authenticating',
+      signedIn: false,
+      transferDisabled: true,
+    };
+
+    expect(await browser.call('validKemerbetSession', verifyingSession)).toEqual(verifyingSession);
+    await browser.call('renderKemerbetSession', verifyingSession, true);
+
+    const status = browser.element('#kemerbet-session-status').textContent;
+    expect(status).toBe(expectedMessage);
+    expect(status).not.toMatch(/https?:|password|token|stack|player/iu);
+  });
+
+  it.each([
+    {
+      active: false,
+      expectedSuffix: ' Check the approval box again before retrying.',
+      failureCode: 'identity_unavailable',
+      failureMessage: 'the sealed agent identity could not be verified',
+      phase: 'idle',
+      stage: 'identity_value',
+      stageMessage: 'sealed identity-value verification',
+    },
+    {
+      active: true,
+      expectedSuffix: '',
+      failureCode: 'transition_deadline_exceeded',
+      failureMessage: 'the bounded signed-in transition deadline expired',
+      phase: 'faulted',
+      stage: 'post_login_reload',
+      stageMessage: 'the post-login reload',
+    },
+    {
+      active: true,
+      expectedSuffix: '',
+      failureCode: 'identity_deadline_exceeded',
+      failureMessage: 'the bounded sealed-identity deadline expired',
+      phase: 'stopping',
+      stage: 'identity_stability',
+      stageMessage: 'sealed identity-stability verification',
+    },
+  ])(
+    'renders a fixed redacted $phase authentication failure',
+    async ({ active, expectedSuffix, failureCode, failureMessage, phase, stage, stageMessage }) => {
+      const browser = ownerBrowserHarness(503);
+      await browser.signIn();
+      const failedSession = {
+        active,
+        authentication: {
+          detailsRedacted: true,
+          failureCode,
+          schemaVersion: 1,
+          stage,
+          status: 'failed',
+        },
+        ...(active
+          ? {
+              expiresAt: '2026-08-30T22:00:00.000Z',
+              frameSequence: 0,
+              generation: '11111111-1111-4111-8111-111111111111',
+            }
+          : {}),
+        loginRequired: false,
+        phase,
+        signedIn: false,
+        transferDisabled: true,
+      };
+
+      expect(await browser.call('validKemerbetSession', failedSession)).toEqual(failedSession);
+      await browser.call('renderKemerbetSession', failedSession, true);
+
+      const status = browser.element('#kemerbet-session-status').textContent;
+      expect(status).toBe(
+        'Private KemerBet sign-in stopped during ' +
+          stageMessage +
+          ' because ' +
+          failureMessage +
+          '. No credential was retained. Transfer remains disabled and no money moved.' +
+          expectedSuffix,
+      );
+      expect(status).not.toMatch(/https?:|password|token|stack|player/iu);
+    },
+  );
+
+  it.each([
+    {
+      detailsRedacted: true,
+      failureCode: 'identity_unavailable',
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'verifying',
+    },
+    {
+      detailsRedacted: true,
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'failed',
+    },
+    {
+      detailsRedacted: true,
+      failureCode: 'identity_unavailable',
+      providerDetail: 'forbidden',
+      schemaVersion: 1,
+      stage: 'identity_value',
+      status: 'failed',
+    },
+  ])('rejects malformed browser authentication status objects', async (authentication) => {
+    const browser = ownerBrowserHarness(503);
+    await browser.signIn();
+
+    await expect(
+      browser.call('validKemerbetSession', {
+        active: true,
+        authentication,
+        expiresAt: '2026-08-30T22:00:00.000Z',
+        frameSequence: 0,
+        generation: '11111111-1111-4111-8111-111111111111',
+        loginRequired: false,
+        phase: authentication.status === 'verifying' ? 'authenticating' : 'faulted',
+        signedIn: false,
+        transferDisabled: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each([
     {
       failureCode: 'dependency_unavailable',
       expectedMessage:

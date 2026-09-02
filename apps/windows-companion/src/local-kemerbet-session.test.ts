@@ -232,6 +232,7 @@ describe('local KemerBet enrollment session', () => {
     expect(dependencies.launchPersistentContext).toHaveBeenCalledWith(
       config.profileRoot,
       expect.objectContaining({
+        chromiumSandbox: true,
         headless: false,
         offline: true,
         serviceWorkers: 'block',

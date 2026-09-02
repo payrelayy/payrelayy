@@ -152,6 +152,7 @@ export async function startLocalKemerBetSession(
     context = await chromium.launchPersistentContext(config.profileRoot, {
       acceptDownloads: false,
       channel: 'chrome',
+      chromiumSandbox: true,
       headless: false,
       offline: true,
       serviceWorkers: 'block',

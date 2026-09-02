@@ -46,13 +46,28 @@ try {
   Pop-Location
 }
 
-$nodeExecutable = (Get-Command node -CommandType Application -ErrorAction Stop).Source
-$nodeLicense = Join-Path (Split-Path -Parent $nodeExecutable) 'LICENSE'
-if (-not (Test-Path -LiteralPath $nodeLicense -PathType Leaf)) {
-  throw 'Use the official Node.js distribution, including its LICENSE, to build a redistributable package.'
+$nodeExecutable = (node -p 'process.execPath').Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $nodeExecutable -PathType Leaf)) {
+  throw 'Could not resolve the exact Node.js executable used by this build.'
 }
+$nodeVersion = (node -p 'process.version').Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+  throw 'Could not resolve the exact Node.js version used by this build.'
+}
+$nodeLicense = Join-Path (Split-Path -Parent $nodeExecutable) 'LICENSE'
 Copy-Item -LiteralPath $nodeExecutable -Destination (Join-Path $packageRoot 'runtime\node.exe')
-Copy-Item -LiteralPath $nodeLicense -Destination (Join-Path $packageRoot 'runtime\LICENSE')
+if (Test-Path -LiteralPath $nodeLicense -PathType Leaf) {
+  Copy-Item -LiteralPath $nodeLicense -Destination (Join-Path $packageRoot 'runtime\LICENSE')
+} else {
+  # Some preinstalled Windows runtimes omit the adjacent license. Fetch only the license text
+  # from the exact official source tag; never substitute or download another executable.
+  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nodejs/node/$nodeVersion/LICENSE" `
+    -OutFile (Join-Path $packageRoot 'runtime\LICENSE') -TimeoutSec 30
+}
+if ((Get-Item -LiteralPath (Join-Path $packageRoot 'runtime\LICENSE')).Length -lt 1000) {
+  throw 'The Node.js redistribution license is missing or incomplete.'
+}
+Set-Content -LiteralPath (Join-Path $packageRoot 'runtime\VERSION') -Value $nodeVersion -Encoding ascii
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Companion.vbs') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\README.txt') -Destination $packageRoot
 Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE_SHA') -Value $ReleaseSha -Encoding ascii -NoNewline

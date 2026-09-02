@@ -40,7 +40,10 @@ try {
   pnpm --filter '@fetanagent/windows-companion...' run test
   if ($LASTEXITCODE -ne 0) { throw 'Windows companion tests failed.' }
 
-  pnpm --filter '@fetanagent/windows-companion' deploy --prod --legacy (Join-Path $packageRoot 'app')
+  # The isolated pnpm layout contains Windows junctions, including links back into
+  # the source workspace. ZIP archives do not preserve those dependencies. A
+  # hoisted deployment materializes the complete runtime graph as ordinary files.
+  pnpm --config.node-linker=hoisted --filter '@fetanagent/windows-companion' deploy --prod --legacy (Join-Path $packageRoot 'app')
   if ($LASTEXITCODE -ne 0) { throw 'Windows companion production deployment failed.' }
 } finally {
   Pop-Location
@@ -72,7 +75,48 @@ Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\README.txt') -Destination $packageRoot
 Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE_SHA') -Value $ReleaseSha -Encoding ascii -NoNewline
 
+if (@(Get-ChildItem -LiteralPath $packageRoot -Recurse -Force -Attributes ReparsePoint).Count -ne 0) {
+  throw 'The portable package must not contain filesystem links or junctions.'
+}
+
 Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+
+# Test the actual archive, not the pre-ZIP directory whose junctions could still
+# resolve against the build machine. This import does not open Chrome or connect
+# to KemerBet; it proves that the extracted runtime can resolve every entry import.
+$verificationRoot = Join-Path $resolvedOutputParent "archive-verification-$($ReleaseSha.Substring(0, 12))"
+if (Test-Path -LiteralPath $verificationRoot) {
+  throw 'The archive verification directory already exists.'
+}
+Expand-Archive -LiteralPath $zipPath -DestinationPath $verificationRoot
+$extractedPackage = Join-Path $verificationRoot (Split-Path -Leaf $packageRoot)
+if ((Get-Content -LiteralPath (Join-Path $extractedPackage 'RELEASE_SHA') -Raw).Trim() -ne $ReleaseSha) {
+  throw 'The extracted archive release identity is invalid.'
+}
+if (@(Get-ChildItem -LiteralPath $extractedPackage -Recurse -Force -Attributes ReparsePoint).Count -ne 0) {
+  throw 'The extracted archive must contain only self-contained runtime files.'
+}
+Push-Location -LiteralPath (Join-Path $extractedPackage 'app')
+try {
+  $portableSmoke = @'
+import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
+import { sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = realpathSync(process.cwd()) + sep;
+for (const name of ['@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
+  const url = import.meta.resolve(name);
+  assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
+  await import(url);
+}
+console.log('WINDOWS_COMPANION_PORTABLE_IMPORT_OK');
+'@
+  & (Join-Path $extractedPackage 'runtime\node.exe') --input-type=module --eval $portableSmoke
+  if ($LASTEXITCODE -ne 0) { throw 'The extracted Windows companion could not load its runtime dependencies.' }
+} finally {
+  Pop-Location
+}
+
 $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $checksumPath = "$zipPath.sha256"
 Set-Content -LiteralPath $checksumPath -Value "$hash  $([System.IO.Path]::GetFileName($zipPath))" -Encoding ascii

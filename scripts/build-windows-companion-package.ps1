@@ -98,7 +98,20 @@ if (@(Get-ChildItem -LiteralPath $extractedPackage -Recurse -Force -Attributes R
 }
 Push-Location -LiteralPath (Join-Path $extractedPackage 'app')
 try {
-  & (Join-Path $extractedPackage 'runtime\node.exe') --input-type=module --eval 'await import("./dist/index.js"); console.log("WINDOWS_COMPANION_PORTABLE_IMPORT_OK")'
+  $portableSmoke = @'
+import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
+import { sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = realpathSync(process.cwd()) + sep;
+for (const name of ['@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
+  const url = import.meta.resolve(name);
+  assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
+  await import(url);
+}
+console.log('WINDOWS_COMPANION_PORTABLE_IMPORT_OK');
+'@
+  & (Join-Path $extractedPackage 'runtime\node.exe') --input-type=module --eval $portableSmoke
   if ($LASTEXITCODE -ne 0) { throw 'The extracted Windows companion could not load its runtime dependencies.' }
 } finally {
   Pop-Location

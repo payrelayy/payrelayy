@@ -78,7 +78,7 @@ with membership_state as (
      )
 )
 select count(*) <= 1
-    and pg_catalog.coalesce(
+    and coalesce(
       pg_catalog.bool_and(
         membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
         and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'

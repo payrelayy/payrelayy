@@ -142,11 +142,18 @@ FROM runtime-base AS executor-runtime-base
 USER root
 
 ARG FETANAGENT_CHROMIUM_PACKAGE_VERSION
+ARG FETANAGENT_DEBIAN_SECURITY_SNAPSHOT
 
-RUN apt-get update \
-  && test -n "${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
+RUN test -n "${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
+  && test -n "${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}" \
+  && expr "${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}" : '[0-9]\{8\}T[0-9]\{6\}Z$' >/dev/null \
+  && printf '%s\n' \
+    "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT} bookworm-security main" \
+    > /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
+  && apt-get -o Acquire::Check-Valid-Until=false update \
   && apt-get install --yes --no-install-recommends ca-certificates "chromium=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" fonts-liberation \
   && install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control /var/lib/fetanagent/kemerbet-sessions \
+  && rm -f /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
   && rm -rf /var/lib/apt/lists/*
 
 # Docker Compose can otherwise inherit proxy authority from the Docker client's
@@ -171,9 +178,11 @@ FROM executor-runtime-base AS executor
 
 ARG VCS_REF=unknown
 ARG FETANAGENT_CHROMIUM_PACKAGE_VERSION
+ARG FETANAGENT_DEBIAN_SECURITY_SNAPSHOT
 LABEL org.opencontainers.image.title="fetanagent-deposit-executor" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.chromium-package-version="${FETANAGENT_CHROMIUM_PACKAGE_VERSION}"
+      org.opencontainers.image.chromium-package-version="${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
+      org.opencontainers.image.chromium-security-snapshot="${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}"
 
 COPY --from=executor-build --chown=10001:10001 /workspace/node_modules ./node_modules
 COPY --from=executor-build --chown=10001:10001 /workspace/packages ./packages

@@ -5925,10 +5925,12 @@ assert.match(workflow, /docker build --pull=false --target api/);
 assert.match(workflow, /docker build --pull=false --target beta-admission/);
 assert.match(workflow, /docker build --pull=false --target bot/);
 assert.match(workflow, /docker build --pull=false --target gateway/);
-assert.match(workflow, /apt-cache policy chromium/);
+assert.match(workflow, /infra\/executor-browser\.lock\.json/);
+assert.match(workflow, /debianPackageVersion/);
+assert.match(workflow, /debianSecuritySnapshot/);
 assert.match(
   workflow,
-  /docker build --pull=false --target executor[\s\S]*?--build-arg "VCS_REF=\$GITHUB_SHA"[\s\S]*?--build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=\$CHROMIUM_PACKAGE_VERSION"[\s\S]*?-t "fetanagent-deposit-executor:\$tag"/,
+  /docker build --pull=false --target executor[\s\S]*?--build-arg "VCS_REF=\$GITHUB_SHA"[\s\S]*?--build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=\$CHROMIUM_PACKAGE_VERSION"[\s\S]*?--build-arg "FETANAGENT_DEBIAN_SECURITY_SNAPSHOT=\$CHROMIUM_SECURITY_SNAPSHOT"[\s\S]*?-t "fetanagent-deposit-executor:\$tag"/,
 );
 assert.match(
   workflow,
@@ -5937,6 +5939,10 @@ assert.match(
 assert.match(
   workflow,
   /docker image inspect "fetanagent-deposit-executor:\$tag"[\s\S]*?org\.opencontainers\.image\.chromium-package-version[\s\S]*?"\$CHROMIUM_PACKAGE_VERSION"/,
+);
+assert.match(
+  workflow,
+  /docker image inspect "fetanagent-deposit-executor:\$tag"[\s\S]*?org\.opencontainers\.image\.chromium-security-snapshot[\s\S]*?"\$CHROMIUM_SECURITY_SNAPSHOT"/,
 );
 assert.match(workflow, /name: Prove persistent Chromium closes and restores cleanly/);
 assert.match(

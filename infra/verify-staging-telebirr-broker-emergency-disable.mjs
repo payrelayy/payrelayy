@@ -56,9 +56,12 @@ assert.match(disableSql, /count\(\*\) = 7[\s\S]*?as financial_features_disabled[
 assert.match(disableSql, /membership\.inherit_option/);
 assert.match(disableSql, /not membership_state\.set_option/);
 assert.match(disableSql, /not membership_state\.admin_option/);
-assert.match(disableSql, /count\(\*\) <= 1[\s\S]*?as membership_scope_safe/);
+assert.match(disableSql, /count\(\*\) filter \([\s\S]*?as membership_scope_safe/);
 assert.match(disableSql, /and coalesce\(/);
 assert.doesNotMatch(disableSql, /pg_catalog\.coalesce/);
+assert.match(disableSql, /membership_state\.member_role = 'postgres'/);
+assert.match(disableSql, /not membership_state\.inherit_option/);
+assert.match(disableSql, /membership_state\.admin_option/);
 assert.equal(
   (disableSql.match(/^revoke /gm) ?? []).length,
   1,

@@ -77,11 +77,33 @@ with membership_state as (
        'fetanagent_telebirr_assignment_broker_runtime'
      )
 )
-select count(*) <= 1
+select count(*) filter (
+         where membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+           and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
+       ) <= 1
+    and count(*) filter (
+          where membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+            and membership_state.member_role = 'postgres'
+        ) <= 1
+    and count(*) filter (
+          where membership_state.granted_role = 'fetanagent_telebirr_assignment_broker_runtime'
+            and membership_state.member_role = 'postgres'
+        ) <= 1
     and coalesce(
       pg_catalog.bool_and(
-        membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
-        and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
+        (
+          membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+          and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
+        ) or (
+          membership_state.granted_role in (
+            'fetanagent_telebirr_assignment_broker',
+            'fetanagent_telebirr_assignment_broker_runtime'
+          )
+          and membership_state.member_role = 'postgres'
+          and not membership_state.inherit_option
+          and not membership_state.set_option
+          and membership_state.admin_option
+        )
       ),
       true
     ) as membership_scope_safe
@@ -93,9 +115,10 @@ from membership_state
   select 1 / 0 as rejected;
 \endif
 
--- A missing row or changed PostgreSQL membership option is repaired conservatively. Any extra or
--- cross-role membership was rejected above. Both statements are transactional with the role
--- disablement and postconditions below.
+-- A missing row or changed PostgreSQL membership option is repaired conservatively. Optional
+-- bounded creator-admin memberships from either broker role to postgres are preserved; every other
+-- extra or cross-role membership was rejected above. Both statements are transactional with the
+-- role disablement and postconditions below.
 revoke fetanagent_telebirr_assignment_broker
 from fetanagent_telebirr_assignment_broker_runtime;
 
@@ -121,13 +144,38 @@ with membership_state as (
        'fetanagent_telebirr_assignment_broker_runtime'
      )
 )
-select count(*) = 1
+select count(*) filter (
+         where membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+           and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
+           and membership_state.inherit_option
+           and not membership_state.set_option
+           and not membership_state.admin_option
+       ) = 1
+    and count(*) filter (
+          where membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+            and membership_state.member_role = 'postgres'
+        ) <= 1
+    and count(*) filter (
+          where membership_state.granted_role = 'fetanagent_telebirr_assignment_broker_runtime'
+            and membership_state.member_role = 'postgres'
+        ) <= 1
     and pg_catalog.bool_and(
-      membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
-      and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
-      and membership_state.inherit_option
-      and not membership_state.set_option
-      and not membership_state.admin_option
+      (
+        membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+        and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
+        and membership_state.inherit_option
+        and not membership_state.set_option
+        and not membership_state.admin_option
+      ) or (
+        membership_state.granted_role in (
+          'fetanagent_telebirr_assignment_broker',
+          'fetanagent_telebirr_assignment_broker_runtime'
+        )
+        and membership_state.member_role = 'postgres'
+        and not membership_state.inherit_option
+        and not membership_state.set_option
+        and membership_state.admin_option
+      )
     ) as normalized_membership_ready
 from membership_state
 \gset

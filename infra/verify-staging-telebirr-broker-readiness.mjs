@@ -64,7 +64,10 @@ assert.match(inspectSql, /receiver-v1\[\.\]telebirr/);
 assert.match(inspectSql, /app\.private_live_telebirr_receiver_profiles/);
 assert.match(inspectSql, /app\.private_live_telebirr_device_enrollments/);
 assert.match(inspectSql, /app\.private_live_telebirr_verification_jobs/);
-assert.match(inspectSql, /'brokerDatabaseScaffold', 'disabled_ready'/);
+assert.match(inspectSql, /then 'disabled_ready'/);
+assert.match(inspectSql, /then 'bounded_login_ready'/);
+assert.match(inspectSql, /else 'unsafe'/);
+assert.match(inspectSql, /'brokerDatabaseScaffold', :'broker_database_scaffold'/);
 assert.match(inspectSql, /'telebirrReceiver', redacted_state\.receiver_state/);
 assert.match(inspectSql, /'openPilot', redacted_state\.open_pilot_state/);
 assert.match(inspectSql, /'deviceEnrollment'/);
@@ -74,7 +77,7 @@ assert.equal(
   5,
   'Every unsafe inspection boundary must stop psql under ON_ERROR_STOP.',
 );
-assert.match(inspectSql, /rollback;\s*$/);
+assert.match(inspectSql, /rollback;[\s\S]+?\\if :broker_scaffold_safe/);
 assert.doesNotMatch(inspectSql, /\\q(?:uit)?\b|\\copy\b|\\o(?:ut)?\b/i);
 assert.doesNotMatch(
   inspectSql,

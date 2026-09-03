@@ -46,21 +46,22 @@ Three workstreams can proceed together while the existing financial gates remain
    settlement path. Receipt amount, receiver, freshness, and duplicate checks must decide the
    outcome before a KemerBet job can be created.
 
-The first bounded coding slice is Telegram proof-request tracking. The implementation now returns
+The first deployed slice is Telegram proof-request tracking. The implementation now returns
 a `p1.` tracking reference and Check status button from proof intake, handles its command/callback
 through an authenticated same-identity lookup, and reports the immutable simulation status after
-runtime restarts. The migration and API's eleven-function preflight must ship together; this source
-change is not deployment or live-processing evidence. Details are in
-[`telegram-deposit-proof-tracking.md`](telegram-deposit-proof-tracking.md).
+runtime restarts. The migration and API's eleven-function preflight shipped together in release
+`8e46eabb770680cd4885a09815df7f8e0aec73e1`. This remains simulation-only tracking, not live payment
+processing. Details are in [`telegram-deposit-proof-tracking.md`](telegram-deposit-proof-tracking.md)
+and the [cloud release evidence](telegram-deposit-cloud-release-2026-09-03.md).
 
-The next source slice also accepts a TeleBirr receipt URL or pasted SMS after the explicit
+The deployed release also accepts a TeleBirr receipt URL or pasted SMS after the explicit
 `/deposit telebirr <Player ID>` prefix. It extracts one bounded candidate locally, preserves the
 existing proof/tracking identity, and requires explicit resubmission when multiple IDs are found.
 It does not fetch customer URLs, trust pasted amounts, add live verification, or change a financial
-gate. CBE Birr still accepts only a direct reference. The executor source additionally rejects stale
+gate. CBE Birr still accepts only a direct reference. The delivered executor image additionally rejects stale
 final-action authority after a delayed fence response or browser preparation and at the click/request
-boundary; expired or uncertain fenced attempts remain reconciliation-only. These are local source
-changes, not evidence of deployment or a completed pilot transaction.
+boundary; expired or uncertain fenced attempts remain reconciliation-only. The executor service
+itself remains stopped. These release checks do not establish a completed pilot transaction.
 
 The remaining guided-flow baseline is:
 `apps/bot/src/index.ts` wires `/start`, `/menu`, Player-ID actions, the amount-free
@@ -148,14 +149,23 @@ Telegram bot reachable
 
 ## Current truthful status — 2026-09-03
 
-The verified Owner/backend deployed baseline is
-`a0e23939def3b41be1e31a870c422a75c08dd8cf`. The Owner page returned HTTP 200 with the new companion
-card and the old hosted preview hidden; the Telegram smoke check passed. The
-Windows companion v0.1.2 release (Git tag `windows-companion-v0.1.2`),
+The verified application/image baseline is
+`8e46eabb770680cd4885a09815df7f8e0aec73e1`. The private proof-status migration is installed,
+the API's eleven-function preflight passed, and Telegram's queue-preserving activation and public
+HTTPS smoke checks passed. The operational workflow repair is
+`920125e4f0c12a3e631645602b358d57f998b419`; its separate SHA does not change the installed images.
+All six containers are running at the application SHA with zero restarts and all five health checks
+passing. Public home, sign-in, and Owner entry returned HTTPS 200. The private Telegram command
+menu now lists `/start`, `/menu`, `/deposit`, `/deposit_status`, and `/help` with simulation-only
+deposit wording. See the [cloud release evidence](telegram-deposit-cloud-release-2026-09-03.md).
+
+The existing bounded beta stops on 2026-09-04 at 12:12:32 UTC (15:12:32 East Africa Time) unless
+renewed through the reviewed deployment process. This is not continuous production availability.
+
+The Windows companion v0.1.2 release (Git tag `windows-companion-v0.1.2`),
 built from `de960b4b63e4a832f8681aebb9537482ca6b0d42`, is published and installed on the Owner's
-`D:` drive. The latest direct-SSH check found all six staging containers running, five health-checked
-services healthy, public/Owner pages returning HTTP 200, and the bot running. The download returned
-HTTP 200 and GitHub's uploaded digest matched the local SHA-256. Public reachability and a working
+`D:` drive. Its earlier download check returned HTTP 200 and GitHub's uploaded digest matched the
+local SHA-256; this cloud rollout did not replace that package. Public reachability and a working
 local window remain separate from financial readiness.
 The retired hosted preview's historical results are portal-contract evidence, not current authority
 to operate a KemerBet account.

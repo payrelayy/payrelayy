@@ -73,6 +73,13 @@ interchangeable. Both command and callback routes use the same authenticated pro
 
 ## Rollout and remaining work
 
+Release `8e46eabb770680cd4885a09815df7f8e0aec73e1` is deployed to the existing staging API/bot.
+The private status migration, exact eleven-function catalog, real bot identity, retained-queue
+startup, and public HTTPS checks were verified on 2026-09-03. The supported commands are also
+published in Telegram's private-chat command menu. See the
+[cloud release evidence](telegram-deposit-cloud-release-2026-09-03.md) for exact GitHub runs,
+Supabase ledger mapping, availability deadline, and limits of the checks.
+
 The migration and updated API must be deployed together because the exact runtime function
 allowlist changes from ten to eleven. An old database fails the new preflight, and an old API
 preflight rejects the added function. Coordinate the normal API/bot rollout and readiness check;

@@ -105,6 +105,51 @@ assert.match(credentialProgram, /connectionTimeoutMillis: 5000/);
 assert.match(credentialProgram, /statement_timeout: 5000/);
 const programWithoutImports = credentialProgram.replace(/^import .*;\r?\n/gm, '');
 let checks = 0;
+if (process.platform !== 'win32') {
+  const serviceFilter =
+    /docker inspect "\$\{containers\[@\]\}" \| jq -e --arg release "\$RELEASE_SHA" '\n([\s\S]*?)' >\/dev\/null/u.exec(
+      operation,
+    )?.[1];
+  assert.ok(serviceFilter);
+  const release = 'a'.repeat(40);
+  const makeService = (name) => ({
+    Config: {
+      Labels: { 'com.docker.compose.service': name, 'org.opencontainers.image.revision': release },
+      Env: [
+        'FINANCIAL_ACTIONS_MODE=dry_run',
+        'KEMERBET_EXECUTOR_ENABLED=false',
+        'KEMERBET_FINAL_ACTION_ENABLED=false',
+      ],
+    },
+    State: { Running: true, Health: { Status: 'healthy' } },
+  });
+  const core = ['api', 'beta-admission', 'customer-web', 'owner-control'].map(makeService);
+  const complete = [...core, makeService('bot'), makeService('gateway')];
+  const wrongRelease = structuredClone(complete);
+  wrongRelease[0].Config.Labels['org.opencontainers.image.revision'] = 'b'.repeat(40);
+  const moneyEnabled = structuredClone(core);
+  moneyEnabled[0].Config.Env.push('KEMERBET_EXECUTOR_ENABLED=true');
+  const unhealthy = structuredClone(core);
+  unhealthy[0].State.Health.Status = 'starting';
+  for (const [name, fixture, pass] of [
+    ['healthy private core', core, true],
+    ['healthy complete release', complete, true],
+    ['partial public release', [...core, makeService('bot')], false],
+    ['wrong image revision', wrongRelease, false],
+    ['extra executor service', [...complete, makeService('executor')], false],
+    ['duplicate service identity', [...core, makeService('api')], false],
+    ['conflicting financial flag', moneyEnabled, false],
+    ['unhealthy service', unhealthy, false],
+  ]) {
+    const result = spawnSync('jq', ['-e', '--arg', 'release', release, serviceFilter], {
+      input: JSON.stringify(fixture),
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+    checks += 1;
+  }
+}
 for (const [name, fixture, pass] of [
   ['verified catalog', {}, true],
   ['non-continuous or unsafe catalog', { ready: false }, false],

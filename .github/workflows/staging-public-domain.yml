@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       confirm_main_commit_sha:
-        description: Type the exact deployed full main commit SHA
+        description: Type the exact full deployed release SHA from main (current main or its ancestor)
         required: true
         type: string
       confirm_droplet_id:
@@ -39,6 +39,7 @@ concurrency:
 env:
   PUBLIC_DOMAIN: fetanagent.com
   STAGING_DROPLET_ID: '593344964'
+  DEPLOYED_RELEASE_SHA: ${{ inputs.confirm_main_commit_sha }}
 
 jobs:
   edge:
@@ -52,7 +53,9 @@ jobs:
       - name: Check out the exact main contract
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ inputs.confirm_main_commit_sha }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Validate exact target and protected SSH inputs
         id: target
@@ -69,7 +72,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
-          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CONFIRMED_COMMIT" "$GITHUB_SHA"
           [[ "$CONFIRMED_DOMAIN" == "$PUBLIC_DOMAIN" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
           [[ "$REQUESTED_MODE" =~ ^(inspect|publish|stop)$ ]]
@@ -99,7 +103,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
           ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-public-edge-ready '$GITHUB_SHA'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-public-edge-ready '$DEPLOYED_RELEASE_SHA'"
 
       - name: Start only the reviewed public gateway
         id: publish
@@ -109,7 +113,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i '${{ steps.target.outputs.protected }}/deploy-key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='${{ steps.target.outputs.protected }}/known-hosts')
           ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.target.outputs.vm_host }}' \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-fresh-public-edge '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.target.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper start-fresh-public-edge '$DEPLOYED_RELEASE_SHA' '${DEPLOYED_RELEASE_SHA:0:12}'"
           echo 'started=true' >> "$GITHUB_OUTPUT"
 
       - name: Verify public HTTPS and authenticated Owner page boundary

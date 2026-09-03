@@ -188,7 +188,6 @@ from membership_state
 alter role fetanagent_telebirr_assignment_broker with
   nologin
   noinherit
-  nosuperuser
   nocreatedb
   nocreaterole
   noreplication
@@ -200,7 +199,6 @@ alter role fetanagent_telebirr_assignment_broker with
 alter role fetanagent_telebirr_assignment_broker_runtime with
   nologin
   noinherit
-  nosuperuser
   nocreatedb
   nocreaterole
   noreplication

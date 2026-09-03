@@ -408,7 +408,7 @@ export function registerTelebirrAssignmentBrokerRuntimeSqlTests(
       }>(`
         select
           constraint_row.conname as constraint_name,
-          array_agg(attribute_row.attname order by constraint_column.ordinality) as columns
+          array_agg(attribute_row.attname order by constraint_column.ordinality)::text[] as columns
         from pg_constraint constraint_row
         cross join lateral unnest(constraint_row.conkey)
           with ordinality as constraint_column(attribute_number, ordinality)

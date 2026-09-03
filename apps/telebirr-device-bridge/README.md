@@ -1,7 +1,7 @@
 # FetanAgent TeleBirr device bridge
 
 This package is an export-only, evidence-only HTTP handler foundation for the dedicated Ethiopian
-Android verifier. It now defines and enforces the missing authenticated transport boundary without
+Android verifier. It defines and enforces the authenticated device transport boundary without
 opening a port, selecting a hostname, provisioning a key, reading PostgreSQL, or enabling money.
 
 The four exact version-1 routes are:
@@ -37,6 +37,14 @@ device's signed observation before reaching the evidence-only sink. The sink API
 `stageEvidenceOnly` and cannot express a claim, settlement, queue execution, wallet mutation, or
 financial action.
 
+The reviewed assignment-source adapter now maps that injected poll to one canonical local broker
+request over the fixed Unix socket
+`/run/fetanagent-telebirr-assignment-broker/assignment.sock`. It binds the authenticated bridge
+request body digest and exact requested lease duration, accepts no URL/host/port, caps every reply,
+rejects compressed, chunked, duplicate, non-canonical, or malformed responses, and converts every
+transport detail into the bridge's non-sensitive `retry` outcome. The public bridge still imports no
+PostgreSQL client, database credential, protected-reference key, or private broker implementation.
+
 ## Deliberately not composed
 
 There is no executable start entrypoint and no listener. The package imports neither `pg` nor a
@@ -48,18 +56,20 @@ Operational composition remains blocked until reviewed implementations exist for
 - one-use Owner pairing challenge storage and device enrollment/revocation;
 - atomic replay/response storage and redacted heartbeat health;
 - a least-privilege evidence staging queue for the isolated trusted verifier;
-- an isolated, separately provisioned protected-reference opener that can produce a short-lived
-  signed assignment without exposing reference ciphertext or a root key to this public bridge; and
+- strict file-backed broker configuration and separately provisioned scoped opening/signing keys,
+  followed by process/container composition of the implemented local socket adapter; and
 - immutable HTTPS origin, DNS/TLS/firewall, key rotation, metrics, and deployment manifests.
 
-The existing protected-reference package deliberately has no decrypt API. This bridge therefore
-does not fake one, reuse an API encryption master as a device key, or send protected database
-material to Android. `pollAssignment` stays injected until that isolated lifecycle is implemented.
+The existing protected-reference package deliberately has no general decrypt API. This bridge
+therefore does not fake one, reuse an API encryption master as a device key, or send protected
+database material to Android. `pollAssignment` stays dependency-injected; the fixed Unix-socket
+adapter is the reviewed production candidate once the isolated broker lifecycle is provisioned.
 
 ## Verification
 
 The package tests cover valid pairing, certificate issuance, signed polling, exact cached replay,
 payload alteration, duplicate headers, content encoding, query paths, wrong receiver bindings,
-wrong assignment signer material, and the absence of database/Supabase/settlement runtime imports.
-The shared protocol package adds hostile accessor/proxy checks and stable TypeScript/Android
-canonical vectors.
+wrong assignment signer material, exact local broker request mapping, transport fail-closed
+behavior, and the absence of database/Supabase/settlement runtime imports. The shared protocol
+package adds canonical local broker codecs, hostile accessor/proxy checks, and stable
+TypeScript/Android canonical vectors.

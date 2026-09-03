@@ -13,6 +13,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import './verify-telegram-activation.mjs';
+
 const root = resolve(import.meta.dirname, '..');
 const workflow = readFileSync(
   resolve(root, '.github/workflows/staging-beta-deploy-smoke.yml'),
@@ -5590,7 +5592,11 @@ assert.match(botWorkflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
 assert.match(botWorkflow, /STAGING_DROPLET_ID: '593344964'/);
 assert.match(botWorkflow, /STAGING_BOT_USERNAME: fetanagentbot/);
 assert.match(botWorkflow, /GITHUB_REF" == 'refs\/heads\/main'/);
-assert.match(botWorkflow, /CONFIRMED_COMMIT.*GITHUB_SHA/);
+assert.match(botWorkflow, /git merge-base --is-ancestor "\$CONFIRMED_COMMIT" "\$GITHUB_SHA"/);
+assert.match(botWorkflow, /fetch-depth: 0/);
+assert.match(botWorkflow, /ref: \$\{\{ inputs\.confirm_main_commit_sha \}\}/);
+assert.match(botWorkflow, /DEPLOYED_RELEASE_SHA: \$\{\{ inputs\.confirm_main_commit_sha \}\}/);
+assert.doesNotMatch(botWorkflow, /fetanagent-staging-deploy-helper [^\n]*\$GITHUB_SHA/);
 assert.match(botWorkflow, /CONFIRMED_PROJECT.*STAGING_PROJECT_REF/);
 assert.match(botWorkflow, /CONFIRMED_PROJECT.*PRODUCTION_PROJECT_REF/);
 assert.match(botWorkflow, /CONFIRMED_DROPLET.*STAGING_DROPLET_ID/);
@@ -5613,8 +5619,12 @@ assert.match(botWorkflow, /telegram\('getMe'\)/);
 assert.match(botWorkflow, /telegram\('getWebhookInfo'\)/);
 assert.match(botWorkflow, /identity\.username\.toLowerCase\(\) !== 'fetanagentbot'/);
 assert.match(botWorkflow, /webhook\.url !== ''/);
-assert.match(botWorkflow, /webhook\.pending_update_count !== 0/);
+assert.match(botWorkflow, /Number\.isSafeInteger\(webhook\.pending_update_count\)/);
+assert.match(botWorkflow, /webhook\.pending_update_count < 0/);
+assert.doesNotMatch(botWorkflow, /pending_update_count !== 0|pending_update_count === 0/);
+assert.match(botWorkflow, /telegram_identity_and_queue_preservation=pass/);
 assert.doesNotMatch(botWorkflow, /deleteWebhook|drop_pending_updates|setWebhook/);
+assert.doesNotMatch(botSource, /drop_pending_updates\s*:\s*true/);
 assert.match(botWorkflow, /StrictHostKeyChecking=yes/g);
 assert.match(botWorkflow, /UserKnownHostsFile=/g);
 assert.match(botWorkflow, /fetanagent-admin@/g);

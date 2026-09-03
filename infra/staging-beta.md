@@ -2595,11 +2595,20 @@ deployment is a time-bounded beta demo, not financial launch approval; all payme
 provider, validation, deposit, withdrawal, and KemerBet execution gates remain off.
 
 `Staging Telegram bot activation and smoke` is the only supported fresh-host bot boundary. Run it
-only after the private deployment passes on the same exact `main` commit. A fresh BotFather token
+only after the private deployment passes for the exact confirmed release. The workflow itself must
+run from `main`; the confirmed deployed release may be that commit or an ancestor of it. Both bot
+activation and public-edge workflows verify this ancestry and check out the confirmed release to
+derive its helper checksum. Every release-bound helper call uses that same deployed SHA. This lets
+an operational workflow repair restore an already-tested release without rebuilding its images,
+changing runtime credentials again, or selecting a different application version. A fresh BotFather token
 must replace the compromised historical token, and its independently recorded
 `STAGING_TELEGRAM_BOT_TOKEN_SHA256` value must match before the workflow contacts Telegram. The
-workflow accepts only the exact `fetanagentbot` identity, requires no webhook and zero pending
-updates, and refuses to mutate or clear Telegram's queue. It then proves that exactly the four
+workflow accepts only the exact `fetanagentbot` identity and requires no webhook. A non-negative
+integer pending-update count is valid: customer messages arriving during maintenance stay queued
+for the normal poller. The activation check uses only read-only identity/webhook metadata calls;
+it never consumes or clears updates, and it refuses to remove an existing webhook. Transport errors
+are redacted, and redirects are rejected. The bot must retain its queue-preserving polling behavior.
+It then proves that exactly the four
 reviewed private services are healthy and Telegram-disabled, transfers the token through the pinned
 non-root SSH identity, installs it as a `10001:10001` mode-`0400` service file, and starts only the
 bot container without dependencies or builds. Readiness requires the exact reviewed revision, zero

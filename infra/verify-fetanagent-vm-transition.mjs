@@ -1368,11 +1368,11 @@ assert.match(deployWorkflow, /STAGING_DROPLET_ID: '593344964'/);
 assert.doesNotMatch(deployWorkflow, /root@|StrictHostKeyChecking=no/);
 assert.match(
   publicWorkflow,
-  /fetanagent-staging-deploy-helper fresh-public-edge-ready '\$GITHUB_SHA'/,
+  /fetanagent-staging-deploy-helper fresh-public-edge-ready '\$DEPLOYED_RELEASE_SHA'/,
 );
 assert.match(
   publicWorkflow,
-  /fetanagent-staging-deploy-helper start-fresh-public-edge '\$GITHUB_SHA' '\$\{GITHUB_SHA:0:12\}'/,
+  /fetanagent-staging-deploy-helper start-fresh-public-edge '\$DEPLOYED_RELEASE_SHA' '\$\{DEPLOYED_RELEASE_SHA:0:12\}'/,
 );
 assert.doesNotMatch(
   publicWorkflow,

@@ -533,7 +533,7 @@ file-backed-secret choice. Do not weaken the application checks to accommodate a
 Do not run `docker compose ... --profile executor up` until all of these are closed:
 
 1. Review `infra/executor-browser.lock.json`, including its exact Debian Chromium package, signed
-   Debian Security snapshot timestamp, package digest, and exact-pinned Playwright version. Pass the
+   Debian Security snapshot timestamp, package digests, and exact-pinned Playwright version. Pass the
    locked package and snapshot as `FETANAGENT_CHROMIUM_PACKAGE_VERSION` and
    `FETANAGENT_DEBIAN_SECURITY_SNAPSHOT`, build and vulnerability-review the image, and record its
    registry manifest digest. Configure the same complete immutable image reference for both

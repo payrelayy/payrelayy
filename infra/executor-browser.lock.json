@@ -4,5 +4,6 @@
   "chromiumMajor": 151,
   "debianPackageVersion": "151.0.7922.173-1~deb12u1",
   "debianSecuritySnapshot": "20260903T210000Z",
-  "debianPackageSha256": "3c8f1f513675d8785925e67a6858407fd5461e4b1903463d127ea6e651a649de"
+  "debianPackageSha256": "3c8f1f513675d8785925e67a6858407fd5461e4b1903463d127ea6e651a649de",
+  "debianCommonPackageSha256": "560f6d013d1c733d4a84e27209d80235968f3672745c27f6ecd2947ac6c12bd8"
 }

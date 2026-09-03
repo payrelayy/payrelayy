@@ -595,7 +595,7 @@ assert.match(dockerfile, /check-valid-until=no/);
 assert.match(dockerfile, /apt-get install --yes --no-install-recommends ca-certificates/);
 assert.match(
   dockerfile,
-  /apt-get install --yes --no-install-recommends "chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}" fonts-liberation/,
+  /apt-get install --yes --no-install-recommends[\s\S]*?"chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"[\s\S]*?"chromium-common=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"[\s\S]*?fonts-liberation/,
 );
 assert.match(dockerfile, /rm -f \/etc\/apt\/sources\.list\.d\/fetanagent-chromium-snapshot\.list/);
 assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*/);
@@ -884,6 +884,7 @@ assert.deepEqual(executorBrowserLock, {
   debianPackageVersion: '151.0.7922.173-1~deb12u1',
   debianSecuritySnapshot: '20260903T210000Z',
   debianPackageSha256: '3c8f1f513675d8785925e67a6858407fd5461e4b1903463d127ea6e651a649de',
+  debianCommonPackageSha256: '560f6d013d1c733d4a84e27209d80235968f3672745c27f6ecd2947ac6c12bd8',
 });
 assert.equal(
   executorPackage.dependencies?.['playwright-core'],

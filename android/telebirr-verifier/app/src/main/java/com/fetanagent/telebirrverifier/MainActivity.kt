@@ -34,13 +34,23 @@ class MainActivity : Activity() {
         },
       )
       addView(versionView("Relay", RelayProtocol.TRANSCRIPT_VERSION))
+      addView(versionView("Pilot", LivePrivatePilotProtocol.OBSERVATION_TRANSCRIPT_VERSION))
+      addView(versionView("Provider", LivePrivatePilotProtocol.SOURCE_PROFILE))
       addView(versionView("Parser", RelayProtocol.PARSER_VERSION))
       addView(versionView("Normalizer", RelayProtocol.NORMALIZER_VERSION))
       addView(
         TextView(context).apply {
+          text = "Signed assignments and the fixed official TeleBirr route only. No editable URL or API key."
+          textSize = 14f
+          setPadding(0, 36, 0, 0)
+          gravity = Gravity.CENTER
+        },
+      )
+      addView(
+        TextView(context).apply {
           text = "No database, KemerBet, settlement, or financial-action authority."
           textSize = 14f
-          setPadding(0, 48, 0, 0)
+          setPadding(0, 24, 0, 0)
           gravity = Gravity.CENTER
         },
       )
@@ -61,6 +71,9 @@ class VerifierLifecycle private constructor(val state: State, val label: String)
     DISABLED,
     ENROLLMENT_REQUIRED,
     READY,
+    BUSY,
+    UPLOAD_PENDING,
+    ATTENTION,
   }
 
   companion object {
@@ -70,5 +83,16 @@ class VerifierLifecycle private constructor(val state: State, val label: String)
       VerifierLifecycle(State.ENROLLMENT_REQUIRED, "Enrollment required")
 
     fun ready(): VerifierLifecycle = VerifierLifecycle(State.READY, "Ready")
+
+    fun from(status: LivePilotRuntimeStatus): VerifierLifecycle =
+      when (status.state) {
+        LivePilotRuntimeState.DISABLED -> disabled()
+        LivePilotRuntimeState.ENROLLMENT_REQUIRED -> enrollmentRequired()
+        LivePilotRuntimeState.READY -> ready()
+        LivePilotRuntimeState.BUSY -> VerifierLifecycle(State.BUSY, "Observing")
+        LivePilotRuntimeState.UPLOAD_PENDING ->
+          VerifierLifecycle(State.UPLOAD_PENDING, "Upload pending")
+        LivePilotRuntimeState.ATTENTION -> VerifierLifecycle(State.ATTENTION, "Attention required")
+      }
   }
 }

@@ -110,4 +110,23 @@ class LivePrivatePilotReceiptParserTest {
     assertEquals("unknown", facts.providerFinalStatus)
     assertEquals("found", facts.lookupOutcome)
   }
+
+  @Test
+  fun `accepts the observed official receipt labels without weakening required facts`() {
+    val observedLabelHtml =
+      livePilotHtml()
+        .replace("Invoice No.", "የደረሰኝ ቁጥር / Invoice No")
+        .replace("Payment date", "የክፍያ ቀን / Payment Date")
+        .replace("25 Birr", "25.00 ETB")
+        .replace("Credited Party name", "የገንዘብ ተቀባይ / Credited Party Name")
+    val facts =
+      parser.parse(livePilotProviderFound(observedLabelHtml), assignment).facts
+        as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+    assertEquals("recognized_layout_v1", facts.layoutAttestation)
+  }
 }

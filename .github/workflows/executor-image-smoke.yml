@@ -24,31 +24,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve the exact Chromium package from the pinned base
+      - name: Resolve the reviewed Chromium package lock
         id: chromium
         shell: bash
-        env:
-          EXECUTOR_BASE_IMAGE: node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
         run: |
           set -euo pipefail
-          chromium_version="$(
-            docker run --rm --platform linux/amd64 "$EXECUTOR_BASE_IMAGE" \
-              sh -euc "apt-get update >/dev/null; apt-cache policy chromium | awk '/Candidate:/ { print \$2; exit }'"
-          )"
+          chromium_version="$(node -p "require('./infra/executor-browser.lock.json').debianPackageVersion")"
+          security_snapshot="$(node -p "require('./infra/executor-browser.lock.json').debianSecuritySnapshot")"
           [[ "$chromium_version" =~ ^[0-9][0-9A-Za-z.+:~_-]*$ ]]
-          [[ "$chromium_version" != '(none)' ]]
+          [[ "$security_snapshot" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
           echo "version=$chromium_version" >> "$GITHUB_OUTPUT"
+          echo "security_snapshot=$security_snapshot" >> "$GITHUB_OUTPUT"
 
       - name: Build the executor image
         shell: bash
         env:
           CHROMIUM_PACKAGE_VERSION: ${{ steps.chromium.outputs.version }}
+          CHROMIUM_SECURITY_SNAPSHOT: ${{ steps.chromium.outputs.security_snapshot }}
           EXECUTOR_IMAGE: fetanagent-deposit-executor:ci
         run: |
           set -euo pipefail
           docker build --pull=false --target executor \
             --build-arg "VCS_REF=$GITHUB_SHA" \
             --build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=$CHROMIUM_PACKAGE_VERSION" \
+            --build-arg "FETANAGENT_DEBIAN_SECURITY_SNAPSHOT=$CHROMIUM_SECURITY_SNAPSHOT" \
             --tag "$EXECUTOR_IMAGE" .
 
           test "$(docker image inspect "$EXECUTOR_IMAGE" --format '{{.Config.User}}')" = '10001:10001'
@@ -59,6 +58,9 @@ jobs:
           test "$(docker image inspect "$EXECUTOR_IMAGE" \
             --format '{{index .Config.Labels "org.opencontainers.image.chromium-package-version"}}')" = \
             "$CHROMIUM_PACKAGE_VERSION"
+          test "$(docker image inspect "$EXECUTOR_IMAGE" \
+            --format '{{index .Config.Labels "org.opencontainers.image.chromium-security-snapshot"}}')" = \
+            "$CHROMIUM_SECURITY_SNAPSHOT"
           image_environment="$(docker image inspect "$EXECUTOR_IMAGE" \
             --format '{{range .Config.Env}}{{println .}}{{end}}')"
           for proxy_name in \

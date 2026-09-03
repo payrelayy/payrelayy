@@ -219,25 +219,23 @@ jobs:
       - name: Verify the locked staging contract
         run: node infra/verify-staging-beta.mjs
 
-      - name: Resolve the exact Chromium package from the pinned executor base
+      - name: Resolve the reviewed Chromium package lock
         id: chromium
         shell: bash
-        env:
-          EXECUTOR_BASE_IMAGE: node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066
         run: |
           set -euo pipefail
-          chromium_version="$(
-            docker run --rm --platform linux/amd64 "$EXECUTOR_BASE_IMAGE" \
-              sh -euc "apt-get update >/dev/null; apt-cache policy chromium | awk '/Candidate:/ { print \$2; exit }'"
-          )"
+          chromium_version="$(node -p "require('./infra/executor-browser.lock.json').debianPackageVersion")"
+          security_snapshot="$(node -p "require('./infra/executor-browser.lock.json').debianSecuritySnapshot")"
           [[ "$chromium_version" =~ ^[0-9][0-9A-Za-z.+:~_-]*$ ]]
-          [[ "$chromium_version" != '(none)' ]]
+          [[ "$security_snapshot" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]
           echo "version=$chromium_version" >> "$GITHUB_OUTPUT"
+          echo "security_snapshot=$security_snapshot" >> "$GITHUB_OUTPUT"
 
       - name: Build commit-labelled images without runtime secrets
         shell: bash
         env:
           CHROMIUM_PACKAGE_VERSION: ${{ steps.chromium.outputs.version }}
+          CHROMIUM_SECURITY_SNAPSHOT: ${{ steps.chromium.outputs.security_snapshot }}
         run: |
           set -euo pipefail
           tag="${GITHUB_SHA:0:12}"
@@ -256,6 +254,7 @@ jobs:
           docker build --pull=false --target executor \
             --build-arg "VCS_REF=$GITHUB_SHA" \
             --build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=$CHROMIUM_PACKAGE_VERSION" \
+            --build-arg "FETANAGENT_DEBIAN_SECURITY_SNAPSHOT=$CHROMIUM_SECURITY_SNAPSHOT" \
             -t "fetanagent-deposit-executor:$tag" .
           for image in owner-control customer-web api beta-admission bot gateway; do
             test "$(docker image inspect "fetanagent-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
@@ -268,6 +267,9 @@ jobs:
           test "$(docker image inspect "fetanagent-deposit-executor:$tag" \
             --format '{{ index .Config.Labels "org.opencontainers.image.chromium-package-version" }}')" = \
             "$CHROMIUM_PACKAGE_VERSION"
+          test "$(docker image inspect "fetanagent-deposit-executor:$tag" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.chromium-security-snapshot" }}')" = \
+            "$CHROMIUM_SECURITY_SNAPSHOT"
 
       - name: Prove persistent Chromium closes and restores cleanly
         shell: bash

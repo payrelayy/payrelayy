@@ -77,6 +77,7 @@ pnpm --filter @fetanagent/executor build
 pnpm --filter @fetanagent/executor test
 docker build --target executor --build-arg VCS_REF=<reviewed-full-commit> `
   --build-arg FETANAGENT_CHROMIUM_PACKAGE_VERSION=<reviewed-exact-debian-version> `
+  --build-arg FETANAGENT_DEBIAN_SECURITY_SNAPSHOT=<reviewed-snapshot-timestamp> `
   --tag <reviewed-registry>/fetanagent-deposit-executor:<reviewed-commit-tag> .
 docker compose -f infra/compose.executor.yaml --profile executor config
 docker compose -f infra/compose.executor.yaml --profile executor-session-provision config
@@ -531,14 +532,17 @@ file-backed-secret choice. Do not weaken the application checks to accommodate a
 
 Do not run `docker compose ... --profile executor up` until all of these are closed:
 
-1. Select an exact Debian Chromium package version from the pinned base image's reviewed repository,
-   pass it as `FETANAGENT_CHROMIUM_PACKAGE_VERSION`, build and vulnerability-review the image, and
-   record its registry manifest digest. Configure the same complete immutable image reference for
-   both services and prove the rendered Compose projection contains no tag or build section. The
-   build fails unless the package is exact and its major equals the Chromium
-   contract shipped by exact-pinned `playwright-core@1.62.1`. Other apt dependencies still come from
-   the moving Debian repository, so the resulting image digest—not the Dockerfile alone—is the
-   deployable unit.
+1. Review `infra/executor-browser.lock.json`, including its exact Debian Chromium package, signed
+   Debian Security snapshot timestamp, package digests, and exact-pinned Playwright version. Pass the
+   locked package and snapshot as `FETANAGENT_CHROMIUM_PACKAGE_VERSION` and
+   `FETANAGENT_DEBIAN_SECURITY_SNAPSHOT`, build and vulnerability-review the image, and record its
+   registry manifest digest. Configure the same complete immutable image reference for both
+   services and prove the rendered Compose projection contains no tag or build section. The build
+   fails unless the package is exact and its major equals the Chromium contract shipped by
+   exact-pinned `playwright-core@1.62.1`. The snapshot prevents an upstream repository update from
+   silently changing the browser; other apt dependencies still select their newest compatible
+   versions from the configured repositories. The resulting image digest—not the Dockerfile
+   alone—is the deployable unit.
 2. Prove non-root Chromium sandbox startup on the exact target kernel with `cap_drop: ALL`,
    `no-new-privileges`, the read-only root filesystem, and no `--no-sandbox` fallback. A failed
    sandbox probe is a launch blocker, not a reason to disable the sandbox.

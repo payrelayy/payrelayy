@@ -129,6 +129,9 @@ const executorConfigSource = await readFile(
 const executorPackage = JSON.parse(
   await readFile(`${repositoryRoot}apps/executor/package.json`, 'utf8'),
 );
+const executorBrowserLock = JSON.parse(
+  await readFile(`${infraDirectory}executor-browser.lock.json`, 'utf8'),
+);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -580,11 +583,21 @@ assert.match(dockerfile, /FROM build-base AS executor-build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/executor\.\.\. run build/);
 assert.match(dockerfile, /FROM runtime-base AS executor-runtime-base/);
 assert.match(dockerfile, /ARG FETANAGENT_CHROMIUM_PACKAGE_VERSION/);
+assert.match(dockerfile, /ARG FETANAGENT_DEBIAN_SECURITY_SNAPSHOT/);
 assert.match(dockerfile, /test -n "\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"/);
+assert.match(dockerfile, /test -n "\$\{FETANAGENT_DEBIAN_SECURITY_SNAPSHOT\}"/);
 assert.match(
   dockerfile,
-  /apt-get install --yes --no-install-recommends ca-certificates "chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}" fonts-liberation/,
+  /https:\/\/snapshot\.debian\.org\/archive\/debian-security\/\$\{FETANAGENT_DEBIAN_SECURITY_SNAPSHOT\}/,
 );
+assert.match(dockerfile, /Acquire::Check-Valid-Until=false/);
+assert.match(dockerfile, /check-valid-until=no/);
+assert.match(dockerfile, /apt-get install --yes --no-install-recommends ca-certificates/);
+assert.match(
+  dockerfile,
+  /apt-get install --yes --no-install-recommends[\s\S]*?"chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"[\s\S]*?"chromium-common=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}"[\s\S]*?fonts-liberation/,
+);
+assert.match(dockerfile, /rm -f \/etc\/apt\/sources\.list\.d\/fetanagent-chromium-snapshot\.list/);
 assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*/);
 assert.match(dockerfile, /ENV HOME=\/tmp/);
 assert.match(
@@ -635,6 +648,10 @@ assert.match(
 );
 assert.match(
   executorImage,
+  /org\.opencontainers\.image\.chromium-security-snapshot="\$\{FETANAGENT_DEBIAN_SECURITY_SNAPSHOT\}"/,
+);
+assert.match(
+  executorImage,
   /COPY --from=executor-build --chown=10001:10001 \/workspace\/node_modules/,
 );
 assert.match(executorImage, /COPY --from=executor-build --chown=10001:10001 \/workspace\/packages/);
@@ -675,14 +692,13 @@ const executorBaseImage =
     dockerfile,
   )?.[1];
 assert.ok(executorBaseImage, 'missing pinned executor build base image');
+assert.match(executorImageSmokeWorkflow, /infra\/executor-browser\.lock\.json/);
+assert.match(executorImageSmokeWorkflow, /debianPackageVersion/);
+assert.match(executorImageSmokeWorkflow, /debianSecuritySnapshot/);
+assert.doesNotMatch(executorImageSmokeWorkflow, /apt-cache policy chromium|EXECUTOR_BASE_IMAGE/);
 assert.match(
   executorImageSmokeWorkflow,
-  new RegExp(`EXECUTOR_BASE_IMAGE:\\s*${escapeRegExp(executorBaseImage)}`),
-);
-assert.match(executorImageSmokeWorkflow, /apt-cache policy chromium/);
-assert.match(
-  executorImageSmokeWorkflow,
-  /docker build --pull=false --target executor[\s\S]*--build-arg "VCS_REF=\$GITHUB_SHA"[\s\S]*--build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=\$CHROMIUM_PACKAGE_VERSION"/,
+  /docker build --pull=false --target executor[\s\S]*--build-arg "VCS_REF=\$GITHUB_SHA"[\s\S]*--build-arg "FETANAGENT_CHROMIUM_PACKAGE_VERSION=\$CHROMIUM_PACKAGE_VERSION"[\s\S]*--build-arg "FETANAGENT_DEBIAN_SECURITY_SNAPSHOT=\$CHROMIUM_SECURITY_SNAPSHOT"/,
 );
 assert.match(
   executorImageSmokeWorkflow,
@@ -691,6 +707,10 @@ assert.match(
 assert.match(
   executorImageSmokeWorkflow,
   /org\.opencontainers\.image\.chromium-package-version[\s\S]*=\s*\\?[\r\n\s]*"\$CHROMIUM_PACKAGE_VERSION"/,
+);
+assert.match(
+  executorImageSmokeWorkflow,
+  /org\.opencontainers\.image\.chromium-security-snapshot[\s\S]*=\s*\\?[\r\n\s]*"\$CHROMIUM_SECURITY_SNAPSHOT"/,
 );
 assert.match(executorImageSmokeWorkflow, /'10001:10001'/);
 assert.match(executorImageSmokeWorkflow, /'\["node","apps\/executor\/dist\/index\.js"\]'/);
@@ -780,7 +800,7 @@ assert.doesNotMatch(executorImageSmokeWorkflow, /\$\{\{\s*secrets\./);
 const executorSmokeDockerRuns = [
   ...executorImageSmokeWorkflow.matchAll(/^\s*docker run\b[^\r\n]*(?:\\\r?\n[^\r\n]*)*/gm),
 ].map((match) => match[0]);
-assert.equal(executorSmokeDockerRuns.length, 3, 'unexpected executor image smoke container');
+assert.equal(executorSmokeDockerRuns.length, 2, 'unexpected executor image smoke container');
 const requiredExecutorSmokeEnvironment = new Map([
   ['NODE_ENV', 'production'],
   ['FINANCIAL_ACTIONS_MODE', 'dry_run'],
@@ -857,7 +877,19 @@ assert.doesNotMatch(
   'the executor image smoke must not contain a deployment command',
 );
 
-assert.equal(executorPackage.dependencies?.['playwright-core'], '1.62.1');
+assert.deepEqual(executorBrowserLock, {
+  schemaVersion: 1,
+  playwrightCoreVersion: '1.62.1',
+  chromiumMajor: 151,
+  debianPackageVersion: '151.0.7922.173-1~deb12u1',
+  debianSecuritySnapshot: '20260903T210000Z',
+  debianPackageSha256: '3c8f1f513675d8785925e67a6858407fd5461e4b1903463d127ea6e651a649de',
+  debianCommonPackageSha256: '560f6d013d1c733d4a84e27209d80235968f3672745c27f6ecd2947ac6c12bd8',
+});
+assert.equal(
+  executorPackage.dependencies?.['playwright-core'],
+  executorBrowserLock.playwrightCoreVersion,
+);
 assert.equal(
   executorPackage.scripts?.['session:provision'],
   'node dist/kemerbet-session-provision.js',

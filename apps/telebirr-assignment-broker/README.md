@@ -53,6 +53,13 @@ receiver/pilot/device/work states and refuses an altered role, function, financi
 protected-receiver boundary. It never emits the receiver name, account, mask, IDs, key material, or
 database credential and has no provisioning mode.
 
+If that inspection finds a stale or otherwise unsafe runtime `LOGIN`, the separate manual
+`Staging TeleBirr broker emergency disable` workflow can only normalize the two broker roles to
+`NOLOGIN`, remove both passwords, terminate their existing sessions, and rerun the redacted full
+inspection. It is bound to the exact `main` commit and staging project, locks and requires all seven
+financial/provider switches to remain disabled, and has no pilot, receiver, device, DigitalOcean,
+secret-generation, or enablement action.
+
 No credential, runtime `LOGIN`, receiver value, child key, signer, or bridge deployment has been
 provisioned by this source change. No fixed calendar date stops the broker; only explicit gates,
 database pilot/enrollment/key state, bounded runtime-role validity, and short lease validity windows

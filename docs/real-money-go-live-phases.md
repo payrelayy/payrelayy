@@ -846,6 +846,9 @@ run URLs, and redacted outcome states as evidence.
   private assignment lease/open/sign boundary and its remaining composition work.
 - [`../.github/workflows/staging-telebirr-broker-readiness.yml`](../.github/workflows/staging-telebirr-broker-readiness.yml)
   — manual exact-commit redacted Supabase readiness inspection with no provisioning mode.
+- [`../.github/workflows/staging-telebirr-broker-emergency-disable.yml`](../.github/workflows/staging-telebirr-broker-emergency-disable.yml)
+  — staging-only role de-credentialing and session termination followed by the full redacted
+  readiness postcondition; it cannot enable a financial feature or provision a runtime.
 - [`../packages/telebirr-reference-opening/README.md`](../packages/telebirr-reference-opening/README.md)
   — provider/purpose-scoped protected-reference opening contract.
 - [`../android/telebirr-verifier/README.md`](../android/telebirr-verifier/README.md) — Android

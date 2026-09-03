@@ -94,6 +94,8 @@ jobs:
           helper_sha="$(git show "$DEPLOYED_RELEASE_SHA:infra/operations/fetanagent-staging-deploy-helper.sh" | sha256sum | awk '{print $1}')"
           [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
           echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
+          continuity_sha="$(sha256sum infra/operations/fetanagent-staging-continuous-availability.sh | awk '{print $1}')"
+          echo "continuity_sha=$continuity_sha" >> "$GITHUB_OUTPUT"
           echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
 
       - name: Verify the installed release without stopping or restarting it
@@ -101,12 +103,13 @@ jobs:
         env:
           VM_HOST: ${{ steps.target.outputs.vm_host }}
           HELPER_SHA: ${{ steps.target.outputs.helper_sha }}
+          CONTINUITY_SHA: ${{ steps.target.outputs.continuity_sha }}
         run: |
           set -euo pipefail
           protected="$RUNNER_TEMP/continuous-availability-protected"
           ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper public-edge-ready '$DEPLOYED_RELEASE_SHA'"
+            "test \"\$(id -u)\" -ne 0 && test \"\$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)\" = '$CONTINUITY_SHA' && sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$DEPLOYED_RELEASE_SHA' >/dev/null && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-public-edge-ready '$DEPLOYED_RELEASE_SHA'"
 
       - name: Inspect or enable continuous database lifetimes
         shell: bash
@@ -131,6 +134,18 @@ jobs:
             psql -X --file=infra/sql/staging-runtimes-availability-inspect.sql
           fi
 
+      - name: Disable the old timer through the exact deployment capability
+        if: inputs.mode == 'enable-continuous'
+        shell: bash
+        env:
+          VM_HOST: ${{ steps.target.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/continuous-availability-protected"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$DEPLOYED_RELEASE_SHA'"
+
       - name: Report timer state and verify public availability
         shell: bash
         env:
@@ -144,7 +159,7 @@ jobs:
           for url in https://fetanagent.com/ https://fetanagent.com/sign-in https://owner.fetanagent.com/owner; do
             curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 15 --output /dev/null "$url"
           done
-          echo 'Database lifetime operation verified. An existing active timer still requires the reviewed root-only disarm operation.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Availability operation verified; see the database lifetimes and systemd state above. Financial controls remain disabled.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove only this job's temporary connection files
         if: always()

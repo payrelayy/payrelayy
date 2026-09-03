@@ -2538,19 +2538,25 @@ not read the Telegram token; it always installs the invalid
 and beta-admission. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
 
-`deploy-and-smoke` has no scheduled application shutdown. Immediately after the existing narrow
-credential-provisioning step, `staging-runtimes-enable-continuous.sql` changes only the four application
-roles' `VALID UNTIL` fields to `infinity`. It validates exact non-administrative attributes, one narrow
+`deploy-and-smoke` finishes with no scheduled application shutdown. Its immutable legacy helper still
+requires a bounded bootstrap: four 24-hour logins and a timer exactly two hours before the earliest expiry.
+During this bootstrap, the host-local timer stops the containers if an interrupted activation is left
+unrecovered. That timer alone is an automatic stop-before-expiry boundary, not credential rotation or
+continuous availability; it is no longer the completed deployment's availability policy.
+
+Before any downtime, the workflow verifies the installed continuous-availability finalizer's checksum
+and its single permitted sudo command. After the four private-core services pass their existing
+startup/readiness checks, `staging-runtimes-enable-continuous.sql` changes only their application roles'
+`VALID UNTIL` fields to `infinity`. It validates exact non-administrative attributes, one narrow
 membership per role, all seven disabled financial switches, and disabled executor/verifier logins
 before changing anything. Passwords, permission grants, connection limits, and financial role
-lifetimes are unchanged. The original provisioning SQL remains bounded for historical recovery
-contracts; every ordinary deployment must complete the separate continuous-lifetime step before
-starting a service.
+lifetimes are unchanged. The checksum-bound finalizer then independently verifies the live release
+and non-expiring database roles before disabling the old timer, including boot enablement and its
+next trigger. Only then is ordinary deployment complete.
 
-Before any long-lived container starts, the workflow verifies that the old expiry timer and service
-are absent. The preceding ordinary helper `stop` removes any old timer; ordinary deployments do not
-arm the old expiry timer. Failure or cancellation after provisioning still runs the existing bounded
-VM stop/disarm and database-login cleanup. This availability policy does not enable financial processing.
+The legacy root helper and its historical recovery contracts are unchanged. Failure or cancellation
+after provisioning, including a failed finalization, still runs the existing bounded VM stop/disarm
+and database-login cleanup. This availability policy does not enable financial processing.
 
 DigitalOcean Droplet `593344964` has the exact current public IPv6 address
 `2a03:b0c0:1:e0:0:1:a8b4:2001`. It is the only address this workflow may remove from Supabase's

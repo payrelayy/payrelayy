@@ -11,6 +11,9 @@ const operation = read('infra/operations/fetanagent-staging-continuous-availabil
 const sql = read('infra/sql/staging-runtimes-enable-continuous.sql');
 const inspection = read('infra/sql/staging-runtimes-availability-inspect.sql');
 const helper = read('infra/operations/fetanagent-staging-deploy-helper.sh');
+const deployWorkflow = read('.github/workflows/staging-beta-deploy-smoke.yml');
+const sudoers = read('infra/operations/fetanagent-staging-continuous-availability.sudoers');
+const installer = read('infra/operations/install-staging-continuous-availability.sh');
 const expectedRoles = [
   'fetanagent_beta_admission_runtime',
   'fetanagent_customer_web_runtime',
@@ -44,6 +47,42 @@ assert.match(workflow, /StrictHostKeyChecking=yes/);
 assert.doesNotMatch(workflow, /fetanagent-staging-deploy-helper (?:stop|start|install)\b/);
 assert.ok(workflow.indexOf('public-edge-ready') < workflow.indexOf('psql -X'));
 assert.ok(operation.includes(createHash('sha256').update(helper).digest('hex')));
+const finalizerDigest = createHash('sha256').update(operation).digest('hex');
+assert.equal(
+  sudoers.trim(),
+  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${finalizerDigest} /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry *`,
+);
+assert.match(installer, /visudo -cf/);
+assert.match(installer, /different sudo capability already exists; no files were replaced/);
+assert.doesNotMatch(installer, /\b(?:psql|systemctl|docker|rm)\s/);
+assert.match(operation, /"\$0" == "\$INSTALLED_PATH"/);
+assert.match(operation, /SUDO_USER:-\}" == fetanagent-admin/);
+assert.match(
+  deployWorkflow,
+  /sudo -n -l \/usr\/local\/sbin\/fetanagent-staging-continuous-availability disable-expiry '\$GITHUB_SHA'/,
+);
+const completion =
+  /- name: Finalize continuous non-financial availability([\s\S]*?)\n\s+- name: Capture bounded Owner-control startup diagnostics/u.exec(
+    deployWorkflow,
+  )?.[1];
+assert.ok(completion);
+assert.ok(
+  deployWorkflow.indexOf('Start the private staging profile and smoke readiness') <
+    deployWorkflow.indexOf('Finalize continuous non-financial availability'),
+);
+assert.match(completion, /psql -X --file=infra\/sql\/staging-runtimes-enable-continuous\.sql/);
+assert.ok(
+  completion.indexOf('staging-runtimes-enable-continuous.sql') <
+    completion.indexOf(
+      'sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry',
+    ),
+);
+assert.ok(
+  workflow.indexOf('staging-runtimes-enable-continuous.sql') <
+    workflow.indexOf(
+      'sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry',
+    ),
+);
 assert.match(operation, /flock --exclusive --nonblock 9/);
 assert.match(operation, /\/metadata\/v1\/id\)" == 593344964/);
 assert.doesNotMatch(

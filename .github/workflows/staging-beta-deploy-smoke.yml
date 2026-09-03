@@ -2683,8 +2683,9 @@ jobs:
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-staging-images.tar")"
           [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
+          continuity_sha="$(sha256sum infra/operations/fetanagent-staging-continuous-availability.sh | awk '{print $1}')"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper docker-storage-ready '$bundle_bytes'"
+            "test \"\$(id -u)\" -ne 0 && test \"\$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)\" = '$continuity_sha' && sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$GITHUB_SHA' >/dev/null && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper docker-storage-ready '$bundle_bytes'"
 
       - name: Stop any prior staging project and disable old logins
         shell: bash
@@ -2771,7 +2772,7 @@ jobs:
               ;;
           esac
 
-      - name: Provision four narrow staging logins
+      - name: Provision four narrow 24-hour staging logins
         id: provision
         shell: bash
         env:
@@ -2793,7 +2794,8 @@ jobs:
           echo 'attempted=true' >> "$GITHUB_OUTPUT"
           psql -X --file=infra/sql/staging-runtimes-provision-for-deploy.sql
 
-      - name: Enable continuous availability for the four application logins
+      - name: Derive the automatic stop time from exact database role expiries
+        id: expiry
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -2807,8 +2809,42 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
-          psql -X --file=infra/sql/staging-runtimes-enable-continuous.sql
-          psql -X --file=infra/sql/staging-runtimes-availability-inspect.sql
+          stop_at="$(psql -X --tuples-only --no-align --set=ON_ERROR_STOP=1 <<'SQL'
+          with expected(role_name) as (
+            values
+              ('fetanagent_beta_admission_runtime'::text),
+              ('fetanagent_customer_web_runtime'::text),
+              ('fetanagent_owner_control_runtime'::text),
+              ('fetanagent_player_actions_runtime'::text)
+          ),
+          observed as (
+            select role.oid,
+                   role.rolcanlogin,
+                   role.rolvaliduntil
+            from expected
+            left join pg_catalog.pg_roles role on role.rolname = expected.role_name
+          )
+          select pg_catalog.to_char(
+                   (pg_catalog.min(rolvaliduntil) - interval '2 hours') at time zone 'UTC',
+                   'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+                 )
+          from observed
+          having pg_catalog.count(oid) = 4
+             and pg_catalog.count(rolvaliduntil) = 4
+             and pg_catalog.bool_and(rolcanlogin)
+             and pg_catalog.bool_and(pg_catalog.isfinite(rolvaliduntil))
+             and pg_catalog.min(rolvaliduntil) > pg_catalog.clock_timestamp() + interval '23 hours 30 minutes'
+             and pg_catalog.max(rolvaliduntil) <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+             and pg_catalog.max(rolvaliduntil) - pg_catalog.min(rolvaliduntil) <= interval '10 seconds';
+          SQL
+          )"
+          [[ "$stop_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          stop_epoch="$(date -u -d "$stop_at" +%s)"
+          [[ "$(date -u -d "@$stop_epoch" '+%Y-%m-%dT%H:%M:%SZ')" == "$stop_at" ]]
+          now_epoch="$(date -u +%s)"
+          (( stop_epoch > now_epoch + 21 * 60 * 60 ))
+          (( stop_epoch <= now_epoch + 23 * 60 * 60 ))
+          echo "stop_at=$stop_at" >> "$GITHUB_OUTPUT"
 
       - name: Transfer and install sealed release inputs
         shell: bash
@@ -2842,16 +2878,18 @@ jobs:
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
 
-      - name: Verify no automatic staging shutdown remains
+      - name: Arm the host-local stop before database credential expiry
         shell: bash
         env:
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          STOP_AT: ${{ steps.expiry.outputs.stop_at }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
           set -euo pipefail
+          [[ "$STOP_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && test \"\$(systemctl show --property=LoadState --value fetanagent-staging-runtime-expiry-stop.timer)\" = 'not-found' && test \"\$(systemctl show --property=LoadState --value fetanagent-staging-runtime-expiry-stop.service)\" = 'not-found'"
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper arm-expiry-stop '$GITHUB_SHA' '$STOP_AT'"
 
       - name: Start the private staging profile and smoke readiness
         id: activate
@@ -2867,6 +2905,29 @@ jobs:
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
           echo 'started=true' >> "$GITHUB_OUTPUT"
+
+      - name: Finalize continuous non-financial availability
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          psql -X --file=infra/sql/staging-runtimes-enable-continuous.sql
+          psql -X --file=infra/sql/staging-runtimes-availability-inspect.sql
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$GITHUB_SHA'"
+          echo 'Continuous application availability verified: no credential expiry or scheduled shutdown; financial controls remain disabled.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Capture bounded Owner-control startup diagnostics
         if: failure() && steps.activate.outcome == 'failure'

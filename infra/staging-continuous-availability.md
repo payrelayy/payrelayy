@@ -19,40 +19,48 @@ would leave an apparently live service with expired credentials.
   are unchanged. Credential rotation still requires the reviewed stopped deployment procedure.
 - Executor/verifier logins remain disabled and their lifetimes are not extended. Financial switches,
   customer sessions, signed capabilities, pairing leases, and supervised pilot limits are unchanged.
-- Ordinary `deploy-and-smoke` runs the guarded continuous-lifetime SQL and checks that neither old
-  shutdown unit is loaded before service startup. Failure/cancellation cleanup and explicit
-  `stop-and-disable` still work.
+- Ordinary `deploy-and-smoke` preserves the legacy helper's bounded startup guard, then runs the
+  continuous-lifetime SQL and checksum-bound timer finalizer after healthy core startup. Completion
+  requires an inactive, boot-disabled timer with no next trigger. The finalizer and its single sudo
+  permission are checked before downtime. Failure/cancellation cleanup and `stop-and-disable` still work.
 - Historical recovery modes remain exact, bounded recovery contracts. Do not use one as an ordinary
   continuously available deployment or change a financial runtime's expiry to keep the bot online.
 
 ## Convert an already-running release without downtime
 
-1. Merge the reviewed code with passing Quality, SQL, and image-smoke checks.
+1. Merge the reviewed code with passing Quality, SQL, and image-smoke checks. From the existing root
+   SSH session, stage the finalizer and its checked-in sudoers file as `finalizer.sh` and
+   `finalizer.sudoers`, owned by root with mode 0600, in a new root-owned mode-0700 directory named
+   `/run/fetanagent-continuity-install-MERGED_COMMIT_SHA`. Verify both against the merged source.
+   Run the reviewed `install-staging-continuous-availability.sh` with that directory and the exact
+   finalizer SHA-256. It installs only the root-owned finalizer and one checksum-bound `disable-expiry`
+   sudo command for `fetanagent-admin`. Existing files with different contents are never overwritten.
 2. Run `Staging continuous availability` in `inspect` mode on `main`, with staging project
    `spzpiyxheappsfyswewl`, Droplet `593344964`, and the exact deployed 40-character application SHA.
 3. Run that workflow with `mode=enable-continuous` and
    `confirm_no_financial_activation=continuous-availability-no-money`. The workflow validates release
-   ancestry and the installed release/helper before executing the transaction through the existing
-   protected Supabase administrator connection. It prints only role lifetimes and switch counts.
-4. From the existing trusted root SSH session, run the exact reviewed
-   `infra/operations/fetanagent-staging-continuous-availability.sh` with arguments `inspect RELEASE_SHA`,
-   then `disable-expiry RELEASE_SHA`. Verify the uploaded script checksum against the merged source
-   before running it. No root credential or new sudo grant is installed in GitHub.
-5. Run the workflow in `inspect` mode again and verify HTTPS and Telegram availability.
+   ancestry and both installed helper digests before executing the transaction through the existing
+   protected Supabase administrator connection. It prints only role lifetimes and switch counts,
+   then invokes the exact finalizer to disable the old timer automatically. No root SSH credential
+   is added to GitHub, and no generic shell or `systemctl` sudo permission is granted.
+4. Run the workflow in `inspect` mode again and verify HTTPS and Telegram availability. The installed
+   finalizer also supports root-only `inspect RELEASE_SHA` for an independent no-write check.
 
 The root operation checks the exact Droplet and installed helper, acquires the existing deployment
-mutation lock, requires the six healthy/non-financial services at the exact release, and opens a
+mutation lock, requires either the four healthy private-core services or the complete six-service
+non-financial release at the exact SHA, and opens a
 fresh restricted API database connection to verify all four non-expiring application lifetimes and
 both disabled financial logins. It then disables only
 `fetanagent-staging-runtime-expiry-stop.timer`, including boot enablement. It refuses an already
 running/failed shutdown service or an unexpected unit path, symlink, owner, or drop-in. It never
 stops/restarts containers, reads administrator database credentials, clears Telegram updates, changes
-the privileged helper, or alters financial authority.
+the legacy privileged helper, or alters financial authority.
 
 The old unit files are retained, disabled, for audit. They have no next trigger. A subsequent ordinary
-deployment's existing `stop` removes them before verifying the empty boundary. Do not manually
-re-enable the old timer. If any check fails, resolve that precise condition; do not skip the database
-verification or broaden sudo permissions.
+deployment's existing `stop` removes them before verifying the empty boundary; startup uses a new
+temporary guard and successful finalization disables it again. Do not manually re-enable the old
+timer. If any check fails, resolve that precise condition; do not skip database verification or
+broaden the checksum-bound sudo permission.
 
 ## Verification and security trade-off
 

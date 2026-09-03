@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Root-only, in-place removal of the old application-availability deadline.
-# No helper replacement, sudo grant, credential change, container restart, or money action.
+# Narrow privileged finalizer for the old application-availability deadline.
+# No legacy-helper replacement, credential change, container restart, or money action.
 set -euo pipefail
 export PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 umask 077
@@ -10,8 +10,14 @@ die() { printf '%s\n' "$1" >&2; exit 1; }
 readonly MODE="$1" RELEASE_SHA="$2"
 [[ "$MODE" =~ ^(inspect|disable-expiry)$ && "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
   die 'The availability operation or release is invalid.'
-[[ "$(id -u)" == 0 && -z "${SUDO_USER:-}" ]] || die 'Use the existing trusted root SSH session.'
-[[ "$(curl --fail --silent --show-error --max-time 5 http://169.254.169.254/metadata/v1/id)" == 593344964 ]] ||
+[[ "$(id -u)" == 0 && ( -z "${SUDO_USER:-}" || "${SUDO_USER:-}" == fetanagent-admin ) ]] ||
+  die 'Use the trusted root session or the dedicated deployment capability.'
+readonly INSTALLED_PATH='/usr/local/sbin/fetanagent-staging-continuous-availability'
+[[ "$0" == "$INSTALLED_PATH" && ! -L "$INSTALLED_PATH" &&
+  "$(stat --format='%U:%G:%a:%h' "$INSTALLED_PATH")" == 'root:root:755:1' ]] ||
+  die 'The finalizer must run from its root-owned installed path.'
+[[ -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] || die 'Docker overrides are forbidden.'
+[[ "$(curl --fail --silent --show-error --noproxy '*' --max-time 5 http://169.254.169.254/metadata/v1/id)" == 593344964 ]] ||
   die 'This is not the approved staging Droplet.'
 
 readonly PROJECT='fetanagent-staging-beta'
@@ -38,12 +44,13 @@ flock --exclusive --nonblock 9 || die 'Another staging operation is active.'
   die 'The mutation lock changed while acquiring it.'
 
 verify_services() {
-  local container metadata
   mapfile -t containers < <(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" | sort)
-  [[ "${#containers[@]}" -eq 6 ]] || die 'Exactly six ordinary staging services must exist.'
+  [[ "${#containers[@]}" -eq 4 || "${#containers[@]}" -eq 6 ]] ||
+    die 'Only the four private-core services or the complete six-service release may be finalized.'
   docker inspect "${containers[@]}" | jq -e --arg release "$RELEASE_SHA" '
-    (map(.Config.Labels["com.docker.compose.service"]) | sort) ==
-      ["api", "beta-admission", "bot", "customer-web", "gateway", "owner-control"] and
+    (map(.Config.Labels["com.docker.compose.service"]) | sort) as $services |
+    ($services == ["api", "beta-admission", "customer-web", "owner-control"] or
+     $services == ["api", "beta-admission", "bot", "customer-web", "gateway", "owner-control"]) and
     all(.[];
       .State.Running == true and
       .Config.Labels["org.opencontainers.image.revision"] == $release and

@@ -21,7 +21,7 @@ would leave an apparently live service with expired credentials.
   customer sessions, signed capabilities, pairing leases, and supervised pilot limits are unchanged.
 - Ordinary `deploy-and-smoke` preserves the legacy helper's bounded startup guard, then runs the
   continuous-lifetime SQL and checksum-bound timer finalizer after healthy core startup. Completion
-  requires an inactive, boot-disabled timer with no next trigger. The finalizer and its single sudo
+  requires an inactive, boot-disabled timer with no next trigger. The finalizer and its exact sudo
   permission are checked before downtime. Failure/cancellation cleanup and `stop-and-disable` still work.
 - Historical recovery modes remain exact, bounded recovery contracts. Do not use one as an ordinary
   continuously available deployment or change a financial runtime's expiry to keep the bot online.
@@ -33,18 +33,25 @@ would leave an apparently live service with expired credentials.
    `finalizer.sudoers`, owned by root with mode 0600, in a new root-owned mode-0700 directory named
    `/run/fetanagent-continuity-install-MERGED_COMMIT_SHA`. Verify both against the merged source.
    Run the reviewed `install-staging-continuous-availability.sh` with that directory and the exact
-   finalizer SHA-256. It installs only the root-owned finalizer and one checksum-bound `disable-expiry`
-   sudo command for `fetanagent-admin`. Existing files with different contents are never overwritten.
+   finalizer SHA-256. It installs only the root-owned finalizer and checksum-bound `preflight` and
+   `disable-expiry` sudo commands for `fetanagent-admin`. It can upgrade only the exact initial
+   finalizer and sudoers digests recorded in the installer; any other differing file is refused.
 2. Run `Staging continuous availability` in `inspect` mode on `main`, with staging project
    `spzpiyxheappsfyswewl`, Droplet `593344964`, and the exact deployed 40-character application SHA.
 3. Run that workflow with `mode=enable-continuous` and
    `confirm_no_financial_activation=continuous-availability-no-money`. The workflow validates release
-   ancestry and both installed helper digests before executing the transaction through the existing
+   ancestry, both installed helper digests, and the healthy deployed service set with the read-only
+   `preflight` before executing the transaction through the existing
    protected Supabase administrator connection. It prints only role lifetimes and switch counts,
    then invokes the exact finalizer to disable the old timer automatically. No root SSH credential
    is added to GitHub, and no generic shell or `systemctl` sudo permission is granted.
 4. Run the workflow in `inspect` mode again and verify HTTPS and Telegram availability. The installed
    finalizer also supports root-only `inspect RELEASE_SHA` for an independent no-write check.
+
+`preflight` accepts both the private core and the already-published six-service deployment and does
+not require database lifetimes to have been converted yet. It never changes the database or timer.
+Do not use the legacy helper's `fresh-public-edge-ready` here: that is a pre-publication check that
+requires exactly five services and unused HTTPS ports, not a check of an already-live gateway.
 
 The root operation checks the exact Droplet and installed helper, acquires the existing deployment
 mutation lock, requires either the four healthy private-core services or the complete six-service

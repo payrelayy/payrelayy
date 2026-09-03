@@ -109,7 +109,7 @@ jobs:
           protected="$RUNNER_TEMP/continuous-availability-protected"
           ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && test \"\$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)\" = '$CONTINUITY_SHA' && sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$DEPLOYED_RELEASE_SHA' >/dev/null && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper fresh-public-edge-ready '$DEPLOYED_RELEASE_SHA'"
+            "test \"\$(id -u)\" -ne 0 && test \"\$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)\" = '$CONTINUITY_SHA' && sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$DEPLOYED_RELEASE_SHA' >/dev/null && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability preflight '$DEPLOYED_RELEASE_SHA'"
 
       - name: Inspect or enable continuous database lifetimes
         shell: bash

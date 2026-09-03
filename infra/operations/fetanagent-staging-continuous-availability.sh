@@ -6,9 +6,9 @@ export PATH='/usr/sbin:/usr/bin:/sbin:/bin'
 umask 077
 
 die() { printf '%s\n' "$1" >&2; exit 1; }
-[[ $# -eq 2 ]] || die 'Expected inspect or disable-expiry, and the exact deployed release SHA.'
+[[ $# -eq 2 ]] || die 'Expected preflight, inspect, or disable-expiry, and the exact deployed release SHA.'
 readonly MODE="$1" RELEASE_SHA="$2"
-[[ "$MODE" =~ ^(inspect|disable-expiry)$ && "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+[[ "$MODE" =~ ^(preflight|inspect|disable-expiry)$ && "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] ||
   die 'The availability operation or release is invalid.'
 [[ "$(id -u)" == 0 && ( -z "${SUDO_USER:-}" || "${SUDO_USER:-}" == fetanagent-admin ) ]] ||
   die 'Use the trusted root session or the dedicated deployment capability.'
@@ -149,7 +149,11 @@ disarm_existing_timer() {
 
 verify_services
 before_containers="${containers[*]}"
-verify_continuous_credentials
+# The no-write preflight must also work before the database conversion. Full
+# inspection and timer removal still require a fresh continuous-credential check.
+if [[ "$MODE" != 'preflight' ]]; then
+  verify_continuous_credentials
+fi
 verify_timer_identity
 if [[ "$MODE" == 'disable-expiry' ]]; then
   disarm_existing_timer

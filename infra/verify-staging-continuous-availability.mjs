@@ -45,15 +45,30 @@ assert.match(workflow, /continuous-availability-no-money/);
 assert.match(workflow, /PGSSLMODE: verify-full/);
 assert.match(workflow, /StrictHostKeyChecking=yes/);
 assert.doesNotMatch(workflow, /fetanagent-staging-deploy-helper (?:stop|start|install)\b/);
-assert.ok(workflow.indexOf('public-edge-ready') < workflow.indexOf('psql -X'));
+const preflightCommand =
+  'sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability preflight';
+assert.ok(workflow.includes(preflightCommand));
+assert.ok(workflow.indexOf(preflightCommand) < workflow.indexOf('psql -X'));
+assert.doesNotMatch(workflow, /(?:fresh-)?public-edge-ready/);
 assert.ok(operation.includes(createHash('sha256').update(helper).digest('hex')));
 const finalizerDigest = createHash('sha256').update(operation).digest('hex');
 assert.equal(
   sudoers.trim(),
-  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${finalizerDigest} /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry *`,
+  ['preflight', 'disable-expiry']
+    .map(
+      (mode) =>
+        `fetanagent-admin ALL=(root) NOPASSWD: sha256:${finalizerDigest} /usr/local/sbin/fetanagent-staging-continuous-availability ${mode} *`,
+    )
+    .join('\n'),
 );
 assert.match(installer, /visudo -cf/);
 assert.match(installer, /different sudo capability already exists; no files were replaced/);
+assert.match(installer, /verify_predecessor "\$TARGET" "\$PREDECESSOR_FINALIZER_SHA" 755/);
+assert.match(installer, /verify_predecessor "\$SUDOERS" "\$PREDECESSOR_SUDOERS_SHA" 440/);
+assert.ok(
+  installer.indexOf('different sudo capability already exists') <
+    installer.indexOf('install -o root -g root -m 0755'),
+);
 assert.doesNotMatch(installer, /\b(?:psql|systemctl|docker|rm)\s/);
 assert.match(operation, /"\$0" == "\$INSTALLED_PATH"/);
 assert.match(operation, /SUDO_USER:-\}" == fetanagent-admin/);
@@ -91,7 +106,7 @@ assert.doesNotMatch(
 );
 assert.equal((operation.match(/systemctl disable --now/g) ?? []).length, 1);
 assert.ok(
-  operation.indexOf('\nverify_continuous_credentials\n') <
+  operation.indexOf('\n  verify_continuous_credentials\n') <
     operation.indexOf('\n  disarm_existing_timer\n'),
 );
 assert.ok(
@@ -201,6 +216,50 @@ const bash =
 assert.ok(bash, 'Bash is required to test the real systemd disarm function.');
 const disarmFunction = /disarm_existing_timer\(\) \{[\s\S]*?\n\}/u.exec(operation)?.[0];
 assert.ok(disarmFunction);
+const operationSequence = operation.slice(
+  operation.lastIndexOf('\nverify_services\nbefore_containers='),
+);
+assert.match(
+  operationSequence,
+  /if \[\[ "\$MODE" != 'preflight' \]\]; then\n  verify_continuous_credentials\nfi/,
+);
+for (const [name, mode, continuous, healthy, pass, expectDisarm] of [
+  ['read-only preflight before conversion', 'preflight', false, true, true, false],
+  ['read-only preflight after conversion', 'preflight', true, true, true, false],
+  ['preflight rejects unhealthy deployment', 'preflight', false, false, false, false],
+  ['inspection requires continuous credentials', 'inspect', false, true, false, false],
+  ['continuous inspection never disarms', 'inspect', true, true, true, false],
+  ['disarm rejects bounded credentials', 'disable-expiry', false, true, false, false],
+  ['disarm follows credential verification', 'disable-expiry', true, true, true, true],
+]) {
+  const result = spawnSync(bash, ['-s'], {
+    input: `set -euo pipefail
+MODE='${mode}'
+TIMER='fetanagent-staging-runtime-expiry-stop.timer'
+die() { printf '%s\\n' "$1" >&2; exit 1; }
+verify_services() { ${healthy}; containers=(verified-container); }
+verify_continuous_credentials() { echo 'credentials_checked'; ${continuous}; }
+verify_timer_identity() { echo 'timer_identity_checked'; }
+disarm_existing_timer() { echo 'timer_disarmed'; }
+systemctl() { [[ "$1" == show ]]; }
+${operationSequence}
+`,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+  assert.equal(result.stdout.includes('timer_disarmed'), expectDisarm, name);
+  if (mode === 'preflight') assert.doesNotMatch(result.stdout, /credentials_checked/);
+  if (expectDisarm) {
+    assert.ok(
+      result.stdout.indexOf('credentials_checked') < result.stdout.indexOf('timer_disarmed'),
+    );
+    assert.ok(
+      result.stdout.indexOf('timer_identity_checked') < result.stdout.indexOf('timer_disarmed'),
+    );
+  }
+  checks += 1;
+}
 for (const [name, behavior, pass] of [
   ['disable active timer', 'normal', true],
   ['already absent timer', 'absent', true],

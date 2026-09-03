@@ -57,6 +57,8 @@ assert.match(disableSql, /membership\.inherit_option/);
 assert.match(disableSql, /not membership_state\.set_option/);
 assert.match(disableSql, /not membership_state\.admin_option/);
 assert.match(disableSql, /count\(\*\) <= 1[\s\S]*?as membership_scope_safe/);
+assert.match(disableSql, /and coalesce\(/);
+assert.doesNotMatch(disableSql, /pg_catalog\.coalesce/);
 assert.equal(
   (disableSql.match(/^revoke /gm) ?? []).length,
   1,

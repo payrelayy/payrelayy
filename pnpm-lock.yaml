@@ -162,6 +162,25 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  apps/telebirr-assignment-broker:
+    dependencies:
+      '@fetanagent/telebirr-reference-opening':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-reference-opening
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-verification-foundation
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../../packages/deposit-reference-protection
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   apps/telebirr-device-bridge:
     dependencies:
       '@fetanagent/telebirr-verification-foundation':
@@ -334,6 +353,12 @@ importers:
       '@fetanagent/telebirr-verification-foundation':
         specifier: workspace:*
         version: link:../telebirr-verification-foundation
+
+  packages/telebirr-reference-opening:
+    devDependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
 
   packages/telebirr-verification-foundation: {}
 

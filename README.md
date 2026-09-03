@@ -212,7 +212,8 @@ environment file.
 | `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
 | `apps/windows-companion`                                    | Local headed-Chrome KemerBet enrollment; read-only and no-transfer                  |
 | `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off |
-| `apps/telebirr-device-bridge`                               | Signed Android enrollment/command gateway; export-only, evidence-only, and inert    |
+| `apps/telebirr-device-bridge`                               | Authenticated Android enrollment/command gateway; export-only and ingress-free      |
+| `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; export-only and unprovisioned        |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
 | `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
@@ -224,6 +225,7 @@ environment file.
 | `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
 | `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                        |
 | `packages/agent-platform-companion-contracts`               | Signed pairing and exact-five no-transfer companion protocol contracts              |
+| `packages/telebirr-reference-opening`                       | TeleBirr-only scoped-key protected-reference opening boundary                       |
 | `packages/config`                                           | Safe environment parsing and feature switches                                       |
 | `packages/i18n`                                             | Shared English message keys and safe locale normalization                           |
 

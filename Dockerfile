@@ -147,11 +147,13 @@ ARG FETANAGENT_DEBIAN_SECURITY_SNAPSHOT
 RUN test -n "${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
   && test -n "${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}" \
   && expr "${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}" : '[0-9]\{8\}T[0-9]\{6\}Z$' >/dev/null \
+  && apt-get update \
+  && apt-get install --yes --no-install-recommends ca-certificates \
   && printf '%s\n' \
     "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT} bookworm-security main" \
     > /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
   && apt-get -o Acquire::Check-Valid-Until=false update \
-  && apt-get install --yes --no-install-recommends ca-certificates "chromium=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" fonts-liberation \
+  && apt-get install --yes --no-install-recommends "chromium=${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" fonts-liberation \
   && install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-control /var/lib/fetanagent/kemerbet-sessions \
   && rm -f /etc/apt/sources.list.d/fetanagent-chromium-snapshot.list \
   && rm -rf /var/lib/apt/lists/*

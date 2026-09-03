@@ -592,9 +592,10 @@ assert.match(
 );
 assert.match(dockerfile, /Acquire::Check-Valid-Until=false/);
 assert.match(dockerfile, /check-valid-until=no/);
+assert.match(dockerfile, /apt-get install --yes --no-install-recommends ca-certificates/);
 assert.match(
   dockerfile,
-  /apt-get install --yes --no-install-recommends ca-certificates "chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}" fonts-liberation/,
+  /apt-get install --yes --no-install-recommends "chromium=\$\{FETANAGENT_CHROMIUM_PACKAGE_VERSION\}" fonts-liberation/,
 );
 assert.match(dockerfile, /rm -f \/etc\/apt\/sources\.list\.d\/fetanagent-chromium-snapshot\.list/);
 assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*/);

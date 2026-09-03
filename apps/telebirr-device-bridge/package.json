@@ -1,0 +1,13 @@
+{
+  "name": "@fetanagent/telebirr-device-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fetanagent/telebirr-verification-foundation": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  }
+}

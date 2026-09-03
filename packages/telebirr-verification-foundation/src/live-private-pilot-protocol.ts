@@ -1471,6 +1471,50 @@ function verifyP1363(key: KeyObject, bytes: Uint8Array, signature: string): bool
 }
 
 /**
+ * Verifies only the canonical server signature and body digest of a live-pilot assignment.
+ * Callers must still enforce signer state, enrollment, receiver, lease, and request bindings.
+ */
+export function verifyTelebirrLivePilotSignedAssignmentSignature(
+  candidate: unknown,
+  signerSpkiDerCandidate: unknown,
+): boolean {
+  const assignment = decodeTelebirrLivePilotSignedAssignment(candidate);
+  const signerKey = parsePublicKey(signerSpkiDerCandidate);
+  const bodyDigest = assignment && digestTelebirrLivePilotAssignmentBody(assignment.body);
+  const transcript =
+    assignment && canonicalTelebirrLivePilotAssignmentSignatureBytes(assignment.body);
+  return Boolean(
+    assignment &&
+    signerKey &&
+    bodyDigest === assignment.bodyDigest &&
+    transcript &&
+    verifyP1363(signerKey.key, transcript, assignment.signature),
+  );
+}
+
+/**
+ * Verifies only the canonical device signature and body digest of a live-pilot observation.
+ * Callers must still enforce enrollment, assignment, time, replay, and trusted job bindings.
+ */
+export function verifyTelebirrLivePilotSignedObservationSignature(
+  candidate: unknown,
+  deviceSpkiDerCandidate: unknown,
+): boolean {
+  const observation = decodeTelebirrLivePilotSignedObservation(candidate);
+  const deviceKey = parsePublicKey(deviceSpkiDerCandidate);
+  const bodyDigest = observation && digestTelebirrLivePilotObservationBody(observation.body);
+  const transcript =
+    observation && canonicalTelebirrLivePilotObservationSignatureBytes(observation.body);
+  return Boolean(
+    observation &&
+    deviceKey &&
+    bodyDigest === observation.bodyDigest &&
+    transcript &&
+    verifyP1363(deviceKey.key, transcript, observation.signature),
+  );
+}
+
+/**
  * Verifies two signatures and every pilot/reference/receiver/time binding, then returns only an
  * advisory evidence route. Even a successful result cannot claim or settle a payment.
  */

@@ -2,7 +2,10 @@
 
 This standalone Android project is an inert, testable foundation for a future Ethiopian-network TeleBirr receipt observation relay. It preserves the version-1 `synthetic_shadow` transcript and also defines the separately domain-separated `live_private_pilot_v1` evidence protocol. It includes Android Keystore P-256 identity, a fixed official receipt route, public-IP-pinned HTTPS transport with original-host SNI and hostname verification, conservative receipt parsing, signed observations, redacted status projections, and a policy-gated one-assignment runtime coordinator.
 
-It is intentionally **disabled and unconfigured by default**. The application contains no enrollment server endpoint and no lease server endpoint. Those trusted server interfaces have not been designed or provisioned, so this app cannot be activated yet.
+It is intentionally **disabled and unconfigured by default**. The app now contains the jointly
+versioned authenticated enrollment/assignment/heartbeat/upload client and strict JSON wire codec,
+but contains no server origin, trusted production keys, pairing grant, or durable production queue.
+Those values have not been provisioned, so the shipped application still cannot be activated.
 
 The compatibility engine still requires an injected protected-reference binding verifier. The new
 private-pilot protocol closes that contract mismatch without changing the compatibility API: a
@@ -41,6 +44,18 @@ and reuse that same signature after an uncertain acknowledgement. A
 tampered/expired/revoked assignment is rejected before provider contact. An unexpected device or
 parser failure becomes review-only evidence rather than an approval assumption.
 
+The new `device_bridge_no_money_v1` channel closes the former transport-contract gap. Android can
+self-sign a one-use pairing request, authenticate a server-signed enrollment certificate, sign a
+short-lived typed command, encode/decode exact duplicate-rejecting JSON, verify the server's signed
+acknowledgement, poll one assignment, send redacted heartbeat state, and upload the exact staged
+assignment/observation pair through injected immutable transport. TypeScript and Kotlin share fixed
+canonical byte/digest vectors. No backend URL or trusted key is editable in the app UI.
+
+Short command and assignment expiries are replay controls, not a fixed product shutdown. There is
+still no global September 4 or other calendar stop in the coordinator. A healthy provisioned device
+will keep receiving newly signed short-lived work until an operator gate, revocation, or pilot state
+explicitly stops it.
+
 The coordinator has no polling timer or calendar shutdown date. Operational stop remains explicit,
 while each assignment and enrollment still expires because stale leases must never authorize a new
 provider lookup. The current in-memory work store is test/development-only; production wiring must
@@ -51,12 +66,12 @@ blocked on all of the following:
 
 - a real, immutable TeleBirr receiver revision/profile/configuration digest;
 - separately provisioned and rotatable trusted assignment-signing and enrolled device keys;
-- authenticated enrollment, lease, heartbeat, upload, and reconciliation endpoints plus strict
-  JSON codecs and authenticated server acknowledgements;
+- deployment and provisioning of the now-defined enrollment, lease, heartbeat, upload, replay, and
+  authenticated acknowledgement endpoints;
 - server-side proof-to-reference binding and a database-global one-use provider-payment claim;
 - an atomic settlement/enqueue boundary with the five-account pilot allowlist and kill switch rechecked;
 - a reviewed live provider-layout attestation and controlled Ethiopian-network end-to-end tests;
-- an encrypted durable Android queue and foreground runtime with bounded backoff, reboot recovery,
+- an encrypted durable Android queue and foreground service with bounded backoff, reboot recovery,
   notification permission handling, clock, update, and device-health controls.
 
 None of those items is inferred or enabled by compiling this project.

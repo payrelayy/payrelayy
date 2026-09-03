@@ -162,6 +162,12 @@ importers:
         specifier: 8.21.0
         version: 8.21.0
 
+  apps/telebirr-device-bridge:
+    dependencies:
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-verification-foundation
+
   apps/trusted-telebirr-verifier:
     dependencies:
       '@fetanagent/telebirr-live-pilot-outcome-adapter':

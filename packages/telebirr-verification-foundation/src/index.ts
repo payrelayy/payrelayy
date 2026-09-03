@@ -104,6 +104,8 @@ export {
   digestTelebirrLivePilotReceiverName,
   normalizeTelebirrCreditedPartyFullName,
   verifyTelebirrLivePrivatePilotEvidence,
+  verifyTelebirrLivePilotSignedAssignmentSignature,
+  verifyTelebirrLivePilotSignedObservationSignature,
   type TelebirrLivePilotAssignmentBody,
   type TelebirrLivePilotDeviceEnrollment,
   type TelebirrLivePilotFoundFacts,
@@ -118,3 +120,4 @@ export {
   type TelebirrLivePilotVerificationReason,
   type TelebirrLivePilotVerificationResult,
 } from './live-private-pilot-protocol.js';
+export * from './device-bridge-protocol.js';

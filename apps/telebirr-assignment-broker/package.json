@@ -1,0 +1,19 @@
+{
+  "name": "@fetanagent/telebirr-assignment-broker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fetanagent/telebirr-reference-opening": "workspace:*",
+    "@fetanagent/telebirr-verification-foundation": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@fetanagent/deposit-reference-protection": "workspace:*",
+    "@types/pg": "8.21.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  }
+}

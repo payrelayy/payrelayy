@@ -20,13 +20,13 @@ export type TelebirrPilot = PreparedPilot & {
   readonly receiverProfileId: string;
 };
 
-type ProofRow = {
+export type ProofRow = {
   readonly candidate_reference_fingerprint: string;
   readonly id: string;
   readonly submitted_at: Date;
 };
 
-type StageRow = {
+export type StageRow = {
   readonly already_staged: boolean;
   readonly expires_at: Date;
   readonly pilot_revision_id: string;
@@ -444,7 +444,7 @@ export async function prepareTelebirrPilot(
   };
 }
 
-async function createLiveProof(
+export async function createLiveProof(
   client: Client,
   pilot: TelebirrPilot,
   playerIndex = 0,
@@ -488,7 +488,7 @@ async function createLiveProof(
   return proof.rows[0]!;
 }
 
-async function stageProof(client: Client, proofId: string, requestKey = randomUUID()) {
+export async function stageProof(client: Client, proofId: string, requestKey = randomUUID()) {
   const staged = await client.query<StageRow>(
     `select *
        from app.stage_private_live_telebirr_verification_job($1::uuid, $2::uuid)`,

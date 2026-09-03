@@ -21,6 +21,7 @@ import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilo
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
+import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
@@ -9572,6 +9573,10 @@ registerPrivateLivePilotOwnerControlSqlTests(
   () => ownerAdminId,
 );
 registerPrivateLiveTelebirrProofLineageSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerTelebirrAssignmentBrokerRuntimeSqlTests(
   () => client,
   () => ownerAdminId,
 );

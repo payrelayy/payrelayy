@@ -147,7 +147,7 @@ Telegram bot reachable
   -> customer app/web later
 ```
 
-## Current truthful status — 2026-09-03
+## Current truthful status — 2026-09-04
 
 The verified application/image baseline is
 `8e46eabb770680cd4885a09815df7f8e0aec73e1`. The private proof-status migration is installed,
@@ -172,23 +172,23 @@ local window remain separate from financial readiness.
 The retired hosted preview's historical results are portal-contract evidence, not current authority
 to operate a KemerBet account.
 
-| Capability                                        | Status                            | Current evidence                                                                                                                                                                                  |
-| ------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fetanagent.com` public home and account entry    | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                                                                                                |
-| `@FetanAgentBot` deployment and runtime           | **COMPLETE**                      | Deployment smoke passed and the bot is running; this final runtime check did not send a fresh `/start`                                                                                            |
-| Five private KemerBet test Player IDs             | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                                                                                       |
-| Owner fixed-pilot dashboard and server boundary   | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                                                                                               |
-| Private pilot database boundary                   | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                                                                                              |
-| Trusted TeleBirr backend foundation               | **COMPLETE, unprovisioned**       | Least-privilege database boundary plus signed Android bridge contracts/handler installed; runtimes remain unconfigured and unstarted                                                              |
-| Owner-adjustable TeleBirr/CBE receiver revisions  | **DEPLOYED; STATE CHECK NEXT**    | Owner reports both receivers saved through the authenticated UI; active revision/profile state still requires a redacted read-only check                                                          |
-| KemerBet executor safety foundation               | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                                                                                     |
-| Historical hosted KemerBet preview and seal       | **RETIRED / HIDDEN**              | Repeated headless, CAPTCHA, request-transition, and session-retention failures make the Droplet-hosted preview unsuitable as the production connection path                                       |
-| Windows companion v0.1.2 package and installation | **COMPLETE — NO-MONEY**           | Published exact-release package installed on D:; extracted-ZIP imports, 64 companion tests, 36 dependency tests, and all GitHub checks passed                                                     |
-| Local KemerBet session validation                 | **NEXT — PAGE CANDIDATE ONLY**    | Sandboxed dedicated Chrome displayed the agent page/account header and survived one refresh; the exact `/agents` main frame is only a candidate, not exact account or authenticated-session proof |
-| Signed exact-five companion pairing and lookup    | **NEXT — NOT WIRED**              | Provider-neutral signed contracts exist, but Owner-device pairing, assignment execution, and signed-result acceptance are not wired into the companion/server path                                |
-| TeleBirr receiver/profile/signer/device           | **NEXT — VERIFY/PROVISION**       | Signed pairing/command/ack codecs now exist; verify the Owner-saved receiver revision, then provision the exact profile, signer, bridge origin, and dedicated verifier device                     |
-| Payment verification, settlement, and execution   | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                                                                                                     |
-| Public real-money processing                      | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                                                                                                    |
+| Capability                                        | Status                            | Current evidence                                                                                                                                                                                                     |
+| ------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fetanagent.com` public home and account entry    | **COMPLETE**                      | Public HTTPS home page responds and exposes Sign in/Create account                                                                                                                                                   |
+| `@FetanAgentBot` deployment and runtime           | **COMPLETE**                      | Deployment smoke passed and the bot is running; this final runtime check did not send a fresh `/start`                                                                                                               |
+| Five private KemerBet test Player IDs             | **COMPLETE**                      | Latest aggregate database audit found exactly five active, valid, current, eligible Players                                                                                                                          |
+| Owner fixed-pilot dashboard and server boundary   | **COMPLETE, financially dormant** | Merged, migration-applied, deployed; prepare/arm/status/stop cannot enable live money by themselves                                                                                                                  |
+| Private pilot database boundary                   | **COMPLETE, unprepared**          | Tables/RPCs are installed; no pilot revision, members, proof, reservation, job, or settlement exists                                                                                                                 |
+| Trusted TeleBirr backend foundation               | **COMPLETE, unprovisioned**       | Deployed verifier boundary remains dormant; source now adds the authenticated bridge and private assignment broker, but its new database role, secrets, transport, and runtime remain unapplied/unprovisioned        |
+| Owner-adjustable TeleBirr/CBE receiver revisions  | **DEPLOYED; STATE CHECK NEXT**    | Owner reports both receivers saved through the authenticated UI; active revision/profile state still requires a redacted read-only check                                                                             |
+| KemerBet executor safety foundation               | **COMPLETE, unprovisioned**       | Consume-only database/one-shot fence/reconciliation boundary exists; runtime remains disabled                                                                                                                        |
+| Historical hosted KemerBet preview and seal       | **RETIRED / HIDDEN**              | Repeated headless, CAPTCHA, request-transition, and session-retention failures make the Droplet-hosted preview unsuitable as the production connection path                                                          |
+| Windows companion v0.1.2 package and installation | **COMPLETE — NO-MONEY**           | Published exact-release package installed on D:; extracted-ZIP imports, 64 companion tests, 36 dependency tests, and all GitHub checks passed                                                                        |
+| Local KemerBet session validation                 | **NEXT — PAGE CANDIDATE ONLY**    | Sandboxed dedicated Chrome displayed the agent page/account header and survived one refresh; the exact `/agents` main frame is only a candidate, not exact account or authenticated-session proof                    |
+| Signed exact-five companion pairing and lookup    | **NEXT — NOT WIRED**              | Provider-neutral signed contracts exist, but Owner-device pairing, assignment execution, and signed-result acceptance are not wired into the companion/server path                                                   |
+| TeleBirr receiver/profile/signer/device           | **NEXT — VERIFY/PROVISION**       | Pairing/command/ack codecs and the private lease/open/sign broker exist in source; verify the Owner-saved receiver, then provision the exact profile, scoped opening key, signer, bridge origin, and dedicated phone |
+| Payment verification, settlement, and execution   | **BLOCKED — disabled**            | All financial/provider/private-pilot switches remain disabled                                                                                                                                                        |
+| Public real-money processing                      | **BLOCKED**                       | No public customer has authority to claim a payment or cause a KemerBet credit                                                                                                                                       |
 
 The current release is still financially disabled. In particular,
 `FINANCIAL_ACTIONS_MODE=dry_run`, `KEMERBET_EXECUTOR_ENABLED=false`,
@@ -446,6 +446,16 @@ retry.
 Make one official TeleBirr observation independently prove the payment reference, amount, time,
 status, and intended receiver before any database settlement is possible.
 
+The current source-level increment composes the authenticated device-bridge request into a private
+assignment broker. The broker leases only an already-authorized proof, opens its `v2.telebirr`
+reference with a TeleBirr/purpose-scoped child key, signs the exact short-lived assignment, verifies
+its own signature, and persists only the public signature/digests needed for lost-ack replay. Its
+forward migration defines a dormant `NOLOGIN` role with exactly two guarded routines. It does not
+receive either reference-protection master key, open a listener, provision credentials, activate a
+feature switch, create a claim, settle money, or execute a KemerBet action. The migration, secrets,
+local-only transport composition, and runtime LOGIN remain intentionally unapplied/unprovisioned in
+the deployed baseline.
+
 ### Required Owner inputs
 
 - the exact receiving TeleBirr account, entered only through the authenticated Owner dashboard;
@@ -464,15 +474,23 @@ logs, screenshots, or ordinary database columns.
    policy, receiver revision, and configuration digest.
 3. Generate a P-256 assignment-signing key; keep the private key in a root-owned secret file and
    store only the public key/fingerprint in PostgreSQL.
-4. Finish the Android verifier's enrollment, lease, heartbeat, official-observation, signature,
+4. Derive the TeleBirr/reference-opening child key offline from the existing encryption master and
+   provision only that scoped child key to the broker. Never provision the encryption master or
+   fingerprint master to the broker.
+5. Apply the reviewed assignment-broker migration, then compose its strict secret/config loader,
+   singleton direct verify-full PostgreSQL connection, exact two-function catalog preflight, and
+   bounded dedicated runtime LOGIN outside Git.
+6. Connect the authenticated bridge handler to the broker through one private local-only transport;
+   do not add a public broker listener or expose the protected-reference opening operation.
+7. Finish the Android verifier's enrollment, lease, heartbeat, official-observation, signature,
    upload, replay, expiry, and revocation lifecycle.
-5. Generate the device identity in Android Keystore and enroll only its public identity.
-6. Compose the trusted backend as a dedicated service with its exact two-function database surface,
-   pinned signer/device public keys, direct verify-full PostgreSQL connection, singleton behavior,
-   bounded role validity, and no public ingress.
-7. Provision its short-lived dedicated database LOGIN outside Git.
-8. Prove the Android device and backend reject stale leases, revoked keys/devices, wrong receiver,
-   wrong reference, unsupported layout, ambiguous status, unavailable provider, and replay.
+8. Generate the device identity in Android Keystore and enroll only its public identity.
+9. Compose the trusted verifier as a separate dedicated service with its pinned signer/device public
+   keys, direct verify-full PostgreSQL connection, singleton behavior, bounded role validity, and no
+   public ingress.
+10. Provision its short-lived dedicated database LOGIN outside Git.
+11. Prove the Android device and backend reject stale leases, revoked keys/devices, wrong receiver,
+    wrong reference, unsupported layout, ambiguous status, unavailable provider, and replay.
 
 ### Owner-visible proof
 
@@ -816,5 +834,9 @@ run URLs, and redacted outcome states as evidence.
   — settlement composition and non-overlap requirements.
 - [`../apps/trusted-telebirr-verifier/README.md`](../apps/trusted-telebirr-verifier/README.md) — trusted
   backend boundary and provisioning blockers.
+- [`../apps/telebirr-assignment-broker/README.md`](../apps/telebirr-assignment-broker/README.md) —
+  private assignment lease/open/sign boundary and its remaining composition work.
+- [`../packages/telebirr-reference-opening/README.md`](../packages/telebirr-reference-opening/README.md)
+  — provider/purpose-scoped protected-reference opening contract.
 - [`../android/telebirr-verifier/README.md`](../android/telebirr-verifier/README.md) — Android
   verifier status and operational gaps.

@@ -12,6 +12,7 @@ const ALLOWED_FUNCTIONS = [
   'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
   'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
   'app.get_telegram_customer_deposit(uuid,uuid)',
+  'app.get_telegram_customer_deposit_proof(uuid,uuid)',
 ] as const;
 
 const ALLOWED_FUNCTION_SQL = ALLOWED_FUNCTIONS.map(
@@ -81,7 +82,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
       )
     ) as no_app_base_object_access,
     (
-      select count(*) = 10
+      select count(*) = ${ALLOWED_FUNCTIONS.length}
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname = 'app'
@@ -96,7 +97,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_FUNCTION_SQL})
     ) as exact_function_surface_allowed,
     (
-      select count(*) = 10 and pg_catalog.bool_and(
+      select count(*) = ${ALLOWED_FUNCTIONS.length} and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
         and owner.rolname = 'postgres'

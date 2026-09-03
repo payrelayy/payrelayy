@@ -6,6 +6,12 @@ import {
   deliverTelegramPrivateAction,
   deliverTelegramPrivateActionWithRetry,
 } from './telegram-private-action-client.js';
+import {
+  reduceTelegramDepositProofCommand,
+  reduceTelegramDepositProofStatusCallbackAction,
+  reduceTelegramDepositStatusCommand,
+} from './telegram-private-action.js';
+import { presentTelegramPlayerIdFlowResult } from './telegram-player-id-flow.js';
 
 const action: TelegramPrivateActionEnvelope = {
   version: 1,
@@ -169,33 +175,128 @@ describe('Telegram private-action bot client', () => {
     ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
   });
 
-  it('accepts only the exact amount-free dry-run proof projection', async () => {
+  it.each(['deposit_proof_received', 'deposit_proof_status'] as const)(
+    'accepts only the exact amount-free dry-run %s projection',
+    async (outcome) => {
+      const proofResult = {
+        version: 1,
+        outcome,
+        proofToken: `${'B'.repeat(21)}A`,
+        providerCode: 'telebirr',
+        providerName: 'TeleBirr',
+        proofStatus: 'proof_received',
+        financialMode: 'dry_run',
+      } as const;
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => proofResult }),
+        }),
+      ).resolves.toEqual(proofResult);
+
+      for (const unsafeResult of [
+        { ...proofResult, providerName: 'CBE Birr' },
+        { ...proofResult, providerCode: 'unknown' },
+        { ...proofResult, proofToken: 'B'.repeat(22) },
+        { ...proofResult, proofToken: `p1.${'A'.repeat(22)}` },
+        { ...proofResult, proofToken: `${'A'.repeat(22)}\n` },
+        { ...proofResult, proofStatus: 'completed' },
+        { ...proofResult, financialMode: 'live' },
+        { ...proofResult, amountMinor: '2500' },
+        { ...proofResult, transactionReference: 'SYNTHETICREF7890' },
+        { ...proofResult, playerId: 'PLAYER-DEMO-42' },
+        { ...proofResult, proofToken: undefined },
+      ]) {
+        await expect(
+          deliverTelegramPrivateAction(action, config, {
+            fetch: async () => ({ status: 200, json: async () => unsafeResult }),
+          }),
+        ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+      }
+    },
+  );
+
+  it('accepts only a generic two-key status-unavailable response', async () => {
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({ version: 1, outcome: 'deposit_status_unavailable' }),
+        }),
+      }),
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_status_unavailable' });
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({
+            version: 1,
+            outcome: 'deposit_status_unavailable',
+            reason: 'foreign_customer',
+          }),
+        }),
+      }),
+    ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+  });
+
+  it('roundtrips proof submission, tracking command and button through the signed client', async () => {
+    const metadata = {
+      updateId: 10,
+      chat: { id: 20, type: 'private' },
+      from: { id: 20, isBot: false, languageCode: 'en' },
+    };
+    const proofToken = 'A'.repeat(22);
     const proofResult = {
       version: 1,
       outcome: 'deposit_proof_received',
-      proofToken: 'B'.repeat(22),
+      proofToken,
       providerCode: 'telebirr',
       providerName: 'TeleBirr',
       proofStatus: 'proof_received',
       financialMode: 'dry_run',
     } as const;
-    await expect(
-      deliverTelegramPrivateAction(action, config, {
-        fetch: async () => ({ status: 200, json: async () => proofResult }),
-      }),
-    ).resolves.toEqual(proofResult);
-
-    for (const unsafeResult of [
-      { ...proofResult, providerName: 'CBE Birr' },
-      { ...proofResult, financialMode: 'live' },
-      { ...proofResult, amountMinor: '2500' },
-      { ...proofResult, transactionReference: 'SYNTHETICREF7890' },
-    ]) {
-      await expect(
-        deliverTelegramPrivateAction(action, config, {
-          fetch: async () => ({ status: 200, json: async () => unsafeResult }),
-        }),
-      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
-    }
+    const submitAction = reduceTelegramDepositProofCommand({
+      ...metadata,
+      command: '/deposit telebirr PLAYER-DEMO-42 SYNTHETICREF7890',
+    });
+    expect(submitAction?.kind).toBe('deposit_proof_command');
+    if (!submitAction) throw new Error('Expected a valid proof action.');
+    const receipt = await deliverTelegramPrivateAction(submitAction, config, {
+      fetch: async () => ({ status: 200, json: async () => proofResult }),
+    });
+    const presentation = presentTelegramPlayerIdFlowResult(receipt);
+    expect(presentation.kind).toBe('menu');
+    if (presentation.kind !== 'menu') throw new Error('Expected tracking button.');
+    const command = presentation.menu.text.match(/\/deposit_status p1\.[A-Za-z0-9_-]{22}/u)?.[0];
+    const commandAction = reduceTelegramDepositStatusCommand({
+      ...metadata,
+      updateId: 11,
+      command,
+    });
+    const callbackAction = reduceTelegramDepositProofStatusCallbackAction({
+      ...metadata,
+      updateId: 11,
+      callbackData: presentation.menu.buttons[0]?.callbackData,
+    });
+    expect(commandAction).toEqual(callbackAction);
+    expect(commandAction).toMatchObject({
+      kind: 'deposit_proof_status_command',
+      proofToken,
+      telegramUserId: '20',
+      privateChatId: '20',
+    });
+    if (!callbackAction) throw new Error('Expected a proof status action.');
+    let captured: unknown;
+    const status = await deliverTelegramPrivateAction(callbackAction, config, {
+      fetch: async (_url, init) => {
+        captured = JSON.parse(Buffer.from(init?.body as Uint8Array).toString('utf8'));
+        return {
+          status: 200,
+          json: async () => ({ ...proofResult, outcome: 'deposit_proof_status' }),
+        };
+      },
+    });
+    expect(captured).toEqual(callbackAction);
+    expect(JSON.stringify(captured)).not.toMatch(/PLAYER-DEMO|SYNTHETICREF|transactionReference/u);
+    expect(presentTelegramPlayerIdFlowResult(status)).toEqual(presentation);
   });
 });

@@ -5,14 +5,22 @@
 FetanAgent is independent from QHash. QHash may be used as a product reference only; its
 database, authentication, receipts, workers, and code are not a FetanAgent dependency.
 
-Version 1's settled customer surface is an English-only, standalone responsive website/PWA with a
-single generic sign-in and neutral workspace for customers and authorized team members. Customer
-account creation is intended to be self-service with email/password authentication, and customer use
-does not require Telegram. Email ownership confirmation is requested only for forgot-password
-recovery, not account creation or routine sign-in. Customers may associate multiple KemerBet Player
-IDs, and Telegram may only be added through a controlled optional legacy-history link. Team
-credential requirements remain a separate security boundary even though the public entry path is
-shared.
+KemerBet integration follows the
+[Owner-authorized agent-workflow requirement](real-money-go-live-phases.md#settled-kemerbet-integration-requirement--2026-09-03):
+FetanAgent is intended to automate the operator's existing manual agent-account work through their
+authenticated local Windows companion session. The Owner is the FetanAgent operator, not KemerBet's
+company owner. Company involvement and an official KemerBet API are not implementation dependencies.
+The phase map is the current connection/deployment authority; the executor foundation described
+below does not mean that the companion is already wired for automatic transfers.
+
+The initial customer surface is the English-only Telegram bot, following the operator's
+2026-09-03 scope decision. Customer app/web development is deferred until the bot is complete and
+reliable. Web accounts, email/password authentication, a generic public workspace, and PWA deployment
+are not prerequisites for that release. Existing private Owner controls and the authenticated local
+KemerBet companion remain operational support. The
+[phase map](real-money-go-live-phases.md) defines the delivery sequence and activation gates; this
+scope change does not stop or deploy a runtime. The web design and implementation details below are
+preserved for the later app/web phase.
 
 The current implementation is narrower and must not be confused with that product target. It has an
 invite-only Telegram staging slice, a private internal operations page, CBE Birr-only redacted
@@ -44,22 +52,23 @@ false. TeleBirr and CBE bank are deferred.
 
 ## Component boundary
 
-```text
-Responsive web/PWA ──> customer web BFF ──> PostgreSQL / Supabase Auth
-                                │
-                                └──> future financial API
-                                                │
-Optional Telegram legacy link ──────────────────┤
-                                                ├──> durable jobs ──> worker ──> provider adapters
-                                                │
-Neutral team workspace ─────────────────────────┤
-                                                │
-                                                └──> supervised executor ──> KemerBet agent UI
+Initial-release target (automatic execution wiring remains incomplete):
 
+```text
+Telegram customer ──> bot ──> private API ──> PostgreSQL financial ledger / durable jobs
+                                  ▲                            │
+Private Owner controls ────────────┘                            ├──> payment verification
+                                                               │
+                                                               └──> guarded KemerBet execution
+                                                                      │
+                                                                      └──> local companion session
+
+Future customer app/web ──> deferred customer web BFF / authentication
 ```
 
-The web/PWA, optional bot, worker, workspace, and executor do not own independent financial state.
-The API and database constraints remain the source of truth for financial workflows.
+The bot, worker, private controls, companion, and executor do not own independent financial state.
+The API and database constraints remain the source of truth for financial workflows. Any later
+customer web/PWA must use those same financial boundaries.
 
 `app` is a private PostgreSQL schema rather than a Supabase Data API schema. The implemented customer
 web BFF uses `@fetanagent/customer-web-workspace-runtime`, a dedicated direct-PostgreSQL identity
@@ -79,8 +88,9 @@ deployed process currently activates them.
 
 ## Product deposit flow
 
-1. The signed-in customer selects one KemerBet Player ID with both proven ownership and a separate
-   current deposit-eligibility decision. Only that combined state may eventually display `Ready`.
+1. The admitted Telegram customer starts a deposit in the bot and selects one KemerBet Player ID
+   with both proven ownership and a separate current deposit-eligibility decision. Customer web
+   sign-in is not required. Only that combined player state may eventually display `Ready`.
 2. The reviewed CBE Birr dry-run intake displays its configured masked receiver account and records
    a request with FetanAgent's current 25–25,000 ETB inclusive amount range for that one deposit.
    Customers may create unlimited separate deposits; FetanAgent has no customer, daily, or
@@ -120,9 +130,10 @@ also requires a separate latest `eligible` ledger decision and no application pa
 A separate
 `/reference DEPOSIT_CODE TRANSACTION_REFERENCE` command sends the raw reference only through the
 signed internal action channel; the API encrypts and blind-indexes it before storage and returns no
-reference material. This is legacy staging behavior, not the canonical web/PWA flow or customer
-copy. The ledger remains at `intake_received` and the submission at `received`. All financial
-feature switches must remain disabled, so the flow cannot contact CBE Birr, create provider evidence
+reference material. This command-based staging flow is the existing Telegram foundation; completing
+the customer bot experience remains initial-release work. The ledger remains at `intake_received`
+and the submission at `received`. All financial feature switches must remain disabled, so the flow
+cannot contact CBE Birr, create provider evidence
 or a payment claim, enqueue verification, call KemerBet, or execute a deposit. Screenshot/PDF intake
 and provider authority remain separately reviewed boundaries.
 
@@ -224,7 +235,10 @@ or lane-wait plans.
 Every plan has `retryAllowed: false`; it performs no I/O, and no application runtime invokes or
 composes these planners.
 
-## Account, session, and optional Telegram-link boundary
+## Deferred web account, session, and optional Telegram-link boundary
+
+This section and the customer-web ownership-proof section preserve future web work. Their web
+authentication, recovery, and history-link requirements do not gate the initial Telegram release.
 
 The pure `@fetanagent/customer-web-access-foundation` package is a historical, non-runtime record of
 these product decisions only.
@@ -241,7 +255,7 @@ procedures. Neither runtime is deployment-wired; neither provides Player-ID owne
 eligibility, and the deposit procedures remain unavailable unless all independent financial/source
 gates are live.
 
-## Customer-web ownership-proof prerequisite boundary
+## Deferred customer-web ownership-proof prerequisite boundary
 
 No reviewed authoritative KemerBet control signal exists for the customer-web flow. The challenge
 profile, challenge delivery path, evidence profile, freshness/replay/attempt/abuse policy,
@@ -264,7 +278,7 @@ eligibility. The existing Owner-only financial boundary must then record a separ
 eligibility decision; proof success must never silently enable deposits. See
 [customer-web-player-ownership-proof.md](customer-web-player-ownership-proof.md).
 
-The canonical public paths are generic `/sign-in`, `/create-account`, and `/workspace` paths. The
+The deferred web design uses generic `/sign-in`, `/create-account`, and `/workspace` paths. The
 server resolves capabilities after authentication; a URL, page title, or client flag must not reveal
 or grant an internal role. Customer-visible copy uses `FetanAgent team`, `Workspace`, `Being checked`,
 and `Review required` rather than `Owner`, `Admin`, or `manual verification`. Exact internal roles
@@ -280,8 +294,9 @@ and an audit of effective Data API grants, exposed RPCs, and RLS remain deployme
 does not enter the service-worker cache. The decision against step-up prompts does not authorize an
 unsafe account change or financial action.
 
-Telegram is not sign-in, recovery, or transaction authority. A future optional history link must
-begin from an authenticated web account, prove the exact legacy Telegram identity with a one-time
+Telegram does not supply web sign-in or recovery, and transport alone is not financial authority.
+A future optional history link must begin from an authenticated web account, prove the exact
+legacy Telegram identity with a one-time
 challenge, reject ambiguity without disclosure, and create a controlled reference without merging
 identities, reparenting customer records, or copying history. It must record a redacted audit event.
 No such link exists today. See
@@ -326,10 +341,15 @@ and rollout boundary remains a separate review. See
 
 ## Withdrawal boundary
 
-FetanAgent validates a KemerBet withdrawal Player ID and code. Only an existing, valid,
-uncompleted withdrawal becomes the internal `awaiting_admin_approval` state. Customer copy uses
-`Being reviewed`; an authorized team member later records the external TeleBirr/CBE Birr payout.
-FetanAgent does not automate sending money in version 1.
+The intended product includes operator-authorized automation of the KemerBet agent-side withdrawal
+workflow. The checked-in agent observation currently defers withdrawal testing, so the exact steps
+and completion evidence remain to be established before that integration can be implemented.
+
+The recorded version-1 design calls for validating a KemerBet withdrawal Player ID and code. Only an
+existing, valid, uncompleted withdrawal would enter the internal `awaiting_admin_approval` state.
+Customer copy uses `Being reviewed`; an authorized team member would later record the external
+TeleBirr/CBE Birr payout. External payout automation is outside that version-1 design. These planned
+states are not evidence of a working withdrawal integration.
 
 ## Required safeguards
 
@@ -352,8 +372,9 @@ FetanAgent does not automate sending money in version 1.
 
 ## Deployment path
 
-The public responsive web/PWA and generic workspace exist in source but are not part of the current
-deployment. Adding them requires the reviewed customer-web image, runtime secret boundary, exact
+The public responsive web/PWA and generic workspace are deferred until the Telegram bot is complete
+and reliable. Their preserved source is not an initial-launch deployment requirement. Adding them
+later requires the reviewed customer-web image, runtime secret boundary, exact
 one-hop trusted-proxy chain, durable limiter migration and secret, Compose/Caddy routing, and a
 staging health check.
 The London DigitalOcean VM otherwise continues to run the reviewed private services. Supabase

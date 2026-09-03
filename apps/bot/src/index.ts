@@ -6,14 +6,22 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
 import {
   isRecognizedTelegramDepositCommand,
+  isRecognizedTelegramDepositProofStatusCallback,
+  isRecognizedTelegramDepositStatusCommand,
+  isTelegramPrivateHelpCommand,
   reduceTelegramDepositProofCommand,
+  reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
 } from './telegram-private-action.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
-import { presentTelegramPlayerIdFlowResult } from './telegram-player-id-flow.js';
+import {
+  TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
+  presentTelegramPlayerIdFlowResult,
+  telegramDepositHelpText,
+} from './telegram-player-id-flow.js';
 import {
   deliverTelegramPrivateInboundWithRetry,
   toTelegramPrivateInboundEvent,
@@ -57,7 +65,13 @@ async function deliverPlayerAction(
       { playerActionKind: action.kind },
       'Telegram Player-ID action delivery was unavailable.',
     );
-    await reply(message('en', 'playerActionUnavailable'));
+    await reply(
+      action.kind === 'deposit_proof_status_command' || action.kind === 'deposit_status_command'
+        ? TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT
+        : action.kind === 'deposit_proof_command'
+          ? message('en', 'depositUnavailable')
+          : message('en', 'playerActionUnavailable'),
+    );
   }
 }
 
@@ -108,6 +122,10 @@ bot.on('message', async (context) => {
         : undefined,
     };
     const text = 'text' in context.message ? context.message.text : undefined;
+    if (isTelegramPrivateHelpCommand({ ...metadata, command: text })) {
+      await context.reply(telegramDepositHelpText());
+      return;
+    }
     const rootAction = reduceTelegramRootMenuAction({ ...metadata, command: text });
     if (rootAction) {
       await deliverPlayerAction(rootAction, (replyText, keyboard) =>
@@ -125,7 +143,11 @@ bot.on('message', async (context) => {
       return;
     }
     if (isRecognizedTelegramDepositCommand({ ...metadata, command: text })) {
-      await context.reply(message('en', 'depositInputInvalid'));
+      await context.reply(telegramDepositHelpText());
+      return;
+    }
+    if (isRecognizedTelegramDepositStatusCommand({ ...metadata, command: text })) {
+      await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);
       return;
     }
     if (!(typeof text === 'string' && text.startsWith('/'))) {
@@ -178,7 +200,7 @@ bot.on('message', async (context) => {
 
 if (playerActions.enabled) {
   bot.on('callback_query:data', async (context) => {
-    const action = reduceTelegramPlayerRegistrationCallbackAction({
+    const callbackMetadata = {
       updateId: context.update.update_id,
       chat: context.chat ? { id: context.chat.id, type: context.chat.type } : undefined,
       from: context.from
@@ -189,9 +211,17 @@ if (playerActions.enabled) {
           }
         : undefined,
       callbackData: context.callbackQuery.data,
-    });
+    };
+    const action =
+      reduceTelegramDepositProofStatusCallbackAction(callbackMetadata) ??
+      reduceTelegramPlayerRegistrationCallbackAction(callbackMetadata);
     await context.answerCallbackQuery();
-    if (!action) return;
+    if (!action) {
+      if (isRecognizedTelegramDepositProofStatusCallback(callbackMetadata)) {
+        await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);
+      }
+      return;
+    }
     await deliverPlayerAction(action, (replyText, keyboard) =>
       context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
     );

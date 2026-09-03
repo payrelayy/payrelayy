@@ -382,6 +382,40 @@ describe('private Telegram action transport contract', () => {
     ).resolves.toEqual(statusAction);
   });
 
+  it('authenticates only a canonical customer-scoped proof-status envelope', async () => {
+    const action: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'deposit_proof_status_command',
+      updateId: '123460',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
+      preferredLocale: 'en',
+      proofToken: 'bkHxZ7kXRBeS8TixlR1s4w',
+    };
+    const signed = signedRequest(action);
+    await expect(
+      verifyTelegramPrivateActionRequest(signed.request, signed.rawBody, verificationOptions()),
+    ).resolves.toEqual(action);
+
+    for (const malformed of [
+      { ...action, proofToken: `p1.${action.proofToken}` },
+      { ...action, proofToken: 'B'.repeat(22) },
+      { ...action, proofToken: `${action.proofToken}\n` },
+      { ...action, proofToken: null },
+      { ...action, privateChatId: '999999999' },
+      { ...action, customerId: 'untrusted-customer' },
+      { ...action, depositToken: action.proofToken },
+    ]) {
+      const request = signedRequest(malformed as unknown as TelegramPrivateActionEnvelope);
+      await expect(
+        verifyTelegramPrivateActionRequest(request.request, request.rawBody, verificationOptions()),
+      ).resolves.toBeUndefined();
+    }
+    expect(JSON.stringify(redactTelegramPrivateActionForLog(action))).not.toContain(
+      action.proofToken,
+    );
+  });
+
   it('redacts opaque callback tokens and Player ID text from the only log projection', () => {
     const redactedCallback = JSON.stringify(redactTelegramPrivateActionForLog(callbackAction));
     const playerId = 'player-123';

@@ -510,6 +510,158 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls.join('\n')).not.toContain('capture_telegram_dry_run_deposit_proof');
   });
 
+  describe('customer proof status', () => {
+    const proofToken = encodeTelegramCapabilityId(depositProofRequestId);
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_proof_status_command',
+      proofToken,
+    };
+    const proofRow = {
+      deposit_proof_request_id: depositProofRequestId,
+      provider_code: 'telebirr',
+      proof_status: 'proof_received',
+      submitted_at: new Date('2026-08-20T12:00:00.000Z'),
+    };
+
+    function fixture(result: { rows: readonly unknown[] } | { error: unknown }) {
+      const calls: { query: string; values: readonly unknown[] }[] = [];
+      const database: TelegramPlayerActionDatabase = {
+        async query(query, values) {
+          calls.push({ query, values });
+          if (query.includes('record_public_telegram_action_inbound_event')) {
+            return {
+              rows: [
+                {
+                  inbound_event_id: inboundEventId,
+                  received_at: new Date('2026-08-20T12:00:00.000Z'),
+                  inbound_event_already_recorded: false,
+                },
+              ],
+            };
+          }
+          if (query.includes('app.get_telegram_customer_deposit_proof(')) {
+            if ('error' in result) throw result.error;
+            return result;
+          }
+          throw new Error('Unexpected proof-status database call.');
+        },
+        async end() {},
+      };
+      return { calls, database };
+    }
+
+    it.each(['telebirr', 'cbe_birr'] as const)(
+      'reads the same %s proof with a recreated runtime without calling deposit-intent or financial commands',
+      async (providerCode) => {
+        const { database, calls } = fixture({
+          rows: [{ ...proofRow, provider_code: providerCode }],
+        });
+        const expected = {
+          version: 1,
+          outcome: 'deposit_proof_status',
+          proofToken,
+          providerCode,
+          providerName: providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
+          proofStatus: 'proof_received',
+          financialMode: 'dry_run',
+        };
+        for (const updateId of ['11', '12']) {
+          const request = { ...action, updateId };
+          const runtime = createPostgresTelegramPlayerActionRuntime(actionConfig, database);
+          await expect(
+            runtime.handle(request, Buffer.from(JSON.stringify(request))),
+          ).resolves.toEqual(expected);
+          await runtime.close();
+        }
+        expect(calls).toHaveLength(4);
+        for (const call of [calls[1], calls[3]]) {
+          expect(call?.values).toEqual([inboundEventId, depositProofRequestId]);
+          expect(call?.query).toContain('app.get_telegram_customer_deposit_proof(');
+          expect(call?.query).not.toContain('app.get_telegram_customer_deposit(');
+        }
+        expect(JSON.stringify(expected)).not.toContain(depositProofRequestId);
+        expect(expected).not.toHaveProperty('amountMinor');
+      },
+    );
+
+    it('retains the dry-run status of historical proof when runtime mode later becomes live', async () => {
+      const { database } = fixture({ rows: [proofRow] });
+      const runtime = createPostgresTelegramPlayerActionRuntime(
+        { ...actionConfig, financialActionsMode: 'live' },
+        database,
+      );
+      await expect(
+        runtime.handle(action, Buffer.from(JSON.stringify(action))),
+      ).resolves.toMatchObject({
+        outcome: 'deposit_proof_status',
+        proofStatus: 'proof_received',
+        financialMode: 'dry_run',
+      });
+    });
+
+    it.each([
+      { rows: [] },
+      { error: { code: 'P0001', message: 'Private actor details must not escape.' } },
+    ])(
+      'returns one generic unavailable result for missing/foreign proofs or rejected actors',
+      async (result) => {
+        const { database } = fixture(result);
+        await expect(
+          createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+            action,
+            Buffer.from(JSON.stringify(action)),
+          ),
+        ).resolves.toEqual({ version: 1, outcome: 'deposit_status_unavailable' });
+      },
+    );
+
+    it.each([
+      [{ ...proofRow, deposit_proof_request_id: depositIntentId }],
+      [{ ...proofRow, provider_code: 'unknown' }],
+      [{ ...proofRow, proof_status: 'verified' }],
+      [{ ...proofRow, proof_status: 'executed' }],
+      [{ ...proofRow, submitted_at: '2026-08-20T12:00:00.000Z' }],
+      [{ ...proofRow, submitted_at: new Date(Number.NaN) }],
+      [{ ...proofRow, candidate_reference_ciphertext: 'private material' }],
+      [proofRow, proofRow],
+      [null],
+    ])(
+      'rejects malformed or overbroad database observations without inventing payment status',
+      async (...rows) => {
+        const { database } = fixture({ rows });
+        await expect(
+          createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+            action,
+            Buffer.from(JSON.stringify(action)),
+          ),
+        ).rejects.toThrow('The Telegram Player-ID action runtime is unavailable.');
+      },
+    );
+
+    it('does not turn database transport failure into proof-not-found or expose database details', async () => {
+      const { database } = fixture({ error: new Error('private transport details') });
+      await expect(
+        createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+          action,
+          Buffer.from(JSON.stringify(action)),
+        ),
+      ).rejects.toThrow('The Telegram Player-ID action runtime is unavailable.');
+    });
+
+    it('rejects a noncanonical proof token before querying the proof getter', async () => {
+      const { database, calls } = fixture({ rows: [proofRow] });
+      const malformed = { ...action, proofToken: 'B'.repeat(22) };
+      await expect(
+        createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+          malformed,
+          Buffer.from(JSON.stringify(malformed)),
+        ),
+      ).resolves.toEqual({ version: 1, outcome: 'deposit_input_invalid' });
+      expect(calls).toHaveLength(1);
+    });
+  });
+
   it('protects a raw reference before the database call and returns no reference material', async () => {
     const transactionReference = 'tx-abc-7890';
     const fingerprintKey = createHmac('sha256', Buffer.from('f'.repeat(64), 'hex'))

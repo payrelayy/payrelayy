@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 
 import type { ApiConfig } from '@fetanagent/config/api';
 import {
+  isTelegramDepositProofToken,
   projectCustomerDepositStatus,
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionResult,
@@ -81,6 +82,10 @@ const GET_CUSTOMER_DEPOSIT_SQL = `
   select deposit_intent_id, expected_amount_minor, currency_code, deposit_status,
          created_at, updated_at
   from app.get_telegram_customer_deposit($1::uuid, $2::uuid)
+`;
+const GET_CUSTOMER_DEPOSIT_PROOF_SQL = `
+  select deposit_proof_request_id, provider_code, proof_status, submitted_at
+  from app.get_telegram_customer_deposit_proof($1::uuid, $2::uuid)
 `;
 
 const DEPOSIT_STATUSES = new Set<DepositStatus>([
@@ -531,6 +536,50 @@ async function handleDepositProof(
   };
 }
 
+async function handleDepositProofStatus(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_proof_status_command' }>,
+): Promise<TelegramPrivateActionResult> {
+  if (!isTelegramDepositProofToken(action.proofToken)) {
+    return { version: 1, outcome: 'deposit_input_invalid' };
+  }
+  const proofRequestId = decodeTelegramCapabilityId(action.proofToken);
+  if (!proofRequestId) return { version: 1, outcome: 'deposit_input_invalid' };
+  let rows: readonly unknown[];
+  try {
+    rows = (
+      await database.query(GET_CUSTOMER_DEPOSIT_PROOF_SQL, [originInboundEventId, proofRequestId])
+    ).rows;
+  } catch (error) {
+    if (!isPgRejection(error)) throw error;
+    return { version: 1, outcome: 'deposit_status_unavailable' };
+  }
+  if (rows.length === 0) return { version: 1, outcome: 'deposit_status_unavailable' };
+  const row = oneRow(rows);
+  if (
+    Object.keys(row).length !== 4 ||
+    row.deposit_proof_request_id !== proofRequestId ||
+    (row.provider_code !== 'cbe_birr' && row.provider_code !== 'telebirr') ||
+    row.proof_status !== 'proof_received' ||
+    !(row.submitted_at instanceof Date) ||
+    Number.isNaN(row.submitted_at.getTime())
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  // These immutable records are dry-run submissions, even if the runtime mode changes later.
+  // A status read cannot promote a proof into a verified payment or a completed deposit.
+  return {
+    version: 1,
+    outcome: 'deposit_proof_status',
+    proofToken: action.proofToken,
+    providerCode: row.provider_code,
+    providerName: row.provider_code === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr',
+    proofStatus: 'proof_received',
+    financialMode: 'dry_run',
+  };
+}
+
 async function handleDepositStatus(
   database: TelegramPlayerActionDatabase,
   originInboundEventId: string,
@@ -643,6 +692,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleDepositReference(pool, inboundEventId, action, config);
           case 'deposit_proof_command':
             return await handleDepositProof(pool, inboundEventId, action, config);
+          case 'deposit_proof_status_command':
+            return await handleDepositProofStatus(pool, inboundEventId, action);
           case 'deposit_status_command':
             return await handleDepositStatus(pool, inboundEventId, action);
         }

@@ -5,12 +5,14 @@ five-account real-money pilot and a later separate public launch is
 [`docs/real-money-go-live-phases.md`](docs/real-money-go-live-phases.md). Use that phase map for
 progress reporting and do not skip its exit gates.
 
-FetanAgent's settled product direction is a standalone, responsive web/PWA-first
-payment-verification and betting-agent service. Customers may create and use FetanAgent accounts
-through the intended self-service email-and-password flow without Telegram, associate multiple
-KemerBet Player IDs, and enter through the same generic public sign-in and neutral workspace used by
-authorized team members. Email ownership confirmation is requested only for forgot-password
-recovery, not account creation or routine sign-in. Product copy is English-only.
+FetanAgent's initial customer release is Telegram-bot-only, following the operator's scope decision
+on 2026-09-03. Completing and validating the bot's deposit, withdrawal, status, and support flows is
+the priority. Customer app/web development is deferred until the bot is complete and reliable;
+customer web accounts, email/password sign-in, and PWA deployment are not initial-launch requirements.
+Existing private Owner controls and the local KemerBet companion remain operational support for the
+bot. This scope decision does not change any running service or financial activation gate. Product
+copy is English-only. The [phase map](docs/real-money-go-live-phases.md) governs the Telegram-first
+delivery sequence.
 
 The repository currently implements an English-only, invite-only Telegram staging slice, a unified
 default-off customer deposit intake/status boundary for web and Telegram, a disabled authoritative
@@ -31,8 +33,9 @@ runtime grant, route, UI, or customer status can create one. It is a fail-closed
 quarantine, not proof or deposit enablement. Stage 1E specifies a pure, blocked-by-default
 official-source policy whose current source status is `unproven`; it neither selects nor permits a
 provider source. Stage 1F records the remaining authoritative-lookup blockers and keeps every lookup
-capability false. Telegram is optional in the settled product and requires a separately reviewed
-legacy-history link rather than becoming web authentication or recovery.
+capability false. The earlier web-first design and optional Telegram-to-web history link are
+deferred design material; the existing Telegram transport is the foundation for the initial
+customer release, and its completion does not depend on that link.
 
 The source also contains a reviewed, disabled-by-default KemerBet execution safety core. A private
 SQL migration defines a consume-only executor role boundary with six callable transition commands
@@ -56,6 +59,9 @@ login, live database switch, or authoritative-verifier service is deployed or pr
 runtime credentials by the repository.
 
 ## Current safety status
+
+The customer-web details below inventory preserved source for a future phase. They are not
+additional deliverables for the initial Telegram launch; shared financial safeguards still apply.
 
 The current foundation is deliberately safe:
 
@@ -97,7 +103,7 @@ The current foundation is deliberately safe:
   configuration, plus an audit of effective `anon` and `authenticated`
   grants, exposed RPC/PostgREST surfaces, and RLS before issuing customer principals;
 - `@fetanagent/customer-web-access-foundation` remains a historical, pure, non-runtime record of the
-  settled product intent. Its blocked result does not enable or configure either implemented runtime;
+  earlier web product intent. Its blocked result does not enable or configure either implemented runtime;
 - the optional Telegram-history link is still unimplemented and cannot be inferred from either Auth
   or the existing Telegram admission flow;
 - the implemented workspace is customer-only; capability-based staff routing through the generic
@@ -197,10 +203,10 @@ environment file.
 
 | Component                                                   | Responsibility                                                                      |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/customer-web`                                         | Disabled SSR/PWA workspace with a non-root image and fail-closed CI smoke           |
+| `apps/customer-web`                                         | Deferred customer SSR/PWA workspace; preserved source for a later release           |
 | `apps/api`                                                  | Private Telegram actions, protected deposit intake/status, and audit boundaries     |
 | `apps/admin`                                                | Existing private staging operations service; not the public neutral workspace       |
-| `apps/bot`                                                  | Optional private Telegram legacy transport; not customer authentication or recovery |
+| `apps/bot`                                                  | Initial customer surface; existing staging transport to complete and validate       |
 | `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner             |
 | `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command         |
 | `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
@@ -249,9 +255,10 @@ FetanAgent-created customer, team-workspace, documentation, PDF, and exported-fi
 English only in version 1. Payment evidence and names may remain in the source language because they
 are data, not interface copy. See [docs/language-policy.md](docs/language-policy.md).
 
-See [docs/standalone-web-pwa.md](docs/standalone-web-pwa.md) for the settled customer product,
-session/recovery safety status, optional Telegram-history link, PWA lifecycle, and canonical
-vocabulary. See [docs/architecture.md](docs/architecture.md),
+See [docs/real-money-go-live-phases.md](docs/real-money-go-live-phases.md) for the initial Telegram
+release scope and gates. [docs/standalone-web-pwa.md](docs/standalone-web-pwa.md) preserves the
+deferred web product design, session/recovery status, optional Telegram-history link, PWA lifecycle,
+and vocabulary. See [docs/architecture.md](docs/architecture.md),
 [docs/database-access.md](docs/database-access.md),
 [docs/deposit-ledger.md](docs/deposit-ledger.md),
 [docs/kemerbet-agent-deposit-observation.md](docs/kemerbet-agent-deposit-observation.md),
@@ -268,7 +275,7 @@ Stage 1E blocked-by-default source-permission contract and its P0 prerequisites,
 for the Stage 1F fail-closed prerequisite inventory. See
 [docs/cbe-birr-fixture-dry-run.md](docs/cbe-birr-fixture-dry-run.md) for the current CBE Birr-only
 fixture scope and its explicit non-live limits. See
-[docs/telegram-inbound.md](docs/telegram-inbound.md) for the optional legacy Telegram boundary and
+[docs/telegram-inbound.md](docs/telegram-inbound.md) for the existing Telegram admission boundary and
 [docs/telegram-transport.md](docs/telegram-transport.md) for the separate signed transport boundary.
 See [docs/player-registration.md](docs/player-registration.md) for the Player-ID request, review,
 explicit ownership-association boundary, and separate deposit-eligibility quarantine,

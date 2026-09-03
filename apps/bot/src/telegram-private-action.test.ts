@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   isRecognizedTelegramDepositCommand,
+  isRecognizedTelegramDepositProofStatusCallback,
+  isRecognizedTelegramDepositStatusCommand,
+  isTelegramPrivateHelpCommand,
   reduceTelegramDepositIntentCommand,
   reduceTelegramDepositProofCommand,
+  reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositReferenceCommand,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
@@ -201,6 +205,107 @@ describe('private Telegram action reducers', () => {
         command: `/deposit_status ${depositToken} extra`,
       }),
     ).toBeUndefined();
+  });
+
+  it('keeps proof status command and callback separate from the legacy deposit namespace', () => {
+    const proofToken = 'AAAAAAAAAAAAAAAAAAAAAA';
+    const commandAction = reduceTelegramDepositStatusCommand({
+      ...privateMetadata,
+      command: `/deposit_status p1.${proofToken}`,
+    });
+    expect(commandAction).toEqual({
+      version: 1,
+      updateId: '123456',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
+      preferredLocale: 'en',
+      kind: 'deposit_proof_status_command',
+      proofToken,
+    });
+    expect(
+      reduceTelegramDepositProofStatusCallbackAction({
+        ...privateMetadata,
+        callbackData: `dps1.${proofToken}`,
+      }),
+    ).toEqual(commandAction);
+    expect(
+      reduceTelegramDepositStatusCommand({
+        ...privateMetadata,
+        command: `/deposit_status ${proofToken}`,
+      }),
+    ).toMatchObject({ kind: 'deposit_status_command', depositToken: proofToken });
+    expect(
+      reduceTelegramPlayerRegistrationCallbackAction({
+        ...privateMetadata,
+        callbackData: `dps1.${proofToken}`,
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    '/deposit_status',
+    '/deposit_status p1.invalid',
+    `/deposit_status p1.${'B'.repeat(22)}`,
+    `/deposit_status p1.${'A'.repeat(23)}`,
+    `/deposit_status p1.${'A'.repeat(22)} extra`,
+    `/deposit_status p1.${'A'.repeat(22)}\n`,
+    `/deposit_status dps1.${'A'.repeat(22)}`,
+  ])('recognizes malformed status for a generic reply without dispatch: %s', (command) => {
+    expect(isRecognizedTelegramDepositStatusCommand({ ...privateMetadata, command })).toBe(true);
+    expect(reduceTelegramDepositStatusCommand({ ...privateMetadata, command })).toBeUndefined();
+  });
+
+  it.each(['dps1', 'dps1.invalid', `dps1.${'B'.repeat(22)}`, `dps1.${'A'.repeat(22)}.extra`])(
+    'recognizes malformed proof callback for a generic reply without dispatch: %s',
+    (callbackData) => {
+      expect(
+        isRecognizedTelegramDepositProofStatusCallback({ ...privateMetadata, callbackData }),
+      ).toBe(true);
+      expect(
+        reduceTelegramDepositProofStatusCallbackAction({ ...privateMetadata, callbackData }),
+      ).toBeUndefined();
+    },
+  );
+
+  it.each([
+    { chat: { id: 123456789, type: 'group' } },
+    { chat: { id: 123456788, type: 'private' } },
+    { from: { id: 123456789, isBot: true, languageCode: 'en' } },
+    { updateId: Number.NaN },
+  ])('rejects help and proof status from an unsafe identity', (override) => {
+    const metadata = { ...privateMetadata, ...override };
+    expect(isTelegramPrivateHelpCommand({ ...metadata, command: '/help' })).toBe(false);
+    expect(
+      reduceTelegramDepositStatusCommand({
+        ...metadata,
+        command: `/deposit_status p1.${'A'.repeat(22)}`,
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramDepositProofStatusCallbackAction({
+        ...metadata,
+        callbackData: `dps1.${'A'.repeat(22)}`,
+      }),
+    ).toBeUndefined();
+    expect(
+      isRecognizedTelegramDepositStatusCommand({ ...metadata, command: '/deposit_status bad' }),
+    ).toBe(false);
+    expect(
+      isRecognizedTelegramDepositProofStatusCallback({ ...metadata, callbackData: 'dps1.bad' }),
+    ).toBe(false);
+  });
+
+  it('recognizes only exact help in an authenticated private chat identity', () => {
+    expect(isTelegramPrivateHelpCommand({ ...privateMetadata, command: '/help' })).toBe(true);
+    expect(isTelegramPrivateHelpCommand({ ...privateMetadata, command: '/help extra' })).toBe(
+      false,
+    );
+    expect(
+      isRecognizedTelegramDepositStatusCommand({
+        ...privateMetadata,
+        command: '/deposit_statuses',
+      }),
+    ).toBe(false);
   });
 
   it('reduces only one compact deposit token and one bounded reference', () => {

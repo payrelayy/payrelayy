@@ -5,6 +5,8 @@ import {
   TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
+  parseTelegramDepositProofStatusCallback,
+  parseTelegramDepositProofTrackingHandle,
   parseTelegramPlayerRegistrationCapabilityCallback,
   type TelegramPrivateActionEnvelope,
   type TelegramPrivateActionIdentity,
@@ -102,6 +104,32 @@ export function isRecognizedTelegramDepositCommand(
   );
 }
 
+/** Recognize status requests so malformed handles receive the same generic unavailable reply. */
+export function isRecognizedTelegramDepositStatusCommand(
+  metadata: TelegramDepositCommandMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    typeof metadata.command === 'string' &&
+    /^\/deposit_status(?:\s|$)/u.test(metadata.command)
+  );
+}
+
+export function isRecognizedTelegramDepositProofStatusCallback(
+  metadata: TelegramPlayerRegistrationCallbackMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    typeof metadata.callbackData === 'string' &&
+    /^dps1(?:\.|$)/u.test(metadata.callbackData)
+  );
+}
+
+/** Help contains no customer data and is available only in the matching private chat. */
+export function isTelegramPrivateHelpCommand(metadata: TelegramDepositCommandMetadata): boolean {
+  return toTelegramPrivateActionIdentity(metadata) !== undefined && metadata.command === '/help';
+}
+
 /**
  * Reduce only the exact root-menu commands. This is a pure local reducer; it is not wired to a
  * grammY handler, polling loop, HTTP client, or dispatcher.
@@ -136,6 +164,17 @@ export function reduceTelegramPlayerRegistrationCallbackAction(
     kind: 'player_registration_callback',
     callbackData: metadata.callbackData,
   };
+}
+
+/** Re-checking a proof always goes to the API with the caller's private-chat identity. */
+export function reduceTelegramDepositProofStatusCallbackAction(
+  metadata: TelegramPlayerRegistrationCallbackMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  const proofToken = parseTelegramDepositProofStatusCallback(metadata.callbackData);
+  return identity && proofToken
+    ? { ...identity, kind: 'deposit_proof_status_command', proofToken }
+    : undefined;
 }
 
 /**
@@ -237,6 +276,14 @@ export function reduceTelegramDepositStatusCommand(
 ): TelegramPrivateActionEnvelope | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
   if (!identity || typeof metadata.command !== 'string') return undefined;
+  if (metadata.command.startsWith('/deposit_status p1.')) {
+    const proofToken = parseTelegramDepositProofTrackingHandle(
+      metadata.command.slice('/deposit_status '.length),
+    );
+    return proofToken
+      ? { ...identity, kind: 'deposit_proof_status_command', proofToken }
+      : undefined;
+  }
   const match = /^\/deposit_status ([A-Za-z0-9_-]+)$/u.exec(metadata.command);
   const depositToken = match?.[1];
   if (

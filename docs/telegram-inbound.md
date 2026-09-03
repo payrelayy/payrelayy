@@ -1,6 +1,12 @@
-# Legacy private Telegram invite-admission and inbox boundary
+# Telegram admission and historical private inbox boundary
 
-## Current scope
+Telegram is the initial customer channel under the
+[2026-09-03 release scope](real-money-go-live-phases.md#telegram-first-release-scope--2026-09-03).
+The invite-only procedure descriptions below record an earlier staging boundary; they must not be
+used as a current deployment inventory. Confirm active admission through the current runtime and
+migrations before changing it. The phase map governs the Telegram launch sequence.
+
+## Historical invite-only scope
 
 The applied Telegram staging admission is **invite-only**. An unknown Telegram user must not become
 a customer merely by opening, messaging, or calling the bot. The historic generic
@@ -21,12 +27,12 @@ database login, or later inbox path is enabled by this documentation.
 
 ## Settled product role
 
-Telegram is optional in the standalone responsive web/PWA product. A customer may create and use a
-FetanAgent account, associate multiple Player IDs, deposit, withdraw, view activity, recover access,
-and contact support without Telegram. Existing invite admission is legacy staging behavior, not the
-canonical account-creation or sign-in flow.
+Telegram is the only customer surface for the initial release. Customers should start and use the
+service inside the bot without creating a web/PWA account. Customer app/web development and account
+linking are deferred until the bot's agreed workflows are complete and reliable. Telegram identity
+establishes the customer conversation; it does not itself prove a payment or a KemerBet account.
 
-A future Telegram-history link must begin from an already authenticated web/PWA account and use a
+The deferred web design proposes a Telegram-history link from an authenticated web/PWA account and a
 short-lived, one-time, opaque challenge to prove control of the exact legacy Telegram identity. It
 must reject expiry, replay, identity mismatch, existing-link conflict, and cross-customer ambiguity
 without revealing another account. Linking creates a controlled reference to the legacy history
@@ -35,8 +41,8 @@ into sign-in, forgot-password recovery, payment authority, or Player-ID ownershi
 history remains under its original authoritative records and requires a separately authorized
 projection. No such link is implemented or enabled.
 
-Optional Telegram messaging may later be disconnected without deleting retained FetanAgent account
-history. See [standalone-web-pwa.md](standalone-web-pwa.md).
+Future account linking or disconnection must preserve retained FetanAgent transaction history. See
+the deferred design in [standalone-web-pwa.md](standalone-web-pwa.md).
 
 ## Trust boundary
 

@@ -70,7 +70,9 @@ assert.ok(
     installer.indexOf('install -o root -g root -m 0755'),
 );
 assert.doesNotMatch(installer, /\b(?:psql|systemctl|docker|rm)\s/);
-assert.match(operation, /"\$0" == "\$INSTALLED_PATH"/);
+assert.match(operation, /invoked_from_installed_file "\$0"/);
+assert.match(operation, /"\$\{SUDO_COMMAND:-\}" == "\$INSTALLED_PATH \$MODE \$RELEASE_SHA"/);
+assert.doesNotMatch(sudoers, /fdexec=never/);
 assert.match(operation, /SUDO_USER:-\}" == fetanagent-admin/);
 assert.match(
   deployWorkflow,
@@ -214,6 +216,37 @@ const bash =
       )
     : 'bash';
 assert.ok(bash, 'Bash is required to test the real systemd disarm function.');
+if (process.platform !== 'win32') {
+  const invocationFunction = /invoked_from_installed_file\(\) \{[\s\S]*?\n\}/u.exec(operation)?.[0];
+  assert.ok(invocationFunction);
+  for (const [name, invokedPath, sudoUser, commandSuffix, pass] of [
+    ['direct installed path', '$INSTALLED_PATH', '', '', true],
+    ['sudo digest proc descriptor', '/proc/self/fd/7', 'fetanagent-admin', '', true],
+    ['sudo digest dev descriptor', '/dev/fd/7', 'fetanagent-admin', '', true],
+    ['unrelated open descriptor', '/dev/fd/8', 'fetanagent-admin', '', false],
+    ['different invoking identity', '/dev/fd/7', 'unrelated-user', '', false],
+    ['different original command', '/dev/fd/7', 'fetanagent-admin', ' extra', false],
+    ['copied script path', '/tmp/unreviewed-script', 'fetanagent-admin', '', false],
+  ]) {
+    const result = spawnSync(bash, ['-s'], {
+      input: `set -euo pipefail
+INSTALLED_PATH="$BASH"
+MODE=preflight
+RELEASE_SHA='${'a'.repeat(40)}'
+SUDO_USER='${sudoUser}'
+SUDO_COMMAND="$INSTALLED_PATH $MODE $RELEASE_SHA${commandSuffix}"
+exec 7<"$INSTALLED_PATH"
+exec 8</dev/null
+${invocationFunction}
+invoked_from_installed_file "${invokedPath}"
+`,
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+    checks += 1;
+  }
+}
 const disarmFunction = /disarm_existing_timer\(\) \{[\s\S]*?\n\}/u.exec(operation)?.[0];
 assert.ok(disarmFunction);
 const operationSequence = operation.slice(

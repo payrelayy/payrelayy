@@ -2683,8 +2683,9 @@ jobs:
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-staging-images.tar")"
           [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
+          continuity_sha="$(sha256sum infra/operations/fetanagent-staging-continuous-availability.sh | awk '{print $1}')"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper docker-storage-ready '$bundle_bytes'"
+            "test \"\$(id -u)\" -ne 0 && test \"\$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)\" = '$continuity_sha' && sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$GITHUB_SHA' >/dev/null && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper docker-storage-ready '$bundle_bytes'"
 
       - name: Stop any prior staging project and disable old logins
         shell: bash
@@ -2904,6 +2905,29 @@ jobs:
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "curl --fail --silent --show-error --max-time 5 http://127.0.0.1:3002/readyz >/dev/null"
           echo 'started=true' >> "$GITHUB_OUTPUT"
+
+      - name: Finalize continuous non-financial availability
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          psql -X --file=infra/sql/staging-runtimes-enable-continuous.sql
+          psql -X --file=infra/sql/staging-runtimes-availability-inspect.sql
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$GITHUB_SHA'"
+          echo 'Continuous application availability verified: no credential expiry or scheduled shutdown; financial controls remain disabled.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Capture bounded Owner-control startup diagnostics
         if: failure() && steps.activate.outcome == 'failure'

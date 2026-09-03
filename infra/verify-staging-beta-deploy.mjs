@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import './verify-telegram-activation.mjs';
+import './verify-staging-continuous-availability.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const workflow = readFileSync(
@@ -9152,7 +9153,7 @@ assert.match(
 assert.doesNotMatch(stagingRunbook, /confirm_stop_and_disable_deadline_utc|operator attestation/);
 assert.match(stagingRunbook, /exactly two hours before the earliest expiry/);
 assert.match(stagingRunbook, /automatic\s+stop-before-expiry boundary/);
-assert.match(stagingRunbook, /not credential rotation or continuous\s+availability/u);
+assert.match(stagingRunbook, /not credential rotation or\s+continuous\s+availability/u);
 const helperReplacementRunbook =
   /### Historical audit record: exact v1\/v2 helper replacement on the staging Droplet([\s\S]*?)\nThe protected `staging` environment/u.exec(
     stagingRunbook,
@@ -15856,5 +15857,5 @@ assert.notEqual(
 assert.match(helperReplacementRunbook, new RegExp(historicalReviewedHelperSuccessorSha, 'gu'));
 
 console.log(
-  'staging deploy workflow verified: manual exact-target guards, read-only exact-IP ban gate, sealed images, bounded runtime credentials, checksummed root helper, provenance-bound one-shot KemerBet recheck, and explicit stop path',
+  'staging deploy workflow verified: manual exact-target guards, read-only exact-IP ban gate, sealed images, bounded bootstrap with continuous-availability finalization, checksummed root helper, provenance-bound one-shot KemerBet recheck, and explicit stop path',
 );

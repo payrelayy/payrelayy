@@ -20,6 +20,7 @@ import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pil
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
+import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
@@ -9579,6 +9580,7 @@ registerTrustedTelebirrVerifierRuntimeSqlTests(
   () => ownerAdminId,
 );
 registerPublicTelegramActionOnboardingSqlTests(() => client);
+registerStagingContinuousAvailabilitySqlTests(() => client);
 registerVerificationSettlementSqlTests(
   () => client,
   () => createSqlIntegrationClient(environment),

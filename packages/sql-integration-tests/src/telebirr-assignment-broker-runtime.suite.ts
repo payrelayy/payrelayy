@@ -401,6 +401,40 @@ export function registerTelebirrAssignmentBrokerRuntimeSqlTests(
          where oid = 'app.private_live_telebirr_assignment_deliveries'::regclass
       `);
       expect(rls.rows).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
+
+      const uniqueConstraints = await client.query<{
+        readonly columns: readonly string[];
+        readonly constraint_name: string;
+      }>(`
+        select
+          constraint_row.conname as constraint_name,
+          array_agg(attribute_row.attname order by constraint_column.ordinality) as columns
+        from pg_constraint constraint_row
+        cross join lateral unnest(constraint_row.conkey)
+          with ordinality as constraint_column(attribute_number, ordinality)
+        join pg_attribute attribute_row
+          on attribute_row.attrelid = constraint_row.conrelid
+         and attribute_row.attnum = constraint_column.attribute_number
+        where constraint_row.conrelid =
+          'app.private_live_telebirr_assignment_deliveries'::regclass
+          and constraint_row.contype = 'u'
+        group by constraint_row.conname
+        order by constraint_row.conname
+      `);
+      expect(uniqueConstraints.rows).toContainEqual({
+        constraint_name: 'private_live_telebirr_assignment_delivery_cover_key',
+        columns: [
+          'assignment_transcript_id',
+          'verification_attempt_id',
+          'assignment_signature_digest',
+        ],
+      });
+      expect(
+        uniqueConstraints.rows.some(
+          (constraint) =>
+            constraint.columns.length === 1 && constraint.columns[0] === 'assignment_transcript_id',
+        ),
+      ).toBe(false);
     });
 
     it('rejects an unprovisioned runtime session even though it inherits the two routines', async () => {

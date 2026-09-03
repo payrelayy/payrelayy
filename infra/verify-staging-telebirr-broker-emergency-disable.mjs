@@ -86,6 +86,11 @@ assert.equal(
   2,
   'Only the two private broker roles may be altered.',
 );
+assert.doesNotMatch(
+  disableSql,
+  /^\s+nosuperuser$/gm,
+  'The bounded Supabase administrator cannot issue the redundant NOSUPERUSER option.',
+);
 assert.match(
   disableSql,
   /alter role fetanagent_telebirr_assignment_broker with[\s\S]*?connection limit 2[\s\S]*?password null[\s\S]*?valid until 'infinity';/,

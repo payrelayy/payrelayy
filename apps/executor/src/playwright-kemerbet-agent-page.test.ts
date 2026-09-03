@@ -449,6 +449,10 @@ class FakePage implements PlaywrightPagePort {
   depositRequestMethod = 'POST';
   depositRequestBody: unknown = { playerId: 78123, amount: 25, notes: '' };
   emitDepositRequest = true;
+  onTransferLocator: (() => void) | null = null;
+  beforeTransferRequest: (() => void | Promise<void>) | null = null;
+  depositRouteInstallations = 0;
+  depositRouteRemovals = 0;
   lastRoute: FakeRoute | null = null;
   private transferRoute: {
     readonly url: string;
@@ -654,22 +658,13 @@ class FakePage implements PlaywrightPagePort {
           ? hiddenExistingLocator()
           : emptyLocator();
       }
+      this.onTransferLocator?.();
       return new FakeLocator({
         onClick: async () => {
           this.transferClicks += 1;
+          await this.beforeTransferRequest?.();
           if (!this.emitDepositRequest) return;
-          const registration = this.transferRoute;
-          if (registration === null || registration.url !== KEMERBET_AGENT_PLAYER_DEPOSIT_URL)
-            return;
-          const route = new FakeRoute(
-            new FakeRequest(
-              this.depositRequestUrl,
-              this.depositRequestMethod,
-              this.depositRequestBody,
-            ),
-          );
-          this.lastRoute = route;
-          await registration.handler(route);
+          await this.dispatchDepositRequest();
         },
       });
     }
@@ -699,13 +694,29 @@ class FakePage implements PlaywrightPagePort {
   }
 
   async route(url: string, handler: (route: PlaywrightRoutePort) => Promise<void>) {
+    this.depositRouteInstallations += 1;
     this.transferRoute = { url, handler };
   }
 
   async unroute(url: string, handler: (route: PlaywrightRoutePort) => Promise<void>) {
+    this.depositRouteRemovals += 1;
     if (this.transferRoute?.url === url && this.transferRoute.handler === handler) {
       this.transferRoute = null;
     }
+  }
+
+  async dispatchDepositRequest(
+    route = new FakeRoute(
+      new FakeRequest(this.depositRequestUrl, this.depositRequestMethod, this.depositRequestBody),
+    ),
+  ): Promise<FakeRoute> {
+    const registration = this.transferRoute;
+    if (registration === null || registration.url !== KEMERBET_AGENT_PLAYER_DEPOSIT_URL) {
+      throw new Error('The persistent deposit request guard is missing.');
+    }
+    this.lastRoute = route;
+    await registration.handler(route);
+    return route;
   }
 
   locator(selector: string): FakeLocator {
@@ -1516,8 +1527,146 @@ describe('Playwright KemerBet agent page', () => {
   it('continues only the exact internal-player ETB deposit request after the final click', async () => {
     const fixture = driver();
     await prepareExactPlayer(fixture);
-    await fixture.driver.transferOnce();
+    await fixture.driver.transferOnce(() => true);
     expect(fixture.page.lastRoute).toMatchObject({ continued: 1, aborted: 0 });
+    const duplicate = await fixture.page.dispatchDepositRequest();
+    expect(duplicate).toMatchObject({ continued: 0, aborted: 1 });
+    expect(fixture.page.depositRouteInstallations).toBe(1);
+    expect(fixture.page.depositRouteRemovals).toBe(0);
+  });
+
+  it.each([
+    ['stale', (): boolean => false],
+    [
+      'throwing',
+      (): boolean => {
+        throw new Error('fixture guard unavailable');
+      },
+    ],
+    ['non-boolean', (): boolean => 'true' as unknown as boolean],
+  ] as const)(
+    'rejects an already %s action guard without a click or a later retry',
+    async (_name, guard) => {
+      const fixture = driver();
+      await prepareExactPlayer(fixture);
+      await expect(fixture.driver.transferOnce(guard)).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+      await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+      expect(fixture.page.transferClicks).toBe(0);
+    },
+  );
+
+  it('reuses the same persistent deny-by-default route for a freshly prepared successful deposit', async () => {
+    const fixture = driver();
+    await prepareExactPlayer(fixture);
+    await fixture.driver.transferOnce(() => true);
+    const first = fixture.page.lastRoute;
+    const lateAfterFirst = await fixture.page.dispatchDepositRequest();
+    expect(lateAfterFirst).toMatchObject({ continued: 0, aborted: 1 });
+
+    await prepareExactPlayer(fixture);
+    await fixture.driver.transferOnce(() => true);
+    const second = fixture.page.lastRoute;
+    expect(second).not.toBe(first);
+    expect(first).toMatchObject({ continued: 1, aborted: 0 });
+    expect(second).toMatchObject({ continued: 1, aborted: 0 });
+    expect(fixture.page.transferClicks).toBe(2);
+    expect(fixture.page.depositRouteInstallations).toBe(1);
+    expect(fixture.page.depositRouteRemovals).toBe(0);
+    expect(await fixture.page.dispatchDepositRequest()).toMatchObject({ continued: 0, aborted: 1 });
+  });
+
+  it('rechecks freshness after resolving the Transfer locator and leaves late requests denied', async () => {
+    const fixture = driver();
+    await prepareExactPlayer(fixture);
+    let fresh = true;
+    fixture.page.onTransferLocator = () => {
+      fresh = false;
+    };
+
+    await expect(fixture.driver.transferOnce(() => fresh)).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+    expect(fixture.page.transferClicks).toBe(0);
+    fresh = true;
+    const late = await fixture.page.dispatchDepositRequest();
+    expect(late).toMatchObject({ continued: 0, aborted: 1 });
+    await expect(fixture.driver.transferOnce(() => fresh)).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+  });
+
+  it.each(['expires', 'throws'] as const)(
+    'aborts the POST when freshness %s during the click, even if the clock later recovers',
+    async (failure) => {
+      const fixture = driver();
+      await prepareExactPlayer(fixture);
+      let fresh = true;
+      fixture.page.beforeTransferRequest = () => {
+        fresh = false;
+      };
+      const guard = () => {
+        if (!fresh && failure === 'throws') throw new Error('fixture clock unavailable');
+        return fresh;
+      };
+
+      await expect(fixture.driver.transferOnce(guard)).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+      expect(fixture.page.transferClicks).toBe(1);
+      expect(fixture.page.lastRoute).toMatchObject({ continued: 0, aborted: 1 });
+      fresh = true;
+      const replay = await fixture.page.dispatchDepositRequest();
+      expect(replay).toMatchObject({ continued: 0, aborted: 1 });
+      await expect(fixture.driver.transferOnce(guard)).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+      expect(fixture.page.transferClicks).toBe(1);
+    },
+  );
+
+  it('consumes the sole request allowance before awaiting the first network continuation', async () => {
+    const fixture = driver();
+    await prepareExactPlayer(fixture);
+    fixture.page.emitDepositRequest = false;
+    const first = new FakeRoute(
+      new FakeRequest(KEMERBET_AGENT_PLAYER_DEPOSIT_URL, 'POST', {
+        playerId: 78123,
+        amount: 25,
+        notes: '',
+      }),
+    );
+    const duplicate = new FakeRoute(
+      new FakeRequest(KEMERBET_AGENT_PLAYER_DEPOSIT_URL, 'POST', {
+        playerId: 78123,
+        amount: 25,
+        notes: '',
+      }),
+    );
+    let releaseContinuation!: () => void;
+    const continuation = new Promise<void>((resolve) => {
+      releaseContinuation = resolve;
+    });
+    vi.spyOn(first, 'continue').mockImplementation(async () => {
+      first.continued += 1;
+      await continuation;
+    });
+    fixture.page.beforeTransferRequest = async () => {
+      const firstRequest = fixture.page.dispatchDepositRequest(first);
+      await fixture.page.dispatchDepositRequest(duplicate);
+      expect(first.continued).toBe(1);
+      expect(duplicate).toMatchObject({ continued: 0, aborted: 1 });
+      releaseContinuation();
+      await firstRequest;
+    };
+
+    await fixture.driver.transferOnce(() => true);
+    expect(fixture.page.transferClicks).toBe(1);
+    expect(first).toMatchObject({ continued: 1, aborted: 0 });
+    expect(duplicate).toMatchObject({ continued: 0, aborted: 1 });
   });
 
   it.each<readonly [string, (page: FakePage) => void]>([
@@ -1561,20 +1710,84 @@ describe('Playwright KemerBet agent page', () => {
     const fixture = driver();
     mutate(fixture.page);
     await prepareExactPlayer(fixture);
-    await expect(fixture.driver.transferOnce()).rejects.toBeInstanceOf(
+    await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
     expect(fixture.page.lastRoute).toMatchObject({ continued: 0, aborted: 1 });
   });
 
+  it('never lends a later matching allowance to an uncertain earlier deposit', async () => {
+    const fixture = driver();
+    await prepareExactPlayer(fixture);
+    fixture.page.depositRequestBody = { playerId: 78123, amount: 26, notes: '' };
+    await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+
+    fixture.page.depositRequestBody = { playerId: 78123, amount: 25, notes: '' };
+    expect(await fixture.page.dispatchDepositRequest()).toMatchObject({ continued: 0, aborted: 1 });
+    await prepareExactPlayer(fixture);
+    await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+    expect(await fixture.page.dispatchDepositRequest()).toMatchObject({ continued: 0, aborted: 1 });
+    expect(fixture.page.transferClicks).toBe(1);
+    expect(fixture.page.depositRouteInstallations).toBe(1);
+  });
+
+  it.each(['continue', 'abort'] as const)(
+    'marks a detached route.%s rejection as uncertain and never rearms its page',
+    async (operation) => {
+      const fixture = driver();
+      await prepareExactPlayer(fixture);
+      fixture.page.emitDepositRequest = false;
+      const requestRoute = new FakeRoute(
+        new FakeRequest(KEMERBET_AGENT_PLAYER_DEPOSIT_URL, 'POST', {
+          playerId: 78123,
+          amount: operation === 'continue' ? 25 : 26,
+          notes: '',
+        }),
+      );
+      const dispatches: Promise<FakeRoute>[] = [];
+      const dispatch = vi
+        .spyOn(requestRoute, operation)
+        .mockRejectedValue(new Error('dispatch lost'));
+      fixture.page.beforeTransferRequest = () => {
+        // Real Playwright dispatches routing independently of the click promise. Do not await
+        // this handler in the fake click: only its explicit result may resolve the submission.
+        dispatches.push(fixture.page.dispatchDepositRequest(requestRoute));
+      };
+
+      await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+      await Promise.all(dispatches);
+      expect(dispatch).toHaveBeenCalledOnce();
+      await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
+        KemerBetDepositBrowserUnavailableError,
+      );
+      expect(await fixture.page.dispatchDepositRequest()).toMatchObject({
+        continued: 0,
+        aborted: 1,
+      });
+      expect(fixture.page.transferClicks).toBe(1);
+    },
+  );
+
   it('fails closed when the Transfer click produces no exact request', async () => {
     const fixture = driver();
     fixture.page.emitDepositRequest = false;
     await prepareExactPlayer(fixture);
-    await expect(fixture.driver.transferOnce()).rejects.toBeInstanceOf(
+    await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
       KemerBetDepositBrowserUnavailableError,
     );
     expect(fixture.page.lastRoute).toBeNull();
+    const late = await fixture.page.dispatchDepositRequest();
+    expect(late).toMatchObject({ continued: 0, aborted: 1 });
+    await expect(fixture.driver.transferOnce(() => true)).rejects.toBeInstanceOf(
+      KemerBetDepositBrowserUnavailableError,
+    );
+    expect(fixture.page.transferClicks).toBe(1);
   });
 
   it('waits for a delayed signed-in identity marker and rejects a swapped identity', async () => {
@@ -1613,7 +1826,7 @@ describe('Playwright KemerBet agent page', () => {
       amountText: '25.00',
       currencyCode: 'ETB',
     });
-    await fixture.driver.transferOnce();
+    await fixture.driver.transferOnce(() => true);
     await expect(fixture.driver.readAgentTransferResult()).resolves.toEqual({
       playerId: 'PLAYER-ALPHA',
       creditEvidenceText: 'Player Balance +25.00 ETB Success',

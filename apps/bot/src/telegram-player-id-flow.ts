@@ -112,8 +112,18 @@ export function telegramDepositHelpText(): string {
     'SIMULATION ONLY — DO NOT SEND MONEY.',
     'Use /deposit telebirr PLAYER_ID TRANSACTION_ID or /deposit cbe_birr PLAYER_ID TRANSACTION_ID.',
     'Use the destination KemerBet Player ID and one test transaction ID of 8–32 letters or digits. Do not include an amount.',
+    'For TeleBirr, you can replace TRANSACTION_ID with a receipt URL or the full SMS text. Only one transaction ID can be submitted at a time.',
+    'URLs are not opened. Pasted amounts and payment details are not verification. Photos and PDF files are not supported yet.',
     'After submission, choose Check status or send /deposit_status followed by the p1. tracking reference from your proof receipt.',
     'Use /menu to add a Player ID. No payment is verified or credited in this simulation.',
+  ].join('\n');
+}
+
+export function telegramDepositReferenceSelectionText(): string {
+  return [
+    'SIMULATION ONLY — DO NOT SEND MONEY.',
+    'More than one transaction ID was found. No proof was submitted.',
+    'Choose the transaction you intend to use, then send /deposit telebirr PLAYER_ID TRANSACTION_ID with only that one ID. Do not include an amount.',
   ].join('\n');
 }
 

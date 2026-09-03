@@ -1,5 +1,5 @@
 import { DEPOSIT_MAXIMUM_MINOR, DEPOSIT_MINIMUM_MINOR } from '@fetanagent/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createDeterministicKemerBetDepositFixture,
@@ -16,6 +16,7 @@ function runtime(
   fixture: ReturnType<typeof createDeterministicKemerBetDepositFixture>,
   browser = fixture.browser,
   finalActionEnabled = true,
+  monotonicNow?: () => number,
 ) {
   const logs: KemerBetDepositRunResult[] = [];
   return {
@@ -28,6 +29,7 @@ function runtime(
       finalActionEnabled,
       privateLiveDepositPilotManifest: deterministicKemerBetPrivateLiveDepositPilotManifest,
       now: fixture.now,
+      ...(monotonicNow === undefined ? {} : { monotonicNow }),
       log: (event) => logs.push(event),
     }),
   };
@@ -107,6 +109,211 @@ describe('KemerBet deposit execution runtime', () => {
       actionRetryAllowed: false,
     });
     expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1 });
+  });
+
+  it.each([10_000, 10_001, 301_000])(
+    'reconciles without Transfer when the fence acknowledgement arrives after %i ms',
+    async (delayMilliseconds) => {
+      const fixture = createDeterministicKemerBetDepositFixture();
+      const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+      vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => {
+        const fenced = await fenceFinalAction(lease);
+        fixture.advance(delayMilliseconds);
+        return fenced;
+      });
+      const submit = vi.spyOn(fixture.browser, 'submitOnceAfterFence');
+      const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+      const cancel = vi.spyOn(fixture.database, 'cancelBeforeAction');
+
+      await expect(runtime(fixture).runtime.runOnce()).resolves.toMatchObject({
+        event: 'reconciliation_required',
+        actionRetryAllowed: false,
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+      expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1 });
+      await runtime(fixture, fixture.freshBrowser()).runtime.runOnce();
+      expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1 });
+    },
+  );
+
+  it('passes the eligible first action to the browser just before the ten-second fence deadline', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture();
+    const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+    vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => {
+      const fenced = await fenceFinalAction(lease);
+      fixture.advance(9_999);
+      return fenced;
+    });
+    const submit = vi.spyOn(fixture.browser, 'submitOnceAfterFence').mockResolvedValue({
+      response: 'success_dialog_observed',
+      exactPlayerCreditMatch: true,
+    });
+
+    await expect(
+      runtime(fixture, fixture.browser, true, () => 0).runtime.runOnce(),
+    ).resolves.toMatchObject({
+      event: 'reconciliation_required',
+    });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(fixture.stats.fenceCalls).toBe(1);
+  });
+
+  it('does not extend an original lease that expires before the ten-second fence deadline', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture();
+    const leaseNextExecution = fixture.database.leaseNextExecution.bind(fixture.database);
+    vi.spyOn(fixture.database, 'leaseNextExecution').mockImplementation(async () => {
+      const leased = await leaseNextExecution();
+      if (leased?.disposition !== 'execution') throw new Error('fixture requires execution');
+      return { ...leased, leaseExpiresAt: new Date(fixture.now().getTime() + 1_000) };
+    });
+    const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+    vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => {
+      const fenced = await fenceFinalAction(lease);
+      fixture.advance(1_000);
+      return fenced;
+    });
+    const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+    const cancel = vi.spyOn(fixture.database, 'cancelBeforeAction');
+
+    await runtime(fixture).runtime.runOnce();
+    expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1 });
+  });
+
+  it.each([
+    ['invalid timestamp', () => new Date(Number.NaN)],
+    ['future timestamp', (now: Date) => new Date(now.getTime() + 1)],
+    ['non-Date timestamp', (now: Date) => now.toISOString() as unknown as Date],
+  ] as const)(
+    'reconciles a fence with an %s without any browser submission',
+    async (_name, timestamp) => {
+      const fixture = createDeterministicKemerBetDepositFixture();
+      const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+      vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => ({
+        ...(await fenceFinalAction(lease)),
+        finalActionFencedAt: timestamp(fixture.now()),
+      }));
+      const submit = vi.spyOn(fixture.browser, 'submitOnceAfterFence');
+      const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+
+      await runtime(fixture).runtime.runOnce();
+      expect(submit).not.toHaveBeenCalled();
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+      expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1, cancelled: false });
+    },
+  );
+
+  it.each([
+    'depositIntentId',
+    'executionAttemptId',
+    'privateLiveDepositPilotAuthorization',
+  ] as const)(
+    'hands off a mismatched or malformed fence %s for reconciliation without cancelling',
+    async (field) => {
+      const fixture = createDeterministicKemerBetDepositFixture();
+      const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+      vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => ({
+        ...(await fenceFinalAction(lease)),
+        [field]: null,
+      }));
+      const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+      const cancel = vi.spyOn(fixture.database, 'cancelBeforeAction');
+
+      await expect(runtime(fixture).runtime.runOnce()).resolves.toMatchObject({
+        event: 'needs_attention',
+      });
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+      expect(cancel).not.toHaveBeenCalled();
+      expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1 });
+    },
+  );
+
+  it('retains the durable fence when the stale-action reconciliation handoff fails', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture({
+      requireReconciliationFails: true,
+    });
+    const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+    vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => {
+      const fenced = await fenceFinalAction(lease);
+      fixture.advance(10_000);
+      return fenced;
+    });
+
+    await expect(runtime(fixture).runtime.runOnce()).resolves.toMatchObject({
+      event: 'final_action_fenced',
+      actionRetryAllowed: false,
+    });
+    await runtime(fixture, fixture.freshBrowser()).runtime.runOnce();
+    expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1, cancelled: false });
+  });
+
+  it('rechecks the action deadline after waiting to acquire the browser submission lane', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture();
+    const submitOnceAfterFence = fixture.browser.submitOnceAfterFence.bind(fixture.browser);
+    vi.spyOn(fixture.browser, 'submitOnceAfterFence').mockImplementation(async (lease, fence) => {
+      fixture.advance(10_000);
+      return submitOnceAfterFence(lease, fence);
+    });
+    const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+
+    await runtime(fixture).runtime.runOnce();
+    expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+    expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1, cancelled: false });
+  });
+
+  it.each(['acknowledgement', 'browser lane'] as const)(
+    'keeps the original monotonic deadline across the %s even if the wall clock hides elapsed time',
+    async (delayedBoundary) => {
+      const fixture = createDeterministicKemerBetDepositFixture();
+      let monotonic = 0;
+      if (delayedBoundary === 'acknowledgement') {
+        const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+        vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => {
+          const fenced = await fenceFinalAction(lease);
+          monotonic = 10_000;
+          return fenced;
+        });
+      } else {
+        const submitOnceAfterFence = fixture.browser.submitOnceAfterFence.bind(fixture.browser);
+        vi.spyOn(fixture.browser, 'submitOnceAfterFence').mockImplementation(
+          async (lease, fence) => {
+            monotonic = 10_000;
+            return submitOnceAfterFence(lease, fence);
+          },
+        );
+      }
+      const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+
+      await runtime(fixture, fixture.browser, true, () => monotonic).runtime.runOnce();
+      expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+      expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1, cancelled: false });
+    },
+  );
+
+  it('caps monotonic elapsed time by the original server lease even when its Date is mutated', async () => {
+    const fixture = createDeterministicKemerBetDepositFixture();
+    let monotonic = 0;
+    const leaseNextExecution = fixture.database.leaseNextExecution.bind(fixture.database);
+    vi.spyOn(fixture.database, 'leaseNextExecution').mockImplementation(async () => {
+      const leased = await leaseNextExecution();
+      if (leased?.disposition !== 'execution') throw new Error('fixture requires execution');
+      return { ...leased, leaseExpiresAt: new Date(fixture.now().getTime() + 100) };
+    });
+    const fenceFinalAction = fixture.database.fenceFinalAction.bind(fixture.database);
+    vi.spyOn(fixture.database, 'fenceFinalAction').mockImplementation(async (lease) => {
+      const fenced = await fenceFinalAction(lease);
+      lease.leaseExpiresAt.setTime(fixture.now().getTime() + 300_000);
+      monotonic = 100;
+      return fenced;
+    });
+    const reconcile = vi.spyOn(fixture.database, 'requireReconciliation');
+
+    await runtime(fixture, fixture.browser, true, () => monotonic).runtime.runOnce();
+    expect(reconcile).toHaveBeenCalledExactlyOnceWith(expect.anything(), false);
+    expect(fixture.stats).toMatchObject({ transferClicks: 0, fenceCalls: 1, cancelled: false });
   });
 
   it('uses the dynamic minimum product amount and completes only after exact reconciliation', async () => {

@@ -47,7 +47,8 @@ export interface KemerBetBrowserPage {
   openPlayerDeposit(): Promise<void>;
   lookupPlayer(playerId: string): Promise<void>;
   fillDeposit(amount: string, notes: string): Promise<void>;
-  transferOnce(): Promise<void>;
+  /** Recheck this synchronous guard immediately before the click and the deposit request. */
+  transferOnce(isFinalActionFresh: () => boolean): Promise<void>;
   readAgentLookup(): Promise<KemerBetAgentLookupView>;
   readAgentPreparedDeposit(): Promise<KemerBetAgentPreparedDepositView>;
   readAgentTransferResult(): Promise<KemerBetAgentTransferResultView | null>;
@@ -82,7 +83,12 @@ export interface KemerBetDepositBrowser {
   prepare(lease: KemerBetDepositExecutionLease): Promise<KemerBetDepositPreparedPage>;
   submitOnceAfterFence(
     lease: KemerBetDepositExecutionLease,
-    fence: { readonly firstFenceAcquired: true; readonly finalActionFencedAt: Date },
+    fence: {
+      readonly firstFenceAcquired: true;
+      readonly finalActionFencedAt: Date;
+      /** Retains the runtime's monotonic deadline through browser/session-lane waits. */
+      readonly isFinalActionFresh?: () => boolean;
+    },
   ): Promise<KemerBetImmediateFinalActionResult>;
   reconcile(lease: KemerBetDepositReconciliationLease): Promise<KemerBetDepositPageObservation>;
 }
@@ -92,6 +98,84 @@ export class KemerBetDepositBrowserUnavailableError extends Error {
     super('The supervised KemerBet deposit browser is unavailable.');
     this.name = 'KemerBetDepositBrowserUnavailableError';
   }
+}
+
+/** The database makes a fenced attempt recoverable after ten seconds, not the original lease. */
+export const KEMERBET_DEPOSIT_FINAL_ACTION_WINDOW_MILLISECONDS = 10_000;
+
+export function isKemerBetDepositFinalActionFresh(
+  leaseExpiresAt: Date,
+  finalActionFencedAt: Date,
+  observedAt: Date,
+): boolean {
+  try {
+    // Use native Date slots so malformed values and overridden getTime methods cannot authorize
+    // an action. A future fence or invalid local clock is unavailable, never extra action time.
+    const leaseExpiry = Date.prototype.getTime.call(leaseExpiresAt);
+    const fencedAt = Date.prototype.getTime.call(finalActionFencedAt);
+    const observed = Date.prototype.getTime.call(observedAt);
+    return (
+      Number.isFinite(leaseExpiry) &&
+      Number.isFinite(fencedAt) &&
+      Number.isFinite(observed) &&
+      observed >= fencedAt &&
+      observed < leaseExpiry &&
+      observed - fencedAt < KEMERBET_DEPOSIT_FINAL_ACTION_WINDOW_MILLISECONDS
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function createKemerBetDepositFinalActionFreshnessGuard(
+  leaseExpiresAt: Date,
+  finalActionFencedAt: Date,
+  now: () => Date,
+  monotonicNow: () => number = () => performance.now(),
+): () => boolean {
+  let leaseExpiry: Date;
+  let fencedAt: Date;
+  let startedAt: number;
+  try {
+    // Capture native values before invoking the clock or any browser code. Readonly Date fields
+    // are still mutable; a shared clock object must never move an already granted deadline.
+    leaseExpiry = new Date(Date.prototype.getTime.call(leaseExpiresAt));
+    fencedAt = new Date(Date.prototype.getTime.call(finalActionFencedAt));
+    startedAt = monotonicNow();
+  } catch {
+    return () => false;
+  }
+  let fresh = true;
+  let lastObserved = Number.NEGATIVE_INFINITY;
+  let lastMonotonic = startedAt;
+  let monotonicDeadline: number | null = null;
+  return () => {
+    if (!fresh) return false;
+    try {
+      const observedAt = now();
+      const observed = Date.prototype.getTime.call(observedAt);
+      const monotonic = monotonicNow();
+      monotonicDeadline ??=
+        startedAt +
+        Math.min(
+          leaseExpiry.getTime() - observed,
+          fencedAt.getTime() + KEMERBET_DEPOSIT_FINAL_ACTION_WINDOW_MILLISECONDS - observed,
+        );
+      fresh =
+        isKemerBetDepositFinalActionFresh(leaseExpiry, fencedAt, observedAt) &&
+        Number.isFinite(startedAt) &&
+        startedAt >= 0 &&
+        Number.isFinite(monotonic) &&
+        monotonic >= lastMonotonic &&
+        monotonic < monotonicDeadline &&
+        observed >= lastObserved;
+      lastObserved = observed;
+      lastMonotonic = monotonic;
+    } catch {
+      fresh = false;
+    }
+    return fresh;
+  };
 }
 
 function requireAllowedUrl(rawUrl: string): URL {
@@ -234,23 +318,44 @@ export function createKemerBetDepositBrowser(
 
     async submitOnceAfterFence(lease, fence) {
       requireExactAgentBinding(lease);
-      if (!fence.firstFenceAcquired || submittedAttemptIds.has(lease.executionAttemptId)) {
+      if (fence.firstFenceAcquired !== true || submittedAttemptIds.has(lease.executionAttemptId)) {
         throw new KemerBetDepositBrowserUnavailableError();
       }
       submittedAttemptIds.add(lease.executionAttemptId);
+      const timestampGuard = createKemerBetDepositFinalActionFreshnessGuard(
+        lease.leaseExpiresAt,
+        fence.finalActionFencedAt,
+        now,
+      );
+      const runtimeGuard = fence.isFinalActionFresh;
+      let actionFresh = true;
+      const isFinalActionFresh = () => {
+        if (!actionFresh) return false;
+        try {
+          actionFresh = (runtimeGuard === undefined || runtimeGuard() === true) && timestampGuard();
+        } catch {
+          actionFresh = false;
+        }
+        return actionFresh;
+      };
+      if (!isFinalActionFresh()) {
+        return { response: 'response_uncertain', exactPlayerCreditMatch: false };
+      }
       await requirePageStillAllowed(agentPage);
       const rendered = await agentPage.readAgentPreparedDeposit();
       if (
         rendered.playerId !== lease.target.playerId ||
         rendered.currencyCode !== lease.target.currencyCode ||
-        amountMinor(rendered.amountText) !== lease.target.amountMinor
+        amountMinor(rendered.amountText) !== lease.target.amountMinor ||
+        !isFinalActionFresh()
       ) {
-        // The attempt is already fenced, so page drift is uncertainty: do not click and do not
-        // permit any retry. Reconciliation records the missing modal fact as fail-closed.
+        // The attempt is already fenced, so page drift or expired authority is uncertainty:
+        // never click or retry. Reconciliation records the missing modal fact as fail-closed.
         return { response: 'response_uncertain', exactPlayerCreditMatch: false };
       }
-      // This is the only browser call in the adapter that can move money.
-      await agentPage.transferOnce();
+      // The concrete driver also awaits readiness/locator work. Carry the guard through that
+      // boundary so expiry during those waits or between the click and POST cannot move money.
+      await agentPage.transferOnce(isFinalActionFresh);
       await requirePageStillAllowed(agentPage);
       try {
         const result = await agentPage.readAgentTransferResult();

@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./candidate-extraction": {
+      "types": "./dist/candidate-extraction.d.ts",
+      "default": "./dist/candidate-extraction.js"
     }
   },
   "scripts": {

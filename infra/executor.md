@@ -37,6 +37,19 @@ KemerBet agent-account ID, or credential. The database-issued lease and fence mu
 manifest values and the same immutable reservation and authorization token before the browser can
 perform a Transfer action.
 
+The local runtime and browser boundary recheck final-action freshness after the database fence
+response and after asynchronous page preparation. The concrete driver checks it again immediately
+before the click and before permitting the deposit POST. Authority ends at the earlier of the
+original execution-lease expiry and ten seconds after `final_action_fenced_at`, matching the
+database's fenced-attempt recovery window; invalid or future timestamps do not grant more time.
+Immutable timestamp snapshots and a one-way monotonic deadline also prevent mutable `Date` values
+or local clock rollback from extending that window. The monotonic budget starts before the fence
+request, conservatively including time spent waiting for its response.
+Once fenced, a stale or uncertain attempt is never cancelled back into executable work or blindly
+retried. It is handed to reconciliation without asserting a successful player credit. The one-shot
+request guard also rejects duplicate and delayed deposit requests after the attempt's allowance is
+used or closed. These are source safeguards, not evidence that an executor or transfer is enabled.
+
 The executor image uses the distribution Chromium at `/usr/bin/chromium`; Playwright downloads no
 browser. The long-lived executor and headed manual provisioner require Chromium's nested sandbox
 and do not add a `--no-sandbox` argument. The separately hardened private-preview and one-time

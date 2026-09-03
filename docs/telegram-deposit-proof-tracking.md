@@ -9,7 +9,8 @@ create a financial job, or activate the KemerBet companion.
 
 1. A customer submits the existing `/deposit telebirr PLAYER_ID TRANSACTION_ID` or
    `/deposit cbe_birr PLAYER_ID TRANSACTION_ID` command. The existing capture authorization and
-   dry-run restrictions still apply.
+   dry-run restrictions still apply. For TeleBirr, the final argument may also be a pasted receipt
+   URL or the full SMS text, including line breaks; the bot extracts only a transaction-ID candidate.
 2. The acknowledgement displays a `p1.<opaque token>` tracking reference and a **Check status**
    button. No amount, raw payment reference, or Player ID is encoded into that reference.
 3. The customer can press the button or send `/deposit_status p1.<opaque token>` in their private
@@ -21,6 +22,34 @@ create a financial job, or activate the KemerBet companion.
 An unknown request, a request belonging to another customer or Telegram identity, and an
 unavailable request receive the same customer-facing status-unavailable response. A copied button
 or tracking reference is not authorization to view a proof.
+
+## TeleBirr receipt URL and SMS input
+
+The bot uses the shared, versioned TeleBirr candidate extractor through its candidate-only export.
+It scans both receipt paths and supported transaction/invoice labels, even when a pasted message
+starts with a URL. Repeated occurrences of the same normalized ID produce one candidate. Distinct
+candidates produce a fixed **More than one transaction ID was found. No proof was submitted.**
+response; the customer must explicitly choose and resubmit one direct ID. The bot does not display
+the candidate list, keep a draft in memory, or guess which payment the customer intended.
+
+The complete command is bounded to 16 KiB of UTF-8 before parsing. Forbidden control characters,
+malformed recognized reference contexts, short/overlong IDs, and non-ASCII or connected suffixes
+fail closed instead of silently truncating or ignoring a conflicting reference. Ordinary sentence
+punctuation and SMS line breaks remain supported. Unlabelled phone numbers, amounts, dates, and
+words are not scanned as references. Direct-reference commands preserve their existing envelope
+spelling so a repeated update remains byte-for-byte compatible with prior direct submissions.
+
+Only the selected reference enters the existing signed `deposit_proof_command` envelope, where
+the API encrypts and fingerprints it before database capture. The original SMS, URL, submitted
+host, receiver name, claimed amount, and other receipt facts are not forwarded, echoed, or logged.
+No customer URL is fetched. A receipt path on a customer-controlled host is only candidate text;
+it is never provider authority. Extraction proves neither payment nor amount and cannot settle or
+execute a deposit. CBE Birr remains direct-reference-only; photos, PDFs, OCR, and interactive
+candidate-selection storage are not implemented by this slice.
+
+This input extension adds no action kind, private database function, grant, migration, financial
+switch, or live verifier connection. Accepted inputs receive the same persisted `p1.` proof and
+customer-scoped status lookup as direct references.
 
 ## Request and identity boundary
 
@@ -54,7 +83,9 @@ financial switch does not turn these records into live requests or change their 
 The later live intake must define its own explicit proof-to-verification-to-deposit lineage and
 customer projection. It must not promote or backfill historical simulation proofs.
 
-The guided multi-step deposit conversation, saved Player-ID selection, receiver instructions,
-URL/SMS/file candidate extraction, live verifier composition, companion execution integration, and
-durable completion notifications remain separate implementation work. This tracking slice neither
-claims nor substitutes for those capabilities.
+The guided multi-step deposit conversation, saved Player-ID selection, receiver instructions, file
+and OCR input, live verifier composition, companion execution integration, and durable completion
+notifications remain separate implementation work. A guided flow must persist its draft and
+exact-once step receipts in the backend; it must not reinterpret registration text through a
+bot-local in-memory wizard. These input/tracking slices neither claim nor substitute for those
+capabilities.

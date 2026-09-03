@@ -220,8 +220,23 @@ language plpgsql
 security definer
 set search_path = pg_catalog
 as $$
+declare
+  enrollment app.private_live_telebirr_device_enrollments%rowtype;
 begin
   perform app.require_telebirr_assignment_broker_session();
+
+  -- Device enrollments are append-only. Read the immutable public snapshot before invoking the
+  -- leasing routine: a sibling table scan in the same RETURN QUERY statement would use the
+  -- statement's pre-call snapshot and could not see the verification-attempt row created by the
+  -- leasing routine.
+  select device_enrollment.*
+    into enrollment
+    from app.private_live_telebirr_device_enrollments device_enrollment
+   where device_enrollment.id = p_device_enrollment_id;
+
+  if enrollment.id is null then
+    raise exception 'The private live TeleBirr device enrollment is unavailable.';
+  end if;
 
   return query
   select leased.verification_attempt_id,
@@ -236,10 +251,10 @@ begin
          leased.issued_at,
          leased.expires_at,
          leased.pilot_revision_id,
-         attempt.device_enrollment_id,
-         attempt.device_id_snapshot,
-         attempt.device_key_id_snapshot,
-         attempt.device_public_key_spki_sha256_snapshot,
+         enrollment.id,
+         enrollment.device_id,
+         enrollment.key_id,
+         enrollment.public_key_spki_sha256,
          leased.receiver_account_id,
          leased.receiver_profile_id,
          leased.receiver_profile_digest,
@@ -260,11 +275,7 @@ begin
       p_leased_by,
       p_lease_request_key,
       p_lease_seconds
-    ) leased
-    join app.private_live_telebirr_verification_attempts attempt
-      on attempt.id = leased.verification_attempt_id
-     and attempt.lease_token = leased.lease_token
-     and attempt.verification_job_id = leased.verification_job_id;
+    ) leased;
 end;
 $$;
 

@@ -35,6 +35,7 @@ class MainActivity : Activity() {
       )
       addView(versionView("Relay", RelayProtocol.TRANSCRIPT_VERSION))
       addView(versionView("Pilot", LivePrivatePilotProtocol.OBSERVATION_TRANSCRIPT_VERSION))
+      addView(versionView("Bridge", DeviceBridgeProtocol.REQUEST_TRANSCRIPT_VERSION))
       addView(versionView("Provider", LivePrivatePilotProtocol.SOURCE_PROFILE))
       addView(versionView("Parser", RelayProtocol.PARSER_VERSION))
       addView(versionView("Normalizer", RelayProtocol.NORMALIZER_VERSION))

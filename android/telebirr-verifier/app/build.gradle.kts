@@ -11,8 +11,8 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = 2
-    versionName = "0.2.0-runtime-inert"
+    versionCode = 3
+    versionName = "0.3.0-device-bridge-inert"
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
     testInstrumentationRunner = "android.test.InstrumentationTestRunner"
@@ -49,6 +49,8 @@ android {
 val gradleLibDir = requireNotNull(gradle.gradleHomeDir).resolve("lib")
 
 dependencies {
+  implementation("com.google.code.gson:gson:2.14.0")
+
   // Gradle 8.11.1 already ships these exact test-runner jars, so offline validation needs no download.
   testImplementation(files(gradleLibDir.resolve("junit-4.13.2.jar")))
   testImplementation(files(gradleLibDir.resolve("hamcrest-core-1.3.jar")))

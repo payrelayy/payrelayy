@@ -96,10 +96,12 @@ as part of these deployment checks.
 
 ## Availability and remaining real-money work
 
-The existing bounded staging timer stops this release on **2026-09-04 at 12:12:32 UTC
-(15:12:32 East Africa Time)**, two hours before its runtime credentials expire. This is not 24/7
-production availability. Use the reviewed staging renewal/deployment process while beta access is
-required; do not disable the expiry protection.
+At the original 14:40 UTC verification, the bounded staging timer was scheduled for **2026-09-04 at
+12:12:32 UTC (15:12:32 East Africa Time)**, two hours before runtime credentials expired. The Owner
+subsequently requested removal of this arbitrary availability limit. That policy is superseded by
+the [continuous-availability procedure](../infra/staging-continuous-availability.md), which changes
+only the four application login lifetimes and disables the old timer after independent database and
+host checks. Removing the timer without first removing application credential expiry is not sufficient.
 
 Still required are the durable guided Telegram conversation, exact local KemerBet session/device
 pairing and execution integration, Android enrollment and official TeleBirr observation lifecycle,

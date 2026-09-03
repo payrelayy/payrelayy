@@ -1,0 +1,160 @@
+name: Staging continuous availability
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect lifetimes or remove expiry from four non-financial application logins
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - enable-continuous
+      confirm_staging_project_ref:
+        description: Type the exact staging Supabase project ref
+        required: true
+        type: string
+      confirm_deployed_release_sha:
+        description: Type the exact full deployed application release SHA from main
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_no_financial_activation:
+        description: Type continuous-availability-no-money for enable-continuous; leave empty for inspect
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  STAGING_DROPLET_ID: '593344964'
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  DEPLOYED_RELEASE_SHA: ${{ inputs.confirm_deployed_release_sha }}
+
+jobs:
+  availability:
+    name: Keep the reviewed non-financial release available
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    steps:
+      - name: Check out the reviewed operation and release ancestry
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate exact target and prepare protected connections
+        id: target
+        shell: bash
+        env:
+          CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_NO_MONEY: ${{ inputs.confirm_no_financial_activation }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          [[ "$DEPLOYED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$DEPLOYED_RELEASE_SHA" "$GITHUB_SHA"
+          [[ "$REQUESTED_MODE" =~ ^(inspect|enable-continuous)$ ]]
+          if [[ "$REQUESTED_MODE" == 'enable-continuous' ]]; then
+            [[ "$CONFIRMED_NO_MONEY" == 'continuous-availability-no-money' ]]
+          else
+            [[ -z "$CONFIRMED_NO_MONEY" ]]
+          fi
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_SSH_PRIVATE_KEY" && -n "$STAGING_VM_KNOWN_HOSTS" ]]
+          protected="$RUNNER_TEMP/continuous-availability-protected"
+          [[ ! -e "$protected" && ! -L "$protected" ]]
+          umask 077
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          helper_sha="$(git show "$DEPLOYED_RELEASE_SHA:infra/operations/fetanagent-staging-deploy-helper.sh" | sha256sum | awk '{print $1}')"
+          [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the installed release without stopping or restarting it
+        shell: bash
+        env:
+          VM_HOST: ${{ steps.target.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.target.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/continuous-availability-protected"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper public-edge-ready '$DEPLOYED_RELEASE_SHA'"
+
+      - name: Inspect or enable continuous database lifetimes
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ runner.temp }}/continuous-availability-protected/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PGCONNECT_TIMEOUT: '10'
+        run: |
+          set -euo pipefail
+          [[ -n "$PGPASSWORD" ]]
+          psql -X --file=infra/sql/staging-runtimes-availability-inspect.sql
+          if [[ "$REQUESTED_MODE" == 'enable-continuous' ]]; then
+            psql -X --file=infra/sql/staging-runtimes-enable-continuous.sql
+            psql -X --file=infra/sql/staging-runtimes-availability-inspect.sql
+          fi
+
+      - name: Report timer state and verify public availability
+        shell: bash
+        env:
+          VM_HOST: ${{ steps.target.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/continuous-availability-protected"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "systemctl show fetanagent-staging-runtime-expiry-stop.timer --property=LoadState --property=ActiveState --property=UnitFileState --property=NextElapseUSecRealtime"
+          for url in https://fetanagent.com/ https://fetanagent.com/sign-in https://owner.fetanagent.com/owner; do
+            curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 15 --output /dev/null "$url"
+          done
+          echo 'Database lifetime operation verified. An existing active timer still requires the reviewed root-only disarm operation.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove only this job's temporary connection files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/continuous-availability-protected"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" ]]
+            [[ "$(realpath -- "$protected")" == "$RUNNER_TEMP/continuous-availability-protected" ]]
+            rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+            rmdir -- "$protected"
+          fi

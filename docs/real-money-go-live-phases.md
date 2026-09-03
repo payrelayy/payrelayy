@@ -159,8 +159,10 @@ passing. Public home, sign-in, and Owner entry returned HTTPS 200. The private T
 menu now lists `/start`, `/menu`, `/deposit`, `/deposit_status`, and `/help` with simulation-only
 deposit wording. See the [cloud release evidence](telegram-deposit-cloud-release-2026-09-03.md).
 
-The existing bounded beta stops on 2026-09-04 at 12:12:32 UTC (15:12:32 East Africa Time) unless
-renewed through the reviewed deployment process. This is not continuous production availability.
+The Owner requested continuous availability on 2026-09-03. The former 2026-09-04 shutdown policy
+is superseded by the [continuous-availability procedure](../infra/staging-continuous-availability.md):
+four non-expiring application login lifetimes plus a disabled/absent expiry timer, verified together.
+Continuous availability is separate from production and real-money readiness.
 
 The Windows companion v0.1.2 release (Git tag `windows-companion-v0.1.2`),
 built from `de960b4b63e4a832f8681aebb9537482ca6b0d42`, is published and installed on the Owner's
@@ -229,8 +231,8 @@ remains disabled. Customer website/app development is deferred.
 3. Verify exact image revision, health, TLS, DNS, firewall, bot identity, zero bot restarts, and the
    dry-run runtime contract.
 4. Confirm the executor, trusted verifier, and every financial switch remain disabled.
-5. Refresh the bounded staging deployment before its automatic expiry when continued demo access is
-   required.
+5. Verify the four application login lifetimes have no expiry and the former shutdown timer is
+   disabled/absent with no next trigger; preserve explicit emergency stop and financial controls.
 
 ### Owner-visible proof
 

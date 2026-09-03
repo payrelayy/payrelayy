@@ -1,5 +1,11 @@
 # Manual staging beta container contract
 
+Ordinary staging releases now have **continuous availability**: there is no scheduled application
+shutdown. This removes the former 24-hour-login/22-hour-uptime policy, not authentication or financial
+safety limits. See [continuous availability](staging-continuous-availability.md) for the reviewed
+in-place conversion and its verification. Historical recovery procedures below retain their original
+bounded contracts and are not the ordinary deployment path.
+
 `compose.staging-beta.yaml` is a deployment artifact for private beta admission plus pending
 Player-ID registration. It does not run under the default Compose profile and it does not include a
 worker, long-lived executor, maintenance process, public API host port, Docker socket, production project
@@ -2532,25 +2538,19 @@ not read the Telegram token; it always installs the invalid
 and beta-admission. It rejects root SSH and fails if the installed helper checksum differs from the
 reviewed repository helper.
 
-`deploy-and-smoke` does not accept an operator-authored stop deadline. Immediately after provisioning,
-it reads only the four exact staging roles' `rolvaliduntil` values through the protected administrator
-connection. All four roles must exist, be login-enabled, have finite expiries within the expected
-24-hour window, and differ by no more than ten seconds. The workflow derives one canonical UTC stop
-time exactly two hours before the earliest expiry. It transfers no database password or administrator
-credential to the VM for this control.
+`deploy-and-smoke` has no scheduled application shutdown. Immediately after the existing narrow
+credential-provisioning step, `staging-runtimes-enable-continuous.sql` changes only the four application
+roles' `VALID UNTIL` fields to `infinity`. It validates exact non-administrative attributes, one narrow
+membership per role, all seven disabled financial switches, and disabled executor/verifier logins
+before changing anything. Passwords, permission grants, connection limits, and financial role
+lifetimes are unchanged. The original provisioning SQL remains bounded for historical recovery
+contracts; every ordinary deployment must complete the separate continuous-lifetime step before
+starting a service.
 
-Before any long-lived container starts, the checksum-verified root helper installs and enables a
-fixed, root-owned systemd service and persistent timer for that derived time. The timer survives a VM
-reboot, stops only the exact `fetanagent-staging-beta` Compose project, removes its runtime secret
-files, and retries once per minute without a start limit if the stop fails. The helper permits the
-timer-only `expiry-stop` path only for a systemd service invocation with its fixed guard marker; the
-deployment identity cannot invoke that path directly. Any ordinary helper `stop` also removes the
-timer. If deriving or arming the timer fails, activation does not start and the workflow disables all
-four logins. A cancellation after provisioning also runs the same bounded VM stop/disarm and database
-login cleanup; cancellation before provisioning has no runtime login to remove. This is an automatic
-stop-before-expiry boundary, not credential rotation or continuous availability: staging intentionally
-goes offline about 22 hours after each successful deployment and must be redeployed with new
-disposable credentials to resume.
+Before any long-lived container starts, the workflow verifies that the old expiry timer and service
+are absent. The preceding ordinary helper `stop` removes any old timer; ordinary deployments do not
+arm the old expiry timer. Failure or cancellation after provisioning still runs the existing bounded
+VM stop/disarm and database-login cleanup. This availability policy does not enable financial processing.
 
 DigitalOcean Droplet `593344964` has the exact current public IPv6 address
 `2a03:b0c0:1:e0:0:1:a8b4:2001`. It is the only address this workflow may remove from Supabase's
@@ -2586,12 +2586,11 @@ request. The gate does not depend on an aging startup-log tail. Missing, mismatc
 material fails closed. Failure disables all four logins. If the administrator
 cleanup connection is temporarily refused after a failed activation, the workflow makes at most
 four cleanup attempts, 15 seconds apart, and then fails visibly rather than claiming cleanup.
-`stop-and-disable` remains the explicit immediate cleanup mode. Independently, the host-local timer
-stops the containers and deletes their runtime secret files two hours before the earliest 24-hour
-login expiry, preventing expired-password reconnect loops from causing another temporary network
-ban. The database roles remain unused until they expire naturally; an explicit stop disables them
-immediately. The workflow does not support in-place runtime-password rotation. A successful
-deployment is a time-bounded beta demo, not financial launch approval; all payment,
+`stop-and-disable` remains the explicit immediate cleanup mode and disables application logins
+immediately. Application logins no longer expire on a fixed daily deadline, avoiding expired-password
+reconnect loops and another temporary network ban. The workflow does not support in-place runtime-password rotation;
+password replacement still uses the reviewed stopped deployment procedure. A successful
+deployment is a continuously available beta, not financial launch approval; all payment,
 provider, validation, deposit, withdrawal, and KemerBet execution gates remain off.
 
 `Staging Telegram bot activation and smoke` is the only supported fresh-host bot boundary. Run it

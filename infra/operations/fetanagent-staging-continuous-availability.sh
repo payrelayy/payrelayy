@@ -13,7 +13,19 @@ readonly MODE="$1" RELEASE_SHA="$2"
 [[ "$(id -u)" == 0 && ( -z "${SUDO_USER:-}" || "${SUDO_USER:-}" == fetanagent-admin ) ]] ||
   die 'Use the trusted root session or the dedicated deployment capability.'
 readonly INSTALLED_PATH='/usr/local/sbin/fetanagent-staging-continuous-availability'
-[[ "$0" == "$INSTALLED_PATH" && ! -L "$INSTALLED_PATH" &&
+invoked_from_installed_file() {
+  local invoked_path="$1"
+  [[ "$invoked_path" == "$INSTALLED_PATH" ]] && return 0
+  # Digest-bound sudo uses fdexec for scripts. Preserve that protection and
+  # accept only its exact original command and the installed file's inode.
+  [[ "${SUDO_USER:-}" == fetanagent-admin &&
+    "${SUDO_COMMAND:-}" == "$INSTALLED_PATH $MODE $RELEASE_SHA" &&
+    "$invoked_path" =~ ^/(proc/self/fd|dev/fd)/[0-9]+$ &&
+    -f "$invoked_path" &&
+    "$(stat -L --format='%d:%i' "$invoked_path")" == "$(stat --format='%d:%i' "$INSTALLED_PATH")" ]]
+}
+invoked_from_installed_file "$0" || die 'The finalizer invocation does not identify its installed file.'
+[[ ! -L "$INSTALLED_PATH" &&
   "$(stat --format='%U:%G:%a:%h' "$INSTALLED_PATH")" == 'root:root:755:1' ]] ||
   die 'The finalizer must run from its root-owned installed path.'
 [[ -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] || die 'Docker overrides are forbidden.'

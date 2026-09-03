@@ -35,7 +35,7 @@ would leave an apparently live service with expired credentials.
    Run the reviewed `install-staging-continuous-availability.sh` with that directory and the exact
    finalizer SHA-256. It installs only the root-owned finalizer and checksum-bound `preflight` and
    `disable-expiry` sudo commands for `fetanagent-admin`. It can upgrade only the exact initial
-   finalizer and sudoers digests recorded in the installer; any other differing file is refused.
+   finalizer/sudoers versions recorded by exact digest in the installer; any other differing file is refused.
 2. Run `Staging continuous availability` in `inspect` mode on `main`, with staging project
    `spzpiyxheappsfyswewl`, Droplet `593344964`, and the exact deployed 40-character application SHA.
 3. Run that workflow with `mode=enable-continuous` and
@@ -52,6 +52,12 @@ would leave an apparently live service with expired credentials.
 not require database lifetimes to have been converted yet. It never changes the database or timer.
 Do not use the legacy helper's `fresh-public-edge-ready` here: that is a pre-publication check that
 requires exactly five services and unused HTTPS ports, not a check of an already-live gateway.
+
+Keep sudo's default checksum-bound descriptor execution enabled. For a script, it changes `$0` to
+an open descriptor path. The finalizer accepts that form only for the exact dedicated deployment
+identity, exact sudo-reported original command, and the installed file's device/inode. Test the
+read-only `preflight` through `fetanagent-admin`'s real sudo command, not just a direct root call.
+See the [sudoers fdexec documentation](https://www.sudo.ws/docs/man/1.9.14/sudoers.man.pdf).
 
 The root operation checks the exact Droplet and installed helper, acquires the existing deployment
 mutation lock, requires either the four healthy private-core services or the complete six-service

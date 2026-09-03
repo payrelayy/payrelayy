@@ -12,6 +12,8 @@ readonly LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 readonly LOCK="$LOCK_ROOT/mutation.lock"
 readonly PREDECESSOR_FINALIZER_SHA='edcafd4de4f6a15b8b64136d7d97a86dff9dad8099acb6a82ae307abe82dc858'
 readonly PREDECESSOR_SUDOERS_SHA='ff438491f6fd7f583f0fbaf85bb90736776863ebc81c5661ad97ef617f7b6758'
+readonly PREFLIGHT_FINALIZER_SHA='37a8ddebe924f92f0c6dafa001a183326e63fb26a3d65e0996238ac808870e1d'
+readonly PREFLIGHT_SUDOERS_SHA='4300ee2f62475c607d7ee96a34c0ceb47ce67668a3b71a8c6515f3749229f483'
 [[ "$STAGED" =~ ^/run/fetanagent-continuity-install-[0-9a-f]{40}$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]] ||
   die 'The source directory or reviewed digest is invalid.'
 [[ "$(curl --fail --silent --show-error --noproxy '*' --max-time 5 http://169.254.169.254/metadata/v1/id)" == 593344964 ]] ||
@@ -55,11 +57,13 @@ verify_predecessor() {
 if [[ -e "$TARGET" || -L "$TARGET" ]]; then
   verify_installed "$TARGET" "$STAGED/finalizer.sh" 755 ||
     verify_predecessor "$TARGET" "$PREDECESSOR_FINALIZER_SHA" 755 ||
+    verify_predecessor "$TARGET" "$PREFLIGHT_FINALIZER_SHA" 755 ||
     die 'A different finalizer already exists; no files were replaced.'
 fi
 if [[ -e "$SUDOERS" || -L "$SUDOERS" ]]; then
   verify_installed "$SUDOERS" "$STAGED/finalizer.sudoers" 440 ||
     verify_predecessor "$SUDOERS" "$PREDECESSOR_SUDOERS_SHA" 440 ||
+    verify_predecessor "$SUDOERS" "$PREFLIGHT_SUDOERS_SHA" 440 ||
     die 'A different sudo capability already exists; no files were replaced.'
 fi
 if ! verify_installed "$TARGET" "$STAGED/finalizer.sh" 755; then install -o root -g root -m 0755 "$STAGED/finalizer.sh" "$TARGET"; fi

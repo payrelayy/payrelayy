@@ -1,0 +1,8 @@
+-- Hosted staging-only operational migration ledger marker.
+--
+-- Supabase recorded this version when the guarded KemerBet quarantine-recovery operation aligned
+-- the existing staging Player-action runtime credential validity. Credential values and lifetimes
+-- are deliberately provisioned outside canonical schema migrations, so reproducing that historical
+-- operational change in a fresh database would be unsafe. This no-op file preserves exact
+-- migration-history continuity without creating a login, credential, schema object, feature
+-- switch, or authority.

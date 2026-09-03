@@ -32,6 +32,17 @@ includes seed data, targets production, deploys an application, starts Telegram,
 payment flow. Review the staging project's security and performance advisors separately after the
 first successful apply.
 
+### Hosted migration-ledger reconciliation
+
+The staging project contains two 2026-08-29 migration entries created by guarded operational
+credential-validity recovery. Their matching repository files are intentionally comment-only
+ledger markers: fresh databases must not reproduce an old staging credential lifetime. The
+Telegram proof-status migration was first reviewed under source timestamp `20260902224258`, but the
+Supabase management migration tool installed the reviewed body under hosted version
+`20260903140617`; the canonical filename uses the hosted version. The infrastructure verifier pins
+these facts and requires the operational markers to remain no-op. Do not use `migration repair` to
+erase or invent history when a hosted entry differs; inspect its exact name and effect first.
+
 ## First staging Owner
 
 The manual

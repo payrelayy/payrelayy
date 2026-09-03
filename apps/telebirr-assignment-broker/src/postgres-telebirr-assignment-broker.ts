@@ -231,7 +231,10 @@ export const PERSIST_TELEBIRR_ASSIGNMENT_SIGNATURE_SQL = `
   )
 `;
 
-export const TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_KEYS = Object.freeze([20260904, 4000] as const);
+// Stable four-byte protocol namespaces ("FETA" / "TBRR"), never a calendar date or shutdown key.
+export const TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_KEYS = Object.freeze([
+  0x46455441, 0x54425252,
+] as const);
 export const TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_ACQUIRE_SQL = `
   select pg_catalog.pg_try_advisory_lock($1::integer, $2::integer)
     as singleton_acquired

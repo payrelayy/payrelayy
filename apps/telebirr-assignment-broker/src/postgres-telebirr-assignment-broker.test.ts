@@ -7,6 +7,7 @@ import {
   TELEBIRR_ASSIGNMENT_BROKER_PREFLIGHT_KEYS,
   TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_ACQUIRE_SQL,
   TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_HELD_SQL,
+  TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_KEYS,
   TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_RELEASE_SQL,
   PostgresTelebirrAssignmentBrokerDatabase,
   TelebirrAssignmentBrokerPostgresUnavailableError,
@@ -87,6 +88,10 @@ function queryWith(operationSql: string, operationRows: readonly unknown[]) {
 }
 
 describe('TeleBirr assignment broker PostgreSQL adapter', () => {
+  it('uses stable protocol singleton namespaces rather than a calendar-shaped key', () => {
+    expect(TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_KEYS).toEqual([0x46455441, 0x54425252]);
+  });
+
   it('requires every catalog preflight fact to be exactly true', async () => {
     const database: TelebirrAssignmentBrokerPostgresQuery = {
       query: vi.fn(async () => ({ rows: [preflightRow()] })),

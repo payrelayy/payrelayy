@@ -67,56 +67,92 @@ with role_state as (
        'fetanagent_telebirr_assignment_broker',
        'fetanagent_telebirr_assignment_broker_runtime'
      )
+), role_shape as (
+  select (
+           select count(*) = 1
+              and pg_catalog.bool_and(
+                not role_state.rolinherit
+                and not role_state.rolsuper
+                and not role_state.rolcreatedb
+                and not role_state.rolcreaterole
+                and not role_state.rolreplication
+                and not role_state.rolbypassrls
+                and role_state.rolconnlimit = 2
+              )
+             from role_state
+            where role_state.rolname = 'fetanagent_telebirr_assignment_broker'
+         ) as group_role_safe,
+         (
+           select count(*) = 1
+              and pg_catalog.bool_and(not role_state.rolcanlogin)
+             from role_state
+            where role_state.rolname = 'fetanagent_telebirr_assignment_broker'
+         ) as group_role_disabled,
+         (
+           select count(*) = 1
+              and pg_catalog.bool_and(
+                not role_state.rolinherit
+                and not role_state.rolsuper
+                and not role_state.rolcreatedb
+                and not role_state.rolcreaterole
+                and not role_state.rolreplication
+                and not role_state.rolbypassrls
+                and role_state.rolconnlimit = 1
+              )
+             from role_state
+            where role_state.rolname = 'fetanagent_telebirr_assignment_broker_runtime'
+         ) as runtime_role_safe,
+         (
+           select count(*) = 1
+              and pg_catalog.bool_and(not role_state.rolcanlogin)
+             from role_state
+            where role_state.rolname = 'fetanagent_telebirr_assignment_broker_runtime'
+         ) as runtime_role_disabled,
+         (
+           select count(*) = 1
+              and pg_catalog.bool_and(
+                role_state.rolcanlogin
+                and role_state.rolvaliduntil
+                  > pg_catalog.clock_timestamp() + interval '5 minutes'
+                and role_state.rolvaliduntil
+                  <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+              )
+             from role_state
+            where role_state.rolname = 'fetanagent_telebirr_assignment_broker_runtime'
+         ) as runtime_login_bounded,
+         (
+           select count(*) = 1
+              and pg_catalog.bool_and(
+                membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+                and membership_state.member_role
+                  = 'fetanagent_telebirr_assignment_broker_runtime'
+                and membership_state.inherit_option
+                and not membership_state.set_option
+                and not membership_state.admin_option
+              )
+             from membership_state
+         ) as membership_safe
+), broker_state as (
+  select case
+           when role_shape.group_role_safe
+             and role_shape.group_role_disabled
+             and role_shape.runtime_role_safe
+             and role_shape.membership_safe
+             and role_shape.runtime_role_disabled then 'disabled_ready'
+           when role_shape.group_role_safe
+             and role_shape.group_role_disabled
+             and role_shape.runtime_role_safe
+             and role_shape.membership_safe
+             and role_shape.runtime_login_bounded then 'bounded_login_ready'
+           else 'unsafe'
+         end as broker_database_scaffold
+    from role_shape
 )
-select (
-  select count(*) = 1
-     and pg_catalog.bool_and(
-       not role_state.rolcanlogin
-       and not role_state.rolinherit
-       and not role_state.rolsuper
-       and not role_state.rolcreatedb
-       and not role_state.rolcreaterole
-       and not role_state.rolreplication
-       and not role_state.rolbypassrls
-       and role_state.rolconnlimit = 2
-     )
-    from role_state
-   where role_state.rolname = 'fetanagent_telebirr_assignment_broker'
-  ) and (
-  select count(*) = 1
-     and pg_catalog.bool_and(
-       not role_state.rolcanlogin
-       and not role_state.rolinherit
-       and not role_state.rolsuper
-       and not role_state.rolcreatedb
-       and not role_state.rolcreaterole
-       and not role_state.rolreplication
-       and not role_state.rolbypassrls
-       and role_state.rolconnlimit = 1
-       and (
-         role_state.rolvaliduntil is null
-         or role_state.rolvaliduntil = 'infinity'::timestamptz
-       )
-     )
-    from role_state
-   where role_state.rolname = 'fetanagent_telebirr_assignment_broker_runtime'
-  ) and (
-  select count(*) = 1
-     and pg_catalog.bool_and(
-       membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
-       and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
-       and membership_state.inherit_option
-       and not membership_state.set_option
-       and not membership_state.admin_option
-     )
-    from membership_state
-  ) as broker_disabled_scaffold_ready
+select broker_state.broker_database_scaffold,
+       broker_state.broker_database_scaffold in ('disabled_ready', 'bounded_login_ready')
+         as broker_scaffold_safe
+from broker_state
 \gset
-\if :broker_disabled_scaffold_ready
-\else
-  \warn 'The private TeleBirr broker role scaffold is not the exact disabled boundary.'
-  select 1 / 0 as rejected;
-\endif
 
 select count(*) = 2
     and pg_catalog.bool_and(
@@ -291,7 +327,7 @@ with active_receiver as (
 select pg_catalog.jsonb_build_object(
   'schemaVersion', 1,
   'financialFeatures', 'disabled',
-  'brokerDatabaseScaffold', 'disabled_ready',
+  'brokerDatabaseScaffold', :'broker_database_scaffold',
   'telebirrReceiver', redacted_state.receiver_state,
   'openPilot', redacted_state.open_pilot_state,
   'deviceEnrollment',
@@ -302,3 +338,9 @@ select pg_catalog.jsonb_build_object(
 from redacted_state;
 
 rollback;
+
+\if :broker_scaffold_safe
+\else
+  \warn 'The private TeleBirr broker role scaffold is unsafe.'
+  select 1 / 0 as rejected;
+\endif

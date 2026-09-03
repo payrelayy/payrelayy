@@ -1,8 +1,6 @@
 import {
   TELEGRAM_PRIVATE_ACTION_DEPOSIT_TOKEN_LENGTH,
   TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS,
-  TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS,
-  TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MAX_CODE_POINTS,
   TELEGRAM_PRIVATE_ACTION_REFERENCE_MIN_CODE_POINTS,
   parseTelegramDepositProofStatusCallback,
@@ -12,6 +10,11 @@ import {
   type TelegramPrivateActionIdentity,
 } from '@fetanagent/contracts';
 import { normalizeLocale } from '@fetanagent/i18n';
+
+import {
+  isBoundedTelegramDepositProofText,
+  reduceTelegramDepositProofInput,
+} from './telegram-deposit-proof-input.js';
 
 export interface TelegramPrivateActionMetadata {
   readonly updateId: number;
@@ -46,7 +49,6 @@ const MAXIMUM_TELEGRAM_IDENTIFIER = 9_007_199_254_740_991;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
 const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
-const DIRECT_PROOF_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
 
 function isSafeTelegramIdentifier(value: number, permitsZero: boolean): boolean {
   return (
@@ -209,37 +211,60 @@ export function reduceTelegramDepositIntentCommand(
   return { ...identity, kind: 'deposit_intent_command', playerId, amountEtb };
 }
 
+export type TelegramDepositProofSubmission =
+  | {
+      readonly kind: 'action';
+      readonly action: Extract<TelegramPrivateActionEnvelope, { kind: 'deposit_proof_command' }>;
+    }
+  | { readonly kind: 'selection_required' }
+  | { readonly kind: 'invalid_input' };
+
 /**
- * Parse the amount-free, direct-reference proof-first dry-run command. The provider is an exact
- * allowlist value, and the reference remains trusted-memory input until the API protects it.
+ * Parse an explicit, amount-free proof command. TeleBirr additionally accepts receipt URL/SMS
+ * candidate text. Ambiguity never selects a reference or forwards the original message.
  */
-export function reduceTelegramDepositProofCommand(
+export function reduceTelegramDepositProofSubmission(
   metadata: TelegramDepositCommandMetadata,
-): TelegramPrivateActionEnvelope | undefined {
+): TelegramDepositProofSubmission | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
-  if (!identity || typeof metadata.command !== 'string') return undefined;
-  const match = /^\/deposit (cbe_birr|telebirr) ([^\s]+) ([^\s]+)$/u.exec(metadata.command);
-  if (!match) return undefined;
-  const [, providerCode, playerId, transactionReference] = match;
   if (
-    (providerCode !== 'cbe_birr' && providerCode !== 'telebirr') ||
-    !validPlayerIdText(playerId) ||
-    !transactionReference ||
-    Array.from(transactionReference).length <
-      TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MIN_CODE_POINTS ||
-    Array.from(transactionReference).length >
-      TELEGRAM_PRIVATE_ACTION_PROOF_REFERENCE_MAX_CODE_POINTS ||
-    !DIRECT_PROOF_REFERENCE_PATTERN.test(transactionReference)
+    !identity ||
+    typeof metadata.command !== 'string' ||
+    !isRecognizedTelegramDepositCommand(metadata)
   ) {
     return undefined;
   }
+  if (!isBoundedTelegramDepositProofText(metadata.command)) return { kind: 'invalid_input' };
+  const match = /^\/deposit (cbe_birr|telebirr) ([^\s]+) ([\s\S]+)$/u.exec(metadata.command);
+  if (!match) return { kind: 'invalid_input' };
+  const [, providerCode, playerId, proofText] = match;
+  if (
+    (providerCode !== 'cbe_birr' && providerCode !== 'telebirr') ||
+    !validPlayerIdText(playerId) ||
+    !proofText
+  ) {
+    return { kind: 'invalid_input' };
+  }
+  const input = reduceTelegramDepositProofInput(providerCode, proofText);
+  if (input.kind !== 'candidate') return input;
   return {
-    ...identity,
-    kind: 'deposit_proof_command',
-    providerCode,
-    playerId,
-    transactionReference,
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'deposit_proof_command',
+      providerCode,
+      playerId,
+      transactionReference: input.transactionReference,
+    },
   };
+}
+
+/** Action-only compatibility helper; the handler uses the full result for safe input guidance. */
+export function reduceTelegramDepositProofCommand(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const result = reduceTelegramDepositProofSubmission(metadata);
+  return result?.kind === 'action' ? result.action : undefined;
 }
 
 /** Parse an exact compact deposit token and a bounded single-token transaction reference. */

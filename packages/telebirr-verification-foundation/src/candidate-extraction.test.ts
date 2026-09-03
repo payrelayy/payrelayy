@@ -93,6 +93,100 @@ describe('TeleBirr candidate extraction', () => {
     }
   });
 
+  it('scans both receipt paths and labels in pasted text instead of preferring a URL', () => {
+    expect(
+      extractTelebirrReferenceCandidates(
+        request(
+          'sms',
+          'https://customer-controlled.invalid/receipt/SYNTB00000001?x=1 Transaction ID: SYNTB00000002.',
+        ),
+      ),
+    ).toMatchObject({
+      outcome: 'selection_required',
+      normalizedReferences: ['SYNTB00000001', 'SYNTB00000002'],
+    });
+  });
+
+  it.each([
+    ['colon', 'Transaction ID:syntb00000001.Thank'],
+    ['hash', 'Txn ID # SYNTB00000001, received.'],
+    ['is', 'Transaction number is SYNTB00000001.Thank'],
+    ['invoice', 'Invoice No. SYNTB00000001; received.'],
+    ['invoice number', 'Invoice number: SYNTB00000001!'],
+    ['multiline', 'Transaction ID:\r\nSYNTB00000001\nThank you.'],
+    ['receipt query', 'https://untrusted.invalid/receipt/SYNTB00000001?redirect=elsewhere'],
+    ['receipt fragment', 'https://untrusted.invalid/receipt/SYNTB00000001#details'],
+  ] as const)('preserves the supported %s token boundary', (_label, text) => {
+    expect(extractTelebirrReferenceCandidates(request('sms', text))).toMatchObject({
+      outcome: 'candidate_ready',
+      normalizedReference: 'SYNTB00000001',
+    });
+  });
+
+  it.each([
+    ['short labelled value', 'Transaction ID: ABC123'],
+    ['overlong labelled value', `Transaction ID: ${'A'.repeat(33)}`],
+    ['missing labelled value', 'Transaction ID:'],
+    ['short receipt value', '/receipt/ABC123'],
+    ['overlong receipt value', `/receipt/${'A'.repeat(33)}`],
+    ['missing receipt value', '/receipt/'],
+    ['label without delimiter', 'Transaction IDsSYNTB00000002'],
+    ['label word continuation', 'Transaction identifier SYNTB00000002'],
+    ['is without delimiter', 'Transaction numberis SYNTB00000002'],
+  ] as const)(
+    'rejects a %s context rather than ignoring it beside a valid reference',
+    (_label, malformedContext) => {
+      for (const text of [
+        malformedContext,
+        `Transaction ID: SYNTB00000001. ${malformedContext}`,
+        `${malformedContext}\n/receipt/SYNTB00000001`,
+      ]) {
+        expect(extractTelebirrReferenceCandidates(request('sms', text))).toMatchObject({
+          outcome: 'invalid_input',
+        });
+      }
+    },
+  );
+
+  it.each([
+    ['Unicode letter', 'SYNTB00000001é'],
+    ['combining mark', 'SYNTB00000001\u0301'],
+    ['zero-width suffix', 'SYNTB00000001\u200b'],
+    ['bidi suffix', 'SYNTB00000001\u202e'],
+    ['underscore', 'SYNTB00000001_2'],
+    ['hyphen', 'SYNTB00000001-ABCD'],
+    ['percent escape', 'SYNTB00000001%41'],
+    ['Unicode long s', 'SYNTB00000ſ1'],
+    ['Unicode sharp s', 'SYNTB00000ß1'],
+    ['Unicode Kelvin sign', 'SYNTB00000K1'],
+  ] as const)('does not truncate or ASCII-normalize a %s token', (_label, token) => {
+    expect(extractTelebirrReferenceCandidates(request('transaction_id', token))).toMatchObject({
+      outcome: 'invalid_input',
+    });
+    for (const context of [`Transaction ID: ${token}`, `/receipt/${token}`]) {
+      expect(extractTelebirrReferenceCandidates(request('sms', context))).toMatchObject({
+        outcome: 'invalid_input',
+      });
+      expect(
+        extractTelebirrReferenceCandidates(
+          request('sms', `Transaction ID: SYNTB00000002. ${context}`),
+        ),
+      ).toMatchObject({ outcome: 'invalid_input' });
+    }
+  });
+
+  it('does not recognize a label embedded inside a Unicode word', () => {
+    for (const text of [
+      'éTransaction ID: SYNTB00000001',
+      '\u0301Transaction ID: SYNTB00000001',
+      '\u200bTransaction ID: SYNTB00000001',
+    ]) {
+      expect(extractTelebirrReferenceCandidates(request('sms', text))).toMatchObject({
+        outcome: 'no_candidates',
+      });
+    }
+  });
+
   it('does not extract unlabelled phone numbers, dates, or amounts', () => {
     expect(
       extractTelebirrReferenceCandidates(

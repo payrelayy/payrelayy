@@ -103,6 +103,9 @@ importers:
       '@fetanagent/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-verification-foundation
       grammy:
         specifier: ^1.35.0
         version: 1.45.1

@@ -1,8 +1,10 @@
 import { DEPOSIT_MAXIMUM_MINOR, DEPOSIT_MINIMUM_MINOR } from '@fetanagent/domain';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createKemerBetDepositBrowser,
+  createKemerBetDepositFinalActionFreshnessGuard,
+  isKemerBetDepositFinalActionFresh,
   KemerBetDepositBrowserUnavailableError,
   type KemerBetAgentHistoryView,
   type KemerBetBrowserPage,
@@ -16,6 +18,7 @@ const AGENT_ACCOUNT_ID = '33333333-3333-4333-8333-333333333334';
 const NOW = new Date('2030-01-02T03:04:20.000Z');
 const FENCED_AT = new Date('2030-01-02T03:04:05.000Z');
 const REQUIRED_AT = new Date('2030-01-02T03:04:15.000Z');
+const FRESH_FENCED_AT = new Date(NOW);
 
 const lease: KemerBetDepositExecutionLease = {
   disposition: 'execution',
@@ -102,7 +105,8 @@ class FakeAgentPage implements KemerBetBrowserPage {
     this.amount = amount;
   }
 
-  async transferOnce() {
+  async transferOnce(isFinalActionFresh: () => boolean) {
+    if (!isFinalActionFresh()) throw new KemerBetDepositBrowserUnavailableError();
     this.transfers += 1;
   }
 
@@ -146,6 +150,101 @@ function dependencies(page = new FakeAgentPage()) {
     },
   };
 }
+
+describe('KemerBet final-action freshness', () => {
+  it.each([
+    [0, true],
+    [9_999, true],
+    [10_000, false],
+    [10_001, false],
+    [-1, false],
+  ])('accepts age %i ms only before crash-recovery eligibility', (ageMilliseconds, expected) => {
+    expect(
+      isKemerBetDepositFinalActionFresh(
+        lease.leaseExpiresAt,
+        FRESH_FENCED_AT,
+        new Date(NOW.getTime() + ageMilliseconds),
+      ),
+    ).toBe(expected);
+  });
+
+  it('also rejects equality with an earlier original lease expiry', () => {
+    const expiresAt = new Date(NOW.getTime() + 100);
+    expect(isKemerBetDepositFinalActionFresh(expiresAt, FRESH_FENCED_AT, expiresAt)).toBe(false);
+  });
+
+  it.each(['lease', 'fence', 'clock'] as const)(
+    'rejects a malformed %s timestamp, including a fake getTime method',
+    (field) => {
+      for (const malformed of [
+        new Date(Number.NaN),
+        NOW.toISOString(),
+        null,
+        { getTime: () => NOW.getTime() },
+        Object.assign(new Date(Number.NaN), { getTime: () => NOW.getTime() }),
+      ]) {
+        expect(
+          isKemerBetDepositFinalActionFresh(
+            field === 'lease' ? (malformed as Date) : lease.leaseExpiresAt,
+            field === 'fence' ? (malformed as Date) : FRESH_FENCED_AT,
+            field === 'clock' ? (malformed as Date) : NOW,
+          ),
+        ).toBe(false);
+      }
+    },
+  );
+
+  it('snapshots mutable bounds before invoking the clock and never revives a rejected action', () => {
+    const leaseExpiry = new Date(NOW.getTime() + 100);
+    const fencedAt = new Date(NOW);
+    let clock = new Date(NOW);
+    const guard = createKemerBetDepositFinalActionFreshnessGuard(leaseExpiry, fencedAt, () => {
+      fencedAt.setTime(clock.getTime());
+      leaseExpiry.setTime(clock.getTime() + 300_000);
+      return clock;
+    });
+    expect(guard()).toBe(true);
+    clock = new Date(NOW.getTime() + 100);
+    expect(guard()).toBe(false);
+    clock = new Date(NOW);
+    expect(guard()).toBe(false);
+  });
+
+  it('rejects an observed wall-clock regression and cannot revive when the clock catches up', () => {
+    let clock = new Date(NOW.getTime() + 2_000);
+    let monotonic = 0;
+    const guard = createKemerBetDepositFinalActionFreshnessGuard(
+      lease.leaseExpiresAt,
+      FRESH_FENCED_AT,
+      () => clock,
+      () => monotonic,
+    );
+    expect(guard()).toBe(true);
+    clock = new Date(NOW.getTime() + 1_000);
+    monotonic = 500;
+    expect(guard()).toBe(false);
+    clock = new Date(NOW.getTime() + 3_000);
+    expect(guard()).toBe(false);
+  });
+
+  it('uses monotonic elapsed time when a rollback is hidden between wall-clock observations', () => {
+    let clock = new Date(NOW);
+    let monotonic = 0;
+    const guard = createKemerBetDepositFinalActionFreshnessGuard(
+      lease.leaseExpiresAt,
+      FRESH_FENCED_AT,
+      () => clock,
+      () => monotonic,
+    );
+    expect(guard()).toBe(true);
+    // Ten real seconds elapsed, but a clock correction hides six seconds between observations.
+    clock = new Date(NOW.getTime() + 4_000);
+    monotonic = 10_000;
+    expect(guard()).toBe(false);
+    monotonic = 0;
+    expect(guard()).toBe(false);
+  });
+});
 
 describe('KemerBet deposit browser boundary', () => {
   it.each([
@@ -203,7 +302,7 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       browser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).resolves.toEqual({
       response: 'success_dialog_observed',
@@ -212,7 +311,7 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       browser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
     expect(fixture.page.transfers).toBe(1);
@@ -235,10 +334,124 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       browser.submitOnceAfterFence(maximumLease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).resolves.toMatchObject({ exactPlayerCreditMatch: true });
   });
+
+  it('consumes a stale first-fence permission without reading the form or allowing replay', async () => {
+    const fixture = dependencies();
+    const browser = createKemerBetDepositBrowser(fixture.value);
+    await browser.prepare(lease);
+
+    await expect(
+      browser.submitOnceAfterFence(lease, {
+        firstFenceAcquired: true,
+        finalActionFencedAt: FENCED_AT,
+      }),
+    ).resolves.toEqual({ response: 'response_uncertain', exactPlayerCreditMatch: false });
+    expect(fixture.page.preparedReads).toBe(1);
+    expect(fixture.page.transfers).toBe(0);
+    await expect(
+      browser.submitOnceAfterFence(lease, {
+        firstFenceAcquired: true,
+        finalActionFencedAt: FRESH_FENCED_AT,
+      }),
+    ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
+  });
+
+  it.each(['fence window', 'original lease'] as const)(
+    'does not Transfer when the %s expires during the final prepared-form readback',
+    async (boundary) => {
+      const fixture = dependencies();
+      let clock = new Date(NOW);
+      fixture.value.now = () => new Date(clock);
+      const browser = createKemerBetDepositBrowser(fixture.value);
+      const targetLease = {
+        ...lease,
+        leaseExpiresAt:
+          boundary === 'original lease' ? new Date(NOW.getTime() + 100) : lease.leaseExpiresAt,
+      };
+      await browser.prepare(targetLease);
+      const readPrepared = fixture.page.readAgentPreparedDeposit.bind(fixture.page);
+      vi.spyOn(fixture.page, 'readAgentPreparedDeposit').mockImplementation(async () => {
+        const rendered = await readPrepared();
+        clock = new Date(NOW.getTime() + (boundary === 'original lease' ? 100 : 10_000));
+        return rendered;
+      });
+      const transfer = vi.spyOn(fixture.page, 'transferOnce');
+
+      await expect(
+        browser.submitOnceAfterFence(targetLease, {
+          firstFenceAcquired: true,
+          finalActionFencedAt: FRESH_FENCED_AT,
+        }),
+      ).resolves.toEqual({ response: 'response_uncertain', exactPlayerCreditMatch: false });
+      expect(transfer).not.toHaveBeenCalled();
+      clock = new Date(NOW);
+      await expect(
+        browser.submitOnceAfterFence(targetLease, {
+          firstFenceAcquired: true,
+          finalActionFencedAt: FRESH_FENCED_AT,
+        }),
+      ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
+      expect(fixture.page.transfers).toBe(0);
+    },
+  );
+
+  it('carries a live freshness guard through the driver boundary without refreshing the fence', async () => {
+    const fixture = dependencies();
+    let clock = new Date(NOW);
+    fixture.value.now = () => new Date(clock);
+    const browser = createKemerBetDepositBrowser(fixture.value);
+    await browser.prepare(lease);
+    vi.spyOn(fixture.page, 'transferOnce').mockImplementation(async (isFinalActionFresh) => {
+      expect(isFinalActionFresh()).toBe(true);
+      clock = new Date(NOW.getTime() + 10_000);
+      expect(isFinalActionFresh()).toBe(false);
+      throw new KemerBetDepositBrowserUnavailableError();
+    });
+
+    await expect(
+      browser.submitOnceAfterFence(lease, {
+        firstFenceAcquired: true,
+        finalActionFencedAt: FRESH_FENCED_AT,
+      }),
+    ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
+    expect(fixture.page.transfers).toBe(0);
+  });
+
+  it.each(['lease', 'fence'] as const)(
+    'does not extend a mutable %s deadline during final readback',
+    async (boundary) => {
+      const fixture = dependencies();
+      let clock = new Date(NOW);
+      fixture.value.now = () => clock;
+      const browser = createKemerBetDepositBrowser(fixture.value);
+      const targetLease = {
+        ...lease,
+        leaseExpiresAt: new Date(NOW.getTime() + (boundary === 'lease' ? 100 : 300_000)),
+      };
+      const fencedAt = new Date(NOW);
+      await browser.prepare(targetLease);
+      const readPrepared = fixture.page.readAgentPreparedDeposit.bind(fixture.page);
+      vi.spyOn(fixture.page, 'readAgentPreparedDeposit').mockImplementation(async () => {
+        const rendered = await readPrepared();
+        clock = new Date(NOW.getTime() + (boundary === 'lease' ? 100 : 10_000));
+        targetLease.leaseExpiresAt.setTime(clock.getTime() + 300_000);
+        fencedAt.setTime(clock.getTime());
+        return rendered;
+      });
+
+      await expect(
+        browser.submitOnceAfterFence(targetLease, {
+          firstFenceAcquired: true,
+          finalActionFencedAt: fencedAt,
+        }),
+      ).resolves.toEqual({ response: 'response_uncertain', exactPlayerCreditMatch: false });
+      expect(fixture.page.transfers).toBe(0);
+    },
+  );
 
   it('rejects a leased target below the product minimum before touching the form', async () => {
     const fixture = dependencies();
@@ -263,7 +476,7 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       browser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).resolves.toEqual({ response: 'response_uncertain', exactPlayerCreditMatch: false });
     expect(fixture.page.transfers).toBe(0);
@@ -278,7 +491,7 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       browser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).resolves.toEqual({ response: 'response_uncertain', exactPlayerCreditMatch: false });
     expect(fixture.page.transfers).toBe(1);
@@ -292,7 +505,7 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       transferBrowser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).rejects.toBeInstanceOf(KemerBetDepositBrowserUnavailableError);
 
@@ -311,7 +524,7 @@ describe('KemerBet deposit browser boundary', () => {
     await expect(
       transferBrowser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
-        finalActionFencedAt: FENCED_AT,
+        finalActionFencedAt: FRESH_FENCED_AT,
       }),
     ).resolves.toEqual({ response: 'response_lost', exactPlayerCreditMatch: false });
 

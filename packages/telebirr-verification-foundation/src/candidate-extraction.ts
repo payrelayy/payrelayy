@@ -13,10 +13,22 @@ export const TELEBIRR_CANDIDATE_EXTRACTION_MAX_INPUT_BYTES = 16 * 1024;
 export const TELEBIRR_CANDIDATE_EXTRACTION_MAX_CANDIDATES = 8;
 
 const REFERENCE_PATTERN = /^[A-Z0-9]{8,32}$/u;
+const RAW_REFERENCE_PATTERN = /^[A-Za-z0-9]{8,32}$/u;
 const FORBIDDEN_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
-const RECEIPT_PATH_PATTERN = /\/receipt\/([A-Za-z0-9]{8,32})(?=$|[^A-Za-z0-9])/giu;
-const LABELLED_REFERENCE_PATTERN =
-  /\b(?:transaction\s*(?:number|id)|txn\s*id|invoice\s*(?:no\.?|number))\s*(?::|#|is)?\s*([A-Za-z0-9]{8,32})(?=$|[^A-Za-z0-9])/giu;
+// Scan introducers before validating a complete token. A bounded matching regex would silently
+// ignore a conflicting short/overlong reference, or accept a prefix before a Unicode suffix.
+// Deliberately omit Unicode case folding: ASCII lookalikes must not become reference characters.
+const RECEIPT_PATH_CONTEXT_PATTERN = /\/receipt\//gi;
+const LABELLED_REFERENCE_CONTEXT_PATTERN =
+  /\b(?:transaction[ \t\r\n]*(?:number|id)|txn[ \t\r\n]*id|invoice[ \t\r\n]*(?:number|no\.?))/gi;
+const LABEL_CONTEXT_CONTINUATION_PATTERN = /[\p{L}\p{M}\p{N}\p{Pc}\p{Cf}]/u;
+const LABEL_SEPARATOR_PATTERN = /[ \t\r\n:#]/u;
+const CONTEXT_WHITESPACE_PATTERN = /[ \t\r\n]/u;
+// A period remains a supported sentence boundary even without a following space ("ID.Thank").
+// Hyphens, underscores, percent escapes and non-ASCII suffixes are not delimiters: validate them
+// as part of the raw token and reject instead of truncating the customer's proposed reference.
+const LABEL_TOKEN_BOUNDARY_PATTERN = /[ \t\r\n.,;!?:()[\]{}"'<>]/u;
+const RECEIPT_TOKEN_BOUNDARY_PATTERN = /[ \t\r\n.,;!?#()[\]{}"'<>]/u;
 
 const requestKeys = ['contractVersion', 'sourceKind', 'text'] as const;
 const invalidResultKeys = [
@@ -142,16 +154,44 @@ function parseRequest(candidate: unknown): TelebirrCandidateExtractionRequest | 
   return { contractVersion: TELEBIRR_CANDIDATE_EXTRACTION_CONTRACT_VERSION, sourceKind, text };
 }
 
-function collectPatternMatches(
+function collectContextCandidates(
   text: string,
   pattern: RegExp,
+  contextKind: 'receipt_path' | 'label',
   candidates: string[],
   seen: Set<string>,
 ): boolean {
   pattern.lastIndex = 0;
   for (const match of text.matchAll(pattern)) {
-    const candidate = match[1]?.toUpperCase();
-    if (!candidate || !REFERENCE_PATTERN.test(candidate) || seen.has(candidate)) continue;
+    let tokenStart = match.index + match[0].length;
+    if (contextKind === 'label') {
+      // JavaScript's \b is ASCII-only. Do not recognize a label embedded in a larger Unicode word.
+      const precedingCharacter = Array.from(
+        text.slice(Math.max(0, match.index - 2), match.index),
+      ).at(-1);
+      if (precedingCharacter && LABEL_CONTEXT_CONTINUATION_PATTERN.test(precedingCharacter)) {
+        continue;
+      }
+      if (!LABEL_SEPARATOR_PATTERN.test(text[tokenStart] ?? '')) return false;
+      while (CONTEXT_WHITESPACE_PATTERN.test(text[tokenStart] ?? '')) tokenStart += 1;
+      if (text[tokenStart] === ':' || text[tokenStart] === '#') {
+        tokenStart += 1;
+      } else if (/^[iI][sS](?=[ \t\r\n]|$)/u.test(text.slice(tokenStart))) {
+        tokenStart += 2;
+      }
+      while (CONTEXT_WHITESPACE_PATTERN.test(text[tokenStart] ?? '')) tokenStart += 1;
+    }
+
+    const tokenBoundary =
+      contextKind === 'receipt_path'
+        ? RECEIPT_TOKEN_BOUNDARY_PATTERN
+        : LABEL_TOKEN_BOUNDARY_PATTERN;
+    let tokenEnd = tokenStart;
+    while (tokenEnd < text.length && !tokenBoundary.test(text[tokenEnd] ?? '')) tokenEnd += 1;
+    const rawCandidate = text.slice(tokenStart, tokenEnd);
+    if (!RAW_REFERENCE_PATTERN.test(rawCandidate)) return false;
+    const candidate = rawCandidate.toUpperCase();
+    if (seen.has(candidate)) continue;
 
     seen.add(candidate);
     candidates.push(candidate);
@@ -167,15 +207,29 @@ function extractCandidates(request: TelebirrCandidateExtractionRequest): readonl
 
   if (request.sourceKind === 'transaction_id') {
     const trimmed = request.text.trim();
-    const normalized = trimmed.toUpperCase();
-    return REFERENCE_PATTERN.test(normalized) ? Object.freeze([normalized]) : null;
+    return RAW_REFERENCE_PATTERN.test(trimmed) ? Object.freeze([trimmed.toUpperCase()]) : null;
   }
 
-  if (!collectPatternMatches(request.text, RECEIPT_PATH_PATTERN, candidates, seen)) return null;
+  if (
+    !collectContextCandidates(
+      request.text,
+      RECEIPT_PATH_CONTEXT_PATTERN,
+      'receipt_path',
+      candidates,
+      seen,
+    )
+  )
+    return null;
 
   if (
     request.sourceKind !== 'receipt_url' &&
-    !collectPatternMatches(request.text, LABELLED_REFERENCE_PATTERN, candidates, seen)
+    !collectContextCandidates(
+      request.text,
+      LABELLED_REFERENCE_CONTEXT_PATTERN,
+      'label',
+      candidates,
+      seen,
+    )
   ) {
     return null;
   }

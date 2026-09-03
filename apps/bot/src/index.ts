@@ -4,12 +4,12 @@ import { message } from '@fetanagent/i18n';
 import { Bot, InlineKeyboard } from 'grammy';
 
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
+import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import {
-  isRecognizedTelegramDepositCommand,
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
   isTelegramPrivateHelpCommand,
-  reduceTelegramDepositProofCommand,
+  reduceTelegramDepositProofSubmission,
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
@@ -21,6 +21,7 @@ import {
   TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
   presentTelegramPlayerIdFlowResult,
   telegramDepositHelpText,
+  telegramDepositReferenceSelectionText,
 } from './telegram-player-id-flow.js';
 import {
   deliverTelegramPrivateInboundWithRetry,
@@ -133,17 +134,26 @@ bot.on('message', async (context) => {
       );
       return;
     }
-    const depositAction =
-      reduceTelegramDepositProofCommand({ ...metadata, command: text }) ??
-      reduceTelegramDepositStatusCommand({ ...metadata, command: text });
+    const proofSubmission = reduceTelegramDepositProofSubmission({ ...metadata, command: text });
+    if (proofSubmission) {
+      if (proofSubmission.kind === 'action') {
+        await deliverPlayerAction(proofSubmission.action, (replyText, keyboard) =>
+          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        );
+      } else {
+        await context.reply(
+          proofSubmission.kind === 'selection_required'
+            ? telegramDepositReferenceSelectionText()
+            : telegramDepositHelpText(),
+        );
+      }
+      return;
+    }
+    const depositAction = reduceTelegramDepositStatusCommand({ ...metadata, command: text });
     if (depositAction) {
       await deliverPlayerAction(depositAction, (replyText, keyboard) =>
         context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
       );
-      return;
-    }
-    if (isRecognizedTelegramDepositCommand({ ...metadata, command: text })) {
-      await context.reply(telegramDepositHelpText());
       return;
     }
     if (isRecognizedTelegramDepositStatusCommand({ ...metadata, command: text })) {
@@ -235,14 +245,11 @@ bot.catch((error) => {
       betaAdmissionEnabled: betaAdmission.enabled,
       playerActionsEnabled: playerActions.enabled,
     },
-    'Telegram bot update failed without starting a customer action.',
+    'Telegram bot update handling failed; processing or reply delivery may be incomplete.',
   );
 });
 
-process.once('SIGINT', () => bot.stop());
-process.once('SIGTERM', () => bot.stop());
-
-await bot.start({
+await runTelegramPolling(bot, {
   allowed_updates: playerActions.enabled ? ['message', 'callback_query'] : ['message'],
   onStart: (botInfo) => {
     console.info(

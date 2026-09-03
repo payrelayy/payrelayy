@@ -5,6 +5,7 @@ import {
   TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
   presentTelegramPlayerIdFlowResult,
   telegramDepositHelpText,
+  telegramDepositReferenceSelectionText,
 } from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
@@ -155,5 +156,18 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(telegramDepositHelpText()).toContain('/deposit cbe_birr PLAYER_ID TRANSACTION_ID');
     expect(telegramDepositHelpText()).toContain('/deposit_status');
     expect(telegramDepositHelpText()).toContain('No payment is verified or credited');
+    expect(telegramDepositHelpText()).toContain('receipt URL or the full SMS text');
+    expect(telegramDepositHelpText()).toContain('URLs are not opened');
+    expect(telegramDepositHelpText()).toContain('Photos and PDF files are not supported yet');
+  });
+
+  it('asks the customer to choose one reference without exposing the candidate list', () => {
+    expect(telegramDepositReferenceSelectionText()).toContain('No proof was submitted.');
+    expect(telegramDepositReferenceSelectionText()).toContain(
+      'SIMULATION ONLY — DO NOT SEND MONEY.',
+    );
+    expect(telegramDepositReferenceSelectionText()).toContain(
+      '/deposit telebirr PLAYER_ID TRANSACTION_ID',
+    );
   });
 });

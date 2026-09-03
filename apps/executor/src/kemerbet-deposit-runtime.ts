@@ -1,6 +1,10 @@
 import type { KemerBetPrivateLiveDepositPilotManifest } from '@fetanagent/config/executor';
 
-import type { KemerBetDepositBrowser } from './kemerbet-deposit-browser-adapter.js';
+import {
+  createKemerBetDepositFinalActionFreshnessGuard,
+  KEMERBET_DEPOSIT_FINAL_ACTION_WINDOW_MILLISECONDS,
+  type KemerBetDepositBrowser,
+} from './kemerbet-deposit-browser-adapter.js';
 import type {
   KemerBetDepositCancelReason,
   KemerBetDepositExecutionDatabase,
@@ -25,6 +29,7 @@ export interface KemerBetDepositRuntimeDependencies {
   readonly finalActionEnabled: boolean;
   readonly privateLiveDepositPilotManifest: KemerBetPrivateLiveDepositPilotManifest;
   readonly now: () => Date;
+  readonly monotonicNow?: () => number;
   readonly log: (event: KemerBetDepositRunResult) => void;
 }
 
@@ -144,6 +149,7 @@ async function executeOnceAfterFreshPreparation(
   dependencies: KemerBetDepositRuntimeDependencies,
   lease: KemerBetDepositExecutionLease,
 ): Promise<KemerBetDepositRunResult> {
+  const originalLeaseExpiresAt = new Date(Date.prototype.getTime.call(lease.leaseExpiresAt));
   if (
     !privateLiveDepositPilotAuthorizationMatchesManifest(
       lease.privateLiveDepositPilotAuthorization,
@@ -200,41 +206,75 @@ async function executeOnceAfterFreshPreparation(
     return cancelBeforeFence(dependencies, lease, 'execution_lease_expired_before_action');
   }
 
+  const monotonicNow = dependencies.monotonicNow ?? (() => performance.now());
+  const fenceRequestedAt = monotonicNow();
   const fence = await dependencies.database.fenceFinalAction(lease);
   const fencedLog = redacted('final_action_fenced', 'execute');
   dependencies.log(fencedLog);
-  if (
-    !privateLiveDepositPilotAuthorizationMatchesManifest(
-      fence.privateLiveDepositPilotAuthorization,
-      dependencies.privateLiveDepositPilotManifest,
-    ) ||
-    !samePrivateLiveDepositPilotAuthorization(
-      lease.privateLiveDepositPilotAuthorization,
-      fence.privateLiveDepositPilotAuthorization,
-    )
-  ) {
-    const result = redacted('needs_attention', 'execute');
-    dependencies.log(result);
-    return result;
-  }
-
+  let fenceAuthorityMatches = false;
   let exactPlayerCreditMatch = false;
-  if (fence.firstFenceAcquired) {
-    try {
-      const immediate = await browser.submitOnceAfterFence(lease, {
-        firstFenceAcquired: true,
-        finalActionFencedAt: fence.finalActionFencedAt,
-      });
-      exactPlayerCreditMatch = immediate.exactPlayerCreditMatch;
-    } catch {
-      // A throw cannot distinguish before-click, in-flight, or response-loss. The durable fence
-      // makes every later execution click illegal; only evidence reconciliation may continue.
+  try {
+    fenceAuthorityMatches =
+      fence.depositIntentId === lease.depositIntentId &&
+      fence.executionAttemptId === lease.executionAttemptId &&
+      typeof fence.firstFenceAcquired === 'boolean' &&
+      privateLiveDepositPilotAuthorizationMatchesManifest(
+        fence.privateLiveDepositPilotAuthorization,
+        dependencies.privateLiveDepositPilotManifest,
+      ) &&
+      samePrivateLiveDepositPilotAuthorization(
+        lease.privateLiveDepositPilotAuthorization,
+        fence.privateLiveDepositPilotAuthorization,
+      );
+    const finalActionFencedAt = new Date(Date.prototype.getTime.call(fence.finalActionFencedAt));
+    const timestampGuard = createKemerBetDepositFinalActionFreshnessGuard(
+      originalLeaseExpiresAt,
+      finalActionFencedAt,
+      dependencies.now,
+      monotonicNow,
+    );
+    // Measure from before the SQL call, conservatively including its acknowledgement delay.
+    // The duration uses two server-authored dates; local wall-clock rollback cannot extend it.
+    const maximumElapsed = Math.min(
+      KEMERBET_DEPOSIT_FINAL_ACTION_WINDOW_MILLISECONDS,
+      originalLeaseExpiresAt.getTime() - finalActionFencedAt.getTime(),
+    );
+    let actionFresh = true;
+    const isFinalActionFresh = () => {
+      if (!actionFresh) return false;
+      try {
+        const elapsed = monotonicNow() - fenceRequestedAt;
+        actionFresh =
+          Number.isFinite(fenceRequestedAt) &&
+          fenceRequestedAt >= 0 &&
+          Number.isFinite(elapsed) &&
+          elapsed >= 0 &&
+          elapsed < maximumElapsed &&
+          timestampGuard();
+      } catch {
+        actionFresh = false;
+      }
+      return actionFresh;
+    };
+    if (fenceAuthorityMatches && fence.firstFenceAcquired === true && isFinalActionFresh()) {
+      const immediate = await browser.submitOnceAfterFence(
+        { ...lease, leaseExpiresAt: new Date(originalLeaseExpiresAt) },
+        { firstFenceAcquired: true, finalActionFencedAt, isFinalActionFresh },
+      );
+      exactPlayerCreditMatch = immediate.exactPlayerCreditMatch === true;
     }
+  } catch {
+    // Malformed/lost fence acknowledgements and browser errors cannot distinguish before-click,
+    // in-flight, or response-loss. Never cancel or retry a durable fence; reconcile without an
+    // asserted modal fact, including when the original lease or ten-second action window expires.
   }
 
   try {
     await dependencies.database.requireReconciliation(lease, exactPlayerCreditMatch);
-    const result = redacted('reconciliation_required', 'execute');
+    const result = redacted(
+      fenceAuthorityMatches ? 'reconciliation_required' : 'needs_attention',
+      'execute',
+    );
     dependencies.log(result);
     return result;
   } catch {

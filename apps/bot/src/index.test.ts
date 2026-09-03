@@ -26,6 +26,8 @@ vi.mock('@fetanagent/config/bot', () => ({
 
 vi.mock('grammy', () => ({
   Bot: class {
+    public async init(): Promise<void> {}
+
     public on(event: string, handler: (context: unknown) => Promise<void>): void {
       if (event === 'message') runtime.messageHandler = handler;
       if (event === 'callback_query:data') runtime.callbackHandler = handler;
@@ -318,6 +320,97 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
     expect(context.replies).toHaveLength(1);
     expect(context.replies[0]).not.toContain(unsafeInput);
+  });
+
+  it.each([
+    'https://customer-controlled.invalid/receipt/SYNTB00000001?private=do-not-forward',
+    'Synthetic Receiver paid ETB 900.00.\nTransaction ID: SYNTB00000001. Fee ETB 5.00.',
+  ])(
+    'routes a pasted TeleBirr proof into existing protected capture and tracking',
+    async (proofText) => {
+      await loadComposition(false, true);
+      runtime.actionResult = {
+        version: 1,
+        outcome: 'deposit_proof_received',
+        proofToken: 'A'.repeat(22),
+        providerCode: 'telebirr',
+        providerName: 'TeleBirr',
+        proofStatus: 'proof_received',
+        financialMode: 'dry_run',
+      };
+      const context = messageContext(`/deposit telebirr PLAYER-DEMO-42 ${proofText}`);
+      await runtime.messageHandler!(context);
+
+      expect(runtime.actionDeliveries).toEqual([
+        {
+          version: 1,
+          kind: 'deposit_proof_command',
+          updateId: '123456',
+          telegramUserId: '123456789',
+          privateChatId: '123456789',
+          preferredLocale: 'en',
+          providerCode: 'telebirr',
+          playerId: 'PLAYER-DEMO-42',
+          transactionReference: 'SYNTB00000001',
+        },
+      ]);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+      expect(context.replies[0]).toContain('p1.AAAAAAAAAAAAAAAAAAAAAA');
+      expect(context.replies[0]).toContain('No payment was verified or credited');
+      expect(JSON.stringify(context.replies)).not.toMatch(
+        /SYNTB|PLAYER-DEMO|900|5\.00|https:|Synthetic Receiver/,
+      );
+      expect(JSON.stringify(runtime.actionDeliveries)).not.toContain(proofText);
+    },
+  );
+
+  it('requires explicit selection for different URL/SMS references without dispatch or disclosure', async () => {
+    await loadComposition(false, true);
+    const context = messageContext(
+      '/deposit telebirr PLAYER-DEMO-42 https://example.invalid/receipt/SYNTB00000001 Transaction ID: SYNTB00000002',
+    );
+    await runtime.messageHandler!(context);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+    expect(context.replies).toEqual([
+      expect.stringContaining('More than one transaction ID was found. No proof was submitted.'),
+    ]);
+    expect(context.replies[0]).toContain('/deposit telebirr PLAYER_ID TRANSACTION_ID');
+    expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO|example\.invalid/);
+  });
+
+  it('rejects malformed pasted proof locally and does not mistake it for Player-ID registration', async () => {
+    await loadComposition(false, true);
+    const context = messageContext(
+      '/deposit telebirr PLAYER-DEMO-42 Transaction ID: SYNTB00000001. Transaction ID: short.',
+    );
+    await runtime.messageHandler!(context);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+    expect(context.replies[0]).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+    expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
+  });
+
+  it('does not leak pasted receipt details through transport-failure logs or replies', async () => {
+    await loadComposition(false, true);
+    runtime.actionError = true;
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const context = messageContext(
+      '/deposit telebirr PLAYER-DEMO-42 Synthetic Receiver paid ETB 900.00. Transaction ID: SYNTB00000001.',
+    );
+    try {
+      await runtime.messageHandler!(context);
+      expect(warning).toHaveBeenCalledOnce();
+      expect(JSON.stringify(warning.mock.calls)).not.toMatch(
+        /SYNTB|PLAYER-DEMO|Synthetic Receiver|900/,
+      );
+      expect(JSON.stringify(context.replies)).not.toMatch(
+        /SYNTB|PLAYER-DEMO|Synthetic Receiver|900/,
+      );
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it('delivers a proof receipt button through the real presentation and callback handler', async () => {

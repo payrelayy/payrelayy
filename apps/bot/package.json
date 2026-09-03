@@ -7,6 +7,7 @@
     "@fetanagent/config": "workspace:*",
     "@fetanagent/contracts": "workspace:*",
     "@fetanagent/i18n": "workspace:*",
+    "@fetanagent/telebirr-verification-foundation": "workspace:*",
     "grammy": "^1.35.0"
   },
   "scripts": {

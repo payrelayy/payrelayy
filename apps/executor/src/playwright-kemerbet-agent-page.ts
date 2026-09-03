@@ -193,7 +193,7 @@ export interface PlaywrightPagePort {
   route(
     url: string,
     handler: (route: PlaywrightRoutePort) => Promise<void>,
-    options: { readonly times: 1 },
+    options?: { readonly times: number },
   ): Promise<void>;
   unroute(url: string, handler: (route: PlaywrightRoutePort) => Promise<void>): Promise<void>;
 }
@@ -950,6 +950,45 @@ export function createPlaywrightKemerBetAgentPage(
   let preparedPlayerId: string | null = null;
   let authoritativeLookup: AuthoritativePlayerLookup | null = null;
   let preparedAmountText: string | null = null;
+  let transferInProgress = false;
+  let transferUnavailable = false;
+  let depositRouteInstallation: Promise<void> | null = null;
+  let pendingDepositRequest: {
+    readonly lookup: AuthoritativePlayerLookup;
+    readonly amount: string;
+    readonly isFresh: () => boolean;
+    readonly resolveResult: (allowed: boolean) => void;
+  } | null = null;
+
+  const depositRouteHandler = async (route: PlaywrightRoutePort): Promise<void> => {
+    // Consume the single allowance before any await, including for malformed/stale requests.
+    // With no current allowance this persistent route denies late or duplicate POSTs.
+    const pending = pendingDepositRequest;
+    pendingDepositRequest = null;
+    let allowed = false;
+    try {
+      const request = route.request();
+      allowed =
+        pending !== null &&
+        request.url() === KEMERBET_AGENT_PLAYER_DEPOSIT_URL &&
+        request.method() === 'POST' &&
+        exactPlayerDepositPayload(request.postDataJSON(), pending.lookup, pending.amount) &&
+        pending.isFresh() === true;
+    } catch {
+      allowed = false;
+    }
+    try {
+      if (allowed) await route.continue();
+      else await route.abort('blockedbyclient');
+    } catch {
+      // A rejected dispatch may already have reached the provider. The Playwright callback is
+      // independent of click completion, so never acknowledge it as a reusable successful page.
+      transferUnavailable = true;
+      allowed = false;
+    } finally {
+      pending?.resolveResult(allowed);
+    }
+  };
 
   async function anyVisible(selector: string): Promise<boolean> {
     const locator = page.locator(selector);
@@ -1512,58 +1551,66 @@ export function createPlaywrightKemerBetAgentPage(
       preparedAmountText = amount;
     },
 
-    async transferOnce() {
-      await requireReadyAgentPage();
-      const exactLookup = authoritativeLookup;
-      const exactAmount = preparedAmountText;
-      if (
-        expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL ||
-        exactLookup === null ||
-        exactLookup.visibleIdentity === null ||
-        exactAmount === null
-      ) {
-        unavailable();
-      }
-      let resolveRouteResult: ((allowed: boolean) => void) | null = null;
-      const routeResult = new Promise<boolean>((resolve) => {
-        resolveRouteResult = resolve;
-      });
-      const routeHandler = async (route: PlaywrightRoutePort): Promise<void> => {
-        const request = route.request();
-        let payload: unknown;
+    async transferOnce(isFinalActionFresh) {
+      if (transferInProgress || transferUnavailable) unavailable();
+      transferInProgress = true;
+      const actionIsFresh = () => {
         try {
-          payload = request.postDataJSON();
+          return !transferUnavailable && isFinalActionFresh() === true;
         } catch {
-          payload = null;
-        }
-        const allowed =
-          request.url() === KEMERBET_AGENT_PLAYER_DEPOSIT_URL &&
-          request.method() === 'POST' &&
-          exactPlayerDepositPayload(payload, exactLookup, exactAmount);
-        try {
-          if (allowed) await route.continue();
-          else await route.abort('blockedbyclient');
-        } finally {
-          resolveRouteResult?.(allowed);
+          return false;
         }
       };
-      await page.route(KEMERBET_AGENT_PLAYER_DEPOSIT_URL, routeHandler, { times: 1 });
-      let allowed = false;
+      let responseTimeout: ReturnType<typeof setTimeout> | undefined;
       try {
-        await (
-          await exactWorkflowControl(contract.depositWorkflow.transferButton)
-        ).click({
-          timeout: timeoutMs,
+        if (!actionIsFresh()) unavailable();
+        await requireReadyAgentPage();
+        const exactLookup = authoritativeLookup;
+        const exactAmount = preparedAmountText;
+        if (
+          expectedUrl !== KEMERBET_AGENT_DEPOSIT_URL ||
+          exactLookup === null ||
+          exactLookup.visibleIdentity === null ||
+          exactAmount === null
+        ) {
+          unavailable();
+        }
+        // Keep a deny-by-default handler for the page lifetime. Removing it after a timeout or
+        // the first request would let a delayed/duplicate deposit bypass the one-action fence.
+        depositRouteInstallation ??= page.route(
+          KEMERBET_AGENT_PLAYER_DEPOSIT_URL,
+          depositRouteHandler,
+        );
+        await depositRouteInstallation;
+        const transferControl = await exactWorkflowControl(contract.depositWorkflow.transferButton);
+        if (!actionIsFresh()) unavailable();
+        const routeResult = new Promise<boolean>((resolveResult) => {
+          pendingDepositRequest = {
+            lookup: exactLookup,
+            amount: exactAmount,
+            isFresh: actionIsFresh,
+            resolveResult,
+          };
         });
-        allowed = await Promise.race([
+        await transferControl.click({ timeout: timeoutMs });
+        const allowed = await Promise.race([
           routeResult,
-          new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+          new Promise<false>((resolve) => {
+            responseTimeout = setTimeout(() => resolve(false), timeoutMs);
+          }),
         ]);
+        if (!allowed) unavailable();
+        await requireReadyAgentPage();
+      } catch (error) {
+        // Production closes this context via the session registry. Also prohibit direct reuse
+        // so a late request from an uncertain attempt cannot borrow a later matching allowance.
+        transferUnavailable = true;
+        throw error;
       } finally {
-        await page.unroute(KEMERBET_AGENT_PLAYER_DEPOSIT_URL, routeHandler);
+        if (responseTimeout !== undefined) clearTimeout(responseTimeout);
+        pendingDepositRequest = null;
+        transferInProgress = false;
       }
-      if (!allowed) unavailable();
-      await requireReadyAgentPage();
     },
 
     async readAgentLookup(): Promise<KemerBetAgentLookupView> {

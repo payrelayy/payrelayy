@@ -106,6 +106,20 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
     );
   });
 
+  it('allows only bounded PostgreSQL creator-admin memberships beside the runtime edge', () => {
+    expect(TELEBIRR_ASSIGNMENT_BROKER_PREFLIGHT_KEYS).toContain('runtime_only_trusted_members');
+    expect(TELEBIRR_ASSIGNMENT_BROKER_PREFLIGHT_KEYS).not.toContain('runtime_has_no_members');
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
+      "member.rolname = 'postgres'",
+    );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
+      'not membership.inherit_option\n        and not membership.set_option\n        and membership.admin_option',
+    );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
+      "count(*) filter (where member.rolname = 'postgres') <= 1",
+    );
+  });
+
   it('maps the exact lease projection and converts PostgreSQL timestamps canonically', async () => {
     const query = queryWith(LEASE_TELEBIRR_ASSIGNMENT_SQL, [leaseRow()]);
     const database = new PostgresTelebirrAssignmentBrokerDatabase(query);

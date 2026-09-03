@@ -56,8 +56,10 @@ database credential and has no provisioning mode.
 If that inspection finds a stale or otherwise unsafe runtime `LOGIN`, the separate manual
 `Staging TeleBirr broker emergency disable` workflow can only normalize the two broker roles to
 `NOLOGIN`, remove both passwords, normalize only their expected one-way membership, terminate their
-existing sessions, and rerun the redacted full inspection. It rejects unexpected membership edges,
-is bound to the exact `main` commit and staging project, locks and requires all seven
+existing sessions, and rerun the redacted full inspection. It preserves at most one bounded
+PostgreSQL creator-admin membership per broker role (`INHERIT=false`, `SET=false`, `ADMIN=true`) and
+rejects every other unexpected edge. It is bound to the exact `main` commit and staging project,
+locks and requires all seven
 financial/provider switches to remain disabled, and has no pilot, receiver, device, DigitalOcean,
 secret-generation, or enablement action.
 

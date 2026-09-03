@@ -117,7 +117,7 @@ jobs:
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
           echo "ca_file=$ca_file" >> "$GITHUB_OUTPUT"
 
-      - name: Disable and de-credential only the broker roles
+      - name: Disable and de-credential the exact broker boundary
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

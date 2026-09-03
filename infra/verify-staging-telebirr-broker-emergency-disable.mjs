@@ -56,6 +56,26 @@ assert.match(disableSql, /count\(\*\) = 7[\s\S]*?as financial_features_disabled[
 assert.match(disableSql, /membership\.inherit_option/);
 assert.match(disableSql, /not membership_state\.set_option/);
 assert.match(disableSql, /not membership_state\.admin_option/);
+assert.match(disableSql, /count\(\*\) <= 1[\s\S]*?as membership_scope_safe/);
+assert.equal(
+  (disableSql.match(/^revoke /gm) ?? []).length,
+  1,
+  'Only the expected broker membership may be revoked.',
+);
+assert.match(
+  disableSql,
+  /revoke fetanagent_telebirr_assignment_broker\s+from fetanagent_telebirr_assignment_broker_runtime;/,
+);
+assert.equal(
+  (disableSql.match(/^grant /gm) ?? []).length,
+  1,
+  'Only the expected broker membership may be granted.',
+);
+assert.match(
+  disableSql,
+  /grant fetanagent_telebirr_assignment_broker\s+to fetanagent_telebirr_assignment_broker_runtime\s+with inherit true, set false, admin false;/,
+);
+assert.doesNotMatch(disableSql, /\bcascade\b/i);
 assert.equal(
   (disableSql.match(/^alter role /gm) ?? []).length,
   2,
@@ -78,8 +98,8 @@ assert.match(disableSql, /'financialFeatures', 'disabled'/);
 assert.match(disableSql, /commit;/);
 assert.doesNotMatch(
   disableSql,
-  /^\s*(?:insert|update|delete|truncate|create|drop|grant|revoke|alter\s+(?:table|function|procedure|schema|database))\b/im,
-  'The action must not mutate application data, features, objects, or privileges.',
+  /^\s*(?:insert|update|delete|truncate|create|drop|alter\s+(?:table|function|procedure|schema|database))\b/im,
+  'The action must not mutate application data, features, objects, or non-membership privileges.',
 );
 assert.doesNotMatch(disableSql, /\bexecute\b|\\(?:copy|o(?:ut)?)\b/i);
 assert.doesNotMatch(
@@ -89,5 +109,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'staging TeleBirr broker emergency disable verified: exact-target role-only de-credentialing with redacted postcondition',
+  'staging TeleBirr broker emergency disable verified: exact-target role and membership de-credentialing with redacted postcondition',
 );

@@ -39,6 +39,10 @@ FROM build-base AS executor-build
 
 RUN pnpm --filter @fetanagent/executor... run build
 
+FROM build-base AS telebirr-assignment-broker-build
+
+RUN pnpm --filter @fetanagent/telebirr-assignment-broker... run build
+
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
 RUN groupadd --gid 10001 fetanagent \
@@ -134,6 +138,27 @@ COPY --from=customer-web-build --chown=10001:10001 /workspace/apps/customer-web 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
 CMD ["node", "apps/customer-web/dist/index.js"]
+
+FROM runtime-base AS telebirr-assignment-broker
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="fetanagent-telebirr-assignment-broker" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+USER root
+
+RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-telebirr-assignment-broker \
+  && install -d -o root -g root -m 0755 /run/configs
+
+USER 10001:10001
+
+COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /workspace/node_modules ./node_modules
+COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /workspace/packages ./packages
+COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /workspace/apps/telebirr-assignment-broker ./apps/telebirr-assignment-broker
+
+# The broker has no TCP health endpoint or exposed port. Runtime composition supplies the fixed
+# guarded files and a writable mode-0700 tmpfs at its one private Unix-socket directory.
+CMD ["node", "apps/telebirr-assignment-broker/dist/telebirr-assignment-broker-main.js"]
 
 # The executor uses the distribution-provided Chromium at the production-pinned
 # /usr/bin/chromium path. playwright-core does not download or bundle another browser.

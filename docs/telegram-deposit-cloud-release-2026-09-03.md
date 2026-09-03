@@ -53,11 +53,12 @@ authorize an arbitrary branch, a different installed image, or a financial activ
 
 ## Supabase verification
 
-The reviewed source migration is
-`supabase/migrations/20260902224258_private_telegram_deposit_proof_status.sql`.
-Supabase's management migration tool recorded it as version `20260903140617`, name
-`private_telegram_deposit_proof_status`. The different hosted timestamp is recorded explicitly;
-reconcile by this ledger entry and the installed function before considering any replay.
+The reviewed source migration is now canonically recorded as
+`supabase/migrations/20260903140617_private_telegram_deposit_proof_status.sql`. It was first reviewed
+under source timestamp `20260902224258`; Supabase's management migration tool installed that exact
+body as version `20260903140617`, name `private_telegram_deposit_proof_status`. The repository later
+aligned the filename with that audited hosted ledger entry so normal CLI planning cannot attempt a
+duplicate. The installed function and reviewed source body were compared before this reconciliation.
 
 The installed `app.get_telegram_customer_deposit_proof(uuid,uuid)` body was compared with the reviewed
 source and matched. Its fixed search path, stable/security-definer properties, and ACL were checked.

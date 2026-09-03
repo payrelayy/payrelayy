@@ -2,6 +2,10 @@
 -- The status-command inbound event identifies the active requesting Telegram identity.
 -- An exact original Telegram receipt must bind that identity to the requested proof.
 -- This lookup grants no capture, verification, settlement, or execution authority.
+--
+-- The source was first reviewed under timestamp 20260902224258. Supabase's staging management
+-- migration tool installed the exact reviewed body as hosted version 20260903140617. The canonical
+-- filename now matches that audited hosted ledger entry so CLI planning cannot attempt a duplicate.
 
 begin;
 

@@ -77,6 +77,50 @@ with membership_state as (
        'fetanagent_telebirr_assignment_broker_runtime'
      )
 )
+select count(*) <= 1
+    and pg_catalog.coalesce(
+      pg_catalog.bool_and(
+        membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
+        and membership_state.member_role = 'fetanagent_telebirr_assignment_broker_runtime'
+      ),
+      true
+    ) as membership_scope_safe
+from membership_state
+\gset
+\if :membership_scope_safe
+\else
+  \warn 'An unexpected private TeleBirr broker membership exists; no role was changed.'
+  select 1 / 0 as rejected;
+\endif
+
+-- A missing row or changed PostgreSQL membership option is repaired conservatively. Any extra or
+-- cross-role membership was rejected above. Both statements are transactional with the role
+-- disablement and postconditions below.
+revoke fetanagent_telebirr_assignment_broker
+from fetanagent_telebirr_assignment_broker_runtime;
+
+grant fetanagent_telebirr_assignment_broker
+to fetanagent_telebirr_assignment_broker_runtime
+with inherit true, set false, admin false;
+
+with membership_state as (
+  select granted_role.rolname as granted_role,
+         member_role.rolname as member_role,
+         membership.inherit_option,
+         membership.set_option,
+         membership.admin_option
+    from pg_catalog.pg_auth_members as membership
+    join pg_catalog.pg_roles as granted_role on granted_role.oid = membership.roleid
+    join pg_catalog.pg_roles as member_role on member_role.oid = membership.member
+   where granted_role.rolname in (
+       'fetanagent_telebirr_assignment_broker',
+       'fetanagent_telebirr_assignment_broker_runtime'
+     )
+      or member_role.rolname in (
+       'fetanagent_telebirr_assignment_broker',
+       'fetanagent_telebirr_assignment_broker_runtime'
+     )
+)
 select count(*) = 1
     and pg_catalog.bool_and(
       membership_state.granted_role = 'fetanagent_telebirr_assignment_broker'
@@ -84,12 +128,12 @@ select count(*) = 1
       and membership_state.inherit_option
       and not membership_state.set_option
       and not membership_state.admin_option
-    ) as exact_membership_ready
+    ) as normalized_membership_ready
 from membership_state
 \gset
-\if :exact_membership_ready
+\if :normalized_membership_ready
 \else
-  \warn 'The private TeleBirr broker membership boundary is not exact; no role was changed.'
+  \warn 'The private TeleBirr broker membership was not normalized safely.'
   select 1 / 0 as rejected;
 \endif
 

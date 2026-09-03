@@ -47,6 +47,12 @@ binding the local socket, checks it again after binding, and closes the socket b
 authority. Startup, readiness, signing, and shutdown errors expose only fixed redacted outcomes.
 The image exposes no TCP port and contains no secret.
 
+Before any provisioning, the manual `Staging TeleBirr broker readiness` workflow runs one
+exact-commit, administrator-authenticated, TLS-verified, read-only transaction. It emits only fixed
+receiver/pilot/device/work states and refuses an altered role, function, financial-switch, or
+protected-receiver boundary. It never emits the receiver name, account, mask, IDs, key material, or
+database credential and has no provisioning mode.
+
 No credential, runtime `LOGIN`, receiver value, child key, signer, or bridge deployment has been
 provisioned by this source change. No fixed calendar date stops the broker; only explicit gates,
 database pilot/enrollment/key state, bounded runtime-role validity, and short lease validity windows

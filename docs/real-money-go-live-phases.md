@@ -524,9 +524,9 @@ logs, screenshots, or ordinary database columns.
    package issuer is implemented with a high-level database routine, exact retry reconciliation,
    and no browser persistence of package material. Its migration is applied, the reviewed public
    assignment-signer ID is merged into staging composition, and the signed
-   [0.5.0 pairing-only prerelease](https://github.com/payrelayy/payrelayy/releases/tag/android-telebirr-pairing-v0.5.0)
-   is published. Deploy that composition and finish the physical-device pairing/heartbeat refusal
-   matrix before treating this item as complete.
+   0.5.0 pairing-only prerelease is published at GitHub tag
+   `android-telebirr-pairing-v0.5.0`. Deploy that composition and finish the physical-device
+   pairing/heartbeat refusal matrix before treating this item as complete.
 8. Generate the device identity in Android Keystore and enroll only its public identity.
 9. Compose the trusted verifier as a separate dedicated service with its pinned signer/device public
    keys, direct verify-full PostgreSQL connection, singleton behavior, bounded role validity, and no

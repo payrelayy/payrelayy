@@ -120,8 +120,8 @@ It requires the exact current `main` commit, the literal `build-pairing-only-no-
 confirmation, both public signer pins, and the protected Android release identity. It verifies the
 APK Signature Scheme v2 certificate fingerprint before retaining the APK for 14 days.
 
-The reviewed commit `49c90225f52d8599489641664267f794d9ef282a` produced the signed
-[0.5.0 pairing-only prerelease](https://github.com/payrelayy/payrelayy/releases/tag/android-telebirr-pairing-v0.5.0).
+The reviewed commit `49c90225f52d8599489641664267f794d9ef282a` produced the signed 0.5.0
+pairing-only prerelease at GitHub tag `android-telebirr-pairing-v0.5.0`.
 Its APK SHA-256 is
 `aa01425badaf81548b7b70c974c8df0d52b98d4d19874bdfcfa0cdef57932e6f`, and its signing
 certificate SHA-256 is

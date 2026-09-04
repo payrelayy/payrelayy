@@ -238,21 +238,22 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
           </form>
           </div>
           <div class="kemerbet-session" aria-labelledby="kemerbet-companion-title">
-            <p class="status-ok">Local sign-in validation</p>
+            <p class="status-ok">Local identity validation</p>
             <h2 id="kemerbet-companion-title">KemerBet Windows companion</h2>
             <p class="receipt-label">
               Use a separate Chrome window on this computer for KemerBet sign-in. This
               moves sign-in off the datacenter and remote preview. Complete any CAPTCHA normally
               in Chrome. The dedicated profile stays on your computer, and the companion keeps
-              the guarded window open for up to twelve hours after a candidate sign-in response.
+              the guarded window open for up to twelve hours after the exact locally bound agent
+              header is verified.
               KemerBet can end its own session earlier. Credentials,
               CAPTCHA values, cookies, and browser storage never pass through this Owner page.
             </p>
             <p class="pilot-warning">
-              This first companion release is for local sign-in validation only. It has no payment
-              execution capability. Provider financial requests are blocked even if KemerBet shows
-              a Transfer button. The account connection still needs validation; server pairing
-              and exact-five lookup are not enabled yet.
+              This companion release verifies the exact agent-header identity locally and stores
+              only a Windows-protected fingerprint. It has no payment execution capability.
+              Provider financial requests are blocked even if KemerBet shows a Transfer button.
+              Server pairing and exact-five lookup are not enabled yet.
             </p>
             <div class="actions companion-actions">
               <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
@@ -264,6 +265,7 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
             <ol class="companion-steps">
               <li>Extract the ZIP once.</li>
               <li>Double-click <strong>Start FetanAgent Companion.vbs</strong>.</li>
+              <li>On first use, enter the exact visible KemerBet agent-header identity locally.</li>
               <li>Sign in only in the separate Chrome window and leave it open.</li>
             </ol>
           </div>

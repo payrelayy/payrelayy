@@ -20,6 +20,14 @@ export const KEMERBET_ENROLLMENT_ADAPTER_VERSION = 'kemerbet-enrollment-v1' as c
 export const KEMERBET_MAX_LOGIN_LIFETIME_SECONDS = 600 as const;
 export const KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS = 43_200 as const;
 export const KEMERBET_MAX_GENERATION_LIFETIME_SECONDS = 43_800 as const;
+export const KEMERBET_LOCAL_IDENTITY_SELECTOR_CONTRACT_VERSION = 1 as const;
+export const KEMERBET_LOCAL_IDENTITY_ROOT_SELECTOR =
+  '.rt--header-actions-content:has(.rt--header-actions-name)' as const;
+export const KEMERBET_LOCAL_IDENTITY_VALUE_SELECTOR = '.rt--header-actions-name' as const;
+export const KEMERBET_LOCAL_SESSION_FAILURE_CAPTCHA_SELECTOR =
+  'iframe[src*="recaptcha"][src*="/bframe"]' as const;
+export const KEMERBET_LOCAL_SESSION_FAILURE_SIGN_IN_FORM_SELECTOR =
+  'form.ant-form:has(input#userName):has(input#password[type="password"])' as const;
 
 /**
  * SHA-256 of canonicalizeAgentPlatformAdapterManifest(manifest). Updating any

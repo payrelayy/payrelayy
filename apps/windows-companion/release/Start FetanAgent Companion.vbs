@@ -1,7 +1,7 @@
 Option Explicit
 
 Dim shell, fileSystem, packageRoot, nodePath, entryPath, releasePath
-Dim dataRoot, releaseSha, command, stream, exitCode
+Dim dataRoot, releaseSha, identityBindingPath, expectedIdentity, command, stream, exitCode
 
 Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
@@ -38,8 +38,23 @@ End If
 shell.Environment("Process")("FETANAGENT_COMPANION_DATA_ROOT") = dataRoot
 shell.Environment("Process")("FETANAGENT_COMPANION_RELEASE_SHA") = releaseSha
 
+identityBindingPath = fileSystem.BuildPath(fileSystem.BuildPath(dataRoot, "identity"), "kemerbet-primary.binding.json")
+If Not fileSystem.FileExists(identityBindingPath) Then
+  expectedIdentity = Trim(InputBox( _
+    "First-use local identity binding" & vbCrLf & vbCrLf & _
+    "Enter the exact agent identity displayed in the KemerBet account header." & vbCrLf & _
+    "This is not your password. It stays on this Windows account and is stored only as a protected fingerprint.", _
+    "FetanAgent Companion"))
+  If Len(expectedIdentity) = 0 Then
+    MsgBox "The companion did not start because first-use identity confirmation was cancelled. No payment was enabled.", 48, "FetanAgent Companion"
+    WScript.Quit 1
+  End If
+  shell.Environment("Process")("FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY") = expectedIdentity
+End If
+
 MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
   "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
+  "The companion will locally verify the exact bound agent header." & vbCrLf & _
   "The KemerBet transfer mutation is disabled in this release.", 64, "FetanAgent Companion"
 
 command = Chr(34) & nodePath & Chr(34) & " " & Chr(34) & entryPath & Chr(34)
@@ -52,7 +67,7 @@ End If
 On Error GoTo 0
 
 If exitCode <> 0 Then
-  MsgBox "The protected KemerBet browser stopped without completing this sign-in check." & vbCrLf & vbCrLf & _
+  MsgBox "The protected KemerBet browser stopped without completing local identity verification." & vbCrLf & vbCrLf & _
     "If another Companion window is already open, use that window. Otherwise confirm Chrome is installed and your internet connection works, then reopen the Companion." & vbCrLf & _
     "Do not enter your password anywhere except the KemerBet Chrome window. No payment was enabled.", 48, "FetanAgent Companion"
 End If

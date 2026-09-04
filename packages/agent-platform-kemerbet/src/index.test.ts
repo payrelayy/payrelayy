@@ -16,6 +16,11 @@ import {
   KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS,
   KEMERBET_MAX_GENERATION_LIFETIME_SECONDS,
   KEMERBET_MAX_LOGIN_LIFETIME_SECONDS,
+  KEMERBET_LOCAL_IDENTITY_ROOT_SELECTOR,
+  KEMERBET_LOCAL_IDENTITY_SELECTOR_CONTRACT_VERSION,
+  KEMERBET_LOCAL_IDENTITY_VALUE_SELECTOR,
+  KEMERBET_LOCAL_SESSION_FAILURE_CAPTCHA_SELECTOR,
+  KEMERBET_LOCAL_SESSION_FAILURE_SIGN_IN_FORM_SELECTOR,
   KEMERBET_SESSION_POLICY,
   classifyKemerBetEnrollmentPage,
   kemerBetEnrollmentAdapter,
@@ -153,5 +158,35 @@ describe('KemerBet session policy', () => {
         absoluteExpiresAt: '2026-08-27T12:10:00.001Z',
       }),
     ).toThrow('exceeds its maximum lifetime');
+  });
+});
+
+describe('KemerBet local identity selector contract', () => {
+  it('pins the local-only identity and signed-out markers to the reviewed selector file', () => {
+    const selectorContract = JSON.parse(
+      readFileSync(
+        new URL('../../../infra/config/kemerbet-selector-contract.v2.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      readonly signedInAgentIdentity: {
+        readonly root: string;
+        readonly value: { readonly selector: string; readonly source: string };
+      };
+      readonly sessionFailure: { readonly captcha: string; readonly signInForm: string };
+    };
+
+    expect(KEMERBET_LOCAL_IDENTITY_SELECTOR_CONTRACT_VERSION).toBe(1);
+    expect({
+      root: KEMERBET_LOCAL_IDENTITY_ROOT_SELECTOR,
+      value: { selector: KEMERBET_LOCAL_IDENTITY_VALUE_SELECTOR, source: 'text' },
+      sessionFailure: {
+        captcha: KEMERBET_LOCAL_SESSION_FAILURE_CAPTCHA_SELECTOR,
+        signInForm: KEMERBET_LOCAL_SESSION_FAILURE_SIGN_IN_FORM_SELECTOR,
+      },
+    }).toEqual({
+      ...selectorContract.signedInAgentIdentity,
+      sessionFailure: selectorContract.sessionFailure,
+    });
   });
 });

@@ -170,6 +170,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
+        { signature: 'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)' },
         {
           signature: 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)',
         },
@@ -203,6 +204,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.review_owner_player_registration_request(uuid,uuid,text,text)',
         },
+        { signature: 'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)' },
         { signature: 'app.revoke_telegram_beta_invite(uuid,uuid,text)' },
         {
           signature:

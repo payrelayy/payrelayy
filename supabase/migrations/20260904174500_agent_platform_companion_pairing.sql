@@ -17,7 +17,8 @@ create role fetanagent_companion_device_bridge
   nocreaterole
   noreplication
   nobypassrls
-  connection limit 2;
+  connection limit 2
+  valid until 'infinity';
 
 create role fetanagent_companion_device_bridge_runtime
   nologin
@@ -27,7 +28,8 @@ create role fetanagent_companion_device_bridge_runtime
   nocreaterole
   noreplication
   nobypassrls
-  connection limit 1;
+  connection limit 1
+  valid until 'infinity';
 
 grant fetanagent_companion_device_bridge
   to fetanagent_companion_device_bridge_runtime
@@ -817,7 +819,6 @@ begin
         select 1
           from app.agent_platform_companion_device_revocations revocation
          where revocation.certificate_id = certificate.certificate_id
-           and revocation.revoked_at <= p_assessed_at
       ) then
       return;
     end if;

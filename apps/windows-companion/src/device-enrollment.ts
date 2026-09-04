@@ -716,9 +716,14 @@ export async function ensureCompanionDeviceEnrollment(
   }
   const deviceRoot = resolve(options.dataRoot, 'device');
   await mkdir(deviceRoot, { recursive: true });
+  const deviceRootStat = await lstat(deviceRoot);
+  const canonicalDataRoot = await realpath(options.dataRoot);
+  const canonicalDeviceRoot = await realpath(deviceRoot);
   if (
-    (await realpath(deviceRoot)).toLocaleLowerCase('en-US') !==
-    deviceRoot.toLocaleLowerCase('en-US')
+    !deviceRootStat.isDirectory() ||
+    deviceRootStat.isSymbolicLink() ||
+    canonicalDeviceRoot.toLocaleLowerCase('en-US') !==
+      resolve(canonicalDataRoot, 'device').toLocaleLowerCase('en-US')
   ) {
     fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
   }

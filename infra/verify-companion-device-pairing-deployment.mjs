@@ -173,6 +173,11 @@ assert.doesNotMatch(runtimeDisable, /^\s*nosuperuser\s*$/mu);
 assert.match(inspection, /expected_runtime_state/u);
 assert.match(inspection, /no_broader_authority/u);
 assert.match(inspection, /calendarShutdown', false/u);
+assert.match(inspection, /member\.rolname = 'postgres'/u);
+assert.match(
+  inspection,
+  /not membership\.inherit_option\s+and not membership\.set_option\s+and membership\.admin_option/u,
+);
 
 assert.match(secretProvisioner, /COMPANION_SERVER_SIGNER_PKCS8_BASE64/u);
 assert.match(secretProvisioner, /COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD/u);

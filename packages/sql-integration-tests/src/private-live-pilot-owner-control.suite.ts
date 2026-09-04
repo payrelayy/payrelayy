@@ -168,8 +168,12 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
         },
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
+        { signature: 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
+        {
+          signature: 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)',
+        },
         { signature: 'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)' },
         {
           signature: 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)',

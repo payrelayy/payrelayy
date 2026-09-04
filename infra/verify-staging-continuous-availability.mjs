@@ -121,6 +121,46 @@ assert.match(credentialProgram, /role\.rolvaliduntil = 'infinity'::timestamptz/)
 assert.match(credentialProgram, /connectionTimeoutMillis: 5000/);
 assert.match(credentialProgram, /statement_timeout: 5000/);
 const programWithoutImports = credentialProgram.replace(/^import .*;\r?\n/gm, '');
+const helperUnitGuard =
+  /require_kemerbet_v1_retirement_expiry_guard_unit_files\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+const helperContinuousGuard =
+  /require_continuous_application_availability_guard\(\) \{[\s\S]*?\nNODE\n\}/u.exec(helper)?.[0];
+const helperComponentGuard = /require_component_availability_guard\(\) \{[\s\S]*?\n\}/u.exec(
+  helper,
+)?.[0];
+const helperCredentialProgram =
+  /require_continuous_application_availability_guard\(\) \{[\s\S]*?<<'NODE'\n([\s\S]*?)\nNODE\n\}/u.exec(
+    helper,
+  )?.[1];
+assert.ok(helperUnitGuard);
+assert.ok(helperContinuousGuard);
+assert.ok(helperComponentGuard);
+assert.ok(helperCredentialProgram);
+assert.match(helperUnitGuard, /root:root:644:1/);
+assert.match(helperUnitGuard, /FETANAGENT_STAGING_EXPIRY_GUARD=1/);
+assert.match(helperUnitGuard, /date -u -d "\$\{timer_lines\[4\]#OnCalendar=\}" \+%s/);
+assert.match(helperContinuousGuard, /--property=ActiveState --value "\$EXPIRY_STOP_TIMER"/);
+assert.match(helperContinuousGuard, /--property=UnitFileState --value "\$EXPIRY_STOP_TIMER"/);
+assert.match(
+  helperContinuousGuard,
+  /--property=NextElapseUSecRealtime --value "\$EXPIRY_STOP_TIMER"/,
+);
+assert.match(helperContinuousGuard, /--property=DropInPaths --value "\$EXPIRY_STOP_TIMER"/);
+assert.match(helperContinuousGuard, /--property=DropInPaths --value "\$EXPIRY_STOP_SERVICE"/);
+assert.match(helperContinuousGuard, /--property=ActiveState --value "\$EXPIRY_STOP_SERVICE"/);
+assert.match(helperContinuousGuard, /label=com\.docker\.compose\.service=api/);
+assert.match(helperContinuousGuard, /org\.opencontainers\.image\.revision/);
+assert.match(helperCredentialProgram, /role\.rolvaliduntil = 'infinity'::timestamptz/);
+assert.match(helperCredentialProgram, /connectionTimeoutMillis: 5000/);
+assert.match(helperCredentialProgram, /statement_timeout: 5000/);
+assert.doesNotMatch(
+  helperContinuousGuard,
+  /(?:SUPABASE_DB_PASSWORD|DATABASE_URL_FILE|service_role|administrator)/iu,
+);
+assert.match(
+  helperComponentGuard,
+  /require_kemerbet_v1_retirement_expiry_guard_armed && return 0[\s\S]*require_continuous_application_availability_guard "\$commit_sha"/,
+);
 let checks = 0;
 if (process.platform !== 'win32') {
   const serviceFilter =
@@ -209,6 +249,54 @@ for (const [name, fixture, pass] of [
   checks += 1;
 }
 
+const helperProgramWithoutImports = helperCredentialProgram.replace(/^import .*;\r?\n/gm, '');
+for (const [name, fixture, pass] of [
+  ['component guard accepts the verified catalog', {}, true],
+  ['component guard rejects bounded or unsafe roles', { ready: false }, false],
+  ['component guard rejects a missing catalog result', { rows: [] }, false],
+  [
+    'component guard rejects an ambiguous catalog result',
+    { rows: [{ ready: true }, { ready: true }] },
+    false,
+  ],
+  ['component guard rejects the wrong database host', { host: 'unrelated.invalid' }, false],
+  ['component guard rejects the wrong database identity', { user: 'postgres' }, false],
+  ['component guard rejects a disabled runtime', { enabled: false }, false],
+  ['component guard rejects a database connection failure', { fail: true }, false],
+]) {
+  const result = spawnSync(process.execPath, ['--input-type=module', '-'], {
+    input: `
+      const fixture = ${JSON.stringify(fixture)};
+      const loadApiConfig = () => ({ telegramPlayerActionRuntime: {
+        enabled: fixture.enabled ?? true,
+        connection: {
+          host: fixture.host ?? 'db.spzpiyxheappsfyswewl.supabase.co',
+          user: fixture.user ?? 'fetanagent_player_actions_runtime',
+        },
+      }});
+      const createTelegramPlayerActionPoolConfig = () => ({});
+      class Pool {
+        async query() {
+          if (fixture.fail) throw new Error('SECRET_CREDENTIAL_MUST_NOT_APPEAR');
+          return { rows: fixture.rows ?? [{ ready: fixture.ready ?? true }] };
+        }
+        async end() {}
+      }
+      ${helperProgramWithoutImports}
+    `,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, pass ? 0 : 1, name);
+  assert.doesNotMatch(result.stdout + result.stderr, /SECRET_CREDENTIAL_MUST_NOT_APPEAR/);
+  if (pass) {
+    assert.equal(result.stdout + result.stderr, '');
+  } else {
+    assert.match(result.stderr, /Continuous application availability verification failed\./);
+  }
+  checks += 1;
+}
+
 const bash =
   process.platform === 'win32'
     ? ['C:/Program Files/Git/bin/bash.exe', 'C:/Program Files/Git/usr/bin/bash.exe'].find(
@@ -216,6 +304,301 @@ const bash =
       )
     : 'bash';
 assert.ok(bash, 'Bash is required to test the real systemd disarm function.');
+for (const [name, release, armedState, continuousState, pass, expectedTrace] of [
+  ['component guard accepts the bounded timer first', 'a'.repeat(40), 'exact', 'reject', true, 'A'],
+  [
+    'component guard falls back to continuous availability',
+    'a'.repeat(40),
+    'reject',
+    'exact',
+    true,
+    'AC',
+  ],
+  [
+    'component guard fails when both postures fail',
+    'a'.repeat(40),
+    'reject',
+    'reject',
+    false,
+    'AC',
+  ],
+  ['component guard rejects an invalid release', 'invalid', 'exact', 'exact', false, ''],
+]) {
+  const result = spawnSync(bash, ['-s'], {
+    input: `set -euo pipefail
+ARMED_STATE='${armedState}'
+CONTINUOUS_STATE='${continuousState}'
+TRACE=''
+require_kemerbet_v1_retirement_expiry_guard_armed() {
+  TRACE="\${TRACE}A"
+  [[ "$ARMED_STATE" == exact ]]
+}
+require_continuous_application_availability_guard() {
+  TRACE="\${TRACE}C"
+  [[ "$CONTINUOUS_STATE" == exact && "$1" == '${'a'.repeat(40)}' ]]
+}
+${helperComponentGuard}
+set +e
+require_component_availability_guard '${release}'
+status=$?
+set -e
+printf '%s' "$TRACE"
+exit "$status"
+`,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+  assert.equal(result.stdout, expectedTrace, name);
+  checks += 1;
+}
+
+for (const [
+  name,
+  release,
+  unitState,
+  timerState,
+  timerEnablement,
+  timerSchedule,
+  timerDropIns,
+  serviceState,
+  serviceDropIns,
+  apiState,
+  catalogState,
+  pass,
+] of [
+  [
+    'exact continuous component posture',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    true,
+  ],
+  [
+    'changed expiry unit files',
+    'a'.repeat(40),
+    'changed',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'active old timer',
+    'a'.repeat(40),
+    'exact',
+    'active',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'boot-enabled old timer',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'enabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'scheduled old timer',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'scheduled',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'timer drop-in override',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'present',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'active old shutdown service',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'active',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'shutdown service drop-in override',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'present',
+    'exact',
+    'exact',
+    false,
+  ],
+  [
+    'wrong API release',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'wrong-release',
+    'exact',
+    false,
+  ],
+  [
+    'ambiguous API inventory',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'ambiguous',
+    'exact',
+    false,
+  ],
+  [
+    'non-continuous runtime catalog',
+    'a'.repeat(40),
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'reject',
+    false,
+  ],
+  [
+    'invalid reviewed release',
+    'invalid',
+    'exact',
+    'inactive',
+    'disabled',
+    'empty',
+    'empty',
+    'inactive',
+    'empty',
+    'exact',
+    'exact',
+    false,
+  ],
+]) {
+  const result = spawnSync(bash, ['-s'], {
+    input: `set -euo pipefail
+PROJECT_NAME='fetanagent-staging-beta'
+EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop.timer'
+EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop.service'
+EXPIRY_STOP_TIMER_PATH="/etc/systemd/system/$EXPIRY_STOP_TIMER"
+EXPIRY_STOP_SERVICE_PATH="/etc/systemd/system/$EXPIRY_STOP_SERVICE"
+UNIT_STATE='${unitState}'
+TIMER_STATE='${timerState}'
+TIMER_ENABLEMENT='${timerEnablement}'
+TIMER_SCHEDULE='${timerSchedule}'
+TIMER_DROP_INS='${timerDropIns}'
+SERVICE_STATE='${serviceState}'
+SERVICE_DROP_INS='${serviceDropIns}'
+API_STATE='${apiState}'
+CATALOG_STATE='${catalogState}'
+require_kemerbet_v1_retirement_expiry_guard_unit_files() { [[ "$UNIT_STATE" == exact ]]; }
+systemctl() {
+  [[ "$1" == show && "$3" == --value ]] || return 91
+  property="\${2#--property=}"
+  unit="$4"
+  case "$property:$unit" in
+    "LoadState:$EXPIRY_STOP_TIMER"|"LoadState:$EXPIRY_STOP_SERVICE") echo loaded ;;
+    "FragmentPath:$EXPIRY_STOP_TIMER") echo "$EXPIRY_STOP_TIMER_PATH" ;;
+    "FragmentPath:$EXPIRY_STOP_SERVICE") echo "$EXPIRY_STOP_SERVICE_PATH" ;;
+    "DropInPaths:$EXPIRY_STOP_TIMER") [[ "$TIMER_DROP_INS" == empty ]] || echo /override.conf ;;
+    "DropInPaths:$EXPIRY_STOP_SERVICE") [[ "$SERVICE_DROP_INS" == empty ]] || echo /override.conf ;;
+    "ActiveState:$EXPIRY_STOP_TIMER") echo "$TIMER_STATE" ;;
+    "UnitFileState:$EXPIRY_STOP_TIMER") echo "$TIMER_ENABLEMENT" ;;
+    "NextElapseUSecRealtime:$EXPIRY_STOP_TIMER") [[ "$TIMER_SCHEDULE" == empty ]] || echo tomorrow ;;
+    "ActiveState:$EXPIRY_STOP_SERVICE") echo "$SERVICE_STATE" ;;
+    *) return 92 ;;
+  esac
+}
+docker_local() {
+  case "$1:$2" in
+    container:ls)
+      case "$API_STATE" in
+        ambiguous) printf '%s\\n%s\\n' aaaaaaaaaaaa bbbbbbbbbbbb ;;
+        *) printf '%s\\n' aaaaaaaaaaaa ;;
+      esac
+      ;;
+    container:inspect)
+      [[ "$API_STATE" == wrong-release ]] && printf '%s\\n' '${'b'.repeat(40)}' || printf '%s\\n' '${'a'.repeat(40)}'
+      ;;
+    container:exec)
+      cat >/dev/null
+      [[ "$CATALOG_STATE" == exact ]]
+      ;;
+    *) return 93 ;;
+  esac
+}
+${helperContinuousGuard}
+require_continuous_application_availability_guard '${release}'
+`,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+  assert.doesNotMatch(result.stdout + result.stderr, /SECRET|password|credential/iu);
+  checks += 1;
+}
+
 if (process.platform !== 'win32') {
   const invocationFunction = /invoked_from_installed_file\(\) \{[\s\S]*?\n\}/u.exec(operation)?.[0];
   assert.ok(invocationFunction);

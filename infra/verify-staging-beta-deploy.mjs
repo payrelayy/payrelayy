@@ -10446,6 +10446,7 @@ assert.match(startBot, /fetanagent-bot:\$image_tag/);
 assert.match(startBot, /--env-file \/dev\/null/);
 assert.match(startBot, /clear_bot_startup_receipt/);
 assert.match(startBot, /up -d --no-build --no-deps bot/);
+assert.match(startBot, /require_component_availability_guard "\$commit_sha"/);
 assert.doesNotMatch(startBot, /gateway|FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
 
 const installRelease = /\n  install\)([\s\S]*?)\n    ;;\n\n  start\|fresh-start\)/u.exec(
@@ -10487,6 +10488,11 @@ assert.equal(
 const startOrFreshStart =
   /\n  start\|fresh-start\)([\s\S]*?)\n    ;;\n\n  bot-disabled-ready\)/u.exec(helper)?.[1];
 assert.ok(startOrFreshStart, 'The helper must define the private-core startup boundary.');
+assert.doesNotMatch(
+  startOrFreshStart,
+  /require_component_availability_guard/,
+  'fresh private-core bootstrap must retain its bounded expiry guard',
+);
 assertInOrder(
   startOrFreshStart,
   [
@@ -11281,6 +11287,7 @@ assertInOrder(
     'FETANAGENT_STAGING_KEMERBET_SESSION_BINDING_FILE="$session_binding_source"',
     'up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision',
     'require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"',
+    'require_component_availability_guard "$commit_sha"',
     'inspect_kemerbet_v2_v3_successor_gate',
   ],
   'private sign-in must start only the no-transfer coordinator and re-attest the unchanged historical overlay/runtime bridge',
@@ -11297,6 +11304,7 @@ assert.match(
   /session_binding_source="\$\(select_kemerbet_session_binding_source "\$commit_sha" security-recovery-preview\)"/,
 );
 assert.doesNotMatch(kemerbetSessionProvisionReady, /FINANCIAL_ACTIONS_MODE=live|KEMERBET_.*=true/);
+assert.match(kemerbetSessionProvisionReady, /require_component_availability_guard "\$commit_sha"/);
 
 const kemerbetSessionRuntime =
   /require_kemerbet_session_provision_runtime\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
@@ -15714,6 +15722,7 @@ const startPublicEdge =
     helper,
   )?.[1];
 assert.ok(startPublicEdge, 'The helper must define the public-edge startup boundary.');
+assert.match(startPublicEdge, /require_component_availability_guard "\$commit_sha"/);
 assertRuntimeBridgePostcondition(
   startPublicEdge,
   'up -d --no-build --wait --wait-timeout 90 gateway',
@@ -15793,6 +15802,12 @@ assert.ok(
 assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" immediate-startup/);
 assert.match(botReady, /record_fresh_bot_startup_receipt "\$2"/);
 assert.match(botReady, /require_exact_fresh_bot_runtime "\$2" steady-state/);
+assert.match(botReady, /require_component_availability_guard "\$2"/);
+assert.equal(
+  (helper.match(/\brequire_component_availability_guard "\$(?:commit_sha|2)"/g) ?? []).length,
+  5,
+  'only Telegram, private KemerBet sign-in, and public-edge component attestations may accept continuous availability',
+);
 assertRuntimeBridgePostcondition(
   botReady,
   'record_fresh_bot_startup_receipt "$2"',

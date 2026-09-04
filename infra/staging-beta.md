@@ -4,7 +4,9 @@ Ordinary staging releases now have **continuous availability**: there is no sche
 shutdown. This removes the former 24-hour-login/22-hour-uptime policy, not authentication or financial
 safety limits. See [continuous availability](staging-continuous-availability.md) for the reviewed
 in-place conversion and its verification. Historical recovery procedures below retain their original
-bounded contracts and are not the ordinary deployment path.
+bounded contracts and are not the ordinary deployment path. After finalization, isolated restarts of
+Telegram, the private no-transfer KemerBet sign-in session, and the public edge re-attest the exact
+disabled-timer plus continuous restricted-database posture; they do not restore the former deadline.
 
 `compose.staging-beta.yaml` is a deployment artifact for private beta admission plus pending
 Player-ID registration. It does not run under the default Compose profile and it does not include a

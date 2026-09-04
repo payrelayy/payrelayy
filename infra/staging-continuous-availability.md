@@ -23,6 +23,11 @@ would leave an apparently live service with expired credentials.
   continuous-lifetime SQL and checksum-bound timer finalizer after healthy core startup. Completion
   requires an inactive, boot-disabled timer with no next trigger. The finalizer and its exact sudo
   permission are checked before downtime. Failure/cancellation cleanup and `stop-and-disable` still work.
+- After that finalization, isolated Telegram, private no-transfer KemerBet-session, and public-edge
+  restart attestations accept the continuous posture instead of requiring the retired deadline to be
+  re-armed. The helper requires the unchanged root-owned unit files, no systemd drop-ins, an inactive
+  shutdown service, an inactive/disabled timer with no next trigger, the exact API release, and a fresh
+  restricted-runtime catalog query proving all four non-financial roles remain safe and non-expiring.
 - Historical recovery modes remain exact, bounded recovery contracts. Do not use one as an ordinary
   continuously available deployment or change a financial runtime's expiry to keep the bot online.
 
@@ -72,8 +77,30 @@ the legacy privileged helper, or alters financial authority.
 The old unit files are retained, disabled, for audit. They have no next trigger. A subsequent ordinary
 deployment's existing `stop` removes them before verifying the empty boundary; startup uses a new
 temporary guard and successful finalization disables it again. Do not manually re-enable the old
-timer. If any check fails, resolve that precise condition; do not skip database verification or
-broaden the checksum-bound sudo permission.
+timer. Current-release component recovery uses the exact continuous attestation above; fresh core
+bootstrap and historical migration recovery still require their bounded startup guard. If any check
+fails, resolve that precise condition; do not skip database verification or broaden the
+checksum-bound sudo permission.
+
+### One-time H17 helper promotion
+
+The H16 helper predates the component-level continuous attestation. Before deploying the first release
+that contains it, run the reviewed
+`infra/operations/fetanagent-kemerbet-continuous-availability-helper-bridge-v17.sh` once from the
+DigitalOcean root console. Stage that script and the successor helper from the exact merged commit in
+its required root-owned directory, verify both SHA-256 values, and pass the merged commit, the helper
+digest, and the script's exact no-money confirmation. The bridge requires the currently deployed
+`70d46b9642c7d1fd781fd7200289b7a2fff068ec` six-service release, the completed H16/H14 recovery chain, the exact installed H16 helper
+and continuous finalizer, the inactive/disabled timer, a fresh restricted database catalog check, and
+all financial gates disabled. Under the shared mutation lock it temporarily disables only the helper
+sudo grant, appends an immutable H17 predecessor/successor record, replaces only the reviewed helper,
+re-attests the unchanged runtime and historical chain, and restores the exact grant. It does not
+restart a container, change a database role, contact KemerBet, enable Transfer, or move money.
+
+If the bridge fails after disabling the grant, do not edit its evidence or restore sudoers manually.
+Rerun the same merged script with the same three arguments; its interrupted-prefix checks resume only
+the exact predecessor-to-successor promotion. After successful promotion, the normal deployment
+upgrades the checksum-bound continuous finalizer and deploys the reviewed release.
 
 ## Verification and security trade-off
 

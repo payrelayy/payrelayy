@@ -57,6 +57,7 @@ readonly KEMERBET_V3_HELPER_ROTATION_V12_PARENT='/var/lib/fetanagent/kemerbet-re
 readonly KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT='/var/lib/fetanagent/kemerbet-readiness-v3-recheck-bridge-v13'
 readonly KEMERBET_QUARANTINE_RECOVERY_V14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
 readonly KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT='/var/lib/fetanagent/kemerbet-security-recovery-preview-bridge-v16'
+readonly KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT='/var/lib/fetanagent/kemerbet-continuous-availability-helper-bridge-v17'
 readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_INSTALLING_NAME='.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing'
@@ -2083,8 +2084,8 @@ require_kemerbet_v1_retirement_expiry_guard_disarmed() {
   [[ "$load_state" == 'not-found' ]]
 }
 
-require_kemerbet_v1_retirement_expiry_guard_armed() {
-  local calendar path stop_epoch now_epoch
+require_kemerbet_v1_retirement_expiry_guard_unit_files() {
+  local path
   local -a timer_lines=()
   command -v systemctl >/dev/null 2>&1 || return 1
   for path in "$EXPIRY_STOP_SERVICE_PATH" "$EXPIRY_STOP_TIMER_PATH"; do
@@ -2118,6 +2119,14 @@ require_kemerbet_v1_retirement_expiry_guard_armed() {
     -z "${timer_lines[8]}" &&
     "${timer_lines[9]}" == '[Install]' &&
     "${timer_lines[10]}" == 'WantedBy=timers.target' ]] || return 1
+  date -u -d "${timer_lines[4]#OnCalendar=}" +%s >/dev/null || return 1
+}
+
+require_kemerbet_v1_retirement_expiry_guard_armed() {
+  local calendar stop_epoch now_epoch
+  local -a timer_lines=()
+  require_kemerbet_v1_retirement_expiry_guard_unit_files || return 1
+  mapfile -t timer_lines <"$EXPIRY_STOP_TIMER_PATH" || return 1
   calendar="${timer_lines[4]#OnCalendar=}"
   stop_epoch="$(date -u -d "$calendar" +%s)" || return 1
   now_epoch="$(date -u +%s)" || return 1
@@ -2133,6 +2142,90 @@ require_kemerbet_v1_retirement_expiry_guard_armed() {
       "$EXPIRY_STOP_SERVICE_PATH" ]] || return 1
   systemctl is-enabled --quiet "$EXPIRY_STOP_TIMER" &&
     systemctl is-active --quiet "$EXPIRY_STOP_TIMER"
+}
+
+require_continuous_application_availability_guard() {
+  local api_container commit_sha="$1"
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  require_kemerbet_v1_retirement_expiry_guard_unit_files || return 1
+  [[ "$(systemctl show --property=LoadState --value "$EXPIRY_STOP_TIMER" 2>/dev/null)" == \
+      'loaded' &&
+    "$(systemctl show --property=FragmentPath --value "$EXPIRY_STOP_TIMER" 2>/dev/null)" == \
+      "$EXPIRY_STOP_TIMER_PATH" &&
+    -z "$(systemctl show --property=DropInPaths --value "$EXPIRY_STOP_TIMER" 2>/dev/null)" &&
+    "$(systemctl show --property=ActiveState --value "$EXPIRY_STOP_TIMER" 2>/dev/null)" == \
+      'inactive' &&
+    "$(systemctl show --property=UnitFileState --value "$EXPIRY_STOP_TIMER" 2>/dev/null)" == \
+      'disabled' &&
+    -z "$(systemctl show --property=NextElapseUSecRealtime --value "$EXPIRY_STOP_TIMER" 2>/dev/null)" &&
+    "$(systemctl show --property=LoadState --value "$EXPIRY_STOP_SERVICE" 2>/dev/null)" == \
+      'loaded' &&
+    "$(systemctl show --property=FragmentPath --value "$EXPIRY_STOP_SERVICE" 2>/dev/null)" == \
+      "$EXPIRY_STOP_SERVICE_PATH" &&
+    -z "$(systemctl show --property=DropInPaths --value "$EXPIRY_STOP_SERVICE" 2>/dev/null)" &&
+    "$(systemctl show --property=ActiveState --value "$EXPIRY_STOP_SERVICE" 2>/dev/null)" == \
+      'inactive' ]] || return 1
+
+  api_container="$(docker_local container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=api')" || return 1
+  [[ "$api_container" =~ ^[0-9a-f]{12,64}$ &&
+    "$(docker_local container inspect "$api_container" \
+      --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == \
+      "$commit_sha" ]] || return 1
+  docker_local container exec -i -w /workspace/apps/api "$api_container" \
+    node --input-type=module - <<'NODE'
+import { loadApiConfig } from '@fetanagent/config/api';
+import { createTelegramPlayerActionPoolConfig } from './dist/postgres-telegram-player-action-runtime.js';
+import { Pool } from 'pg';
+
+let pool;
+try {
+  const config = loadApiConfig();
+  if (!config.telegramPlayerActionRuntime.enabled ||
+      config.telegramPlayerActionRuntime.connection.host !== 'db.spzpiyxheappsfyswewl.supabase.co' ||
+      config.telegramPlayerActionRuntime.connection.user !== 'fetanagent_player_actions_runtime') {
+    throw new Error('configuration');
+  }
+  pool = new Pool({
+    ...createTelegramPlayerActionPoolConfig(config.telegramPlayerActionRuntime),
+    application_name: 'fetanagent-component-availability-check',
+    max: 1,
+    connectionTimeoutMillis: 5000,
+    statement_timeout: 5000,
+  });
+  const { rows } = await pool.query(`
+    with expected(role_name, connection_limit) as (values
+      ('fetanagent_beta_admission_runtime', 1),
+      ('fetanagent_customer_web_runtime', 2),
+      ('fetanagent_owner_control_runtime', 1),
+      ('fetanagent_player_actions_runtime', 2)
+    )
+    select count(*) = 4 and bool_and(role.rolcanlogin
+      and role.rolvaliduntil = 'infinity'::timestamptz
+      and role.rolconnlimit = expected.connection_limit
+      and not (role.rolinherit or role.rolsuper or role.rolcreatedb or role.rolcreaterole
+        or role.rolreplication or role.rolbypassrls))
+      and (select count(*) = 2 from pg_roles where
+        rolname in ('fetanagent_deposit_executor_runtime', 'fetanagent_trusted_telebirr_verifier_runtime')
+        and not rolcanlogin) as ready
+    from expected join pg_roles role on role.rolname = expected.role_name
+  `);
+  if (rows.length !== 1 || rows[0].ready !== true) throw new Error('catalog');
+} catch {
+  console.error('Continuous application availability verification failed.');
+  process.exitCode = 1;
+} finally {
+  if (pool) await pool.end().catch(() => { process.exitCode = 1; });
+}
+NODE
+}
+
+require_component_availability_guard() {
+  local commit_sha="$1"
+  [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  require_kemerbet_v1_retirement_expiry_guard_armed && return 0
+  require_continuous_application_availability_guard "$commit_sha"
 }
 
 KEMERBET_V1_RETIREMENT_DURABLE_VOLUME_DIGEST=''
@@ -3858,9 +3951,15 @@ KEMERBET_H16_PREVIEW_BRIDGE_RELEASE=''
 KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256=''
 KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256=''
 KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_STATE='absent'
+KEMERBET_H17_AVAILABILITY_BRIDGE_RELEASE=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER=''
 
 inspect_kemerbet_h16_preview_bridge() {
-  local inspection
+  local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
   local -a inspection_lines=()
   KEMERBET_H16_PREVIEW_BRIDGE_STATE='absent'
   KEMERBET_H16_PREVIEW_BRIDGE_RELEASE=''
@@ -3873,14 +3972,16 @@ inspect_kemerbet_h16_preview_bridge() {
   fi
   KEMERBET_H16_PREVIEW_BRIDGE_STATE='invalid'
   inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT" "$HELPER_PATH" <<'PY'
+    "$KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT" "$helper_path" \
+    "$helper_mode" <<'PY'
 import hashlib
 import os
 import re
 import stat
 import sys
 
-parent, helper = sys.argv[1:]
+parent, helper, helper_mode_text = sys.argv[1:]
+helper_mode = int(helper_mode_text, 8)
 release_pattern = re.compile(r'[0-9a-f]{40}')
 sha_pattern = re.compile(r'[0-9a-f]{64}')
 canonical_h14 = '06459511d9330a0e1d956c42529b81aa9970e7a2'
@@ -3960,7 +4061,7 @@ try:
     intent_data = exact_file(f'{root}/intent-v1', 0o600, 4096)
     completion_data = exact_file(f'{root}/completed-v1', 0o600, 4096)
     predecessor_data = exact_file(f'{root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
-    helper_data = exact_file(helper, 0o755, 2 * 1024 * 1024)
+    helper_data = exact_file(helper, helper_mode, 2 * 1024 * 1024)
     intent = intent_data.decode('ascii').splitlines()
     completion = completion_data.decode('ascii').splitlines()
     if (
@@ -4020,6 +4121,167 @@ PY
   KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256="${inspection_lines[2]}"
   KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[3]}"
   KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE="${inspection_lines[4]}"
+}
+
+inspect_kemerbet_h17_availability_bridge() {
+  local inspection
+  local -a inspection_lines=()
+  KEMERBET_H17_AVAILABILITY_BRIDGE_STATE='absent'
+  KEMERBET_H17_AVAILABILITY_BRIDGE_RELEASE=''
+  KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256=''
+  KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+  KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE=''
+  KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER=''
+  if [[ ! -e "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" &&
+    ! -L "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" ]]; then
+    return 0
+  fi
+  KEMERBET_H17_AVAILABILITY_BRIDGE_STATE='invalid'
+  inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" "$HELPER_PATH" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+parent, helper = sys.argv[1:]
+release_pattern = re.compile(r'[0-9a-f]{40}')
+sha_pattern = re.compile(r'[0-9a-f]{64}')
+runtime_release = '70d46b9642c7d1fd781fd7200289b7a2fff068ec'
+predecessor_sha = 'da555f29ac6260e1dff6c969218eb55ea9bd66c8167600e3ecc700118c8ea9e6'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_directory(path, mode, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, mode)
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != entries
+    ):
+        reject()
+
+
+def exact_file(path, mode, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, mode, 1)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_size > maximum
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = bytearray()
+        while len(data) <= maximum:
+            chunk = os.read(descriptor, maximum + 1 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if (
+            len(data) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+                before.st_nlink, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+                after.st_nlink, after.st_size, after.st_mtime_ns)
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+        ):
+            reject()
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
+try:
+    parent_value = os.lstat(parent)
+    if (
+        not stat.S_ISDIR(parent_value.st_mode)
+        or (parent_value.st_uid, parent_value.st_gid, stat.S_IMODE(parent_value.st_mode))
+        != (0, 0, 0o700)
+        or os.path.realpath(parent) != parent
+    ):
+        reject()
+    children = os.listdir(parent)
+    if len(children) != 1 or release_pattern.fullmatch(children[0]) is None:
+        reject()
+    bridge_release = children[0]
+    root = f'{parent}/{bridge_release}'
+    exact_directory(parent, 0o700, [bridge_release])
+    exact_directory(root, 0o700, ['completed-v1', 'intent-v1', 'predecessor-helper'])
+    intent_data = exact_file(f'{root}/intent-v1', 0o600, 4096)
+    completion_data = exact_file(f'{root}/completed-v1', 0o600, 4096)
+    predecessor_data = exact_file(f'{root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
+    helper_data = exact_file(helper, 0o755, 2 * 1024 * 1024)
+    intent = intent_data.decode('ascii').splitlines()
+    completion = completion_data.decode('ascii').splitlines()
+    h16_release = intent[4].split('=', 1)[1] if len(intent) > 4 else ''
+    successor_sha = intent[6].split('=', 1)[1] if len(intent) > 6 else ''
+    if (
+        len(intent) != 16
+        or len(completion) != 17
+        or intent[0] != 'contract=fetanagent-kemerbet-continuous-availability-helper-bridge-v17'
+        or intent[1] != 'state=authorized'
+        or intent[2] != f'bridge_release={bridge_release}'
+        or intent[3] != f'runtime_release={runtime_release}'
+        or not intent[4].startswith('h16_bridge_release=')
+        or release_pattern.fullmatch(h16_release) is None
+        or bridge_release in (runtime_release, h16_release)
+        or intent[5] != f'predecessor_helper_sha256={predecessor_sha}'
+        or not intent[6].startswith('successor_helper_sha256=')
+        or sha_pattern.fullmatch(successor_sha) is None
+        or successor_sha == predecessor_sha
+        or intent[7:] != [
+            'continuous_application_availability=true',
+            'expiry_timer_active=false',
+            'expiry_timer_enabled=false',
+            'expiry_timer_next_trigger=false',
+            'financial_actions_mode=dry_run',
+            'kemerbet_executor_enabled=false',
+            'kemerbet_final_action_enabled=false',
+            'transfer_enabled=false',
+            'money_moved=false',
+        ]
+        or completion[0] != intent[0]
+        or completion[1] != 'state=availability-helper-installed'
+        or completion[2:16] != intent[2:16]
+        or completion[16] != f'bridge_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or intent_data != ('\n'.join(intent) + '\n').encode('ascii')
+        or completion_data != ('\n'.join(completion) + '\n').encode('ascii')
+        or hashlib.sha256(predecessor_data).hexdigest() != predecessor_sha
+        or hashlib.sha256(helper_data).hexdigest() != successor_sha
+    ):
+        reject()
+    sys.stdout.write(
+        f'active\n{bridge_release}\n{successor_sha}\n{predecessor_sha}\n{h16_release}\n'
+    )
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 0
+  mapfile -t inspection_lines <<<"$inspection"
+  [[ "${#inspection_lines[@]}" -eq 5 &&
+    "${inspection_lines[0]}" == 'active' &&
+    "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ ]] || return 0
+  KEMERBET_H17_AVAILABILITY_BRIDGE_STATE="${inspection_lines[0]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_RELEASE="${inspection_lines[1]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256="${inspection_lines[2]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[3]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE="${inspection_lines[4]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT}/${inspection_lines[1]}/predecessor-helper"
 }
 
 inspect_kemerbet_h14_recovery_gate() {
@@ -4900,12 +5162,36 @@ PY
   KEMERBET_H14_RECOVERY_HELPER_SHA256="${inspection_lines[2]}"
   KEMERBET_H14_RECOVERY_PROFILE_ID="${inspection_lines[3]}"
   current_helper_sha="${inspection_lines[4]}"
-  inspect_kemerbet_h16_preview_bridge
+  inspect_kemerbet_h17_availability_bridge
+  [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" != 'invalid' ]] || {
+    KEMERBET_H14_RECOVERY_STATE='invalid'
+    return 0
+  }
+  if [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]; then
+    inspect_kemerbet_h16_preview_bridge \
+      "$KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER" 400
+  else
+    inspect_kemerbet_h16_preview_bridge
+  fi
   [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" != 'invalid' ]] || {
     KEMERBET_H14_RECOVERY_STATE='invalid'
     return 0
   }
-  if [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
+  if [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]; then
+    [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' &&
+      "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' &&
+      "$KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE" == "$KEMERBET_H14_RECOVERY_RELEASE" &&
+      "$KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
+        "$KEMERBET_H14_RECOVERY_HELPER_SHA256" &&
+      "$KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE" == \
+        "$KEMERBET_H16_PREVIEW_BRIDGE_RELEASE" &&
+      "$KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
+        "$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256" &&
+      "$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" == "$current_helper_sha" ]] || {
+      KEMERBET_H14_RECOVERY_STATE='invalid'
+      return 0
+    }
+  elif [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
     [[ "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' &&
       "$KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE" == "$KEMERBET_H14_RECOVERY_RELEASE" &&
       "$KEMERBET_H16_PREVIEW_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
@@ -4937,7 +5223,9 @@ inspect_kemerbet_v2_v3_successor_gate() {
     fi
     KEMERBET_V2_V3_SUCCESSOR_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
     KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H14_RECOVERY_HELPER_SHA256"
-    if [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
+    if [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]; then
+      KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256"
+    elif [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
       KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256"
     fi
     KEMERBET_V2_V3_RUNTIME_BRIDGE_STATE='active'
@@ -18191,8 +18479,8 @@ case "$command" in
       ^(pending|resealed-awaiting-recheck)$ ]]; then
       [[ "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" == "$commit_sha" ]] ||
         die 'the recovered Telegram runtime does not match the v1 retirement release'
-      require_kemerbet_v1_retirement_expiry_guard_armed ||
-        die 'the recovery expiry guard changed during Telegram startup'
+      require_component_availability_guard "$commit_sha" ||
+        die 'the application availability guard changed during Telegram startup'
       require_exact_fresh_bot_runtime "$commit_sha" immediate-startup
       require_kemerbet_v1_retirement_current_context "$commit_sha" ||
         die 'the v1 retirement context changed during Telegram startup'
@@ -18228,8 +18516,8 @@ case "$command" in
       ^(pending|resealed-awaiting-recheck)$ ]]; then
       [[ "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" == "$2" ]] ||
         die 'the Telegram startup receipt does not match the v1 retirement release'
-      require_kemerbet_v1_retirement_expiry_guard_armed ||
-        die 'the recovery expiry guard changed during Telegram attestation'
+      require_component_availability_guard "$2" ||
+        die 'the application availability guard changed during Telegram attestation'
       require_kemerbet_v1_retirement_current_context "$2" ||
         die 'the v1 retirement context changed during Telegram attestation'
       kemerbet_v1_retirement_release_asset_digest "$2" >/dev/null ||
@@ -18422,8 +18710,8 @@ case "$command" in
       up -d --no-build --no-deps --wait --wait-timeout 90 kemerbet-session-provision
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
     require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"
-    require_kemerbet_v1_retirement_expiry_guard_armed ||
-      die 'the recovery expiry guard changed during private KemerBet session startup'
+    require_component_availability_guard "$commit_sha" ||
+      die 'the application availability guard changed during private KemerBet session startup'
     inspect_kemerbet_v2_v3_successor_gate
     [[ "$KEMERBET_V2_V3_SUCCESSOR_GATE_STATE" == "$successor_session_state" &&
       "$KEMERBET_V2_V3_SUCCESSOR_RELEASE" == "$successor_session_release" &&
@@ -18444,8 +18732,8 @@ case "$command" in
     session_binding_source="$(select_kemerbet_session_binding_source "$commit_sha" security-recovery-preview)"
     require_exact_fresh_bot_runtime "$commit_sha" published-with-kemerbet-session
     require_kemerbet_session_provision_runtime "$commit_sha" "$session_binding_source"
-    require_kemerbet_v1_retirement_expiry_guard_armed ||
-      die 'the recovery expiry guard changed before private KemerBet session attestation'
+    require_component_availability_guard "$commit_sha" ||
+      die 'the application availability guard changed before private KemerBet session attestation'
     require_kemerbet_v3_runtime_bridge
     ;;
 
@@ -19562,8 +19850,8 @@ case "$command" in
       ^(pending|resealed-awaiting-recheck)$ ]]; then
       [[ "$KEMERBET_V1_RETIREMENT_GATE_RELEASE" == "$commit_sha" ]] ||
         die 'the recovered public edge does not match the v1 retirement release'
-      require_kemerbet_v1_retirement_expiry_guard_armed ||
-        die 'the recovery expiry guard changed during public-edge startup'
+      require_component_availability_guard "$commit_sha" ||
+        die 'the application availability guard changed during public-edge startup'
       require_exact_fresh_bot_runtime "$commit_sha" published-steady-state
       require_kemerbet_v1_retirement_current_context "$commit_sha" ||
         die 'the v1 retirement context changed during public-edge startup'

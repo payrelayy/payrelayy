@@ -10,8 +10,8 @@ readonly TARGET='/usr/local/sbin/fetanagent-staging-continuous-availability'
 readonly SUDOERS='/etc/sudoers.d/fetanagent-staging-continuous-availability'
 readonly LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 readonly LOCK="$LOCK_ROOT/mutation.lock"
-readonly PREDECESSOR_FINALIZER_SHA='edcafd4de4f6a15b8b64136d7d97a86dff9dad8099acb6a82ae307abe82dc858'
-readonly PREDECESSOR_SUDOERS_SHA='ff438491f6fd7f583f0fbaf85bb90736776863ebc81c5661ad97ef617f7b6758'
+readonly PREDECESSOR_FINALIZER_SHA='a52a4db7a46849c75f94d734d005d34360e555ebbe46274b59d5c5d9f8a5917f'
+readonly PREDECESSOR_SUDOERS_SHA='677eeb3bf0a4ff428f7db953d75485ae7405e9a36d2bbe428879a54a8e805138'
 readonly PREFLIGHT_FINALIZER_SHA='37a8ddebe924f92f0c6dafa001a183326e63fb26a3d65e0996238ac808870e1d'
 readonly PREFLIGHT_SUDOERS_SHA='4300ee2f62475c607d7ee96a34c0ceb47ce67668a3b71a8c6515f3749229f483'
 [[ "$STAGED" =~ ^/run/fetanagent-continuity-install-[0-9a-f]{40}$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]] ||

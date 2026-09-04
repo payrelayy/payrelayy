@@ -100,7 +100,6 @@ $fetanagent$;
 alter role fetanagent_companion_device_bridge_runtime with
   login
   noinherit
-  nosuperuser
   nocreatedb
   nocreaterole
   noreplication

@@ -4,8 +4,10 @@ This standalone Android project is an inert, testable foundation for a future Et
 
 It is intentionally **disabled and unconfigured by default**. The app now contains the jointly
 versioned authenticated enrollment/assignment/heartbeat/upload client and strict JSON wire codec,
-but contains no server origin, trusted production keys, pairing grant, or durable production queue.
-Those values have not been provisioned, so the shipped application still cannot be activated.
+but contains no server origin, trusted production keys, pairing grant, or foreground worker.
+The durable encrypted queue implementation is now present but not yet wired to that foreground
+lifecycle. The external values have not been provisioned, so the shipped application still cannot
+be activated.
 
 The compatibility engine still requires an injected protected-reference binding verifier. The new
 private-pilot protocol closes that contract mismatch without changing the compatibility API: a
@@ -58,8 +60,12 @@ explicitly stops it.
 
 The coordinator has no polling timer or calendar shutdown date. Operational stop remains explicit,
 while each assignment and enrollment still expires because stale leases must never authorize a new
-provider lookup. The current in-memory work store is test/development-only; production wiring must
-provide a durable encrypted implementation.
+provider lookup. A production-shaped durable work store now seals every assignment state and staged
+observation with a non-exportable Android Keystore AES-GCM key below the app's no-backup directory.
+It atomically persists the exact original signatures across process death/reboot and retains
+acknowledgement/rejection tombstones so the same assignment is not observed twice. Corruption,
+unexpected files, a missing key, or a non-atomic filesystem fail closed. The coordinator still uses
+this implementation only after the foreground lifecycle is explicitly composed.
 
 The live-pilot code remains **unwired to the shipped application lifecycle**. Activation remains
 blocked on all of the following:
@@ -71,8 +77,8 @@ blocked on all of the following:
 - server-side proof-to-reference binding and a database-global one-use provider-payment claim;
 - an atomic settlement/enqueue boundary with the five-account pilot allowlist and kill switch rechecked;
 - a reviewed live provider-layout attestation and controlled Ethiopian-network end-to-end tests;
-- an encrypted durable Android queue and foreground service with bounded backoff, reboot recovery,
-  notification permission handling, clock, update, and device-health controls.
+- foreground-service composition of the implemented encrypted Android queue, with bounded backoff,
+  reboot recovery, notification permission handling, clock, update, and device-health controls.
 
 None of those items is inferred or enabled by compiling this project.
 
@@ -100,8 +106,9 @@ The Owner's [Qhash Android verifier](https://github.com/Bizuayehu18/Qhash) was s
 and operational reference. The parts carried forward are the Ethiopian-network deployment model,
 the official `transactioninfo.ethiotelecom.et/receipt/{reference}` route, the observed `Invoice No`,
 `Payment Date`, `Settled Amount`, and `Credited Party Name` labels, Addis Ababa time interpretation,
-one-at-a-time work, and visible health states. Bounded backoff and the foreground/durable queue stay
-as explicit work for the next Android lifecycle slice.
+one-at-a-time work, and visible health states. The encrypted durable queue is now implemented;
+bounded backoff and foreground-service composition stay as explicit work for the next Android
+lifecycle slice.
 The parser tests now cover those observed label and amount variants.
 
 FetanAgent deliberately does not adopt Qhash's editable backend URL, device-entered shared API key,

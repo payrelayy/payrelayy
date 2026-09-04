@@ -100,6 +100,30 @@ object DeviceBridgeJsonCodec {
       DeviceBridgeCommandResponse(acknowledgement, assignment)
     }
 
+  /**
+   * Canonical encrypted-queue payload. The caller must seal these bytes before writing them; this
+   * codec deliberately keeps the sensitive assignment reference out of preferences and logs.
+   */
+  fun encodePendingUpload(value: LivePilotPendingUpload): ByteArray =
+    encode(
+      obj(
+        "schemaVersion" to number(1),
+        "signedAssignment" to assignmentEnvelope(value.assignment),
+        "signedObservation" to observationEnvelope(value.observation),
+      ),
+    )
+
+  fun decodePendingUpload(bytes: ByteArray): LivePilotPendingUpload? =
+    decode(bytes) { root ->
+      val value =
+        root.requireObject(setOf("schemaVersion", "signedAssignment", "signedObservation"))
+      require(value.int("schemaVersion") == 1)
+      LivePilotPendingUpload(
+        assignment = value.value("signedAssignment").assignmentEnvelope(),
+        observation = value.value("signedObservation").observationEnvelopeValue(),
+      )
+    }
+
   internal fun encodePairingResponseForTest(
     certificate: SignedDeviceBridgeEnrollmentCertificate,
   ): ByteArray = encode(obj("certificate" to certificateEnvelope(certificate)))
@@ -567,6 +591,95 @@ object DeviceBridgeJsonCodec {
     )
   }
 
+  private fun JsonValue.observationEnvelopeValue(): LivePilotSignedObservation {
+    val value = requireObject(observationEnvelopeKeys)
+    return LivePilotSignedObservation(
+      contractVersion = value.int("contractVersion"),
+      providerCode = value.string("providerCode"),
+      protocolMode = value.string("protocolMode"),
+      transcriptVersion = value.string("transcriptVersion"),
+      bodyDigestAlgorithm = value.string("bodyDigestAlgorithm"),
+      bodyDigest = value.string("bodyDigest"),
+      signatureAlgorithm = value.string("signatureAlgorithm"),
+      signatureEncoding = value.string("signatureEncoding"),
+      body = value.value("body").observationBodyValue(),
+      signature = value.string("signature"),
+    ).also {
+      require(it.bodyDigest == LivePilotCanonicalTranscripts.observationBodyDigest(it.body))
+    }
+  }
+
+  private fun JsonValue.observationBodyValue(): LivePilotObservationBody {
+    val value = requireObject(observationBodyKeys)
+    return LivePilotObservationBody(
+      contractVersion = value.int("contractVersion"),
+      providerCode = value.string("providerCode"),
+      protocolMode = value.string("protocolMode"),
+      assignmentId = value.string("assignmentId"),
+      requestId = value.string("requestId"),
+      jobId = value.string("jobId"),
+      attemptNumber = value.int("attemptNumber"),
+      pilotRevisionId = value.string("pilotRevisionId"),
+      deviceId = value.string("deviceId"),
+      keyId = value.string("keyId"),
+      leaseNonceDigest = value.string("leaseNonceDigest"),
+      challengeId = value.string("challengeId"),
+      challengeDigest = value.string("challengeDigest"),
+      assignmentBodyDigest = value.string("assignmentBodyDigest"),
+      referenceFingerprint = value.string("referenceFingerprint"),
+      referenceBindingDigest = value.string("referenceBindingDigest"),
+      sourceProfile = value.string("sourceProfile"),
+      receiverRevisionId = value.string("receiverRevisionId"),
+      receiverProfileId = value.string("receiverProfileId"),
+      receiverProfileDigest = value.string("receiverProfileDigest"),
+      receiverConfigurationDigest = value.string("receiverConfigurationDigest"),
+      receiverNameNormalizerVersion = value.string("receiverNameNormalizerVersion"),
+      expectedReceiverNameDigest = value.string("expectedReceiverNameDigest"),
+      adapterVersion = value.string("adapterVersion"),
+      parserVersion = value.string("parserVersion"),
+      factsNormalizerVersion = value.string("factsNormalizerVersion"),
+      sourceDocumentDigest = value.string("sourceDocumentDigest"),
+      normalizedFactsDigest = value.string("normalizedFactsDigest"),
+      observedAt = value.string("observedAt"),
+      facts = value.value("facts").factsValue(),
+    )
+  }
+
+  private fun JsonValue.factsValue(): LivePilotReceiptFacts {
+    val candidate = this as? JsonValue.Object ?: error("Expected facts object")
+    return when (candidate.string("lookupOutcome")) {
+      "review_required" -> {
+        val value = requireObject(reviewRequiredFactsKeys)
+        LivePilotReviewRequiredFacts(
+          lookupOutcome = value.string("lookupOutcome"),
+          reviewReason = value.string("reviewReason"),
+          retrievedAt = value.nullableString("retrievedAt"),
+        )
+      }
+      "found" -> {
+        val value = requireObject(foundFactsKeys)
+        LivePilotFoundFacts(
+          lookupOutcome = value.string("lookupOutcome"),
+          evidenceSource = value.string("evidenceSource"),
+          layoutAttestation = value.string("layoutAttestation"),
+          providerFinalStatus = value.string("providerFinalStatus"),
+          canonicalReferencePresent = value.boolean("canonicalReferencePresent"),
+          referenceMatch = value.string("referenceMatch"),
+          amountMinor = value.nullableLong("amountMinor"),
+          currencyCode = value.string("currencyCode"),
+          receiverMatch = value.string("receiverMatch"),
+          creditedPartyNameDigest = value.nullableString("creditedPartyNameDigest"),
+          paymentMode = value.string("paymentMode"),
+          paymentReason = value.string("paymentReason"),
+          paymentChannel = value.string("paymentChannel"),
+          occurredAt = value.nullableString("occurredAt"),
+          retrievedAt = value.string("retrievedAt"),
+        )
+      }
+      else -> error("Unknown lookup outcome")
+    }
+  }
+
   private fun JsonValue.Object.safety(): DeviceBridgeSafety =
     DeviceBridgeSafety(
       evidenceOnly = boolean("evidenceOnly"),
@@ -736,6 +849,76 @@ object DeviceBridgeJsonCodec {
       "issuedAt",
       "expiresAt",
     )
+
+  private val observationEnvelopeKeys =
+    setOf(
+      "contractVersion",
+      "providerCode",
+      "protocolMode",
+      "transcriptVersion",
+      "bodyDigestAlgorithm",
+      "bodyDigest",
+      "signatureAlgorithm",
+      "signatureEncoding",
+      "body",
+      "signature",
+    )
+
+  private val observationBodyKeys =
+    setOf(
+      "contractVersion",
+      "providerCode",
+      "protocolMode",
+      "assignmentId",
+      "requestId",
+      "jobId",
+      "attemptNumber",
+      "pilotRevisionId",
+      "deviceId",
+      "keyId",
+      "leaseNonceDigest",
+      "challengeId",
+      "challengeDigest",
+      "assignmentBodyDigest",
+      "referenceFingerprint",
+      "referenceBindingDigest",
+      "sourceProfile",
+      "receiverRevisionId",
+      "receiverProfileId",
+      "receiverProfileDigest",
+      "receiverConfigurationDigest",
+      "receiverNameNormalizerVersion",
+      "expectedReceiverNameDigest",
+      "adapterVersion",
+      "parserVersion",
+      "factsNormalizerVersion",
+      "sourceDocumentDigest",
+      "normalizedFactsDigest",
+      "observedAt",
+      "facts",
+    )
+
+  private val reviewRequiredFactsKeys =
+    setOf("lookupOutcome", "reviewReason", "retrievedAt")
+
+  private val foundFactsKeys =
+    setOf(
+      "lookupOutcome",
+      "evidenceSource",
+      "layoutAttestation",
+      "providerFinalStatus",
+      "canonicalReferencePresent",
+      "referenceMatch",
+      "amountMinor",
+      "currencyCode",
+      "receiverMatch",
+      "creditedPartyNameDigest",
+      "paymentMode",
+      "paymentReason",
+      "paymentChannel",
+      "occurredAt",
+      "retrievedAt",
+    )
 }
 
 private sealed interface JsonValue {
@@ -759,6 +942,16 @@ private sealed interface JsonValue {
       require(INTEGER_PATTERN.matches(raw))
       return raw.toInt()
     }
+
+    fun nullableLong(name: String): Long? =
+      when (val candidate = value(name)) {
+        Null -> null
+        is NumberValue -> {
+          require(INTEGER_PATTERN.matches(candidate.raw))
+          candidate.raw.toLong()
+        }
+        else -> error("$name is not a nullable integer")
+      }
   }
 
   data class Text(val value: String) : JsonValue

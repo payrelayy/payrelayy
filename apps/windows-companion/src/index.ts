@@ -12,6 +12,10 @@ function report(event: LocalKemerBetSessionEvent): void {
     login_required: 'KemerBet is ready. Sign in directly in the Chrome window.',
     signed_in_candidate:
       'KemerBet agent page detected; account and session identity have not been verified. Financial requests remain blocked.',
+    verifying_identity:
+      'KemerBet agent page detected. Verifying the exact locally bound identity without uploading it…',
+    signed_in_verified:
+      'The exact locally bound KemerBet identity is verified. Server pairing and Player-ID lookup remain disabled.',
     stopping: 'Stopping the local KemerBet browser…',
     stopped: 'The local KemerBet browser stopped.',
     failed: 'The local KemerBet browser could not continue. Financial requests remain blocked.',
@@ -30,6 +34,15 @@ function report(event: LocalKemerBetSessionEvent): void {
   if (event.reason === 'mutation_attempt_blocked' || event.reason === 'provider_request_failed') {
     console.info(
       'An unapproved or failed provider request was stopped. The local browser remains available.',
+    );
+  }
+  if (
+    event.reason === 'identity_confirmation_required' ||
+    event.reason === 'identity_binding_unavailable' ||
+    event.reason === 'identity_mismatch'
+  ) {
+    console.info(
+      'Local KemerBet identity verification failed closed. Reopen the reviewed companion and confirm the exact agent header locally.',
     );
   }
 }

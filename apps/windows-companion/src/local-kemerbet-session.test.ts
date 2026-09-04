@@ -14,6 +14,7 @@ const dependencies = vi.hoisted(() => ({
   mkdir: vi.fn(),
   realpath: vi.fn(),
   releaseSessionLock: vi.fn(),
+  verifyLocalKemerBetIdentity: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -27,6 +28,9 @@ vi.mock('./session-lock.js', () => ({
   acquireSessionLock: dependencies.acquireSessionLock,
   releaseSessionLock: dependencies.releaseSessionLock,
 }));
+vi.mock('./local-kemerbet-identity.js', () => ({
+  verifyLocalKemerBetIdentity: dependencies.verifyLocalKemerBetIdentity,
+}));
 
 const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
 const LOGIN_URL = 'https://agentsystem.admindigi.com/login';
@@ -37,8 +41,10 @@ const TEN_MINUTES = 10 * 60 * 1_000;
 const TWELVE_HOURS = 12 * 60 * 60 * 1_000;
 const config: WindowsCompanionConfig = {
   dataRoot: resolve('test-fixtures', 'local-companion'),
+  expectedAgentIdentityProvided: false,
   profileRoot: resolve('test-fixtures', 'local-companion', 'profile'),
   releaseSha: 'local-development',
+  takeExpectedAgentIdentity: () => undefined,
 };
 
 type Listener = (...args: unknown[]) => unknown;
@@ -209,6 +215,12 @@ async function start(landingUrl = AGENTS_URL) {
   return { context, events, order, page: context.page, session };
 }
 
+async function settleIdentityVerification(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'));
@@ -220,6 +232,12 @@ beforeEach(() => {
     handle: { close: vi.fn(async () => undefined) },
   });
   dependencies.releaseSessionLock.mockResolvedValue(undefined);
+  dependencies.verifyLocalKemerBetIdentity.mockResolvedValue({
+    bindingCreated: false,
+    identityVerified: true,
+    identifiersRedacted: true,
+    transferDisabled: true,
+  });
 });
 
 afterEach(async () => {
@@ -274,7 +292,7 @@ describe('local KemerBet enrollment session', () => {
     const { context, events } = await start();
 
     expect(events.at(-1)).toEqual({
-      state: 'signed_in_candidate',
+      state: 'signed_in_verified',
       transferDisabled: true,
       detailsRedacted: true,
     });
@@ -284,13 +302,77 @@ describe('local KemerBet enrollment session', () => {
     expect(events.filter((event) => event.state === 'signed_in_candidate')).toHaveLength(1);
   });
 
+  it('reports a newly created local identity binding without exposing identity material', async () => {
+    dependencies.verifyLocalKemerBetIdentity.mockResolvedValueOnce({
+      bindingCreated: true,
+      identityVerified: true,
+      identifiersRedacted: true,
+      transferDisabled: true,
+    });
+    const { events } = await start();
+    expect(events.at(-1)).toEqual({
+      state: 'signed_in_verified',
+      reason: 'identity_binding_created',
+      transferDisabled: true,
+      detailsRedacted: true,
+    });
+    expect(JSON.stringify(events)).not.toContain('@');
+  });
+
+  it('fails closed when the local identity does not match the bound KemerBet account', async () => {
+    dependencies.verifyLocalKemerBetIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('redacted identity mismatch'), {
+        code: 'FETANAGENT_IDENTITY_MISMATCH',
+      }),
+    );
+    await expect(start()).rejects.toThrow('could not start');
+  });
+
+  it('starts a fresh identity check after a login-page interruption invalidates an active check', async () => {
+    let resolveFirstVerification:
+      | ((result: {
+          bindingCreated: boolean;
+          identityVerified: true;
+          identifiersRedacted: true;
+          transferDisabled: true;
+        }) => void)
+      | undefined;
+    dependencies.verifyLocalKemerBetIdentity.mockImplementationOnce(
+      async () =>
+        await new Promise((resolvePromise) => {
+          resolveFirstVerification = resolvePromise;
+        }),
+    );
+    const { events, page } = await start(LOGIN_URL);
+
+    page.navigate(AGENTS_URL);
+    await settleIdentityVerification();
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(1);
+    page.navigate(LOGIN_URL);
+    page.navigate(AGENTS_URL);
+    await settleIdentityVerification();
+
+    resolveFirstVerification?.({
+      bindingCreated: false,
+      identityVerified: true,
+      identifiersRedacted: true,
+      transferDisabled: true,
+    });
+    await settleIdentityVerification();
+    await settleIdentityVerification();
+
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)?.state).toBe('signed_in_verified');
+  });
+
   it.each([AGENTS_URL, `${AGENTS_URL}/`])(
     'recognizes only a page candidate on the reviewed main-frame URL %s, without API evidence',
     async (url) => {
       const { events, page } = await start(LOGIN_URL);
       page.navigate(url);
+      await settleIdentityVerification();
       expect(events.at(-1)).toEqual({
-        state: 'signed_in_candidate',
+        state: 'signed_in_verified',
         transferDisabled: true,
         detailsRedacted: true,
       });
@@ -318,7 +400,8 @@ describe('local KemerBet enrollment session', () => {
     expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
 
     page.navigate(AGENTS_URL);
-    expect(events.at(-1)?.state).toBe('signed_in_candidate');
+    await settleIdentityVerification();
+    expect(events.at(-1)?.state).toBe('signed_in_verified');
   });
 
   it.each([
@@ -340,10 +423,11 @@ describe('local KemerBet enrollment session', () => {
       expect(events.at(-1)?.state).toBe('login_required');
       expect(events.some((event) => event.state === 'signed_in_candidate')).toBe(false);
       page.navigate(AGENTS_URL);
+      await settleIdentityVerification();
       page.emit('response', response);
 
       expect(events.at(-1)).toEqual({
-        state: 'signed_in_candidate',
+        state: 'signed_in_verified',
         transferDisabled: true,
         detailsRedacted: true,
       });
@@ -482,7 +566,7 @@ describe('local KemerBet enrollment session', () => {
       expect(context.unroute).not.toHaveBeenCalled();
       expect(context.unrouteAll).not.toHaveBeenCalled();
       expect(events.at(-1)).toEqual({
-        state: landingUrl === AGENTS_URL ? 'signed_in_candidate' : 'login_required',
+        state: landingUrl === AGENTS_URL ? 'signed_in_verified' : 'login_required',
         reason: 'mutation_attempt_blocked',
         transferDisabled: true,
         detailsRedacted: true,

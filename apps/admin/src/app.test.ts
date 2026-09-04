@@ -423,9 +423,10 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Private KemerBet sign-in');
     expect(response.body).toContain('Transfer is blocked');
     expect(response.body).toContain('KemerBet Windows companion');
-    expect(response.body).toContain('Local sign-in validation');
+    expect(response.body).toContain('Local identity validation');
+    expect(response.body).toContain('Windows-protected fingerprint');
     expect(response.body).toContain('id="kemerbet-legacy-profile-controls" hidden inert');
-    expect(response.body).toMatch(/server pairing\s+and exact-five lookup are not enabled yet/u);
+    expect(response.body).toMatch(/Server pairing\s+and exact-five lookup are not enabled yet/u);
     expect(response.body).toContain('releases/latest/download/FetanAgent-Windows-Companion.zip');
     expect(response.body).toContain('aria-labelledby="kemerbet-session-title" hidden inert');
     expect(response.body).toContain('survives page');

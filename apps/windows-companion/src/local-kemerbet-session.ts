@@ -11,12 +11,20 @@ import {
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 
 import type { WindowsCompanionConfig } from './config.js';
+import { verifyLocalKemerBetIdentity } from './local-kemerbet-identity.js';
 import { installProviderMutationBoundary } from './provider-route.js';
 import { isLocalKemerBetProviderUrl, type LocalKemerBetGuardPhase } from './request-guard.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
 export type LocalKemerBetSessionState =
-  'starting' | 'login_required' | 'signed_in_candidate' | 'stopping' | 'stopped' | 'failed';
+  | 'starting'
+  | 'login_required'
+  | 'signed_in_candidate'
+  | 'verifying_identity'
+  | 'signed_in_verified'
+  | 'stopping'
+  | 'stopped'
+  | 'failed';
 
 export interface LocalKemerBetSessionEvent {
   readonly state: LocalKemerBetSessionState;
@@ -25,6 +33,10 @@ export interface LocalKemerBetSessionEvent {
   readonly reason?:
     | 'candidate_lifetime_complete'
     | 'browser_closed'
+    | 'identity_binding_created'
+    | 'identity_binding_unavailable'
+    | 'identity_confirmation_required'
+    | 'identity_mismatch'
     | 'login_lifetime_expired'
     | 'mutation_attempt_blocked'
     | 'profile_in_use'
@@ -82,9 +94,13 @@ export async function startLocalKemerBetSession(
   report({ state: 'starting', transferDisabled: true, detailsRedacted: true });
 
   let phase: LocalKemerBetGuardPhase = 'manual_login';
+  let expectedAgentIdentity = config.takeExpectedAgentIdentity();
   let signedInCandidate = false;
+  let signedInVerified = false;
   let stopping = false;
   let terminal = false;
+  let identityVerificationEpoch = 0;
+  let identityVerificationPromise: Promise<void> | undefined;
   let loginTimer: NodeJS.Timeout | undefined;
   let candidateTimer: NodeJS.Timeout | undefined;
   let sessionTimer: NodeJS.Timeout | undefined;
@@ -107,6 +123,7 @@ export async function startLocalKemerBetSession(
     if (terminal) return;
     terminal = true;
     stopping = true;
+    identityVerificationEpoch += 1;
     if (loginTimer) clearTimeout(loginTimer);
     if (candidateTimer) clearTimeout(candidateTimer);
     if (sessionTimer) clearTimeout(sessionTimer);
@@ -179,7 +196,11 @@ export async function startLocalKemerBetSession(
           // A refused notification or other unapproved request must not destroy the login
           // window. Its network operation stays blocked while the owner retains visible feedback.
           report({
-            state: signedInCandidate ? 'signed_in_candidate' : 'login_required',
+            state: signedInVerified
+              ? 'signed_in_verified'
+              : signedInCandidate
+                ? 'signed_in_candidate'
+                : 'login_required',
             transferDisabled: true,
             detailsRedacted: true,
             reason,
@@ -188,19 +209,81 @@ export async function startLocalKemerBetSession(
       },
     );
 
-    const markSignedInCandidate = (): void => {
-      if (signedInCandidate || terminal) return;
-      signedInCandidate = true;
-      if (loginTimer) clearTimeout(loginTimer);
-      loginTimer = undefined;
-      report({ state: 'signed_in_candidate', transferDisabled: true, detailsRedacted: true });
-      candidateTimer = setTimeout(() => {
-        void finish('stopped', 'candidate_lifetime_complete');
-      }, KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS * 1_000);
-      candidateTimer.unref();
+    const beginIdentityVerification = async (): Promise<void> => {
+      if (terminal || signedInVerified) return;
+      if (identityVerificationPromise !== undefined) {
+        await identityVerificationPromise;
+        if (
+          !terminal &&
+          !signedInVerified &&
+          classifyPageUrl(page.url()) === 'authenticated_candidate'
+        ) {
+          await beginIdentityVerification();
+        }
+        return;
+      }
+      const verificationEpoch = ++identityVerificationEpoch;
+      report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
+      const task = (async () => {
+        try {
+          const result = await verifyLocalKemerBetIdentity({
+            dataRoot: config.dataRoot,
+            ...(expectedAgentIdentity === undefined ? {} : { expectedAgentIdentity }),
+            page,
+            releaseSha: config.releaseSha,
+          });
+          if (
+            terminal ||
+            verificationEpoch !== identityVerificationEpoch ||
+            classifyPageUrl(page.url()) !== 'authenticated_candidate'
+          ) {
+            return;
+          }
+          expectedAgentIdentity = undefined;
+          signedInVerified = true;
+          report({
+            state: 'signed_in_verified',
+            transferDisabled: true,
+            detailsRedacted: true,
+            ...(result.bindingCreated ? { reason: 'identity_binding_created' as const } : {}),
+          });
+          candidateTimer = setTimeout(() => {
+            void finish('stopped', 'candidate_lifetime_complete');
+          }, KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS * 1_000);
+          candidateTimer.unref();
+        } catch (error) {
+          if (terminal || verificationEpoch !== identityVerificationEpoch) return;
+          throw error;
+        }
+      })();
+      const trackedTask = task.finally(() => {
+        if (identityVerificationPromise === trackedTask) identityVerificationPromise = undefined;
+      });
+      identityVerificationPromise = trackedTask;
+      return trackedTask;
     };
 
-    const observePage = (candidate: Page): void => {
+    const markSignedInCandidate = async (): Promise<void> => {
+      if (terminal) return;
+      if (!signedInCandidate) {
+        signedInCandidate = true;
+        if (loginTimer) clearTimeout(loginTimer);
+        loginTimer = undefined;
+        report({ state: 'signed_in_candidate', transferDisabled: true, detailsRedacted: true });
+      }
+      await beginIdentityVerification();
+    };
+
+    const identityFailureReason = (error: unknown): LocalKemerBetSessionEvent['reason'] => {
+      const code = error instanceof Error && 'code' in error ? String(error.code) : undefined;
+      if (code === 'FETANAGENT_IDENTITY_CONFIRMATION_REQUIRED') {
+        return 'identity_confirmation_required';
+      }
+      if (code === 'FETANAGENT_IDENTITY_MISMATCH') return 'identity_mismatch';
+      return 'identity_binding_unavailable';
+    };
+
+    const observePage = async (candidate: Page): Promise<void> => {
       const kind = classifyPageUrl(candidate.url());
       if (kind === 'unsupported' && candidate.url() !== 'about:blank' && !stopping) {
         void finish('failed', 'unexpected_page');
@@ -208,14 +291,15 @@ export async function startLocalKemerBetSession(
       }
       if (kind === 'authenticated_candidate') {
         phase = 'signed_in_read_only';
-        // This is an agent-page candidate, not proof of authentication or account identity.
-        // Retaining the guarded window must not depend on a background response that may have
-        // already arrived, used a different locale, or been restored from the local profile.
-        markSignedInCandidate();
+        // This route is only a candidate. The local identity verifier must still reject visible
+        // signed-out state and match the exact reviewed header to its protected local binding.
+        await markSignedInCandidate();
         return;
       }
       if (kind === 'login') {
+        identityVerificationEpoch += 1;
         signedInCandidate = false;
+        signedInVerified = false;
         if (candidateTimer) clearTimeout(candidateTimer);
         candidateTimer = undefined;
         phase = 'manual_login';
@@ -225,7 +309,11 @@ export async function startLocalKemerBetSession(
     };
 
     page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) observePage(page);
+      if (frame === page.mainFrame()) {
+        void observePage(page).catch((error: unknown) =>
+          finish('failed', identityFailureReason(error)),
+        );
+      }
     });
     context.on('page', (candidate) => {
       if (candidate !== page && !stopping) {
@@ -276,7 +364,7 @@ export async function startLocalKemerBetSession(
       waitUntil: 'commit',
       timeout: 45_000,
     });
-    observePage(page);
+    await observePage(page);
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? String(error.code) : undefined;
     const reason =
@@ -284,7 +372,13 @@ export async function startLocalKemerBetSession(
         ? 'profile_in_use'
         : code === 'FETANAGENT_PROFILE_PATH_UNSAFE'
           ? 'profile_path_unsafe'
-          : 'startup_failed';
+          : code === 'FETANAGENT_IDENTITY_CONFIRMATION_REQUIRED'
+            ? 'identity_confirmation_required'
+            : code === 'FETANAGENT_IDENTITY_MISMATCH'
+              ? 'identity_mismatch'
+              : code === 'FETANAGENT_IDENTITY_BINDING_UNAVAILABLE'
+                ? 'identity_binding_unavailable'
+                : 'startup_failed';
     await finish('failed', reason);
     await done.catch(() => undefined);
     throw new Error('The protected local KemerBet browser could not start.');

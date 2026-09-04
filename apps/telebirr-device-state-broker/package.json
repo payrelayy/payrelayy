@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/telebirr-device-state-broker-main.js",
     "test": "vitest run --passWithNoTests"
   }
 }

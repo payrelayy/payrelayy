@@ -11,9 +11,10 @@ later expose only the reviewed Caddy gateway after the firewall and DNS gates in
 The repository provides:
 
 - [`../Dockerfile`](../Dockerfile): locked dependency builds and distinct non-root API,
-  customer-web, Owner-control, beta-admission, bot, executor, and secret-free gateway runtime targets
-  with no secret copied into them. Their shared Linux/amd64 base image is pinned to a reviewed
-  immutable digest for the London VM and must be reverified before a real deployment;
+  customer-web, Owner-control, beta-admission, bot, executor, TeleBirr assignment-broker,
+  TeleBirr device-state-broker, and secret-free gateway runtime targets with no secret copied into
+  them. Their shared Linux/amd64 base image is pinned to a reviewed immutable digest for the London
+  VM and must be reverified before a real deployment;
 - [`compose.inactive.yaml`](compose.inactive.yaml): an explicitly `inactive` Compose profile on an
   internal Docker network, with neither an image-exposed nor published host port; it contains the
   API and customer-web fail-closed runtime containers.

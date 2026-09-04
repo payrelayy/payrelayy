@@ -21,6 +21,20 @@ that resolves to itself with mode `0700`; the created socket is inode-checked an
 Every request and response is canonical, bounded, operation/path-bound, and carries the exact
 no-money safety contract.
 
-There is still no executable start entrypoint and nothing is deployed or provisioned by this
-package. The next composition slice will add strict file-backed configuration and a fail-closed
-application lifecycle around the PostgreSQL runtime and this socket server.
+The package now has a fail-closed executable lifecycle and the repository `Dockerfile` contains a
+dedicated `telebirr-device-state-broker` target. The image runs as UID/GID `10001:10001`, exposes no
+port, starts PostgreSQL before the socket, rechecks database readiness after listening, and closes
+the socket before PostgreSQL. It is disabled by default and accepts no calendar stop or expiry.
+
+The enabled staging runtime accepts only these guarded files:
+
+- `/run/secrets/telebirr_device_state_broker_database_url`: root- or runtime-owned mode `0400`, for
+  the exact `fetanagent_telebirr_device_state_runtime` role at the reviewed Supabase host with
+  `sslmode=verify-full`;
+- `/run/configs/supabase_ca_certificate`: root- or runtime-owned, read-only PEM CA material.
+
+Inline database credentials, Supabase `service_role`, assignment signing/opening keys, root
+reference-protection secrets, root execution, non-Linux execution, writable/substituted guarded
+files, and any non-dry-run financial mode fail closed to one redacted error. The credentials,
+container deployment, bridge composition, and Android enrollment are still intentionally
+unprovisioned.

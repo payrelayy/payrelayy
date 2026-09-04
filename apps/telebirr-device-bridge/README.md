@@ -74,17 +74,17 @@ blocked until:
 
 - an isolated verifier consumer for staged evidence that independently revalidates both signatures
   before invoking the existing trusted-verifier completion boundary;
-- strict file-backed device-state configuration and application/container composition join the
-  implemented PostgreSQL adapter, private socket server, and database-free bridge client;
-- separately provisioned scoped opening/signing keys and process/container composition of the
-  implemented assignment socket adapter; and
+- the implemented assignment and device-state broker lifecycles are provisioned and deployed as
+  separate private processes/containers with only their scoped guarded files;
+- separately provisioned scoped opening/signing keys are mounted only into the assignment broker;
+  and
 - immutable HTTPS origin, DNS/TLS/firewall, key rotation, metrics, and deployment manifests.
 
 The existing protected-reference package deliberately has no general decrypt API. This bridge
 therefore does not fake one, reuse an API encryption master as a device key, or send protected
 database material to Android. `pollAssignment` and all durable device-state operations stay
 dependency-injected; the two fixed Unix-socket adapters are the reviewed production candidates once
-their isolated broker lifecycles are provisioned.
+their isolated broker runtimes are provisioned.
 
 ## Verification
 

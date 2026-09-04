@@ -42,9 +42,11 @@ const TWELVE_HOURS = 12 * 60 * 60 * 1_000;
 const config: WindowsCompanionConfig = {
   dataRoot: resolve('test-fixtures', 'local-companion'),
   expectedAgentIdentityProvided: false,
+  pairingPackageProvided: false,
   profileRoot: resolve('test-fixtures', 'local-companion', 'profile'),
   releaseSha: 'local-development',
   takeExpectedAgentIdentity: () => undefined,
+  takePairingPackage: () => undefined,
 };
 
 type Listener = (...args: unknown[]) => unknown;

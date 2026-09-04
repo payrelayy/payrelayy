@@ -3,7 +3,7 @@
 This is the local, headed-browser replacement for the unreliable DigitalOcean KemerBet sign-in
 preview. It runs in the signed-in Windows desktop session and opens the installed stable Chrome.
 
-The current slice is deliberately local-identity/read-only:
+The current slice is deliberately pairing-only/read-only:
 
 - the owner types KemerBet credentials and CAPTCHA directly into the local Chrome window;
 - the dedicated Chrome profile stays on this Windows account;
@@ -12,6 +12,11 @@ The current slice is deliberately local-identity/read-only:
   key is protected with Windows DPAPI for the current user;
 - later launches must reproduce that same protected local identity binding before the session is
   reported as locally verified;
+- a ten-minute Owner-issued package can enroll one locally generated P-256 public key only after
+  that exact identity verification; the private key is DPAPI-protected for the current Windows user
+  and never leaves the computer;
+- exact retries reuse the same locally protected key and signed request, while a stored valid
+  enrollment starts without another package;
 - only the exact KemerBet login POST and non-financial session-refresh POST are permitted;
 - the KemerBet transfer endpoint and every other provider mutation are blocked;
 - the exact non-financial KemerBet session-refresh request remains available so the signed-in
@@ -32,8 +37,7 @@ companion then rejects visible login/CAPTCHA state, observes exactly one reviewe
 twice, and matches it to the DPAPI-protected local binding before reporting `signed_in_verified`.
 Window retention does not depend on a particular background `Account/Info` response or locale.
 Returning to the actual login page resets the state and starts a new non-sliding ten-minute login
-window within the overall session cap. Server-signed device pairing and exact-five lookup remain
-unwired.
+window within the overall session cap. Exact-five lookup remains disabled after pairing.
 
 Sensitive request data may pass through the companion's local Node process memory during forwarding;
 it remains on this device and is not retained in logs or sent to remote FetanAgent services. Browser
@@ -49,5 +53,7 @@ pnpm --filter @fetanagent/windows-companion start
 
 For a first local-development run, set
 `FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY` to the exact visible agent-header value before
-starting. Use `Ctrl+C` in the launching terminal to close the guarded browser. The next phase adds
-device pairing and one signed exact-five lookup assignment; it does not add Amount or Transfer.
+starting. To enroll a verified device, set `FETANAGENT_COMPANION_PAIRING_PACKAGE` to a fresh package
+created on the Owner page; the process consumes and deletes that environment value during startup.
+Use `Ctrl+C` in the launching terminal to close the guarded browser. The next phase adds one signed
+exact-five lookup assignment; it does not add Amount or Transfer.

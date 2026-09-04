@@ -31,7 +31,7 @@ try {
   if ($LASTEXITCODE -ne 0 -or $checkedOutSha -ne $ReleaseSha) {
     throw 'The release SHA does not match the checked-out source.'
   }
-  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1
+  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1
   if ($LASTEXITCODE -ne 0) { throw 'Release inputs contain uncommitted changes.' }
 
   pnpm --filter '@fetanagent/windows-companion...' run build
@@ -72,6 +72,7 @@ if ((Get-Item -LiteralPath (Join-Path $packageRoot 'runtime\LICENSE')).Length -l
 }
 Set-Content -LiteralPath (Join-Path $packageRoot 'runtime\VERSION') -Value $nodeVersion -Encoding ascii
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Companion.vbs') -Destination $packageRoot
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Enter FetanAgent Pairing Package.ps1') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\README.txt') -Destination $packageRoot
 Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE_SHA') -Value $ReleaseSha -Encoding ascii -NoNewline
 
@@ -104,7 +105,7 @@ import { realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = realpathSync(process.cwd()) + sep;
-for (const name of ['@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
+for (const name of ['@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
   const url = import.meta.resolve(name);
   assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
   await import(url);

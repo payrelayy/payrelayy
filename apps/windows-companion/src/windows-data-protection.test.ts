@@ -25,4 +25,29 @@ describe('Windows current-user data protection', () => {
     },
     90_000,
   );
+
+  it.skipIf(process.platform !== 'win32')(
+    'keeps the device signing key in a separate DPAPI purpose domain',
+    async () => {
+      const identityProtector = createWindowsCurrentUserDataProtector(
+        process.env,
+        'local-identity',
+      );
+      const deviceProtector = createWindowsCurrentUserDataProtector(
+        process.env,
+        'device-signing-key',
+      );
+      const cleartext = randomBytes(32);
+      let ciphertext: Buffer | null = null;
+      try {
+        ciphertext = await deviceProtector.protect(cleartext);
+        await expect(identityProtector.unprotect(ciphertext)).rejects.toThrow();
+        await expect(deviceProtector.unprotect(ciphertext)).resolves.toEqual(cleartext);
+      } finally {
+        cleartext.fill(0);
+        ciphertext?.fill(0);
+      }
+    },
+    90_000,
+  );
 });

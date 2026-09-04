@@ -253,7 +253,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
               This companion release verifies the exact agent-header identity locally and stores
               only a Windows-protected fingerprint. It has no payment execution capability.
               Provider financial requests are blocked even if KemerBet shows a Transfer button.
-              Server pairing and exact-five lookup are not enabled yet.
+              The pairing package below grants public-key enrollment only. Exact-five lookup is
+              not enabled yet.
             </p>
             <div class="actions companion-actions">
               <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
@@ -268,6 +269,39 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
               <li>On first use, enter the exact visible KemerBet agent-header identity locally.</li>
               <li>Sign in only in the separate Chrome window and leave it open.</li>
             </ol>
+            <div class="device-pairing" aria-labelledby="companion-device-pairing-title">
+              <p class="status-ok">Public-key enrollment only</p>
+              <h3 id="companion-device-pairing-title">Pair this Windows companion</h3>
+              <p class="receipt-label">
+                Create one ten-minute package after the exact local KemerBet identity is verified.
+                The companion generates its private P-256 key on this computer and protects it with
+                Windows DPAPI. Only the public key is enrolled. Lookup, Amount, Notes, Transfer,
+                settlement, and money movement remain disabled.
+              </p>
+              <p class="request-meta" id="companion-device-pairing-status">
+                Sign in to check pairing readiness.
+              </p>
+              <form id="companion-device-pairing-form">
+                <label class="confirmation-row" for="companion-device-pairing-confirmation">
+                  <input id="companion-device-pairing-confirmation" type="checkbox" />
+                  I approve one public-key pairing package for this Windows companion. It grants
+                  no lookup or financial authority.
+                </label>
+                <button id="companion-device-pairing-button" type="submit" disabled>
+                  Create one-use Windows pairing package
+                </button>
+              </form>
+              <div class="pairing-receipt" id="companion-device-pairing-receipt" hidden>
+                <p class="receipt-label">Paste this only into the local FetanAgent companion launcher.</p>
+                <output class="pairing-package" id="companion-device-pairing-package"></output>
+                <div class="actions">
+                  <button id="companion-device-pairing-copy-button" type="button">Copy package</button>
+                  <button class="secondary" id="companion-device-pairing-clear-button" type="button">
+                    Clear from page
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="kemerbet-session" aria-labelledby="kemerbet-session-title" hidden inert>
             <h3 id="kemerbet-session-title">Private KemerBet sign-in</h3>
@@ -527,6 +561,14 @@ const telebirrDevicePairingReceipt = document.querySelector('#telebirr-device-pa
 const telebirrDevicePairingPackage = document.querySelector('#telebirr-device-pairing-package');
 const telebirrDevicePairingCopyButton = document.querySelector('#telebirr-device-pairing-copy-button');
 const telebirrDevicePairingClearButton = document.querySelector('#telebirr-device-pairing-clear-button');
+const companionDevicePairingForm = document.querySelector('#companion-device-pairing-form');
+const companionDevicePairingConfirmation = document.querySelector('#companion-device-pairing-confirmation');
+const companionDevicePairingButton = document.querySelector('#companion-device-pairing-button');
+const companionDevicePairingStatus = document.querySelector('#companion-device-pairing-status');
+const companionDevicePairingReceipt = document.querySelector('#companion-device-pairing-receipt');
+const companionDevicePairingPackage = document.querySelector('#companion-device-pairing-package');
+const companionDevicePairingCopyButton = document.querySelector('#companion-device-pairing-copy-button');
+const companionDevicePairingClearButton = document.querySelector('#companion-device-pairing-clear-button');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
@@ -544,6 +586,9 @@ let currentPilotLoaded = false;
 let pendingTelebirrDevicePairingRequestId;
 let currentTelebirrDevicePairing;
 let telebirrDevicePairingExpiryTimer;
+let pendingCompanionDevicePairingRequestId;
+let currentCompanionDevicePairing;
+let companionDevicePairingExpiryTimer;
 let eligiblePilotPlayers = [];
 let eligibleReadinessCohortPlayerCount = 0;
 let readinessCohortPrepared = false;
@@ -572,6 +617,8 @@ const KEMERBET_READINESS_REQUEST_STORAGE_KEY =
   'fetanagent.owner.kemerbet-readiness-request.v1';
 const TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
   'fetanagent.owner.telebirr-device-pairing-request.v1';
+const COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
+  'fetanagent.owner.companion-device-pairing-request.v1';
 const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000;
 // Caddy's Owner upstream first-header deadline is 30 seconds. Fail locally first so the UI can
 // reconcile an uncertain mutation using the same idempotency key instead of waiting on a gateway
@@ -892,6 +939,16 @@ function clearTelebirrDevicePairingPackage() {
   telebirrDevicePairingReceipt.hidden = true;
 }
 
+function clearCompanionDevicePairingPackage() {
+  if (companionDevicePairingExpiryTimer !== undefined) {
+    window.clearTimeout(companionDevicePairingExpiryTimer);
+  }
+  companionDevicePairingExpiryTimer = undefined;
+  currentCompanionDevicePairing = undefined;
+  companionDevicePairingPackage.textContent = '';
+  companionDevicePairingReceipt.hidden = true;
+}
+
 function clearDepositIntake() {
   depositIntakeList.replaceChildren();
 }
@@ -1017,6 +1074,40 @@ function clearPendingTelebirrDevicePairingRequestId() {
   }
 }
 
+function readPendingCompanionDevicePairingRequestId() {
+  if (pendingCompanionDevicePairingRequestId) return pendingCompanionDevicePairingRequestId;
+  try {
+    const stored = window.sessionStorage.getItem(COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY);
+    if (!validOwnerMutationRequestId(stored)) {
+      window.sessionStorage.removeItem(COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY);
+      return undefined;
+    }
+    pendingCompanionDevicePairingRequestId = stored;
+    return stored;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistPendingCompanionDevicePairingRequestId(requestId) {
+  if (!validOwnerMutationRequestId(requestId)) throw new Error('invalid_request_id');
+  pendingCompanionDevicePairingRequestId = requestId;
+  try {
+    window.sessionStorage.setItem(COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY, requestId);
+  } catch {
+    // The in-memory request ID still prevents a blind retry in this tab.
+  }
+}
+
+function clearPendingCompanionDevicePairingRequestId() {
+  pendingCompanionDevicePairingRequestId = undefined;
+  try {
+    window.sessionStorage.removeItem(COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY);
+  } catch {
+    // The in-memory value is already cleared after a terminal response.
+  }
+}
+
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
@@ -1041,6 +1132,10 @@ function signOut(message = 'Signed out.') {
   clearKemerbetReadinessCohort();
   clearReceivers();
   clearKemerbetAgentProfiles();
+  clearCompanionDevicePairingPackage();
+  companionDevicePairingConfirmation.checked = false;
+  companionDevicePairingStatus.textContent = 'Sign in to check pairing readiness.';
+  companionDevicePairingButton.disabled = true;
   clearPilot();
   clearDepositIntake();
   invitePanel.hidden = true;
@@ -1093,6 +1188,7 @@ async function loadOwnerAuthConfig() {
   if (!response.ok) throw new Error('config');
   const config = await response.json();
   if (config.supabaseUrl !== expectedSupabaseUrl ||
+      typeof config.companionDevicePairingConfigured !== 'boolean' ||
       typeof config.telebirrDevicePairingConfigured !== 'boolean' ||
       typeof config.publishableKey !== 'string' ||
       !/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(config.publishableKey)) {
@@ -2180,6 +2276,119 @@ function strictBase64UrlText(value) {
   }
 }
 
+function validCompanionDevicePairingReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'alreadyIssued,devicePlatform,expiresAt,lookupAllowed,moneyMovementAllowed,pairingOnly,pairingPackage,transferDisabled' ||
+      typeof value.alreadyIssued !== 'boolean' ||
+      value.devicePlatform !== 'windows' ||
+      value.lookupAllowed !== false ||
+      value.moneyMovementAllowed !== false ||
+      value.pairingOnly !== true ||
+      value.transferDisabled !== true ||
+      typeof value.expiresAt !== 'string' ||
+      !Number.isFinite(Date.parse(value.expiresAt)) ||
+      new Date(value.expiresAt).toISOString() !== value.expiresAt ||
+      typeof value.pairingPackage !== 'string' ||
+      value.pairingPackage.length > 8_192 ||
+      !value.pairingPackage.startsWith('fetanagent-companion-pairing-v1.')) return undefined;
+  const encoded = value.pairingPackage.slice('fetanagent-companion-pairing-v1.'.length);
+  const canonicalJson = strictBase64UrlText(encoded);
+  if (!canonicalJson) return undefined;
+  try {
+    const grant = JSON.parse(canonicalJson);
+    const requiredKeys = [
+      'schemaVersion', 'protocolMode', 'pairingId', 'pairingNonceDigest', 'issuedAt',
+      'expiresAt', 'endpoint', 'signerKeyId', 'serverSigningPublicKeySpki',
+      'serverSigningPublicKeySpkiSha256', 'minimumCompanionVersion', 'oneUse',
+      'accountMutationAllowed', 'balanceMutationAllowed', 'providerMutationAllowed',
+      'paymentAllowed', 'depositAllowed', 'withdrawAllowed', 'transferAllowed',
+      'settlementAllowed', 'finalActionAllowed', 'financialActionAllowed',
+      'moneyMovementAllowed', 'transferDisabled', 'identifiersRedacted', 'moneyMoved',
+    ].sort().join(',');
+    if (!grant || typeof grant !== 'object' || Array.isArray(grant) ||
+        Object.keys(grant).sort().join(',') !== requiredKeys ||
+        grant.schemaVersion !== 1 ||
+        grant.protocolMode !== 'local_companion_no_transfer_v1' ||
+        typeof grant.pairingId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(grant.pairingId) ||
+        typeof grant.pairingNonceDigest !== 'string' ||
+        !/^sha256:[0-9a-f]{64}$/.test(grant.pairingNonceDigest) ||
+        typeof grant.issuedAt !== 'string' ||
+        new Date(grant.issuedAt).toISOString() !== grant.issuedAt ||
+        grant.expiresAt !== value.expiresAt ||
+        Date.parse(grant.expiresAt) <= Date.parse(grant.issuedAt) ||
+        Date.parse(grant.expiresAt) - Date.parse(grant.issuedAt) > 10 * 60 * 1_000 ||
+        grant.endpoint !== 'https://device.fetanagent.com/v1/companion/device/enrollments:pair' ||
+        typeof grant.signerKeyId !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(grant.signerKeyId) ||
+        typeof grant.serverSigningPublicKeySpki !== 'string' ||
+        !/^[A-Za-z0-9_-]+$/.test(grant.serverSigningPublicKeySpki) ||
+        typeof grant.serverSigningPublicKeySpkiSha256 !== 'string' ||
+        !/^sha256:[0-9a-f]{64}$/.test(grant.serverSigningPublicKeySpkiSha256) ||
+        grant.minimumCompanionVersion !== '0.1.4' || grant.oneUse !== true ||
+        grant.accountMutationAllowed !== false || grant.balanceMutationAllowed !== false ||
+        grant.providerMutationAllowed !== false || grant.paymentAllowed !== false ||
+        grant.depositAllowed !== false || grant.withdrawAllowed !== false ||
+        grant.transferAllowed !== false || grant.settlementAllowed !== false ||
+        grant.finalActionAllowed !== false || grant.financialActionAllowed !== false ||
+        grant.moneyMovementAllowed !== false || grant.transferDisabled !== true ||
+        grant.identifiersRedacted !== true || grant.moneyMoved !== false) return undefined;
+  } catch {
+    return undefined;
+  }
+  return {
+    alreadyIssued: value.alreadyIssued,
+    expiresAt: value.expiresAt,
+    pairingPackage: value.pairingPackage,
+  };
+}
+
+function updateCompanionDevicePairingAvailability() {
+  if (currentCompanionDevicePairing &&
+      Date.parse(currentCompanionDevicePairing.expiresAt) <= Date.now()) {
+    clearCompanionDevicePairingPackage();
+    clearPendingCompanionDevicePairingRequestId();
+  }
+  const configured = ownerAuthConfig?.companionDevicePairingConfigured === true;
+  companionDevicePairingButton.disabled = !configured ||
+    Boolean(currentCompanionDevicePairing) ||
+    !companionDevicePairingConfirmation.checked ||
+    companionDevicePairingForm.dataset.ownerBusy === 'true';
+  if (!ownerAuthConfig) {
+    companionDevicePairingStatus.textContent = 'Sign in to check pairing readiness.';
+  } else if (!configured) {
+    companionDevicePairingStatus.textContent =
+      'Windows pairing is disabled until the independent server signing key and bridge are provisioned.';
+  } else if (currentCompanionDevicePairing) {
+    companionDevicePairingStatus.textContent =
+      'One public-key pairing package is ready until ' +
+      new Date(currentCompanionDevicePairing.expiresAt).toLocaleString() + '.';
+  } else if (readPendingCompanionDevicePairingRequestId()) {
+    companionDevicePairingStatus.textContent =
+      'A prior request is pending reconciliation. Create will recover that exact package only.';
+  } else {
+    companionDevicePairingStatus.textContent =
+      'Ready to create one ten-minute public-key pairing package. Lookup and money authority remain disabled.';
+  }
+}
+
+function showCompanionDevicePairing(receipt) {
+  clearCompanionDevicePairingPackage();
+  currentCompanionDevicePairing = receipt;
+  companionDevicePairingPackage.textContent = receipt.pairingPackage;
+  companionDevicePairingReceipt.hidden = false;
+  companionDevicePairingConfirmation.checked = false;
+  const delay = Math.max(1, Date.parse(receipt.expiresAt) - Date.now());
+  companionDevicePairingExpiryTimer = window.setTimeout(() => {
+    if (currentCompanionDevicePairing?.pairingPackage !== receipt.pairingPackage) return;
+    clearCompanionDevicePairingPackage();
+    clearPendingCompanionDevicePairingRequestId();
+    updateCompanionDevicePairingAvailability();
+  }, delay);
+  updateCompanionDevicePairingAvailability();
+}
+
 function validTelebirrDevicePairingReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join(',') !==
@@ -2930,6 +3139,84 @@ async function prepareKemerbetReadinessCohort() {
   }
 }
 
+function companionDevicePairingMutationHeaders(requestId) {
+  return {
+    'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-companion-device-pairing-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+async function issueCompanionDevicePairing() {
+  if (ownerAuthConfig?.companionDevicePairingConfigured !== true ||
+      currentCompanionDevicePairing || !companionDevicePairingConfirmation.checked) return;
+  if (!window.confirm(
+    'Create one ten-minute public-key pairing package for this Windows companion? ' +
+    'Player lookup, Amount, Notes, Transfer, settlement, execution, and money movement remain disabled.',
+  )) return;
+  const requestId = readPendingCompanionDevicePairingRequestId() ?? crypto.randomUUID();
+  persistPendingCompanionDevicePairingRequestId(requestId);
+  setBusy(companionDevicePairingForm, true);
+  setNotice('Creating or reconciling the one-use Windows companion pairing package…');
+  let terminalFailure = false;
+  let specificFailureNotice = false;
+  try {
+    const response = await ownerRequest('/v1/owner/companion-device-pairing', {
+      method: 'POST',
+      headers: companionDevicePairingMutationHeaders(requestId),
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+        requestId,
+      }),
+    });
+    if (response.status !== 200 && response.status !== 201) {
+      const failure = await response.json().catch(() => undefined);
+      if (response.status === 400 || response.status === 409) {
+        terminalFailure = true;
+        clearPendingCompanionDevicePairingRequestId();
+      }
+      if (response.status === 409 &&
+          failure?.error === 'companion_device_pairing_not_configured') {
+        specificFailureNotice = true;
+        setNotice('Windows companion pairing is not provisioned on the server yet.');
+      } else if (response.status === 409 &&
+          failure?.error === 'companion_device_pairing_not_ready') {
+        specificFailureNotice = true;
+        setNotice(
+          'Windows companion pairing is not ready. Keep money disabled and verify the independent bridge signer and Supabase state.',
+        );
+      }
+      throw new Error('companion_device_pairing_issue');
+    }
+    const receipt = validCompanionDevicePairingReceipt(await response.json());
+    if (!receipt || (response.status === 200) !== receipt.alreadyIssued) {
+      throw new Error('companion_device_pairing_receipt');
+    }
+    if (Date.parse(receipt.expiresAt) <= Date.now()) {
+      terminalFailure = true;
+      clearPendingCompanionDevicePairingRequestId();
+      throw new Error('companion_device_pairing_expired');
+    }
+    showCompanionDevicePairing(receipt);
+    setNotice(
+      receipt.alreadyIssued
+        ? 'The exact Windows pairing package was recovered. Paste it only into the local companion before it expires.'
+        : 'Windows pairing package created. Paste it only into the local companion before it expires.',
+    );
+  } catch (error) {
+    if (!isSignedOutError(error) && !terminalFailure) {
+      setNotice(
+        'Windows pairing acknowledgement is uncertain. The same request ID is retained; the next confirmed attempt can recover only that exact package.',
+      );
+    } else if (!isSignedOutError(error) && !specificFailureNotice) {
+      setNotice('No Windows companion pairing package was created. Review readiness before retrying.');
+    }
+  } finally {
+    setBusy(companionDevicePairingForm, false);
+    updateCompanionDevicePairingAvailability();
+  }
+}
+
 function telebirrDevicePairingMutationHeaders(requestId) {
   return {
     'content-type': 'application/json',
@@ -3202,6 +3489,7 @@ loginForm.addEventListener('submit', async (event) => {
     }
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
+    updateCompanionDevicePairingAvailability();
     applyOwnerAuthSession(session, true);
   } catch {
     passwordInput.value = '';
@@ -3224,6 +3512,7 @@ async function restoreOwnerSession() {
     const config = await loadOwnerAuthConfig();
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
+    updateCompanionDevicePairingAvailability();
     ownerSessionExpiresAt = persisted.expiresAt;
     refreshToken = persisted.refreshToken;
     await refreshOwnerSession();
@@ -3384,6 +3673,39 @@ pilotPrepareForm.addEventListener('submit', async (event) => {
 pilotRefreshButton.addEventListener('click', loadCurrentPilot);
 pilotArmButton.addEventListener('click', armFixedPilot);
 pilotStopButton.addEventListener('click', stopCurrentPilot);
+companionDevicePairingConfirmation.addEventListener(
+  'change',
+  updateCompanionDevicePairingAvailability,
+);
+companionDevicePairingForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await issueCompanionDevicePairing();
+});
+companionDevicePairingCopyButton.addEventListener('click', async () => {
+  if (!currentCompanionDevicePairing ||
+      Date.parse(currentCompanionDevicePairing.expiresAt) <= Date.now()) {
+    updateCompanionDevicePairingAvailability();
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(currentCompanionDevicePairing.pairingPackage);
+    setNotice(
+      'Windows pairing package copied. Paste it only into the local FetanAgent Companion launcher.',
+    );
+  } catch {
+    setNotice(
+      'Copy was unavailable. Select the displayed package and paste it only into the local FetanAgent Companion launcher.',
+    );
+  }
+});
+companionDevicePairingClearButton.addEventListener('click', () => {
+  if (!currentCompanionDevicePairing) return;
+  clearCompanionDevicePairingPackage();
+  updateCompanionDevicePairingAvailability();
+  setNotice(
+    'The Windows pairing package was cleared from this page. Its request ID is retained until expiry so a confirmed retry can recover only the same package.',
+  );
+});
 telebirrDevicePairingConfirmation.addEventListener(
   'change',
   updateTelebirrDevicePairingAvailability,
@@ -3420,6 +3742,7 @@ export function ownerDashboardPublicConfig(
   runtime: Extract<OwnerControlRuntimeConfig, { enabled: true }>,
 ) {
   return {
+    companionDevicePairingConfigured: runtime.companionDevicePairing.configured,
     publishableKey: runtime.publishableKey,
     supabaseUrl: runtime.supabaseUrl,
     telebirrDevicePairingConfigured: runtime.devicePairing.configured,

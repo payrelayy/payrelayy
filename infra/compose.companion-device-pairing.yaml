@@ -1,0 +1,116 @@
+name: fetanagent-companion-device-pairing
+
+# Pairing-only public-key enrollment. This composition has no host-published port, Player-ID input,
+# provider credential, transfer endpoint, settlement authority, or money-movement switch.
+services:
+  companion-device-bridge:
+    profiles: [companion-device-pairing]
+    platform: linux/amd64
+    image: fetanagent-companion-device-bridge:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: companion-device-bridge
+      args:
+        VCS_REF: ${FETANAGENT_VCS_REF:?set the reviewed full commit SHA}
+    init: true
+    user: '10001:10001'
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.35
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED: 'true'
+      COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED: 'true'
+      COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: staging
+      COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE: /run/secrets/companion_device_bridge_database_url
+      COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE: /run/secrets/companion_device_bridge_server_signer.pkcs8.der
+      COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE: /run/configs/companion_device_bridge_runtime_manifest.v1.json
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
+    secrets:
+      - source: companion_device_bridge_database_url
+        target: companion_device_bridge_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: companion_device_bridge_server_signer
+        target: companion_device_bridge_server_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: companion_device_bridge_runtime_manifest
+        target: /run/configs/companion_device_bridge_runtime_manifest.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      companion_device_database_egress: {}
+      companion_device_ingress:
+        aliases:
+          - companion-device-bridge
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - "import{connect}from'node:net';const c=connect({host:'127.0.0.1',port:8085}),f=()=>process.exit(1);c.setTimeout(1000,f);c.once('error',f);c.once('connect',()=>{c.destroy();process.exit(0)})"
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 4
+
+networks:
+  companion_device_database_egress:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
+  companion_device_ingress:
+    external: true
+    name: fetanagent-companion-device-ingress
+
+configs:
+  companion_device_bridge_runtime_manifest:
+    file: ${FETANAGENT_COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE:?set the immutable public companion bridge manifest}
+  supabase_ca_certificate:
+    file: ${FETANAGENT_COMPANION_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
+
+# Both secret sources are mode-0400 operator-owned files outside Git. No Supabase administrator or
+# service-role key, Owner credential, KemerBet credential, Telegram token, or financial key enters
+# this container.
+secrets:
+  companion_device_bridge_database_url:
+    file: ${FETANAGENT_COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE:?set the scoped continuously available bridge database URL file}
+  companion_device_bridge_server_signer:
+    file: ${FETANAGENT_COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE:?set the companion bridge PKCS8 file}

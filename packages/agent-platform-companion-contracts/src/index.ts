@@ -19,6 +19,12 @@ export const AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM = 'ecdsa-p256-sha256' 
 export const AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING = 'ieee-p1363-base64url' as const;
 export const AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM = 'sha256' as const;
 export const AGENT_PLATFORM_COMPANION_DEVICE_PLATFORM = 'windows' as const;
+export const AGENT_PLATFORM_COMPANION_PAIRING_PATH =
+  '/v1/companion/device/enrollments:pair' as const;
+export const AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE =
+  'application/vnd.fetanagent.companion-device-bridge+json' as const;
+export const AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX =
+  'fetanagent-companion-pairing-v1.' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_TRANSCRIPT_VERSION =
   'agent-platform-companion-pairing-transcript-v1' as const;
 export const AGENT_PLATFORM_COMPANION_CERTIFICATE_TRANSCRIPT_VERSION =

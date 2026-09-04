@@ -70,6 +70,11 @@ import {
   type OwnerReceiverRotationReason,
 } from './owner-receiver-accounts.js';
 import {
+  OwnerCompanionDevicePairingNotReadyError,
+  OwnerCompanionDevicePairingRejectedError,
+  OwnerCompanionDevicePairingUnavailableError,
+} from './owner-companion-device-pairing.js';
+import {
   OwnerTelebirrDevicePairingNotReadyError,
   OwnerTelebirrDevicePairingRejectedError,
   OwnerTelebirrDevicePairingUnavailableError,
@@ -131,6 +136,7 @@ const PRIVATE_LIVE_PILOT_STOP_REASONS = new Set<PrivateLivePilotStopReason>([
 ]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
+const OWNER_COMPANION_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-companion-device-pairing-v1';
 const OWNER_TELEBIRR_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-telebirr-device-pairing-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
@@ -461,6 +467,21 @@ export function buildOwnerControlApp(
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
         OWNER_TELEBIRR_DEVICE_PAIRING_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validCompanionDevicePairingMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_COMPANION_DEVICE_PAIRING_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -1554,6 +1575,48 @@ export function buildOwnerControlApp(
       }
       if (error instanceof OwnerKemerbetSessionUnavailableError) {
         request.log.warn('Owner KemerBet session stop is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.post('/v1/owner/companion-device-pairing', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        body?.confirmation !== 'owner_confirmed_windows_companion_pairing_only_no_money' ||
+        !validCompanionDevicePairingMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      if (!runtimeConfig.companionDevicePairing.configured) {
+        return reply.code(409).send({ error: 'companion_device_pairing_not_configured' });
+      }
+      if (!dependencies.runtime.companionDevicePairing) {
+        request.log.warn('Configured Owner companion device pairing adapter is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const receipt = await dependencies.runtime.companionDevicePairing.issue(
+        authUserId,
+        body.requestId as string,
+      );
+      return reply.code(receipt.alreadyIssued ? 200 : 201).send(receipt);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerCompanionDevicePairingRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof OwnerCompanionDevicePairingNotReadyError) {
+        return reply.code(409).send({ error: 'companion_device_pairing_not_ready' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerCompanionDevicePairingUnavailableError
+      ) {
+        request.log.warn('Owner companion device pairing issuance is unavailable.');
       }
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }

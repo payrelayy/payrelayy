@@ -1,7 +1,8 @@
 Option Explicit
 
-Dim shell, fileSystem, packageRoot, nodePath, entryPath, releasePath
-Dim dataRoot, releaseSha, identityBindingPath, expectedIdentity, command, stream, exitCode
+Dim shell, fileSystem, packageRoot, nodePath, entryPath, releasePath, pairingDialogPath
+Dim dataRoot, releaseSha, identityBindingPath, enrollmentPath, expectedIdentity
+Dim pairingPackage, pairingCommand, pairingProcess, command, stream, exitCode
 
 Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
@@ -10,8 +11,9 @@ packageRoot = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 nodePath = fileSystem.BuildPath(packageRoot, "runtime\node.exe")
 entryPath = fileSystem.BuildPath(packageRoot, "app\dist\index.js")
 releasePath = fileSystem.BuildPath(packageRoot, "RELEASE_SHA")
+pairingDialogPath = fileSystem.BuildPath(packageRoot, "Enter FetanAgent Pairing Package.ps1")
 
-If Not fileSystem.FileExists(nodePath) Or Not fileSystem.FileExists(entryPath) Or Not fileSystem.FileExists(releasePath) Then
+If Not fileSystem.FileExists(nodePath) Or Not fileSystem.FileExists(entryPath) Or Not fileSystem.FileExists(releasePath) Or Not fileSystem.FileExists(pairingDialogPath) Then
   MsgBox "This FetanAgent Companion package is incomplete. Download and extract it again.", 16, "FetanAgent Companion"
   WScript.Quit 1
 End If
@@ -24,6 +26,27 @@ End If
 
 If Not fileSystem.FolderExists(dataRoot) Then
   fileSystem.CreateFolder(dataRoot)
+End If
+
+enrollmentPath = fileSystem.BuildPath(fileSystem.BuildPath(dataRoot, "device"), "companion-primary.enrollment.json")
+If Not fileSystem.FileExists(enrollmentPath) Then
+  If MsgBox( _
+    "This Windows companion is not paired with the FetanAgent server yet." & vbCrLf & vbCrLf & _
+    "If you already created a ten-minute Windows pairing package on the Owner page, select Yes and paste it now. Select No to open KemerBet without server pairing; no lookup or payment will be enabled.", _
+    36, "FetanAgent Companion") = 6 Then
+    pairingCommand = Chr(34) & shell.ExpandEnvironmentStrings("%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe") & Chr(34) & _
+      " -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File " & Chr(34) & pairingDialogPath & Chr(34)
+    On Error Resume Next
+    Set pairingProcess = shell.Exec(pairingCommand)
+    If Err.Number = 0 Then
+      pairingPackage = Trim(pairingProcess.StdOut.ReadAll)
+      If Len(pairingPackage) > 0 Then
+        shell.Environment("Process")("FETANAGENT_COMPANION_PAIRING_PACKAGE") = pairingPackage
+      End If
+    End If
+    Err.Clear
+    On Error GoTo 0
+  End If
 End If
 
 Set stream = fileSystem.OpenTextFile(releasePath, 1, False)
@@ -55,7 +78,8 @@ End If
 MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
   "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
   "The companion will locally verify the exact bound agent header." & vbCrLf & _
-  "The KemerBet transfer mutation is disabled in this release.", 64, "FetanAgent Companion"
+  "Any supplied pairing package will be consumed only after that verification." & vbCrLf & _
+  "Player lookup and the KemerBet transfer mutation are disabled in this release.", 64, "FetanAgent Companion"
 
 command = Chr(34) & nodePath & Chr(34) & " " & Chr(34) & entryPath & Chr(34)
 On Error Resume Next

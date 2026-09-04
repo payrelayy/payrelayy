@@ -1,0 +1,261 @@
+name: Staging Windows companion pairing trust
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect, provision continuously, or explicitly disable the pairing-only runtime
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - provision
+          - disable
+      confirm_staging_project_ref:
+        description: Type the exact staging Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_no_money_operation:
+        description: Type the exact no-money confirmation shown in the workflow documentation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-companion-device-pairing-trust
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+
+jobs:
+  validate-target:
+    name: Validate exact no-money staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      REQUESTED_MODE: ${{ inputs.mode }}
+      CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_NO_MONEY_OPERATION: ${{ inputs.confirm_no_money_operation }}
+    steps:
+      - name: Require main, exact source, staging, and no-money confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|provision|disable)$ ]]
+          [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
+          case "$REQUESTED_MODE" in
+            inspect)
+              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'inspect-companion-pairing-no-money' ]]
+              ;;
+            provision)
+              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'provision-companion-pairing-only-no-money' ]]
+              ;;
+            disable)
+              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'disable-companion-pairing-runtime-no-money' ]]
+              ;;
+          esac
+
+  operate-pairing-trust:
+    name: Apply and verify the exact pairing-only trust state
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate protected companion material without exposing it
+        id: protected-inputs
+        shell: bash
+        env:
+          COMPANION_PRIVATE_BASE64: ${{ secrets.COMPANION_SERVER_SIGNER_PKCS8_BASE64 }}
+          COMPANION_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
+          COMPANION_SIGNER_ID: ${{ vars.COMPANION_SERVER_SIGNER_ID }}
+          COMPANION_SIGNER_KEY_ID: ${{ vars.COMPANION_SERVER_SIGNER_KEY_ID }}
+          COMPANION_PUBLIC_BASE64: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
+          COMPANION_PUBLIC_BASE64URL: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL }}
+          COMPANION_PUBLIC_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          COMPANION_VALID_FROM: ${{ vars.COMPANION_SERVER_SIGNER_VALID_FROM }}
+          COMPANION_VALID_UNTIL: ${{ vars.COMPANION_SERVER_SIGNER_VALID_UNTIL }}
+          COMPANION_MANIFEST_BASE64: ${{ vars.COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          command -v psql >/dev/null
+          command -v openssl >/dev/null
+          command -v jq >/dev/null
+          [[ "$COMPANION_SIGNER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$COMPANION_SIGNER_KEY_ID" == 'companion-server-staging-v1' ]]
+          [[ "$COMPANION_PUBLIC_BASE64URL" =~ ^[A-Za-z0-9_-]{122}$ ]]
+          [[ "$COMPANION_PUBLIC_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$COMPANION_VALID_FROM" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [[ "$COMPANION_VALID_UNTIL" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [[ "$COMPANION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/fetanagent-companion-pairing-trust"
+          [[ ! -e "$protected" && ! -L "$protected" ]]
+          install -d -m 0700 "$protected"
+          printf '%s' "$COMPANION_PRIVATE_BASE64" | base64 --decode > "$protected/signer.pkcs8.der"
+          printf '%s' "$COMPANION_PUBLIC_BASE64" | base64 --decode > "$protected/signer.spki.der"
+          printf '%s' "$COMPANION_MANIFEST_BASE64" | base64 --decode > "$protected/runtime-manifest.json"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$protected/supabase-ca.crt"
+          chmod 0600 "$protected"/*
+
+          [[ "$(stat -c %s "$protected/signer.spki.der")" -eq 91 ]]
+          [[ "$(stat -c %s "$protected/signer.pkcs8.der")" -le 256 ]]
+          [[ "sha256:$(sha256sum "$protected/signer.spki.der" | cut -d ' ' -f 1)" == "$COMPANION_PUBLIC_SHA256" ]]
+          derived_base64url="$(base64 -w 0 "$protected/signer.spki.der" | tr '+/' '-_' | tr -d '=')"
+          [[ "$derived_base64url" == "$COMPANION_PUBLIC_BASE64URL" ]]
+          unset derived_base64url
+          openssl pkey -inform DER -in "$protected/signer.pkcs8.der" -check -noout >/dev/null 2>&1
+          openssl pkey -inform DER -in "$protected/signer.pkcs8.der" -pubout -outform DER \
+            -out "$protected/signer.derived.spki.der" >/dev/null 2>&1
+          cmp --silent "$protected/signer.spki.der" "$protected/signer.derived.spki.der"
+          openssl pkey -pubin -inform DER -in "$protected/signer.spki.der" -text -noout 2>&1 \
+            | grep -Eq 'ASN1 OID: (prime256v1|secp256r1)'
+          jq -e \
+            --arg signer_id "$COMPANION_SIGNER_ID" \
+            --arg signer_key_id "$COMPANION_SIGNER_KEY_ID" \
+            --arg signer_digest "$COMPANION_PUBLIC_SHA256" \
+            'type == "object" and
+             keys == ["contractVersion", "deploymentTarget", "moneyMovementAllowed", "pairingOnly", "serverSignerId", "serverSignerKeyId", "serverSignerPublicKeySpkiSha256"] and
+             .contractVersion == 1 and .deploymentTarget == "staging" and
+             .pairingOnly == true and .moneyMovementAllowed == false and
+             .serverSignerId == $signer_id and .serverSignerKeyId == $signer_key_id and
+             .serverSignerPublicKeySpkiSha256 == $signer_digest' \
+            "$protected/runtime-manifest.json" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          echo "protected=$protected" >> "$GITHUB_OUTPUT"
+
+      - name: Apply the exact trust/runtime operation and inspect its postcondition
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
+          COMPANION_SIGNER_ID: ${{ vars.COMPANION_SERVER_SIGNER_ID }}
+          COMPANION_SIGNER_KEY_ID: ${{ vars.COMPANION_SERVER_SIGNER_KEY_ID }}
+          COMPANION_PUBLIC_BASE64URL: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL }}
+          COMPANION_PUBLIC_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          COMPANION_VALID_FROM: ${{ vars.COMPANION_SERVER_SIGNER_VALID_FROM }}
+          COMPANION_VALID_UNTIL: ${{ vars.COMPANION_SERVER_SIGNER_VALID_UNTIL }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected-inputs.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_companion_pairing_trust
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          common_signer_args=(
+            --set=companion_signer_id="$COMPANION_SIGNER_ID"
+            --set=companion_signer_key_id="$COMPANION_SIGNER_KEY_ID"
+            --set=companion_signer_public_spki="$COMPANION_PUBLIC_BASE64URL"
+            --set=companion_signer_public_spki_sha256="$COMPANION_PUBLIC_SHA256"
+            --set=companion_signer_valid_from="$COMPANION_VALID_FROM"
+            --set=companion_signer_valid_until="$COMPANION_VALID_UNTIL"
+          )
+          expected_runtime_state='continuous_function_only'
+          if [[ "$REQUESTED_MODE" == 'provision' ]]; then
+            trust_result="$(psql -X --quiet --tuples-only --no-align \
+              "${common_signer_args[@]}" \
+              --file=infra/sql/staging-companion-server-signer-provision.sql)"
+            jq -e '
+              type == "object" and .schemaVersion == 1 and
+              .operation == "companion_trust_only" and
+              .companionSigner == "active_unrevoked" and
+              .financialFeatures == "disabled_or_dry_run_only" and
+              .moneyMoved == false
+            ' <<<"$trust_result" >/dev/null
+            runtime_result="$(psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/staging-companion-bridge-runtime-enable-continuous.sql)"
+            jq -e '
+              type == "object" and .schemaVersion == 1 and
+              .operation == "companion_runtime_enable_continuous" and
+              .runtime == "continuous_function_only" and
+              .calendarShutdown == false and .moneyMoved == false
+            ' <<<"$runtime_result" >/dev/null
+          elif [[ "$REQUESTED_MODE" == 'disable' ]]; then
+            expected_runtime_state='disabled'
+            disable_result="$(psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/staging-companion-bridge-runtime-disable.sql)"
+            jq -e '
+              type == "object" and .schemaVersion == 1 and
+              .operation == "companion_runtime_disable" and .runtime == "disabled" and
+              .calendarShutdown == false and .moneyMoved == false
+            ' <<<"$disable_result" >/dev/null
+          fi
+
+          inspect_args=(
+            --set=expected_runtime_state="$expected_runtime_state"
+            --set=companion_signer_id="$COMPANION_SIGNER_ID"
+            --set=companion_signer_key_id="$COMPANION_SIGNER_KEY_ID"
+            --set=companion_signer_public_spki_sha256="$COMPANION_PUBLIC_SHA256"
+            --set=companion_signer_valid_from="$COMPANION_VALID_FROM"
+            --set=companion_signer_valid_until="$COMPANION_VALID_UNTIL"
+          )
+          inspection_succeeded='false'
+          if inspection_result="$(psql -X --quiet --tuples-only --no-align \
+              "${inspect_args[@]}" \
+              --file=infra/sql/staging-companion-pairing-inspect.sql)" &&
+             jq -e \
+               --arg runtime "$expected_runtime_state" \
+               'type == "object" and .schemaVersion == 1 and
+                .operation == "companion_pairing_inspect" and
+                .companionSigner == "active_unrevoked" and .runtime == $runtime and
+                .calendarShutdown == false and
+                .financialFeatures == "disabled_or_dry_run_only" and
+                .moneyMoved == false' <<<"$inspection_result" >/dev/null; then
+            inspection_succeeded='true'
+          fi
+          if [[ "$inspection_succeeded" != 'true' ]]; then
+            if [[ "$REQUESTED_MODE" == 'provision' ]]; then
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/staging-companion-bridge-runtime-disable.sql >/dev/null || true
+            fi
+            exit 1
+          fi
+          echo "Companion pairing trust inspected successfully: runtime=$expected_runtime_state, calendar shutdown=false, money moved=false." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner-local protected material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/fetanagent-companion-pairing-trust"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" ]]
+            [[ "$(realpath -- "$protected")" == "$protected" ]]
+            rm -f -- "$protected"/*
+            rmdir -- "$protected"
+          fi

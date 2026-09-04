@@ -2,6 +2,10 @@ import { pathToFileURL } from 'node:url';
 
 import { loadWindowsCompanionConfig, redactedWindowsCompanionConfig } from './config.js';
 import {
+  ensureCompanionDeviceEnrollment,
+  type CompanionDeviceEnrollmentResult,
+} from './device-enrollment.js';
+import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
 } from './local-kemerbet-session.js';
@@ -47,6 +51,39 @@ function report(event: LocalKemerBetSessionEvent): void {
   }
 }
 
+function reportEnrollment(result: CompanionDeviceEnrollmentResult | undefined): void {
+  const state = result?.devicePaired
+    ? 'paired'
+    : result?.pairingRequired
+      ? 'pairing_required'
+      : 'failed';
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'device_pairing_state_changed',
+      state,
+      detailsRedacted: true,
+      transferDisabled: true,
+      moneyMoved: false,
+    }),
+  );
+  if (state === 'paired') {
+    console.info(
+      result?.alreadyPaired
+        ? 'The local companion device certificate is verified. Exact-five lookup remains disabled.'
+        : 'The local companion device is paired with a signed no-money certificate. Exact-five lookup remains disabled.',
+    );
+  } else if (state === 'pairing_required') {
+    console.info(
+      'Device pairing is required. Create a one-use Windows companion package on the authenticated Owner page, then restart this companion and paste it into the local launcher.',
+    );
+  } else {
+    console.info(
+      'Device pairing failed closed. The KemerBet browser remains local and every financial request remains blocked.',
+    );
+  }
+}
+
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
   console.info(
@@ -56,7 +93,21 @@ export async function runWindowsCompanion(): Promise<void> {
       config: redactedWindowsCompanionConfig(config),
     }),
   );
-  const session = await startLocalKemerBetSession(config, report);
+  const pairingPackage = config.takePairingPackage();
+  let enrollmentStarted = false;
+  let enrollmentPromise: Promise<void> | undefined;
+  const session = await startLocalKemerBetSession(config, (event) => {
+    report(event);
+    if (event.state !== 'signed_in_verified' || enrollmentStarted) return;
+    enrollmentStarted = true;
+    enrollmentPromise = ensureCompanionDeviceEnrollment({
+      dataRoot: config.dataRoot,
+      releaseSha: config.releaseSha,
+      ...(pairingPackage === undefined ? {} : { pairingPackage }),
+    })
+      .then(reportEnrollment)
+      .catch(() => reportEnrollment(undefined));
+  });
   let stopping = false;
   const stop = () => {
     if (stopping) return;
@@ -67,6 +118,7 @@ export async function runWindowsCompanion(): Promise<void> {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   await session.done;
+  await enrollmentPromise;
 }
 
 const entryPath = process.argv[1];

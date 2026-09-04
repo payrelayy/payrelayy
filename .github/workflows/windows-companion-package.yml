@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/windows-companion-package.yml'
       - 'apps/windows-companion/**'
+      - 'packages/agent-platform-companion-contracts/**'
       - 'packages/agent-platform-contracts/**'
       - 'packages/agent-platform-kemerbet/**'
       - 'scripts/build-windows-companion-package.ps1'

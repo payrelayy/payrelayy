@@ -18,6 +18,7 @@ const config = {
     port: 5432,
     user: 'fetanagent_owner_control_runtime',
   },
+  companionDevicePairing: { serverSignerKeyId: undefined, configured: false },
   devicePairing: { assignmentSignerKeyId: undefined, configured: false },
   publishableKey: 'sb_publishable_test_key_for_staging_only',
   receiverReferenceProtection: {
@@ -57,7 +58,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows exactly twenty-eight reviewed Owner procedures including the bounded device-pairing issuer', () => {
+  it('allows exactly thirty reviewed Owner procedures including both bounded device-pairing authorities', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -135,7 +136,13 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 28');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 30');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');

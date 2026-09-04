@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/agent-platform-companion-contracts": "workspace:*",
     "@fetanagent/cbe-birr-fixtures": "workspace:*",
     "@fetanagent/config": "workspace:*",
     "@fetanagent/contracts": "workspace:*",

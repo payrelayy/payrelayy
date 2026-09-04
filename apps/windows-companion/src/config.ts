@@ -8,9 +8,11 @@ const RELEASE_PATTERN = /^(?:[0-9a-f]{40}|local-development)$/u;
 export interface WindowsCompanionConfig {
   readonly dataRoot: string;
   readonly expectedAgentIdentityProvided: boolean;
+  readonly pairingPackageProvided: boolean;
   readonly profileRoot: string;
   readonly releaseSha: string;
   takeExpectedAgentIdentity(): string | undefined;
+  takePairingPackage(): string | undefined;
 }
 
 function defaultDataRoot(environment: NodeJS.ProcessEnv): string {
@@ -52,14 +54,32 @@ export function loadWindowsCompanionConfig(
   }
   delete environment.FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY;
   const expectedAgentIdentityProvided = expectedAgentIdentity !== undefined;
+  let pairingPackage = environment.FETANAGENT_COMPANION_PAIRING_PACKAGE;
+  if (
+    pairingPackage !== undefined &&
+    (pairingPackage.length < 1 ||
+      pairingPackage.length > 8_192 ||
+      pairingPackage !== pairingPackage.trim() ||
+      /[\u0000-\u001f\u007f]/u.test(pairingPackage))
+  ) {
+    throw new Error('FetanAgent Companion pairing package is invalid.');
+  }
+  delete environment.FETANAGENT_COMPANION_PAIRING_PACKAGE;
+  const pairingPackageProvided = pairingPackage !== undefined;
   return Object.freeze({
     dataRoot,
     expectedAgentIdentityProvided,
+    pairingPackageProvided,
     profileRoot: resolve(dataRoot, 'profiles', 'kemerbet', 'primary'),
     releaseSha,
     takeExpectedAgentIdentity: () => {
       const value = expectedAgentIdentity;
       expectedAgentIdentity = undefined;
+      return value;
+    },
+    takePairingPackage: () => {
+      const value = pairingPackage;
+      pairingPackage = undefined;
       return value;
     },
   });
@@ -69,6 +89,7 @@ export function redactedWindowsCompanionConfig(config: WindowsCompanionConfig) {
   return Object.freeze({
     dataRootConfigured: config.dataRoot.length > 0,
     expectedAgentIdentityProvided: config.expectedAgentIdentityProvided,
+    pairingPackageProvided: config.pairingPackageProvided,
     profileConfigured: config.profileRoot.length > 0,
     releaseSha: config.releaseSha,
   });

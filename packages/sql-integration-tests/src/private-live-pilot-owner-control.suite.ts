@@ -50,7 +50,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('private live-pilot Owner-control boundary', () => {
-    it('grants the fixed preparation and five exact pilot controls without tables or other authority', async () => {
+    it('grants the fixed preparation and reviewed pilot controls without tables or other authority', async () => {
       const client = getClient();
       const publicSignatures = [
         'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)',
@@ -170,6 +170,10 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
+        {
+          signature:
+            'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamp with time zone)',
+        },
         { signature: 'app.issue_telegram_beta_invite(uuid,text,timestamp with time zone)' },
         { signature: 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)' },
         { signature: 'app.list_owner_dry_run_deposit_intake(uuid,integer)' },

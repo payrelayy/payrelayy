@@ -173,6 +173,10 @@ assert.doesNotMatch(runtimeDisable, /^\s*nosuperuser\s*$/mu);
 assert.match(inspection, /expected_runtime_state/u);
 assert.match(inspection, /no_broader_authority/u);
 assert.match(inspection, /calendarShutdown', false/u);
+assert.match(inspection, /array\['app', 'public'\]::text\[\]/u);
+assert.match(inspection, /has_schema_privilege\([\s\S]*?'USAGE'/u);
+assert.match(inspection, /has_schema_privilege\([\s\S]*?'CREATE'/u);
+assert.match(inspection, /has_any_column_privilege/u);
 assert.match(inspection, /member\.rolname = 'postgres'/u);
 assert.match(
   inspection,

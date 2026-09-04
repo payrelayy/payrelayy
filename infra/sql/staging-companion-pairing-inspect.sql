@@ -204,11 +204,34 @@ where namespace.nspname = 'app'
   select 1 / 0 as rejected;
 \endif
 
-select not exists (
+select (
+  select coalesce(
+    pg_catalog.array_agg(namespace.nspname order by namespace.nspname),
+    '{}'::text[]
+  ) = array['app', 'public']::text[]
+  from pg_catalog.pg_namespace as namespace
+  where namespace.nspname not in ('pg_catalog', 'information_schema')
+    and namespace.nspname !~ '^pg_(toast|temp)'
+    and pg_catalog.has_schema_privilege(
+      'fetanagent_companion_device_bridge', namespace.oid, 'USAGE'
+    )
+) and not exists (
+  select 1
+  from pg_catalog.pg_namespace as namespace
+  where namespace.nspname not in ('pg_catalog', 'information_schema')
+    and namespace.nspname !~ '^pg_(toast|temp)'
+    and pg_catalog.has_schema_privilege(
+      'fetanagent_companion_device_bridge', namespace.oid, 'CREATE'
+    )
+) and not exists (
   select 1
   from pg_catalog.pg_proc as routine
   join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
-  where namespace.nspname = 'app'
+  where namespace.nspname not in ('pg_catalog', 'information_schema')
+    and namespace.nspname !~ '^pg_(toast|temp)'
+    and pg_catalog.has_schema_privilege(
+      'fetanagent_companion_device_bridge', namespace.oid, 'USAGE'
+    )
     and pg_catalog.has_function_privilege(
       'fetanagent_companion_device_bridge', routine.oid, 'EXECUTE'
     )
@@ -227,14 +250,22 @@ select not exists (
   join pg_catalog.pg_namespace as namespace on namespace.oid = relation.relnamespace
   where namespace.nspname not in ('pg_catalog', 'information_schema')
     and namespace.nspname !~ '^pg_(toast|temp)'
+    and pg_catalog.has_schema_privilege(
+      'fetanagent_companion_device_bridge', namespace.oid, 'USAGE'
+    )
     and relation.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
     and (
       (relation.relkind = 'S' and pg_catalog.has_sequence_privilege(
         'fetanagent_companion_device_bridge', relation.oid, 'USAGE,SELECT,UPDATE'
       )) or (
-        relation.relkind <> 'S' and pg_catalog.has_table_privilege(
-          'fetanagent_companion_device_bridge', relation.oid,
-          'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'
+        relation.relkind <> 'S' and (
+          pg_catalog.has_table_privilege(
+            'fetanagent_companion_device_bridge', relation.oid,
+            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'
+          ) or pg_catalog.has_any_column_privilege(
+            'fetanagent_companion_device_bridge', relation.oid,
+            'SELECT,INSERT,UPDATE,REFERENCES'
+          )
         )
       )
     )

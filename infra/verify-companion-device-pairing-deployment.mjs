@@ -20,6 +20,7 @@ const [
   deploymentHelper,
   deploymentInstaller,
   databasePreflight,
+  postgresRuntime,
   windowsLauncher,
   windowsPairingDialog,
   windowsPackageBuilder,
@@ -49,6 +50,7 @@ const [
     'utf8',
   ),
   readFile(new URL('apps/companion-device-bridge/src/database-preflight-cli.ts', root), 'utf8'),
+  readFile(new URL('apps/companion-device-bridge/src/postgres-runtime.ts', root), 'utf8'),
   readFile(new URL('apps/windows-companion/release/Start FetanAgent Companion.vbs', root), 'utf8'),
   readFile(
     new URL('apps/windows-companion/release/Enter FetanAgent Pairing Package.ps1', root),
@@ -264,6 +266,8 @@ assert.match(databasePreflight, /loadCompanionDeviceBridgeConfig/u);
 assert.match(databasePreflight, /startCompanionDeviceBridgeApplication/u);
 assert.match(databasePreflight, /function-only staging runtime configuration/u);
 assert.doesNotMatch(databasePreflight, /listen\(8085|money|transfer/iu);
+assert.match(postgresRuntime, /owner\.rolname = 'postgres' and defaults\.defaclnamespace = 0/u);
+assert.doesNotMatch(postgresRuntime, /namespace\.oid = defaults\.defaclnamespace/u);
 
 assert.match(windowsLauncher, /Enter FetanAgent Pairing Package\.ps1/u);
 assert.match(windowsLauncher, /FETANAGENT_COMPANION_PAIRING_PACKAGE/u);

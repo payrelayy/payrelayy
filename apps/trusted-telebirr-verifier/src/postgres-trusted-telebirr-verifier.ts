@@ -227,9 +227,7 @@ export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL = `
       select 1
       from pg_catalog.pg_default_acl as defaults
       join pg_catalog.pg_roles as owner on owner.oid = defaults.defaclrole
-      join pg_catalog.pg_namespace as namespace
-        on namespace.oid = defaults.defaclnamespace
-      where owner.rolname = 'postgres' and namespace.nspname = 'app'
+      where owner.rolname = 'postgres' and defaults.defaclnamespace = 0
         and defaults.defaclobjtype = 'f'
         and not exists (
           select 1 from pg_catalog.aclexplode(defaults.defaclacl) as privilege

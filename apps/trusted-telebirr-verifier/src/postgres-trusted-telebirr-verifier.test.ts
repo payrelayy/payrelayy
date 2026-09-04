@@ -81,6 +81,12 @@ describe('trusted TeleBirr PostgreSQL boundary', () => {
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'as allowed_functions_execution_private',
     );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'defaults.defaclnamespace = 0',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'namespace.oid = defaults.defaclnamespace',
+    );
   });
 
   it('accepts one exact all-true catalog row and rejects false, missing, or extra fields', async () => {

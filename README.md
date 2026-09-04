@@ -214,6 +214,7 @@ environment file.
 | `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off |
 | `apps/telebirr-device-bridge`                               | Authenticated Android enrollment/command gateway; export-only and ingress-free      |
 | `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; export-only and unprovisioned        |
+| `apps/telebirr-device-state-broker`                         | Private durable Android device-state broker; guarded and unprovisioned              |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
 | `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |

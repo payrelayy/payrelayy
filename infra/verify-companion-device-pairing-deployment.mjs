@@ -118,8 +118,10 @@ assert.doesNotMatch(companionMatcher, /lookup|amount|transfer|settlement|execute
 assert.match(caddyfile, /max_size 64KiB/u);
 assert.match(caddyfile, /reverse_proxy companion-device-bridge:8085/u);
 assert.match(stagingCompose, /- companion_device_ingress/u);
-assert.match(stagingCompose, /name: fetanagent-companion-device-ingress/u);
-assert.match(stagingCompose, /companion_device_ingress:[\s\S]*?internal: true/u);
+assert.match(
+  stagingCompose,
+  /  companion_device_ingress:\r?\n    external: true\r?\n    name: fetanagent-companion-device-ingress(?:\r?\n|$)/u,
+);
 
 assert.match(migration, /create role fetanagent_companion_device_bridge\s+nologin/u);
 assert.match(migration, /create role fetanagent_companion_device_bridge_runtime\s+nologin/u);

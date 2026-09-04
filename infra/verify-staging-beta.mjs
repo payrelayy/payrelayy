@@ -1106,13 +1106,13 @@ assert.doesNotMatch(
 );
 assert.match(
   companionDeviceIngressNetwork,
-  /name: fetanagent-companion-device-ingress\s*\r?\n\s+driver: bridge\s*\r?\n\s+internal: true\s*\r?\n\s+attachable: false/,
-  'the cross-project companion bridge must be fixed, internal-only, and non-attachable',
+  /external: true\s*\r?\n\s+name: fetanagent-companion-device-ingress/,
+  'the companion-helper-attested bridge must be consumed as a fixed external network',
 );
 assert.doesNotMatch(
   companionDeviceIngressNetwork,
-  /driver_opts:|ipam:/,
-  'the companion ingress must remain a simple Docker-internal bridge',
+  /driver:|internal:|attachable:|driver_opts:|ipam:/,
+  'the staging project must not create, replace, or relabel the companion ingress',
 );
 assert.match(
   telebirrDeviceIngressNetwork,

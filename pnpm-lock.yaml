@@ -187,6 +187,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/telebirr-verification-foundation
 
+  apps/telebirr-device-state-broker:
+    dependencies:
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-verification-foundation
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   apps/trusted-telebirr-verifier:
     dependencies:
       '@fetanagent/telebirr-live-pilot-outcome-adapter':

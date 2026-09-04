@@ -121,4 +121,5 @@ export {
   type TelebirrLivePilotVerificationResult,
 } from './live-private-pilot-protocol.js';
 export * from './device-bridge-protocol.js';
+export * from './device-state-local-protocol.js';
 export * from './assignment-broker-local-protocol.js';

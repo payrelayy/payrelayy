@@ -51,9 +51,17 @@ rejects compressed, chunked, duplicate, non-canonical, or malformed responses, a
 transport detail into the bridge's non-sensitive `retry` outcome. The public bridge still imports no
 PostgreSQL client, database credential, protected-reference key, or private broker implementation.
 
+The nine durable device-state dependencies now have a separate canonical local adapter over
+`/run/fetanagent-telebirr-device-state/state.sock`. Pairing claim/complete/release, enrollment load,
+command replay claim/complete/release, heartbeat recording, and evidence staging each use a
+distinct fixed path in one closed protocol. Opaque public IDs are rejected before PostgreSQL UUID
+casts; request, payload, certificate, assignment, receiver, and signer bindings are rechecked at
+the local boundary. The client accepts no host, URL, TCP port, credential, SQL, or generic RPC
+method and reduces every transport detail to one non-sensitive local-unavailable error.
+
 ## Deliberately not composed
 
-There is no executable start entrypoint and no listener. The package imports neither `pg` nor a
+There is no executable start entrypoint and no public listener. The package imports neither `pg` nor a
 Supabase client and accepts no `service_role`, database password, wallet, settlement, or executor
 dependency. Server and assignment private keys are injected signers; they are not present in Git.
 
@@ -62,20 +70,21 @@ The dormant Supabase migration
 surface for one-use Owner pairing, exact certificate and command replay, redacted heartbeat health,
 and append-only evidence staging. It stores only the pairing nonce digest and gives its unconfigured
 NOLOGIN runtime no table, settlement, execution, or money authority. Operational composition remains
-blocked until reviewed implementations exist for:
+blocked until:
 
-- a private PostgreSQL adapter and fixed local socket that implement the bridge dependencies through
-  that dedicated device-state runtime (the public HTTP handler must remain database-free);
 - an isolated verifier consumer for staged evidence that independently revalidates both signatures
   before invoking the existing trusted-verifier completion boundary;
-- strict file-backed broker configuration and separately provisioned scoped opening/signing keys,
-  followed by process/container composition of the implemented local socket adapter; and
+- strict file-backed device-state configuration and application/container composition join the
+  implemented PostgreSQL adapter, private socket server, and database-free bridge client;
+- separately provisioned scoped opening/signing keys and process/container composition of the
+  implemented assignment socket adapter; and
 - immutable HTTPS origin, DNS/TLS/firewall, key rotation, metrics, and deployment manifests.
 
 The existing protected-reference package deliberately has no general decrypt API. This bridge
 therefore does not fake one, reuse an API encryption master as a device key, or send protected
-database material to Android. `pollAssignment` stays dependency-injected; the fixed Unix-socket
-adapter is the reviewed production candidate once the isolated broker lifecycle is provisioned.
+database material to Android. `pollAssignment` and all durable device-state operations stay
+dependency-injected; the two fixed Unix-socket adapters are the reviewed production candidates once
+their isolated broker lifecycles are provisioned.
 
 ## Verification
 
@@ -83,6 +92,7 @@ The package tests cover valid pairing, certificate issuance, lost pairing respon
 pairing completion, in-progress pairing, signer failure, signed polling, exact cached command
 replay, payload alteration, duplicate headers, content encoding, query paths, wrong receiver
 bindings, wrong assignment signer material, exact local broker request mapping, transport
-fail-closed behavior, and the absence of database/Supabase/settlement runtime imports. The shared
-protocol package adds canonical local broker codecs, hostile accessor/proxy checks, and stable
+fail-closed behavior, all nine device-state mappings, operation/path confusion, and the absence of
+database/Supabase/settlement runtime imports. The shared protocol package adds canonical local
+broker codecs, hostile accessor/proxy checks, per-operation byte ceilings, and stable
 TypeScript/Android canonical vectors.

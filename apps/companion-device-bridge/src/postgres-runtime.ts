@@ -257,6 +257,18 @@ interface CompanionDeviceBridgePostgresQuery {
   query(sql: string, values?: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
 
+export type CompanionDeviceBridgeInitialPreflightFailure =
+  | Readonly<{ readonly kind: 'database_connection_unavailable' }>
+  | Readonly<{ readonly kind: 'database_query_unavailable' }>
+  | Readonly<{ readonly kind: 'catalog_response_invalid' }>
+  | Readonly<{
+      readonly kind: 'catalog_checks_rejected';
+      readonly checks: readonly (typeof COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS)[number][];
+    }>;
+
+type CompanionDeviceBridgeCatalogPreflightAssessment =
+  Readonly<{ readonly kind: 'passed' }> | CompanionDeviceBridgeInitialPreflightFailure;
+
 export class CompanionDeviceBridgePostgresUnavailableError extends Error {
   constructor() {
     super('The companion device bridge database boundary is unavailable.');
@@ -264,33 +276,54 @@ export class CompanionDeviceBridgePostgresUnavailableError extends Error {
   }
 }
 
-function exactPreflightRow(candidate: unknown): boolean {
-  if (
-    typeof candidate !== 'object' ||
-    candidate === null ||
-    Array.isArray(candidate) ||
-    nodeUtilTypes.isProxy(candidate) ||
-    Object.getPrototypeOf(candidate) !== Object.prototype
-  ) {
-    return false;
+async function assessCompanionDeviceBridgeCatalogPreflight(
+  database: CompanionDeviceBridgePostgresQuery,
+): Promise<CompanionDeviceBridgeCatalogPreflightAssessment> {
+  let rows: readonly unknown[];
+  try {
+    rows = (await database.query(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL, [])).rows;
+  } catch {
+    return Object.freeze({ kind: 'database_query_unavailable' as const });
   }
-  const row = candidate as Record<string, unknown>;
-  const keys = Object.keys(row).sort();
-  const expected = [...COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS].sort();
-  return (
-    keys.length === expected.length &&
-    keys.every((key, index) => key === expected[index]) &&
-    expected.every((key) => row[key] === true)
-  );
+  try {
+    if (rows.length !== 1) {
+      return Object.freeze({ kind: 'catalog_response_invalid' as const });
+    }
+    const candidate = rows[0];
+    if (
+      typeof candidate !== 'object' ||
+      candidate === null ||
+      Array.isArray(candidate) ||
+      nodeUtilTypes.isProxy(candidate) ||
+      Object.getPrototypeOf(candidate) !== Object.prototype
+    ) {
+      return Object.freeze({ kind: 'catalog_response_invalid' as const });
+    }
+    const row = candidate as Record<string, unknown>;
+    const keys = Object.keys(row).sort();
+    const expected = [...COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS].sort();
+    if (
+      keys.length !== expected.length ||
+      !keys.every((key, index) => key === expected[index]) ||
+      !expected.every((key) => typeof row[key] === 'boolean')
+    ) {
+      return Object.freeze({ kind: 'catalog_response_invalid' as const });
+    }
+    const checks = Object.freeze(
+      COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS.filter((key) => row[key] === false),
+    );
+    return checks.length === 0
+      ? Object.freeze({ kind: 'passed' as const })
+      : Object.freeze({ kind: 'catalog_checks_rejected' as const, checks });
+  } catch {
+    return Object.freeze({ kind: 'catalog_response_invalid' as const });
+  }
 }
 
 export async function assertCompanionDeviceBridgeCatalogPreflight(
   database: CompanionDeviceBridgePostgresQuery,
 ): Promise<void> {
-  try {
-    const result = await database.query(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL, []);
-    if (result.rows.length !== 1 || !exactPreflightRow(result.rows[0])) throw new Error();
-  } catch {
+  if ((await assessCompanionDeviceBridgeCatalogPreflight(database)).kind !== 'passed') {
     throw new CompanionDeviceBridgePostgresUnavailableError();
   }
 }
@@ -308,6 +341,9 @@ interface PgModule {
 
 export interface CompanionDeviceBridgePostgresRuntimeDependencies {
   readonly createPool?: (config: Readonly<Record<string, unknown>>) => CompanionDeviceBridgePool;
+  readonly onInitialPreflightFailure?: (
+    failure: CompanionDeviceBridgeInitialPreflightFailure,
+  ) => void;
 }
 
 export interface CompanionDeviceBridgePostgresRuntime {
@@ -352,6 +388,13 @@ export async function createCompanionDeviceBridgePostgresRuntime(
   const raw: CompanionDeviceBridgePostgresQuery = {
     query: (sql, values = []) => pool.query(sql, values),
   };
+  const reportInitialPreflightFailure = (failure: CompanionDeviceBridgeInitialPreflightFailure) => {
+    try {
+      dependencies.onInitialPreflightFailure?.(failure);
+    } catch {
+      // Diagnostics are observational only and can never change the fail-closed runtime outcome.
+    }
+  };
   const guarded: CompanionDeviceStateDatabase = {
     async query(sql, values) {
       if (!available || closed) throw new CompanionDeviceBridgePostgresUnavailableError();
@@ -367,12 +410,23 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     },
   };
 
+  let connected = false;
   try {
     const client = await pool.connect();
     client.release();
+    connected = true;
     available = true;
-    await assertCompanionDeviceBridgeCatalogPreflight(raw);
+    const assessment = await assessCompanionDeviceBridgeCatalogPreflight(raw);
+    if (assessment.kind !== 'passed') {
+      reportInitialPreflightFailure(assessment);
+      throw new Error();
+    }
   } catch {
+    if (!connected) {
+      reportInitialPreflightFailure(
+        Object.freeze({ kind: 'database_connection_unavailable' as const }),
+      );
+    }
     available = false;
     await pool.end().catch(() => undefined);
     pool.removeListener('error', markUnavailable);

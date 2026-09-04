@@ -93,12 +93,48 @@ describe('companion device bridge PostgreSQL runtime', () => {
 
   it('fails startup closed when any catalog assertion is false', async () => {
     const fake = fakePool({ badPreflight: true });
+    const failures: unknown[] = [];
     await expect(
       createCompanionDeviceBridgePostgresRuntime(connection, 'companion_server_signer_2026_01', {
         createPool: () => fake.pool,
+        onInitialPreflightFailure: (failure) => failures.push(failure),
       }),
     ).rejects.toThrow(CompanionDeviceBridgePostgresUnavailableError);
+    expect(failures).toEqual([
+      { kind: 'catalog_checks_rejected', checks: ['runtime_login_is_safe'] },
+    ]);
     expect(fake.pool.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports only fixed safe classifications for connection, query, and response failures', async () => {
+    const cases = [
+      {
+        expected: { kind: 'database_connection_unavailable' },
+        pool: {
+          ...fakePool().pool,
+          connect: vi.fn(async () => Promise.reject(new Error('secret'))),
+        },
+      },
+      {
+        expected: { kind: 'database_query_unavailable' },
+        pool: { ...fakePool().pool, query: vi.fn(async () => Promise.reject(new Error('secret'))) },
+      },
+      {
+        expected: { kind: 'catalog_response_invalid' },
+        pool: { ...fakePool().pool, query: vi.fn(async () => ({ rows: [] })) },
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const failures: unknown[] = [];
+      await expect(
+        createCompanionDeviceBridgePostgresRuntime(connection, 'companion_server_signer_2026_01', {
+          createPool: () => testCase.pool,
+          onInitialPreflightFailure: (failure) => failures.push(failure),
+        }),
+      ).rejects.toThrow(CompanionDeviceBridgePostgresUnavailableError);
+      expect(failures).toEqual([testCase.expected]);
+      expect(JSON.stringify(failures)).not.toContain('secret');
+    }
   });
 
   it('rejects malformed, extra, or proxied preflight rows', async () => {
@@ -106,6 +142,12 @@ describe('companion device bridge PostgreSQL runtime', () => {
       { ...passingPreflight(), unexpected: true },
       { ...passingPreflight(), runtime_login_identity_allowed: 'true' },
       new Proxy(passingPreflight(), {}),
+      Object.defineProperty(passingPreflight(), 'runtime_login_identity_allowed', {
+        enumerable: true,
+        get: () => {
+          throw new Error('untrusted accessor detail');
+        },
+      }),
     ]) {
       await expect(
         assertCompanionDeviceBridgeCatalogPreflight({

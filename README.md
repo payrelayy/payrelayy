@@ -215,6 +215,7 @@ environment file.
 | `apps/telebirr-device-bridge`                               | Database-free internal Android gateway; guarded image, HTTPS ingress unprovisioned  |
 | `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; guarded and unprovisioned            |
 | `apps/telebirr-device-state-broker`                         | Private durable Android device-state broker; guarded and unprovisioned              |
+| `android/telebirr-verifier`                                 | Inert Android signed-client/queue/foreground lifecycle; enrollment unprovisioned    |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
 | `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |

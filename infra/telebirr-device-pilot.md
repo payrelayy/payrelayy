@@ -16,7 +16,10 @@ The deployable source contract consists of:
   the only public port owner and the only existing service attached to the internal device-ingress
   bridge; and
 - [`verify-telebirr-device-pilot-deployment.mjs`](verify-telebirr-device-pilot-deployment.mjs), plus
-  the Linux `docker compose config` gate in the quality workflow.
+  the Linux `docker compose config` gate in the quality workflow; and
+- the standalone [`../android/telebirr-verifier`](../android/telebirr-verifier) application, whose
+  inert review build contains the fixed bridge transport, signed protocol, encrypted queue, and
+  bounded `specialUse` foreground lifecycle without production enrollment.
 
 This source contract is not proof that the stack is live. Until the credentials, manifests,
 database roles, gateway replacement, containers, DNS, TLS, Android enrollment, and signed smoke
@@ -134,6 +137,14 @@ The production helper/workflow must implement this order as one locked, exact-co
 10. Create a single-use Owner pairing challenge, generate the device identity inside Android
     Keystore, enroll only its public key, and perform the signed no-money pairing/heartbeat/replay
     smoke. Keep observation verification, settlement, and execution disabled.
+11. Install only the reviewed, signed operational APK on the dedicated Owner phone. Require
+    automatic network-provided date/time and timezone, grant notification visibility, allow the app
+    to run in the phone vendor's background/battery settings, press Start once, and require the
+    persistent redacted health notification. Do not enter an endpoint, API key, reference, receiver
+    name, or other secret into the phone.
+12. With no assignment open, prove the idle backoff remains bounded; then reboot the phone and
+    require opt-in recovery. Use the notification Stop action and require that a second reboot stays
+    stopped. Re-enable only for the later controlled evidence test.
 
 Do not publish DNS earlier merely to make certificate issuance convenient. A public hostname that
 routes to a missing bridge is a failed deployment, not progress.
@@ -176,6 +187,9 @@ This deployment phase is complete only when all of the following are independent
 - four accepted route shapes and rejection of every other public route/method/content type;
 - one Android Keystore public identity enrolled through a one-use challenge;
 - signed pairing, heartbeat, and exact replay behavior in no-money mode; and
+- the reviewed signed APK version, granted notification visibility, persistent foreground health,
+  bounded idle/retry behavior, one successful opted-in reboot recovery, and one successful explicit
+  Stop that remains stopped after reboot; and
 - settlement, execution, claims, and all real-money switches still disabled.
 
 Successful deployment is evidence that the Android evidence transport is reachable. It is not yet

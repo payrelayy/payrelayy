@@ -57,11 +57,17 @@ There is no executable start entrypoint and no listener. The package imports nei
 Supabase client and accepts no `service_role`, database password, wallet, settlement, or executor
 dependency. Server and assignment private keys are injected signers; they are not present in Git.
 
-Operational composition remains blocked until reviewed implementations exist for:
+The dormant Supabase migration
+`20260904013000_private_telebirr_device_state_runtime.sql` now provides the reviewed durable database
+surface for one-use Owner pairing, exact certificate and command replay, redacted heartbeat health,
+and append-only evidence staging. It stores only the pairing nonce digest and gives its unconfigured
+NOLOGIN runtime no table, settlement, execution, or money authority. Operational composition remains
+blocked until reviewed implementations exist for:
 
-- one-use Owner pairing challenge storage and device enrollment/revocation;
-- atomic replay/response storage and redacted heartbeat health;
-- a least-privilege evidence staging queue for the isolated trusted verifier;
+- a private PostgreSQL adapter and fixed local socket that implement the bridge dependencies through
+  that dedicated device-state runtime (the public HTTP handler must remain database-free);
+- an isolated verifier consumer for staged evidence that independently revalidates both signatures
+  before invoking the existing trusted-verifier completion boundary;
 - strict file-backed broker configuration and separately provisioned scoped opening/signing keys,
   followed by process/container composition of the implemented local socket adapter; and
 - immutable HTTPS origin, DNS/TLS/firewall, key rotation, metrics, and deployment manifests.

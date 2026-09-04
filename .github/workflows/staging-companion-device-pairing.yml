@@ -1,10 +1,10 @@
-name: Staging Windows companion pairing trust
+name: Staging Windows companion no-money trust
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Inspect, provision continuously, or explicitly disable the pairing-only runtime
+        description: Inspect, provision, or disable the pairing and read-only lookup runtime
         required: true
         default: inspect
         type: choice
@@ -63,18 +63,18 @@ jobs:
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
           case "$REQUESTED_MODE" in
             inspect)
-              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'inspect-companion-pairing-no-money' ]]
+              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'inspect-companion-read-only-lookup-no-money' ]]
               ;;
             provision)
-              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'provision-companion-pairing-only-no-money' ]]
+              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'provision-companion-read-only-lookup-no-money' ]]
               ;;
             disable)
-              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'disable-companion-pairing-runtime-no-money' ]]
+              [[ "$CONFIRMED_NO_MONEY_OPERATION" == 'disable-companion-read-only-runtime-no-money' ]]
               ;;
           esac
 
   operate-pairing-trust:
-    name: Apply and verify the exact pairing-only trust state
+    name: Apply and verify the exact no-money trust state
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -100,7 +100,7 @@ jobs:
           COMPANION_PUBLIC_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
           COMPANION_VALID_FROM: ${{ vars.COMPANION_SERVER_SIGNER_VALID_FROM }}
           COMPANION_VALID_UNTIL: ${{ vars.COMPANION_SERVER_SIGNER_VALID_UNTIL }}
-          COMPANION_MANIFEST_BASE64: ${{ vars.COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
+          COMPANION_MANIFEST_BASE64: ${{ vars.COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V2_BASE64 }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
         run: |
@@ -144,9 +144,10 @@ jobs:
             --arg signer_key_id "$COMPANION_SIGNER_KEY_ID" \
             --arg signer_digest "$COMPANION_PUBLIC_SHA256" \
             'type == "object" and
-             keys == ["contractVersion", "deploymentTarget", "moneyMovementAllowed", "pairingOnly", "serverSignerId", "serverSignerKeyId", "serverSignerPublicKeySpkiSha256"] and
-             .contractVersion == 1 and .deploymentTarget == "staging" and
-             .pairingOnly == true and .moneyMovementAllowed == false and
+             keys == ["contractVersion", "deploymentTarget", "exactFiveReadOnlyLookupAllowed", "financialActionAllowed", "moneyMovementAllowed", "pairingAllowed", "serverSignerId", "serverSignerKeyId", "serverSignerPublicKeySpkiSha256"] and
+             .contractVersion == 2 and .deploymentTarget == "staging" and
+             .pairingAllowed == true and .exactFiveReadOnlyLookupAllowed == true and
+             .financialActionAllowed == false and .moneyMovementAllowed == false and
              .serverSignerId == $signer_id and .serverSignerKeyId == $signer_key_id and
              .serverSignerPublicKeySpkiSha256 == $signer_digest' \
             "$protected/runtime-manifest.json" >/dev/null
@@ -245,7 +246,7 @@ jobs:
             fi
             exit 1
           fi
-          echo "Companion pairing trust inspected successfully: runtime=$expected_runtime_state, calendar shutdown=false, money moved=false." >> "$GITHUB_STEP_SUMMARY"
+          echo "Companion no-money trust inspected successfully: pairing and read-only lookup allowed, runtime=$expected_runtime_state, calendar shutdown=false, money moved=false." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove runner-local protected material
         if: always()

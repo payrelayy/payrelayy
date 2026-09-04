@@ -8,10 +8,16 @@ import {
   KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS,
   KEMERBET_MAX_LOGIN_LIFETIME_SECONDS,
 } from '@fetanagent/agent-platform-kemerbet';
+import type { ExactFivePlayerIds } from '@fetanagent/agent-platform-companion-contracts';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 
 import type { WindowsCompanionConfig } from './config.js';
 import { verifyLocalKemerBetIdentity } from './local-kemerbet-identity.js';
+import {
+  createLocalKemerBetLookupAuthorization,
+  executeExactFiveLocalKemerBetLookup,
+  type LocalKemerBetLookupOutcome,
+} from './local-kemerbet-lookup.js';
 import { installProviderMutationBoundary } from './provider-route.js';
 import { isLocalKemerBetProviderUrl, type LocalKemerBetGuardPhase } from './request-guard.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
@@ -50,6 +56,18 @@ export interface LocalKemerBetSessionEvent {
 
 export interface LocalKemerBetSession {
   readonly done: Promise<void>;
+  readonly verified: Promise<boolean>;
+  executeExactFiveLookup(
+    playerIds: ExactFivePlayerIds,
+  ): Promise<
+    readonly [
+      LocalKemerBetLookupOutcome,
+      LocalKemerBetLookupOutcome,
+      LocalKemerBetLookupOutcome,
+      LocalKemerBetLookupOutcome,
+      LocalKemerBetLookupOutcome,
+    ]
+  >;
   stop(): Promise<void>;
 }
 
@@ -95,6 +113,8 @@ export async function startLocalKemerBetSession(
 
   let phase: LocalKemerBetGuardPhase = 'manual_login';
   let expectedAgentIdentity = config.takeExpectedAgentIdentity();
+  const lookupAuthorization = createLocalKemerBetLookupAuthorization();
+  let lookupInProgress = false;
   let signedInCandidate = false;
   let signedInVerified = false;
   let stopping = false;
@@ -105,9 +125,12 @@ export async function startLocalKemerBetSession(
   let candidateTimer: NodeJS.Timeout | undefined;
   let sessionTimer: NodeJS.Timeout | undefined;
   let context: BrowserContext | undefined;
+  let localPage: Page | undefined;
   let lock: SessionLock | undefined;
   let resolveDone!: () => void;
   let rejectDone!: (error: Error) => void;
+  let resolveVerified!: (verified: boolean) => void;
+  let verifiedSettled = false;
   const done = new Promise<void>((resolvePromise, rejectPromise) => {
     resolveDone = resolvePromise;
     rejectDone = rejectPromise;
@@ -115,6 +138,14 @@ export async function startLocalKemerBetSession(
   // A blocked request can stop startup before startLocalKemerBetSession returns to its caller.
   // The returned promise still rejects, without an unhandled rejection in that startup window.
   void done.catch(() => undefined);
+  const verified = new Promise<boolean>((resolvePromise) => {
+    resolveVerified = resolvePromise;
+  });
+  const settleVerified = (value: boolean): void => {
+    if (verifiedSettled) return;
+    verifiedSettled = true;
+    resolveVerified(value);
+  };
 
   const finish = async (
     state: 'failed' | 'stopped',
@@ -122,6 +153,8 @@ export async function startLocalKemerBetSession(
   ): Promise<void> => {
     if (terminal) return;
     terminal = true;
+    settleVerified(false);
+    lookupAuthorization.clear();
     stopping = true;
     identityVerificationEpoch += 1;
     if (loginTimer) clearTimeout(loginTimer);
@@ -186,6 +219,7 @@ export async function startLocalKemerBetSession(
 
     const pages = context.pages();
     const page = pages[0] ?? (await context.newPage());
+    localPage = page;
     for (const extra of pages.slice(1)) await extra.close();
 
     await installProviderMutationBoundary(
@@ -207,6 +241,7 @@ export async function startLocalKemerBetSession(
           });
         }
       },
+      lookupAuthorization,
     );
 
     const beginIdentityVerification = async (): Promise<void> => {
@@ -241,6 +276,7 @@ export async function startLocalKemerBetSession(
           }
           expectedAgentIdentity = undefined;
           signedInVerified = true;
+          settleVerified(true);
           report({
             state: 'signed_in_verified',
             transferDisabled: true,
@@ -300,6 +336,7 @@ export async function startLocalKemerBetSession(
         identityVerificationEpoch += 1;
         signedInCandidate = false;
         signedInVerified = false;
+        lookupAuthorization.clear();
         if (candidateTimer) clearTimeout(candidateTimer);
         candidateTimer = undefined;
         phase = 'manual_login';
@@ -326,6 +363,8 @@ export async function startLocalKemerBetSession(
     context.on('close', () => {
       if (!terminal) {
         terminal = true;
+        settleVerified(false);
+        lookupAuthorization.clear();
         if (loginTimer) clearTimeout(loginTimer);
         if (candidateTimer) clearTimeout(candidateTimer);
         if (sessionTimer) clearTimeout(sessionTimer);
@@ -386,6 +425,20 @@ export async function startLocalKemerBetSession(
 
   return Object.freeze({
     done,
+    verified,
+    async executeExactFiveLookup(playerIds: ExactFivePlayerIds) {
+      const page = localPage;
+      if (terminal || stopping || !signedInVerified || lookupInProgress || !page) {
+        throw new Error('The local KemerBet lookup session is unavailable.');
+      }
+      lookupInProgress = true;
+      try {
+        return await executeExactFiveLocalKemerBetLookup(page, playerIds, lookupAuthorization);
+      } finally {
+        lookupAuthorization.clear();
+        lookupInProgress = false;
+      }
+    },
     stop: () => finish('stopped'),
   });
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import {
   AGENT_PLATFORM_COMPANION_CERTIFICATE_TRANSCRIPT_VERSION,
+  AGENT_PLATFORM_COMPANION_ASSIGNMENT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
   AGENT_PLATFORM_COMPANION_DEVICE_PLATFORM,
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
@@ -12,12 +13,16 @@ import {
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
   canonicalCompanionEnrollmentCertificateSignatureBytes,
+  canonicalKemerBetExactFiveLookupAssignmentSignatureBytes,
   digestCompanionEnrollmentCertificateBody,
+  digestKemerBetExactFiveLookupAssignmentBody,
   verifySignedCompanionPairingRequest,
   type CompanionEnrollmentCertificateBody,
   type CompanionNoMoneySafety,
+  type KemerBetExactFiveLookupAssignmentBody,
   type SignedCompanionEnrollmentCertificate,
   type SignedCompanionPairingRequest,
+  type SignedKemerBetExactFiveLookupAssignment,
 } from '@fetanagent/agent-platform-companion-contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -28,6 +33,7 @@ import {
   WINDOWS_COMPANION_VERSION,
   decodeCompanionPairingPackage,
   ensureCompanionDeviceEnrollment,
+  loadCompanionDeviceSigningRuntime,
 } from './device-enrollment.js';
 import type { WindowsCurrentUserDataProtector } from './windows-data-protection.js';
 
@@ -141,6 +147,52 @@ function signCompanionEnrollmentCertificateForTest(
     signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
     signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
     signerKeyId: keyId,
+    body,
+    signature: sign('sha256', transcript, {
+      key: privateKey,
+      dsaEncoding: 'ieee-p1363',
+    }).toString('base64url'),
+  });
+}
+
+function signedLookupAssignment(
+  certificate: SignedCompanionEnrollmentCertificate,
+  privateKey: KeyObject,
+  assignmentId: string,
+  requestId: string,
+  leaseNonceDigest: string,
+): SignedKemerBetExactFiveLookupAssignment {
+  const body: KemerBetExactFiveLookupAssignmentBody = Object.freeze({
+    contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    assignmentId,
+    requestId,
+    certificateId: certificate.body.certificateId,
+    deviceId: certificate.body.deviceId,
+    deviceKeyId: certificate.body.deviceKeyId,
+    platformCode: 'kemerbet',
+    assignmentKind: 'exact_five_player_lookup',
+    lookupMode: 'find_only',
+    playerIds: ['28379330', '28379331', '28379332', '28379333', '28379334'] as const,
+    currencyCode: 'ETB',
+    leaseNonceDigest,
+    oneUse: true,
+    issuedAt: new Date(now.getTime() + 1_000).toISOString(),
+    expiresAt: new Date(now.getTime() + 5 * 60 * 1_000).toISOString(),
+    ...safety,
+  });
+  const bodyDigest = digestKemerBetExactFiveLookupAssignmentBody(body);
+  const transcript = canonicalKemerBetExactFiveLookupAssignmentSignatureBytes(body, signerKeyId);
+  if (!bodyDigest || !transcript) throw new Error('invalid synthetic assignment');
+  return Object.freeze({
+    contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    transcriptVersion: AGENT_PLATFORM_COMPANION_ASSIGNMENT_TRANSCRIPT_VERSION,
+    bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+    bodyDigest,
+    signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+    signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+    signerKeyId,
     body,
     signature: sign('sha256', transcript, {
       key: privateKey,
@@ -272,5 +324,48 @@ describe('Windows companion device enrollment', () => {
         protector: protector(),
       }),
     ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+  });
+
+  it('binds every stored lookup result to the exact current assignment before submission', async () => {
+    const dataRoot = await root();
+    const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const serverPublicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
+    const selectedProtector = protector();
+    await ensureCompanionDeviceEnrollment({
+      dataRoot,
+      pairingPackage: pairingPackage(serverPublicKey),
+      releaseSha,
+      fetch: successfulFetch(server.privateKey) as unknown as typeof fetch,
+      now: () => now,
+      protector: selectedProtector,
+    });
+    const runtime = await loadCompanionDeviceSigningRuntime({
+      dataRoot,
+      now: () => new Date(now.getTime() + 30_000),
+      protector: selectedProtector,
+    });
+    const assignment = signedLookupAssignment(
+      runtime.certificate,
+      server.privateKey,
+      'lookup-assignment-0001',
+      'lookup-request-0001',
+      `sha256:${'1'.repeat(64)}`,
+    );
+    const otherAssignment = signedLookupAssignment(
+      runtime.certificate,
+      server.privateKey,
+      'lookup-assignment-0002',
+      'lookup-request-0002',
+      `sha256:${'2'.repeat(64)}`,
+    );
+    const assessedAt = new Date(now.getTime() + 30_000);
+    expect(runtime.decodeAndVerifyAssignment(assignment, assessedAt)).toEqual(assignment);
+    const result = runtime.createSignedLookupResult(
+      assignment,
+      ['found', 'review_required', 'found', 'review_required', 'found'],
+      new Date(now.getTime() + 20_000),
+    );
+    expect(runtime.verifyLookupExchange(assignment, result, assessedAt)).toBe(true);
+    expect(runtime.verifyLookupExchange(otherAssignment, result, assessedAt)).toBe(false);
   });
 });

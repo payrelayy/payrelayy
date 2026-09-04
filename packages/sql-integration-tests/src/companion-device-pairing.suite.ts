@@ -11,6 +11,10 @@ const bridgeFunctions = [
   'app.claim_agent_platform_companion_pairing(uuid,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text)',
   'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)',
   'app.release_agent_platform_companion_pairing(text)',
+  'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text)',
+  'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)',
+  'app.release_agent_platform_companion_lookup_assignment(text)',
+  'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb)',
 ] as const;
 const tables = [
   'agent_platform_companion_device_revocations',

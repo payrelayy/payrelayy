@@ -13,6 +13,7 @@ vi.mock('./request-guard.js', async (importOriginal) => {
       method: string,
       rawUrl: string,
       phase: import('./request-guard.js').LocalKemerBetGuardPhase,
+      approvedLookupPlayerId?: string,
     ) => {
       const url = new URL(rawUrl);
       if (url.origin !== fixture.origin) return { action: 'abort', reason: 'invalid_transport' };
@@ -24,6 +25,7 @@ vi.mock('./request-guard.js', async (importOriginal) => {
         method,
         `${mappedOrigin}${url.pathname}${url.search}`,
         phase,
+        approvedLookupPlayerId,
       );
     },
   };

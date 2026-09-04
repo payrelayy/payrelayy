@@ -3,7 +3,7 @@
 This is the local, headed-browser replacement for the unreliable DigitalOcean KemerBet sign-in
 preview. It runs in the signed-in Windows desktop session and opens the installed stable Chrome.
 
-The current slice is deliberately pairing-only/read-only:
+The current slice is deliberately paired, signed-command-only, and read-only:
 
 - the owner types KemerBet credentials and CAPTCHA directly into the local Chrome window;
 - the dedicated Chrome profile stays on this Windows account;
@@ -17,6 +17,8 @@ The current slice is deliberately pairing-only/read-only:
   and never leaves the computer;
 - exact retries reuse the same locally protected key and signed request, while a stored valid
   enrollment starts without another package;
+- after pairing, only one unexpired server-signed assignment can authorize exactly five sequential
+  Player-ID Find requests; the companion returns signed redacted outcomes and aggregate counts;
 - only the exact KemerBet login POST and non-financial session-refresh POST are permitted;
 - the KemerBet transfer endpoint and every other provider mutation are blocked;
 - the exact non-financial KemerBet session-refresh request remains available so the signed-in
@@ -37,7 +39,8 @@ companion then rejects visible login/CAPTCHA state, observes exactly one reviewe
 twice, and matches it to the DPAPI-protected local binding before reporting `signed_in_verified`.
 Window retention does not depend on a particular background `Account/Info` response or locale.
 Returning to the actual login page resets the state and starts a new non-sliding ten-minute login
-window within the overall session cap. Exact-five lookup remains disabled after pairing.
+window within the overall session cap. A separately signed exact-five Player-ID lookup can run
+after pairing; it is read-only and cannot enter an amount, note, transfer, or settlement action.
 
 Sensitive request data may pass through the companion's local Node process memory during forwarding;
 it remains on this device and is not retained in logs or sent to remote FetanAgent services. Browser
@@ -55,5 +58,5 @@ For a first local-development run, set
 `FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY` to the exact visible agent-header value before
 starting. To enroll a verified device, set `FETANAGENT_COMPANION_PAIRING_PACKAGE` to a fresh package
 created on the Owner page; the process consumes and deletes that environment value during startup.
-Use `Ctrl+C` in the launching terminal to close the guarded browser. The next phase adds one signed
-exact-five lookup assignment; it does not add Amount or Transfer.
+Use `Ctrl+C` in the launching terminal to close the guarded browser. No assignment can authorize an
+Amount, Notes, Transfer, settlement, account mutation, balance mutation, or money movement action.

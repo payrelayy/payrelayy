@@ -79,7 +79,8 @@ MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & 
   "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
   "The companion will locally verify the exact bound agent header." & vbCrLf & _
   "Any supplied pairing package will be consumed only after that verification." & vbCrLf & _
-  "Player lookup and the KemerBet transfer mutation are disabled in this release.", 64, "FetanAgent Companion"
+  "Only a separate expiring server-signed command can run exactly five Find-only Player-ID lookups." & vbCrLf & _
+  "Amount, Notes, Transfer, settlement, and money movement remain disabled.", 64, "FetanAgent Companion"
 
 command = Chr(34) & nodePath & Chr(34) & " " & Chr(34) & entryPath & Chr(34)
 On Error Resume Next

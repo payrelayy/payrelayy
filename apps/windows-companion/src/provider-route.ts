@@ -8,6 +8,11 @@ import {
 
 type BlockReason = 'mutation_attempt_blocked' | 'provider_request_failed';
 
+export interface LocalKemerBetLookupAuthorization {
+  currentPlayerId(): string | undefined;
+  consume(playerId: string): boolean;
+}
+
 function escapeHtmlAttribute(value: string): string {
   return value.replace(/[&<>"']/gu, (character) => {
     const escaped: Record<string, string> = {
@@ -28,6 +33,7 @@ async function forwardProviderRequest(
   reportBlocked: (reason: BlockReason) => void,
   allowNavigationRedirect: () => boolean,
   resetNavigationRedirects: () => void,
+  lookupAuthorization?: LocalKemerBetLookupAuthorization,
 ): Promise<void> {
   const request = route.request();
   const method = request.method();
@@ -49,9 +55,22 @@ async function forwardProviderRequest(
       }
     }
     for (let hop = 0; hop < 5; hop += 1) {
-      if (decideLocalKemerBetRequest(method, targetUrl.href, phase()).action !== 'allow') {
+      const decision = decideLocalKemerBetRequest(
+        method,
+        targetUrl.href,
+        phase(),
+        lookupAuthorization?.currentPlayerId(),
+      );
+      if (decision.action !== 'allow') {
         await abort('mutation_attempt_blocked');
         return;
+      }
+      if (decision.reason === 'exact_lookup') {
+        const playerId = targetUrl.searchParams.get('externalId');
+        if (playerId === null || lookupAuthorization?.consume(playerId) !== true) {
+          await abort('mutation_attempt_blocked');
+          return;
+        }
       }
       const timeout = deadline - Date.now();
       if (timeout <= 0) {
@@ -128,6 +147,7 @@ export async function installProviderMutationBoundary(
   context: BrowserContext,
   phase: () => LocalKemerBetGuardPhase,
   reportBlocked: (reason: BlockReason) => void,
+  lookupAuthorization?: LocalKemerBetLookupAuthorization,
 ): Promise<void> {
   // Chrome starts offline; context-wide routing covers initial popup, iframe, and worker
   // requests, with service workers disabled. Unrelated CAPTCHA traffic stays in Chrome.
@@ -141,6 +161,7 @@ export async function installProviderMutationBoundary(
       () => {
         navigationRedirects = 0;
       },
+      lookupAuthorization,
     ),
   );
 }

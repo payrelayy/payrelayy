@@ -2,6 +2,8 @@ import { request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
 
 import {
+  AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
   AGENT_PLATFORM_COMPANION_PAIRING_PATH,
 } from '@fetanagent/agent-platform-companion-contracts';
@@ -22,18 +24,24 @@ afterEach(async () => {
   activeServer = undefined;
 });
 
-function start() {
+function start(
+  response: {
+    readonly statusCode: number;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly body: Uint8Array;
+  } = {
+    statusCode: 201,
+    headers: {
+      'cache-control': 'no-store',
+      'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+    },
+    body: Buffer.from('{"certificate":"synthetic"}', 'utf8'),
+  },
+) {
   let observedBody: Buffer | undefined;
   const handler = vi.fn(async (request: CompanionBridgeHttpRequest) => {
     observedBody = Buffer.from(request.body);
-    return {
-      statusCode: 201,
-      headers: {
-        'cache-control': 'no-store',
-        'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
-      },
-      body: Buffer.from('{"certificate":"synthetic"}', 'utf8'),
-    };
+    return response;
   });
   activeServer = createCompanionDeviceBridgeHttpServer(handler, {
     host: COMPANION_DEVICE_BRIDGE_LISTEN_HOST,
@@ -42,7 +50,11 @@ function start() {
   return { handler, observedBody: () => observedBody, server: activeServer };
 }
 
-function request(body: Buffer, headers: Record<string, string> = {}) {
+function request(
+  body: Buffer,
+  headers: Record<string, string> = {},
+  path: string = AGENT_PLATFORM_COMPANION_PAIRING_PATH,
+) {
   return new Promise<{
     readonly body: string;
     readonly headers: Readonly<Record<string, string | string[] | undefined>>;
@@ -53,7 +65,7 @@ function request(body: Buffer, headers: Record<string, string> = {}) {
         host: '127.0.0.1',
         port: COMPANION_DEVICE_BRIDGE_LISTEN_PORT,
         method: 'POST',
-        path: AGENT_PLATFORM_COMPANION_PAIRING_PATH,
+        path,
         headers: {
           accept: AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
           'content-length': String(body.byteLength),
@@ -133,6 +145,35 @@ describe('companion device bridge HTTP boundary', () => {
     expect(response).toContain('HTTP/1.1 400 Bad Request');
     expect(response).toContain('{"code":"invalid_request"}');
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('admits both fixed lookup paths and preserves a strict empty 204 response', async () => {
+    const { handler, server } = start({
+      statusCode: 204,
+      headers: {
+        'cache-control': 'no-store',
+        'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+        'referrer-policy': 'no-referrer',
+        'x-content-type-options': 'nosniff',
+      },
+      body: Buffer.alloc(0),
+    });
+    await server.listen();
+    for (const path of [
+      AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+      AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+    ]) {
+      const response = await request(Buffer.from('{}', 'utf8'), {}, path);
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['content-length']).toBe('0');
+      expect(response.headers['content-type']).toBeUndefined();
+      expect(response.body).toBe('');
+    }
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler.mock.calls.map(([observed]) => observed.path)).toEqual([
+      AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+      AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+    ]);
   });
 
   it('closes parser-invalid clients without exposing Node parser details', async () => {

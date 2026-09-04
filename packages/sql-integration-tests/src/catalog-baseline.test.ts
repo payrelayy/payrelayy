@@ -9,6 +9,7 @@ import {
   type SqlIntegrationEnvironment,
 } from './environment.js';
 import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
+import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
@@ -6802,6 +6803,7 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(nonTriggerEligibilityReaders.rows).toEqual([
+      { signature: 'app.agent_platform_companion_current_exact_five_players()' },
       { signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)' },
       {
         signature:
@@ -6871,7 +6873,8 @@ describe('disposable SQL migration baseline', () => {
         join pg_namespace namespace on namespace.oid = procedure.pronamespace
        where namespace.nspname = 'app'
          and procedure.oid in (
-           'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)'::regprocedure,
+            'app.agent_platform_companion_current_exact_five_players()'::regprocedure,
+            'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)'::regprocedure,
            'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure,
            'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
            'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
@@ -6892,6 +6895,15 @@ describe('disposable SQL migration baseline', () => {
        order by signature
     `);
     expect(eligibilityReaderPrivileges.rows).toEqual([
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.agent_platform_companion_current_exact_five_players()',
+      },
       {
         customer_web_runtime: false,
         deposit_executor_runtime: false,
@@ -9552,6 +9564,10 @@ describe('disposable SQL migration baseline', () => {
 
 registerDepositExecutionCommandSqlTests(() => client);
 registerCompanionDevicePairingSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerCompanionExactFiveLookupSqlTests(
   () => client,
   () => ownerAdminId,
 );

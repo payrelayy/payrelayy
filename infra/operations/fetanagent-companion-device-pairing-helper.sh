@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Root-owned, checksum-bound helper for the pairing-only Windows companion bridge.
-# It owns no KemerBet credential and exposes no lookup, deposit, transfer, or settlement operation.
+# Root-owned, checksum-bound helper for the Windows companion no-money bridge.
+# It owns no KemerBet credential and exposes only pairing plus signed exact-five read-only lookup.
 
 set -euo pipefail
 
@@ -103,7 +103,7 @@ require_release_files_at() {
     "$(stat --format='%U:%G:%a' "$root")" == 'root:root:755' ]] ||
     die 'the companion release directory is absent or unsafe'
   require_public_file "$root/infra/compose.companion-device-pairing.yaml"
-  require_public_file "$root/configs/companion-device-bridge-runtime-manifest.v1.json"
+  require_public_file "$root/configs/companion-device-bridge-runtime-manifest.v2.json"
   require_public_file "$root/configs/supabase-ca.crt"
   require_secret_file "$root/secrets/companion-device-bridge-database-url"
   require_secret_file "$root/secrets/companion-device-bridge-server-signer.pkcs8.der"
@@ -155,7 +155,7 @@ compose_environment() {
     "FETANAGENT_VCS_REF=$commit_sha" \
     "FETANAGENT_IMAGE_TAG=$image_tag" \
     "FETANAGENT_COMPANION_SUPABASE_CA_CERTIFICATE_FILE=$root/configs/supabase-ca.crt" \
-    "FETANAGENT_COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE=$root/configs/companion-device-bridge-runtime-manifest.v1.json" \
+    "FETANAGENT_COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE=$root/configs/companion-device-bridge-runtime-manifest.v2.json" \
     "FETANAGENT_COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE=$root/secrets/companion-device-bridge-database-url" \
     "FETANAGENT_COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE=$root/secrets/companion-device-bridge-server-signer.pkcs8.der"
 }
@@ -235,7 +235,7 @@ require_ready_release() {
     'NODE_ENV=production' \
     'FINANCIAL_ACTIONS_MODE=dry_run' \
     'INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED=true' \
-    'COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED=true'; do
+    'COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED=true'; do
     [[ "$(grep -Fxc "$exact" <<<"$environment")" == '1' ]] ||
       die 'the companion bridge safety environment is not exact'
   done
@@ -275,7 +275,7 @@ validate_incoming_material() {
   local incoming="$1" expected_files actual_files manifest_digest derived_digest
   expected_files="$(printf '%s\n' \
     companion-device-bridge-database-url \
-    companion-device-bridge-runtime-manifest.v1.json \
+    companion-device-bridge-runtime-manifest.v2.json \
     companion-device-bridge-server-signer.pkcs8.der \
     compose.companion-device-pairing.yaml \
     fetanagent-companion-device-bridge.tar \
@@ -313,7 +313,7 @@ PY
   openssl pkey -inform DER -in "$incoming/companion-device-bridge-server-signer.pkcs8.der" \
     -check -noout >/dev/null 2>&1 || die 'the companion signer private key is invalid'
   manifest_digest="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$incoming/companion-device-bridge-runtime-manifest.v1.json" <<'PY'
+    "$incoming/companion-device-bridge-runtime-manifest.v2.json" <<'PY'
 import json, re, sys
 from pathlib import Path
 
@@ -323,12 +323,16 @@ if not raw or len(raw) > 16384 or b'\x00' in raw or b'\r' in raw or b'\n' in raw
     raise SystemExit(1)
 value = json.loads(raw.decode('utf-8'))
 if not isinstance(value, dict) or list(value) != [
-    'contractVersion', 'deploymentTarget', 'pairingOnly', 'moneyMovementAllowed',
+    'contractVersion', 'deploymentTarget', 'pairingAllowed',
+    'exactFiveReadOnlyLookupAllowed', 'financialActionAllowed', 'moneyMovementAllowed',
     'serverSignerId', 'serverSignerKeyId', 'serverSignerPublicKeySpkiSha256'
 ] or json.dumps(value, separators=(',', ':')).encode() != raw:
     raise SystemExit(1)
-if value['contractVersion'] != 1 or value['deploymentTarget'] != 'staging' or \
-        value['pairingOnly'] is not True or value['moneyMovementAllowed'] is not False or \
+if value['contractVersion'] != 2 or value['deploymentTarget'] != 'staging' or \
+        value['pairingAllowed'] is not True or \
+        value['exactFiveReadOnlyLookupAllowed'] is not True or \
+        value['financialActionAllowed'] is not False or \
+        value['moneyMovementAllowed'] is not False or \
         value['serverSignerKeyId'] != 'companion-server-staging-v1' or \
         not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', value['serverSignerId']) or \
         not re.fullmatch(r'sha256:[0-9a-f]{64}', value['serverSignerPublicKeySpkiSha256']):
@@ -358,8 +362,8 @@ install_release() {
     "$installing/infra" "$installing/configs" "$installing/secrets"
   install -o root -g root -m 0444 "$incoming/compose.companion-device-pairing.yaml" \
     "$installing/infra/compose.companion-device-pairing.yaml"
-  install -o root -g root -m 0444 "$incoming/companion-device-bridge-runtime-manifest.v1.json" \
-    "$installing/configs/companion-device-bridge-runtime-manifest.v1.json"
+  install -o root -g root -m 0444 "$incoming/companion-device-bridge-runtime-manifest.v2.json" \
+    "$installing/configs/companion-device-bridge-runtime-manifest.v2.json"
   install -o root -g root -m 0444 "$incoming/supabase-ca.crt" \
     "$installing/configs/supabase-ca.crt"
   install -o 10001 -g 10001 -m 0400 "$incoming/companion-device-bridge-database-url" \
@@ -444,7 +448,7 @@ case "$command" in
     acquire_mutation_lock
     require_host_identity
     require_ready_release "$2" "${2:0:12}"
-    printf '%s\n' 'Companion pairing bridge ready: pairing only; lookup and money movement disabled.'
+    printf '%s\n' 'Companion bridge ready: pairing and signed exact-five read-only lookup enabled; financial actions and money movement disabled.'
     ;;
 
   stop)

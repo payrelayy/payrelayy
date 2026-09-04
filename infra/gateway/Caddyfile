@@ -49,7 +49,7 @@ device.fetanagent.com {
 
 	@companion_device_bridge {
 		method POST
-		path /v1/companion/device/enrollments:pair
+		path /v1/companion/device/enrollments:pair /v1/companion/device/lookup-assignments:poll /v1/companion/device/lookup-results:submit
 		header Content-Type application/vnd.fetanagent.companion-device-bridge+json
 		header Accept application/vnd.fetanagent.companion-device-bridge+json
 	}

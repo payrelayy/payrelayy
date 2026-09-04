@@ -1,5 +1,9 @@
-const KEMERBET_AGENT_WEB_ORIGIN = 'https://agentsystem.admindigi.com';
-const KEMERBET_AGENT_API_ORIGIN = 'https://admin-api.agt-digi.com';
+import {
+  KEMERBET_AGENT_API_ORIGIN,
+  KEMERBET_AGENT_PLAYER_LOOKUP_PATH,
+  KEMERBET_AGENT_WEB_ORIGIN,
+} from '@fetanagent/agent-platform-kemerbet';
+
 const KEMERBET_LOGIN_PATH = '/Account/Login';
 const KEMERBET_REFRESH_PATH = '/Account/RefreshToken';
 const KEMERBET_DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
@@ -36,7 +40,13 @@ export type LocalKemerBetGuardPhase = 'manual_login' | 'signed_in_read_only';
 export type LocalKemerBetRequestDecision =
   | {
       readonly action: 'allow';
-      readonly reason: 'outside_provider' | 'provider_read' | 'exact_login' | 'exact_refresh';
+      readonly reason:
+        | 'outside_provider'
+        | 'provider_read'
+        | 'exact_login'
+        | 'exact_refresh'
+        | 'exact_lookup'
+        | 'exact_lookup_preflight';
     }
   | {
       readonly action: 'abort';
@@ -61,6 +71,7 @@ export function decideLocalKemerBetRequest(
   methodCandidate: string,
   rawUrl: string,
   phase: LocalKemerBetGuardPhase,
+  approvedLookupPlayerId?: string,
 ): LocalKemerBetRequestDecision {
   const method = methodCandidate.toUpperCase();
   let url: URL;
@@ -107,6 +118,21 @@ export function decideLocalKemerBetRequest(
       query.length === 1 &&
       query[0]?.[0] === 'languageCode' &&
       /^[A-Za-z]{2,3}(?:[-_][A-Za-z]{2,4})?$/u.test(query[0]?.[1] ?? '');
+    const exactLookup =
+      (method === 'GET' || method === 'OPTIONS') &&
+      phase === 'signed_in_read_only' &&
+      typeof approvedLookupPlayerId === 'string' &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(approvedLookupPlayerId) &&
+      url.pathname === KEMERBET_AGENT_PLAYER_LOOKUP_PATH &&
+      query.length === 1 &&
+      query[0]?.[0] === 'externalId' &&
+      query[0]?.[1] === approvedLookupPlayerId;
+    if (url.origin === KEMERBET_AGENT_API_ORIGIN && exactLookup) {
+      return {
+        action: 'allow',
+        reason: method === 'GET' ? 'exact_lookup' : 'exact_lookup_preflight',
+      };
+    }
     const reviewedRead =
       REVIEWED_API_READ_PATHS.has(url.pathname) && (url.search === '' || infoQuery);
     if (reviewedRead || (method === 'OPTIONS' && exactSessionMutation)) {

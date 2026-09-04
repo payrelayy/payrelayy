@@ -23,9 +23,11 @@ const privateKey = Buffer.from(keyPair.privateKey.export({ format: 'der', type: 
 const publicKey = Buffer.from(keyPair.publicKey.export({ format: 'der', type: 'spki' }));
 const publicKeyDigest = `sha256:${createHash('sha256').update(publicKey).digest('hex')}`;
 const manifest = JSON.stringify({
-  contractVersion: 1,
+  contractVersion: 2,
   deploymentTarget: 'staging',
-  pairingOnly: true,
+  pairingAllowed: true,
+  exactFiveReadOnlyLookupAllowed: true,
+  financialActionAllowed: false,
   moneyMovementAllowed: false,
   serverSignerId: '11111111-1111-4111-8111-111111111111',
   serverSignerKeyId: 'companion_server_signer_2026_01',
@@ -36,7 +38,7 @@ const enabledEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   FINANCIAL_ACTIONS_MODE: 'dry_run',
   INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED: 'true',
-  COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED: 'true',
+  COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED: 'true',
   COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'staging',
   COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE,
   COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
@@ -176,7 +178,10 @@ describe('companion device bridge configuration', () => {
   it.each([
     ['non-production', { NODE_ENV: 'test' }],
     ['live financial mode', { FINANCIAL_ACTIONS_MODE: 'live' }],
-    ['missing no-money gate', { COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED: 'false' }],
+    [
+      'missing no-money lookup gate',
+      { COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED: 'false' },
+    ],
     ['wrong target', { COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production' }],
     ['wrong CA path', { NODE_EXTRA_CA_CERTS: '/tmp/ca' }],
     ['wrong database file', { COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE: '/tmp/database' }],
@@ -311,7 +316,9 @@ describe('companion device bridge configuration', () => {
       deploymentTarget: 'staging',
       connectionConfigured: true,
       signerConfigured: true,
-      pairingOnly: true,
+      pairingAllowed: true,
+      exactFiveReadOnlyLookupAllowed: true,
+      financialActionAllowed: false,
       moneyMovementAllowed: false,
     });
     expect(JSON.stringify(projection)).not.toContain('synthetic-password');

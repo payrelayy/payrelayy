@@ -3,6 +3,7 @@ import {
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
+  randomBytes,
   randomUUID,
   sign,
   type KeyObject,
@@ -16,24 +17,49 @@ import {
   AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
   AGENT_PLATFORM_COMPANION_DEVICE_PLATFORM,
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+  AGENT_PLATFORM_COMPANION_HTTP_TRANSCRIPT_VERSION,
+  AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PAIRING_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
   AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX,
   AGENT_PLATFORM_COMPANION_PAIRING_PATH,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+  AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+  canonicalCompanionHttpRequestSignatureBytes,
   canonicalCompanionPairingSignatureBytes,
+  canonicalKemerBetExactFiveLookupResultSignatureBytes,
   certificateMatchesPairingRequest,
   decodeSignedCompanionEnrollmentCertificate,
+  decodeSignedCompanionHttpRequest,
   decodeSignedCompanionPairingRequest,
+  decodeKemerBetExactFiveLookupResultBody,
+  decodeSignedKemerBetExactFiveLookupAssignment,
+  decodeSignedKemerBetExactFiveLookupResult,
+  digestCompanionHttpRequestBody,
+  digestCompanionLookupEmptyQuery,
   digestCompanionPairingPublicPayload,
+  digestCompanionPlayerId,
+  digestKemerBetExactFiveLookupResultBody,
+  verifyKemerBetExactFiveLookupExchange,
   verifySignedCompanionEnrollmentCertificate,
+  verifySignedCompanionHttpRequest,
   verifySignedCompanionPairingRequest,
+  verifySignedKemerBetExactFiveLookupAssignment,
+  verifySignedKemerBetExactFiveLookupResult,
   type CompanionNoMoneySafety,
+  type CompanionPlayerLookupOutcome,
+  type CompanionHttpRequestBody,
+  type ExactFiveLookupResultItems,
+  type KemerBetExactFiveLookupResultBody,
   type CompanionPairingPublicPayload,
   type SignedCompanionEnrollmentCertificate,
+  type SignedCompanionHttpRequest,
   type SignedCompanionPairingRequest,
+  type SignedKemerBetExactFiveLookupAssignment,
+  type SignedKemerBetExactFiveLookupResult,
 } from '@fetanagent/agent-platform-companion-contracts';
 
 import {
@@ -41,7 +67,7 @@ import {
   type WindowsCurrentUserDataProtector,
 } from './windows-data-protection.js';
 
-export const WINDOWS_COMPANION_VERSION = '0.1.4' as const;
+export const WINDOWS_COMPANION_VERSION = '0.1.5' as const;
 export const COMPANION_PAIRING_PACKAGE_PREFIX = AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX;
 export const COMPANION_PAIRING_CONTENT_TYPE = AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE;
 export const COMPANION_PAIRING_PATH = AGENT_PLATFORM_COMPANION_PAIRING_PATH;
@@ -787,5 +813,313 @@ export async function ensureCompanionDeviceEnrollment(
     identifiersRedacted: true,
     pairingRequired: false,
     transferDisabled: true,
+  });
+}
+
+export type CompanionLookupRequestPath =
+  | typeof AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH
+  | typeof AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH;
+
+export type ExactFiveCompanionLookupOutcomes = readonly [
+  CompanionPlayerLookupOutcome,
+  CompanionPlayerLookupOutcome,
+  CompanionPlayerLookupOutcome,
+  CompanionPlayerLookupOutcome,
+  CompanionPlayerLookupOutcome,
+];
+
+export interface CompanionDeviceSigningRuntime {
+  readonly certificate: SignedCompanionEnrollmentCertificate;
+  readonly pollEndpoint: string;
+  readonly resultEndpoint: string;
+  createSignedHttpRequest(
+    path: CompanionLookupRequestPath,
+    contentDigest: string,
+    issuedAt?: Date,
+  ): SignedCompanionHttpRequest;
+  decodeAndVerifyAssignment(
+    candidate: unknown,
+    assessedAt?: Date,
+  ): SignedKemerBetExactFiveLookupAssignment | undefined;
+  verifyLookupExchange(
+    assignment: SignedKemerBetExactFiveLookupAssignment,
+    result: SignedKemerBetExactFiveLookupResult,
+    assessedAt?: Date,
+  ): boolean;
+  createSignedLookupResult(
+    assignment: SignedKemerBetExactFiveLookupAssignment,
+    outcomes: ExactFiveCompanionLookupOutcomes,
+    observedAt?: Date,
+  ): SignedKemerBetExactFiveLookupResult;
+}
+
+export interface LoadCompanionDeviceSigningRuntimeOptions {
+  readonly dataRoot: string;
+  readonly now?: () => Date;
+  readonly protector?: WindowsCurrentUserDataProtector;
+}
+
+function validRuntimeDate(candidate: Date): string {
+  if (!Number.isFinite(candidate.getTime())) {
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  }
+  return candidate.toISOString();
+}
+
+function endpointFor(enrollmentEndpoint: string, path: CompanionLookupRequestPath): string {
+  const endpoint = new URL(enrollmentEndpoint);
+  endpoint.pathname = path;
+  endpoint.search = '';
+  endpoint.hash = '';
+  const value = endpoint.toString();
+  if (value !== `https://device.fetanagent.com${path}`) {
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  }
+  return value;
+}
+
+/**
+ * Reopens the paired key behind a narrow signing interface. The private key, raw Player IDs,
+ * KemerBet session material, and any financial-action capability are never exposed.
+ */
+export async function loadCompanionDeviceSigningRuntime(
+  options: LoadCompanionDeviceSigningRuntimeOptions,
+): Promise<CompanionDeviceSigningRuntime> {
+  const nowProvider = options.now ?? (() => new Date());
+  const loadedAt = nowProvider();
+  const loadedAtIso = validRuntimeDate(loadedAt);
+  const deviceRoot = resolve(options.dataRoot, 'device');
+  const rootStat = await lstat(deviceRoot).catch(() =>
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE'),
+  );
+  const canonicalDataRoot = await realpath(options.dataRoot).catch(() =>
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE'),
+  );
+  const canonicalDeviceRoot = await realpath(deviceRoot).catch(() =>
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE'),
+  );
+  if (
+    !rootStat.isDirectory() ||
+    rootStat.isSymbolicLink() ||
+    canonicalDeviceRoot.toLocaleLowerCase('en-US') !==
+      resolve(canonicalDataRoot, 'device').toLocaleLowerCase('en-US')
+  ) {
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  }
+  const rawKey = await readStored(resolve(deviceRoot, DEVICE_KEY_FILE));
+  const rawEnrollment = await readStored(resolve(deviceRoot, DEVICE_ENROLLMENT_FILE));
+  if (!rawKey || !rawEnrollment) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  const storedKey = decodeStoredDeviceKey(parseJson(rawKey));
+  const enrollment = decodeStoredEnrollment(parseJson(rawEnrollment));
+  if (
+    !storedKey ||
+    !enrollment ||
+    !(await validateExistingEnrollment(storedKey, rawEnrollment, loadedAt))
+  ) {
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  }
+  const protector =
+    options.protector ?? createWindowsCurrentUserDataProtector(process.env, 'device-signing-key');
+  const privateKey = await openDevicePrivateKey(storedKey, protector);
+  const serverKey = p256PublicKey(enrollment.serverSigningPublicKeySpki);
+  const serverPublicKey = Buffer.from(serverKey.bytes);
+  serverKey.bytes.fill(0);
+  if (
+    enrollment.serverSignerKeyId !== enrollment.certificate.signerKeyId ||
+    Date.parse(enrollment.certificate.body.validFrom) > Date.parse(loadedAtIso) ||
+    Date.parse(enrollment.certificate.body.validUntil) <= Date.parse(loadedAtIso)
+  ) {
+    serverPublicKey.fill(0);
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  }
+
+  const certificate = enrollment.certificate;
+  const createSignedHttpRequest = (
+    path: CompanionLookupRequestPath,
+    contentDigest: string,
+    issuedAt = nowProvider(),
+  ): SignedCompanionHttpRequest => {
+    if (
+      (path !== AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH &&
+        path !== AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH) ||
+      !DIGEST_PATTERN.test(contentDigest)
+    ) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    const issuedAtIso = validRuntimeDate(issuedAt);
+    const issuedAtMs = Date.parse(issuedAtIso);
+    const certificateExpiryMs = Date.parse(certificate.body.validUntil);
+    const expiresAtMs = Math.min(issuedAtMs + 60_000, certificateExpiryMs);
+    if (issuedAtMs < Date.parse(certificate.body.validFrom) || expiresAtMs <= issuedAtMs) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    const nonce = randomBytes(32);
+    let nonceDigest: string;
+    try {
+      nonceDigest = sha256(nonce);
+    } finally {
+      nonce.fill(0);
+    }
+    const body: CompanionHttpRequestBody = Object.freeze({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      requestId: randomUUID(),
+      certificateId: certificate.body.certificateId,
+      deviceId: certificate.body.deviceId,
+      deviceKeyId: certificate.body.deviceKeyId,
+      method: 'POST',
+      canonicalPath: path,
+      queryDigest: digestCompanionLookupEmptyQuery(),
+      contentDigest,
+      nonceDigest,
+      issuedAt: issuedAtIso,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      ...noMoneySafety,
+    });
+    const bodyDigest = digestCompanionHttpRequestBody(body);
+    const transcript = canonicalCompanionHttpRequestSignatureBytes(body);
+    if (!bodyDigest || !transcript) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    const request = decodeSignedCompanionHttpRequest({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      transcriptVersion: AGENT_PLATFORM_COMPANION_HTTP_TRANSCRIPT_VERSION,
+      bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+      bodyDigest,
+      signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+      signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+      deviceKeyId: certificate.body.deviceKeyId,
+      body,
+      signature: sign('sha256', transcript, {
+        key: privateKey,
+        dsaEncoding: 'ieee-p1363',
+      }).toString('base64url'),
+    });
+    if (
+      !request ||
+      !verifySignedCompanionHttpRequest(request, certificate, serverPublicKey, issuedAtIso)
+    ) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    return request;
+  };
+
+  const decodeAndVerifyAssignment = (
+    candidate: unknown,
+    assessedAt = nowProvider(),
+  ): SignedKemerBetExactFiveLookupAssignment | undefined => {
+    const assessedAtIso = validRuntimeDate(assessedAt);
+    const assignment = decodeSignedKemerBetExactFiveLookupAssignment(candidate);
+    return assignment &&
+      assignment.signerKeyId === enrollment.serverSignerKeyId &&
+      assignment.body.certificateId === certificate.body.certificateId &&
+      assignment.body.deviceId === certificate.body.deviceId &&
+      assignment.body.deviceKeyId === certificate.body.deviceKeyId &&
+      Date.parse(assessedAtIso) >= Date.parse(assignment.body.issuedAt) &&
+      Date.parse(assessedAtIso) < Date.parse(assignment.body.expiresAt) &&
+      verifySignedKemerBetExactFiveLookupAssignment(assignment, serverPublicKey)
+      ? assignment
+      : undefined;
+  };
+
+  const verifyLookupExchange = (
+    assignment: SignedKemerBetExactFiveLookupAssignment,
+    result: SignedKemerBetExactFiveLookupResult,
+    assessedAt = nowProvider(),
+  ): boolean => {
+    const assessedAtIso = validRuntimeDate(assessedAt);
+    return (
+      verifySignedKemerBetExactFiveLookupResult(result, certificate) &&
+      verifyKemerBetExactFiveLookupExchange(
+        {
+          assessedAt: assessedAtIso,
+          certificate,
+          signedAssignment: assignment,
+          signedResult: result,
+        },
+        serverPublicKey,
+      ).disposition === 'would_accept_read_only_result'
+    );
+  };
+
+  const createSignedLookupResult = (
+    assignment: SignedKemerBetExactFiveLookupAssignment,
+    outcomes: ExactFiveCompanionLookupOutcomes,
+    observedAt = nowProvider(),
+  ): SignedKemerBetExactFiveLookupResult => {
+    const observedAtIso = validRuntimeDate(observedAt);
+    if (
+      !decodeAndVerifyAssignment(assignment, observedAt) ||
+      !Array.isArray(outcomes) ||
+      outcomes.length !== 5 ||
+      outcomes.some(
+        (outcome) =>
+          outcome !== 'found' && outcome !== 'not_found' && outcome !== 'review_required',
+      )
+    ) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    const items = assignment.body.playerIds.map((playerId, playerIndex) => {
+      const playerIdDigest = digestCompanionPlayerId(playerId);
+      if (!playerIdDigest) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+      return Object.freeze({
+        playerIndex: playerIndex as 0 | 1 | 2 | 3 | 4,
+        playerIdDigest,
+        outcome: outcomes[playerIndex]!,
+      });
+    }) as unknown as ExactFiveLookupResultItems;
+    const resultBody = decodeKemerBetExactFiveLookupResultBody({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      resultId: randomUUID(),
+      assignmentId: assignment.body.assignmentId,
+      assignmentBodyDigest: assignment.bodyDigest,
+      requestId: assignment.body.requestId,
+      certificateId: certificate.body.certificateId,
+      deviceId: certificate.body.deviceId,
+      deviceKeyId: certificate.body.deviceKeyId,
+      platformCode: 'kemerbet',
+      assignmentKind: 'exact_five_player_lookup',
+      lookupMode: 'find_only',
+      currencyCode: 'ETB',
+      items,
+      foundCount: outcomes.filter((outcome) => outcome === 'found').length,
+      notFoundCount: outcomes.filter((outcome) => outcome === 'not_found').length,
+      reviewRequiredCount: outcomes.filter((outcome) => outcome === 'review_required').length,
+      observedAt: observedAtIso,
+      ...noMoneySafety,
+    });
+    if (!resultBody) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    const bodyDigest = digestKemerBetExactFiveLookupResultBody(resultBody);
+    const transcript = canonicalKemerBetExactFiveLookupResultSignatureBytes(resultBody);
+    if (!bodyDigest || !transcript) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    const result = decodeSignedKemerBetExactFiveLookupResult({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      transcriptVersion: AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION,
+      bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+      bodyDigest,
+      signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+      signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+      deviceKeyId: certificate.body.deviceKeyId,
+      body: resultBody,
+      signature: sign('sha256', transcript, {
+        key: privateKey,
+        dsaEncoding: 'ieee-p1363',
+      }).toString('base64url'),
+    });
+    if (!result || !verifyLookupExchange(assignment, result, observedAt)) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    return result;
+  };
+
+  return Object.freeze({
+    certificate,
+    pollEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH),
+    resultEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH),
+    createSignedHttpRequest,
+    decodeAndVerifyAssignment,
+    verifyLookupExchange,
+    createSignedLookupResult,
   });
 }

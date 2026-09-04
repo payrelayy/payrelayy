@@ -7,7 +7,7 @@ import {
   type CompanionNoMoneySafety,
 } from '@fetanagent/agent-platform-companion-contracts';
 
-export const OWNER_COMPANION_MINIMUM_VERSION = '0.1.4' as const;
+export const OWNER_COMPANION_MINIMUM_VERSION = '0.1.5' as const;
 export const OWNER_COMPANION_PAIRING_ENDPOINT =
   `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_PAIRING_PATH}` as const;
 

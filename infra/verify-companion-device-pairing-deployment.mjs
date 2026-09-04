@@ -232,6 +232,10 @@ assert.match(deploymentHelper, /file_stat\.st_size > 512/u);
 assert.match(deploymentHelper, /re\.fullmatch\(pattern, raw\) is None/u);
 assert.match(deploymentHelper, /the companion database URL is not exact canonical bytes/u);
 assert.match(deploymentHelper, /the companion bridge unexpectedly publishes a host port/u);
+assert.match(
+  deploymentHelper,
+  /NetworkSettings\.Networks\}\}\{\{println \$name\}\}\{\{end\}\}' \|\s+sed '\/\^\$\/d' \| LC_ALL=C sort/u,
+);
 assert.match(deploymentHelper, /SUPABASE_SERVICE_ROLE_KEY/u);
 assert.match(deploymentHelper, /expected verify, install, activate, ready, stop, or discard/u);
 assert.match(deploymentHelper, /installed_helper_identity/u);
@@ -244,7 +248,7 @@ const helperSha256 = createHash('sha256').update(deploymentHelper).digest('hex')
 assert.match(deploymentInstaller, new RegExp(`EXPECTED_HELPER_SHA256='${helperSha256}'`, 'u'));
 assert.match(
   deploymentInstaller,
-  /PREVIOUS_HELPER_SHA256='44c4f114efeba17d26a16a3d1406b6df776a8b46c2f987ab81d5955f0a76601d'/u,
+  /PREVIOUS_HELPER_SHA256='b97588105f1c5a8f85b01e931a465559d604ccf61ca45836b1edc4eded6f5a7e'/u,
 );
 assert.match(deploymentInstaller, /NOPASSWD: sha256:\$digest \$TARGET \*/u);
 assert.match(

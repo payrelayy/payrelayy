@@ -222,7 +222,8 @@ require_ready_release() {
   [[ "$port_bindings" == '{}' || "$port_bindings" == 'null' ]] ||
     die 'the companion bridge unexpectedly publishes a host port'
   networks="$(docker_local container inspect "$container_id" --format \
-    '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' | LC_ALL=C sort)" ||
+    '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' |
+    sed '/^$/d' | LC_ALL=C sort)" ||
     die 'the companion bridge network membership could not be inspected'
   expected_networks="$(printf '%s\n%s\n' \
     "${PROJECT_NAME}_companion_device_database_egress" "$INGRESS_NETWORK" | LC_ALL=C sort)"

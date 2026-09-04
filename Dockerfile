@@ -218,8 +218,8 @@ COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/node_mod
 COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/packages ./packages
 COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/apps/telebirr-device-bridge ./apps/telebirr-device-bridge
 
-# Do not EXPOSE or host-publish port 8084. A separately reviewed HTTPS gateway is the only intended
-# ingress and reaches this listener across a private Docker network.
+# Do not declare or host-publish port 8084. A separately reviewed HTTPS gateway is the only
+# intended ingress and reaches this listener across a private Docker network.
 CMD ["node", "apps/telebirr-device-bridge/dist/telebirr-device-bridge-main.js"]
 
 # The executor uses the distribution-provided Chromium at the production-pinned

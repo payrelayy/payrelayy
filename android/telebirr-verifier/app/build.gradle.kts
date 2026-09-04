@@ -1,8 +1,14 @@
+import java.io.File
 import java.security.KeyFactory
+import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.PrivateKey
+import java.security.Signature
 import java.security.interfaces.ECPublicKey
 import java.security.spec.X509EncodedKeySpec
+import java.security.cert.X509Certificate
 import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import java.util.Base64
 
 plugins {
@@ -18,6 +24,13 @@ data class OperationalVerifierTrust(
   val assignmentSignerKeyId: String,
   val assignmentSignerPublicKeySpki: String,
   val assignmentSignerPublicKeySpkiSha256: String,
+)
+
+data class OperationalVerifierSigning(
+  val keyAlias: String,
+  val keyPassword: String,
+  val storeFile: File,
+  val storePassword: String,
 )
 
 fun quotedBuildConfig(value: String): String =
@@ -82,6 +95,112 @@ val operationalTrust =
     )
   }
 
+val operationalSigning =
+  if (operationalTrust == null) {
+    null
+  } else {
+    val configuredPath =
+      providers.gradleProperty("fetanagentVerifierSigningStoreFile").orNull
+        ?: error(
+          "Operational verifier builds require " +
+            "-PfetanagentVerifierSigningStoreFile=<PKCS12-file>.",
+        )
+    val keyAlias =
+      providers.gradleProperty("fetanagentVerifierSigningKeyAlias").orNull
+        ?: error(
+          "Operational verifier builds require " +
+            "-PfetanagentVerifierSigningKeyAlias=<key-alias>.",
+        )
+    val expectedCertificateDigest =
+      providers.gradleProperty("fetanagentVerifierSigningCertSha256").orNull
+        ?: error(
+          "Operational verifier builds require " +
+            "-PfetanagentVerifierSigningCertSha256=sha256:<hex>.",
+        )
+    require(Regex("^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$").matches(keyAlias)) {
+      "fetanagentVerifierSigningKeyAlias is not a bounded alias."
+    }
+    require(Regex("^sha256:[0-9a-f]{64}$").matches(expectedCertificateDigest)) {
+      "fetanagentVerifierSigningCertSha256 is not a SHA-256 identifier."
+    }
+
+    fun signingSecret(name: String): String =
+      requireNotNull(providers.environmentVariable(name).orNull) {
+        "Operational verifier signing secret $name is unavailable."
+      }.also { value ->
+        require(value.length in 32..256 && !value.any(Char::isWhitespace)) {
+          "Operational verifier signing secret $name is malformed."
+        }
+      }
+
+    val storePassword = signingSecret("FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD")
+    val keyPassword = signingSecret("FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD")
+    val path = file(configuredPath).toPath().toAbsolutePath().normalize()
+    require(Files.isRegularFile(path) && !Files.isSymbolicLink(path)) {
+      "fetanagentVerifierSigningStoreFile must identify one regular, non-symlink file."
+    }
+    require(Files.size(path) in 1..65_536) {
+      "fetanagentVerifierSigningStoreFile is not a bounded PKCS12 store."
+    }
+
+    val storePasswordCharacters = storePassword.toCharArray()
+    val keyPasswordCharacters = keyPassword.toCharArray()
+    try {
+      val keyStore = KeyStore.getInstance("PKCS12")
+      Files.newInputStream(path, StandardOpenOption.READ).use { input ->
+        keyStore.load(input, storePasswordCharacters)
+      }
+      val aliases = keyStore.aliases().toList()
+      require(aliases == listOf(keyAlias) && keyStore.isKeyEntry(keyAlias)) {
+        "The operational signing store must contain only the configured key entry."
+      }
+      val certificate = keyStore.getCertificate(keyAlias) as? X509Certificate
+        ?: error("The operational signing entry has no X.509 certificate.")
+      certificate.checkValidity()
+      val privateKey = keyStore.getKey(keyAlias, keyPasswordCharacters) as? PrivateKey
+        ?: error("The operational signing entry has no private key.")
+      require(
+        certificate.publicKey.algorithm == "RSA" &&
+          privateKey.algorithm == certificate.publicKey.algorithm,
+      ) {
+        "The operational signing entry must contain one matching RSA key pair."
+      }
+      val signingProbe = "fetanagent-android-signing-key-match-v1".toByteArray(Charsets.UTF_8)
+      val signer = Signature.getInstance("SHA256withRSA")
+      signer.initSign(privateKey)
+      signer.update(signingProbe)
+      val probeSignature = signer.sign()
+      try {
+        val verifier = Signature.getInstance("SHA256withRSA")
+        verifier.initVerify(certificate.publicKey)
+        verifier.update(signingProbe)
+        require(verifier.verify(probeSignature)) {
+          "The operational signing certificate does not match its private key."
+        }
+      } finally {
+        probeSignature.fill(0)
+      }
+      val actualCertificateDigest =
+        "sha256:" +
+          MessageDigest.getInstance("SHA-256")
+            .digest(certificate.encoded)
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+      require(actualCertificateDigest == expectedCertificateDigest) {
+        "The operational signing certificate does not match its reviewed fingerprint."
+      }
+    } finally {
+      storePasswordCharacters.fill('\u0000')
+      keyPasswordCharacters.fill('\u0000')
+    }
+
+    OperationalVerifierSigning(
+      keyAlias = keyAlias,
+      keyPassword = keyPassword,
+      storeFile = path.toFile(),
+      storePassword = storePassword,
+    )
+  }
+
 val verifierVersionName =
   when (requestedRuntimeMode) {
     "pairing_only" -> "0.5.0-secure-pairing"
@@ -111,12 +230,29 @@ android {
     testInstrumentationRunner = "android.test.InstrumentationTestRunner"
   }
 
+  signingConfigs {
+    operationalSigning?.let { signing ->
+      create("operationalRelease") {
+        storeFile = signing.storeFile
+        storePassword = signing.storePassword
+        keyAlias = signing.keyAlias
+        keyPassword = signing.keyPassword
+        storeType = "PKCS12"
+        enableV1Signing = false
+        enableV2Signing = true
+      }
+    }
+  }
+
   buildTypes {
     debug {
       isMinifyEnabled = false
     }
     release {
       isMinifyEnabled = true
+      operationalSigning?.let {
+        signingConfig = signingConfigs.getByName("operationalRelease")
+      }
       operationalTrust?.let { trust ->
         buildConfigField("boolean", "VERIFIER_ENABLED", "true")
         buildConfigField("String", "VERIFIER_RUNTIME_MODE", quotedBuildConfig(trust.runtimeMode))

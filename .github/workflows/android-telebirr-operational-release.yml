@@ -1,0 +1,185 @@
+name: Android TeleBirr operational pairing release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_pairing_only_no_money:
+        description: Type build-pairing-only-no-money
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-telebirr-operational-release
+  cancel-in-progress: false
+
+jobs:
+  build-pairing-release:
+    name: Build signed pairing-only APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Require current main and the no-money pairing-only confirmation
+        shell: bash
+        env:
+          CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_PAIRING_ONLY: ${{ inputs.confirm_pairing_only_no_money }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PAIRING_ONLY" == 'build-pairing-only-no-money' ]]
+
+      - name: Set up Java 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up pinned Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Decode and verify release-only protected inputs
+        id: protected
+        shell: bash
+        env:
+          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_TELEBIRR_SIGNING_KEY_ALIAS }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}
+          ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          ASSIGNMENT_SIGNER_SPKI_BASE64: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64 }}
+          ASSIGNMENT_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          BRIDGE_SIGNER_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
+          BRIDGE_SIGNER_SPKI_BASE64: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
+          BRIDGE_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+        run: |
+          set -euo pipefail
+          [[ "$ANDROID_KEY_ALIAS" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]
+          [[ "$ANDROID_SIGNING_CERT_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ASSIGNMENT_SIGNER_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
+          [[ "$BRIDGE_SIGNER_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
+          [[ "$ASSIGNMENT_SIGNER_KEY_ID" != "$BRIDGE_SIGNER_KEY_ID" ]]
+          [[ "$ASSIGNMENT_SIGNER_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$BRIDGE_SIGNER_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ASSIGNMENT_SIGNER_SPKI_SHA256" != "$BRIDGE_SIGNER_SPKI_SHA256" ]]
+          [[ -n "$ANDROID_KEYSTORE_BASE64" ]]
+
+          protected="$RUNNER_TEMP/fetanagent-android-telebirr-operational"
+          [[ ! -e "$protected" && ! -L "$protected" ]]
+          umask 077
+          install -d -m 0700 "$protected"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$protected/release.p12"
+          printf '%s' "$ASSIGNMENT_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/assignment.spki.der"
+          printf '%s' "$BRIDGE_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/bridge.spki.der"
+          chmod 0600 "$protected"/*
+          [[ -s "$protected/release.p12" ]]
+          [[ "$(stat -c %s "$protected/assignment.spki.der")" -eq 91 ]]
+          [[ "$(stat -c %s "$protected/bridge.spki.der")" -eq 91 ]]
+          [[ "sha256:$(sha256sum "$protected/assignment.spki.der" | cut -d ' ' -f 1)" == "$ASSIGNMENT_SIGNER_SPKI_SHA256" ]]
+          [[ "sha256:$(sha256sum "$protected/bridge.spki.der" | cut -d ' ' -f 1)" == "$BRIDGE_SIGNER_SPKI_SHA256" ]]
+          echo "protected=$protected" >> "$GITHUB_OUTPUT"
+
+      - name: Test, lint, and build the signed pairing-only APK
+        working-directory: android/telebirr-verifier
+        shell: bash
+        env:
+          FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_TELEBIRR_SIGNING_KEY_PASSWORD }}
+          FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_TELEBIRR_SIGNING_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          gradle --no-daemon --stacktrace \
+            -PfetanagentVerifierRuntimeMode=pairing_only \
+            -PfetanagentVerifierServerSignerKeyId='${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}' \
+            -PfetanagentVerifierServerSignerSpkiFile="$protected/bridge.spki.der" \
+            -PfetanagentVerifierAssignmentSignerKeyId='${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}' \
+            -PfetanagentVerifierAssignmentSignerSpkiFile="$protected/assignment.spki.der" \
+            -PfetanagentVerifierSigningStoreFile="$protected/release.p12" \
+            -PfetanagentVerifierSigningKeyAlias='${{ vars.ANDROID_TELEBIRR_SIGNING_KEY_ALIAS }}' \
+            -PfetanagentVerifierSigningCertSha256='${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}' \
+            clean testDebugUnitTest lintDebug assembleRelease
+          test -s app/build/outputs/apk/release/app-release.apk
+          test ! -e app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify build bindings, signature, and release digest
+        id: artifact
+        working-directory: android/telebirr-verifier
+        shell: bash
+        env:
+          ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}
+          ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          BRIDGE_SIGNER_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
+        run: |
+          set -euo pipefail
+          build_config='app/build/generated/source/buildConfig/release/com/fetanagent/telebirrverifier/BuildConfig.java'
+          test -f "$build_config"
+          grep -Fq 'VERIFIER_ENABLED = true' "$build_config"
+          grep -Fq 'VERIFIER_RUNTIME_MODE = "pairing_only"' "$build_config"
+          grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
+          grep -Fq "ASSIGNMENT_SIGNER_KEY_ID = \"$ASSIGNMENT_SIGNER_KEY_ID\"" "$build_config"
+
+          mapfile -t apksigners < <(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V)
+          [[ "${#apksigners[@]}" -ge 1 ]]
+          apksigner="${apksigners[-1]}"
+          certificate_hex="${ANDROID_SIGNING_CERT_SHA256#sha256:}"
+          signature_report="$($apksigner verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk)"
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' <<<"$signature_report"
+          grep -Fqi "Signer #1 certificate SHA-256 digest: $certificate_hex" <<<"$signature_report"
+
+          artifact_dir="$RUNNER_TEMP/fetanagent-android-telebirr-artifact"
+          [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
+          install -d -m 0700 "$artifact_dir"
+          artifact_name='FetanAgent-TeleBirr-Verifier-0.5.0-pairing-only.apk'
+          install -m 0600 app/build/outputs/apk/release/app-release.apk "$artifact_dir/$artifact_name"
+          (
+            cd "$artifact_dir"
+            sha256sum "$artifact_name" > "$artifact_name.sha256"
+          )
+          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo 'Signed pairing-only APK verified. Assignment polling and money movement are disabled.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload signed pairing-only release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fetanagent-telebirr-pairing-only-${{ github.sha }}
+          path: |
+            ${{ steps.artifact.outputs.artifact_dir }}/${{ steps.artifact.outputs.artifact_name }}
+            ${{ steps.artifact.outputs.artifact_dir }}/${{ steps.artifact.outputs.artifact_name }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Remove runner-local protected material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for candidate in \
+            "$RUNNER_TEMP/fetanagent-android-telebirr-operational" \
+            "$RUNNER_TEMP/fetanagent-android-telebirr-artifact"; do
+            if [[ -e "$candidate" || -L "$candidate" ]]; then
+              [[ -d "$candidate" && ! -L "$candidate" ]]
+              [[ "$(realpath -- "$candidate")" == "$candidate" ]]
+              rm -f -- "$candidate"/*
+              rmdir -- "$candidate"
+            fi
+          done

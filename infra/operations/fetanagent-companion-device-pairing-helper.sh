@@ -361,9 +361,16 @@ command="${1:-}"
 [[ $EUID -eq 0 ]] || die 'the helper must run as root through sudo'
 [[ "${SUDO_USER:-}" == "$EXPECTED_SUDO_USER" ]] ||
   die 'the helper requires the dedicated deployment identity'
-[[ "$0" == "$HELPER_PATH" && ! -L "$HELPER_PATH" &&
-  "$(stat --format='%U:%G:%a' "$HELPER_PATH")" == 'root:root:755' ]] ||
+[[ ! -L "$HELPER_PATH" && -f "$HELPER_PATH" &&
+  "$(realpath -- "$HELPER_PATH")" == "$HELPER_PATH" &&
+  "$(stat --format='%U:%G:%a:%h' "$HELPER_PATH")" == 'root:root:755:1' ]] ||
   die 'the installed helper path, ownership, or mode is unsafe'
+installed_helper_identity="$(stat --format='%d:%i' "$HELPER_PATH")" ||
+  die 'the installed helper identity could not be read'
+executing_helper_identity="$(stat -L --format='%d:%i' -- "$0")" ||
+  die 'the executing helper identity could not be read'
+[[ "$executing_helper_identity" == "$installed_helper_identity" ]] ||
+  die 'the executing helper is not the installed helper'
 [[ -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] || die 'Docker overrides are forbidden'
 
 case "$command" in

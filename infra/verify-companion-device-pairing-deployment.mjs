@@ -219,11 +219,28 @@ assert.match(deploymentHelper, /database-preflight-cli\.js/u);
 assert.match(deploymentHelper, /the companion bridge unexpectedly publishes a host port/u);
 assert.match(deploymentHelper, /SUPABASE_SERVICE_ROLE_KEY/u);
 assert.match(deploymentHelper, /expected verify, install, activate, ready, stop, or discard/u);
+assert.match(deploymentHelper, /installed_helper_identity/u);
+assert.match(deploymentHelper, /stat -L --format='%d:%i' -- "\$0"/u);
+assert.match(deploymentHelper, /the executing helper is not the installed helper/u);
+assert.doesNotMatch(deploymentHelper, /"\$0" == "\$HELPER_PATH"/u);
 assert.doesNotMatch(deploymentHelper, /2026-09-04/u);
 
 const helperSha256 = createHash('sha256').update(deploymentHelper).digest('hex');
 assert.match(deploymentInstaller, new RegExp(`EXPECTED_HELPER_SHA256='${helperSha256}'`, 'u'));
-assert.match(deploymentInstaller, /NOPASSWD: sha256:\$EXPECTED_HELPER_SHA256 \$TARGET \*/u);
+assert.match(
+  deploymentInstaller,
+  /PREVIOUS_HELPER_SHA256='b541bed882ed3a9209caeb9aea9829d4436d508b2975e317c1f9f9323d05d5a3'/u,
+);
+assert.match(deploymentInstaller, /NOPASSWD: sha256:\$digest \$TARGET \*/u);
+assert.match(
+  deploymentInstaller,
+  /expected_sudoers\(\) \{[\s\S]*?sudoers_for_digest "\$EXPECTED_HELPER_SHA256"/u,
+);
+assert.match(deploymentInstaller, /install_mode='upgrade'/u);
+assert.match(deploymentInstaller, /require_previous_backup_state/u);
+assert.match(deploymentInstaller, /require_installed_state_for_digest "\$PREVIOUS_HELPER_SHA256"/u);
+assert.match(deploymentInstaller, /mv -f -- "\$TARGET_PREVIOUS" "\$TARGET"/u);
+assert.match(deploymentInstaller, /mv -f -- "\$SUDOERS_PREVIOUS" "\$SUDOERS"/u);
 assert.match(
   deploymentInstaller,
   /run this installer directly in the authenticated DigitalOcean root console/u,

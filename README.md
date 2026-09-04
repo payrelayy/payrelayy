@@ -201,35 +201,35 @@ environment file.
 
 ## Current and planned components
 
-| Component                                                   | Responsibility                                                                      |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `apps/customer-web`                                         | Deferred customer SSR/PWA workspace; preserved source for a later release           |
-| `apps/api`                                                  | Private Telegram actions, protected deposit intake/status, and audit boundaries     |
-| `apps/admin`                                                | Existing private staging operations service; not the public neutral workspace       |
-| `apps/bot`                                                  | Initial customer surface; existing staging transport to complete and validate       |
-| `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner             |
-| `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command         |
-| `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
-| `apps/windows-companion`                                    | Local headed-Chrome KemerBet enrollment; read-only and no-transfer                  |
-| `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off |
-| `apps/telebirr-device-bridge`                               | Database-free internal Android gateway; guarded image, HTTPS ingress unprovisioned  |
-| `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; guarded and unprovisioned            |
-| `apps/telebirr-device-state-broker`                         | Private durable Android device-state broker; guarded and unprovisioned              |
-| `android/telebirr-verifier`                                 | Inert Android signed-client/queue/foreground lifecycle; enrollment unprovisioned    |
-| `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
-| `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |
-| `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract     |
-| `packages/cbe-birr-official-source-policy`                  | Pure source-permission policy; fixed `unproven` and blocked                         |
-| `packages/cbe-birr-authoritative-lookup-prerequisite`       | Pure blocked lookup-prerequisite inventory; every capability is false               |
-| `packages/customer-web-access-foundation`                   | Historical pure web/PWA decision record; no runtime or authentication               |
-| `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                        |
-| `packages/customer-web-workspace-runtime`                   | Seven-function account, Player-ID, deposit, status, and durable throttle BFF        |
-| `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime               |
-| `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                        |
-| `packages/agent-platform-companion-contracts`               | Signed pairing and exact-five no-transfer companion protocol contracts              |
-| `packages/telebirr-reference-opening`                       | TeleBirr-only scoped-key protected-reference opening boundary                       |
-| `packages/config`                                           | Safe environment parsing and feature switches                                       |
-| `packages/i18n`                                             | Shared English message keys and safe locale normalization                           |
+| Component                                                   | Responsibility                                                                                                                       |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/customer-web`                                         | Deferred customer SSR/PWA workspace; preserved source for a later release                                                            |
+| `apps/api`                                                  | Private Telegram actions, protected deposit intake/status, and audit boundaries                                                      |
+| `apps/admin`                                                | Private staging operations and one-use no-money Android pairing issuer; not the public neutral workspace                             |
+| `apps/bot`                                                  | Initial customer surface; existing staging transport to complete and validate                                                        |
+| `apps/worker`                                               | Disabled pure shadow planners; no provider transport or database runner                                                              |
+| `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command                                                          |
+| `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned                                                         |
+| `apps/windows-companion`                                    | Local headed-Chrome KemerBet enrollment; read-only and no-transfer                                                                   |
+| `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off                                                  |
+| `apps/telebirr-device-bridge`                               | Database-free internal Android gateway; guarded image, HTTPS ingress unprovisioned                                                   |
+| `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; guarded and unprovisioned                                                             |
+| `apps/telebirr-device-state-broker`                         | Private durable Android device-state broker; guarded and unprovisioned                                                               |
+| `android/telebirr-verifier`                                 | Inert-by-default Android signed client, encrypted pairing/queue, and foreground lifecycle; operational keys/enrollment unprovisioned |
+| `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                                                                        |
+| `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions                                                        |
+| `packages/cbe-birr-authoritative-fixtures`                  | Offline provider-shaped normalization fixtures for the advisory shadow contract                                                      |
+| `packages/cbe-birr-official-source-policy`                  | Pure source-permission policy; fixed `unproven` and blocked                                                                          |
+| `packages/cbe-birr-authoritative-lookup-prerequisite`       | Pure blocked lookup-prerequisite inventory; every capability is false                                                                |
+| `packages/customer-web-access-foundation`                   | Historical pure web/PWA decision record; no runtime or authentication                                                                |
+| `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                                                                         |
+| `packages/customer-web-workspace-runtime`                   | Seven-function account, Player-ID, deposit, status, and durable throttle BFF                                                         |
+| `packages/customer-web-player-ownership-proof-prerequisite` | Pure blocked ownership-proof inventory; no positive result or runtime                                                                |
+| `packages/contracts`                                        | Provider contracts plus pure advisory KemerBet fake planners                                                                         |
+| `packages/agent-platform-companion-contracts`               | Signed pairing and exact-five no-transfer companion protocol contracts                                                               |
+| `packages/telebirr-reference-opening`                       | TeleBirr-only scoped-key protected-reference opening boundary                                                                        |
+| `packages/config`                                           | Safe environment parsing and feature switches                                                                                        |
+| `packages/i18n`                                             | Shared English message keys and safe locale normalization                                                                            |
 
 ## Local development
 

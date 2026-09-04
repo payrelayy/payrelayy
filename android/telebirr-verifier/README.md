@@ -5,10 +5,12 @@ This standalone Android project is an inert, testable foundation for a future Et
 It is intentionally **disabled and unconfigured by default**. The app now contains the jointly
 versioned authenticated enrollment/assignment/heartbeat/upload client, strict JSON wire codec,
 immutable `device.fetanagent.com` HTTPS exchange, bounded foreground lifecycle, persistent
-notification/stop control, and opt-in boot recovery. It contains no trusted production keys,
-pairing grant, enrollment certificate, or open pilot. The durable encrypted queue and signed client
-are present, but production composition deliberately returns `Enrollment required` until those
-external values are provisioned. The shipped application therefore still cannot be activated.
+notification/stop control, opt-in boot recovery, signed operational trust profile, and encrypted
+one-use provisioning state. It contains no trusted production keys, pairing grant, enrollment
+certificate, or open pilot. Normal debug and release builds remain inert. A separate operational
+release fails at build time unless it receives both reviewed public P-256 signer files, their opaque
+key IDs, and an explicit `pairing_only` or `evidence_only` mode. No private key is an Android build
+input.
 
 The compatibility engine still requires an injected protected-reference binding verifier. The new
 private-pilot protocol closes that contract mismatch without changing the compatibility API: a
@@ -72,8 +74,17 @@ unexpected files, a missing key, or a non-atomic filesystem fail closed. Android
 device-to-device transfer are both explicitly excluded. The production coordinator will use this
 implementation only after trusted enrollment is provisioned into the composition boundary.
 
-The lifecycle shell is now wired into the shipped app, but the evidence runtime remains
-**fail-closed and unprovisioned**. Activation remains blocked on all of the following:
+The lifecycle and secure provisioning shell are now wired into the app, but the evidence runtime
+remains **fail-closed and unprovisioned**. The enabled unprovisioned UI accepts only the canonical
+short-lived package created by the authenticated Owner page. It generates the device identity in
+Android Keystore, encrypts the exact signed pairing request before network use, resends that same
+request after an uncertain response, verifies both build-pinned public signers, and atomically
+replaces the pending record with the signed certificate. It has no editable endpoint or long-lived
+shared API key. The matching Owner-side issuer is implemented as a same-origin, authenticated,
+idempotent no-money operation: PostgreSQL chooses the current pilot/profile/signer and the browser
+stores only the request ID, never the package. It remains disabled until its migration is deployed
+and the reviewed assignment-signer identifier is configured. Activation remains blocked on all of
+the following:
 
 - a real, immutable TeleBirr receiver revision/profile/configuration digest;
 - separately provisioned and rotatable trusted assignment-signing and enrolled device keys;
@@ -82,8 +93,8 @@ The lifecycle shell is now wired into the shipped app, but the evidence runtime 
 - server-side proof-to-reference binding and a database-global one-use provider-payment claim;
 - an atomic settlement/enqueue boundary with the five-account pilot allowlist and kill switch rechecked;
 - a reviewed live provider-layout attestation and controlled Ethiopian-network end-to-end tests;
-- injection of the authenticated client, trusted material, official receipt transport, parser, and
-  encrypted queue into the production runtime composition after enrollment;
+- generation and independent review of the two operational public-key pins and their exact bridge
+  manifest bindings;
 - a signed release build, controlled install, Android battery-policy setup, clock/update health
   checks, and Ethiopian-network end-to-end validation on the Owner's dedicated phone.
 
@@ -100,14 +111,34 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 ```
 
 `assembleDebug` produces a debug-signed, debuggable local test artifact. It is not a production
-release artifact and must not be distributed or installed as an operational verifier.
+release artifact and must not be distributed or installed as an operational verifier. Ordinary
+`assembleRelease` also stays inert and unsigned.
+
+After the server and assignment signers exist, a reviewed pairing-only release can be assembled
+with public material only:
+
+```powershell
+gradle --offline assembleRelease `
+  -PfetanagentVerifierRuntimeMode=pairing_only `
+  -PfetanagentVerifierServerSignerKeyId=<manifest-server-key-id> `
+  -PfetanagentVerifierServerSignerSpkiFile=<public-server-spki-der-file> `
+  -PfetanagentVerifierAssignmentSignerKeyId=<manifest-assignment-key-id> `
+  -PfetanagentVerifierAssignmentSignerSpkiFile=<public-assignment-spki-der-file>
+```
+
+The build rejects missing, symlinked, non-canonical, non-P-256, duplicated, or mismatched public
+keys. The output is still unsigned until the separately controlled Android release-signing step.
+Use `pairing_only` for the first phone enrollment/heartbeat smoke: it never constructs the official
+receipt transport and never polls for an assignment. `evidence_only` is a later separately reviewed
+build decision after the no-money transport smoke passes.
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
-versions. Version `0.4.0-foreground-inert` remains compiled with `VERIFIER_ENABLED=false`, so its
-screen remains `Disabled` and exposes no activation button. A separately reviewed operational build
-will expose only `Start automatic verification` and `Stop`; it still has no URL, credential, or
-reference input.
+versions. Version `0.5.0-secure-provisioning-inert` remains compiled with
+`VERIFIER_ENABLED=false`, so its screen remains `Disabled` and exposes no activation button. An
+enabled, unenrolled operational build exposes one obscured one-use pairing-package field. After
+enrollment it exposes only `Start automatic verification` and `Stop`; it still has no URL, API key,
+receipt reference, receiver name, account credential, or financial control input.
 
 ## Foreground lifecycle contract
 
@@ -135,10 +166,12 @@ The Owner's [Qhash Android verifier](https://github.com/Bizuayehu18/Qhash) was s
 and operational reference. The parts carried forward are the Ethiopian-network deployment model,
 the official `transactioninfo.ethiotelecom.et/receipt/{reference}` route, the observed `Invoice No`,
 `Payment Date`, `Settled Amount`, and `Credited Party Name` labels, Addis Ababa time interpretation,
-one-at-a-time work, and visible health states. The encrypted durable queue, bounded backoff,
-persistent notification, explicit stop control, and opt-in reboot recovery are now implemented.
-Trusted production provisioning and device validation remain separate so the lifecycle cannot turn
-an inert review artifact into a live verifier by itself.
+one-at-a-time work, and visible health states. The encrypted durable queue, encrypted exact-request
+provisioning state, pinned operational public trust, bounded backoff, persistent notification,
+explicit stop control, and opt-in reboot recovery are now implemented. The Owner challenge issuer,
+operational signer/profile provisioning, APK signing, deployment, and real-device validation remain
+separate gates, so this source change cannot turn an inert review artifact into a live verifier by
+itself.
 The parser tests now cover those observed label and amount variants.
 
 FetanAgent deliberately does not adopt Qhash's editable backend URL, device-entered shared API key,

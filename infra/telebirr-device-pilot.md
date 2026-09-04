@@ -134,9 +134,12 @@ The production helper/workflow must implement this order as one locked, exact-co
    nameservers, MX, SPF, and all unrelated records. Do not add an AAAA record in the first cutover.
 9. Wait for public DNS, Caddy certificate issuance, and HTTPS readiness. Verify the certificate
    hostname/chain and require HTTP/1.1 or HTTP/2 only. Re-run the negative route matrix publicly.
-10. Create a single-use Owner pairing challenge, generate the device identity inside Android
-    Keystore, enroll only its public key, and perform the signed no-money pairing/heartbeat/replay
-    smoke. Keep observation verification, settlement, and execution disabled.
+10. Create a single-use Owner pairing challenge and copy its canonical short-lived package directly
+    from the authenticated Owner page into the dedicated phone. The app generates the device
+    identity inside Android Keystore, encrypts the exact signed request before sending it, enrolls
+    only its public key, and clears the matching clipboard entry after success. Perform the signed
+    no-money pairing/heartbeat/exact-request-replay smoke in a `pairing_only` APK. Keep assignment
+    polling, official-provider observation, settlement, and execution disabled.
 11. Install only the reviewed, signed operational APK on the dedicated Owner phone. Require
     automatic network-provided date/time and timezone, grant notification visibility, allow the app
     to run in the phone vendor's background/battery settings, press Start once, and require the

@@ -14,6 +14,7 @@ const deviceStateGroup = 'fetanagent_telebirr_device_state';
 const deviceStateRuntime = 'fetanagent_telebirr_device_state_runtime';
 const issueFunction =
   'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamp with time zone)';
+const ownerIssueFunction = 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)';
 const deviceFunctions = [
   'app.claim_private_telebirr_device_pairing(uuid,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone)',
   'app.claim_private_telebirr_device_replay(text,timestamp with time zone)',
@@ -413,6 +414,11 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         await client.query(`select has_function_privilege(
           'fetanagent_owner_control', '${issueFunction}', 'EXECUTE'
         ) as allowed`),
+      ).toMatchObject({ rows: [{ allowed: false }] });
+      expect(
+        await client.query(`select has_function_privilege(
+          'fetanagent_owner_control', '${ownerIssueFunction}', 'EXECUTE'
+        ) as allowed`),
       ).toMatchObject({ rows: [{ allowed: true }] });
     });
 
@@ -513,6 +519,94 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         expect(persisted.rows).toEqual([
           { certificate_count: '1', enrollment_count: '1', raw_nonce_columns: '0' },
         ]);
+      });
+    });
+
+    it('lets the Owner issue one current no-money package without choosing database authority', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const ownerAdminId = getOwnerAdminId();
+        const pilot = await prepareTelebirrPilot(client, ownerAdminId);
+        const signer = await client.query<{ readonly signer_key_id: string }>(
+          `select signer_key_id
+             from app.private_live_telebirr_assignment_signers
+            where id = $1::uuid`,
+          [pilot.assignmentSignerId],
+        );
+        expect(signer.rows).toHaveLength(1);
+
+        const dormantSwitches = await client.query<{ readonly feature_key: string }>(
+          `update app.feature_switches
+              set mode = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then 'dry_run'::app.feature_mode
+                    else 'disabled'::app.feature_mode
+                  end,
+                  settings = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then pg_catalog.jsonb_build_object(
+                        'contract_version', 1,
+                        'pilot_revision_id', $1::uuid,
+                        'configuration_digest', $2::text
+                      )
+                    else '{}'::jsonb
+                  end
+            where feature_key in (
+              'cbe_birr_authoritative_verification',
+              'deposit_execution',
+              'payment_verification',
+              'private_live_deposit_pilot',
+              'telebirr_authoritative_verification'
+            )
+          returning feature_key`,
+          [pilot.pilotRevisionId, pilot.configurationDigest],
+        );
+        expect(dormantSwitches.rows).toHaveLength(5);
+
+        const requestId = randomUUID();
+        const startedAt = Date.now();
+        const first = await client.query<IssuedRow>(
+          `select *
+             from app.issue_current_private_telebirr_device_pairing(
+               $1::uuid, $2::uuid, $3::text, '0.5.0'::text
+             )`,
+          [ownerAdminId, requestId, signer.rows[0]!.signer_key_id],
+        );
+        expect(first.rows).toHaveLength(1);
+        expect(first.rows[0]!.pairing_id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+        );
+        expect(first.rows[0]!.pairing_nonce_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+        expect(first.rows[0]!.replayed).toBe(false);
+        expect(first.rows[0]!.expires_at.getTime()).toBeGreaterThan(startedAt + 30_000);
+        expect(first.rows[0]!.expires_at.getTime()).toBeLessThanOrEqual(startedAt + 601_000);
+
+        const replay = await client.query<IssuedRow>(
+          `select *
+             from app.issue_current_private_telebirr_device_pairing(
+               $1::uuid, $2::uuid, $3::text, '0.5.0'::text
+             )`,
+          [ownerAdminId, requestId, signer.rows[0]!.signer_key_id],
+        );
+        expect(replay.rows).toEqual([{ ...first.rows[0]!, replayed: true }]);
+
+        const stored = await client.query<{ readonly count: string }>(
+          `select pg_catalog.count(*)::text as count
+             from app.private_live_telebirr_device_pairing_challenges
+            where issue_request_key = $1::uuid`,
+          [requestId],
+        );
+        expect(stored.rows).toEqual([{ count: '1' }]);
+
+        await expect(
+          client.query(
+            `select *
+               from app.issue_current_private_telebirr_device_pairing(
+                 $1::uuid, $2::uuid, 'unknown_signer_key_0001'::text, '0.5.0'::text
+               )`,
+            [ownerAdminId, randomUUID()],
+          ),
+        ).rejects.toThrow(/assignment signer is not ready/iu);
       });
     });
 

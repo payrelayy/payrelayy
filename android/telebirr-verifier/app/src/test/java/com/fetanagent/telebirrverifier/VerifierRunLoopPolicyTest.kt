@@ -19,6 +19,14 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `pairing-only heartbeat mode uses the same bounded idle cadence`() {
+    val policy = VerifierRunLoopPolicy { 0.0 }
+    val status = status(LivePilotRuntimeState.READY, "transport_enrolled")
+    val delays = (0..4).map { policy.decide(status, it.toLong()).delayMillis }
+    assertEquals(listOf(10_000L, 20_000L, 30_000L, 60_000L, 60_000L), delays)
+  }
+
+  @Test
   fun `pending uploads retry quickly then cap at five minutes`() {
     val policy = VerifierRunLoopPolicy { 0.0 }
     val status = status(LivePilotRuntimeState.UPLOAD_PENDING, "upload_retry_scheduled")

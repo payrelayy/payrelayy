@@ -18,6 +18,7 @@ const config = {
     port: 5432,
     user: 'fetanagent_owner_control_runtime',
   },
+  devicePairing: { assignmentSignerKeyId: undefined, configured: false },
   publishableKey: 'sb_publishable_test_key_for_staging_only',
   receiverReferenceProtection: {
     encryptionSecret: 'c'.repeat(64),
@@ -56,7 +57,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows exactly twenty-seven reviewed Owner procedures including claim-bound recovery, the atomic readiness claim, and root receipt', () => {
+  it('allows exactly twenty-eight reviewed Owner procedures including the bounded device-pairing issuer', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );
@@ -100,6 +101,10 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.get_current_private_live_deposit_pilot_status(uuid)',
     );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('internal_telebirr_device_pairing_issue_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.arm_private_live_deposit_pilot(uuid,uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.stop_private_live_deposit_pilot(uuid,uuid,text)',
@@ -130,7 +135,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 27');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 28');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('exact_app_execute_count');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('direct_table_access_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('has_any_column_privilege');

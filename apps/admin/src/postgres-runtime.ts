@@ -10,6 +10,7 @@ import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-a
 import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
 import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot.js';
 import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
+import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
 
 export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
@@ -31,6 +32,7 @@ export interface OwnerControlPostgresRuntime {
     'arm' | 'current' | 'prepare' | 'status' | 'stop'
   >;
   readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'>;
+  readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   close(): Promise<void>;
   ready(): Promise<boolean>;
 }
@@ -138,6 +140,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.arm_private_live_deposit_pilot(uuid,uuid)', 'execute') as private_live_pilot_arm_allowed,
     has_function_privilege(current_user, 'app.stop_private_live_deposit_pilot(uuid,uuid,text)', 'execute') as private_live_pilot_stop_allowed,
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
+    has_function_privilege(current_user, 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)', 'execute') as telebirr_device_pairing_issue_allowed,
+    not has_function_privilege(current_user, 'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz)', 'execute') as internal_telebirr_device_pairing_issue_denied,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
     has_function_privilege(current_user, 'app.list_owner_kemerbet_agent_profiles(uuid)', 'execute') as kemerbet_agent_profile_list_allowed,
@@ -173,7 +177,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 27
+      select count(*) = 28
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -205,6 +209,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure,
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure
+          ,'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
           ,'app.list_owner_kemerbet_agent_profiles(uuid)'::regprocedure
@@ -288,6 +293,12 @@ export async function createOwnerControlPostgresRuntime(
         fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
       },
     ),
+    telebirrDevicePairing: config.devicePairing.configured
+      ? new PostgresOwnerTelebirrDevicePairing(
+          { query: async (sql, values) => pool.query(sql, [...values]) },
+          config.devicePairing.assignmentSignerKeyId,
+        )
+      : undefined,
     ready: async () => {
       if (closed) return false;
       try {

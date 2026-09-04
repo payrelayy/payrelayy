@@ -39,6 +39,7 @@ export type OwnerControlRuntimeConfig =
   | {
       readonly enabled: false;
       readonly connection: undefined;
+      readonly devicePairing: undefined;
       readonly projectReference: undefined;
       readonly publishableKey: undefined;
       readonly receiverReferenceProtection: undefined;
@@ -49,6 +50,15 @@ export type OwnerControlRuntimeConfig =
   | {
       readonly enabled: true;
       readonly connection: OwnerControlDatabaseConnection;
+      readonly devicePairing:
+        | {
+            readonly assignmentSignerKeyId: undefined;
+            readonly configured: false;
+          }
+        | {
+            readonly assignmentSignerKeyId: string;
+            readonly configured: true;
+          };
       readonly projectReference: typeof OWNER_CONTROL_STAGING_PROJECT_REFERENCE;
       readonly publishableKey: string;
       readonly receiverReferenceProtection: {
@@ -193,6 +203,7 @@ export function loadOwnerControlConfig(
       runtime: {
         enabled: false,
         connection: undefined,
+        devicePairing: undefined,
         projectReference: undefined,
         publishableKey: undefined,
         receiverReferenceProtection: undefined,
@@ -256,12 +267,23 @@ export function loadOwnerControlConfig(
     },
     dependencies.readSecretFile === undefined ? {} : { readFile: dependencies.readSecretFile },
   );
+  const assignmentSignerKeyId = environment.OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID;
+  if (
+    assignmentSignerKeyId !== undefined &&
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u.test(assignmentSignerKeyId)
+  ) {
+    throw new Error('OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID is malformed.');
+  }
 
   return {
     ...common,
     runtime: {
       enabled: true,
       connection: parseDatabaseUrl(databaseUrl),
+      devicePairing:
+        assignmentSignerKeyId === undefined
+          ? { assignmentSignerKeyId: undefined, configured: false }
+          : { assignmentSignerKeyId, configured: true },
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
       publishableKey,
       receiverReferenceProtection: {
@@ -288,6 +310,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
       stage: config.runtime.stage,
       tlsMode: config.runtime.tlsMode,
       databaseConfigured: config.runtime.enabled,
+      telebirrDevicePairingConfigured:
+        config.runtime.enabled && config.runtime.devicePairing.configured,
       publishableKeyConfigured: config.runtime.enabled,
       receiverReferenceProtectionConfigured: config.runtime.enabled,
       receiverReferenceMasterProfileVersion: config.runtime.enabled

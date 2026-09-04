@@ -21,7 +21,6 @@ select pg_catalog.pg_advisory_xact_lock(
 alter role fetanagent_companion_device_bridge_runtime with
   nologin
   noinherit
-  nosuperuser
   nocreatedb
   nocreaterole
   noreplication

@@ -118,6 +118,12 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
     expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
       "count(*) filter (where member.rolname = 'postgres') <= 1",
     );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
+      'defaults.defaclnamespace = 0',
+    );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'namespace.oid = defaults.defaclnamespace',
+    );
   });
 
   it('maps the exact lease projection and converts PostgreSQL timestamps canonically', async () => {

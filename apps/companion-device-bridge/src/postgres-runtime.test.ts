@@ -58,6 +58,10 @@ describe('companion device bridge PostgreSQL runtime', () => {
     expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
       'array_agg(namespace.nspname order by namespace.nspname)',
     );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain('defaults.defaclnamespace = 0');
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'namespace.oid = defaults.defaclnamespace',
+    );
     const fake = fakePool();
     let observedConfig: Readonly<Record<string, unknown>> | undefined;
     const runtime = await createCompanionDeviceBridgePostgresRuntime(

@@ -83,6 +83,10 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
       "count(*) filter (where member.rolname = 'postgres') <= 1",
     );
     expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain('routine.pronargdefaults = 0');
+    expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain('defaults.defaclnamespace = 0');
+    expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'namespace.oid = defaults.defaclnamespace',
+    );
   });
 
   it('rejects preflight rows with extras, accessors, proxies, or non-boolean facts', async () => {

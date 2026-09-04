@@ -353,11 +353,50 @@ function guardedCa(value: unknown): string {
     value.length === 0 ||
     Buffer.byteLength(value, 'utf8') > MAX_GUARDED_FILE_BYTES ||
     value.includes('\0') ||
-    !/^(?:-----BEGIN CERTIFICATE-----\n(?:[A-Za-z0-9+/]{1,76}\n)+-----END CERTIFICATE-----\n?)+$/u.test(
-      value,
-    )
+    value.includes('\r')
   ) {
     return unavailable();
+  }
+
+  const withoutFinalNewline = value.endsWith('\n') ? value.slice(0, -1) : value;
+  const blocks = withoutFinalNewline.match(
+    /-----BEGIN CERTIFICATE-----\n[\s\S]*?\n-----END CERTIFICATE-----/gu,
+  );
+  if (blocks === null || blocks.length === 0 || blocks.join('\n') !== withoutFinalNewline) {
+    return unavailable();
+  }
+
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    if (
+      lines[0] !== '-----BEGIN CERTIFICATE-----' ||
+      lines.at(-1) !== '-----END CERTIFICATE-----'
+    ) {
+      return unavailable();
+    }
+    const payloadLines = lines.slice(1, -1);
+    if (
+      payloadLines.length === 0 ||
+      payloadLines.some(
+        (line, index) =>
+          line.length < 1 ||
+          line.length > 76 ||
+          !/^[A-Za-z0-9+/]+={0,2}$/u.test(line) ||
+          (index < payloadLines.length - 1 && line.includes('=')),
+      )
+    ) {
+      return unavailable();
+    }
+    const encoded = payloadLines.join('');
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)) {
+      return unavailable();
+    }
+    const decoded = Buffer.from(encoded, 'base64');
+    if (decoded.byteLength === 0 || decoded.toString('base64') !== encoded) {
+      decoded.fill(0);
+      return unavailable();
+    }
+    decoded.fill(0);
   }
   return value;
 }

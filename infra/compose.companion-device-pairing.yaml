@@ -54,25 +54,13 @@ services:
     secrets:
       - source: companion_device_bridge_database_url
         target: companion_device_bridge_database_url
-        uid: '10001'
-        gid: '10001'
-        mode: 0400
       - source: companion_device_bridge_server_signer
         target: companion_device_bridge_server_signer.pkcs8.der
-        uid: '10001'
-        gid: '10001'
-        mode: 0400
     configs:
       - source: companion_device_bridge_runtime_manifest
         target: /run/configs/companion_device_bridge_runtime_manifest.v1.json
-        uid: '10001'
-        gid: '10001'
-        mode: 0444
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
-        uid: '10001'
-        gid: '10001'
-        mode: 0444
     networks:
       companion_device_database_egress: {}
       companion_device_ingress:
@@ -106,9 +94,10 @@ configs:
   supabase_ca_certificate:
     file: ${FETANAGENT_COMPANION_SUPABASE_CA_CERTIFICATE_FILE:?set the verified staging Supabase CA file}
 
-# Both secret sources are mode-0400 operator-owned files outside Git. No Supabase administrator or
-# service-role key, Owner credential, KemerBet credential, Telegram token, or financial key enters
-# this container.
+# The root deployment helper attests the source metadata used by standalone Compose: secret files
+# are owned by numeric uid/gid 10001 with mode 0400, while public configs are root-owned mode 0444.
+# No Supabase administrator or service-role key, Owner credential, KemerBet credential, Telegram
+# token, or financial key enters this container.
 secrets:
   companion_device_bridge_database_url:
     file: ${FETANAGENT_COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE:?set the scoped continuously available bridge database URL file}

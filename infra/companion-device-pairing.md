@@ -13,6 +13,9 @@ neither a KemerBet credential nor a Supabase administrator/service-role credenti
   `fetanagent_companion_device_bridge_runtime`, and signs a no-money enrollment certificate.
 - The bridge has no host-published port. Caddy can reach it only through the fixed internal
   `fetanagent-companion-device-ingress` Docker network.
+- The root helper, rather than unsupported standalone-Compose `uid`, `gid`, or `mode` fields,
+  attests file-backed secret ownership and permissions before every start. The database URL is an
+  exact no-line-ending byte sequence and is revalidated before it reaches the non-root container.
 - The runtime login has no calendar expiry. It stays available until the explicit disable workflow
   is run. Pairing packages still expire after ten minutes and device certificates remain revocable.
 

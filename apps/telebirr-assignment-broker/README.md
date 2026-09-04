@@ -1,9 +1,9 @@
 # Private TeleBirr assignment broker
 
-This export-only package is the private half of the Android device bridge. It leases one already
-eligible TeleBirr proof, opens the provider-bound protected reference with a scoped child key,
-constructs and signs the exact short-lived device assignment, and persists only the signature and
-digest transcript required for exact lost-ack replay.
+This private executable package is the protected-reference half of the Android device bridge. It
+leases one already eligible TeleBirr proof, opens the provider-bound protected reference with a
+scoped child key, constructs and signs the exact short-lived device assignment, and persists only
+the signature and digest transcript required for exact lost-ack replay.
 
 The broker never receives the API encryption master or fingerprint master. It accepts no raw
 reference, amount, claim, settlement, wallet, execution, or KemerBet dependency. The only plaintext

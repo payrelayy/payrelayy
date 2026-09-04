@@ -47,6 +47,10 @@ FROM build-base AS telebirr-device-state-broker-build
 
 RUN pnpm --filter @fetanagent/telebirr-device-state-broker... run build
 
+FROM build-base AS telebirr-device-bridge-build
+
+RUN pnpm --filter @fetanagent/telebirr-device-bridge... run build
+
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
 RUN groupadd --gid 10001 fetanagent \
@@ -184,6 +188,39 @@ COPY --from=telebirr-device-state-broker-build --chown=10001:10001 /workspace/ap
 # The device-state broker has no TCP health endpoint or exposed port. Runtime composition supplies
 # only its scoped database URL, the public Supabase CA, and a mode-0700 private socket directory.
 CMD ["node", "apps/telebirr-device-state-broker/dist/telebirr-device-state-broker-main.js"]
+
+FROM runtime-base AS telebirr-device-bridge
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="fetanagent-telebirr-device-bridge" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+# The bridge must not inherit an outbound proxy path. Its only runtime transports are the two fixed
+# Unix sockets; inbound plain HTTP is reachable solely from the private gateway network.
+ENV HTTP_PROXY="" \
+    http_proxy="" \
+    HTTPS_PROXY="" \
+    https_proxy="" \
+    FTP_PROXY="" \
+    ftp_proxy="" \
+    ALL_PROXY="" \
+    all_proxy=""
+
+USER root
+
+RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-telebirr-assignment-broker \
+  && install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-telebirr-device-state \
+  && install -d -o root -g root -m 0755 /run/configs
+
+USER 10001:10001
+
+COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/node_modules ./node_modules
+COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/packages ./packages
+COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/apps/telebirr-device-bridge ./apps/telebirr-device-bridge
+
+# Do not declare or host-publish port 8084. A separately reviewed HTTPS gateway is the only
+# intended ingress and reaches this listener across a private Docker network.
+CMD ["node", "apps/telebirr-device-bridge/dist/telebirr-device-bridge-main.js"]
 
 # The executor uses the distribution-provided Chromium at the production-pinned
 # /usr/bin/chromium path. playwright-core does not download or bundle another browser.

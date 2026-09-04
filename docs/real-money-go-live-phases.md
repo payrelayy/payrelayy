@@ -473,6 +473,16 @@ the catalog before and after creating the inode-checked mode-`0600` socket, clos
 authority order, and has a non-root no-port image target. No runtime credential, deployment, public
 ingress, pilot switch, settlement, or money capability is enabled by that source increment.
 
+The database-free bridge is now executable as a separate non-root image. It accepts its P-256
+server signer and assignment public key only through fixed guarded files cross-bound by a canonical
+manifest, rejects database/service-role credentials and outbound proxies, and listens on internal
+port `8084` without declaring an exposed port. Before listening, after listening, and during
+readiness it validates both broker directories at mode `0700` and both fixed socket inodes at mode
+`0600`, owned by the shared non-root runtime UID. A missing, replaced, symlinked, over-broad, or
+wrong-owner socket fails closed. Internet-facing HTTPS gateway/DNS composition, credentials, and
+actual deployment remain unprovisioned; the source increment enables no money action and contains
+no fixed calendar stop.
+
 ### Required Owner inputs
 
 - the exact receiving TeleBirr account, entered only through the authenticated Owner dashboard;
@@ -499,11 +509,12 @@ logs, screenshots, or ordinary database columns.
    image target, and redacted staging readiness inspection exist. Run that read-only inspection;
    only after it reports a protected active receiver plus a matching open pilot/profile, generate
    the bounded dedicated runtime `LOGIN` and provision only the guarded files outside Git.
-6. The canonical fixed assignment and device-state Unix-socket servers, bridge adapters, guarded
-   configs, fail-closed lifecycles, and no-port image targets exist in source. Provision and deploy
-   both private brokers, then compose the database-free bridge as a separate process/container; do
-   not add a public broker listener, database credential to the bridge, or exposed
-   protected-reference opening operation.
+6. The canonical fixed assignment and device-state Unix-socket servers, bridge adapters, all three
+   guarded fail-closed lifecycles, and all three independent image targets exist in source.
+   Provision and deploy the two private brokers plus the database-free bridge on private networks
+   and socket volumes, then place only the bridge behind the reviewed HTTPS gateway. Do not add a
+   public broker listener, database credential to the bridge, host-published bridge port, or
+   exposed protected-reference opening operation.
 7. Finish the Android verifier's enrollment, lease, heartbeat, official-observation, signature,
    upload, replay, expiry, and revocation lifecycle.
 8. Generate the device identity in Android Keystore and enroll only its public identity.

@@ -201,6 +201,10 @@ assert.match(
   ownerService,
   /OWNER_RECEIVER_REFERENCE_PROFILE_FILE: \/etc\/fetanagent\/deposit-proof-reference-profile\.v2\.json/,
 );
+assert.match(
+  ownerService,
+  /OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: telebirr-assignment-staging-v1/,
+);
 assert.doesNotMatch(ownerService, /^\s+DEPOSIT_PROOF_REFERENCE_/mu);
 assert.match(ownerService, /ports:\s*\r?\n\s+- 127\.0\.0\.1:3002:3002/);
 assert.match(ownerService, /networks:\s*\r?\n\s+- owner_control_service/);

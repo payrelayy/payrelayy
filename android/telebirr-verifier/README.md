@@ -9,8 +9,8 @@ notification/stop control, opt-in boot recovery, signed operational trust profil
 one-use provisioning state. It contains no trusted production keys, pairing grant, enrollment
 certificate, or open pilot. Normal debug and release builds remain inert. A separate operational
 release fails at build time unless it receives both reviewed public P-256 signer files, their opaque
-key IDs, and an explicit `pairing_only` or `evidence_only` mode. No private key is an Android build
-input.
+key IDs, an explicit `pairing_only` or `evidence_only` mode, and the separately protected Android
+PKCS12 signing identity. The two server private keys are never Android build inputs.
 
 The compatibility engine still requires an injected protected-reference binding verifier. The new
 private-pilot protocol closes that contract mismatch without changing the compatibility API: a
@@ -114,8 +114,13 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 release artifact and must not be distributed or installed as an operational verifier. Ordinary
 `assembleRelease` also stays inert and unsigned.
 
-After the server and assignment signers exist, a reviewed pairing-only release can be assembled
-with public material only:
+After the server and assignment signers exist, the protected manual GitHub workflow
+`Android TeleBirr operational pairing release` produces the first reviewed pairing-only artifact.
+It requires the exact current `main` commit, the literal `build-pairing-only-no-money`
+confirmation, both public signer pins, and the protected Android release identity. It verifies the
+APK Signature Scheme v2 certificate fingerprint before retaining the APK for 14 days.
+
+The equivalent controlled local invocation is:
 
 ```powershell
 gradle --offline assembleRelease `
@@ -123,14 +128,20 @@ gradle --offline assembleRelease `
   -PfetanagentVerifierServerSignerKeyId=<manifest-server-key-id> `
   -PfetanagentVerifierServerSignerSpkiFile=<public-server-spki-der-file> `
   -PfetanagentVerifierAssignmentSignerKeyId=<manifest-assignment-key-id> `
-  -PfetanagentVerifierAssignmentSignerSpkiFile=<public-assignment-spki-der-file>
+  -PfetanagentVerifierAssignmentSignerSpkiFile=<public-assignment-spki-der-file> `
+  -PfetanagentVerifierSigningStoreFile=<protected-pkcs12-file> `
+  -PfetanagentVerifierSigningKeyAlias=<reviewed-key-alias> `
+  -PfetanagentVerifierSigningCertSha256=sha256:<reviewed-certificate-digest>
 ```
 
-The build rejects missing, symlinked, non-canonical, non-P-256, duplicated, or mismatched public
-keys. The output is still unsigned until the separately controlled Android release-signing step.
-Use `pairing_only` for the first phone enrollment/heartbeat smoke: it never constructs the official
-receipt transport and never polls for an assignment. `evidence_only` is a later separately reviewed
-build decision after the no-money transport smoke passes.
+The two signing passwords are supplied only through
+`FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD` and
+`FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD`. The build rejects missing, symlinked, non-canonical,
+non-P-256, duplicated, or mismatched public trust keys, and rejects an unknown, expired,
+multi-entry, non-RSA, or fingerprint-mismatched Android signing store. Ordinary release builds stay
+inert and unsigned. Use `pairing_only` for the first phone enrollment/heartbeat smoke: it never
+constructs the official receipt transport and never polls for an assignment. `evidence_only` is a
+later separately reviewed build decision after the no-money transport smoke passes.
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
@@ -168,10 +179,12 @@ the official `transactioninfo.ethiotelecom.et/receipt/{reference}` route, the ob
 `Payment Date`, `Settled Amount`, and `Credited Party Name` labels, Addis Ababa time interpretation,
 one-at-a-time work, and visible health states. The encrypted durable queue, encrypted exact-request
 provisioning state, pinned operational public trust, bounded backoff, persistent notification,
-explicit stop control, and opt-in reboot recovery are now implemented. The Owner challenge issuer,
-operational signer/profile provisioning, APK signing, deployment, and real-device validation remain
-separate gates, so this source change cannot turn an inert review artifact into a live verifier by
-itself.
+explicit stop control, and opt-in reboot recovery are now implemented. The Owner challenge issuer
+and protected trust-only signer provisioner are implemented. The provisioner refuses to insert the
+immutable assignment signer unless all financial switches remain disabled and no draft or armed
+pilot exists. Deployment of the three database-free bridge services, phone installation/pairing,
+and real-device validation remain separate gates, so this source change cannot turn an inert review
+artifact into a live verifier by itself.
 The parser tests now cover those observed label and amount variants.
 
 FetanAgent deliberately does not adopt Qhash's editable backend URL, device-entered shared API key,

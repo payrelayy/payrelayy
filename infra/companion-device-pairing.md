@@ -33,6 +33,9 @@ checks passed.
 3. Run the installer directly as root. It verifies the helper digest embedded in the installer,
    validates Bash syntax, installs the helper as root-owned mode `0755`, and creates a sudoers rule
    pinned to that exact SHA-256. It does not start a container or change a database.
+   When the one reviewed predecessor is already installed, the installer accepts only that exact
+   predecessor helper and sudoers digest, keeps attested rollback copies during the rotation, and
+   restores them if the successor fails validation. Every other pre-existing state is rejected.
 4. Delete the two `/root` staging files after the installed helper and full sudoers configuration
    pass inspection.
 

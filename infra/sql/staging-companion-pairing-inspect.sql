@@ -175,7 +175,7 @@ where granted.rolname in (
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 3
+select count(*) = 7
     and pg_catalog.bool_and(
       routine.prosecdef
       and routine.prokind = 'f'
@@ -195,7 +195,17 @@ where namespace.nspname = 'app'
     pg_catalog.to_regprocedure(
       'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)'
     ),
-    pg_catalog.to_regprocedure('app.release_agent_platform_companion_pairing(text)')
+    pg_catalog.to_regprocedure('app.release_agent_platform_companion_pairing(text)'),
+    pg_catalog.to_regprocedure(
+      'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'
+    ),
+    pg_catalog.to_regprocedure(
+      'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)'
+    ),
+    pg_catalog.to_regprocedure('app.release_agent_platform_companion_lookup_assignment(text)'),
+    pg_catalog.to_regprocedure(
+      'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'
+    )
   )
 \gset
 \if :function_surface_exact
@@ -242,7 +252,17 @@ select (
       pg_catalog.to_regprocedure(
         'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)'
       ),
-      pg_catalog.to_regprocedure('app.release_agent_platform_companion_pairing(text)')
+      pg_catalog.to_regprocedure('app.release_agent_platform_companion_pairing(text)'),
+      pg_catalog.to_regprocedure(
+        'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'
+      ),
+      pg_catalog.to_regprocedure(
+        'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)'
+      ),
+      pg_catalog.to_regprocedure('app.release_agent_platform_companion_lookup_assignment(text)'),
+      pg_catalog.to_regprocedure(
+        'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'
+      )
     )
 ) and not exists (
   select 1

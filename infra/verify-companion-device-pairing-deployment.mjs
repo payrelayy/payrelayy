@@ -180,6 +180,19 @@ assert.match(workflow, /staging-companion-server-signer-provision\.sql/u);
 assert.match(workflow, /staging-companion-bridge-runtime-enable-continuous\.sql/u);
 assert.match(workflow, /staging-companion-bridge-runtime-disable\.sql/u);
 assert.match(workflow, /staging-companion-pairing-inspect\.sql/u);
+assert.match(inspection, /select count\(\*\) = 7/u);
+for (const routine of [
+  'claim_agent_platform_companion_lookup_assignment',
+  'complete_agent_platform_companion_lookup_assignment',
+  'release_agent_platform_companion_lookup_assignment',
+  'accept_agent_platform_companion_lookup_result',
+]) {
+  assert.equal(
+    (inspection.match(new RegExp(routine, 'gu')) ?? []).length,
+    2,
+    `the staging inspector must admit only the reviewed ${routine} function in both exact allowlists`,
+  );
+}
 assert.match(workflow, /PGSSLMODE: verify-full/u);
 assert.match(workflow, /PGUSER: postgres\.\$\{\{ env\.STAGING_PROJECT_REF \}\}/u);
 assert.match(workflow, /calendarShutdown == false/u);

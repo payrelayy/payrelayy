@@ -52,6 +52,12 @@ function fakePool(options: { readonly badPreflight?: boolean } = {}) {
 
 describe('companion device bridge PostgreSQL runtime', () => {
   it('uses one verify-full connection and rechecks the exact function-only catalog boundary', async () => {
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+      'array_agg(namespace.nspname::text order by namespace.nspname)',
+    );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'array_agg(namespace.nspname order by namespace.nspname)',
+    );
     const fake = fakePool();
     let observedConfig: Readonly<Record<string, unknown>> | undefined;
     const runtime = await createCompanionDeviceBridgePostgresRuntime(

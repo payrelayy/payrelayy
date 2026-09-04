@@ -17,6 +17,7 @@ import {
 const databaseUrl =
   'postgresql://fetanagent_companion_device_bridge_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
+const paddedCa = '-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n';
 const keyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const privateKey = Buffer.from(keyPair.privateKey.export({ format: 'der', type: 'pkcs8' }));
 const publicKey = Buffer.from(keyPair.publicKey.export({ format: 'der', type: 'spki' }));
@@ -222,6 +223,44 @@ describe('companion device bridge configuration', () => {
           [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: manifest,
           [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
           [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it.each([
+    ['standard Base64 padding', paddedCa],
+    ['no terminal newline', paddedCa.slice(0, -1)],
+    ['an exact certificate chain', `${ca}${paddedCa}`],
+  ])('accepts canonical CA PEM with %s', (_name, value) => {
+    const config = loadCompanionDeviceBridgeConfig(
+      enabledEnvironment,
+      guardedDependencies({
+        [COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE]: databaseUrl,
+        [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: manifest,
+        [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
+        [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: value,
+      }),
+    );
+    expect(config.enabled).toBe(true);
+    if (!config.enabled) throw new Error('expected enabled config');
+    expect(config.connection.ca).toBe(value);
+  });
+
+  it.each([
+    ['noncanonical padding', paddedCa.replace('AQ==', 'AQ=')],
+    ['a carriage return', paddedCa.replaceAll('\n', '\r\n')],
+    ['a blank chain separator', `${ca}\n${paddedCa}`],
+    ['trailing text', `${paddedCa}unexpected`],
+  ])('rejects CA PEM with %s', (_name, value) => {
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        enabledEnvironment,
+        guardedDependencies({
+          [COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE]: databaseUrl,
+          [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: manifest,
+          [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
+          [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: value,
         }),
       ),
     ).toThrow('configuration is unavailable');

@@ -1020,10 +1020,8 @@ networks:
     internal: true
     attachable: false
   companion_device_ingress:
+    external: true
     name: fetanagent-companion-device-ingress
-    driver: bridge
-    internal: true
-    attachable: false
 
 volumes:
   kemerbet_session_control:

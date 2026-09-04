@@ -23,6 +23,11 @@ The repository provides:
   one immutable image reference; the executor requires an explicit staging/production target and a
   lifetime database singleton. It publishes no port, changes no database switch, and remains
   unprovisioned; see [`executor.md`](executor.md);
+- [`compose.telebirr-device-pilot.yaml`](compose.telebirr-device-pilot.yaml): an explicit-profile,
+  no-money composition for the two private Unix-socket brokers and the database-free Android
+  bridge. It publishes no host port, gives each broker separate database egress, gives the bridge
+  only the internal Caddy ingress network, and contains no calendar stop; see
+  [`telebirr-device-pilot.md`](telebirr-device-pilot.md);
 - [`.github/workflows/customer-web-image-smoke.yml`](../.github/workflows/customer-web-image-smoke.yml):
   builds the real customer-web image, verifies its non-root identity and immutable revision label,
   requires the credential-free production entrypoint to fail closed, and probes the built app only
@@ -70,14 +75,17 @@ Production secrets must be supplied by the VM outside this repository, using dis
 or service-owned files with restrictive permissions. The current Compose file intentionally does
 not reference any of them.
 
-| Future process | May receive                                                                                                      | Must never receive                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Beta admission | dedicated staging PostgreSQL direct IPv6 URL, verified public Supabase CA, bot transport HMAC copy, payload HMAC | Telegram token, generic API/provider credentials, Supabase service-role key         |
-| Owner control  | dedicated staging PostgreSQL direct IPv6 URL, public Auth client key, verified public Supabase CA                | bot token, beta HMACs, generic API/provider credentials, Supabase service-role key  |
-| API            | dedicated Player-ID PostgreSQL URL and action transport/payload/capability/semantic HMAC keys                    | Telegram bot token, KemerBet credentials, Supabase service-role key                 |
-| Bot            | Telegram bot token plus separately scoped beta-admission and Player-ID transport HMAC copies                     | database URL, provider credentials, KemerBet credentials, Supabase service-role key |
-| Maintenance    | a future narrowly scoped nonce-retention credential only; manual read-only preflight                             | bot token, API database credential, financial/provider credentials                  |
-| Executor       | its separately reviewed browser profile and least-privilege platform credentials                                 | bot token, API database credential, Supabase service-role key                       |
+| Future process               | May receive                                                                                                      | Must never receive                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Beta admission               | dedicated staging PostgreSQL direct IPv6 URL, verified public Supabase CA, bot transport HMAC copy, payload HMAC | Telegram token, generic API/provider credentials, Supabase service-role key                         |
+| Owner control                | dedicated staging PostgreSQL direct IPv6 URL, public Auth client key, verified public Supabase CA                | bot token, beta HMACs, generic API/provider credentials, Supabase service-role key                  |
+| API                          | dedicated Player-ID PostgreSQL URL and action transport/payload/capability/semantic HMAC keys                    | Telegram bot token, KemerBet credentials, Supabase service-role key                                 |
+| Bot                          | Telegram bot token plus separately scoped beta-admission and Player-ID transport HMAC copies                     | database URL, provider credentials, KemerBet credentials, Supabase service-role key                 |
+| Maintenance                  | a future narrowly scoped nonce-retention credential only; manual read-only preflight                             | bot token, API database credential, financial/provider credentials                                  |
+| Executor                     | its separately reviewed browser profile and least-privilege platform credentials                                 | bot token, API database credential, Supabase service-role key                                       |
+| TeleBirr assignment broker   | dedicated direct verify-full URL, scoped reference-opening child key, assignment signer and manifest             | master reference-protection keys, device-state URL, service-role key, Telegram/KemerBet credentials |
+| TeleBirr device-state broker | dedicated direct verify-full URL and verified Supabase CA                                                        | opening/signing keys, assignment URL, service-role key, settlement/execution authority              |
+| TeleBirr device bridge       | bridge server signer, assignment public key, immutable public manifest, two read-only Unix sockets               | every database URL/key, reference-opening key, service-role key, proxy/Internet egress              |
 
 No container may mount the Docker socket. Do not use a shared production `.env` file, browser
 profile, Git secret, or chat transcript as a secret store.

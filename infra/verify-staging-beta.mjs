@@ -152,8 +152,16 @@ assert.match(
   gatewayService,
   /source: \/var\/lib\/fetanagent-gateway\/config\s*\r?\n\s+target: \/config/,
 );
-assert.match(gatewayService, /networks:\s*\r?\n\s+- owner_control_service/);
+assert.match(
+  gatewayService,
+  /networks:\s*\r?\n\s+- owner_control_service\s*\r?\n\s+- telebirr_device_ingress/,
+);
 assert.doesNotMatch(gatewayService, /staging_service|secrets:|configs:|docker\.sock/);
+assert.equal(
+  countMatches(compose, /telebirr_device_ingress/g),
+  2,
+  'only the gateway attachment and the fixed internal network declaration may name the TeleBirr ingress',
+);
 assert.match(gatewayService, /condition: service_healthy/);
 assert.match(gatewayService, /caddy\s*\r?\n\s+- validate/);
 
@@ -1057,6 +1065,7 @@ const stagingNetwork = childBlock(networks, 'staging_service');
 const kemerbetReadinessControlNetwork = childBlock(networks, 'kemerbet_readiness_control');
 const kemerbetReadinessProxyNetwork = childBlock(networks, 'kemerbet_readiness_proxy');
 const kemerbetReadinessEgressNetwork = childBlock(networks, 'kemerbet_readiness_egress');
+const telebirrDeviceIngressNetwork = childBlock(networks, 'telebirr_device_ingress');
 assert.deepEqual(
   sorted([...networks.matchAll(/^  ([a-z][a-z0-9_]*):\s*$/gm)].map((match) => match[1])),
   sorted([
@@ -1065,8 +1074,9 @@ assert.deepEqual(
     'kemerbet_readiness_control',
     'kemerbet_readiness_proxy',
     'kemerbet_readiness_egress',
+    'telebirr_device_ingress',
   ]),
-  'only the two application bridges and the three static readiness bridges are allowed',
+  'only the two application bridges, three static readiness bridges, and TeleBirr ingress are allowed',
 );
 for (const [networkName, network] of [
   ['owner_control_service', ownerControlNetwork],
@@ -1082,6 +1092,16 @@ assert.doesNotMatch(
   kemerbetReadinessEgressNetwork,
   /driver_opts:|ipam:|com\.docker\.network\.bridge\.gateway_mode_ipv[46]/,
   'the proxy-only egress bridge must not inherit isolated static-network configuration',
+);
+assert.match(
+  telebirrDeviceIngressNetwork,
+  /name: fetanagent-telebirr-device-ingress\s*\r?\n\s+driver: bridge\s*\r?\n\s+internal: true\s*\r?\n\s+attachable: false/,
+  'the cross-project TeleBirr bridge must be fixed, internal-only, and non-attachable',
+);
+assert.doesNotMatch(
+  telebirrDeviceIngressNetwork,
+  /driver_opts:|ipam:/,
+  'the TeleBirr ingress must remain a simple Docker-internal bridge',
 );
 
 const assertExactIsolatedReadinessNetwork = (

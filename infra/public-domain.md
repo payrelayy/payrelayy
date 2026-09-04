@@ -3,8 +3,10 @@
 The safe DNS and HTTPS architecture keeps Porkbun authoritative for `fetanagent.com`, preserves the
 existing Porkbun email-forwarding records, and exposes only a hardened Caddy gateway. The gateway
 serves the static landing page at `fetanagent.com` and proxies only the authenticated Owner-control
-page at `owner.fetanagent.com`. The API, beta admission, bot, PostgreSQL, and Docker socket remain
-unpublished.
+page at `owner.fetanagent.com`. After the separately reviewed no-money TeleBirr device stack is
+healthy, it may also proxy only four exact authenticated device POST routes at
+`device.fetanagent.com` to the database-free bridge over a Docker-internal network. The API, beta
+admission, bot, brokers, PostgreSQL, bridge host port, and Docker socket remain unpublished.
 
 ## Why Porkbun remains authoritative
 
@@ -40,15 +42,18 @@ Those paths preserve ACME account and certificate state across bounded gateway r
 Preserve every MX, SPF TXT, and `_acme-challenge` TXT record. Do not use **Delete all records**.
 Delete only the Porkbun parking records that conflict with the explicit hosts, then create:
 
-| Type  | Host    | Answer / value   | TTL |
-| ----- | ------- | ---------------- | --- |
-| A     | blank   | `161.35.41.232`  | 600 |
-| A     | `owner` | `161.35.41.232`  | 600 |
-| CNAME | `www`   | `fetanagent.com` | 600 |
+| Type  | Host     | Answer / value   | TTL |
+| ----- | -------- | ---------------- | --- |
+| A     | blank    | `161.35.41.232`  | 600 |
+| A     | `owner`  | `161.35.41.232`  | 600 |
+| A     | `device` | `161.35.41.232`  | 600 |
+| CNAME | `www`    | `fetanagent.com` | 600 |
 
 Do not add an AAAA record during the initial cutover. Add IPv6 only after public HTTPS has been
 independently verified over IPv6. Remove the wildcard Porkbun parking CNAME only if it conflicts
-with the explicit `owner` or `www` records; it is not needed by FetanAgent.
+with the explicit `owner`, `device`, or `www` records; it is not needed by FetanAgent. The `device`
+record is a later gated addition: do not create it until the checks in
+[`telebirr-device-pilot.md`](telebirr-device-pilot.md) reach their DNS step.
 
 ## Fail-closed publication sequence
 
@@ -56,7 +61,7 @@ with the explicit `owner` or `www` records; it is not needed by FetanAgent.
    `deploy-and-smoke`. This transfers the gateway image but does not start it because the gateway
    belongs only to the `public-domain` profile.
 2. Configure the DigitalOcean Cloud Firewall and UFW rules.
-3. Add the three Porkbun DNS records and wait until all three names resolve only to
+3. Add the original three Porkbun DNS records and wait until all three public names resolve only to
    `161.35.41.232`.
 4. After the separately reviewed Telegram activation gate passes, run `Staging public domain edge`
    in `inspect` mode with the exact main commit, domain, and Droplet ID. It proves the exact
@@ -67,6 +72,10 @@ with the explicit `owner` or `www` records; it is not needed by FetanAgent.
    secret-free gateway and performs bounded public TLS smoke checks.
 6. If the smoke fails, the workflow removes the gateway automatically. The private bot and Owner
    service remain unchanged.
+
+The `device` A record is not part of the original public-home publication. Add it only after the
+database-free bridge and both private brokers are healthy behind the reviewed gateway, following
+the separate fail-closed sequence in [`telebirr-device-pilot.md`](telebirr-device-pilot.md).
 
 The workflow `stop` mode removes only the public gateway. It does not delete certificate state,
 stop the private beta, disable database logins, or modify DNS. Remove or park the DNS records

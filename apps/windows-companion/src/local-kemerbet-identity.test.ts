@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -94,7 +94,7 @@ function page(
 let root: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'fetanagent-companion-identity-'));
+  root = await realpath(await mkdtemp(join(tmpdir(), 'fetanagent-companion-identity-')));
 });
 
 afterEach(async () => {

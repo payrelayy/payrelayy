@@ -11,8 +11,8 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = 3
-    versionName = "0.3.0-device-bridge-inert"
+    versionCode = 4
+    versionName = "0.4.0-foreground-inert"
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
     testInstrumentationRunner = "android.test.InstrumentationTestRunner"

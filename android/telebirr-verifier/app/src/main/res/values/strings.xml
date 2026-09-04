@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
   <string name="app_name">FetanAgent TeleBirr Verifier</string>
+  <string name="automatic_operation_enabled">Automatic operation is enabled.</string>
+  <string name="automatic_operation_stopped">Automatic operation is stopped.</string>
+  <string name="inert_artifact_notice">This reviewed APK is inert until trusted production enrollment is provisioned.</string>
+  <string name="no_calendar_shutdown">There is no calendar shutdown date. Stop is explicit, by revocation, or by an invalid safety gate.</string>
+  <string name="signed_route_only">Signed assignments and the fixed official TeleBirr route only. No editable URL or API key.</string>
+  <string name="no_financial_authority">No database, KemerBet, settlement, or financial-action authority.</string>
+  <string name="start_automatic_verification">Start automatic verification</string>
+  <string name="stop">Stop</string>
+  <string name="version_value">%1$s: %2$s</string>
+  <string name="notification_channel_name">TeleBirr verifier operation</string>
+  <string name="notification_channel_description">Visible health and stop control for the dedicated verifier phone</string>
+  <string name="special_use_fgs_subtype">Dedicated operator phone continuously polls short-lived signed TeleBirr evidence assignments, uploads evidence only, and exposes a persistent health and stop notification.</string>
 </resources>

@@ -286,11 +286,15 @@ interface Fixture {
   readonly handler: ReturnType<typeof createTelebirrDeviceBridgeHandler>;
   readonly state: {
     now: string;
+    pairingCompletion: 'success' | 'commit_then_throw';
     pollResult: TelebirrDeviceBridgeAssignmentPollResult;
     completed: Map<string, TelebirrDeviceBridgeCommandResponse>;
   };
   readonly spies: {
-    consumePairing: ReturnType<typeof vi.fn>;
+    claimPairing: ReturnType<typeof vi.fn>;
+    completePairing: ReturnType<typeof vi.fn>;
+    releasePairing: ReturnType<typeof vi.fn>;
+    serverSign: ReturnType<typeof vi.fn>;
     poll: ReturnType<typeof vi.fn>;
     stage: ReturnType<typeof vi.fn>;
     heartbeat: ReturnType<typeof vi.fn>;
@@ -306,13 +310,13 @@ function fixture(): Fixture {
   const pairing = signedPairing(pairingBody(device), device.privateKey);
   const state = {
     now: '2026-09-04T10:00:05.000Z',
+    pairingCompletion: 'success' as 'success' | 'commit_then_throw',
     pollResult: { kind: 'none' } as TelebirrDeviceBridgeAssignmentPollResult,
     completed: new Map<string, TelebirrDeviceBridgeCommandResponse>(),
   };
-  const consumePairing = vi.fn(
-    async (_request: SignedTelebirrDeviceBridgePairingRequest, _assessedAt: string) =>
-      enrollmentBody(pairing, assignmentSigner.digest),
-  );
+  const claimPairing = vi.fn();
+  const completePairing = vi.fn();
+  const releasePairing = vi.fn();
   const poll = vi.fn(
     async (
       _certificate: TelebirrDeviceBridgeEnrollmentCertificateBody,
@@ -337,20 +341,55 @@ function fixture(): Fixture {
   const release = vi.fn(async (_identity: string) => undefined);
   const nextId = vi.fn(() => 'bridge-acknowledgement-0001');
   let certificate: SignedTelebirrDeviceBridgeEnrollmentCertificate | undefined;
+  let pairingClaimed = false;
   const claimed = new Set<string>();
+  const serverSign = vi.fn(async (transcript: Uint8Array) => p1363(server.privateKey, transcript));
+  claimPairing.mockImplementation(
+    async (request: SignedTelebirrDeviceBridgePairingRequest, _assessedAt: string) => {
+      if (request.bodyDigest !== pairing.bodyDigest) return undefined;
+      if (certificate) return { kind: 'completed' as const, certificate };
+      if (pairingClaimed) return { kind: 'in_progress' as const };
+      pairingClaimed = true;
+      return {
+        kind: 'claimed' as const,
+        certificateBody: enrollmentBody(pairing, assignmentSigner.digest),
+      };
+    },
+  );
+  completePairing.mockImplementation(
+    async (
+      pairingRequestBodyDigest: string,
+      completedCertificate: SignedTelebirrDeviceBridgeEnrollmentCertificate,
+    ) => {
+      if (pairingRequestBodyDigest !== pairing.bodyDigest || !pairingClaimed || certificate) {
+        return false;
+      }
+      certificate = completedCertificate;
+      pairingClaimed = false;
+      if (state.pairingCompletion === 'commit_then_throw') {
+        state.pairingCompletion = 'success';
+        throw new Error('simulated lost completion acknowledgement');
+      }
+      return true;
+    },
+  );
+  releasePairing.mockImplementation(async (pairingRequestBodyDigest: string) => {
+    if (pairingRequestBodyDigest === pairing.bodyDigest && !certificate) pairingClaimed = false;
+  });
   const dependencies: TelebirrDeviceBridgeDependencies = {
     serverSigningPublicKeySpkiDer: server.spki,
     assignmentSigningPublicKeySpkiDer: assignmentSigner.spki,
     serverSigner: {
       keyId: 'bridge-server-key-0001',
-      signP1363: async (transcript) => p1363(server.privateKey, transcript),
+      signP1363: serverSign,
     },
     now: () => state.now,
     nextOpaqueId: nextId,
-    consumePairingChallenge: async (request, assessedAt) => {
-      const result = await consumePairing(request, assessedAt);
-      return result as TelebirrDeviceBridgeEnrollmentCertificateBody;
-    },
+    claimPairingChallenge: async (request, assessedAt) => claimPairing(request, assessedAt),
+    completePairingChallenge: async (pairingRequestBodyDigest, completedCertificate) =>
+      completePairing(pairingRequestBodyDigest, completedCertificate),
+    releasePairingChallenge: async (pairingRequestBodyDigest) =>
+      releasePairing(pairingRequestBodyDigest),
     loadEnrollment: async () => certificate,
     claimReplay: async (identity) => {
       const completed = state.completed.get(identity);
@@ -371,14 +410,7 @@ function fixture(): Fixture {
     recordHeartbeat: async (...args) => heartbeat(...args),
     stageEvidenceOnly: async (...args) => stage(...args),
   };
-  const underlying = createTelebirrDeviceBridgeHandler(dependencies);
-  const handler: typeof underlying = async (request) => {
-    const response = await underlying(request);
-    if (request.path === '/v1/telebirr/device/enrollments:pair' && response.statusCode === 201) {
-      certificate = json(response).certificate as SignedTelebirrDeviceBridgeEnrollmentCertificate;
-    }
-    return response;
-  };
+  const handler = createTelebirrDeviceBridgeHandler(dependencies);
   return {
     device,
     server,
@@ -387,7 +419,17 @@ function fixture(): Fixture {
     dependencies,
     handler,
     state,
-    spies: { consumePairing, poll, stage, heartbeat, release, nextId },
+    spies: {
+      claimPairing,
+      completePairing,
+      releasePairing,
+      serverSign,
+      poll,
+      stage,
+      heartbeat,
+      release,
+      nextId,
+    },
   };
 }
 
@@ -403,7 +445,9 @@ describe('TeleBirr evidence-only device bridge handler', () => {
   it('consumes a one-use signed pairing challenge and returns a self-checked certificate', async () => {
     const value = fixture();
     const certificate = await enroll(value);
-    expect(value.spies.consumePairing).toHaveBeenCalledOnce();
+    expect(value.spies.claimPairing).toHaveBeenCalledOnce();
+    expect(value.spies.completePairing).toHaveBeenCalledOnce();
+    expect(value.spies.releasePairing).not.toHaveBeenCalled();
     expect(
       verifySignedTelebirrDeviceBridgeEnrollmentCertificate(certificate, value.server.spki),
     ).toBe(true);
@@ -415,6 +459,67 @@ describe('TeleBirr evidence-only device bridge handler', () => {
       financialActionAllowed: false,
       moneyMovementAllowed: false,
     });
+  });
+
+  it('returns the exact signed enrollment certificate after a lost response without reissuing', async () => {
+    const value = fixture();
+    const first = await value.handler(
+      httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
+    );
+    value.state.now = '2026-09-04T10:11:00.000Z';
+    const second = await value.handler(
+      httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
+    );
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(Buffer.from(second.body).equals(Buffer.from(first.body))).toBe(true);
+    expect(value.spies.claimPairing).toHaveBeenCalledTimes(2);
+    expect(value.spies.completePairing).toHaveBeenCalledOnce();
+    expect(value.spies.serverSign).toHaveBeenCalledOnce();
+    expect(value.spies.releasePairing).not.toHaveBeenCalled();
+  });
+
+  it('preserves a committed pairing when completion acknowledgement is uncertain', async () => {
+    const value = fixture();
+    value.state.pairingCompletion = 'commit_then_throw';
+    const first = await value.handler(
+      httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
+    );
+    const second = await value.handler(
+      httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
+    );
+
+    expect(first.statusCode).toBe(503);
+    expect(second.statusCode).toBe(201);
+    expect(value.spies.serverSign).toHaveBeenCalledOnce();
+    expect(value.spies.completePairing).toHaveBeenCalledOnce();
+    expect(value.spies.releasePairing).not.toHaveBeenCalled();
+  });
+
+  it('reports an in-progress pairing without signing or consuming it twice', async () => {
+    const value = fixture();
+    value.spies.claimPairing.mockResolvedValue({ kind: 'in_progress' });
+    const response = await value.handler(
+      httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(value.spies.serverSign).not.toHaveBeenCalled();
+    expect(value.spies.completePairing).not.toHaveBeenCalled();
+    expect(value.spies.releasePairing).not.toHaveBeenCalled();
+  });
+
+  it('releases an uncommitted pairing claim when certificate signing fails', async () => {
+    const value = fixture();
+    value.spies.serverSign.mockRejectedValue(new Error('simulated signer outage'));
+    const response = await value.handler(
+      httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
+    );
+
+    expect(response.statusCode).toBe(503);
+    expect(value.spies.completePairing).not.toHaveBeenCalled();
+    expect(value.spies.releasePairing).toHaveBeenCalledWith(value.pairing.bodyDigest);
   });
 
   it('authenticates a typed poll and returns a request-bound server acknowledgement', async () => {
@@ -560,19 +665,23 @@ describe('TeleBirr evidence-only device bridge handler', () => {
       }),
     );
     expect(response.statusCode).toBe(400);
-    expect(value.spies.consumePairing).not.toHaveBeenCalled();
+    expect(value.spies.claimPairing).not.toHaveBeenCalled();
   });
 
   it('does not issue enrollment if the configured signer and certificate grant disagree', async () => {
     const value = fixture();
-    value.spies.consumePairing.mockResolvedValue({
-      ...enrollmentBody(value.pairing, value.assignmentSigner.digest),
-      assignmentSignerPublicKeySpkiSha256: sha('f'),
+    value.spies.claimPairing.mockResolvedValue({
+      kind: 'claimed',
+      certificateBody: {
+        ...enrollmentBody(value.pairing, value.assignmentSigner.digest),
+        assignmentSignerPublicKeySpkiSha256: sha('f'),
+      },
     });
     const response = await value.handler(
       httpRequest('/v1/telebirr/device/enrollments:pair', value.pairing),
     );
     expect(response.statusCode).toBe(401);
+    expect(value.spies.releasePairing).toHaveBeenCalledWith(value.pairing.bodyDigest);
   });
 
   it('contains no database, Supabase, wallet, or settlement runtime dependency', async () => {

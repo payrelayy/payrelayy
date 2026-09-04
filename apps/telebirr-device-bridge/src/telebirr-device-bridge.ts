@@ -86,6 +86,17 @@ export type TelebirrDeviceBridgeReplayClaim =
       readonly response: TelebirrDeviceBridgeCommandResponse;
     };
 
+export type TelebirrDeviceBridgePairingClaim =
+  | {
+      readonly kind: 'claimed';
+      readonly certificateBody: TelebirrDeviceBridgeEnrollmentCertificateBody;
+    }
+  | { readonly kind: 'in_progress' }
+  | {
+      readonly kind: 'completed';
+      readonly certificate: SignedTelebirrDeviceBridgeEnrollmentCertificate;
+    };
+
 export type TelebirrDeviceBridgeAssignmentPollResult =
   | { readonly kind: 'assignment'; readonly assignment: TelebirrLivePilotSignedAssignment }
   | { readonly kind: 'none' }
@@ -128,11 +139,19 @@ export interface TelebirrDeviceBridgeDependencies {
   readonly now: () => string;
   readonly nextOpaqueId: (kind: 'acknowledgement') => string;
 
-  /** Atomically consumes an Owner-created, one-use pairing challenge and returns its exact grant. */
-  consumePairingChallenge(
+  /**
+   * Atomically claims an Owner-created one-use challenge. An exact retry after an uncertain reply
+   * returns the original signed certificate; a different request can never consume that replay.
+   */
+  claimPairingChallenge(
     request: SignedTelebirrDeviceBridgePairingRequest,
     assessedAt: string,
-  ): Promise<TelebirrDeviceBridgeEnrollmentCertificateBody | undefined>;
+  ): Promise<TelebirrDeviceBridgePairingClaim | undefined>;
+  completePairingChallenge(
+    pairingRequestBodyDigest: string,
+    certificate: SignedTelebirrDeviceBridgeEnrollmentCertificate,
+  ): Promise<boolean>;
+  releasePairingChallenge(pairingRequestBodyDigest: string): Promise<void>;
 
   loadEnrollment(
     enrollmentId: string,
@@ -216,26 +235,75 @@ async function handlePairing(
     !pairing ||
     !assessedAt ||
     !verifySignedTelebirrDeviceBridgePairingRequest(pairing) ||
-    Date.parse(assessedAt) < Date.parse(pairing.body.issuedAt) ||
-    Date.parse(assessedAt) >= Date.parse(pairing.body.expiresAt)
+    Date.parse(assessedAt) < Date.parse(pairing.body.issuedAt)
   ) {
     return errorResponse(401, 'invalid_request');
   }
-  const body = decodeTelebirrDeviceBridgeEnrollmentCertificateBody(
-    await dependencies.consumePairingChallenge(pairing, assessedAt),
-  );
+  const claim = await dependencies.claimPairingChallenge(pairing, assessedAt);
+  if (!claim) return errorResponse(401, 'invalid_request');
+  if (claim.kind === 'in_progress') return errorResponse(409, 'request_in_progress');
+  if (claim.kind === 'completed') {
+    return validCachedCertificate(
+      claim.certificate,
+      pairing,
+      serverSpki,
+      assignmentSpkiDigest,
+      assessedAt,
+    )
+      ? jsonResponse(201, { certificate: claim.certificate })
+      : errorResponse(503, 'temporarily_unavailable');
+  }
+
+  const body = decodeTelebirrDeviceBridgeEnrollmentCertificateBody(claim.certificateBody);
   if (
+    Date.parse(assessedAt) >= Date.parse(pairing.body.expiresAt) ||
     !body ||
     body.state !== 'active' ||
     body.assignmentSignerPublicKeySpkiSha256 !== assignmentSpkiDigest
   ) {
+    await dependencies.releasePairingChallenge(pairing.bodyDigest);
     return errorResponse(401, 'invalid_request');
   }
-  const certificate = await signCertificate(body, dependencies, serverSpki);
+  let certificate: SignedTelebirrDeviceBridgeEnrollmentCertificate | undefined;
+  try {
+    certificate = await signCertificate(body, dependencies, serverSpki);
+  } catch {
+    await dependencies.releasePairingChallenge(pairing.bodyDigest);
+    return errorResponse(503, 'temporarily_unavailable');
+  }
   if (!certificate || !telebirrDeviceBridgeCertificateMatchesPairingRequest(certificate, pairing)) {
+    await dependencies.releasePairingChallenge(pairing.bodyDigest);
+    return errorResponse(503, 'temporarily_unavailable');
+  }
+  try {
+    if (!(await dependencies.completePairingChallenge(pairing.bodyDigest, certificate))) {
+      return errorResponse(503, 'temporarily_unavailable');
+    }
+  } catch {
+    // Completion may have committed before its acknowledgement was lost. Preserve the claim so an
+    // exact retry can recover the signed certificate instead of consuming the challenge twice.
     return errorResponse(503, 'temporarily_unavailable');
   }
   return jsonResponse(201, { certificate });
+}
+
+function validCachedCertificate(
+  candidate: unknown,
+  pairing: SignedTelebirrDeviceBridgePairingRequest,
+  serverSpki: Uint8Array,
+  assignmentSpkiDigest: string,
+  assessedAt: string,
+): candidate is SignedTelebirrDeviceBridgeEnrollmentCertificate {
+  const certificate = decodeSignedTelebirrDeviceBridgeEnrollmentCertificate(candidate);
+  return Boolean(
+    certificate &&
+    certificate.body.state === 'active' &&
+    certificate.body.assignmentSignerPublicKeySpkiSha256 === assignmentSpkiDigest &&
+    Date.parse(assessedAt) >= Date.parse(certificate.body.validFrom) &&
+    Date.parse(assessedAt) < Date.parse(certificate.body.validUntil) &&
+    verifySignedTelebirrDeviceBridgeEnrollmentCertificate(certificate, serverSpki) &&
+    telebirrDeviceBridgeCertificateMatchesPairingRequest(certificate, pairing),
+  );
 }
 
 async function handleCommand(

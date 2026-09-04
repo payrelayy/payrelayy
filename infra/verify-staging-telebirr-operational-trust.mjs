@@ -37,6 +37,7 @@ for (const workflow of [trustWorkflow, androidWorkflow]) {
   assert.match(workflow, /permissions:\s*\r?\n\s+contents: read/);
   assert.match(workflow, /environment: staging/);
   assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\.0\.1/);
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
   assert.match(workflow, /CONFIRMED_MAIN_COMMIT_SHA.*GITHUB_SHA/s);
   assert.doesNotMatch(
@@ -119,7 +120,10 @@ assert.match(androidWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/);
 assert.match(androidWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD/);
 assert.match(androidWorkflow, /FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD/);
 assert.match(androidWorkflow, /apksigner verify --verbose --print-certs/);
+assert.match(androidWorkflow, /Verified using v1 scheme \(JAR signing\): false/);
 assert.match(androidWorkflow, /Verified using v2 scheme .*: true/);
+assert.match(androidWorkflow, /Number of signers: 1/);
+assert.match(androidWorkflow, /V2 Signer: certificate SHA-256 digest/);
 assert.match(androidWorkflow, /retention-days: 14/);
 assert.match(androidWorkflow, /Assignment polling and money movement are disabled/);
 

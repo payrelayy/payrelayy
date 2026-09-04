@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { win32 } from 'node:path';
 
 const MAXIMUM_DPAPI_RESULT_BYTES = 4_096;
+const DPAPI_OPERATION_TIMEOUT_MS = 30_000;
 const DPAPI_ENTROPY = 'FetanAgent Windows Companion\0KemerBet local identity\0v1';
 
 export interface WindowsCurrentUserDataProtector {
@@ -85,7 +86,7 @@ async function invokeDpapi(
     const timeout = setTimeout(() => {
       child.kill();
       reject();
-    }, 10_000);
+    }, DPAPI_OPERATION_TIMEOUT_MS);
     timeout.unref();
     child.once('error', reject);
     child.stdout.on('data', (chunk: Buffer) => {

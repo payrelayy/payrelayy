@@ -23,6 +23,6 @@ describe('Windows current-user data protection', () => {
         opened?.fill(0);
       }
     },
-    30_000,
+    90_000,
   );
 });

@@ -212,8 +212,8 @@ environment file.
 | `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned        |
 | `apps/windows-companion`                                    | Local headed-Chrome KemerBet enrollment; read-only and no-transfer                  |
 | `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off |
-| `apps/telebirr-device-bridge`                               | Authenticated Android enrollment/command gateway; export-only and ingress-free      |
-| `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; export-only and unprovisioned        |
+| `apps/telebirr-device-bridge`                               | Database-free internal Android gateway; guarded image, HTTPS ingress unprovisioned  |
+| `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; guarded and unprovisioned            |
 | `apps/telebirr-device-state-broker`                         | Private durable Android device-state broker; guarded and unprovisioned              |
 | `packages/domain`                                           | Money rules, state machines, limits, idempotency reason codes                       |
 | `packages/cbe-birr-fixtures`                                | Strict local, redacted CBE Birr fixture parser and advisory dry-run decisions       |

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/telebirr-device-bridge-main.js",
     "test": "vitest run --passWithNoTests"
   }
 }

@@ -1,8 +1,10 @@
 # FetanAgent TeleBirr device bridge
 
-This package is an export-only, evidence-only HTTP handler foundation for the dedicated Ethiopian
+This package is the executable, evidence-only internal HTTP bridge for the dedicated Ethiopian
 Android verifier. It defines and enforces the authenticated device transport boundary without
-opening a port, selecting a hostname, provisioning a key, reading PostgreSQL, or enabling money.
+reading PostgreSQL, holding a database credential, or enabling money. Its fixed
+`0.0.0.0:8084` listener is for a private Docker network only; the image deliberately declares no
+exposed port and requires a separately reviewed HTTPS gateway for Internet ingress.
 
 The four exact version-1 routes are:
 
@@ -59,11 +61,26 @@ casts; request, payload, certificate, assignment, receiver, and signer bindings 
 the local boundary. The client accepts no host, URL, TCP port, credential, SQL, or generic RPC
 method and reduces every transport detail to one non-sensitive local-unavailable error.
 
-## Deliberately not composed
+## Runtime boundary and remaining composition
 
-There is no executable start entrypoint and no public listener. The package imports neither `pg` nor a
-Supabase client and accepts no `service_role`, database password, wallet, settlement, or executor
-dependency. Server and assignment private keys are injected signers; they are not present in Git.
+The package now has a fail-closed executable lifecycle and a dedicated non-root container target.
+Startup is disabled by default. Enabled startup requires production Node mode,
+`FINANCIAL_ACTIONS_MODE=dry_run`, the internal bridge gate, the bridge-specific no-money gate, and
+the staging target. It imports neither `pg` nor a Supabase client and accepts no `service_role`,
+database password, wallet, settlement, or executor dependency.
+
+Before it opens the internal listener, the lifecycle verifies both fixed local broker directories
+are owned by its non-root UID at mode `0700` and both Unix sockets are owned by that UID at mode
+`0600`. Symlinks, path substitution, inode replacement, a missing broker, root execution, or a
+non-Linux runtime fail closed. The same checks run after listening and during readiness. The bridge
+container shares UID/GID `10001:10001` with the two private broker containers so the mode-`0600`
+sockets need no broader group or world permissions.
+
+The P-256 server signer is loaded only from the fixed guarded secret file
+`/run/secrets/telebirr_device_bridge_server_signer.pkcs8.der`. The assignment public key and
+canonical runtime manifest are loaded from fixed read-only files under `/run/configs`; their SPKI
+digests and signer key ID must cross-bind exactly. The image contains no key. Every proxy
+environment variable is empty and non-empty proxy configuration is rejected.
 
 The dormant Supabase migration
 `20260904013000_private_telebirr_device_state_runtime.sql` now provides the reviewed durable database
@@ -74,8 +91,8 @@ blocked until:
 
 - an isolated verifier consumer for staged evidence that independently revalidates both signatures
   before invoking the existing trusted-verifier completion boundary;
-- the implemented assignment and device-state broker lifecycles are provisioned and deployed as
-  separate private processes/containers with only their scoped guarded files;
+- the implemented bridge, assignment broker, and device-state broker images are deployed on one
+  private network with only their scoped guarded files and shared socket volumes;
 - separately provisioned scoped opening/signing keys are mounted only into the assignment broker;
   and
 - immutable HTTPS origin, DNS/TLS/firewall, key rotation, metrics, and deployment manifests.
@@ -83,8 +100,8 @@ blocked until:
 The existing protected-reference package deliberately has no general decrypt API. This bridge
 therefore does not fake one, reuse an API encryption master as a device key, or send protected
 database material to Android. `pollAssignment` and all durable device-state operations stay
-dependency-injected; the two fixed Unix-socket adapters are the reviewed production candidates once
-their isolated broker runtimes are provisioned.
+dependency-injected; the two fixed Unix-socket adapters and executable lifecycle are the reviewed
+production candidates once the isolated runtime composition is provisioned.
 
 ## Verification
 
@@ -92,7 +109,10 @@ The package tests cover valid pairing, certificate issuance, lost pairing respon
 pairing completion, in-progress pairing, signer failure, signed polling, exact cached command
 replay, payload alteration, duplicate headers, content encoding, query paths, wrong receiver
 bindings, wrong assignment signer material, exact local broker request mapping, transport
-fail-closed behavior, all nine device-state mappings, operation/path confusion, and the absence of
-database/Supabase/settlement runtime imports. The shared protocol package adds canonical local
-broker codecs, hostile accessor/proxy checks, per-operation byte ceilings, and stable
-TypeScript/Android canonical vectors.
+fail-closed behavior, all nine device-state mappings, operation/path confusion, guarded key-file
+attacks, private-socket ownership and replacement, lifecycle cleanup, real network framing, and the
+absence of database/Supabase/settlement runtime imports. The image smoke gate independently builds
+the bridge target, verifies the non-root/no-exposed-port/no-proxy boundary, checks both private
+socket directories, and runs the real entrypoint without credentials to prove redacted fail-closed
+startup. The shared protocol package adds canonical local broker codecs, hostile accessor/proxy
+checks, per-operation byte ceilings, and stable TypeScript/Android canonical vectors.

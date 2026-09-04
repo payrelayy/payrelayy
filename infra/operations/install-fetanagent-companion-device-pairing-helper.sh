@@ -3,8 +3,8 @@
 
 set -euo pipefail
 
-readonly EXPECTED_HELPER_SHA256='44c4f114efeba17d26a16a3d1406b6df776a8b46c2f987ab81d5955f0a76601d'
-readonly PREVIOUS_HELPER_SHA256='b541bed882ed3a9209caeb9aea9829d4436d508b2975e317c1f9f9323d05d5a3'
+readonly EXPECTED_HELPER_SHA256='b97588105f1c5a8f85b01e931a465559d604ccf61ca45836b1edc4eded6f5a7e'
+readonly PREVIOUS_HELPER_SHA256='44c4f114efeba17d26a16a3d1406b6df776a8b46c2f987ab81d5955f0a76601d'
 readonly SOURCE='/root/fetanagent-companion-device-pairing-helper.sh'
 readonly TARGET='/usr/local/sbin/fetanagent-companion-device-pairing-helper'
 readonly TARGET_INSTALLING='/usr/local/sbin/.fetanagent-companion-device-pairing-helper.installing'

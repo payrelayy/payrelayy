@@ -285,12 +285,28 @@ validate_incoming_material() {
     [[ ! -L "$incoming/$name" && -f "$incoming/$name" ]] ||
       die 'an incoming companion release input is not a regular file'
   done <<<"$actual_files"
-  grep -Eq "^postgresql://${DATABASE_ROLE}:[0-9a-f]{64}@${DATABASE_HOST}:5432/postgres\\?sslmode=verify-full$" \
-    "$incoming/companion-device-bridge-database-url" || die 'the companion database URL is not exact'
-  [[ "$(awk 'END { print NR + 0 }' "$incoming/companion-device-bridge-database-url")" == '1' ]] ||
-    die 'the companion database URL must be one line'
-  ! grep -q $'\r' "$incoming/companion-device-bridge-database-url" ||
-    die 'the companion database URL contains a carriage return'
+  if ! env -i PATH="$SAFE_PATH" python3 -I - \
+    "$incoming/companion-device-bridge-database-url" "$DATABASE_ROLE" "$DATABASE_HOST" <<'PY'
+import re, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+file_stat = path.stat()
+if file_stat.st_size < 1 or file_stat.st_size > 512:
+    raise SystemExit(1)
+raw = path.read_bytes()
+role = sys.argv[2].encode('ascii')
+host = sys.argv[3].encode('ascii')
+pattern = (
+    rb'postgresql://' + re.escape(role) + rb':[0-9a-f]{64}@' + re.escape(host) +
+    rb':5432/postgres\?sslmode=verify-full'
+)
+if len(raw) != file_stat.st_size or re.fullmatch(pattern, raw) is None:
+    raise SystemExit(1)
+PY
+  then
+    die 'the companion database URL is not exact canonical bytes'
+  fi
   openssl x509 -in "$incoming/supabase-ca.crt" -noout -checkend 0 >/dev/null 2>&1 ||
     die 'the Supabase CA certificate is invalid or expired'
   openssl pkey -inform DER -in "$incoming/companion-device-bridge-server-signer.pkcs8.der" \

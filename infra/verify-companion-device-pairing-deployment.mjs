@@ -81,6 +81,7 @@ assert.match(
 assert.match(compose, /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/u);
 assert.match(compose, /FINANCIAL_ACTIONS_MODE: dry_run/u);
 assert.match(compose, /COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED: 'true'/u);
+assert.doesNotMatch(compose, /^\s+(?:uid|gid|mode):/mu);
 assert.match(compose, /internal: false/u);
 assert.match(compose, /external: true\s*\r?\n\s*name: fetanagent-companion-device-ingress/u);
 assert.match(compose, /host:'127\.0\.0\.1',port:8085/u);
@@ -204,6 +205,13 @@ assert.match(deploymentWorkflow, /COMPANION_SERVER_SIGNER_PKCS8_BASE64/u);
 assert.match(deploymentWorkflow, /fetanagent-companion-device-pairing-helper install/u);
 assert.match(deploymentWorkflow, /fetanagent-companion-device-pairing-helper activate/u);
 assert.match(deploymentWorkflow, /fetanagent-companion-device-pairing-helper ready/u);
+assert.match(
+  deploymentWorkflow,
+  /printf '%s' \\\s*"postgresql:\/\/\$\{COMPANION_RUNTIME_ROLE\}:\$\{COMPANION_RUNTIME_PASSWORD\}@\$\{STAGING_DIRECT_DATABASE_HOST\}:5432\/postgres\?sslmode=verify-full"/u,
+);
+assert.match(deploymentWorkflow, /printf '%s' "\$SUPABASE_CA_CERTIFICATE_PEM"/u);
+assert.doesNotMatch(deploymentWorkflow, /postgres\?sslmode=verify-full\\n/u);
+assert.doesNotMatch(deploymentWorkflow, /printf '%s\\n' "\$SUPABASE_CA_CERTIFICATE_PEM"/u);
 assert.doesNotMatch(
   deploymentWorkflow,
   /SUPABASE_SERVICE_ROLE|service_role|FINANCIAL_ACTIONS_MODE: live|2026-09-04/u,
@@ -216,6 +224,11 @@ assert.match(deploymentHelper, /MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.l
 assert.match(deploymentHelper, /--driver bridge --internal --attachable=false/u);
 assert.match(deploymentHelper, /COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED=true/u);
 assert.match(deploymentHelper, /database-preflight-cli\.js/u);
+assert.match(deploymentHelper, /"\$\(stat --format='%u:%g:%a' "\$path"\)" == '10001:10001:400'/u);
+assert.match(deploymentHelper, /install -o 10001 -g 10001 -m 0400/u);
+assert.match(deploymentHelper, /file_stat\.st_size > 512/u);
+assert.match(deploymentHelper, /re\.fullmatch\(pattern, raw\) is None/u);
+assert.match(deploymentHelper, /the companion database URL is not exact canonical bytes/u);
 assert.match(deploymentHelper, /the companion bridge unexpectedly publishes a host port/u);
 assert.match(deploymentHelper, /SUPABASE_SERVICE_ROLE_KEY/u);
 assert.match(deploymentHelper, /expected verify, install, activate, ready, stop, or discard/u);
@@ -229,7 +242,7 @@ const helperSha256 = createHash('sha256').update(deploymentHelper).digest('hex')
 assert.match(deploymentInstaller, new RegExp(`EXPECTED_HELPER_SHA256='${helperSha256}'`, 'u'));
 assert.match(
   deploymentInstaller,
-  /PREVIOUS_HELPER_SHA256='b541bed882ed3a9209caeb9aea9829d4436d508b2975e317c1f9f9323d05d5a3'/u,
+  /PREVIOUS_HELPER_SHA256='44c4f114efeba17d26a16a3d1406b6df776a8b46c2f987ab81d5955f0a76601d'/u,
 );
 assert.match(deploymentInstaller, /NOPASSWD: sha256:\$digest \$TARGET \*/u);
 assert.match(

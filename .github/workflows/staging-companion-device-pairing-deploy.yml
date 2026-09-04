@@ -111,10 +111,9 @@ jobs:
               > "$protected/companion-device-bridge-server-signer.spki.der"
             printf '%s' "$COMPANION_RUNTIME_MANIFEST_BASE64" | base64 --decode \
               > "$protected/companion-device-bridge-runtime-manifest.v1.json"
-            printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$protected/supabase-ca.crt"
-            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-              "$COMPANION_RUNTIME_ROLE" "$COMPANION_RUNTIME_PASSWORD" \
-              "$STAGING_DIRECT_DATABASE_HOST" \
+            printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" > "$protected/supabase-ca.crt"
+            printf '%s' \
+              "postgresql://${COMPANION_RUNTIME_ROLE}:${COMPANION_RUNTIME_PASSWORD}@${STAGING_DIRECT_DATABASE_HOST}:5432/postgres?sslmode=verify-full" \
               > "$protected/companion-device-bridge-database-url"
             chmod 0600 "$protected"/*
             openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null

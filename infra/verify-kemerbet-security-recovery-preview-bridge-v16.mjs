@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -13,7 +12,7 @@ const helperPath = resolve(root, 'infra/operations/fetanagent-staging-deploy-hel
 const normalized = (path) => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 const installer = normalized(installerPath);
 const helper = normalized(helperPath);
-const helperSha256 = createHash('sha256').update(helper, 'utf8').digest('hex');
+const h16SuccessorHelperSha256 = 'da555f29ac6260e1dff6c969218eb55ea9bd66c8167600e3ecc700118c8ea9e6';
 
 const parent = '/var/lib/fetanagent/kemerbet-security-recovery-preview-bridge-v16';
 const canonicalH14Release = '06459511d9330a0e1d956c42529b81aa9970e7a2';
@@ -113,8 +112,8 @@ assert.match(
 );
 assert.match(
   installer,
-  new RegExp(`^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${helperSha256}'$`, 'mu'),
-  'the H16 installer must pin the exact LF-normalized successor helper',
+  new RegExp(`^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${h16SuccessorHelperSha256}'$`, 'mu'),
+  'the historical H16 installer must retain its exact installed successor helper',
 );
 assert.match(installer, new RegExp(`^readonly CONFIRMATION='${confirmation}'$`, 'mu'));
 assert.equal(
@@ -628,5 +627,5 @@ assert.ok(
 );
 
 console.log(
-  `KemerBet H16 security-recovery preview bridge contracts verified; successor helper ${helperSha256}.`,
+  `KemerBet H16 security-recovery preview bridge contracts verified; historical successor helper ${h16SuccessorHelperSha256}.`,
 );

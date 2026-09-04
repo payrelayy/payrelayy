@@ -14,6 +14,7 @@ readonly IMAGE_NAME='fetanagent-companion-device-bridge'
 readonly RELEASE_ROOT='/srv/fetanagent/companion-device-pairing/releases'
 readonly STATE_ROOT='/var/lib/fetanagent-companion-device-pairing'
 readonly CURRENT_RELEASE="$STATE_ROOT/current-release"
+readonly TRANSITION_PREDECESSOR_RELEASE='f8ecfd6cea2d64887ecb3590213c36df80408f84'
 readonly INGRESS_NETWORK='fetanagent-companion-device-ingress'
 readonly INGRESS_NETWORK_LABEL='companion-device-ingress-v1'
 readonly MUTATION_LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
@@ -97,13 +98,32 @@ release_path() {
   printf '%s/%s\n' "$RELEASE_ROOT" "$1"
 }
 
+runtime_manifest_name() {
+  local commit_sha="$1"
+  if [[ "$commit_sha" == "$TRANSITION_PREDECESSOR_RELEASE" ]]; then
+    printf '%s\n' 'companion-device-bridge-runtime-manifest.v1.json'
+    return
+  fi
+  printf '%s\n' 'companion-device-bridge-runtime-manifest.v2.json'
+}
+
+runtime_safety_environment() {
+  local commit_sha="$1"
+  if [[ "$commit_sha" == "$TRANSITION_PREDECESSOR_RELEASE" ]]; then
+    printf '%s\n' 'COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED=true'
+    return
+  fi
+  printf '%s\n' 'COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED=true'
+}
+
 require_release_files_at() {
-  local root="$1" commit_sha="$2" image_tag="$3" observed_image
+  local root="$1" commit_sha="$2" image_tag="$3" observed_image manifest_name
+  manifest_name="$(runtime_manifest_name "$commit_sha")"
   [[ ! -L "$root" && -d "$root" && "$(realpath -- "$root")" == "$root" &&
     "$(stat --format='%U:%G:%a' "$root")" == 'root:root:755' ]] ||
     die 'the companion release directory is absent or unsafe'
   require_public_file "$root/infra/compose.companion-device-pairing.yaml"
-  require_public_file "$root/configs/companion-device-bridge-runtime-manifest.v2.json"
+  require_public_file "$root/configs/$manifest_name"
   require_public_file "$root/configs/supabase-ca.crt"
   require_secret_file "$root/secrets/companion-device-bridge-database-url"
   require_secret_file "$root/secrets/companion-device-bridge-server-signer.pkcs8.der"
@@ -146,8 +166,9 @@ ensure_ingress_network() {
 }
 
 compose_environment() {
-  local commit_sha="$1" image_tag="$2" root
+  local commit_sha="$1" image_tag="$2" root manifest_name
   root="$(release_path "$commit_sha")"
+  manifest_name="$(runtime_manifest_name "$commit_sha")"
   printf '%s\0' \
     "PATH=$SAFE_PATH" \
     'HOME=/root' \
@@ -155,7 +176,7 @@ compose_environment() {
     "FETANAGENT_VCS_REF=$commit_sha" \
     "FETANAGENT_IMAGE_TAG=$image_tag" \
     "FETANAGENT_COMPANION_SUPABASE_CA_CERTIFICATE_FILE=$root/configs/supabase-ca.crt" \
-    "FETANAGENT_COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE=$root/configs/companion-device-bridge-runtime-manifest.v2.json" \
+    "FETANAGENT_COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE=$root/configs/$manifest_name" \
     "FETANAGENT_COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE=$root/secrets/companion-device-bridge-database-url" \
     "FETANAGENT_COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE=$root/secrets/companion-device-bridge-server-signer.pkcs8.der"
 }
@@ -204,7 +225,8 @@ record_current_release() {
 
 require_ready_release() {
   local commit_sha="$1" image_tag="$2" container_id environment networks observed port_bindings
-  local expected_networks
+  local expected_networks safety_environment
+  safety_environment="$(runtime_safety_environment "$commit_sha")"
   require_release_files "$commit_sha" "$image_tag"
   require_ingress_network
   [[ "$(read_current_release)" == "$commit_sha" ]] ||
@@ -235,7 +257,7 @@ require_ready_release() {
     'NODE_ENV=production' \
     'FINANCIAL_ACTIONS_MODE=dry_run' \
     'INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED=true' \
-    'COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED=true'; do
+    "$safety_environment"; do
     [[ "$(grep -Fxc "$exact" <<<"$environment")" == '1' ]] ||
       die 'the companion bridge safety environment is not exact'
   done
@@ -404,6 +426,8 @@ case "$command" in
   install)
     [[ $# -eq 4 ]] || die 'install requires a commit, image tag, and incoming directory'
     validate_release "$2" "$3"
+    [[ "$2" != "$TRANSITION_PREDECESSOR_RELEASE" ]] ||
+      die 'the pinned transition predecessor cannot be installed as an incoming release'
     [[ "$4" == "/tmp/fetanagent-companion-$2" && ! -L "$4" && -d "$4" &&
       "$(stat --format='%U:%a' "$4")" == "$EXPECTED_SUDO_USER:700" ]] ||
       die 'the incoming companion directory is outside the approved boundary'

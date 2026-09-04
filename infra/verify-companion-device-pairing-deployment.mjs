@@ -267,6 +267,38 @@ assert.match(deploymentHelper, /STAGING_PUBLIC_IPV4='161\.35\.41\.232'/u);
 assert.match(deploymentHelper, /MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.lock"/u);
 assert.match(deploymentHelper, /--driver bridge --internal --attachable=false/u);
 assert.match(deploymentHelper, /COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED=true/u);
+assert.match(
+  deploymentHelper,
+  /TRANSITION_PREDECESSOR_RELEASE='f8ecfd6cea2d64887ecb3590213c36df80408f84'/u,
+);
+assert.match(
+  deploymentHelper,
+  /runtime_manifest_name\(\) \{[\s\S]*?"\$commit_sha" == "\$TRANSITION_PREDECESSOR_RELEASE"[\s\S]*?runtime-manifest\.v1\.json[\s\S]*?runtime-manifest\.v2\.json[\s\S]*?\n\}/u,
+);
+assert.match(
+  deploymentHelper,
+  /runtime_safety_environment\(\) \{[\s\S]*?"\$commit_sha" == "\$TRANSITION_PREDECESSOR_RELEASE"[\s\S]*?NO_MONEY_PAIRING_ENABLED=true[\s\S]*?NO_MONEY_READ_ONLY_LOOKUP_ENABLED=true[\s\S]*?\n\}/u,
+);
+assert.match(
+  deploymentHelper,
+  /manifest_name="\$\(runtime_manifest_name "\$commit_sha"\)"[\s\S]*?require_public_file "\$root\/configs\/\$manifest_name"/u,
+);
+assert.match(
+  deploymentHelper,
+  /FETANAGENT_COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE=\$root\/configs\/\$manifest_name/u,
+);
+assert.match(
+  deploymentHelper,
+  /safety_environment="\$\(runtime_safety_environment "\$commit_sha"\)"[\s\S]*?"\$safety_environment"; do/u,
+);
+assert.match(
+  deploymentHelper,
+  /install\)[\s\S]*?"\$2" != "\$TRANSITION_PREDECESSOR_RELEASE"[\s\S]*?validate_incoming_material "\$4"/u,
+);
+assert.match(
+  deploymentHelper,
+  /expected_files="\$\(printf '%s\\n'[\s\S]*?companion-device-bridge-runtime-manifest\.v2\.json/u,
+);
 assert.match(deploymentHelper, /database-preflight-cli\.js/u);
 assert.match(deploymentHelper, /"\$\(stat --format='%u:%g:%a' "\$path"\)" == '10001:10001:400'/u);
 assert.match(deploymentHelper, /install -o 10001 -g 10001 -m 0400/u);
@@ -290,7 +322,7 @@ const helperSha256 = createHash('sha256').update(deploymentHelper).digest('hex')
 assert.match(deploymentInstaller, new RegExp(`EXPECTED_HELPER_SHA256='${helperSha256}'`, 'u'));
 assert.match(
   deploymentInstaller,
-  /PREVIOUS_HELPER_SHA256='1ec327191eb013d7e62d79ceed7013a273c5bd58ca04494dd4ddaac60c75a8ef'/u,
+  /PREVIOUS_HELPER_SHA256='fcc648e741b4d0e5d31f33541a12c4a4ad610f43d4c97626dafb3ce904432795'/u,
 );
 assert.match(deploymentInstaller, /NOPASSWD: sha256:\$digest \$TARGET \*/u);
 assert.match(

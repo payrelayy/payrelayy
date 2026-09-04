@@ -68,6 +68,7 @@ describe('Owner-control configuration', () => {
   it('accepts only the exact staging project, dedicated role, pinned database routes, and verify-full URL', () => {
     expect(loadOwnerControlConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
+      devicePairing: { assignmentSignerKeyId: undefined, configured: false },
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
       stage: 'staging',
       tlsMode: 'verify-full',
@@ -104,6 +105,28 @@ describe('Owner-control configuration', () => {
         loadOwnerControlConfig({ ...enabledEnvironment(), OWNER_CONTROL_DATABASE_URL: unsafe }),
       ).toThrow();
     }
+  });
+
+  it('enables only a validated public TeleBirr assignment-signer identifier', () => {
+    const configured = loadOwnerControlConfig({
+      ...enabledEnvironment(),
+      OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'telebirr_assignment_signer_2026_01',
+    });
+    expect(configured.runtime).toMatchObject({
+      devicePairing: {
+        assignmentSignerKeyId: 'telebirr_assignment_signer_2026_01',
+        configured: true,
+      },
+    });
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(configured))).not.toContain(
+      'telebirr_assignment_signer_2026_01',
+    );
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'short',
+      }),
+    ).toThrow('OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID is malformed');
   });
 
   it('requires exact production secret mounts and never logs credentials', () => {

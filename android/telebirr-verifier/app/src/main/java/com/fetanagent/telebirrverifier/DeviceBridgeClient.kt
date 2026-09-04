@@ -3,6 +3,29 @@ package com.fetanagent.telebirrverifier
 import java.security.SecureRandom
 import java.util.UUID
 
+object DeviceBridgeAppVersion {
+  fun atLeast(actual: String, minimum: String): Boolean {
+    DeviceBridgeProtocol.requireVersion(actual, "actualAppVersion")
+    DeviceBridgeProtocol.requireVersion(minimum, "minimumAppVersion")
+
+    fun numeric(value: String): List<Int>? {
+      val match = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:[-.].*)?$").matchEntire(value)
+        ?: return null
+      return match.groupValues.drop(1).map { it.toIntOrNull() ?: return null }
+    }
+
+    val actualParts = numeric(actual)
+    val minimumParts = numeric(minimum)
+    if (actualParts == null || minimumParts == null) return actual == minimum
+    for (index in actualParts.indices) {
+      if (actualParts[index] != minimumParts[index]) {
+        return actualParts[index] > minimumParts[index]
+      }
+    }
+    return true
+  }
+}
+
 class DeviceBridgeRetryableException : RuntimeException("Device bridge is temporarily unavailable")
 
 class DeviceBridgeRejectedException(val reason: DeviceBridgeReasonCode) :
@@ -41,8 +64,8 @@ class DeviceBridgeEnrollmentClient(
 
   fun enroll(pairing: SignedDeviceBridgePairingRequest): SignedDeviceBridgeEnrollmentCertificate {
     require(DeviceBridgeVerifier.verifyPairing(pairing))
-    val now = now()
-    require(now >= pairing.body.issuedAt && now < pairing.body.expiresAt)
+    val requestAssessedAt = now()
+    require(requestAssessedAt >= pairing.body.issuedAt && requestAssessedAt < pairing.body.expiresAt)
     val response =
       exchange.post(
         DeviceBridgeProtocol.PAIRING_PATH,
@@ -58,7 +81,11 @@ class DeviceBridgeEnrollmentClient(
     require(DeviceBridgeVerifier.verifyCertificate(certificate, trustedServerSpkiDer))
     require(DeviceBridgeVerifier.certificateMatchesPairing(certificate, pairing))
     require(certificate.body.state == "active")
-    require(now >= certificate.body.validFrom && now < certificate.body.validUntil)
+    val certificateAssessedAt = now()
+    require(
+      certificateAssessedAt >= certificate.body.validFrom &&
+        certificateAssessedAt < certificate.body.validUntil,
+    )
     return certificate
   }
 
@@ -94,7 +121,7 @@ class AuthenticatedDeviceBridgeClient(
     require(public.publicKeySpkiBase64Url == certificate.body.devicePublicKeySpki)
     require(public.publicKeySpkiSha256 == certificate.body.devicePublicKeySpkiSha256)
     DeviceBridgeProtocol.requireVersion(appVersion, "appVersion")
-    require(versionAtLeast(appVersion, certificate.body.minimumAppVersion))
+    require(DeviceBridgeAppVersion.atLeast(appVersion, certificate.body.minimumAppVersion))
   }
 
   override fun nextAssignment(): LivePilotSignedAssignment? {
@@ -235,6 +262,7 @@ class AuthenticatedDeviceBridgeClient(
       requireNotNull(DeviceBridgeJsonCodec.decodeCommandResponse(response.body)) {
         "Invalid device bridge response"
       }
+    require(decoded.acknowledgement.signerKeyId == certificate.signerKeyId)
     val assessedAt = SafeOfficialReceiptTransport.canonicalTimestamp(clock.nowMillis())
     require(
       DeviceBridgeVerifier.verifyAcknowledgement(
@@ -278,23 +306,6 @@ class AuthenticatedDeviceBridgeClient(
       DeviceBridgeReasonCode.TEMPORARY_UNAVAILABLE,
       -> LivePilotUploadRejection.ASSIGNMENT_REJECTED
     }
-
-  private fun versionAtLeast(actual: String, minimum: String): Boolean {
-    fun numeric(value: String): List<Int>? {
-      val match = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:[-.].*)?$").matchEntire(value)
-        ?: return null
-      return match.groupValues.drop(1).map { it.toIntOrNull() ?: return null }
-    }
-    val actualParts = numeric(actual)
-    val minimumParts = numeric(minimum)
-    if (actualParts == null || minimumParts == null) return actual == minimum
-    for (index in actualParts.indices) {
-      if (actualParts[index] != minimumParts[index]) {
-        return actualParts[index] > minimumParts[index]
-      }
-    }
-    return actual == minimum
-  }
 
   override fun toString(): String = "AuthenticatedDeviceBridgeClient(<redacted>)"
 }

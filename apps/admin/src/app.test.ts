@@ -24,12 +24,27 @@ import {
   OwnerPrivateLivePilotUnavailableError,
   type PrivateLivePilotStatus,
 } from './owner-private-live-pilot.js';
+import {
+  OwnerTelebirrDevicePairingNotReadyError,
+  type OwnerTelebirrDevicePairingReceipt,
+} from './owner-telebirr-device-pairing.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 
 const authUserId = '11111111-1111-4111-8111-111111111111';
 const inviteId = '22222222-2222-4222-8222-222222222222';
 const pilotRevisionId = '33333333-3333-4333-8333-333333333333';
 const pilotRequestId = '55555555-5555-4555-8555-555555555555';
+const telebirrPairingPackage =
+  'fetanagent-pairing-v1.' +
+  Buffer.from(
+    JSON.stringify({
+      schemaVersion: 1,
+      pairingId: '66666666-6666-4666-8666-666666666666',
+      pairingNonceDigest: `sha256:${'b'.repeat(64)}`,
+      expiresAt: '2026-09-04T12:10:00.000Z',
+    }),
+    'utf8',
+  ).toString('base64url');
 const bearer = 'header.payload.signature-with-safe-characters';
 const receiverEncryptionMaster = 'c'.repeat(64);
 const receiverFingerprintMaster = 'd'.repeat(64);
@@ -81,6 +96,30 @@ function receiverMutationHeaders(requestId = pilotRequestId) {
     'content-type': 'application/json',
     origin: 'http://127.0.0.1:3002',
     'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+function devicePairingReceipt(
+  overrides: Partial<OwnerTelebirrDevicePairingReceipt> = {},
+): OwnerTelebirrDevicePairingReceipt {
+  return {
+    alreadyIssued: false,
+    assignmentPollingAllowed: false,
+    expiresAt: '2026-09-04T12:10:00.000Z',
+    moneyMovementAllowed: false,
+    pairingOnly: true,
+    pairingPackage: telebirrPairingPackage,
+    ...overrides,
+  };
+}
+
+function telebirrDevicePairingMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-telebirr-device-pairing-v1',
     'x-idempotency-key': requestId,
   };
 }
@@ -179,7 +218,7 @@ function readinessEligiblePlayers() {
   }));
 }
 
-function config() {
+function config(devicePairingConfigured = false) {
   return loadOwnerControlConfig({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
@@ -190,6 +229,9 @@ function config() {
     OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverEncryptionMaster,
     OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverFingerprintMaster,
     OWNER_RECEIVER_REFERENCE_PROFILE: receiverMasterProfile,
+    ...(devicePairingConfigured
+      ? { OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'telebirr_assignment_signer_2026_01' }
+      : {}),
   });
 }
 
@@ -317,6 +359,7 @@ function runtime(
         rotationReason: request.rotationReason,
       }),
     },
+    telebirrDevicePairing: undefined,
     ready: async () => true,
     close: async () => undefined,
     ...overrides,
@@ -373,6 +416,9 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('TeleBirr five-Player pilot');
     expect(response.body).toContain('25 ETB maximum per deposit and Player');
     expect(response.body).toContain('Emergency stop');
+    expect(response.body).toContain('TeleBirr verifier phone pairing');
+    expect(response.body).toContain('id="telebirr-device-pairing-button"');
+    expect(response.body).toMatch(/Assignment\s+polling and money movement remain disabled/u);
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).toContain('Private KemerBet sign-in');
     expect(response.body).toContain('Transfer is blocked');
@@ -403,9 +449,16 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.json()).toEqual({
       publishableKey: 'sb_publishable_test_key_for_staging_only',
       supabaseUrl: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
+      telebirrDevicePairingConfigured: false,
     });
     expect(response.body).not.toContain('password');
     await app.close();
+
+    const configuredApp = buildOwnerControlApp(config(true), { runtime: runtime() });
+    const configured = await configuredApp.inject({ method: 'GET', url: '/owner/config.json' });
+    expect(configured.json()).toMatchObject({ telebirrDevicePairingConfigured: true });
+    expect(configured.body).not.toContain('telebirr_assignment_signer_2026_01');
+    await configuredApp.close();
   });
 
   it('restores a rotating twelve-hour Owner session after a same-tab reload', async () => {
@@ -556,6 +609,13 @@ describe('Owner-control HTTP boundary', () => {
       'The authenticated session is retained and preview input is locked.',
     );
     expect(response.body).toContain('owner_confirmed_fixed_telebirr_five_player_pilot');
+    expect(response.body).toContain('/v1/owner/telebirr-device-pairing');
+    expect(response.body).toContain('owner_confirmed_pairing_only_no_money');
+    expect(response.body).toContain(
+      "'x-fetanagent-owner-csrf': 'owner-telebirr-device-pairing-v1'",
+    );
+    expect(response.body).toContain('TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY');
+    expect(response.body).not.toContain('localStorage');
     expect(response.body).toContain('owner_confirmed_emergency_stop');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'private-live-pilot-v1'");
     expect(response.body).toContain('Run advisory fixture');
@@ -3574,6 +3634,142 @@ describe('Owner-control HTTP boundary', () => {
     expect(authenticationCalls).toBe(0);
     expect(controlCalls).toEqual([]);
     await app.close();
+  });
+
+  it('issues only an authenticated, idempotent, pairing-only Android package', async () => {
+    const calls: Array<readonly string[]> = [];
+    const app = buildOwnerControlApp(config(true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        telebirrDevicePairing: {
+          issue: async (actor, requestId) => {
+            calls.push([actor, requestId]);
+            return calls.length === 1
+              ? devicePairingReceipt()
+              : devicePairingReceipt({ alreadyIssued: true });
+          },
+        },
+      }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_pairing_only_no_money',
+      requestId: pilotRequestId,
+    };
+
+    const fresh = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/telebirr-device-pairing',
+      headers: telebirrDevicePairingMutationHeaders(),
+      payload,
+    });
+    expect(fresh.statusCode).toBe(201);
+    expect(fresh.json()).toEqual(devicePairingReceipt());
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/telebirr-device-pairing',
+      headers: telebirrDevicePairingMutationHeaders(),
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(devicePairingReceipt({ alreadyIssued: true }));
+    expect(calls).toEqual([
+      [authUserId, pilotRequestId],
+      [authUserId, pilotRequestId],
+    ]);
+    expect(replay.body).not.toContain('assignment_signer');
+    await app.close();
+  });
+
+  it('keeps Android pairing disabled until its reviewed signer is configured', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run for a public disabled state');
+      }) as typeof fetch,
+      runtime: runtime({
+        telebirrDevicePairing: {
+          issue: async () => {
+            throw new Error('pairing must remain disabled');
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/telebirr-device-pairing',
+      headers: telebirrDevicePairingMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_pairing_only_no_money',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'device_pairing_not_configured' });
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('rejects Android pairing authority fields before authentication and maps no-ready state', async () => {
+    let authenticationCalls = 0;
+    const invalidApp = buildOwnerControlApp(config(true), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    for (const candidate of [
+      {
+        confirmation: 'owner_confirmed_pairing_only_no_money',
+        requestId: pilotRequestId,
+        signerKeyId: 'browser-controlled',
+      },
+      {
+        confirmation: 'owner_confirmed_pairing_only_no_money',
+        minimumAppVersion: '0.0.0',
+        requestId: pilotRequestId,
+      },
+      {
+        confirmation: 'owner_confirmed_pairing_only_no_money',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        requestId: pilotRequestId,
+      },
+    ]) {
+      const response = await invalidApp.inject({
+        method: 'POST',
+        url: '/v1/owner/telebirr-device-pairing',
+        headers: telebirrDevicePairingMutationHeaders(),
+        payload: candidate,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    await invalidApp.close();
+
+    const notReadyApp = buildOwnerControlApp(config(true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        telebirrDevicePairing: {
+          issue: async () => {
+            throw new OwnerTelebirrDevicePairingNotReadyError();
+          },
+        },
+      }),
+    });
+    const notReady = await notReadyApp.inject({
+      method: 'POST',
+      url: '/v1/owner/telebirr-device-pairing',
+      headers: telebirrDevicePairingMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_pairing_only_no_money',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(notReady.statusCode).toBe(409);
+    expect(notReady.json()).toEqual({ error: 'device_pairing_not_ready' });
+    await notReadyApp.close();
   });
 
   it('strongly authenticates and prepares only an exact dormant pilot request', async () => {

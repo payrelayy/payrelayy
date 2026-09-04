@@ -1,7 +1,93 @@
+import java.security.KeyFactory
+import java.security.MessageDigest
+import java.security.interfaces.ECPublicKey
+import java.security.spec.X509EncodedKeySpec
+import java.nio.file.Files
+import java.util.Base64
+
 plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
 }
+
+data class OperationalVerifierTrust(
+  val runtimeMode: String,
+  val serverSignerKeyId: String,
+  val serverSignerPublicKeySpki: String,
+  val serverSignerPublicKeySpkiSha256: String,
+  val assignmentSignerKeyId: String,
+  val assignmentSignerPublicKeySpki: String,
+  val assignmentSignerPublicKeySpkiSha256: String,
+)
+
+fun quotedBuildConfig(value: String): String =
+  "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+fun readP256PublicKey(propertyName: String): Pair<String, String> {
+  val configuredPath =
+    providers.gradleProperty(propertyName).orNull
+      ?: error("Operational verifier builds require -P$propertyName=<P-256-SPKI-DER-file>.")
+  val path = file(configuredPath).toPath().toAbsolutePath().normalize()
+  require(Files.isRegularFile(path) && !Files.isSymbolicLink(path)) {
+    "$propertyName must identify one regular, non-symlink public-key file."
+  }
+  val der = Files.readAllBytes(path)
+  require(der.size in 1..512) { "$propertyName is not a bounded public key." }
+  val key =
+    KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(der)) as? ECPublicKey
+      ?: error("$propertyName is not an EC public key.")
+  require(key.params.curve.field.fieldSize == 256 && key.encoded.contentEquals(der)) {
+    "$propertyName must be one canonical P-256 SPKI DER public key."
+  }
+  val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(der)
+  val digest =
+    MessageDigest.getInstance("SHA-256")
+      .digest(der)
+      .joinToString(separator = "") { byte -> "%02x".format(byte) }
+  return encoded to "sha256:$digest"
+}
+
+val requestedRuntimeMode =
+  providers.gradleProperty("fetanagentVerifierRuntimeMode").orNull ?: "inert"
+require(requestedRuntimeMode in setOf("inert", "pairing_only", "evidence_only")) {
+  "fetanagentVerifierRuntimeMode must be inert, pairing_only, or evidence_only."
+}
+
+val operationalTrust =
+  if (requestedRuntimeMode == "inert") {
+    null
+  } else {
+    fun keyId(propertyName: String): String =
+      requireNotNull(providers.gradleProperty(propertyName).orNull) {
+          "Operational verifier builds require -P$propertyName=<opaque-key-id>."
+        }
+        .also { value ->
+          require(Regex("^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$").matches(value)) {
+            "$propertyName is not a bounded opaque key identifier."
+          }
+        }
+    val serverKey = readP256PublicKey("fetanagentVerifierServerSignerSpkiFile")
+    val assignmentKey = readP256PublicKey("fetanagentVerifierAssignmentSignerSpkiFile")
+    require(serverKey.second != assignmentKey.second) {
+      "The bridge server signer and assignment signer must be independent keys."
+    }
+    OperationalVerifierTrust(
+      runtimeMode = requestedRuntimeMode,
+      serverSignerKeyId = keyId("fetanagentVerifierServerSignerKeyId"),
+      serverSignerPublicKeySpki = serverKey.first,
+      serverSignerPublicKeySpkiSha256 = serverKey.second,
+      assignmentSignerKeyId = keyId("fetanagentVerifierAssignmentSignerKeyId"),
+      assignmentSignerPublicKeySpki = assignmentKey.first,
+      assignmentSignerPublicKeySpkiSha256 = assignmentKey.second,
+    )
+  }
+
+val verifierVersionName =
+  when (requestedRuntimeMode) {
+    "pairing_only" -> "0.5.0-secure-pairing"
+    "evidence_only" -> "0.5.0-evidence-only"
+    else -> "0.5.0-secure-provisioning-inert"
+  }
 
 android {
   namespace = "com.fetanagent.telebirrverifier"
@@ -11,10 +97,17 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = 4
-    versionName = "0.4.0-foreground-inert"
+    versionCode = 5
+    versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
+    buildConfigField("String", "VERIFIER_RUNTIME_MODE", quotedBuildConfig("inert"))
+    buildConfigField("String", "SERVER_SIGNER_KEY_ID", quotedBuildConfig(""))
+    buildConfigField("String", "SERVER_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
+    buildConfigField("String", "SERVER_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(""))
+    buildConfigField("String", "ASSIGNMENT_SIGNER_KEY_ID", quotedBuildConfig(""))
+    buildConfigField("String", "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
+    buildConfigField("String", "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(""))
     testInstrumentationRunner = "android.test.InstrumentationTestRunner"
   }
 
@@ -24,6 +117,36 @@ android {
     }
     release {
       isMinifyEnabled = true
+      operationalTrust?.let { trust ->
+        buildConfigField("boolean", "VERIFIER_ENABLED", "true")
+        buildConfigField("String", "VERIFIER_RUNTIME_MODE", quotedBuildConfig(trust.runtimeMode))
+        buildConfigField("String", "SERVER_SIGNER_KEY_ID", quotedBuildConfig(trust.serverSignerKeyId))
+        buildConfigField(
+          "String",
+          "SERVER_SIGNER_PUBLIC_KEY_SPKI",
+          quotedBuildConfig(trust.serverSignerPublicKeySpki),
+        )
+        buildConfigField(
+          "String",
+          "SERVER_SIGNER_PUBLIC_KEY_SPKI_SHA256",
+          quotedBuildConfig(trust.serverSignerPublicKeySpkiSha256),
+        )
+        buildConfigField(
+          "String",
+          "ASSIGNMENT_SIGNER_KEY_ID",
+          quotedBuildConfig(trust.assignmentSignerKeyId),
+        )
+        buildConfigField(
+          "String",
+          "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI",
+          quotedBuildConfig(trust.assignmentSignerPublicKeySpki),
+        )
+        buildConfigField(
+          "String",
+          "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI_SHA256",
+          quotedBuildConfig(trust.assignmentSignerPublicKeySpkiSha256),
+        )
+      }
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }

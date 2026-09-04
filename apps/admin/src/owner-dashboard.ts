@@ -343,6 +343,43 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
               <option value="pilot_complete">Pilot complete</option>
             </select>
           </div>
+          <div class="device-pairing" aria-labelledby="telebirr-device-pairing-title">
+            <p class="status-ok">Database-free Android enrollment</p>
+            <h3 id="telebirr-device-pairing-title">TeleBirr verifier phone pairing</h3>
+            <p class="receipt-label">
+              Create one ten-minute package for the dedicated Android phone only after the pilot
+              is armed in dry-run. The package can enroll one device; it cannot poll assignments,
+              verify a deposit, settle, execute, or move money.
+            </p>
+            <p class="pilot-warning">
+              Copy this directly to the phone. Do not send it through Telegram, chat, email,
+              screenshots, issue comments, or logs. A lost response is reconciled with the same
+              request ID and cannot create a second package.
+            </p>
+            <p class="request-meta" id="telebirr-device-pairing-status">
+              Sign in to check pairing readiness.
+            </p>
+            <form id="telebirr-device-pairing-form">
+              <label class="confirmation-row" for="telebirr-device-pairing-confirmation">
+                <input id="telebirr-device-pairing-confirmation" type="checkbox" />
+                I approve one pairing-only package for the dedicated Android phone. Assignment
+                polling and money movement remain disabled.
+              </label>
+              <button id="telebirr-device-pairing-button" type="submit" disabled>
+                Create one-use pairing package
+              </button>
+            </form>
+            <div class="pairing-receipt" id="telebirr-device-pairing-receipt" hidden>
+              <p class="receipt-label">One-use package (sensitive until it expires)</p>
+              <output class="pairing-package" id="telebirr-device-pairing-package"></output>
+              <div class="review-actions">
+                <button id="telebirr-device-pairing-copy-button" type="button">Copy package</button>
+                <button class="secondary" id="telebirr-device-pairing-clear-button" type="button">
+                  Clear from page
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="review-section" aria-labelledby="deposit-intake-title">
@@ -414,6 +451,10 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .pilot-status dl { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 8px 14px; }
 .pilot-status dt { color: #a1a1aa; }
 .pilot-status dd { margin: 0; overflow-wrap: anywhere; }
+.device-pairing { margin-top: 24px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
+.device-pairing h3 { margin-top: 0; }
+.pairing-receipt { margin-top: 18px; }
+.pairing-package { display: block; max-height: 180px; overflow: auto; border: 1px solid #3f3f46; border-radius: 10px; background: #09090b; padding: 12px; color: #e4e4e7; overflow-wrap: anywhere; user-select: all; }
 .kemerbet-session { margin-top: 24px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
 .kemerbet-session h3 { margin-top: 0; }
 #kemerbet-session-canvas { width: 100%; height: auto; margin-top: 16px; border: 1px solid #3f3f46; border-radius: 10px; background: #000; cursor: crosshair; }
@@ -476,6 +517,14 @@ const pilotStatusFacts = document.querySelector('#pilot-status-facts');
 const pilotArmButton = document.querySelector('#pilot-arm-button');
 const pilotStopButton = document.querySelector('#pilot-stop-button');
 const pilotStopReason = document.querySelector('#pilot-stop-reason');
+const telebirrDevicePairingForm = document.querySelector('#telebirr-device-pairing-form');
+const telebirrDevicePairingConfirmation = document.querySelector('#telebirr-device-pairing-confirmation');
+const telebirrDevicePairingButton = document.querySelector('#telebirr-device-pairing-button');
+const telebirrDevicePairingStatus = document.querySelector('#telebirr-device-pairing-status');
+const telebirrDevicePairingReceipt = document.querySelector('#telebirr-device-pairing-receipt');
+const telebirrDevicePairingPackage = document.querySelector('#telebirr-device-pairing-package');
+const telebirrDevicePairingCopyButton = document.querySelector('#telebirr-device-pairing-copy-button');
+const telebirrDevicePairingClearButton = document.querySelector('#telebirr-device-pairing-clear-button');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
@@ -490,6 +539,9 @@ let pendingKemerbetReadinessCohortRequestId;
 let currentInvite;
 let currentPilot;
 let currentPilotLoaded = false;
+let pendingTelebirrDevicePairingRequestId;
+let currentTelebirrDevicePairing;
+let telebirrDevicePairingExpiryTimer;
 let eligiblePilotPlayers = [];
 let eligibleReadinessCohortPlayerCount = 0;
 let readinessCohortPrepared = false;
@@ -516,6 +568,8 @@ const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
 const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
 const KEMERBET_READINESS_REQUEST_STORAGE_KEY =
   'fetanagent.owner.kemerbet-readiness-request.v1';
+const TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
+  'fetanagent.owner.telebirr-device-pairing-request.v1';
 const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000;
 // Caddy's Owner upstream first-header deadline is 30 seconds. Fail locally first so the UI can
 // reconcile an uncertain mutation using the same idempotency key instead of waiting on a gateway
@@ -820,6 +874,20 @@ function clearPilot() {
   pilotConfirmation.checked = false;
   pilotReadiness.textContent = 'Sign in to load the approved cohort.';
   pilotPrepareButton.disabled = true;
+  clearTelebirrDevicePairingPackage();
+  telebirrDevicePairingConfirmation.checked = false;
+  telebirrDevicePairingStatus.textContent = 'Sign in to check pairing readiness.';
+  telebirrDevicePairingButton.disabled = true;
+}
+
+function clearTelebirrDevicePairingPackage() {
+  if (telebirrDevicePairingExpiryTimer !== undefined) {
+    window.clearTimeout(telebirrDevicePairingExpiryTimer);
+  }
+  telebirrDevicePairingExpiryTimer = undefined;
+  currentTelebirrDevicePairing = undefined;
+  telebirrDevicePairingPackage.textContent = '';
+  telebirrDevicePairingReceipt.hidden = true;
 }
 
 function clearDepositIntake() {
@@ -913,6 +981,40 @@ function clearPendingKemerbetReadinessRequestId() {
   }
 }
 
+function readPendingTelebirrDevicePairingRequestId() {
+  if (pendingTelebirrDevicePairingRequestId) return pendingTelebirrDevicePairingRequestId;
+  try {
+    const stored = window.sessionStorage.getItem(TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY);
+    if (!validOwnerMutationRequestId(stored)) {
+      window.sessionStorage.removeItem(TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY);
+      return undefined;
+    }
+    pendingTelebirrDevicePairingRequestId = stored;
+    return stored;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistPendingTelebirrDevicePairingRequestId(requestId) {
+  if (!validOwnerMutationRequestId(requestId)) throw new Error('invalid_request_id');
+  pendingTelebirrDevicePairingRequestId = requestId;
+  try {
+    window.sessionStorage.setItem(TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY, requestId);
+  } catch {
+    // The in-memory request ID still prevents a blind retry in this tab.
+  }
+}
+
+function clearPendingTelebirrDevicePairingRequestId() {
+  pendingTelebirrDevicePairingRequestId = undefined;
+  try {
+    window.sessionStorage.removeItem(TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY);
+  } catch {
+    // The in-memory value is already cleared after a terminal response.
+  }
+}
+
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
@@ -989,6 +1091,7 @@ async function loadOwnerAuthConfig() {
   if (!response.ok) throw new Error('config');
   const config = await response.json();
   if (config.supabaseUrl !== expectedSupabaseUrl ||
+      typeof config.telebirrDevicePairingConfigured !== 'boolean' ||
       typeof config.publishableKey !== 'string' ||
       !/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(config.publishableKey)) {
     throw new Error('config');
@@ -2061,6 +2164,137 @@ function renderKemerbetReadinessCohortAvailability(players) {
   updateKemerbetReadinessCohortAvailability();
 }
 
+function strictBase64UrlText(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) return undefined;
+  try {
+    const padding = '='.repeat((4 - value.length % 4) % 4);
+    const binary = atob(value.replace(/-/g, '+').replace(/_/g, '/') + padding);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const canonical = btoa(text).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+    return canonical === value ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function validTelebirrDevicePairingReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'alreadyIssued,assignmentPollingAllowed,expiresAt,moneyMovementAllowed,pairingOnly,pairingPackage' ||
+      typeof value.alreadyIssued !== 'boolean' ||
+      value.assignmentPollingAllowed !== false ||
+      value.moneyMovementAllowed !== false ||
+      value.pairingOnly !== true ||
+      typeof value.expiresAt !== 'string' ||
+      !Number.isFinite(Date.parse(value.expiresAt)) ||
+      new Date(value.expiresAt).toISOString() !== value.expiresAt ||
+      typeof value.pairingPackage !== 'string' ||
+      value.pairingPackage.length > 1_024 ||
+      !value.pairingPackage.startsWith('fetanagent-pairing-v1.')) return undefined;
+  const encoded = value.pairingPackage.slice('fetanagent-pairing-v1.'.length);
+  const canonicalJson = strictBase64UrlText(encoded);
+  if (!canonicalJson) return undefined;
+  try {
+    const grant = JSON.parse(canonicalJson);
+    if (!grant || typeof grant !== 'object' || Array.isArray(grant) ||
+        Object.keys(grant).sort().join(',') !==
+          'expiresAt,pairingId,pairingNonceDigest,schemaVersion' ||
+        grant.schemaVersion !== 1 ||
+        typeof grant.pairingId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(grant.pairingId) ||
+        typeof grant.pairingNonceDigest !== 'string' ||
+        !/^sha256:[0-9a-f]{64}$/.test(grant.pairingNonceDigest) ||
+        grant.expiresAt !== value.expiresAt ||
+        JSON.stringify({
+          schemaVersion: 1,
+          pairingId: grant.pairingId,
+          pairingNonceDigest: grant.pairingNonceDigest,
+          expiresAt: grant.expiresAt,
+        }) !== canonicalJson) return undefined;
+  } catch {
+    return undefined;
+  }
+  return {
+    alreadyIssued: value.alreadyIssued,
+    expiresAt: value.expiresAt,
+    pairingPackage: value.pairingPackage,
+  };
+}
+
+function telebirrDevicePairingPilotReady() {
+  return currentPilotLoaded && currentPilot &&
+    currentPilot.pilotStatus === 'armed' &&
+    currentPilot.switchMode === 'dry_run' &&
+    !currentPilot.financiallyActive &&
+    currentPilot.withinActiveWindow &&
+    Date.parse(currentPilot.expiresAt) > Date.now();
+}
+
+function updateTelebirrDevicePairingAvailability() {
+  if (currentTelebirrDevicePairing &&
+      Date.parse(currentTelebirrDevicePairing.expiresAt) <= Date.now()) {
+    clearTelebirrDevicePairingPackage();
+    clearPendingTelebirrDevicePairingRequestId();
+  }
+  const configured = ownerAuthConfig?.telebirrDevicePairingConfigured === true;
+  const ready = configured && telebirrDevicePairingPilotReady();
+  telebirrDevicePairingButton.disabled = !ready ||
+    Boolean(currentTelebirrDevicePairing) ||
+    !telebirrDevicePairingConfirmation.checked ||
+    telebirrDevicePairingForm.dataset.ownerBusy === 'true';
+
+  if (!ownerAuthConfig) {
+    telebirrDevicePairingStatus.textContent = 'Sign in to check pairing readiness.';
+  } else if (!configured) {
+    telebirrDevicePairingStatus.textContent =
+      'Pairing is disabled until the reviewed server and assignment signing keys are provisioned.';
+  } else if (!currentPilotLoaded) {
+    telebirrDevicePairingStatus.textContent = 'Checking the current private-pilot state.';
+  } else if (!currentPilot) {
+    telebirrDevicePairingStatus.textContent =
+      'Prepare and arm the fixed TeleBirr pilot in dry-run before pairing the phone.';
+  } else if (currentPilot.financiallyActive || currentPilot.switchMode === 'live') {
+    telebirrDevicePairingStatus.textContent =
+      'Pairing is blocked because financial authority is active. Emergency-stop the pilot.';
+  } else if (currentPilot.pilotStatus === 'draft') {
+    telebirrDevicePairingStatus.textContent =
+      'Arm the reviewed dry-run configuration before pairing the phone.';
+  } else if (currentPilot.pilotStatus !== 'armed' ||
+      currentPilot.switchMode !== 'dry_run' ||
+      !currentPilot.withinActiveWindow ||
+      Date.parse(currentPilot.expiresAt) <= Date.now()) {
+    telebirrDevicePairingStatus.textContent =
+      'The current pilot is stopped, outside its active window, or expired. Pairing remains blocked.';
+  } else if (currentTelebirrDevicePairing) {
+    telebirrDevicePairingStatus.textContent =
+      'One pairing-only package is ready until ' +
+      new Date(currentTelebirrDevicePairing.expiresAt).toLocaleString() + '.';
+  } else if (readPendingTelebirrDevicePairingRequestId()) {
+    telebirrDevicePairingStatus.textContent =
+      'A prior request is pending reconciliation. Create will recover that exact package only.';
+  } else {
+    telebirrDevicePairingStatus.textContent =
+      'Ready to create one ten-minute pairing-only package. Money authority remains disabled.';
+  }
+}
+
+function showTelebirrDevicePairing(receipt) {
+  clearTelebirrDevicePairingPackage();
+  currentTelebirrDevicePairing = receipt;
+  telebirrDevicePairingPackage.textContent = receipt.pairingPackage;
+  telebirrDevicePairingReceipt.hidden = false;
+  telebirrDevicePairingConfirmation.checked = false;
+  const delay = Math.max(1, Date.parse(receipt.expiresAt) - Date.now());
+  telebirrDevicePairingExpiryTimer = window.setTimeout(() => {
+    if (currentTelebirrDevicePairing?.pairingPackage !== receipt.pairingPackage) return;
+    clearTelebirrDevicePairingPackage();
+    clearPendingTelebirrDevicePairingRequestId();
+    updateTelebirrDevicePairingAvailability();
+  }, delay);
+  updateTelebirrDevicePairingAvailability();
+}
+
 function updatePilotPreparationAvailability() {
   pilotPrepareButton.disabled = !ordinaryKemerbetMutationAllowed() || Boolean(currentPilot) ||
     selectedPilotPlayerIds.size !== 5 ||
@@ -2110,11 +2344,16 @@ function renderPilotCandidates(players) {
 function renderPilotStatus(pilot, statusLoaded = true) {
   currentPilotLoaded = statusLoaded;
   currentPilot = pilot;
+  if (statusLoaded && !telebirrDevicePairingPilotReady()) {
+    clearTelebirrDevicePairingPackage();
+    clearPendingTelebirrDevicePairingRequestId();
+  }
   pilotStatusFacts.replaceChildren();
   pilotStatusPanel.hidden = !pilot;
   if (!pilot) {
     renderPilotCandidates(eligiblePilotPlayers);
     updateKemerbetReadinessCohortAvailability();
+    updateTelebirrDevicePairingAvailability();
     return;
   }
   const facts = [
@@ -2139,6 +2378,7 @@ function renderPilotStatus(pilot, statusLoaded = true) {
   pilotStopButton.disabled = !ordinaryKemerbetMutationAllowed() || pilot.pilotStatus === 'stopped';
   renderPilotCandidates(eligiblePilotPlayers);
   updateKemerbetReadinessCohortAvailability();
+  updateTelebirrDevicePairingAvailability();
 }
 
 async function loadCurrentPilot() {
@@ -2154,7 +2394,10 @@ async function loadCurrentPilot() {
   } catch (error) {
     currentPilotLoaded = false;
     if (!currentPilot) renderPilotStatus(undefined, false);
-    else updateKemerbetReadinessCohortAvailability();
+    else {
+      updateKemerbetReadinessCohortAvailability();
+      updateTelebirrDevicePairingAvailability();
+    }
     if (!isSignedOutError(error)) setNotice('Current private-pilot status is unavailable. Do not prepare or arm.');
   } finally {
     pilotRefreshButton.disabled = false;
@@ -2685,6 +2928,87 @@ async function prepareKemerbetReadinessCohort() {
   }
 }
 
+function telebirrDevicePairingMutationHeaders(requestId) {
+  return {
+    'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-telebirr-device-pairing-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+async function issueTelebirrDevicePairing() {
+  if (!telebirrDevicePairingPilotReady() ||
+      ownerAuthConfig?.telebirrDevicePairingConfigured !== true ||
+      currentTelebirrDevicePairing ||
+      !telebirrDevicePairingConfirmation.checked) return;
+  if (!window.confirm(
+    'Create one ten-minute pairing-only package for the dedicated Android phone? ' +
+    'Assignment polling, verification, execution, and money movement remain disabled.',
+  )) return;
+
+  const requestId = readPendingTelebirrDevicePairingRequestId() ?? crypto.randomUUID();
+  persistPendingTelebirrDevicePairingRequestId(requestId);
+  setBusy(telebirrDevicePairingForm, true);
+  setNotice('Creating or reconciling the one-use Android pairing package…');
+  let terminalFailure = false;
+  let specificFailureNotice = false;
+  try {
+    const response = await ownerRequest('/v1/owner/telebirr-device-pairing', {
+      method: 'POST',
+      headers: telebirrDevicePairingMutationHeaders(requestId),
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_pairing_only_no_money',
+        requestId,
+      }),
+    });
+    if (response.status !== 200 && response.status !== 201) {
+      const failure = await response.json().catch(() => undefined);
+      if (response.status === 400 || response.status === 409) {
+        terminalFailure = true;
+        clearPendingTelebirrDevicePairingRequestId();
+      }
+      if (response.status === 409 && failure?.error === 'device_pairing_not_configured') {
+        specificFailureNotice = true;
+        setNotice(
+          'Android pairing is not provisioned on the Owner server yet. No package was created.',
+        );
+      } else if (response.status === 409 && failure?.error === 'device_pairing_not_ready') {
+        specificFailureNotice = true;
+        setNotice(
+          'Android pairing is not ready. Keep money disabled and verify the armed pilot, receiver profile, and signing-key state.',
+        );
+      }
+      throw new Error('device_pairing_issue');
+    }
+    const receipt = validTelebirrDevicePairingReceipt(await response.json());
+    if (!receipt || (response.status === 200) !== receipt.alreadyIssued) {
+      throw new Error('device_pairing_receipt');
+    }
+    if (Date.parse(receipt.expiresAt) <= Date.now()) {
+      terminalFailure = true;
+      clearPendingTelebirrDevicePairingRequestId();
+      throw new Error('device_pairing_expired');
+    }
+    showTelebirrDevicePairing(receipt);
+    setNotice(
+      receipt.alreadyIssued
+        ? 'The exact one-use package was recovered. Copy it directly to the Android phone before it expires.'
+        : 'One-use package created. Copy it directly to the Android phone before it expires.',
+    );
+  } catch (error) {
+    if (!isSignedOutError(error) && !terminalFailure) {
+      setNotice(
+        'Pairing acknowledgement is uncertain. The same request ID is retained; the next confirmed attempt can recover only that exact package.',
+      );
+    } else if (!isSignedOutError(error) && !specificFailureNotice) {
+      setNotice('No Android pairing package was created. Review readiness before trying again.');
+    }
+  } finally {
+    setBusy(telebirrDevicePairingForm, false);
+    updateTelebirrDevicePairingAvailability();
+  }
+}
+
 function pilotMutationHeaders(requestId) {
   return {
     'content-type': 'application/json',
@@ -3058,6 +3382,35 @@ pilotPrepareForm.addEventListener('submit', async (event) => {
 pilotRefreshButton.addEventListener('click', loadCurrentPilot);
 pilotArmButton.addEventListener('click', armFixedPilot);
 pilotStopButton.addEventListener('click', stopCurrentPilot);
+telebirrDevicePairingConfirmation.addEventListener(
+  'change',
+  updateTelebirrDevicePairingAvailability,
+);
+telebirrDevicePairingForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await issueTelebirrDevicePairing();
+});
+telebirrDevicePairingCopyButton.addEventListener('click', async () => {
+  if (!currentTelebirrDevicePairing ||
+      Date.parse(currentTelebirrDevicePairing.expiresAt) <= Date.now()) {
+    updateTelebirrDevicePairingAvailability();
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(currentTelebirrDevicePairing.pairingPackage);
+    setNotice('Pairing package copied. Paste it only into the dedicated FetanAgent Android app.');
+  } catch {
+    setNotice('Copy was unavailable. Select the displayed package and paste it only into the phone.');
+  }
+});
+telebirrDevicePairingClearButton.addEventListener('click', () => {
+  if (!currentTelebirrDevicePairing) return;
+  clearTelebirrDevicePairingPackage();
+  updateTelebirrDevicePairingAvailability();
+  setNotice(
+    'The package was cleared from this page. Its request ID is retained until expiry so a confirmed retry can recover only the same package.',
+  );
+});
 void restoreOwnerSession();
 `;
 
@@ -3067,5 +3420,6 @@ export function ownerDashboardPublicConfig(
   return {
     publishableKey: runtime.publishableKey,
     supabaseUrl: runtime.supabaseUrl,
+    telebirrDevicePairingConfigured: runtime.devicePairing.configured,
   } as const;
 }

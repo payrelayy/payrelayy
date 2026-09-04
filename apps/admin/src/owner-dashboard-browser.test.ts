@@ -69,10 +69,33 @@ function response(status: number, body: unknown) {
   return value;
 }
 
+function pairingReceipt(expiresAt: string) {
+  const pairingPackage =
+    'fetanagent-pairing-v1.' +
+    Buffer.from(
+      JSON.stringify({
+        schemaVersion: 1,
+        pairingId: '22222222-2222-4222-8222-222222222222',
+        pairingNonceDigest: `sha256:${'a'.repeat(64)}`,
+        expiresAt,
+      }),
+      'utf8',
+    ).toString('base64url');
+  return {
+    alreadyIssued: false,
+    assignmentPollingAllowed: false,
+    expiresAt,
+    moneyMovementAllowed: false,
+    pairingOnly: true,
+    pairingPackage,
+  } as const;
+}
+
 function ownerBrowserHarness(
   dashboardStatus: 401 | 403 | 503,
   options: Readonly<{
     confirm?: boolean;
+    devicePairingConfigured?: boolean;
     fetchOverride?: BrowserFetchOverride;
     randomUUID?: () => string;
   }> = {},
@@ -104,6 +127,10 @@ function ownerBrowserHarness(
   element('#kemerbet-agent-profile-form').elements = namedElements({
     configurationReason: new FakeElement(),
   });
+  element('#telebirr-device-pairing-form').elements = namedElements({
+    confirmation: element('#telebirr-device-pairing-confirmation'),
+    submit: element('#telebirr-device-pairing-button'),
+  });
 
   const stored = new Map<string, string>();
   const sessionStorage = {
@@ -133,6 +160,7 @@ function ownerBrowserHarness(
       return response(200, {
         publishableKey: `sb_publishable_${'a'.repeat(32)}`,
         supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',
+        telebirrDevicePairingConfigured: options.devicePairingConfigured ?? false,
       });
     }
     if (url.endsWith('/auth/v1/token?grant_type=password')) {
@@ -148,7 +176,10 @@ function ownerBrowserHarness(
   const context = createContext({
     AbortController,
     URL,
+    TextDecoder,
+    Uint8Array,
     atob: (value: string) => Buffer.from(value, 'base64').toString('binary'),
+    btoa: (value: string) => Buffer.from(value, 'binary').toString('base64'),
     createImageBitmap: async () => ({ close() {} }),
     crypto: {
       randomUUID: options.randomUUID ?? (() => '11111111-1111-4111-8111-111111111111'),
@@ -194,6 +225,59 @@ function ownerBrowserHarness(
 }
 
 describe('Owner dashboard browser authentication boundary', () => {
+  it('shows one canonical Android package while persisting only its idempotency key', async () => {
+    const expiresAt = '2099-09-04T12:10:00.000Z';
+    const receipt = pairingReceipt(expiresAt);
+    let pairingPosts = 0;
+    let activeTest = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      devicePairingConfigured: true,
+      fetchOverride: (url, init) => {
+        if (!activeTest || url !== '/v1/owner/telebirr-device-pairing') return undefined;
+        pairingPosts += 1;
+        expect(init.method).toBe('POST');
+        expect(init.headers).toMatchObject({
+          'x-fetanagent-owner-csrf': 'owner-telebirr-device-pairing-v1',
+          'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+        });
+        return response(201, receipt);
+      },
+    });
+    await browser.signIn();
+    activeTest = true;
+    await browser.call('renderPilotStatus', {
+      expiresAt: '2099-09-04T14:00:00.000Z',
+      financiallyActive: false,
+      pilotRevisionId: '33333333-3333-4333-8333-333333333333',
+      pilotStatus: 'armed',
+      reservedAmountMinor: '0',
+      reservedDepositCount: 0,
+      switchMode: 'dry_run',
+      withinActiveWindow: true,
+    });
+    const confirmation = browser.element('#telebirr-device-pairing-confirmation');
+    confirmation.checked = true;
+    await confirmation.listeners.get('change')?.({ preventDefault() {} });
+    expect(browser.element('#telebirr-device-pairing-button').disabled).toBe(false);
+
+    const submit = browser.element('#telebirr-device-pairing-form').listeners.get('submit');
+    if (!submit) throw new Error('Device-pairing submit listener was not installed.');
+    await submit({ preventDefault() {} });
+
+    expect(pairingPosts).toBe(1);
+    expect(browser.element('#telebirr-device-pairing-receipt').hidden).toBe(false);
+    expect(browser.element('#telebirr-device-pairing-package').textContent).toBe(
+      receipt.pairingPackage,
+    );
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.telebirr-device-pairing-request.v1'),
+    ).toBe('11111111-1111-4111-8111-111111111111');
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toContain(
+      receipt.pairingPackage,
+    );
+  });
+
   it('keeps the valid session when post-authentication dashboard hydration fails', async () => {
     const browser = ownerBrowserHarness(503);
 

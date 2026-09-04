@@ -2,24 +2,41 @@ package com.fetanagent.telebirrverifier
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
   private lateinit var stateStore: VerifierOperationalStateStore
+  private lateinit var pairingExecutor: ExecutorService
+  private var pairingInProgress = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     stateStore = VerifierOperationalStateStore(applicationContext)
+    pairingExecutor =
+      Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "fetanagent-device-pairing").apply { isDaemon = true }
+      }
     render()
+  }
+
+  override fun onDestroy() {
+    pairingExecutor.shutdownNow()
+    super.onDestroy()
   }
 
   override fun onResume() {
@@ -52,16 +69,26 @@ class MainActivity : Activity() {
 
   private fun render() {
     val snapshot = stateStore.snapshot()
+    val enrolled =
+      BuildConfig.VERIFIER_ENABLED &&
+        runCatching { VerifierRuntimeComposition.isEnrolled(applicationContext) }
+          .getOrDefault(false)
     val displayedStatus =
-      if (BuildConfig.VERIFIER_ENABLED) snapshot.status
-      else LivePilotRuntimeStatus(LivePilotRuntimeState.DISABLED, "build_disabled")
-    val root = statusView(VerifierLifecycle.from(displayedStatus), snapshot)
+      when {
+        !BuildConfig.VERIFIER_ENABLED ->
+          LivePilotRuntimeStatus(LivePilotRuntimeState.DISABLED, "build_disabled")
+        !enrolled ->
+          LivePilotRuntimeStatus(LivePilotRuntimeState.ENROLLMENT_REQUIRED, "provisioning_required")
+        else -> snapshot.status
+      }
+    val root = statusView(VerifierLifecycle.from(displayedStatus), snapshot, enrolled)
     setContentView(ScrollView(this).apply { addView(root) })
   }
 
   private fun statusView(
     lifecycle: VerifierLifecycle,
     snapshot: VerifierOperationalSnapshot,
+    enrolled: Boolean,
   ): LinearLayout = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       gravity = Gravity.CENTER_HORIZONTAL
@@ -125,8 +152,67 @@ class MainActivity : Activity() {
           gravity = Gravity.CENTER
         },
       )
-      if (BuildConfig.VERIFIER_ENABLED) addOperationalControls(snapshot.operatorEnabled)
+      if (BuildConfig.VERIFIER_ENABLED && !enrolled) {
+        addPairingControls()
+      } else if (BuildConfig.VERIFIER_ENABLED) {
+        addOperationalControls(snapshot.operatorEnabled)
+      }
     }
+
+  private fun LinearLayout.addPairingControls() {
+    addView(
+      TextView(context).apply {
+        setText(R.string.pairing_instructions)
+        textSize = 14f
+        setPadding(0, 40, 0, 16)
+        gravity = Gravity.CENTER
+      },
+    )
+    val pairingPackage =
+      EditText(context).apply {
+        setHint(R.string.pairing_package_hint)
+        inputType =
+          InputType.TYPE_CLASS_TEXT or
+            InputType.TYPE_TEXT_VARIATION_PASSWORD or
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        isSaveEnabled = false
+        maxLines = 3
+        contentDescription = getString(R.string.pairing_package_hint)
+      }
+    addView(
+      pairingPackage,
+      LinearLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT,
+          ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
+        .apply { topMargin = 16 },
+    )
+    addView(
+      Button(context).apply {
+        setText(if (pairingInProgress) R.string.pairing_in_progress else R.string.pair_this_phone)
+        isEnabled = !pairingInProgress
+        setOnClickListener {
+          val packageValue = pairingPackage.text?.toString()?.trim().orEmpty()
+          if (DeviceBridgeJsonCodec.decodePairingGrantPackage(packageValue) == null) {
+            recordPairingFailure("pairing_package_invalid")
+            return@setOnClickListener
+          }
+          AlertDialog.Builder(this@MainActivity)
+            .setTitle(R.string.confirm_pairing_title)
+            .setMessage(R.string.confirm_pairing_message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.pair_this_phone) { _, _ -> pairPhone(packageValue) }
+            .show()
+        }
+      },
+      LinearLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT,
+          ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
+        .apply { topMargin = 16 },
+    )
+  }
 
   private fun LinearLayout.addOperationalControls(operatorEnabled: Boolean) {
     addView(
@@ -157,7 +243,13 @@ class MainActivity : Activity() {
   }
 
   private fun requestStart() {
-    if (!BuildConfig.VERIFIER_ENABLED) return
+    if (
+      !BuildConfig.VERIFIER_ENABLED ||
+        !runCatching { VerifierRuntimeComposition.isEnrolled(applicationContext) }
+          .getOrDefault(false)
+    ) {
+      return
+    }
     if (
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -202,6 +294,51 @@ class MainActivity : Activity() {
     }
     runCatching { VerifierForegroundService.requestStop(this) }
     render()
+  }
+
+  private fun pairPhone(packageValue: String) {
+    if (pairingInProgress || !BuildConfig.VERIFIER_ENABLED) return
+    pairingInProgress = true
+    render()
+    pairingExecutor.execute {
+      val result =
+        runCatching {
+          VerifierRuntimeComposition.pairingCoordinator(applicationContext).pair(packageValue)
+        }
+      runOnUiThread {
+        pairingInProgress = false
+        if (result.isSuccess) {
+          clearMatchingClipboard(packageValue)
+          runCatching {
+            stateStore.recordStatus(
+              LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "transport_enrolled"),
+            )
+          }
+        } else {
+          val code = (result.exceptionOrNull() as? DevicePairingFailure)?.code
+            ?: "pairing_unavailable"
+          recordPairingFailure(code, renderAfter = false)
+        }
+        render()
+      }
+    }
+  }
+
+  private fun recordPairingFailure(code: String, renderAfter: Boolean = true) {
+    runCatching {
+      stateStore.recordStatus(
+        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, code),
+      )
+    }
+    if (renderAfter) render()
+  }
+
+  private fun clearMatchingClipboard(packageValue: String) {
+    runCatching {
+      val clipboard = getSystemService(ClipboardManager::class.java)
+      val current = clipboard.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+      if (current == packageValue) clipboard.clearPrimaryClip()
+    }
   }
 
   private fun versionView(label: String, version: String): TextView =

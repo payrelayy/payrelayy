@@ -9,6 +9,7 @@ import java.io.StringWriter
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 data class DeviceBridgeCommandResponse(
   val acknowledgement: SignedDeviceBridgeAcknowledgement,
@@ -29,14 +30,68 @@ data class DeviceBridgeCommandResponse(
 /** Strict duplicate-rejecting JSON wire codec for the public Android bridge surface. */
 object DeviceBridgeJsonCodec {
   private const val MAX_WIRE_BYTES = 256 * 1_024
+  private const val PAIRING_PACKAGE_PREFIX = "fetanagent-pairing-v1."
 
   fun encodePairingRequest(request: SignedDeviceBridgePairingRequest): ByteArray =
     encode(pairingEnvelope(request))
+
+  fun decodePairingRequest(bytes: ByteArray): SignedDeviceBridgePairingRequest? =
+    decode(bytes) { root -> root.pairingEnvelope() }
 
   fun decodePairingResponse(bytes: ByteArray): SignedDeviceBridgeEnrollmentCertificate? =
     decode(bytes) { root ->
       root.requireObject(setOf("certificate")).value("certificate").certificateEnvelope()
     }
+
+  fun encodeEnrollmentCertificate(
+    certificate: SignedDeviceBridgeEnrollmentCertificate,
+  ): ByteArray = encode(certificateEnvelope(certificate))
+
+  fun decodeEnrollmentCertificate(
+    bytes: ByteArray,
+  ): SignedDeviceBridgeEnrollmentCertificate? = decode(bytes) { root -> root.certificateEnvelope() }
+
+  fun encodePairingGrantPackage(grant: DevicePairingGrant): String {
+    val payload =
+      encode(
+        obj(
+          "schemaVersion" to number(1),
+          "pairingId" to text(grant.pairingId),
+          "pairingNonceDigest" to text(grant.pairingNonceDigest),
+          "expiresAt" to text(grant.expiresAt),
+        ),
+      )
+    return PAIRING_PACKAGE_PREFIX +
+      Base64.getUrlEncoder().withoutPadding().encodeToString(payload)
+  }
+
+  fun decodePairingGrantPackage(value: String): DevicePairingGrant? =
+    runCatching {
+        require(value.length in (PAIRING_PACKAGE_PREFIX.length + 1)..1_024)
+        require(value.startsWith(PAIRING_PACKAGE_PREFIX))
+        val encoded = value.removePrefix(PAIRING_PACKAGE_PREFIX)
+        require(Regex("^[A-Za-z0-9_-]+$").matches(encoded))
+        val payload = Base64.getUrlDecoder().decode(encoded)
+        require(Base64.getUrlEncoder().withoutPadding().encodeToString(payload) == encoded)
+        val grant =
+          requireNotNull(
+            decode(payload) { root ->
+              val candidate =
+                root.requireObject(
+                  setOf("schemaVersion", "pairingId", "pairingNonceDigest", "expiresAt"),
+                )
+              require(candidate.int("schemaVersion") == 1)
+              DevicePairingGrant(
+                pairingId = candidate.string("pairingId"),
+                pairingNonceDigest = candidate.string("pairingNonceDigest"),
+                expiresAt = candidate.string("expiresAt"),
+              )
+            },
+          )
+        require(encodePairingGrantPackage(grant) == value)
+        grant
+      }
+      .getOrNull()
 
   fun encodeAssignmentPollFrame(
     request: SignedDeviceBridgeRequest,
@@ -450,6 +505,45 @@ object DeviceBridgeJsonCodec {
     )
   }
 
+  private fun JsonValue.pairingEnvelope(): SignedDeviceBridgePairingRequest {
+    val value = requireObject(pairingEnvelopeKeys)
+    return SignedDeviceBridgePairingRequest(
+      contractVersion = value.int("contractVersion"),
+      providerCode = value.string("providerCode"),
+      protocolMode = value.string("protocolMode"),
+      transcriptVersion = value.string("transcriptVersion"),
+      bodyDigestAlgorithm = value.string("bodyDigestAlgorithm"),
+      bodyDigest = value.string("bodyDigest"),
+      signatureAlgorithm = value.string("signatureAlgorithm"),
+      signatureEncoding = value.string("signatureEncoding"),
+      keyId = value.string("keyId"),
+      body = value.value("body").pairingBody(),
+      signature = value.string("signature"),
+    )
+  }
+
+  private fun JsonValue.pairingBody(): DeviceBridgePairingBody {
+    val value = requireObject(pairingBodyKeys)
+    return DeviceBridgePairingBody(
+      contractVersion = value.int("contractVersion"),
+      providerCode = value.string("providerCode"),
+      protocolMode = value.string("protocolMode"),
+      pairingId = value.string("pairingId"),
+      pairingNonceDigest = value.string("pairingNonceDigest"),
+      deviceId = value.string("deviceId"),
+      keyId = value.string("keyId"),
+      devicePublicKeySpki = value.string("devicePublicKeySpki"),
+      devicePublicKeySpkiSha256 = value.string("devicePublicKeySpkiSha256"),
+      signatureAlgorithm = value.string("signatureAlgorithm"),
+      devicePlatform = value.string("devicePlatform"),
+      appVersion = value.string("appVersion"),
+      issuedAt = value.string("issuedAt"),
+      expiresAt = value.string("expiresAt"),
+      oneUse = value.boolean("oneUse"),
+      safety = value.safety(),
+    )
+  }
+
   private fun JsonValue.certificateBody(): DeviceBridgeEnrollmentCertificateBody {
     val value = requireObject(certificateBodyKeys)
     return DeviceBridgeEnrollmentCertificateBody(
@@ -734,6 +828,40 @@ object DeviceBridgeJsonCodec {
       "rawReceiptUploadAllowed",
       "sensitiveLoggingAllowed",
     )
+
+  private val pairingEnvelopeKeys =
+    setOf(
+      "contractVersion",
+      "providerCode",
+      "protocolMode",
+      "transcriptVersion",
+      "bodyDigestAlgorithm",
+      "bodyDigest",
+      "signatureAlgorithm",
+      "signatureEncoding",
+      "keyId",
+      "body",
+      "signature",
+    )
+
+  private val pairingBodyKeys =
+    setOf(
+      "contractVersion",
+      "providerCode",
+      "protocolMode",
+      "pairingId",
+      "pairingNonceDigest",
+      "deviceId",
+      "keyId",
+      "devicePublicKeySpki",
+      "devicePublicKeySpkiSha256",
+      "signatureAlgorithm",
+      "devicePlatform",
+      "appVersion",
+      "issuedAt",
+      "expiresAt",
+      "oneUse",
+    ) + safetyKeys
 
   private val certificateBodyKeys =
     setOf(

@@ -124,13 +124,38 @@ where role.rolname in (
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 1
+select count(*) filter (
+      where granted.rolname = 'fetanagent_companion_device_bridge'
+        and member.rolname = 'fetanagent_companion_device_bridge_runtime'
+        and membership.inherit_option
+        and not membership.set_option
+        and not membership.admin_option
+    ) = 1
+    and count(*) filter (
+      where granted.rolname = 'fetanagent_companion_device_bridge'
+        and member.rolname = 'postgres'
+    ) <= 1
+    and count(*) filter (
+      where granted.rolname = 'fetanagent_companion_device_bridge_runtime'
+        and member.rolname = 'postgres'
+    ) <= 1
     and pg_catalog.bool_and(
-      granted.rolname = 'fetanagent_companion_device_bridge'
-      and member.rolname = 'fetanagent_companion_device_bridge_runtime'
-      and membership.inherit_option
-      and not membership.set_option
-      and not membership.admin_option
+      (
+        granted.rolname = 'fetanagent_companion_device_bridge'
+        and member.rolname = 'fetanagent_companion_device_bridge_runtime'
+        and membership.inherit_option
+        and not membership.set_option
+        and not membership.admin_option
+      ) or (
+        granted.rolname in (
+          'fetanagent_companion_device_bridge',
+          'fetanagent_companion_device_bridge_runtime'
+        )
+        and member.rolname = 'postgres'
+        and not membership.inherit_option
+        and not membership.set_option
+        and membership.admin_option
+      )
     ) as membership_exact
 from pg_catalog.pg_auth_members as membership
 join pg_catalog.pg_roles as granted on granted.oid = membership.roleid

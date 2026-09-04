@@ -68,6 +68,7 @@ describe('Owner-control configuration', () => {
   it('accepts only the exact staging project, dedicated role, pinned database routes, and verify-full URL', () => {
     expect(loadOwnerControlConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
+      companionDevicePairing: { serverSignerKeyId: undefined, configured: false },
       devicePairing: { assignmentSignerKeyId: undefined, configured: false },
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
       stage: 'staging',
@@ -127,6 +128,28 @@ describe('Owner-control configuration', () => {
         OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'short',
       }),
     ).toThrow('OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID is malformed');
+  });
+
+  it('enables only a validated public Windows companion server-signer identifier', () => {
+    const configured = loadOwnerControlConfig({
+      ...enabledEnvironment(),
+      OWNER_COMPANION_SERVER_SIGNER_KEY_ID: 'companion_server_signer_2026_01',
+    });
+    expect(configured.runtime).toMatchObject({
+      companionDevicePairing: {
+        serverSignerKeyId: 'companion_server_signer_2026_01',
+        configured: true,
+      },
+    });
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(configured))).not.toContain(
+      'companion_server_signer_2026_01',
+    );
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        OWNER_COMPANION_SERVER_SIGNER_KEY_ID: 'short',
+      }),
+    ).toThrow('OWNER_COMPANION_SERVER_SIGNER_KEY_ID is malformed');
   });
 
   it('requires exact production secret mounts and never logs credentials', () => {

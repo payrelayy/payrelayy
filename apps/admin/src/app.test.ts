@@ -19,6 +19,10 @@ import {
   type OwnerKemerbetSessionStatus,
 } from './owner-kemerbet-session-control.js';
 import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
+import {
+  OwnerCompanionDevicePairingNotReadyError,
+  type OwnerCompanionDevicePairingReceipt,
+} from './owner-companion-device-pairing.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
 import {
   OwnerPrivateLivePilotUnavailableError,
@@ -45,6 +49,11 @@ const telebirrPairingPackage =
     }),
     'utf8',
   ).toString('base64url');
+const companionPairingPackage =
+  'fetanagent-companion-pairing-v1.' +
+  Buffer.from(JSON.stringify({ pairingOnly: true, transferDisabled: true }), 'utf8').toString(
+    'base64url',
+  );
 const bearer = 'header.payload.signature-with-safe-characters';
 const receiverEncryptionMaster = 'c'.repeat(64);
 const receiverFingerprintMaster = 'd'.repeat(64);
@@ -111,6 +120,32 @@ function devicePairingReceipt(
     pairingOnly: true,
     pairingPackage: telebirrPairingPackage,
     ...overrides,
+  };
+}
+
+function companionDevicePairingReceipt(
+  overrides: Partial<OwnerCompanionDevicePairingReceipt> = {},
+): OwnerCompanionDevicePairingReceipt {
+  return {
+    alreadyIssued: false,
+    devicePlatform: 'windows',
+    expiresAt: '2026-09-04T12:10:00.000Z',
+    lookupAllowed: false,
+    moneyMovementAllowed: false,
+    pairingOnly: true,
+    pairingPackage: companionPairingPackage,
+    transferDisabled: true,
+    ...overrides,
+  };
+}
+
+function companionDevicePairingMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-companion-device-pairing-v1',
+    'x-idempotency-key': requestId,
   };
 }
 
@@ -218,7 +253,7 @@ function readinessEligiblePlayers() {
   }));
 }
 
-function config(devicePairingConfigured = false) {
+function config(devicePairingConfigured = false, companionDevicePairingConfigured = false) {
   return loadOwnerControlConfig({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
@@ -231,6 +266,9 @@ function config(devicePairingConfigured = false) {
     OWNER_RECEIVER_REFERENCE_PROFILE: receiverMasterProfile,
     ...(devicePairingConfigured
       ? { OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'telebirr_assignment_signer_2026_01' }
+      : {}),
+    ...(companionDevicePairingConfigured
+      ? { OWNER_COMPANION_SERVER_SIGNER_KEY_ID: 'companion-server-staging-v1' }
       : {}),
   });
 }
@@ -359,6 +397,7 @@ function runtime(
         rotationReason: request.rotationReason,
       }),
     },
+    companionDevicePairing: undefined,
     telebirrDevicePairing: undefined,
     ready: async () => true,
     close: async () => undefined,
@@ -426,7 +465,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Local identity validation');
     expect(response.body).toContain('Windows-protected fingerprint');
     expect(response.body).toContain('id="kemerbet-legacy-profile-controls" hidden inert');
-    expect(response.body).toMatch(/Server pairing\s+and exact-five lookup are not enabled yet/u);
+    expect(response.body).toMatch(/Public-key enrollment only/u);
+    expect(response.body).toContain('id="companion-device-pairing-form"');
     expect(response.body).toContain('releases/latest/download/FetanAgent-Windows-Companion.zip');
     expect(response.body).toContain('aria-labelledby="kemerbet-session-title" hidden inert');
     expect(response.body).toContain('survives page');
@@ -448,6 +488,7 @@ describe('Owner-control HTTP boundary', () => {
     const response = await app.inject({ method: 'GET', url: '/owner/config.json' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
+      companionDevicePairingConfigured: false,
       publishableKey: 'sb_publishable_test_key_for_staging_only',
       supabaseUrl: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
       telebirrDevicePairingConfigured: false,
@@ -3635,6 +3676,142 @@ describe('Owner-control HTTP boundary', () => {
     expect(authenticationCalls).toBe(0);
     expect(controlCalls).toEqual([]);
     await app.close();
+  });
+
+  it('issues only an authenticated, idempotent, no-money Windows companion package', async () => {
+    const calls: Array<readonly string[]> = [];
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionDevicePairing: {
+          issue: async (actor, requestId) => {
+            calls.push([actor, requestId]);
+            return calls.length === 1
+              ? companionDevicePairingReceipt()
+              : companionDevicePairingReceipt({ alreadyIssued: true });
+          },
+        },
+      }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+      requestId: pilotRequestId,
+    };
+
+    const fresh = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-device-pairing',
+      headers: companionDevicePairingMutationHeaders(),
+      payload,
+    });
+    expect(fresh.statusCode).toBe(201);
+    expect(fresh.json()).toEqual(companionDevicePairingReceipt());
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-device-pairing',
+      headers: companionDevicePairingMutationHeaders(),
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(companionDevicePairingReceipt({ alreadyIssued: true }));
+    expect(calls).toEqual([
+      [authUserId, pilotRequestId],
+      [authUserId, pilotRequestId],
+    ]);
+    expect(replay.body).not.toContain('server_signer');
+    await app.close();
+  });
+
+  it('keeps Windows companion pairing disabled until its independent signer is configured', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run for a public disabled state');
+      }) as typeof fetch,
+      runtime: runtime({
+        companionDevicePairing: {
+          issue: async () => {
+            throw new Error('pairing must remain disabled');
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-device-pairing',
+      headers: companionDevicePairingMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: 'companion_device_pairing_not_configured' });
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('rejects Windows pairing authority fields before auth and maps no-ready state', async () => {
+    let authenticationCalls = 0;
+    const invalidApp = buildOwnerControlApp(config(false, true), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    for (const candidate of [
+      {
+        confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+        requestId: pilotRequestId,
+        signerKeyId: 'browser-controlled',
+      },
+      {
+        confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+        minimumCompanionVersion: '0.0.0',
+        requestId: pilotRequestId,
+      },
+      {
+        confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+        requestId: pilotRequestId,
+        transferAllowed: true,
+      },
+    ]) {
+      const response = await invalidApp.inject({
+        method: 'POST',
+        url: '/v1/owner/companion-device-pairing',
+        headers: companionDevicePairingMutationHeaders(),
+        payload: candidate,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    await invalidApp.close();
+
+    const notReadyApp = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionDevicePairing: {
+          issue: async () => {
+            throw new OwnerCompanionDevicePairingNotReadyError();
+          },
+        },
+      }),
+    });
+    const notReady = await notReadyApp.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-device-pairing',
+      headers: companionDevicePairingMutationHeaders(),
+      payload: {
+        confirmation: 'owner_confirmed_windows_companion_pairing_only_no_money',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(notReady.statusCode).toBe(409);
+    expect(notReady.json()).toEqual({ error: 'companion_device_pairing_not_ready' });
+    await notReadyApp.close();
   });
 
   it('issues only an authenticated, idempotent, pairing-only Android package', async () => {

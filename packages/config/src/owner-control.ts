@@ -38,6 +38,7 @@ export interface OwnerControlDatabaseConnection {
 export type OwnerControlRuntimeConfig =
   | {
       readonly enabled: false;
+      readonly companionDevicePairing: undefined;
       readonly connection: undefined;
       readonly devicePairing: undefined;
       readonly projectReference: undefined;
@@ -49,6 +50,15 @@ export type OwnerControlRuntimeConfig =
     }
   | {
       readonly enabled: true;
+      readonly companionDevicePairing:
+        | {
+            readonly serverSignerKeyId: undefined;
+            readonly configured: false;
+          }
+        | {
+            readonly serverSignerKeyId: string;
+            readonly configured: true;
+          };
       readonly connection: OwnerControlDatabaseConnection;
       readonly devicePairing:
         | {
@@ -202,6 +212,7 @@ export function loadOwnerControlConfig(
       ...common,
       runtime: {
         enabled: false,
+        companionDevicePairing: undefined,
         connection: undefined,
         devicePairing: undefined,
         projectReference: undefined,
@@ -274,11 +285,22 @@ export function loadOwnerControlConfig(
   ) {
     throw new Error('OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID is malformed.');
   }
+  const companionServerSignerKeyId = environment.OWNER_COMPANION_SERVER_SIGNER_KEY_ID;
+  if (
+    companionServerSignerKeyId !== undefined &&
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u.test(companionServerSignerKeyId)
+  ) {
+    throw new Error('OWNER_COMPANION_SERVER_SIGNER_KEY_ID is malformed.');
+  }
 
   return {
     ...common,
     runtime: {
       enabled: true,
+      companionDevicePairing:
+        companionServerSignerKeyId === undefined
+          ? { serverSignerKeyId: undefined, configured: false }
+          : { serverSignerKeyId: companionServerSignerKeyId, configured: true },
       connection: parseDatabaseUrl(databaseUrl),
       devicePairing:
         assignmentSignerKeyId === undefined
@@ -310,6 +332,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
       stage: config.runtime.stage,
       tlsMode: config.runtime.tlsMode,
       databaseConfigured: config.runtime.enabled,
+      companionDevicePairingConfigured:
+        config.runtime.enabled && config.runtime.companionDevicePairing.configured,
       telebirrDevicePairingConfigured:
         config.runtime.enabled && config.runtime.devicePairing.configured,
       publishableKeyConfigured: config.runtime.enabled,

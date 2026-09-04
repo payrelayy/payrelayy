@@ -47,6 +47,7 @@ services:
       OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master
       OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
       OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+      OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-staging-v1
       OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: telebirr-assignment-staging-v1
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
@@ -646,6 +647,7 @@ services:
         target: /config
     networks:
       - owner_control_service
+      - companion_device_ingress
       - telebirr_device_ingress
     depends_on:
       customer-web:
@@ -1014,6 +1016,11 @@ networks:
     attachable: false
   telebirr_device_ingress:
     name: fetanagent-telebirr-device-ingress
+    driver: bridge
+    internal: true
+    attachable: false
+  companion_device_ingress:
+    name: fetanagent-companion-device-ingress
     driver: bridge
     internal: true
     attachable: false

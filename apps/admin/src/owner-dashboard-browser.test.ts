@@ -91,9 +91,58 @@ function pairingReceipt(expiresAt: string) {
   } as const;
 }
 
+function companionPairingReceipt(expiresAt: string) {
+  const expiresAtMilliseconds = Date.parse(expiresAt);
+  const issuedAt = new Date(expiresAtMilliseconds - 10 * 60 * 1_000).toISOString();
+  const pairingPackage =
+    'fetanagent-companion-pairing-v1.' +
+    Buffer.from(
+      JSON.stringify({
+        schemaVersion: 1,
+        protocolMode: 'local_companion_no_transfer_v1',
+        pairingId: '22222222-2222-4222-8222-222222222222',
+        pairingNonceDigest: `sha256:${'a'.repeat(64)}`,
+        issuedAt,
+        expiresAt,
+        endpoint: 'https://device.fetanagent.com/v1/companion/device/enrollments:pair',
+        signerKeyId: 'companion-server-staging-v1',
+        serverSigningPublicKeySpki: 'A'.repeat(122),
+        serverSigningPublicKeySpkiSha256: `sha256:${'b'.repeat(64)}`,
+        minimumCompanionVersion: '0.1.4',
+        oneUse: true,
+        accountMutationAllowed: false,
+        balanceMutationAllowed: false,
+        providerMutationAllowed: false,
+        paymentAllowed: false,
+        depositAllowed: false,
+        withdrawAllowed: false,
+        transferAllowed: false,
+        settlementAllowed: false,
+        finalActionAllowed: false,
+        financialActionAllowed: false,
+        moneyMovementAllowed: false,
+        transferDisabled: true,
+        identifiersRedacted: true,
+        moneyMoved: false,
+      }),
+      'utf8',
+    ).toString('base64url');
+  return {
+    alreadyIssued: false,
+    devicePlatform: 'windows',
+    expiresAt,
+    lookupAllowed: false,
+    moneyMovementAllowed: false,
+    pairingOnly: true,
+    pairingPackage,
+    transferDisabled: true,
+  } as const;
+}
+
 function ownerBrowserHarness(
   dashboardStatus: 401 | 403 | 503,
   options: Readonly<{
+    companionDevicePairingConfigured?: boolean;
     confirm?: boolean;
     devicePairingConfigured?: boolean;
     fetchOverride?: BrowserFetchOverride;
@@ -131,6 +180,10 @@ function ownerBrowserHarness(
     confirmation: element('#telebirr-device-pairing-confirmation'),
     submit: element('#telebirr-device-pairing-button'),
   });
+  element('#companion-device-pairing-form').elements = namedElements({
+    confirmation: element('#companion-device-pairing-confirmation'),
+    submit: element('#companion-device-pairing-button'),
+  });
 
   const stored = new Map<string, string>();
   const sessionStorage = {
@@ -158,6 +211,7 @@ function ownerBrowserHarness(
     if (overridden !== undefined) return overridden;
     if (url === '/owner/config.json') {
       return response(200, {
+        companionDevicePairingConfigured: options.companionDevicePairingConfigured ?? false,
         publishableKey: `sb_publishable_${'a'.repeat(32)}`,
         supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',
         telebirrDevicePairingConfigured: options.devicePairingConfigured ?? false,
@@ -225,6 +279,51 @@ function ownerBrowserHarness(
 }
 
 describe('Owner dashboard browser authentication boundary', () => {
+  it('shows one canonical Windows package while persisting only its idempotency key', async () => {
+    const expiresAt = '2099-09-04T12:10:00.000Z';
+    const receipt = companionPairingReceipt(expiresAt);
+    let pairingPosts = 0;
+    let activeTest = false;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      fetchOverride: (url, init) => {
+        if (!activeTest || url !== '/v1/owner/companion-device-pairing') return undefined;
+        pairingPosts += 1;
+        expect(init.method).toBe('POST');
+        expect(init.headers).toMatchObject({
+          'x-fetanagent-owner-csrf': 'owner-companion-device-pairing-v1',
+          'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+        });
+        expect(String(init.body)).not.toContain('amount');
+        expect(String(init.body)).not.toContain('player');
+        return response(201, receipt);
+      },
+    });
+    await browser.signIn();
+    activeTest = true;
+    const confirmation = browser.element('#companion-device-pairing-confirmation');
+    confirmation.checked = true;
+    await confirmation.listeners.get('change')?.({ preventDefault() {} });
+    expect(browser.element('#companion-device-pairing-button').disabled).toBe(false);
+
+    const submit = browser.element('#companion-device-pairing-form').listeners.get('submit');
+    if (!submit) throw new Error('Companion-pairing submit listener was not installed.');
+    await submit({ preventDefault() {} });
+
+    expect(pairingPosts).toBe(1);
+    expect(browser.element('#companion-device-pairing-receipt').hidden).toBe(false);
+    expect(browser.element('#companion-device-pairing-package').textContent).toBe(
+      receipt.pairingPackage,
+    );
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.companion-device-pairing-request.v1'),
+    ).toBe('11111111-1111-4111-8111-111111111111');
+    expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toContain(
+      receipt.pairingPackage,
+    );
+  });
+
   it('shows one canonical Android package while persisting only its idempotency key', async () => {
     const expiresAt = '2099-09-04T12:10:00.000Z';
     const receipt = pairingReceipt(expiresAt);

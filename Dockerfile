@@ -51,6 +51,10 @@ FROM build-base AS telebirr-device-bridge-build
 
 RUN pnpm --filter @fetanagent/telebirr-device-bridge... run build
 
+FROM build-base AS companion-device-bridge-build
+
+RUN pnpm --filter @fetanagent/companion-device-bridge... run build
+
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
 RUN groupadd --gid 10001 fetanagent \
@@ -221,6 +225,36 @@ COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/apps/tel
 # Do not declare or host-publish port 8084. A separately reviewed HTTPS gateway is the only
 # intended ingress and reaches this listener across a private Docker network.
 CMD ["node", "apps/telebirr-device-bridge/dist/telebirr-device-bridge-main.js"]
+
+FROM runtime-base AS companion-device-bridge
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="fetanagent-companion-device-bridge" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+# Inbound HTTP is reachable only from the private gateway network. The sole outbound authority is
+# a verify-full PostgreSQL connection using the function-only short-lived runtime role.
+ENV HTTP_PROXY="" \
+    http_proxy="" \
+    HTTPS_PROXY="" \
+    https_proxy="" \
+    FTP_PROXY="" \
+    ftp_proxy="" \
+    ALL_PROXY="" \
+    all_proxy=""
+
+USER root
+
+RUN install -d -o root -g root -m 0755 /run/configs
+
+USER 10001:10001
+
+COPY --from=companion-device-bridge-build --chown=10001:10001 /workspace/node_modules ./node_modules
+COPY --from=companion-device-bridge-build --chown=10001:10001 /workspace/packages ./packages
+COPY --from=companion-device-bridge-build --chown=10001:10001 /workspace/apps/companion-device-bridge ./apps/companion-device-bridge
+
+# Port 8085 is never published on the host. Caddy is the only intended caller.
+CMD ["node", "apps/companion-device-bridge/dist/main.js"]
 
 # The executor uses the distribution-provided Chromium at the production-pinned
 # /usr/bin/chromium path. playwright-core does not download or bundle another browser.

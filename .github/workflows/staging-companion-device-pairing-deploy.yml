@@ -1,0 +1,239 @@
+name: Staging companion pairing bridge deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect, deploy, or explicitly stop only the Windows companion pairing bridge
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - deploy
+          - stop
+      confirm_release_sha:
+        description: Type the exact full reviewed release SHA (current main for deploy)
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_pairing_only_operation:
+        description: Type the exact pairing-only confirmation for the selected mode
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_DROPLET_ID: '593344964'
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
+  COMPANION_RUNTIME_ROLE: fetanagent_companion_device_bridge_runtime
+
+jobs:
+  operate:
+    name: Guarded pairing-only bridge operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the reviewed deployment contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate exact target and prepare protected inputs
+        id: protected
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          CONFIRMED_RELEASE: ${{ inputs.confirm_release_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_pairing_only_operation }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          COMPANION_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
+          COMPANION_SIGNER_PRIVATE_BASE64: ${{ secrets.COMPANION_SERVER_SIGNER_PKCS8_BASE64 }}
+          COMPANION_SIGNER_PUBLIC_BASE64: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
+          COMPANION_SIGNER_PUBLIC_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          COMPANION_RUNTIME_MANIFEST_BASE64: ${{ vars.COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$REQUESTED_MODE" =~ ^(inspect|deploy|stop)$ ]]
+          [[ "$CONFIRMED_RELEASE" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CONFIRMED_RELEASE" "$GITHUB_SHA"
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          case "$REQUESTED_MODE" in
+            inspect)
+              [[ "$CONFIRMED_OPERATION" == 'inspect-companion-pairing-bridge-no-money' ]]
+              ;;
+            deploy)
+              [[ "$CONFIRMED_RELEASE" == "$GITHUB_SHA" ]]
+              [[ "$CONFIRMED_OPERATION" == 'deploy-companion-pairing-only-no-money' ]]
+              ;;
+            stop)
+              [[ "$CONFIRMED_OPERATION" == 'stop-companion-pairing-bridge-no-money' ]]
+              ;;
+          esac
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+          protected="$RUNNER_TEMP/fetanagent-companion-bridge-protected"
+          [[ ! -e "$protected" && ! -L "$protected" ]]
+          umask 077
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" > "$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" > "$protected/known-hosts"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+
+          if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
+            [[ "$COMPANION_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$COMPANION_SIGNER_PUBLIC_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" && -n "$COMPANION_SIGNER_PRIVATE_BASE64" &&
+              -n "$COMPANION_SIGNER_PUBLIC_BASE64" && -n "$COMPANION_RUNTIME_MANIFEST_BASE64" ]]
+            printf '%s' "$COMPANION_SIGNER_PRIVATE_BASE64" | base64 --decode \
+              > "$protected/companion-device-bridge-server-signer.pkcs8.der"
+            printf '%s' "$COMPANION_SIGNER_PUBLIC_BASE64" | base64 --decode \
+              > "$protected/companion-device-bridge-server-signer.spki.der"
+            printf '%s' "$COMPANION_RUNTIME_MANIFEST_BASE64" | base64 --decode \
+              > "$protected/companion-device-bridge-runtime-manifest.v1.json"
+            printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$protected/supabase-ca.crt"
+            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+              "$COMPANION_RUNTIME_ROLE" "$COMPANION_RUNTIME_PASSWORD" \
+              "$STAGING_DIRECT_DATABASE_HOST" \
+              > "$protected/companion-device-bridge-database-url"
+            chmod 0600 "$protected"/*
+            openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+            openssl pkey -inform DER \
+              -in "$protected/companion-device-bridge-server-signer.pkcs8.der" \
+              -check -noout >/dev/null 2>&1
+            openssl pkey -inform DER \
+              -in "$protected/companion-device-bridge-server-signer.pkcs8.der" \
+              -pubout -outform DER -out "$protected/derived.spki.der" >/dev/null 2>&1
+            cmp --silent "$protected/derived.spki.der" \
+              "$protected/companion-device-bridge-server-signer.spki.der"
+            [[ "sha256:$(sha256sum "$protected/derived.spki.der" | awk '{print $1}')" == \
+              "$COMPANION_SIGNER_PUBLIC_SHA256" ]]
+            jq -e --arg digest "$COMPANION_SIGNER_PUBLIC_SHA256" '
+              type == "object" and
+              keys == ["contractVersion", "deploymentTarget", "moneyMovementAllowed", "pairingOnly", "serverSignerId", "serverSignerKeyId", "serverSignerPublicKeySpkiSha256"] and
+              .contractVersion == 1 and .deploymentTarget == "staging" and
+              .pairingOnly == true and .moneyMovementAllowed == false and
+              .serverSignerKeyId == "companion-server-staging-v1" and
+              .serverSignerPublicKeySpkiSha256 == $digest
+            ' "$protected/companion-device-bridge-runtime-manifest.v1.json" >/dev/null
+          fi
+
+          helper_sha="$(sha256sum infra/operations/fetanagent-companion-device-pairing-helper.sh | awk '{print $1}')"
+          [[ "$helper_sha" =~ ^[0-9a-f]{64}$ ]]
+          echo "helper_sha=$helper_sha" >> "$GITHUB_OUTPUT"
+          echo "protected=$protected" >> "$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the checksum-bound DigitalOcean capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper verify '${{ steps.protected.outputs.helper_sha }}'"
+
+      - name: Build and seal the exact pairing-only bridge image
+        if: inputs.mode == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          docker build --pull=false --target companion-device-bridge \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --tag "fetanagent-companion-device-bridge:$tag" .
+          [[ "$(docker image inspect "fetanagent-companion-device-bridge:$tag" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}|{{.Config.User}}|{{json .Config.Cmd}}')" == \
+            "$GITHUB_SHA|10001:10001|[\"node\",\"apps/companion-device-bridge/dist/main.js\"]" ]]
+          docker save --output "$RUNNER_TEMP/fetanagent-companion-device-bridge.tar" \
+            "fetanagent-companion-device-bridge:$tag"
+          [[ "$(stat -c %s "$RUNNER_TEMP/fetanagent-companion-device-bridge.tar")" -gt 0 ]]
+
+      - name: Transfer, install, activate, and verify the bridge
+        id: deploy
+        if: inputs.mode == 'deploy'
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.confirm_release_sha }}
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          host='${{ steps.protected.outputs.vm_host }}'
+          helper_sha='${{ steps.protected.outputs.helper_sha }}'
+          incoming="/tmp/fetanagent-companion-$RELEASE_SHA"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$host" \
+            "sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper discard '$RELEASE_SHA' && install -d -m 0700 '$incoming'"
+          scp "${ssh_opts[@]}" \
+            "$RUNNER_TEMP/fetanagent-companion-device-bridge.tar" \
+            infra/compose.companion-device-pairing.yaml \
+            "$protected/companion-device-bridge-database-url" \
+            "$protected/companion-device-bridge-runtime-manifest.v1.json" \
+            "$protected/companion-device-bridge-server-signer.pkcs8.der" \
+            "$protected/supabase-ca.crt" \
+            "fetanagent-admin@$host:$incoming/"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$host" \
+            "sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper install '$RELEASE_SHA' '${RELEASE_SHA:0:12}' '$incoming' && sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper activate '$RELEASE_SHA' '${RELEASE_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper ready '$RELEASE_SHA'"
+          echo 'activated=true' >> "$GITHUB_OUTPUT"
+          echo 'Pairing-only companion bridge deployed continuously; lookup and money movement remain disabled.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Inspect the exact active bridge without mutation
+        if: inputs.mode == 'inspect'
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.confirm_release_sha }}
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+            "sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper ready '$RELEASE_SHA'"
+
+      - name: Explicitly stop only the companion pairing bridge
+        if: inputs.mode == 'stop'
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+            "sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper stop"
+
+      - name: Remove runner and remote transfer material
+        if: always()
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.confirm_release_sha }}
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/fetanagent-companion-bridge-protected"
+          if [[ -d "$protected" && ! -L "$protected" && "$(realpath -- "$protected")" == "$protected" ]]; then
+            if [[ -f "$protected/deploy-key" && -f "$protected/known-hosts" ]]; then
+              ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+              ssh "${ssh_opts[@]}" 'fetanagent-admin@${{ steps.protected.outputs.vm_host }}' \
+                "sudo -n /usr/local/sbin/fetanagent-companion-device-pairing-helper discard '$RELEASE_SHA'" >/dev/null 2>&1 || true
+            fi
+            rm -f -- "$protected"/*
+            rmdir -- "$protected"
+          fi
+          rm -f -- "$RUNNER_TEMP/fetanagent-companion-device-bridge.tar"

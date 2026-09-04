@@ -4,7 +4,12 @@ import { win32 } from 'node:path';
 
 const MAXIMUM_DPAPI_RESULT_BYTES = 4_096;
 const DPAPI_OPERATION_TIMEOUT_MS = 30_000;
-const DPAPI_ENTROPY = 'FetanAgent Windows Companion\0KemerBet local identity\0v1';
+const DPAPI_ENTROPY = Object.freeze({
+  'device-signing-key': 'FetanAgent Windows Companion\0Device signing key\0v1',
+  'local-identity': 'FetanAgent Windows Companion\0KemerBet local identity\0v1',
+} as const);
+
+export type WindowsDataProtectionPurpose = keyof typeof DPAPI_ENTROPY;
 
 export interface WindowsCurrentUserDataProtector {
   protect(cleartext: Buffer): Promise<Buffer>;
@@ -36,8 +41,11 @@ function canonicalBase64(value: string): Buffer {
   return bytes;
 }
 
-function encodedPowerShell(operation: 'Protect' | 'Unprotect'): string {
-  const entropyBase64 = Buffer.from(DPAPI_ENTROPY, 'utf8').toString('base64');
+function encodedPowerShell(
+  operation: 'Protect' | 'Unprotect',
+  purpose: WindowsDataProtectionPurpose,
+): string {
+  const entropyBase64 = Buffer.from(DPAPI_ENTROPY[purpose], 'utf8').toString('base64');
   const script = String.raw`
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Security
@@ -65,6 +73,7 @@ async function invokeDpapi(
   powershellPath: string,
   operation: 'Protect' | 'Unprotect',
   input: Buffer,
+  purpose: WindowsDataProtectionPurpose,
 ): Promise<Buffer> {
   if (input.length < 1 || input.length > MAXIMUM_DPAPI_RESULT_BYTES) unavailable();
   return await new Promise<Buffer>((resolvePromise, rejectPromise) => {
@@ -80,7 +89,13 @@ async function invokeDpapi(
     };
     const child = spawn(
       powershellPath,
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodedPowerShell(operation)],
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-EncodedCommand',
+        encodedPowerShell(operation, purpose),
+      ],
       { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] },
     );
     const timeout = setTimeout(() => {
@@ -124,6 +139,7 @@ async function invokeDpapi(
 
 export function createWindowsCurrentUserDataProtector(
   environment: NodeJS.ProcessEnv = process.env,
+  purpose: WindowsDataProtectionPurpose = 'local-identity',
 ): WindowsCurrentUserDataProtector {
   if (process.platform !== 'win32' && environment.NODE_ENV !== 'test') unavailable();
   const windowsRoot = environment.SystemRoot ?? environment.WINDIR;
@@ -144,7 +160,8 @@ export function createWindowsCurrentUserDataProtector(
   );
   if (!existsSync(powershellPath)) unavailable();
   return Object.freeze({
-    protect: (cleartext: Buffer) => invokeDpapi(powershellPath, 'Protect', cleartext),
-    unprotect: (ciphertext: Buffer) => invokeDpapi(powershellPath, 'Unprotect', ciphertext),
+    protect: (cleartext: Buffer) => invokeDpapi(powershellPath, 'Protect', cleartext, purpose),
+    unprotect: (ciphertext: Buffer) =>
+      invokeDpapi(powershellPath, 'Unprotect', ciphertext, purpose),
   });
 }

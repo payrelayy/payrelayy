@@ -8,6 +8,7 @@ import {
   readSqlIntegrationEnvironment,
   type SqlIntegrationEnvironment,
 } from './environment.js';
+import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
@@ -9550,6 +9551,10 @@ describe('disposable SQL migration baseline', () => {
 });
 
 registerDepositExecutionCommandSqlTests(() => client);
+registerCompanionDevicePairingSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
 registerDryRunDepositProofIntakeSqlTests(() => client);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);

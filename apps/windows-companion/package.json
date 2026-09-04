@@ -1,9 +1,10 @@
 {
   "name": "@fetanagent/windows-companion",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/agent-platform-companion-contracts": "workspace:*",
     "@fetanagent/agent-platform-kemerbet": "workspace:*",
     "playwright-core": "1.62.1"
   },

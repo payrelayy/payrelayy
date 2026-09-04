@@ -16,20 +16,26 @@ Duplicate `Content-Type`, content encoding, query-bearing paths, extra JSON keys
 keys, wrong command paths, altered payloads, and capability escalation fail closed.
 
 Enrollment is a one-use Owner-created challenge. The phone self-signs its pairing request with the
-P-256 key generated in Android Keystore. The bridge atomically consumes the challenge and returns a
-server-signed certificate binding that device/key to one pilot revision, receiver revision/profile,
-receiver configuration digest, app floor, and assignment signer. Only public keys cross this
-boundary.
+P-256 key generated in Android Keystore. The bridge atomically claims the exact signed request,
+signs the certificate, and completes the claim before replying. If that reply is lost, an exact
+retry receives the original signed certificate—even after the short pairing-request window has
+closed, provided the certificate itself is still active. A different request cannot consume or
+recover that claim. The certificate binds the device/key to one pilot revision, receiver
+revision/profile, receiver configuration digest, app floor, and assignment signer. Only public keys
+cross this boundary.
 
 Commands are short-lived and device-signed. The request signature binds the exact command, path,
 typed payload digest, enrollment, nonce, and validity window. Short request expiry prevents a stale
 captured request from authorizing a later provider lookup; it is not a calendar shutdown and does
 not stop the product on a fixed date. Enrollment remains explicitly revocable.
 
-The replay dependency is intentionally atomic. A first request claims its replay identity; after
-dispatch the bridge stores the exact signed response. An exact retry after an uncertain network
-response gets the original acknowledgement and does not dispatch a second assignment poll or
-evidence stage. In-progress duplicates receive a non-sensitive retry response.
+The pairing and command replay dependencies are intentionally atomic. A first request claims its
+replay identity; after signing or dispatch the bridge stores the exact signed response. An exact
+retry after an uncertain network response gets the original certificate or acknowledgement and
+does not consume another pairing challenge, dispatch a second assignment poll, or stage evidence a
+second time. In-progress duplicates receive a non-sensitive retry response. An uncertain pairing
+completion is never released because it may already have committed; a later exact retry resolves
+that state safely.
 
 Assignments are accepted from the injected source only after their signer key, signature, expiry,
 device, pilot, and every receiver binding match the certificate. Uploads additionally verify the
@@ -67,9 +73,10 @@ adapter is the reviewed production candidate once the isolated broker lifecycle 
 
 ## Verification
 
-The package tests cover valid pairing, certificate issuance, signed polling, exact cached replay,
-payload alteration, duplicate headers, content encoding, query paths, wrong receiver bindings,
-wrong assignment signer material, exact local broker request mapping, transport fail-closed
-behavior, and the absence of database/Supabase/settlement runtime imports. The shared protocol
-package adds canonical local broker codecs, hostile accessor/proxy checks, and stable
+The package tests cover valid pairing, certificate issuance, lost pairing responses, uncertain
+pairing completion, in-progress pairing, signer failure, signed polling, exact cached command
+replay, payload alteration, duplicate headers, content encoding, query paths, wrong receiver
+bindings, wrong assignment signer material, exact local broker request mapping, transport
+fail-closed behavior, and the absence of database/Supabase/settlement runtime imports. The shared
+protocol package adds canonical local broker codecs, hostile accessor/proxy checks, and stable
 TypeScript/Android canonical vectors.

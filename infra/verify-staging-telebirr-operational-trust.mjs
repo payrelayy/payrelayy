@@ -124,6 +124,10 @@ assert.match(androidWorkflow, /Verified using v1 scheme \(JAR signing\): false/)
 assert.match(androidWorkflow, /Verified using v2 scheme .*: true/);
 assert.match(androidWorkflow, /Number of signers: 1/);
 assert.match(androidWorkflow, /V2 Signer: certificate SHA-256 digest/);
+assert.match(
+  androidWorkflow,
+  /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\.0\.1/,
+);
 assert.match(androidWorkflow, /retention-days: 14/);
 assert.match(androidWorkflow, /Assignment polling and money movement are disabled/);
 

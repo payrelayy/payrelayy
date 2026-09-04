@@ -18,8 +18,10 @@ The deployable source contract consists of:
 - [`verify-telebirr-device-pilot-deployment.mjs`](verify-telebirr-device-pilot-deployment.mjs), plus
   the Linux `docker compose config` gate in the quality workflow; and
 - the standalone [`../android/telebirr-verifier`](../android/telebirr-verifier) application, whose
-  inert review build contains the fixed bridge transport, signed protocol, encrypted queue, and
-  bounded `specialUse` foreground lifecycle without production enrollment.
+  inert source default contains the fixed bridge transport, signed protocol, encrypted queue, and
+  bounded `specialUse` foreground lifecycle; and the signed 0.5.0 pairing-only prerelease at GitHub
+  tag `android-telebirr-pairing-v0.5.0`, which remains unenrolled and cannot poll assignments or
+  observe receipts.
 
 This source contract is not proof that the stack is live. Until the credentials, manifests,
 database roles, gateway replacement, containers, DNS, TLS, Android enrollment, and signed smoke

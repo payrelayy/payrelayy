@@ -206,7 +206,7 @@ where namespace.nspname = 'app'
 
 select (
   select coalesce(
-    pg_catalog.array_agg(namespace.nspname order by namespace.nspname),
+    pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname),
     '{}'::text[]
   ) = array['app', 'public']::text[]
   from pg_catalog.pg_namespace as namespace

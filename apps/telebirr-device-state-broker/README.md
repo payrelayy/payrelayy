@@ -14,6 +14,13 @@ It has no generic SQL API and no table, Supabase `service_role`, claim, settleme
 execution, wallet, or money capability. Pairing stores only the challenge digest. Evidence staging
 does not invoke the trusted-verifier completion boundary.
 
-This package does not yet listen on a socket or port and is not deployed. The next composition
-slice will expose these nine fixed operations through one strict local Unix-socket protocol so the
-internet-facing bridge remains free of PostgreSQL code and credentials.
+The package now includes a strict local-only server for exactly those nine operations at the fixed
+Unix socket `/run/fetanagent-telebirr-device-state/state.sock`. It accepts no TCP address, host,
+URL, generic RPC method, or database command. Startup requires a non-root-owned runtime directory
+that resolves to itself with mode `0700`; the created socket is inode-checked and mode `0600`.
+Every request and response is canonical, bounded, operation/path-bound, and carries the exact
+no-money safety contract.
+
+There is still no executable start entrypoint and nothing is deployed or provisioned by this
+package. The next composition slice will add strict file-backed configuration and a fail-closed
+application lifecycle around the PostgreSQL runtime and this socket server.

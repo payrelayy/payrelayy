@@ -8,9 +8,11 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  KEMERBET_AGENT_API_ORIGIN,
   KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL,
   KEMERBET_AGENT_LOGIN_URL,
   KEMERBET_AGENT_LOGIN_RETRY_URL,
+  KEMERBET_AGENT_PLAYER_LOOKUP_PATH,
   KEMERBET_ENROLLMENT_ADAPTER_DIGEST,
   KEMERBET_ENROLLMENT_ADAPTER_MANIFEST,
   KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS,
@@ -21,11 +23,77 @@ import {
   KEMERBET_LOCAL_IDENTITY_VALUE_SELECTOR,
   KEMERBET_LOCAL_SESSION_FAILURE_CAPTCHA_SELECTOR,
   KEMERBET_LOCAL_SESSION_FAILURE_SIGN_IN_FORM_SELECTOR,
+  KEMERBET_READ_ONLY_LOOKUP_RESPONSE_CONTRACT,
   KEMERBET_SESSION_POLICY,
   classifyKemerBetEnrollmentPage,
   kemerBetEnrollmentAdapter,
   parseKemerBetSessionGeneration,
+  validateKemerBetReadOnlyPlayerLookupResponse,
 } from './index.js';
+
+describe('KemerBet read-only Player lookup response', () => {
+  const response = (overrides: Record<string, unknown> = {}) =>
+    Buffer.from(
+      JSON.stringify({
+        value: {
+          id: 101,
+          externalId: '28379330',
+          currencyCode: 'ETB',
+          userName: 'redacted-at-boundary',
+          email: null,
+          ...overrides,
+        },
+      }),
+      'utf8',
+    );
+
+  it('accepts only an exact ETB response bound to the requested external ID', () => {
+    expect(
+      validateKemerBetReadOnlyPlayerLookupResponse({
+        body: response(),
+        requestedPlayerId: '28379330',
+        statusCode: 200,
+      }),
+    ).toBe(true);
+    for (const body of [
+      response({ externalId: '28379331' }),
+      response({ currencyCode: 'USD' }),
+      response({ id: 0 }),
+      response({ userName: null, email: null }),
+    ]) {
+      expect(
+        validateKemerBetReadOnlyPlayerLookupResponse({
+          body,
+          requestedPlayerId: '28379330',
+          statusCode: 200,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it('pins one non-financial GET contract and rejects malformed transport bytes', () => {
+    expect(KEMERBET_AGENT_API_ORIGIN).toBe('https://admin-api.agt-digi.com');
+    expect(KEMERBET_AGENT_PLAYER_LOOKUP_PATH).toBe('/Player/GeneralInfoByExternalId');
+    expect(KEMERBET_READ_ONLY_LOOKUP_RESPONSE_CONTRACT).toMatchObject({
+      currencyCode: 'ETB',
+      statusCode: 200,
+    });
+    expect(
+      validateKemerBetReadOnlyPlayerLookupResponse({
+        body: Buffer.from('{', 'utf8'),
+        requestedPlayerId: '28379330',
+        statusCode: 200,
+      }),
+    ).toBe(false);
+    expect(
+      validateKemerBetReadOnlyPlayerLookupResponse({
+        body: response(),
+        requestedPlayerId: '28379330',
+        statusCode: 404,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('KemerBet enrollment page classification', () => {
   it.each([KEMERBET_AGENT_LOGIN_URL, KEMERBET_AGENT_LOGIN_RETRY_URL])(

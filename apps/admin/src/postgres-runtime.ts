@@ -11,11 +11,13 @@ import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registrat
 import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot.js';
 import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
+import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
 
 export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly companionDevicePairing?: Pick<PostgresOwnerCompanionDevicePairing, 'issue'> | undefined;
+  readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
   readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
@@ -144,8 +146,14 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)', 'execute') as companion_device_pairing_issue_allowed,
     has_function_privilege(current_user, 'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)', 'execute') as companion_device_revoke_allowed,
+    has_function_privilege(current_user, 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)', 'execute') as companion_lookup_issue_allowed,
+    has_function_privilege(current_user, 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)', 'execute') as companion_lookup_status_allowed,
     not has_function_privilege(current_user, 'app.claim_agent_platform_companion_pairing(uuid,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)', 'execute') as internal_companion_device_pairing_claim_denied,
     not has_function_privilege(current_user, 'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)', 'execute') as internal_companion_device_pairing_complete_denied,
+    not has_function_privilege(current_user, 'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)', 'execute') as internal_companion_lookup_claim_denied,
+    not has_function_privilege(current_user, 'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)', 'execute') as internal_companion_lookup_complete_denied,
+    not has_function_privilege(current_user, 'app.release_agent_platform_companion_lookup_assignment(text)', 'execute') as internal_companion_lookup_release_denied,
+    not has_function_privilege(current_user, 'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)', 'execute') as internal_companion_lookup_result_denied,
     has_function_privilege(current_user, 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)', 'execute') as telebirr_device_pairing_issue_allowed,
     not has_function_privilege(current_user, 'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz)', 'execute') as internal_telebirr_device_pairing_issue_denied,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
@@ -183,7 +191,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 30
+      select count(*) = 32
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'
@@ -217,6 +225,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure
           ,'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)'::regprocedure
+          ,'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)'::regprocedure
+          ,'app.get_agent_platform_companion_exact_five_lookup_status(uuid)'::regprocedure
           ,'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
@@ -275,6 +285,12 @@ export async function createOwnerControlPostgresRuntime(
     }),
     companionDevicePairing: config.companionDevicePairing.configured
       ? new PostgresOwnerCompanionDevicePairing(
+          { query: async (sql, values) => pool.query(sql, [...values]) },
+          config.companionDevicePairing.serverSignerKeyId,
+        )
+      : undefined,
+    companionLookup: config.companionDevicePairing.configured
+      ? new PostgresOwnerCompanionLookup(
           { query: async (sql, values) => pool.query(sql, [...values]) },
           config.companionDevicePairing.serverSignerKeyId,
         )

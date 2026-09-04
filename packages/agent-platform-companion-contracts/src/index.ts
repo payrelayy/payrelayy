@@ -21,6 +21,10 @@ export const AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM = 'sha256' as const;
 export const AGENT_PLATFORM_COMPANION_DEVICE_PLATFORM = 'windows' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_PATH =
   '/v1/companion/device/enrollments:pair' as const;
+export const AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH =
+  '/v1/companion/device/lookup-assignments:poll' as const;
+export const AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH =
+  '/v1/companion/device/lookup-results:submit' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE =
   'application/vnd.fetanagent.companion-device-bridge+json' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX =
@@ -42,7 +46,7 @@ const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const P1363_BASE64URL_PATTERN = /^[A-Za-z0-9_-]{86}$/u;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const PATH_PATTERN = /^\/[a-z0-9][a-z0-9/_-]{0,191}$/u;
+const PATH_PATTERN = /^\/[a-z0-9][a-z0-9/_:-]{0,191}$/u;
 const MAX_SPKI_BYTES = 512;
 const MAX_PAIRING_LIFETIME_MS = 10 * 60 * 1_000;
 const MAX_HTTP_REQUEST_LIFETIME_MS = 5 * 60 * 1_000;
@@ -1768,6 +1772,51 @@ export function deriveKemerBetExactFiveLookupResultReplayIdentity(
           ['deviceId', envelope.body.deviceId],
           ['deviceKeyId', envelope.body.deviceKeyId],
           ['bodyDigest', envelope.bodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+/** Canonical empty-query digest used by both fixed companion lookup endpoints. */
+export function digestCompanionLookupEmptyQuery(): string {
+  return sha256(encodeFields('fetanagent:agent-platform-companion:lookup-empty-query:v1', []));
+}
+
+/** Binds a poll request to the exact presented enrollment certificate without a circular digest. */
+export function digestCompanionLookupPollContent(
+  certificateBodyDigestCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  return certificateBodyDigest
+    ? sha256(
+        encodeFields('fetanagent:agent-platform-companion:lookup-poll-content:v1', [
+          ['certificateBodyDigest', certificateBodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+/** Binds a submission request to the exact signed assignment and redacted signed result. */
+export function digestCompanionLookupResultContent(
+  assignmentCandidate: unknown,
+  resultCandidate: unknown,
+): string | undefined {
+  const assignment = decodeSignedKemerBetExactFiveLookupAssignment(assignmentCandidate);
+  const result = decodeSignedKemerBetExactFiveLookupResult(resultCandidate);
+  const assignmentDigest =
+    assignment && digestKemerBetExactFiveLookupAssignmentBody(assignment.body);
+  const resultDigest = result && digestKemerBetExactFiveLookupResultBody(result.body);
+  const resultReplayIdentity = result && deriveKemerBetExactFiveLookupResultReplayIdentity(result);
+  return assignment &&
+    result &&
+    assignmentDigest === assignment.bodyDigest &&
+    resultDigest === result.bodyDigest &&
+    resultReplayIdentity
+    ? sha256(
+        encodeFields('fetanagent:agent-platform-companion:lookup-result-content:v1', [
+          ['assignmentBodyDigest', assignment.bodyDigest],
+          ['resultBodyDigest', result.bodyDigest],
+          ['resultReplayIdentity', resultReplayIdentity],
         ]),
       )
     : undefined;

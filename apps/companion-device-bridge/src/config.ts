@@ -25,7 +25,7 @@ export const COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE =
 export const COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE =
   '/run/secrets/companion_device_bridge_server_signer.pkcs8.der' as const;
 export const COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE =
-  '/run/configs/companion_device_bridge_runtime_manifest.v1.json' as const;
+  '/run/configs/companion_device_bridge_runtime_manifest.v2.json' as const;
 export const COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE =
   '/run/configs/supabase_ca_certificate' as const;
 
@@ -278,16 +278,20 @@ function runtimeManifestFrom(value: string): CompanionDeviceBridgeRuntimeManifes
   const record = plainCanonicalRecord(value, [
     'contractVersion',
     'deploymentTarget',
-    'pairingOnly',
+    'pairingAllowed',
+    'exactFiveReadOnlyLookupAllowed',
+    'financialActionAllowed',
     'moneyMovementAllowed',
     'serverSignerId',
     'serverSignerKeyId',
     'serverSignerPublicKeySpkiSha256',
   ]);
   if (
-    record.contractVersion !== 1 ||
+    record.contractVersion !== 2 ||
     record.deploymentTarget !== 'staging' ||
-    record.pairingOnly !== true ||
+    record.pairingAllowed !== true ||
+    record.exactFiveReadOnlyLookupAllowed !== true ||
+    record.financialActionAllowed !== false ||
     record.moneyMovementAllowed !== false ||
     typeof record.serverSignerId !== 'string' ||
     !UUID_V4_PATTERN.test(record.serverSignerId) ||
@@ -480,7 +484,7 @@ export function loadCompanionDeviceBridgeConfig(
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
-    !exactBoolean(environment.COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED) ||
+    !exactBoolean(environment.COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED) ||
     environment.COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET !== 'staging' ||
     environment.NODE_EXTRA_CA_CERTS !== COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE
   ) {
@@ -531,7 +535,9 @@ export function redactedCompanionDeviceBridgeConfigForLog(
   deploymentTarget: 'staging' | undefined;
   connectionConfigured: boolean;
   signerConfigured: boolean;
-  pairingOnly: true;
+  pairingAllowed: true;
+  exactFiveReadOnlyLookupAllowed: true;
+  financialActionAllowed: false;
   moneyMovementAllowed: false;
 }> {
   return Object.freeze({
@@ -539,7 +545,9 @@ export function redactedCompanionDeviceBridgeConfigForLog(
     deploymentTarget: config.enabled ? config.deploymentTarget : undefined,
     connectionConfigured: config.enabled,
     signerConfigured: config.enabled,
-    pairingOnly: true,
+    pairingAllowed: true,
+    exactFiveReadOnlyLookupAllowed: true,
+    financialActionAllowed: false,
     moneyMovementAllowed: false,
   });
 }

@@ -8,6 +8,8 @@ import {
   AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
   AGENT_PLATFORM_COMPANION_HTTP_TRANSCRIPT_VERSION,
+  AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PAIRING_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
   AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION,
@@ -38,6 +40,9 @@ import {
   deriveKemerBetExactFiveLookupAssignmentReplayIdentity,
   digestCompanionEnrollmentCertificateBody,
   digestCompanionHttpRequestBody,
+  digestCompanionLookupEmptyQuery,
+  digestCompanionLookupPollContent,
+  digestCompanionLookupResultContent,
   digestCompanionPairingPublicPayload,
   digestCompanionPlayerId,
   digestKemerBetExactFiveLookupAssignmentBody,
@@ -367,6 +372,57 @@ function fixture() {
 }
 
 describe('agent-platform companion contracts', () => {
+  it('uses fixed read-only lookup paths and domain-separated request-content digests', () => {
+    const value = fixture();
+    expect(AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH).toBe(
+      '/v1/companion/device/lookup-assignments:poll',
+    );
+    expect(AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH).toBe(
+      '/v1/companion/device/lookup-results:submit',
+    );
+    expect(digestCompanionLookupEmptyQuery()).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(digestCompanionLookupPollContent(value.certificate.bodyDigest)).toMatch(
+      /^sha256:[0-9a-f]{64}$/u,
+    );
+    expect(digestCompanionLookupResultContent(value.assignment, value.result)).toMatch(
+      /^sha256:[0-9a-f]{64}$/u,
+    );
+    for (const [canonicalPath, contentDigest] of [
+      [
+        AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+        digestCompanionLookupPollContent(value.certificate.bodyDigest),
+      ],
+      [
+        AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+        digestCompanionLookupResultContent(value.assignment, value.result),
+      ],
+    ] as const) {
+      const body = httpBody(value.certificate.body, {
+        canonicalPath,
+        queryDigest: digestCompanionLookupEmptyQuery(),
+        contentDigest: contentDigest!,
+      });
+      const request = signedHttp(body, value.device.privateKey);
+      expect(decodeSignedCompanionHttpRequest(request)).toEqual(request);
+      expect(
+        verifySignedCompanionHttpRequest(
+          request,
+          value.certificate,
+          value.server.spki,
+          '2026-09-02T10:02:00.000Z',
+        ),
+      ).toBe(true);
+    }
+    expect(digestCompanionLookupPollContent(`sha256:${'0'.repeat(64)}`)).not.toBe(
+      digestCompanionLookupPollContent(value.certificate.bodyDigest),
+    );
+    expect(
+      digestCompanionLookupResultContent(value.assignment, {
+        ...value.result,
+        bodyDigest: `sha256:${'0'.repeat(64)}`,
+      }),
+    ).toBeUndefined();
+  });
   it('pins P-256/SHA-256, P1363/base64url, Windows, and a no-money protocol', () => {
     expect({
       version: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,

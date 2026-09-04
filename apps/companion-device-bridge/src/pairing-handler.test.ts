@@ -64,7 +64,7 @@ function pairingRequest(): SignedCompanionPairingRequest {
     devicePublicKeySpkiSha256: sha(spki),
     signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
     devicePlatform: AGENT_PLATFORM_COMPANION_DEVICE_PLATFORM,
-    companionVersion: '0.1.4',
+    companionVersion: '0.1.5',
     issuedAt: '2026-09-04T12:00:00.000Z',
     expiresAt: '2026-09-04T12:10:00.000Z',
     oneUse: true,

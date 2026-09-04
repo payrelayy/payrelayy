@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 import {
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+  AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PAIRING_PATH,
 } from '@fetanagent/agent-platform-companion-contracts';
 
@@ -83,7 +85,9 @@ function declaredBodyLength(
   const expects = headerValues(headers, 'expect');
   if (
     method !== 'POST' ||
-    path !== AGENT_PLATFORM_COMPANION_PAIRING_PATH ||
+    (path !== AGENT_PLATFORM_COMPANION_PAIRING_PATH &&
+      path !== AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH &&
+      path !== AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH) ||
     contentTypes?.length !== 1 ||
     contentTypes[0] !== AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE ||
     accepts?.length !== 1 ||
@@ -149,7 +153,9 @@ function safeResponse(candidate: CompanionBridgeHttpResponse): CompanionBridgeHt
     typeof candidate.headers !== 'object' ||
     candidate.headers === null ||
     !(candidate.body instanceof Uint8Array) ||
-    candidate.body.byteLength < 1 ||
+    (candidate.statusCode === 204
+      ? candidate.body.byteLength !== 0
+      : candidate.body.byteLength < 1) ||
     candidate.body.byteLength > COMPANION_DEVICE_BRIDGE_MAX_RESPONSE_BYTES
   ) {
     return unavailableError();

@@ -16,10 +16,21 @@ const CLAIM_PAIRING_FUNCTION =
 const COMPLETE_PAIRING_FUNCTION =
   'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)';
 const RELEASE_PAIRING_FUNCTION = 'app.release_agent_platform_companion_pairing(text)';
+const CLAIM_LOOKUP_FUNCTION =
+  'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)';
+const COMPLETE_LOOKUP_FUNCTION =
+  'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)';
+const RELEASE_LOOKUP_FUNCTION = 'app.release_agent_platform_companion_lookup_assignment(text)';
+const ACCEPT_LOOKUP_RESULT_FUNCTION =
+  'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
 const ALLOWED_FUNCTIONS = [
   CLAIM_PAIRING_FUNCTION,
   COMPLETE_PAIRING_FUNCTION,
   RELEASE_PAIRING_FUNCTION,
+  CLAIM_LOOKUP_FUNCTION,
+  COMPLETE_LOOKUP_FUNCTION,
+  RELEASE_LOOKUP_FUNCTION,
+  ACCEPT_LOOKUP_RESULT_FUNCTION,
 ] as const;
 const ALLOWED_FUNCTIONS_SQL = ALLOWED_FUNCTIONS.map(
   (signature) => `pg_catalog.to_regprocedure('${signature}')`,
@@ -172,7 +183,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         )
     ) as no_non_system_base_object_access,
     (
-      select count(*) = 3
+      select count(*) = 7
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
       where namespace.nspname not in ('pg_catalog', 'information_schema')
@@ -199,7 +210,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and routine.prosecdef and routine.oid not in (${ALLOWED_FUNCTIONS_SQL})
     ) as no_reachable_unallowlisted_security_definer,
     (
-      select count(*) = 3 and pg_catalog.bool_and(
+      select count(*) = 7 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog']::text[]
         and owner.rolname = 'postgres'
@@ -209,7 +220,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
       where routine.oid in (${ALLOWED_FUNCTIONS_SQL})
     ) as allowed_functions_hardened,
     (
-      select count(*) = 3 and pg_catalog.bool_and(
+      select count(*) = 7 and pg_catalog.bool_and(
         routine.pronargs = expected.argument_count
         and routine.pronargdefaults = 0
         and routine.proretset = expected.returns_set
@@ -223,7 +234,16 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         (pg_catalog.to_regprocedure('${COMPLETE_PAIRING_FUNCTION}'), 5, false,
           'pg_catalog.bool', 'boolean'),
         (pg_catalog.to_regprocedure('${RELEASE_PAIRING_FUNCTION}'), 1, false,
-          'pg_catalog.bool', 'boolean')
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${CLAIM_LOOKUP_FUNCTION}'), 10, true,
+          'pg_catalog.record',
+          'table(claim_state text, assignment_body jsonb, signed_assignment jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_LOOKUP_FUNCTION}'), 4, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${RELEASE_LOOKUP_FUNCTION}'), 1, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,
+          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')
       ) expected(oid, argument_count, returns_set, return_type, result)
       join pg_catalog.pg_proc routine on routine.oid = expected.oid
     ) as allowed_function_contracts_exact,

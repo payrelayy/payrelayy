@@ -9,6 +9,7 @@ import {
   type SqlIntegrationEnvironment,
 } from './environment.js';
 import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
+import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
@@ -9552,6 +9553,10 @@ describe('disposable SQL migration baseline', () => {
 
 registerDepositExecutionCommandSqlTests(() => client);
 registerCompanionDevicePairingSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerCompanionExactFiveLookupSqlTests(
   () => client,
   () => ownerAdminId,
 );

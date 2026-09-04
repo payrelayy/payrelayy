@@ -253,8 +253,8 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
               This companion release verifies the exact agent-header identity locally and stores
               only a Windows-protected fingerprint. It has no payment execution capability.
               Provider financial requests are blocked even if KemerBet shows a Transfer button.
-              The pairing package below grants public-key enrollment only. Exact-five lookup is
-              not enabled yet.
+              The pairing package below grants public-key enrollment only. A separate signed
+              command can authorize exactly five find-only Player-ID lookups.
             </p>
             <div class="actions companion-actions">
               <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
@@ -276,7 +276,7 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
                 Create one ten-minute package after the exact local KemerBet identity is verified.
                 The companion generates its private P-256 key on this computer and protects it with
                 Windows DPAPI. Only the public key is enrolled. Lookup, Amount, Notes, Transfer,
-                settlement, and money movement remain disabled.
+                settlement, and money movement are not granted by the pairing package.
               </p>
               <p class="request-meta" id="companion-device-pairing-status">
                 Sign in to check pairing readiness.
@@ -301,6 +301,30 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
                   </button>
                 </div>
               </div>
+            </div>
+            <div class="device-pairing" aria-labelledby="companion-lookup-title">
+              <p class="status-ok">Signed read-only readiness check</p>
+              <h3 id="companion-lookup-title">Run exact-five KemerBet lookup</h3>
+              <p class="receipt-label">
+                This sends the current five eligible Player IDs only to the paired local companion.
+                It performs five sequential Find actions and returns only redacted counts. Amount,
+                Notes, Transfer, settlement, execution, and money movement remain disabled.
+              </p>
+              <p class="request-meta" id="companion-lookup-status" role="status"
+                aria-live="polite" aria-atomic="true">
+                Sign in to check lookup readiness.
+              </p>
+              <form id="companion-lookup-form">
+                <label class="confirmation-row" for="companion-lookup-confirmation">
+                  <input id="companion-lookup-confirmation" type="checkbox" />
+                  I approve one expiring, signed command for exactly five find-only lookups. No
+                  amount or final action is authorized.
+                </label>
+                <button id="companion-lookup-button" type="submit" disabled>
+                  Run five read-only lookups
+                </button>
+              </form>
+              <dl class="status-grid" id="companion-lookup-result" hidden></dl>
             </div>
           </div>
           <div class="kemerbet-session" aria-labelledby="kemerbet-session-title" hidden inert>
@@ -569,6 +593,11 @@ const companionDevicePairingReceipt = document.querySelector('#companion-device-
 const companionDevicePairingPackage = document.querySelector('#companion-device-pairing-package');
 const companionDevicePairingCopyButton = document.querySelector('#companion-device-pairing-copy-button');
 const companionDevicePairingClearButton = document.querySelector('#companion-device-pairing-clear-button');
+const companionLookupForm = document.querySelector('#companion-lookup-form');
+const companionLookupConfirmation = document.querySelector('#companion-lookup-confirmation');
+const companionLookupButton = document.querySelector('#companion-lookup-button');
+const companionLookupStatus = document.querySelector('#companion-lookup-status');
+const companionLookupResult = document.querySelector('#companion-lookup-result');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
 
 let accessToken;
@@ -589,6 +618,9 @@ let telebirrDevicePairingExpiryTimer;
 let pendingCompanionDevicePairingRequestId;
 let currentCompanionDevicePairing;
 let companionDevicePairingExpiryTimer;
+let pendingCompanionLookupRequestId;
+let currentCompanionLookup;
+let companionLookupPollTimer;
 let eligiblePilotPlayers = [];
 let eligibleReadinessCohortPlayerCount = 0;
 let readinessCohortPrepared = false;
@@ -619,6 +651,8 @@ const TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
   'fetanagent.owner.telebirr-device-pairing-request.v1';
 const COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
   'fetanagent.owner.companion-device-pairing-request.v1';
+const COMPANION_LOOKUP_REQUEST_STORAGE_KEY =
+  'fetanagent.owner.companion-exact-five-lookup-request.v1';
 const OWNER_TOKEN_REQUEST_TIMEOUT_MS = 10 * 1_000;
 // Caddy's Owner upstream first-header deadline is 30 seconds. Fail locally first so the UI can
 // reconcile an uncertain mutation using the same idempotency key instead of waiting on a gateway
@@ -1108,6 +1142,40 @@ function clearPendingCompanionDevicePairingRequestId() {
   }
 }
 
+function readPendingCompanionLookupRequestId() {
+  if (pendingCompanionLookupRequestId) return pendingCompanionLookupRequestId;
+  try {
+    const stored = window.sessionStorage.getItem(COMPANION_LOOKUP_REQUEST_STORAGE_KEY);
+    if (!validOwnerMutationRequestId(stored)) {
+      window.sessionStorage.removeItem(COMPANION_LOOKUP_REQUEST_STORAGE_KEY);
+      return undefined;
+    }
+    pendingCompanionLookupRequestId = stored;
+    return stored;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistPendingCompanionLookupRequestId(requestId) {
+  if (!validOwnerMutationRequestId(requestId)) throw new Error('invalid_request_id');
+  pendingCompanionLookupRequestId = requestId;
+  try {
+    window.sessionStorage.setItem(COMPANION_LOOKUP_REQUEST_STORAGE_KEY, requestId);
+  } catch {
+    // The in-memory request ID still prevents a blind retry in this tab.
+  }
+}
+
+function clearPendingCompanionLookupRequestId() {
+  pendingCompanionLookupRequestId = undefined;
+  try {
+    window.sessionStorage.removeItem(COMPANION_LOOKUP_REQUEST_STORAGE_KEY);
+  } catch {
+    // The in-memory value is already cleared after an authoritative response.
+  }
+}
+
 function signOut(message = 'Signed out.') {
   ownerAuthGeneration += 1;
   clearOwnerRefreshTimer();
@@ -1136,6 +1204,10 @@ function signOut(message = 'Signed out.') {
   companionDevicePairingConfirmation.checked = false;
   companionDevicePairingStatus.textContent = 'Sign in to check pairing readiness.';
   companionDevicePairingButton.disabled = true;
+  clearCompanionLookup();
+  companionLookupConfirmation.checked = false;
+  companionLookupStatus.textContent = 'Sign in to check lookup readiness.';
+  companionLookupButton.disabled = true;
   clearPilot();
   clearDepositIntake();
   invitePanel.hidden = true;
@@ -2326,7 +2398,7 @@ function validCompanionDevicePairingReceipt(value) {
         !/^[A-Za-z0-9_-]+$/.test(grant.serverSigningPublicKeySpki) ||
         typeof grant.serverSigningPublicKeySpkiSha256 !== 'string' ||
         !/^sha256:[0-9a-f]{64}$/.test(grant.serverSigningPublicKeySpkiSha256) ||
-        grant.minimumCompanionVersion !== '0.1.4' || grant.oneUse !== true ||
+        grant.minimumCompanionVersion !== '0.1.5' || grant.oneUse !== true ||
         grant.accountMutationAllowed !== false || grant.balanceMutationAllowed !== false ||
         grant.providerMutationAllowed !== false || grant.paymentAllowed !== false ||
         grant.depositAllowed !== false || grant.withdrawAllowed !== false ||
@@ -2387,6 +2459,210 @@ function showCompanionDevicePairing(receipt) {
     updateCompanionDevicePairingAvailability();
   }, delay);
   updateCompanionDevicePairingAvailability();
+}
+
+function validCompanionLookupStatus(value, issueReceipt = false) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const terminal = value.state === 'completed' || value.state === 'review_required';
+  const keys = [
+    'assignmentId', 'state', 'issuedAt', 'expiresAt', 'playerCount', 'platformCode',
+    'lookupMode', 'identifiersRedacted', 'transferDisabled', 'moneyMovementAllowed',
+    'moneyMoved',
+  ];
+  if (terminal) keys.push('completedAt', 'foundCount', 'notFoundCount', 'reviewRequiredCount');
+  if (issueReceipt) keys.push('alreadyIssued');
+  if (Object.keys(value).sort().join(',') !== keys.sort().join(',') ||
+      typeof value.assignmentId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.assignmentId) ||
+      !['pending', 'claimed', 'signed', 'completed', 'review_required', 'expired'].includes(value.state) ||
+      typeof value.issuedAt !== 'string' || new Date(value.issuedAt).toISOString() !== value.issuedAt ||
+      typeof value.expiresAt !== 'string' || new Date(value.expiresAt).toISOString() !== value.expiresAt ||
+      Date.parse(value.expiresAt) <= Date.parse(value.issuedAt) ||
+      Date.parse(value.expiresAt) - Date.parse(value.issuedAt) > 10 * 60 * 1_000 ||
+      value.playerCount !== 5 || value.platformCode !== 'kemerbet' ||
+      value.lookupMode !== 'find_only' || value.identifiersRedacted !== true ||
+      value.transferDisabled !== true || value.moneyMovementAllowed !== false ||
+      value.moneyMoved !== false ||
+      (issueReceipt && typeof value.alreadyIssued !== 'boolean')) return undefined;
+  if (terminal) {
+    if (typeof value.completedAt !== 'string' ||
+        new Date(value.completedAt).toISOString() !== value.completedAt ||
+        !Number.isInteger(value.foundCount) || value.foundCount < 0 || value.foundCount > 5 ||
+        !Number.isInteger(value.notFoundCount) || value.notFoundCount < 0 || value.notFoundCount > 5 ||
+        !Number.isInteger(value.reviewRequiredCount) || value.reviewRequiredCount < 0 ||
+        value.reviewRequiredCount > 5 ||
+        value.foundCount + value.notFoundCount + value.reviewRequiredCount !== 5) return undefined;
+  }
+  return value;
+}
+
+function clearCompanionLookup() {
+  if (companionLookupPollTimer !== undefined) window.clearTimeout(companionLookupPollTimer);
+  companionLookupPollTimer = undefined;
+  currentCompanionLookup = undefined;
+  companionLookupResult.replaceChildren();
+  companionLookupResult.hidden = true;
+}
+
+function updateCompanionLookupAvailability() {
+  const configured = ownerAuthConfig?.companionDevicePairingConfigured === true;
+  const active = currentCompanionLookup &&
+    ['pending', 'claimed', 'signed'].includes(currentCompanionLookup.state) &&
+    Date.parse(currentCompanionLookup.expiresAt) > Date.now();
+  companionLookupButton.disabled = !configured || active ||
+    !companionLookupConfirmation.checked || companionLookupForm.dataset.ownerBusy === 'true';
+  if (!ownerAuthConfig) {
+    companionLookupStatus.textContent = 'Sign in to check lookup readiness.';
+  } else if (!configured) {
+    companionLookupStatus.textContent =
+      'Signed companion lookup is disabled until the bridge signer is provisioned.';
+  } else if (!currentCompanionLookup) {
+    companionLookupStatus.textContent =
+      'Ready to issue one exact-five find-only assignment. All money actions remain disabled.';
+  } else if (currentCompanionLookup.state === 'pending') {
+    companionLookupStatus.textContent = 'Signed assignment is waiting for the paired companion.';
+  } else if (currentCompanionLookup.state === 'claimed') {
+    companionLookupStatus.textContent = 'The bridge is signing the exact assignment.';
+  } else if (currentCompanionLookup.state === 'signed') {
+    companionLookupStatus.textContent = 'The paired companion is running five read-only lookups.';
+  } else if (currentCompanionLookup.state === 'completed') {
+    companionLookupStatus.textContent = 'Five signed read-only lookups completed successfully.';
+  } else if (currentCompanionLookup.state === 'review_required') {
+    companionLookupStatus.textContent = 'The signed lookup finished and requires review.';
+  } else {
+    companionLookupStatus.textContent = 'The prior assignment expired without a final result.';
+  }
+}
+
+function renderCompanionLookup(status) {
+  currentCompanionLookup = status;
+  companionLookupResult.replaceChildren();
+  companionLookupResult.hidden = !status;
+  if (status) {
+    const facts = [
+      ['State', status.state.replace('_', ' ')],
+      ['Players', '5'],
+      ['Mode', 'Find only'],
+      ['Transfer', 'Disabled'],
+      ['Money moved', 'No'],
+      ['Expires', new Date(status.expiresAt).toLocaleString()],
+    ];
+    if (status.state === 'completed' || status.state === 'review_required') {
+      facts.push(
+        ['Found', String(status.foundCount)],
+        ['Not found', String(status.notFoundCount)],
+        ['Review required', String(status.reviewRequiredCount)],
+      );
+    }
+    for (const [label, value] of facts) {
+      const term = document.createElement('dt');
+      term.textContent = label;
+      const detail = document.createElement('dd');
+      detail.textContent = value;
+      companionLookupResult.append(term, detail);
+    }
+  }
+  updateCompanionLookupAvailability();
+}
+
+function scheduleCompanionLookupStatus() {
+  if (companionLookupPollTimer !== undefined) window.clearTimeout(companionLookupPollTimer);
+  companionLookupPollTimer = undefined;
+  if (!currentCompanionLookup ||
+      !['pending', 'claimed', 'signed'].includes(currentCompanionLookup.state)) return;
+  companionLookupPollTimer = window.setTimeout(() => void loadCompanionLookupStatus(), 2_000);
+}
+
+async function loadCompanionLookupStatus() {
+  try {
+    const response = await ownerRequest('/v1/owner/companion-exact-five-lookup/status', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('companion_lookup_status');
+    const payload = await response.json();
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+        Object.keys(payload).join(',') !== 'lookup') throw new Error('companion_lookup_status');
+    const status = payload.lookup === null ? undefined : validCompanionLookupStatus(payload.lookup);
+    if (payload.lookup !== null && !status) throw new Error('companion_lookup_status');
+    renderCompanionLookup(status);
+    if (status) clearPendingCompanionLookupRequestId();
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      companionLookupStatus.textContent =
+        'Signed lookup status is temporarily unavailable. Transfer remains disabled.';
+    }
+  } finally {
+    scheduleCompanionLookupStatus();
+  }
+}
+
+function companionLookupMutationHeaders(requestId) {
+  return {
+    'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-companion-exact-five-lookup-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+async function issueCompanionLookup() {
+  if (ownerAuthConfig?.companionDevicePairingConfigured !== true ||
+      !companionLookupConfirmation.checked ||
+      (currentCompanionLookup && ['pending', 'claimed', 'signed'].includes(currentCompanionLookup.state))) return;
+  if (!window.confirm(
+    'Run exactly five find-only KemerBet Player-ID lookups on the paired local companion? ' +
+    'Amount, Notes, Transfer, settlement, execution, and money movement remain disabled.',
+  )) return;
+  const requestId = readPendingCompanionLookupRequestId() ?? crypto.randomUUID();
+  persistPendingCompanionLookupRequestId(requestId);
+  setBusy(companionLookupForm, true);
+  setNotice('Issuing the signed exact-five read-only lookup assignment…');
+  let terminalFailure = false;
+  try {
+    const response = await ownerRequest('/v1/owner/companion-exact-five-lookup', {
+      method: 'POST',
+      headers: companionLookupMutationHeaders(requestId),
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+        requestId,
+      }),
+    });
+    if (response.status !== 200 && response.status !== 201) {
+      const failure = await response.json().catch(() => undefined);
+      if (response.status === 400 || response.status === 409) {
+        terminalFailure = true;
+        clearPendingCompanionLookupRequestId();
+      }
+      if (response.status === 409 && failure?.error === 'companion_lookup_not_ready') {
+        setNotice(
+          'Lookup is not ready: keep every money switch disabled and verify exactly five eligible Players plus one active paired companion.',
+        );
+      }
+      throw new Error('companion_lookup_issue');
+    }
+    const receipt = validCompanionLookupStatus(await response.json(), true);
+    if (!receipt || (response.status === 200) !== receipt.alreadyIssued) {
+      throw new Error('companion_lookup_receipt');
+    }
+    clearPendingCompanionLookupRequestId();
+    companionLookupConfirmation.checked = false;
+    renderCompanionLookup(receipt);
+    scheduleCompanionLookupStatus();
+    setNotice(
+      receipt.alreadyIssued
+        ? 'The exact signed assignment was reconciled. Waiting for its redacted result.'
+        : 'Signed exact-five assignment issued. The local companion will return redacted counts only.',
+    );
+  } catch (error) {
+    if (!isSignedOutError(error) && !terminalFailure) {
+      setNotice(
+        'Lookup acknowledgement is uncertain. The same request ID is retained and status will be reconciled without issuing a blind duplicate.',
+      );
+      await loadCompanionLookupStatus();
+    }
+  } finally {
+    setBusy(companionLookupForm, false);
+    updateCompanionLookupAvailability();
+  }
 }
 
 function validTelebirrDevicePairingReceipt(value) {
@@ -3434,6 +3710,7 @@ async function loadOwnerPlayerQueues() {
       loadReceivers(),
       loadDepositIntake(),
       loadCurrentPilot(),
+      loadCompanionLookupStatus(),
     ]);
   } finally {
     refreshRequestsButton.disabled = false;
@@ -3490,6 +3767,7 @@ loginForm.addEventListener('submit', async (event) => {
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
     updateCompanionDevicePairingAvailability();
+    updateCompanionLookupAvailability();
     applyOwnerAuthSession(session, true);
   } catch {
     passwordInput.value = '';
@@ -3513,6 +3791,7 @@ async function restoreOwnerSession() {
     ownerAuthGeneration += 1;
     ownerAuthConfig = config;
     updateCompanionDevicePairingAvailability();
+    updateCompanionLookupAvailability();
     ownerSessionExpiresAt = persisted.expiresAt;
     refreshToken = persisted.refreshToken;
     await refreshOwnerSession();
@@ -3680,6 +3959,11 @@ companionDevicePairingConfirmation.addEventListener(
 companionDevicePairingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await issueCompanionDevicePairing();
+});
+companionLookupConfirmation.addEventListener('change', updateCompanionLookupAvailability);
+companionLookupForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await issueCompanionLookup();
 });
 companionDevicePairingCopyButton.addEventListener('click', async () => {
   if (!currentCompanionDevicePairing ||

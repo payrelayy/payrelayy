@@ -21,7 +21,7 @@ $variableNames = @(
   'COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256',
   'COMPANION_SERVER_SIGNER_VALID_FROM',
   'COMPANION_SERVER_SIGNER_VALID_UNTIL',
-  'COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64'
+  'COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V2_BASE64'
 )
 
 function Invoke-Gh {
@@ -117,9 +117,11 @@ try {
   $validFrom = [DateTimeOffset]::UtcNow.AddMinutes(-5).ToString('yyyy-MM-ddTHH:mm:ssZ')
   $validUntil = [DateTimeOffset]::UtcNow.AddYears(2).ToString('yyyy-MM-ddTHH:mm:ssZ')
   $manifest = [ordered]@{
-    contractVersion = 1
+    contractVersion = 2
     deploymentTarget = 'staging'
-    pairingOnly = $true
+    pairingAllowed = $true
+    exactFiveReadOnlyLookupAllowed = $true
+    financialActionAllowed = $false
     moneyMovementAllowed = $false
     serverSignerId = $signerId
     serverSignerKeyId = $signerKeyId
@@ -142,7 +144,7 @@ try {
     COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 = $publicKeyDigest
     COMPANION_SERVER_SIGNER_VALID_FROM = $validFrom
     COMPANION_SERVER_SIGNER_VALID_UNTIL = $validUntil
-    COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 = [Convert]::ToBase64String($manifestBytes)
+    COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V2_BASE64 = [Convert]::ToBase64String($manifestBytes)
   }
 
   foreach ($entry in $secretValues.GetEnumerator()) {

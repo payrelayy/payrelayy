@@ -108,7 +108,7 @@ function companionPairingReceipt(expiresAt: string) {
         signerKeyId: 'companion-server-staging-v1',
         serverSigningPublicKeySpki: 'A'.repeat(122),
         serverSigningPublicKeySpkiSha256: `sha256:${'b'.repeat(64)}`,
-        minimumCompanionVersion: '0.1.4',
+        minimumCompanionVersion: '0.1.5',
         oneUse: true,
         accountMutationAllowed: false,
         balanceMutationAllowed: false,
@@ -136,6 +136,32 @@ function companionPairingReceipt(expiresAt: string) {
     pairingOnly: true,
     pairingPackage,
     transferDisabled: true,
+  } as const;
+}
+
+function companionLookupReceipt(state: 'pending' | 'completed' | 'review_required' = 'pending') {
+  const terminal = state === 'completed' || state === 'review_required';
+  return {
+    assignmentId: '33333333-3333-4333-8333-333333333333',
+    state,
+    issuedAt: '2099-09-04T12:00:00.000Z',
+    expiresAt: '2099-09-04T12:10:00.000Z',
+    ...(terminal
+      ? {
+          completedAt: '2099-09-04T12:04:00.000Z',
+          foundCount: state === 'completed' ? 5 : 4,
+          notFoundCount: 0,
+          reviewRequiredCount: state === 'completed' ? 0 : 1,
+        }
+      : {}),
+    playerCount: 5,
+    platformCode: 'kemerbet',
+    lookupMode: 'find_only',
+    identifiersRedacted: true,
+    transferDisabled: true,
+    moneyMovementAllowed: false,
+    moneyMoved: false,
+    alreadyIssued: false,
   } as const;
 }
 
@@ -183,6 +209,10 @@ function ownerBrowserHarness(
   element('#companion-device-pairing-form').elements = namedElements({
     confirmation: element('#companion-device-pairing-confirmation'),
     submit: element('#companion-device-pairing-button'),
+  });
+  element('#companion-lookup-form').elements = namedElements({
+    confirmation: element('#companion-lookup-confirmation'),
+    submit: element('#companion-lookup-button'),
   });
 
   const stored = new Map<string, string>();
@@ -322,6 +352,63 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toContain(
       receipt.pairingPackage,
     );
+  });
+
+  it('issues one exact-five read-only command and renders only redacted terminal counts', async () => {
+    const pending = companionLookupReceipt();
+    const { alreadyIssued: _alreadyIssued, ...terminal } =
+      companionLookupReceipt('review_required');
+    let activeTest = false;
+    let lookupPosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      fetchOverride: (url, init) => {
+        if (!activeTest) return undefined;
+        if (url === '/v1/owner/companion-exact-five-lookup') {
+          lookupPosts += 1;
+          expect(init.method).toBe('POST');
+          expect(init.headers).toMatchObject({
+            'x-fetanagent-owner-csrf': 'owner-companion-exact-five-lookup-v1',
+            'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+          });
+          expect(JSON.parse(String(init.body))).toEqual({
+            confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+            requestId: '11111111-1111-4111-8111-111111111111',
+          });
+          expect(String(init.body)).not.toMatch(/playerIds|amount|notes|transfer/i);
+          return response(201, pending);
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: terminal });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    activeTest = true;
+    const confirmation = browser.element('#companion-lookup-confirmation');
+    confirmation.checked = true;
+    await confirmation.listeners.get('change')?.({ preventDefault() {} });
+    expect(browser.element('#companion-lookup-button').disabled).toBe(false);
+
+    const submit = browser.element('#companion-lookup-form').listeners.get('submit');
+    if (!submit) throw new Error('Companion lookup submit listener was not installed.');
+    await submit({ preventDefault() {} });
+    expect(lookupPosts).toBe(1);
+    expect(browser.element('#companion-lookup-status').textContent).toBe(
+      'Signed assignment is waiting for the paired companion.',
+    );
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.companion-exact-five-lookup-request.v1'),
+    ).toBeNull();
+
+    await browser.call('loadCompanionLookupStatus');
+    expect(browser.element('#companion-lookup-status').textContent).toBe(
+      'The signed lookup finished and requires review.',
+    );
+    expect(browser.element('#companion-lookup-result').hidden).toBe(false);
+    expect(JSON.stringify(terminal)).not.toContain('playerIds');
   });
 
   it('shows one canonical Android package while persisting only its idempotency key', async () => {

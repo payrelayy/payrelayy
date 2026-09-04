@@ -1,5 +1,5 @@
-FetanAgent Windows Companion — public-key pairing / no-transfer release
-=======================================================================
+FetanAgent Windows Companion — signed exact-five read-only / no-transfer release
+=================================================================================
 
 1. Extract the complete ZIP file.
 2. In the FetanAgent Owner page, create a one-use Windows pairing package. It is valid for ten
@@ -17,12 +17,17 @@ FetanAgent Windows Companion — public-key pairing / no-transfer release
    within ten minutes. Closing Chrome stops the companion.
 8. After local identity verification, the companion generates a P-256 key on this computer,
    protects the private key with Windows DPAPI, and sends only the signed public pairing request.
-9. Close the companion Chrome window to stop it.
+9. On the authenticated FetanAgent Owner page, approve one exact-five read-only lookup. The
+   companion performs exactly five sequential KemerBet Find requests and returns only signed,
+   redacted outcomes and aggregate counts. It never enters Amount or Notes and never clicks
+   Transfer.
+10. Close the companion Chrome window to stop it.
 
-This release adds server-signed public-key device enrollment after local exact-identity
-verification. It has no Player lookup or payment execution capability.
+This release adds server-signed public-key device enrollment and one-use, expiring, signed
+exact-five Player-ID lookup assignments after local exact-identity verification. Player lookup is
+Find-only and sequential; it has no payment execution capability.
 KemerBet wallet and transaction requests are blocked even if the provider page displays a
-Transfer button. Exact-five lookup is not wired into this release. It does not move money.
+Transfer button. Amount, Notes, Transfer, settlement, and all money movement remain blocked.
 Detecting the agent page is only a candidate until the exact locally bound header is
 observed twice, visible signed-out/CAPTCHA markers are absent, and the protected fingerprint
 matches. Repeated page events do not extend the twelve-hour deadline. Each guarded session has an

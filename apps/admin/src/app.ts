@@ -75,6 +75,11 @@ import {
   OwnerCompanionDevicePairingUnavailableError,
 } from './owner-companion-device-pairing.js';
 import {
+  OwnerCompanionLookupNotReadyError,
+  OwnerCompanionLookupRejectedError,
+  OwnerCompanionLookupUnavailableError,
+} from './owner-companion-exact-five-lookup.js';
+import {
   OwnerTelebirrDevicePairingNotReadyError,
   OwnerTelebirrDevicePairingRejectedError,
   OwnerTelebirrDevicePairingUnavailableError,
@@ -137,6 +142,7 @@ const PRIVATE_LIVE_PILOT_STOP_REASONS = new Set<PrivateLivePilotStopReason>([
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const OWNER_PILOT_CSRF_HEADER_VALUE = 'private-live-pilot-v1';
 const OWNER_COMPANION_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-companion-device-pairing-v1';
+const OWNER_COMPANION_LOOKUP_CSRF_HEADER_VALUE = 'owner-companion-exact-five-lookup-v1';
 const OWNER_TELEBIRR_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-telebirr-device-pairing-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
@@ -482,6 +488,21 @@ export function buildOwnerControlApp(
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
         OWNER_COMPANION_DEVICE_PAIRING_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validCompanionLookupMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_COMPANION_LOOKUP_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -1621,6 +1642,83 @@ export function buildOwnerControlApp(
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });
+
+  app.post('/v1/owner/companion-exact-five-lookup', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        body?.confirmation !== 'owner_confirmed_exact_five_find_only_no_money' ||
+        !validCompanionLookupMutationHeaders(request.raw.rawHeaders, body.requestId)
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      if (!runtimeConfig.companionDevicePairing.configured) {
+        return reply.code(409).send({ error: 'companion_lookup_not_configured' });
+      }
+      if (!dependencies.runtime.companionLookup) {
+        request.log.warn('Configured Owner companion lookup adapter is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const receipt = await dependencies.runtime.companionLookup.issue(
+        authUserId,
+        body.requestId as string,
+      );
+      return reply.code(receipt.alreadyIssued ? 200 : 201).send(receipt);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerCompanionLookupRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof OwnerCompanionLookupNotReadyError) {
+        return reply.code(409).send({ error: 'companion_lookup_not_ready' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerCompanionLookupUnavailableError
+      ) {
+        request.log.warn('Owner companion lookup issuance is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/companion-exact-five-lookup/status',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).length !== 0) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        if (!runtimeConfig.companionDevicePairing.configured) {
+          return reply.code(409).send({ error: 'companion_lookup_not_configured' });
+        }
+        if (!dependencies.runtime.companionLookup) {
+          request.log.warn('Configured Owner companion lookup adapter is unavailable.');
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const status = await dependencies.runtime.companionLookup.status(authUserId);
+        return reply.code(200).send({ lookup: status ?? null });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerCompanionLookupRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (
+          error instanceof OwnerAuthenticationUnavailableError ||
+          error instanceof OwnerCompanionLookupUnavailableError
+        ) {
+          request.log.warn('Owner companion lookup status is unavailable.');
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
 
   app.post('/v1/owner/telebirr-device-pairing', async (request, reply) => {
     try {

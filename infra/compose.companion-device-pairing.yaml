@@ -1,7 +1,8 @@
 name: fetanagent-companion-device-pairing
 
-# Pairing-only public-key enrollment. This composition has no host-published port, Player-ID input,
-# provider credential, transfer endpoint, settlement authority, or money-movement switch.
+# Public-key enrollment plus signed exact-five read-only lookup. This composition has no
+# host-published port, provider credential, transfer endpoint, settlement authority, or
+# money-movement switch. Raw Player IDs can enter only an expiring signed assignment.
 services:
   companion-device-bridge:
     profiles: [companion-device-pairing]
@@ -37,11 +38,11 @@ services:
       NODE_ENV: production
       FINANCIAL_ACTIONS_MODE: dry_run
       INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED: 'true'
-      COMPANION_DEVICE_BRIDGE_NO_MONEY_PAIRING_ENABLED: 'true'
+      COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED: 'true'
       COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: staging
       COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE: /run/secrets/companion_device_bridge_database_url
       COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE: /run/secrets/companion_device_bridge_server_signer.pkcs8.der
-      COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE: /run/configs/companion_device_bridge_runtime_manifest.v1.json
+      COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE: /run/configs/companion_device_bridge_runtime_manifest.v2.json
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
       HTTP_PROXY: ''
       http_proxy: ''
@@ -58,7 +59,7 @@ services:
         target: companion_device_bridge_server_signer.pkcs8.der
     configs:
       - source: companion_device_bridge_runtime_manifest
-        target: /run/configs/companion_device_bridge_runtime_manifest.v1.json
+        target: /run/configs/companion_device_bridge_runtime_manifest.v2.json
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
     networks:

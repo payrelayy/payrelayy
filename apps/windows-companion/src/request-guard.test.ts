@@ -84,6 +84,30 @@ describe('local KemerBet request guard', () => {
     ).toEqual({ action: 'allow', reason: 'outside_provider' });
   });
 
+  it('allows one exact assigned Player-ID GET only in the signed-in read-only phase', () => {
+    const url = 'https://admin-api.agt-digi.com/Player/GeneralInfoByExternalId?externalId=28379330';
+    expect(decideLocalKemerBetRequest('GET', url, 'signed_in_read_only')).toEqual({
+      action: 'abort',
+      reason: 'unreviewed_read',
+    });
+    expect(decideLocalKemerBetRequest('GET', url, 'signed_in_read_only', '28379330')).toEqual({
+      action: 'allow',
+      reason: 'exact_lookup',
+    });
+    expect(decideLocalKemerBetRequest('OPTIONS', url, 'signed_in_read_only', '28379330')).toEqual({
+      action: 'allow',
+      reason: 'exact_lookup_preflight',
+    });
+    expect(decideLocalKemerBetRequest('GET', url, 'manual_login', '28379330')).toEqual({
+      action: 'abort',
+      reason: 'unreviewed_read',
+    });
+    expect(decideLocalKemerBetRequest('GET', url, 'signed_in_read_only', '28379331')).toEqual({
+      action: 'abort',
+      reason: 'unreviewed_read',
+    });
+  });
+
   it('classifies alternate provider transports then rejects them rather than allowing outside traffic', () => {
     for (const origin of [
       'http://admin-api.agt-digi.com',

@@ -23,6 +23,11 @@ import {
   OwnerCompanionDevicePairingNotReadyError,
   type OwnerCompanionDevicePairingReceipt,
 } from './owner-companion-device-pairing.js';
+import {
+  OwnerCompanionLookupNotReadyError,
+  type OwnerCompanionLookupIssueReceipt,
+  type OwnerCompanionLookupStatus,
+} from './owner-companion-exact-five-lookup.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
 import {
   OwnerPrivateLivePilotUnavailableError,
@@ -145,6 +150,41 @@ function companionDevicePairingMutationHeaders(requestId = pilotRequestId) {
     'content-type': 'application/json',
     origin: 'http://127.0.0.1:3002',
     'x-fetanagent-owner-csrf': 'owner-companion-device-pairing-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+function companionLookupStatus(
+  overrides: Partial<OwnerCompanionLookupStatus> = {},
+): OwnerCompanionLookupStatus {
+  return {
+    assignmentId: '99999999-9999-4999-8999-999999999999',
+    state: 'pending',
+    issuedAt: '2026-09-05T12:00:00.000Z',
+    expiresAt: '2026-09-05T12:10:00.000Z',
+    playerCount: 5,
+    platformCode: 'kemerbet',
+    lookupMode: 'find_only',
+    identifiersRedacted: true,
+    transferDisabled: true,
+    moneyMovementAllowed: false,
+    moneyMoved: false,
+    ...overrides,
+  };
+}
+
+function companionLookupReceipt(
+  overrides: Partial<OwnerCompanionLookupIssueReceipt> = {},
+): OwnerCompanionLookupIssueReceipt {
+  return { ...companionLookupStatus(), alreadyIssued: false, ...overrides };
+}
+
+function companionLookupMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-companion-exact-five-lookup-v1',
     'x-idempotency-key': requestId,
   };
 }
@@ -398,6 +438,7 @@ function runtime(
       }),
     },
     companionDevicePairing: undefined,
+    companionLookup: undefined,
     telebirrDevicePairing: undefined,
     ready: async () => true,
     close: async () => undefined,
@@ -3812,6 +3853,164 @@ describe('Owner-control HTTP boundary', () => {
     expect(notReady.statusCode).toBe(409);
     expect(notReady.json()).toEqual({ error: 'companion_device_pairing_not_ready' });
     await notReadyApp.close();
+  });
+
+  it('issues and reads only an authenticated, idempotent, exact-five no-money lookup', async () => {
+    const calls: Array<readonly string[]> = [];
+    const status = companionLookupStatus({
+      state: 'completed',
+      foundCount: 4,
+      notFoundCount: 0,
+      reviewRequiredCount: 1,
+      completedAt: '2026-09-05T12:04:00.000Z',
+    });
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionLookup: {
+          issue: async (actor, requestId) => {
+            calls.push(['issue', actor, requestId]);
+            return calls.filter(([kind]) => kind === 'issue').length === 1
+              ? companionLookupReceipt()
+              : companionLookupReceipt({ alreadyIssued: true });
+          },
+          status: async (actor) => {
+            calls.push(['status', actor]);
+            return status;
+          },
+        },
+      }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+      requestId: pilotRequestId,
+    };
+
+    const fresh = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-exact-five-lookup',
+      headers: companionLookupMutationHeaders(),
+      payload,
+    });
+    expect(fresh.statusCode).toBe(201);
+    expect(fresh.json()).toEqual(companionLookupReceipt());
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-exact-five-lookup',
+      headers: companionLookupMutationHeaders(),
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(companionLookupReceipt({ alreadyIssued: true }));
+    const observed = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/companion-exact-five-lookup/status',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(observed.statusCode).toBe(200);
+    expect(observed.json()).toEqual({ lookup: status });
+    expect(observed.body).not.toContain('playerIds');
+    expect(calls).toEqual([
+      ['issue', authUserId, pilotRequestId],
+      ['issue', authUserId, pilotRequestId],
+      ['status', authUserId],
+    ]);
+    await app.close();
+  });
+
+  it('rejects companion lookup authority and financial fields before authentication', async () => {
+    let authenticationCalls = 0;
+    const issueCalls: string[] = [];
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime({
+        companionLookup: {
+          issue: async () => {
+            issueCalls.push('issue');
+            return companionLookupReceipt();
+          },
+          status: async () => undefined,
+        },
+      }),
+    });
+    for (const candidate of [
+      {
+        confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+        requestId: pilotRequestId,
+        playerIds: ['forbidden'],
+      },
+      {
+        confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+        requestId: pilotRequestId,
+        amount: 25,
+      },
+      {
+        confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+        requestId: pilotRequestId,
+        transferAllowed: true,
+      },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/companion-exact-five-lookup',
+        headers: companionLookupMutationHeaders(),
+        payload: candidate,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: 'invalid_request' });
+    }
+    expect(authenticationCalls).toBe(0);
+    expect(issueCalls).toEqual([]);
+    await app.close();
+  });
+
+  it('keeps companion lookup disabled until configured and maps guarded readiness separately', async () => {
+    let authenticationCalls = 0;
+    const disabled = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_exact_five_find_only_no_money',
+      requestId: pilotRequestId,
+    };
+    const disabledResponse = await disabled.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-exact-five-lookup',
+      headers: companionLookupMutationHeaders(),
+      payload,
+    });
+    expect(disabledResponse.statusCode).toBe(409);
+    expect(disabledResponse.json()).toEqual({ error: 'companion_lookup_not_configured' });
+    expect(authenticationCalls).toBe(0);
+    await disabled.close();
+
+    const notReady = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionLookup: {
+          issue: async () => {
+            throw new OwnerCompanionLookupNotReadyError();
+          },
+          status: async () => undefined,
+        },
+      }),
+    });
+    const notReadyResponse = await notReady.inject({
+      method: 'POST',
+      url: '/v1/owner/companion-exact-five-lookup',
+      headers: companionLookupMutationHeaders(),
+      payload,
+    });
+    expect(notReadyResponse.statusCode).toBe(409);
+    expect(notReadyResponse.json()).toEqual({ error: 'companion_lookup_not_ready' });
+    await notReady.close();
   });
 
   it('issues only an authenticated, idempotent, pairing-only Android package', async () => {

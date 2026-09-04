@@ -3,12 +3,14 @@ import { pathToFileURL } from 'node:url';
 import { loadWindowsCompanionConfig, redactedWindowsCompanionConfig } from './config.js';
 import {
   ensureCompanionDeviceEnrollment,
+  loadCompanionDeviceSigningRuntime,
   type CompanionDeviceEnrollmentResult,
 } from './device-enrollment.js';
 import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
 } from './local-kemerbet-session.js';
+import { runCompanionLookupWorker, type CompanionLookupWorkerEvent } from './lookup-worker.js';
 
 function report(event: LocalKemerBetSessionEvent): void {
   const messages: Record<LocalKemerBetSessionEvent['state'], string> = {
@@ -19,7 +21,7 @@ function report(event: LocalKemerBetSessionEvent): void {
     verifying_identity:
       'KemerBet agent page detected. Verifying the exact locally bound identity without uploading it…',
     signed_in_verified:
-      'The exact locally bound KemerBet identity is verified. Server pairing and Player-ID lookup remain disabled.',
+      'The exact locally bound KemerBet identity is verified. Financial actions remain disabled.',
     stopping: 'Stopping the local KemerBet browser…',
     stopped: 'The local KemerBet browser stopped.',
     failed: 'The local KemerBet browser could not continue. Financial requests remain blocked.',
@@ -70,8 +72,8 @@ function reportEnrollment(result: CompanionDeviceEnrollmentResult | undefined): 
   if (state === 'paired') {
     console.info(
       result?.alreadyPaired
-        ? 'The local companion device certificate is verified. Exact-five lookup remains disabled.'
-        : 'The local companion device is paired with a signed no-money certificate. Exact-five lookup remains disabled.',
+        ? 'The local companion device certificate is verified. Signed exact-five read-only lookup is ready.'
+        : 'The local companion device is paired with a signed no-money certificate. Signed exact-five read-only lookup is ready.',
     );
   } else if (state === 'pairing_required') {
     console.info(
@@ -84,6 +86,24 @@ function reportEnrollment(result: CompanionDeviceEnrollmentResult | undefined): 
   }
 }
 
+function reportLookup(event: CompanionLookupWorkerEvent): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'exact_five_lookup_state_changed',
+      state: event.state,
+      ...(event.foundCount === undefined ? {} : { foundCount: event.foundCount }),
+      ...(event.reviewRequiredCount === undefined
+        ? {}
+        : { reviewRequiredCount: event.reviewRequiredCount }),
+      detailsRedacted: true,
+      identifiersRedacted: true,
+      transferDisabled: true,
+      moneyMoved: false,
+    }),
+  );
+}
+
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
   console.info(
@@ -94,19 +114,30 @@ export async function runWindowsCompanion(): Promise<void> {
     }),
   );
   const pairingPackage = config.takePairingPackage();
-  let enrollmentStarted = false;
-  let enrollmentPromise: Promise<void> | undefined;
-  const session = await startLocalKemerBetSession(config, (event) => {
-    report(event);
-    if (event.state !== 'signed_in_verified' || enrollmentStarted) return;
-    enrollmentStarted = true;
-    enrollmentPromise = ensureCompanionDeviceEnrollment({
-      dataRoot: config.dataRoot,
-      releaseSha: config.releaseSha,
-      ...(pairingPackage === undefined ? {} : { pairingPackage }),
-    })
-      .then(reportEnrollment)
-      .catch(() => reportEnrollment(undefined));
+  const session = await startLocalKemerBetSession(config, report);
+  const lookupAbort = new AbortController();
+  void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
+  const enrollmentPromise = session.verified.then(async (verified) => {
+    if (!verified) return;
+    try {
+      const enrollment = await ensureCompanionDeviceEnrollment({
+        dataRoot: config.dataRoot,
+        releaseSha: config.releaseSha,
+        ...(pairingPackage === undefined ? {} : { pairingPackage }),
+      });
+      reportEnrollment(enrollment);
+      if (!enrollment.devicePaired) return;
+      const device = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
+      await runCompanionLookupWorker({
+        dataRoot: config.dataRoot,
+        device,
+        session,
+        signal: lookupAbort.signal,
+        report: reportLookup,
+      });
+    } catch {
+      reportEnrollment(undefined);
+    }
   });
   let stopping = false;
   const stop = () => {
@@ -118,6 +149,7 @@ export async function runWindowsCompanion(): Promise<void> {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   await session.done;
+  lookupAbort.abort();
   await enrollmentPromise;
 }
 

@@ -1,6 +1,12 @@
 import type { Server } from 'node:http';
 
+import {
+  AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+} from '@fetanagent/agent-platform-companion-contracts';
+
 import type { CompanionDeviceBridgeConfig } from './config.js';
+import { createCompanionLookupHandler } from './lookup-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
 import {
   createCompanionDeviceBridgePostgresRuntime,
@@ -83,13 +89,45 @@ export async function startCompanionDeviceBridgeApplication(
     postgres = await createPostgresRuntime(config.connection, config.signer.keyId);
     if (!(await postgres.ready())) throw new Error();
     const state = postgres.state;
-    const handler = createCompanionPairingHandler({
+    const pairingHandler = createCompanionPairingHandler({
       signer: config.signer,
       now: dependencies.now ?? (() => new Date().toISOString()),
       claimPairing: (request, assessedAt) => state.claimPairing(request, assessedAt),
       completePairing: (bodyDigest, certificate) => state.completePairing(bodyDigest, certificate),
       releasePairing: (bodyDigest) => state.releasePairing(bodyDigest),
     });
+    const lookupHandler = createCompanionLookupHandler({
+      signer: config.signer,
+      now: dependencies.now ?? (() => new Date().toISOString()),
+      claimAssignment: (certificate, request, replayIdentity, assessedAt) =>
+        state.claimLookupAssignment(certificate, request, replayIdentity, assessedAt),
+      completeAssignment: (bodyDigest, assignment) =>
+        state.completeLookupAssignment(bodyDigest, assignment),
+      releaseAssignment: (assignmentId) => state.releaseLookupAssignment(assignmentId),
+      acceptResult: (
+        certificate,
+        request,
+        httpReplayIdentity,
+        assignment,
+        result,
+        resultReplayIdentity,
+        assessedAt,
+      ) =>
+        state.acceptLookupResult(
+          certificate,
+          request,
+          httpReplayIdentity,
+          assignment,
+          result,
+          resultReplayIdentity,
+          assessedAt,
+        ),
+    });
+    const handler: CompanionDeviceBridgeHandler = (request) =>
+      request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
+      request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
+        ? lookupHandler(request)
+        : pairingHandler(request);
     server = createServer(handler);
     await server.listen();
     if (!server.ready() || !server.server.listening || !(await postgres.ready())) {

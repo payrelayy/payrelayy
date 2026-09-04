@@ -43,3 +43,27 @@ owner.fetanagent.com {
 		}
 	}
 }
+
+device.fetanagent.com {
+	import security_headers
+
+	@telebirr_device_bridge {
+		method POST
+		path /v1/telebirr/device/enrollments:pair /v1/telebirr/device/assignments:poll /v1/telebirr/device/heartbeat /v1/telebirr/device/observations:upload
+		header Content-Type application/vnd.fetanagent.telebirr-device-bridge+json
+	}
+
+	handle @telebirr_device_bridge {
+		request_body {
+			max_size 256KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+
+	respond 404
+}

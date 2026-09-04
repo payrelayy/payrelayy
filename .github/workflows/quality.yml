@@ -76,6 +76,20 @@ jobs:
           FETANAGENT_STAGING_BOT_PLAYER_ACTION_TRANSPORT_HMAC_FILE=/dev/null \
             docker compose --env-file /dev/null --file infra/compose.staging-beta.yaml \
               --profile staging-manual config --quiet
+          FETANAGENT_IMAGE_TAG=ci \
+          FETANAGENT_VCS_REF="${GITHUB_SHA}" \
+          FETANAGENT_TELEBIRR_SUPABASE_CA_CERTIFICATE_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_KEY_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_ASSIGNMENT_DATABASE_URL_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_REFERENCE_OPENING_KEY_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_ASSIGNMENT_RUNTIME_MANIFEST_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_PRIVATE_KEY_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_DEVICE_STATE_DATABASE_URL_FILE=/dev/null \
+          FETANAGENT_TELEBIRR_DEVICE_BRIDGE_SERVER_SIGNER_PRIVATE_KEY_FILE=/dev/null \
+            docker compose --env-file /dev/null \
+              --file infra/compose.telebirr-device-pilot.yaml \
+              --profile telebirr-device-pilot config --quiet
 
       - name: Build and validate the public HTTPS gateway
         shell: bash

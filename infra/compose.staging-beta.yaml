@@ -645,6 +645,7 @@ services:
         target: /config
     networks:
       - owner_control_service
+      - telebirr_device_ingress
     depends_on:
       customer-web:
         condition: service_healthy
@@ -1009,6 +1010,11 @@ networks:
     driver: bridge
     enable_ipv6: true
     internal: false
+    attachable: false
+  telebirr_device_ingress:
+    name: fetanagent-telebirr-device-ingress
+    driver: bridge
+    internal: true
     attachable: false
 
 volumes:

@@ -5734,7 +5734,7 @@ assert.ok(
 );
 assert.equal(
   createHash('sha256').update(transitionSshVerify).digest('hex'),
-  'd24537ae9f6a7d7640a6991ff8a09c27eb8424202640af94bcec701bab01984e',
+  '4261a77da03399283db520f8533e7242ba4652c616340b9c841e1605ccdef8f0',
   'The reviewed read-only transition SSH job body must remain byte-for-byte exact.',
 );
 assert.match(transitionSshVerify, /if: inputs\.mode == 'transition-ssh-verify'/);
@@ -5811,7 +5811,7 @@ const transitionStopLegacy = /\n  transition-stop-legacy:\n([\s\S]*?)\n  deploy:
 assert.ok(transitionStopLegacy, 'The guarded legacy-stop transition job must exist.');
 assert.equal(
   createHash('sha256').update(transitionStopLegacy).digest('hex'),
-  'f0ad7ed8cd313c48722de46bde8d446b6e71d56541c1940f17c67d7405c8c56d',
+  '84caa3ca2cdab763aa3d637f8cbba68357d91ef51f76d42a5710091fbb031523',
   'The reviewed legacy-stop transition job body must remain byte-for-byte exact.',
 );
 assert.match(transitionStopLegacy, /if: inputs\.mode == 'transition-stop-legacy'/);
@@ -6002,7 +6002,7 @@ assert.equal(
 );
 assert.match(
   retirementRecoveryJob,
-  /uses: actions\/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4\.2\.2/,
+  /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\.0\.1/,
 );
 assert.match(retirementRecoveryJob, /fetch-depth: 0/);
 assert.match(retirementRecoveryJob, /persist-credentials: false/);

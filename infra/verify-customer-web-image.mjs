@@ -88,7 +88,7 @@ assert.doesNotMatch(
 );
 assert.match(workflow, /^permissions:\s*\r?\n  contents: read$/m);
 assert.match(workflow, /timeout-minutes: 20/);
-assert.match(workflow, /actions\/checkout@11bd71901bbe5b1630ceea73d27597364c9af683/);
+assert.match(workflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/);
 assert.match(workflow, /persist-credentials: false/);
 
 assert.match(

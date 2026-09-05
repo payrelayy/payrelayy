@@ -32,6 +32,21 @@ alter role fetanagent_telebirr_device_state_runtime with
   nologin noinherit nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 password null valid until 'infinity';
 
+-- Make NOLOGIN and password revocation visible before terminating pooled sessions. Keeping the
+-- ALTER ROLE statements and termination loop in one transaction permits a disconnected pooler
+-- client to authenticate again against the still-visible pre-transaction role state.
+commit;
+
+begin transaction isolation level serializable;
+set local search_path = pg_catalog;
+set local statement_timeout = '15s';
+set local lock_timeout = '2s';
+set local idle_in_transaction_session_timeout = '15s';
+
+select pg_catalog.pg_advisory_xact_lock(
+  pg_catalog.hashtextextended('fetanagent:staging:telebirr-device-pilot-runtime', 0)
+);
+
 do $fetanagent$
 declare
   activity_pid integer;

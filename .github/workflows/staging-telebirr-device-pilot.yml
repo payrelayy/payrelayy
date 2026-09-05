@@ -344,6 +344,43 @@ jobs:
             .deviceStateBroker == "bounded_login_ready"
           ' <<<"$result" >/dev/null
 
+      - name: Confirm both bounded runtime logins before activating containers
+        shell: bash
+        env:
+          TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
+          TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          runtime_login_ready() {
+            local role="$1" password="$2" delay
+            for delay in 10 20 40 60; do
+              sleep "$delay"
+              if PGUSER="$role.$STAGING_PROJECT_REF" PGPASSWORD="$password" \
+                PGAPPNAME="fetanagent_telebirr_runtime_login_preflight" \
+                psql -X --quiet --set=expected_runtime_role="$role" \
+                  --file=infra/sql/staging-runtime-login-preflight.sql >/dev/null 2>&1
+              then
+                return 0
+              fi
+            done
+            echo '::error::A bounded TeleBirr runtime login did not become reachable.'
+            return 1
+          }
+          runtime_login_ready \
+            "$ASSIGNMENT_RUNTIME_ROLE" "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD"
+          runtime_login_ready \
+            "$DEVICE_STATE_RUNTIME_ROLE" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD"
+          unset TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD \
+            TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD
+
       - name: Transfer and install the sealed release
         shell: bash
         env:

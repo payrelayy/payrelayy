@@ -200,6 +200,7 @@ for (const contract of [
   'build-telebirr-assignment-runtime-manifest.mjs',
   'staging-telebirr-device-pilot-provision.sql',
   'staging-telebirr-device-pilot-disable.sql',
+  'staging-runtime-login-preflight.sql',
   'fetanagent-telebirr-device-pilot-helper',
 ]) {
   assert.match(deployWorkflow, new RegExp(escapeRegExp(contract), 'u'));
@@ -237,6 +238,12 @@ assert.match(pilotRunbook, /Supavisor session pooler on port `5432`/u);
 assert.match(pilotRunbook, /<runtime-role>\.<staging-project-ref>/u);
 assert.match(deployWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/u);
 assert.doesNotMatch(deployWorkflow, /STAGING_DIRECT_DATABASE_HOST/u);
+assert.match(deployWorkflow, /for delay in 10 20 40 60/u);
+assert.match(
+  deployWorkflow,
+  /PGUSER="\$role\.\$STAGING_PROJECT_REF" PGPASSWORD="\$password"[\s\S]*?--set=expected_runtime_role="\$role"/u,
+  'activation must prove each bounded runtime identity through the exact session-pooler login',
+);
 
 assert.match(deployHelper, /^set -euo pipefail$/mu);
 assert.match(deployHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
@@ -299,6 +306,15 @@ assert.match(runtimeInputSql, /receiverAccountHolderNameSnapshot/u);
 assert.match(runtimeInputSql, /expectedReceiverNameDigest/u);
 assert.match(disableSql, /password null valid until 'infinity'/u);
 assert.match(disableSql, /pg_terminate_backend/u);
+assert.equal(
+  (disableSql.match(/^begin transaction isolation level serializable;$/gmu) ?? []).length,
+  2,
+  'runtime disablement must commit NOLOGIN before terminating pooled sessions',
+);
+assert.ok(
+  disableSql.indexOf('commit;') < disableSql.indexOf('pg_catalog.pg_terminate_backend'),
+  'NOLOGIN must be committed before the termination loop can observe and drain runtime sessions',
+);
 
 console.log(
   'TeleBirr device pilot deployment verified: three isolated no-money services, read-only socket consumers, database-free ingress, and exact HTTPS routes.',

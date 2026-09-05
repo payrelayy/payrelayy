@@ -41,6 +41,8 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '593344964'
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  STAGING_ADMIN_POOLER_PORT: '6543'
+  STAGING_RUNTIME_POOLER_PORT: '5432'
   ASSIGNMENT_RUNTIME_ROLE: fetanagent_telebirr_assignment_broker_runtime
   DEVICE_STATE_RUNTIME_ROLE: fetanagent_telebirr_device_state_runtime
 
@@ -291,7 +293,7 @@ jobs:
           TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
           PGSSLMODE: verify-full
@@ -342,7 +344,7 @@ jobs:
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
           PGSSLMODE: verify-full
@@ -369,7 +371,7 @@ jobs:
           TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
           PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.STAGING_RUNTIME_POOLER_PORT }}
           PGDATABASE: postgres
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
@@ -452,7 +454,7 @@ jobs:
           HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
           PGSSLMODE: verify-full
@@ -502,7 +504,7 @@ jobs:
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
           PGSSLMODE: verify-full

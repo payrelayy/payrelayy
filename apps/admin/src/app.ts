@@ -587,7 +587,12 @@ export function buildOwnerControlApp(
   }
 
   type KemerbetStateMutationMode =
-    'ordinary' | 'pilot_dry_run' | 'private_session' | 'readiness_cohort' | 'security_recovery';
+    | 'ordinary'
+    | 'pilot_dry_run'
+    | 'pilot_stop'
+    | 'private_session'
+    | 'readiness_cohort'
+    | 'security_recovery';
   type KemerbetStateMutationResult<T> =
     | { readonly state: 'blocked' }
     | {
@@ -603,17 +608,18 @@ export function buildOwnerControlApp(
     return serializeKemerbetProfileLifecycle(async () => {
       const lifecycle = await kemerbetReadinessLifecycle();
       if (
-        lifecycle === 'recheck_authorization_spent_failed_terminal' ||
-        (lifecycle === 'security_recovery_cohort_staged' &&
-          mode !== 'private_session' &&
-          mode !== 'pilot_dry_run') ||
-        lifecycle === 'imported' ||
-        lifecycle === 'retryable_failed' ||
-        ((mode === 'ordinary' || mode === 'pilot_dry_run' || mode === 'private_session') &&
-          (lifecycle === 'security_recovery_failed_terminal' ||
-            lifecycle === 'security_recovery_profile_finalized')) ||
-        (mode === 'readiness_cohort' && lifecycle === 'security_recovery_failed_terminal') ||
-        (mode === 'security_recovery' && lifecycle !== 'security_recovery_failed_terminal')
+        mode !== 'pilot_stop' &&
+        (lifecycle === 'recheck_authorization_spent_failed_terminal' ||
+          (lifecycle === 'security_recovery_cohort_staged' &&
+            mode !== 'private_session' &&
+            mode !== 'pilot_dry_run') ||
+          lifecycle === 'imported' ||
+          lifecycle === 'retryable_failed' ||
+          ((mode === 'ordinary' || mode === 'pilot_dry_run' || mode === 'private_session') &&
+            (lifecycle === 'security_recovery_failed_terminal' ||
+              lifecycle === 'security_recovery_profile_finalized')) ||
+          (mode === 'readiness_cohort' && lifecycle === 'security_recovery_failed_terminal') ||
+          (mode === 'security_recovery' && lifecycle !== 'security_recovery_failed_terminal'))
       ) {
         return { state: 'blocked' };
       }
@@ -1804,11 +1810,11 @@ export function buildOwnerControlApp(
         ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
         : reply.code(201).send({ pilot: mutation.value });
     } catch (error) {
-      if (
-        error instanceof OwnerAuthenticationRejectedError ||
-        error instanceof OwnerPrivateLivePilotRejectedError
-      ) {
+      if (error instanceof OwnerAuthenticationRejectedError) {
         return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof OwnerPrivateLivePilotRejectedError) {
+        return reply.code(409).send({ error: 'pilot_not_ready' });
       }
       if (
         error instanceof OwnerAuthenticationUnavailableError ||
@@ -1841,11 +1847,11 @@ export function buildOwnerControlApp(
           ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
           : reply.code(200).send(mutation.value);
       } catch (error) {
-        if (
-          error instanceof OwnerAuthenticationRejectedError ||
-          error instanceof OwnerPrivateLivePilotRejectedError
-        ) {
+        if (error instanceof OwnerAuthenticationRejectedError) {
           return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerPrivateLivePilotRejectedError) {
+          return reply.code(409).send({ error: 'pilot_not_ready' });
         }
         request.log.warn('Owner private live-deposit pilot arming is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
@@ -1869,7 +1875,7 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const mutation = await runKemerbetStateMutation('ordinary', () =>
+        const mutation = await runKemerbetStateMutation('pilot_stop', () =>
           dependencies.runtime.privateLivePilot.stop(
             authUserId,
             request.params.pilotRevisionId,
@@ -1880,11 +1886,11 @@ export function buildOwnerControlApp(
           ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
           : reply.code(200).send({ pilot: mutation.value });
       } catch (error) {
-        if (
-          error instanceof OwnerAuthenticationRejectedError ||
-          error instanceof OwnerPrivateLivePilotRejectedError
-        ) {
+        if (error instanceof OwnerAuthenticationRejectedError) {
           return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerPrivateLivePilotRejectedError) {
+          return reply.code(409).send({ error: 'pilot_not_ready' });
         }
         request.log.warn('Owner private live-deposit pilot emergency stop is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });

@@ -336,6 +336,32 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           getOwnerAdminId(),
           ownerAuthUserId,
         );
+        const frozenReadiness = await queryAsOwnerControl<{
+          readonly cohort_state: string;
+        }>(
+          client,
+          `select cohort_state
+             from app.prepare_owner_kemerbet_readiness_cohort_claim($1::uuid, $2::uuid)`,
+          [ownerAuthUserId, randomUUID()],
+        );
+        expect(frozenReadiness).toHaveLength(5);
+        expect(frozenReadiness.every((row) => row.cohort_state === 'prepared')).toBe(true);
+
+        await client.query('savepoint ordinary_frozen_switch_mutation');
+        let frozenSwitchFailure: unknown;
+        try {
+          await client.query(`
+            update app.feature_switches
+               set mode = 'dry_run'
+             where feature_key = 'payment_verification'
+          `);
+        } catch (error) {
+          frozenSwitchFailure = error;
+        }
+        await client.query('rollback to savepoint ordinary_frozen_switch_mutation');
+        await client.query('release savepoint ordinary_frozen_switch_mutation');
+        expect(String(frozenSwitchFailure)).toMatch(/readiness cohort is frozen/iu);
+
         const requestId = randomUUID();
         const activeFrom = new Date(Date.now() - 15_000);
         const expiresAt = new Date(activeFrom.getTime() + 2 * 60 * 60 * 1_000);
@@ -628,6 +654,29 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
             metadata: { reason_code: 'execution_uncertainty' },
           },
         ]);
+
+        const closedMutationContext = await client.query<{ readonly context_closed: boolean }>(`
+          select gate.pilot_mutation_backend_pid is null
+                   and gate.pilot_mutation_transaction_id is null
+                   and gate.pilot_mutation_mode is null as context_closed
+            from app.private_owner_kemerbet_readiness_cohort_gate gate
+           where gate.singleton
+        `);
+        expect(closedMutationContext.rows).toEqual([{ context_closed: true }]);
+
+        await client.query('savepoint frozen_source_still_closed');
+        let frozenSourceFailure: unknown;
+        try {
+          await client.query(
+            "select pg_catalog.set_config('app.companion_verified_pilot_mutation', 'arm', true)",
+          );
+          await client.query('insert into app.customers default values');
+        } catch (error) {
+          frozenSourceFailure = error;
+        }
+        await client.query('rollback to savepoint frozen_source_still_closed');
+        await client.query('release savepoint frozen_source_still_closed');
+        expect(String(frozenSourceFailure)).toMatch(/readiness cohort is frozen/iu);
       } finally {
         await client.query('rollback');
       }

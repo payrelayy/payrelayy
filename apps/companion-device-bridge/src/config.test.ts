@@ -14,8 +14,10 @@ import {
   type CompanionDeviceBridgeGuardedFileStat,
 } from './config.js';
 
-const databaseUrl =
+const directDatabaseUrl =
   'postgresql://fetanagent_companion_device_bridge_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
+const databaseUrl =
+  'postgresql://fetanagent_companion_device_bridge_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
 const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
 const paddedCa = '-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n';
 const keyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -133,10 +135,10 @@ describe('companion device bridge configuration', () => {
     if (!config.enabled) throw new Error('expected enabled config');
     expect(config.connection).toMatchObject({
       database: 'postgres',
-      host: 'db.spzpiyxheappsfyswewl.supabase.co',
+      host: 'aws-1-eu-west-1.pooler.supabase.com',
       password: 'synthetic-password-123456',
       port: 5432,
-      user: 'fetanagent_companion_device_bridge_runtime',
+      user: 'fetanagent_companion_device_bridge_runtime.spzpiyxheappsfyswewl',
       ca,
     });
     expect(config.serverSignerId).toBe('11111111-1111-4111-8111-111111111111');
@@ -173,6 +175,25 @@ describe('companion device bridge configuration', () => {
     expect(dependencies.returnedBuffers.every((bytes) => bytes.every((value) => value === 0))).toBe(
       true,
     );
+  });
+
+  it('also accepts only the exact staging direct route and bare runtime role', () => {
+    const config = loadCompanionDeviceBridgeConfig(
+      enabledEnvironment,
+      guardedDependencies({
+        [COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE]: directDatabaseUrl,
+        [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: manifest,
+        [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
+        [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
+      }),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      connection: {
+        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        user: 'fetanagent_companion_device_bridge_runtime',
+      },
+    });
   });
 
   it.each([
@@ -214,7 +235,22 @@ describe('companion device bridge configuration', () => {
 
   it.each([
     ['wrong role', databaseUrl.replace('fetanagent_companion_device_bridge_runtime', 'postgres')],
-    ['wrong host', databaseUrl.replace('db.spzpiyxheappsfyswewl.supabase.co', 'localhost')],
+    ['wrong host', databaseUrl.replace('aws-1-eu-west-1.pooler.supabase.com', 'localhost')],
+    [
+      'bare role on the session pooler',
+      databaseUrl.replace(
+        'fetanagent_companion_device_bridge_runtime.spzpiyxheappsfyswewl',
+        'fetanagent_companion_device_bridge_runtime',
+      ),
+    ],
+    [
+      'project-suffixed role on the direct route',
+      directDatabaseUrl.replace(
+        'fetanagent_companion_device_bridge_runtime:',
+        'fetanagent_companion_device_bridge_runtime.spzpiyxheappsfyswewl:',
+      ),
+    ],
+    ['transaction pooler port', databaseUrl.replace(':5432/', ':6543/')],
     ['wrong TLS', databaseUrl.replace('verify-full', 'require')],
     ['extra query', `${databaseUrl}&application_name=other`],
     ['short password', databaseUrl.replace('synthetic-password-123456', 'short')],

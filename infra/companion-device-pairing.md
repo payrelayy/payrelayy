@@ -24,6 +24,10 @@ administrator/service-role credential.
 - The root helper, rather than unsupported standalone-Compose `uid`, `gid`, or `mode` fields,
   attests file-backed secret ownership and permissions before every start. The database URL is an
   exact no-line-ending byte sequence and is revalidated before it reaches the non-root container.
+- The continuously running bridge uses the Supavisor session pooler on port `5432`, with the exact
+  `<runtime-role>.<staging-project-ref>` login. The helper proves the IPv4 route, pooler DNS answer,
+  and TCP reachability before replacing an active release. Transaction pooling on port `6543` and
+  mismatched host/login combinations are rejected.
 - The runtime login has no calendar expiry. It stays available until the explicit disable workflow
   is run. Pairing packages still expire after ten minutes and device certificates remain revocable.
 

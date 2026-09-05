@@ -20,6 +20,10 @@ export const COMPANION_DEVICE_BRIDGE_GROUP_ROLE = 'fetanagent_companion_device_b
 export const COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST =
   'db.spzpiyxheappsfyswewl.supabase.co' as const;
+export const COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST =
+  'aws-1-eu-west-1.pooler.supabase.com' as const;
+export const COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER =
+  `${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE}` as const;
 export const COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE =
   '/run/secrets/companion_device_bridge_database_url' as const;
 export const COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE =
@@ -37,10 +41,14 @@ const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 export interface CompanionDeviceBridgeConnectionConfig {
   readonly ca: string;
   readonly database: 'postgres';
-  readonly host: typeof COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST;
+  readonly host:
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST;
   readonly password: string;
   readonly port: 5432;
-  readonly user: typeof COMPANION_DEVICE_BRIDGE_DATABASE_ROLE;
+  readonly user:
+    | typeof COMPANION_DEVICE_BRIDGE_DATABASE_ROLE
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER;
 }
 
 export type CompanionDeviceBridgeConfig =
@@ -328,11 +336,16 @@ function connectionFromUrl(value: string): Omit<CompanionDeviceBridgeConnectionC
   const user = decodeUrlComponent(url.username);
   const password = decodeUrlComponent(url.password);
   const database = decodeUrlComponent(url.pathname.slice(1));
+  const directRoute =
+    url.hostname === COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST &&
+    user === COMPANION_DEVICE_BRIDGE_DATABASE_ROLE;
+  const sessionPoolerRoute =
+    url.hostname === COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST &&
+    user === COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
-    url.hostname !== COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST ||
+    (!directRoute && !sessionPoolerRoute) ||
     (url.port !== '' && url.port !== '5432') ||
-    user !== COMPANION_DEVICE_BRIDGE_DATABASE_ROLE ||
     password.length < 16 ||
     database !== 'postgres' ||
     url.hash !== '' ||
@@ -344,10 +357,14 @@ function connectionFromUrl(value: string): Omit<CompanionDeviceBridgeConnectionC
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST,
+    host: directRoute
+      ? COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST
+      : COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST,
     password,
     port: 5432 as const,
-    user: COMPANION_DEVICE_BRIDGE_DATABASE_ROLE,
+    user: directRoute
+      ? COMPANION_DEVICE_BRIDGE_DATABASE_ROLE
+      : COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER,
   });
 }
 

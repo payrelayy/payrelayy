@@ -18,6 +18,7 @@ const [
   runtimeDisable,
   inspection,
   secretProvisioner,
+  deploymentRunbook,
   deploymentWorkflow,
   deploymentHelper,
   deploymentInstaller,
@@ -58,6 +59,7 @@ const [
   readFile(new URL('infra/sql/staging-companion-bridge-runtime-disable.sql', root), 'utf8'),
   readFile(new URL('infra/sql/staging-companion-pairing-inspect.sql', root), 'utf8'),
   readFile(new URL('infra/operations/provision-companion-operational-secrets.ps1', root), 'utf8'),
+  readFile(new URL('infra/companion-device-pairing.md', root), 'utf8'),
   readFile(new URL('.github/workflows/staging-companion-device-pairing-deploy.yml', root), 'utf8'),
   readFile(new URL('infra/operations/fetanagent-companion-device-pairing-helper.sh', root), 'utf8'),
   readFile(
@@ -266,8 +268,10 @@ assert.match(deploymentWorkflow, /fetanagent-companion-device-pairing-helper act
 assert.match(deploymentWorkflow, /fetanagent-companion-device-pairing-helper ready/u);
 assert.match(
   deploymentWorkflow,
-  /printf '%s' \\\s*"postgresql:\/\/\$\{COMPANION_RUNTIME_ROLE\}:\$\{COMPANION_RUNTIME_PASSWORD\}@\$\{STAGING_DIRECT_DATABASE_HOST\}:5432\/postgres\?sslmode=verify-full"/u,
+  /printf 'postgresql:\/\/%s\.%s:%s@%s:5432\/postgres\?sslmode=verify-full'/u,
 );
+assert.match(deploymentWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/u);
+assert.doesNotMatch(deploymentWorkflow, /STAGING_DIRECT_DATABASE_HOST/u);
 assert.match(deploymentWorkflow, /printf '%s' "\$SUPABASE_CA_CERTIFICATE_PEM"/u);
 assert.doesNotMatch(deploymentWorkflow, /postgres\?sslmode=verify-full\\n/u);
 assert.doesNotMatch(deploymentWorkflow, /printf '%s\\n' "\$SUPABASE_CA_CERTIFICATE_PEM"/u);
@@ -279,6 +283,13 @@ assert.doesNotMatch(
 assert.match(deploymentHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
 assert.match(deploymentHelper, /STAGING_DROPLET_ID='593344964'/u);
 assert.match(deploymentHelper, /STAGING_PUBLIC_IPV4='161\.35\.41\.232'/u);
+assert.match(
+  deploymentHelper,
+  /DATABASE_SESSION_POOLER_HOST='aws-1-eu-west-1\.pooler\.supabase\.com'/u,
+);
+assert.match(deploymentHelper, /getent ahostsv4 "\$DATABASE_SESSION_POOLER_HOST"/u);
+assert.match(deploymentHelper, /\/dev\/tcp\/\$DATABASE_SESSION_POOLER_HOST\/5432/u);
+assert.doesNotMatch(deploymentHelper, /DATABASE_HOST='db\.|ahostsv6/u);
 assert.match(deploymentHelper, /MUTATION_LOCK="\$MUTATION_LOCK_ROOT\/mutation\.lock"/u);
 assert.match(deploymentHelper, /--driver bridge --internal --attachable=false/u);
 assert.match(deploymentHelper, /COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED=true/u);
@@ -320,6 +331,8 @@ assert.match(deploymentHelper, /install -o 10001 -g 10001 -m 0400/u);
 assert.match(deploymentHelper, /file_stat\.st_size > 512/u);
 assert.match(deploymentHelper, /re\.fullmatch\(pattern, raw\) is None/u);
 assert.match(deploymentHelper, /the companion database URL is not exact canonical bytes/u);
+assert.match(deploymentRunbook, /Supavisor session pooler on port `5432`/u);
+assert.match(deploymentRunbook, /<runtime-role>\.<staging-project-ref>/u);
 assert.match(deploymentHelper, /the companion bridge unexpectedly publishes a host port/u);
 assert.match(
   deploymentHelper,
@@ -337,7 +350,7 @@ const helperSha256 = createHash('sha256').update(deploymentHelper).digest('hex')
 assert.match(deploymentInstaller, new RegExp(`EXPECTED_HELPER_SHA256='${helperSha256}'`, 'u'));
 assert.match(
   deploymentInstaller,
-  /PREVIOUS_HELPER_SHA256='fcc648e741b4d0e5d31f33541a12c4a4ad610f43d4c97626dafb3ce904432795'/u,
+  /PREVIOUS_HELPER_SHA256='9350241bf8b648c71c97715a1e361afd156d5c1f9b945ec10fb16e42394679a8'/u,
 );
 assert.match(deploymentInstaller, /NOPASSWD: sha256:\$digest \$TARGET \*/u);
 assert.match(

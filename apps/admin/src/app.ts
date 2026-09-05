@@ -587,7 +587,7 @@ export function buildOwnerControlApp(
   }
 
   type KemerbetStateMutationMode =
-    'ordinary' | 'private_session' | 'readiness_cohort' | 'security_recovery';
+    'ordinary' | 'pilot_dry_run' | 'private_session' | 'readiness_cohort' | 'security_recovery';
   type KemerbetStateMutationResult<T> =
     | { readonly state: 'blocked' }
     | {
@@ -604,10 +604,12 @@ export function buildOwnerControlApp(
       const lifecycle = await kemerbetReadinessLifecycle();
       if (
         lifecycle === 'recheck_authorization_spent_failed_terminal' ||
-        (lifecycle === 'security_recovery_cohort_staged' && mode !== 'private_session') ||
+        (lifecycle === 'security_recovery_cohort_staged' &&
+          mode !== 'private_session' &&
+          mode !== 'pilot_dry_run') ||
         lifecycle === 'imported' ||
         lifecycle === 'retryable_failed' ||
-        ((mode === 'ordinary' || mode === 'private_session') &&
+        ((mode === 'ordinary' || mode === 'pilot_dry_run' || mode === 'private_session') &&
           (lifecycle === 'security_recovery_failed_terminal' ||
             lifecycle === 'security_recovery_profile_finalized')) ||
         (mode === 'readiness_cohort' && lifecycle === 'security_recovery_failed_terminal') ||
@@ -1790,7 +1792,7 @@ export function buildOwnerControlApp(
       }
 
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const mutation = await runKemerbetStateMutation('ordinary', () =>
+      const mutation = await runKemerbetStateMutation('pilot_dry_run', () =>
         dependencies.runtime.privateLivePilot.prepare(authUserId, {
           activeFrom,
           expiresAt,
@@ -1832,7 +1834,7 @@ export function buildOwnerControlApp(
           return reply.code(400).send({ error: 'invalid_request' });
         }
         const authUserId = await ownerSubject(request.raw.rawHeaders);
-        const mutation = await runKemerbetStateMutation('ordinary', () =>
+        const mutation = await runKemerbetStateMutation('pilot_dry_run', () =>
           dependencies.runtime.privateLivePilot.arm(authUserId, request.params.pilotRevisionId),
         );
         return mutation.state === 'blocked'

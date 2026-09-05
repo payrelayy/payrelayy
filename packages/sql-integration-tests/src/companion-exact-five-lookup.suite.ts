@@ -158,7 +158,15 @@ async function createEligibleAssociatedPlayer(
   );
 }
 
-async function createExactFivePlayers(client: Client, ownerAuthUserId: string): Promise<void> {
+type ExactFivePlayers = {
+  readonly ownerCustomerId: string;
+  readonly playerIds: readonly string[];
+};
+
+async function createExactFivePlayers(
+  client: Client,
+  ownerAuthUserId: string,
+): Promise<ExactFivePlayers> {
   const activeProfile = await client.query<{ readonly count: number }>(`
     select count(*)::integer
       from app.private_owner_kemerbet_agent_profile_revisions profile
@@ -185,6 +193,20 @@ async function createExactFivePlayers(client: Client, ownerAuthUserId: string): 
   for (let ordinal = 1; ordinal <= 5; ordinal += 1) {
     await createEligibleAssociatedPlayer(client, ownerAuthUserId, ordinal);
   }
+  const players = await client.query<{
+    readonly customer_id: string;
+    readonly player_id: string;
+  }>(`
+    select player.customer_id::text, eligible.player_id
+      from app.agent_platform_companion_current_exact_five_players() eligible
+      join app.customer_platform_players player on player.id = eligible.player_account_id
+     order by eligible.player_account_id
+  `);
+  expect(players.rows).toHaveLength(5);
+  return {
+    ownerCustomerId: players.rows[0]!.customer_id,
+    playerIds: players.rows.map((player) => player.player_id),
+  };
 }
 
 async function createPairedDevice(
@@ -297,12 +319,13 @@ function assignmentEnvelope(
 function resultEnvelope(
   assignment: Record<string, unknown>,
   observedAt: Date,
+  allFound = false,
 ): Record<string, unknown> {
   const assignmentBody = assignment.body as Record<string, unknown>;
   const items = Array.from({ length: 5 }, (_, playerIndex) => ({
     playerIndex,
     playerIdDigest: sha(`redacted-player-${playerIndex}-${randomUUID()}`),
-    outcome: playerIndex === 4 ? 'review_required' : 'found',
+    outcome: !allFound && playerIndex === 4 ? 'review_required' : 'found',
   }));
   const body = {
     contractVersion: 1,
@@ -319,9 +342,9 @@ function resultEnvelope(
     lookupMode: 'find_only',
     currencyCode: 'ETB',
     items,
-    foundCount: 4,
+    foundCount: allFound ? 5 : 4,
     notFoundCount: 0,
-    reviewRequiredCount: 1,
+    reviewRequiredCount: allFound ? 0 : 1,
     observedAt: timestamp(observedAt),
     accountMutationAllowed: false,
     balanceMutationAllowed: false,
@@ -366,6 +389,76 @@ const acceptSql = `
     $12::timestamptz, $13::timestamptz, $14::timestamptz, $15::jsonb, $16::jsonb
   )
 `;
+
+export async function createAcceptedExactFiveCompanionEvidence(
+  client: Client,
+  ownerAdminId: string,
+  ownerAuthUserId: string,
+): Promise<ExactFivePlayers & { readonly assignmentId: string }> {
+  const players = await createExactFivePlayers(client, ownerAuthUserId);
+  const paired = await createPairedDevice(client, ownerAdminId);
+  const issued = await queryAsOwnerControl<LookupIssueRow>(
+    client,
+    `select * from app.issue_agent_platform_companion_exact_five_lookup(
+       $1::uuid, $2::uuid, $3::text
+     )`,
+    [ownerAuthUserId, randomUUID(), paired.signerKeyId],
+  );
+  expect(issued).toHaveLength(1);
+
+  const certificateBody = paired.certificateBody;
+  const pollAssessedAt = canonicalNow();
+  const claimed = await client.query<LookupClaimRow>(claimSql, [
+    sha(`pilot-evidence-poll-replay:${randomUUID()}`),
+    sha(`pilot-evidence-poll-body:${randomUUID()}`),
+    `pilot-evidence-poll-${randomUUID().replaceAll('-', '')}`,
+    String(certificateBody.certificateId),
+    String(certificateBody.deviceId),
+    String(certificateBody.deviceKeyId),
+    pollAssessedAt,
+    new Date(pollAssessedAt.getTime() + 60_000),
+    pollAssessedAt,
+    paired.signerKeyId,
+  ]);
+  expect(claimed.rows).toHaveLength(1);
+  expect(claimed.rows[0]!.claim_state).toBe('claimed');
+
+  const assignment = assignmentEnvelope(claimed.rows[0]!.assignment_body!, paired.signerKeyId);
+  const completed = await client.query<{ readonly completed: boolean }>(
+    `select app.complete_agent_platform_companion_lookup_assignment(
+       $1::text, $2::text, $3::text, $4::jsonb
+     ) as completed`,
+    [assignment.bodyDigest, paired.signerKeyId, assignment.signature, assignment],
+  );
+  expect(completed.rows).toEqual([{ completed: true }]);
+
+  const resultAssessedAt = canonicalNow();
+  const result = resultEnvelope(assignment, resultAssessedAt, true);
+  const resultBody = result.body as Record<string, unknown>;
+  const accepted = await client.query<{ readonly accepted: boolean; readonly replayed: boolean }>(
+    acceptSql,
+    [
+      sha(`pilot-evidence-result-http-replay:${randomUUID()}`),
+      sha(`pilot-evidence-result-http-body:${randomUUID()}`),
+      `pilot-evidence-result-request-${randomUUID().replaceAll('-', '')}`,
+      sha(`pilot-evidence-result-replay:${randomUUID()}`),
+      String((assignment.body as Record<string, unknown>).assignmentId),
+      String(assignment.bodyDigest),
+      String(resultBody.resultId),
+      String(result.bodyDigest),
+      String(certificateBody.certificateId),
+      String(certificateBody.deviceId),
+      String(certificateBody.deviceKeyId),
+      resultAssessedAt,
+      new Date(resultAssessedAt.getTime() + 60_000),
+      resultAssessedAt,
+      assignment,
+      result,
+    ],
+  );
+  expect(accepted.rows).toEqual([{ accepted: true, replayed: false }]);
+  return { ...players, assignmentId: issued[0]!.assignment_id };
+}
 
 export function registerCompanionExactFiveLookupSqlTests(
   getClient: () => Client,

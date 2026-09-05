@@ -1739,7 +1739,10 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             owner_runtime_allowed: false,
             settlement_allowed: false,
           });
-        } else if (row.signature.includes('prepare_private_live_deposit_pilot')) {
+        } else if (
+          row.signature.includes('prepare_private_live_deposit_pilot') ||
+          row.signature === 'app.arm_private_live_deposit_pilot(uuid,uuid)'
+        ) {
           expect(row).toMatchObject({
             direct_grantees: [],
             executor_allowed: false,

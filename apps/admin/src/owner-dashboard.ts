@@ -662,6 +662,7 @@ const OWNER_RECONCILIATION_REQUEST_TIMEOUT_MS = 4 * 1_000;
 const OWNER_REFRESH_RETRY_DELAY_MS = 5 * 1_000;
 const KEMERBET_TEXT_BATCH_DELAY_MS = 180;
 const KEMERBET_TEXT_BATCH_MAX_CHARS = 64;
+const COMPANION_PILOT_LOOKUP_MAX_AGE_MS = 15 * 60 * 1_000;
 
 function ownerTransportTimeoutError() {
   return new Error('owner_transport_timeout');
@@ -761,6 +762,21 @@ function ordinaryKemerbetMutationAllowed() {
   return !kemerbetSecurityRecoveryRequired;
 }
 
+function companionLookupPilotReady() {
+  const completedAt = Date.parse(currentCompanionLookup?.completedAt || '');
+  const now = Date.now();
+  return currentCompanionLookup?.state === 'completed' &&
+    currentCompanionLookup.foundCount === 5 &&
+    currentCompanionLookup.notFoundCount === 0 &&
+    currentCompanionLookup.reviewRequiredCount === 0 &&
+    Number.isFinite(completedAt) && completedAt <= now + 30_000 &&
+    completedAt >= now - COMPANION_PILOT_LOOKUP_MAX_AGE_MS;
+}
+
+function pilotDryRunMutationAllowed() {
+  return companionLookupPilotReady();
+}
+
 function readinessKemerbetMutationAllowed() {
   return ordinaryKemerbetMutationAllowed() || kemerbetSecurityRecoveryCohortRequired;
 }
@@ -791,8 +807,11 @@ function applyKemerbetQuarantineMutationBoundary() {
     updatePilotPreparationAvailability();
     return;
   }
-  for (const form of [receiverForm, pilotPrepareForm]) {
+  for (const form of [receiverForm]) {
     for (const element of form.elements) element.disabled = true;
+  }
+  for (const element of pilotPrepareForm.elements) {
+    element.disabled = !companionLookupPilotReady() || pilotPrepareForm.dataset.ownerBusy === 'true';
   }
   if (kemerbetSecurityRecoveryCohortRequired) {
     if (kemerbetReadinessCohortForm.dataset.ownerBusy !== 'true') {
@@ -811,6 +830,9 @@ function applyKemerbetQuarantineMutationBoundary() {
   for (const element of document.querySelectorAll('[data-kemerbet-state-mutation="ordinary"]')) {
     element.disabled = true;
   }
+  for (const element of document.querySelectorAll('[data-kemerbet-state-mutation="pilot_dry_run"]')) {
+    element.disabled = !companionLookupPilotReady() || Boolean(currentPilot);
+  }
   if (privateKemerbetSessionMutationAllowed()) {
     kemerbetSessionConfirmation.disabled = Boolean(currentKemerbetSession?.active);
     kemerbetSessionStartButton.disabled = !activeKemerbetAgentProfileId ||
@@ -823,7 +845,9 @@ function applyKemerbetQuarantineMutationBoundary() {
     kemerbetSessionStartButton.disabled = true;
     kemerbetSessionStopButton.disabled = true;
   }
-  pilotArmButton.disabled = true;
+  pilotArmButton.disabled = !companionLookupPilotReady() || !currentPilot ||
+    currentPilot.pilotStatus !== 'draft' || currentPilot.financiallyActive ||
+    Date.parse(currentPilot.expiresAt) <= Date.now();
   pilotStopButton.disabled = true;
   if (
     !kemerbetRecheckSpentFailedTerminal &&
@@ -834,6 +858,7 @@ function applyKemerbetQuarantineMutationBoundary() {
   }
   kemerbetAgentProfileReason.disabled = true;
   updateKemerbetReadinessCohortAvailability();
+  updatePilotPreparationAvailability();
 }
 
 function requireOrdinaryKemerbetMutation() {
@@ -845,6 +870,15 @@ function requireOrdinaryKemerbetMutation() {
       : kemerbetSecurityRecoverySessionAllowed
         ? 'KemerBet security recovery is in progress. Only the exact recovery private sign-in and read-only status refreshes are available; no money moves.'
         : 'KemerBet security recovery is required. Only the exact security-recovery profile action and read-only status refreshes are available; no money moves.',
+  );
+  return false;
+}
+
+function requirePilotDryRunMutation() {
+  if (pilotDryRunMutationAllowed()) return true;
+  applyKemerbetQuarantineMutationBoundary();
+  setNotice(
+    'Complete one fresh signed five-for-five companion lookup before preparing or arming the TeleBirr dry-run pilot. No money moves.',
   );
   return false;
 }
@@ -2563,6 +2597,7 @@ function renderCompanionLookup(status) {
     }
   }
   updateCompanionLookupAvailability();
+  renderPilotCandidates(eligiblePilotPlayers);
 }
 
 function scheduleCompanionLookupStatus() {
@@ -2783,7 +2818,7 @@ function showTelebirrDevicePairing(receipt) {
 }
 
 function updatePilotPreparationAvailability() {
-  pilotPrepareButton.disabled = !ordinaryKemerbetMutationAllowed() || Boolean(currentPilot) ||
+  pilotPrepareButton.disabled = !pilotDryRunMutationAllowed() || Boolean(currentPilot) ||
     selectedPilotPlayerIds.size !== 5 ||
     !pilotConfirmation.checked;
 }
@@ -2812,9 +2847,9 @@ function renderPilotCandidates(players) {
     label.className = 'request-card pilot-choice';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.dataset.kemerbetStateMutation = 'ordinary';
+    checkbox.dataset.kemerbetStateMutation = 'pilot_dry_run';
     checkbox.checked = selectedPilotPlayerIds.has(player.playerId);
-    checkbox.disabled = !ordinaryKemerbetMutationAllowed() || Boolean(currentPilot);
+    checkbox.disabled = !pilotDryRunMutationAllowed() || Boolean(currentPilot);
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) selectedPilotPlayerIds.add(player.playerId);
       else selectedPilotPlayerIds.delete(player.playerId);
@@ -2859,7 +2894,7 @@ function renderPilotStatus(pilot, statusLoaded = true) {
     detail.textContent = value;
     pilotStatusFacts.append(term, detail);
   }
-  pilotArmButton.disabled = !ordinaryKemerbetMutationAllowed() ||
+  pilotArmButton.disabled = !pilotDryRunMutationAllowed() ||
     pilot.pilotStatus !== 'draft' || pilot.financiallyActive ||
     Date.parse(pilot.expiresAt) <= Date.now();
   pilotStopButton.disabled = !ordinaryKemerbetMutationAllowed() || pilot.pilotStatus === 'stopped';
@@ -3583,7 +3618,7 @@ function pilotMutationHeaders(requestId) {
 }
 
 async function prepareFixedPilot() {
-  if (!requireOrdinaryKemerbetMutation() || currentPilot ||
+  if (!requirePilotDryRunMutation() || currentPilot ||
       selectedPilotPlayerIds.size !== 5 || !pilotConfirmation.checked) return;
   if (!window.confirm(
     'Prepare exactly five selected Players for the fixed TeleBirr pilot: 25 ETB each, 125 ETB total, one reservation each, and two hours? This remains financially disabled.',
@@ -3626,7 +3661,7 @@ async function prepareFixedPilot() {
 }
 
 async function armFixedPilot() {
-  if (!requireOrdinaryKemerbetMutation() || !currentPilot ||
+  if (!requirePilotDryRunMutation() || !currentPilot ||
       currentPilot.pilotStatus !== 'draft') return;
   if (!window.confirm(
     'Arm this pilot configuration in dry-run only? This must not enable payment verification, settlement, the executor, or KemerBet actions.',
@@ -3656,7 +3691,7 @@ async function armFixedPilot() {
     }
   } finally {
     if (currentPilot) {
-      pilotArmButton.disabled = !ordinaryKemerbetMutationAllowed() ||
+      pilotArmButton.disabled = !pilotDryRunMutationAllowed() ||
         currentPilot.pilotStatus !== 'draft' ||
         Date.parse(currentPilot.expiresAt) <= Date.now();
     }

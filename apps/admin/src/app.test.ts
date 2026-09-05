@@ -657,7 +657,10 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(
       response.body.match(/requireOrdinaryKemerbetMutation\(\)/gu)?.length,
-    ).toBeGreaterThanOrEqual(8);
+    ).toBeGreaterThanOrEqual(6);
+    expect(response.body.match(/requirePilotDryRunMutation\(\)/gu)?.length).toBeGreaterThanOrEqual(
+      3,
+    );
     expect(
       response.body.match(/requirePrivateKemerbetSessionMutation\(\)/gu)?.length,
     ).toBeGreaterThanOrEqual(4);
@@ -2727,7 +2730,7 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
-  it('allows only the private KemerBet session lane for an exact staged recovery cohort', async () => {
+  it('allows the private session and companion-gated dry-run pilot lanes for a staged cohort', async () => {
     const calls: string[] = [];
     const app = buildOwnerControlApp(config(), {
       fetch: verifiedAuthFetch(),
@@ -2789,6 +2792,20 @@ describe('Owner-control HTTP boundary', () => {
           claim: async () => {
             calls.push('claim');
             throw new Error('recovery cohort must not be replaced');
+          },
+        },
+        privateLivePilot: {
+          ...runtime().privateLivePilot,
+          arm: async () => {
+            calls.push('pilot-arm');
+            return {
+              alreadyApplied: false,
+              status: pilotStatus({ pilotStatus: 'armed', switchMode: 'dry_run' }),
+            };
+          },
+          prepare: async () => {
+            calls.push('pilot-prepare');
+            return pilotStatus();
           },
         },
       }),
@@ -2872,7 +2889,43 @@ describe('Owner-control HTTP boundary', () => {
       },
     });
     expect(cohort.statusCode).toBe(409);
-    expect(calls).toEqual(['status', 'start', 'frame', 'input', 'stop']);
+
+    const prepared = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/private-live-deposit-pilots/prepare',
+      headers: pilotMutationHeaders(),
+      payload: {
+        activeFrom: '2026-09-05T18:00:00.000Z',
+        confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
+        expiresAt: '2026-09-05T20:00:00.000Z',
+        playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
+        requestId: pilotRequestId,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+
+    const armed = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_dry_run_only',
+        requestId: pilotRevisionId,
+      },
+    });
+    expect(armed.statusCode).toBe(200);
+    expect(armed.json()).toMatchObject({
+      status: { financiallyActive: false, pilotStatus: 'armed', switchMode: 'dry_run' },
+    });
+    expect(calls).toEqual([
+      'status',
+      'start',
+      'frame',
+      'input',
+      'stop',
+      'pilot-prepare',
+      'pilot-arm',
+    ]);
     await app.close();
   });
 

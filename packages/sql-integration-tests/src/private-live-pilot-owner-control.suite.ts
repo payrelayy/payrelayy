@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Client, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
 
+import { createAcceptedExactFiveCompanionEvidence } from './companion-exact-five-lookup.suite.js';
 import { createPilotPrerequisites } from './private-live-money-pilot.suite.js';
 
 type SqlValue = Date | number | readonly string[] | string | null;
@@ -54,7 +55,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
       const client = getClient();
       const publicSignatures = [
         'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)',
-        'app.arm_private_live_deposit_pilot(uuid,uuid)',
+        'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)',
         'app.stop_private_live_deposit_pilot(uuid,uuid,text)',
         'app.get_private_live_deposit_pilot_status(uuid,uuid)',
         'app.get_current_private_live_deposit_pilot_status(uuid)',
@@ -135,11 +136,13 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
            and routine.proname in (
              'arm_private_live_deposit_pilot_by_admin_id',
              'get_private_live_deposit_pilot_status_by_admin_id',
+             'prepare_approved_private_live_telebirr_pilot_unverified',
              'prepare_private_live_deposit_pilot_by_admin_id',
+             'require_companion_verified_private_live_telebirr_pilot',
              'stop_private_live_deposit_pilot_by_admin_id'
            )
       `);
-      expect(privateImplementations.rows).toHaveLength(4);
+      expect(privateImplementations.rows).toHaveLength(6);
       expect(
         privateImplementations.rows.every(
           (row) => !row.group_execute && !row.runtime_execute && !row.public_execute,
@@ -160,7 +163,9 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)',
         },
-        { signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)' },
+        {
+          signature: 'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)',
+        },
         {
           signature: 'app.associate_owner_validated_player_registration_request(uuid,uuid,text)',
         },
@@ -311,13 +316,33 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
                   and receiver.status = 'active'
              )
         `);
+        const missingEvidenceActiveFrom = new Date(Date.now() - 15_000);
+        await expectFailureAtSavepoint(
+          client,
+          `select app.prepare_approved_private_live_telebirr_pilot(
+             $1::uuid, $2::uuid, $3::text[], $4::timestamptz, $5::timestamptz
+           )`,
+          [
+            ownerAuthUserId,
+            randomUUID(),
+            prerequisites.playerIds,
+            missingEvidenceActiveFrom,
+            new Date(missingEvidenceActiveFrom.getTime() + 2 * 60 * 60 * 1_000),
+          ],
+        );
+
+        const companionEvidence = await createAcceptedExactFiveCompanionEvidence(
+          client,
+          getOwnerAdminId(),
+          ownerAuthUserId,
+        );
         const requestId = randomUUID();
         const activeFrom = new Date(Date.now() - 15_000);
         const expiresAt = new Date(activeFrom.getTime() + 2 * 60 * 60 * 1_000);
         const prepareValues: readonly SqlValue[] = [
           ownerAuthUserId,
           requestId,
-          prerequisites.playerIds,
+          companionEvidence.playerIds,
           activeFrom,
           expiresAt,
         ];
@@ -395,16 +420,16 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         expect(preparedAudits.rows[0]!.actor_admin_id).toBe(getOwnerAdminId());
         expect(JSON.stringify(preparedAudits.rows[0]!.metadata)).not.toContain(requestId);
         expect(JSON.stringify(preparedAudits.rows[0]!.metadata)).not.toContain(
-          prerequisites.playerIds[0],
+          companionEvidence.playerIds[0],
         );
         expect(JSON.stringify(preparedAudits.rows[0]!.metadata)).not.toContain(
-          prerequisites.ownerCustomerId,
+          companionEvidence.ownerCustomerId,
         );
 
         await expectFailureAtSavepoint(client, prepareSql, [
           ownerAuthUserId,
           randomUUID(),
-          prerequisites.playerIds,
+          companionEvidence.playerIds,
           activeFrom,
           new Date(expiresAt.getTime() + 1),
         ]);
@@ -427,12 +452,14 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           pilot_revision_id: pilotRevisionId,
           pilot_status: 'draft',
           provider_count: 1,
-          submitting_customer_count: 1,
+          submitting_customer_count: 5,
         });
 
         await queryAsOwnerControl(
           client,
-          `select app.arm_private_live_deposit_pilot($1::uuid, $2::uuid)`,
+          `select app.arm_companion_verified_private_live_telebirr_pilot(
+             $1::uuid, $2::uuid
+           )`,
           [ownerAuthUserId, pilotRevisionId],
         );
         const armed = await queryAsOwnerControl<Record<string, unknown>>(
@@ -468,8 +495,8 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           pilot_status: 'armed',
           switch_mode: 'dry_run',
         });
-        expect(JSON.stringify(armed[0])).not.toContain(prerequisites.playerIds[0]);
-        expect(JSON.stringify(armed[0])).not.toContain(prerequisites.ownerCustomerId);
+        expect(JSON.stringify(armed[0])).not.toContain(companionEvidence.playerIds[0]);
+        expect(JSON.stringify(armed[0])).not.toContain(companionEvidence.ownerCustomerId);
 
         const armedAudits = await client.query<{
           readonly actor_admin_id: string;
@@ -485,10 +512,10 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         expect(armedAudits.rows[0]!.actor_admin_id).toBe(getOwnerAdminId());
         expect(armedAudits.rows[0]!.metadata).toMatchObject({ financially_active: false });
         expect(JSON.stringify(armedAudits.rows[0]!.metadata)).not.toContain(
-          prerequisites.playerIds[0],
+          companionEvidence.playerIds[0],
         );
         expect(JSON.stringify(armedAudits.rows[0]!.metadata)).not.toContain(
-          prerequisites.ownerCustomerId,
+          companionEvidence.ownerCustomerId,
         );
 
         const armedSwitches = await client.query<{

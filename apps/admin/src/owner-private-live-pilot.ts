@@ -79,7 +79,7 @@ const PREPARE_SQL = `
     $5::timestamptz
   ) as pilot_revision_id
 `;
-const ARM_SQL = `select app.arm_private_live_deposit_pilot($1::uuid, $2::uuid)`;
+const ARM_SQL = `select app.arm_companion_verified_private_live_telebirr_pilot($1::uuid, $2::uuid)`;
 const STOP_SQL = `select app.stop_private_live_deposit_pilot($1::uuid, $2::uuid, $3::text)`;
 const STATUS_SQL = `
   select pilot_revision_id,

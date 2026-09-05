@@ -214,6 +214,16 @@ for (const command of ['start', 'ready', 'stop', 'rollback']) {
   assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
 }
 assert.match(deployHelper, /negative_public_smoke/u);
+assert.match(
+  deployHelper,
+  /--project-name "\$STAGING_PROJECT" --profile staging-manual --profile public-domain/u,
+  'gateway validation must retain its Owner and customer dependency services in the Compose model',
+);
+assert.match(
+  qualityWorkflow,
+  /--file infra\/compose\.staging-beta\.yaml\s*\\\s*\r?\n\s*--profile staging-manual --profile public-domain config --quiet/u,
+  'CI must exercise the exact dependency-complete gateway profile set used by the VM installer',
+);
 assert.match(deployWorkflow, /--cap-drop ALL\s*\\\s*\r?\n\s+--cap-add NET_BIND_SERVICE/u);
 assert.match(deployHelper, /--cap-drop ALL\s*\\\s*\r?\n\s+--cap-add NET_BIND_SERVICE/u);
 assert.match(deployHelper, /HostConfig\.ReadonlyRootfs/u);

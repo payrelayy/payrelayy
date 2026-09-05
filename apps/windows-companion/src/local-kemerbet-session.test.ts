@@ -527,6 +527,59 @@ describe('local KemerBet enrollment session', () => {
     expect(context.close).toHaveBeenCalledTimes(1);
   });
 
+  it('ignores an already-queued login deadline after the same browser becomes verified', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    let queuedLoginDeadline: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: (...arguments_: unknown[]) => void,
+      delay?: number,
+      ...arguments_: unknown[]
+    ): ReturnType<typeof setTimeout> => {
+      if (delay === TEN_MINUTES && queuedLoginDeadline === undefined) {
+        queuedLoginDeadline = () => Reflect.apply(callback, undefined, arguments_);
+        return Reflect.apply(originalSetTimeout, globalThis, [() => undefined, delay]);
+      }
+      return Reflect.apply(originalSetTimeout, globalThis, [callback, delay, ...arguments_]);
+    }) as typeof setTimeout);
+    const { context, events, page } = await start(LOGIN_URL);
+    expect(queuedLoginDeadline).toBeDefined();
+
+    page.navigate(AGENTS_URL);
+    await settleIdentityVerification();
+    expect(events.at(-1)?.state).toBe('signed_in_verified');
+    queuedLoginDeadline!();
+    await Promise.resolve();
+
+    expect(context.close).not.toHaveBeenCalled();
+    expect(events.at(-1)?.state).toBe('signed_in_verified');
+  });
+
+  it('ignores an already-queued candidate deadline after returning to login', async () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    let queuedCandidateDeadline: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: (...arguments_: unknown[]) => void,
+      delay?: number,
+      ...arguments_: unknown[]
+    ): ReturnType<typeof setTimeout> => {
+      if (delay === TWELVE_HOURS && queuedCandidateDeadline === undefined) {
+        queuedCandidateDeadline = () => Reflect.apply(callback, undefined, arguments_);
+        return Reflect.apply(originalSetTimeout, globalThis, [() => undefined, delay]);
+      }
+      return Reflect.apply(originalSetTimeout, globalThis, [callback, delay, ...arguments_]);
+    }) as typeof setTimeout);
+    const { context, events, page } = await start();
+    expect(queuedCandidateDeadline).toBeDefined();
+
+    page.navigate(LOGIN_URL);
+    expect(events.at(-1)?.state).toBe('login_required');
+    queuedCandidateDeadline!();
+    await Promise.resolve();
+
+    expect(context.close).not.toHaveBeenCalled();
+    expect(events.at(-1)?.state).toBe('login_required');
+  });
+
   it('does not extend the initial ten-minute login deadline on repeated login navigation', async () => {
     const { context, events, page, session } = await start(LOGIN_URL);
     await vi.advanceTimersByTimeAsync(TEN_MINUTES - 1);

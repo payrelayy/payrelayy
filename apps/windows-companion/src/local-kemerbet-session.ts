@@ -120,6 +120,8 @@ export async function startLocalKemerBetSession(
   let stopping = false;
   let terminal = false;
   let identityVerificationEpoch = 0;
+  let loginDeadlineEpoch = 0;
+  let candidateDeadlineEpoch = 0;
   let identityVerificationPromise: Promise<void> | undefined;
   let loginTimer: NodeJS.Timeout | undefined;
   let candidateTimer: NodeJS.Timeout | undefined;
@@ -147,6 +149,18 @@ export async function startLocalKemerBetSession(
     resolveVerified(value);
   };
 
+  const disarmLoginDeadline = (): void => {
+    loginDeadlineEpoch += 1;
+    if (loginTimer !== undefined) clearTimeout(loginTimer);
+    loginTimer = undefined;
+  };
+
+  const disarmCandidateDeadline = (): void => {
+    candidateDeadlineEpoch += 1;
+    if (candidateTimer !== undefined) clearTimeout(candidateTimer);
+    candidateTimer = undefined;
+  };
+
   const finish = async (
     state: 'failed' | 'stopped',
     reason?: LocalKemerBetSessionEvent['reason'],
@@ -157,8 +171,8 @@ export async function startLocalKemerBetSession(
     lookupAuthorization.clear();
     stopping = true;
     identityVerificationEpoch += 1;
-    if (loginTimer) clearTimeout(loginTimer);
-    if (candidateTimer) clearTimeout(candidateTimer);
+    disarmLoginDeadline();
+    disarmCandidateDeadline();
     if (sessionTimer) clearTimeout(sessionTimer);
     let browserClosed = context === undefined;
     try {
@@ -189,10 +203,30 @@ export async function startLocalKemerBetSession(
 
   const armLoginDeadline = (): void => {
     if (terminal || loginTimer !== undefined) return;
+    const deadlineEpoch = ++loginDeadlineEpoch;
     loginTimer = setTimeout(() => {
+      if (deadlineEpoch !== loginDeadlineEpoch) return;
+      loginTimer = undefined;
+      if (terminal || signedInCandidate || signedInVerified || phase !== 'manual_login') {
+        return;
+      }
       void finish('failed', 'login_lifetime_expired');
     }, KEMERBET_MAX_LOGIN_LIFETIME_SECONDS * 1_000);
     loginTimer.unref();
+  };
+
+  const armCandidateDeadline = (): void => {
+    if (terminal || candidateTimer !== undefined) return;
+    const deadlineEpoch = ++candidateDeadlineEpoch;
+    candidateTimer = setTimeout(() => {
+      if (deadlineEpoch !== candidateDeadlineEpoch) return;
+      candidateTimer = undefined;
+      if (terminal || !signedInCandidate || !signedInVerified || phase !== 'signed_in_read_only') {
+        return;
+      }
+      void finish('stopped', 'candidate_lifetime_complete');
+    }, KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS * 1_000);
+    candidateTimer.unref();
   };
 
   try {
@@ -283,10 +317,7 @@ export async function startLocalKemerBetSession(
             detailsRedacted: true,
             ...(result.bindingCreated ? { reason: 'identity_binding_created' as const } : {}),
           });
-          candidateTimer = setTimeout(() => {
-            void finish('stopped', 'candidate_lifetime_complete');
-          }, KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS * 1_000);
-          candidateTimer.unref();
+          armCandidateDeadline();
         } catch (error) {
           if (terminal || verificationEpoch !== identityVerificationEpoch) return;
           throw error;
@@ -303,8 +334,7 @@ export async function startLocalKemerBetSession(
       if (terminal) return;
       if (!signedInCandidate) {
         signedInCandidate = true;
-        if (loginTimer) clearTimeout(loginTimer);
-        loginTimer = undefined;
+        disarmLoginDeadline();
         report({ state: 'signed_in_candidate', transferDisabled: true, detailsRedacted: true });
       }
       await beginIdentityVerification();
@@ -337,8 +367,7 @@ export async function startLocalKemerBetSession(
         signedInCandidate = false;
         signedInVerified = false;
         lookupAuthorization.clear();
-        if (candidateTimer) clearTimeout(candidateTimer);
-        candidateTimer = undefined;
+        disarmCandidateDeadline();
         phase = 'manual_login';
         armLoginDeadline();
         report({ state: 'login_required', transferDisabled: true, detailsRedacted: true });
@@ -365,8 +394,8 @@ export async function startLocalKemerBetSession(
         terminal = true;
         settleVerified(false);
         lookupAuthorization.clear();
-        if (loginTimer) clearTimeout(loginTimer);
-        if (candidateTimer) clearTimeout(candidateTimer);
+        disarmLoginDeadline();
+        disarmCandidateDeadline();
         if (sessionTimer) clearTimeout(sessionTimer);
         void releaseSessionLock(lock)
           .catch(() => undefined)

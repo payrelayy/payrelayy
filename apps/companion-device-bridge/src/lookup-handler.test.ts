@@ -354,6 +354,29 @@ describe('companion exact-five lookup handler', () => {
     expect(parsed(inProgress)).toEqual({ code: 'request_in_progress' });
   });
 
+  it('accepts only the bounded forward clock skew before polling the database', async () => {
+    const value = fixture();
+    const boundaryClaim = vi.fn(async () => ({ kind: 'none' as const }));
+    const boundary = await createCompanionLookupHandler(
+      dependencies(value, {
+        now: () => '2026-09-05T11:59:35.000Z',
+        claimAssignment: boundaryClaim,
+      }),
+    )(value.pollRequest());
+    expect(boundary.statusCode).toBe(204);
+    expect(boundaryClaim).toHaveBeenCalledTimes(1);
+
+    const rejectedClaim = vi.fn();
+    const beyondBoundary = await createCompanionLookupHandler(
+      dependencies(value, {
+        now: () => '2026-09-05T11:59:34.999Z',
+        claimAssignment: rejectedClaim,
+      }),
+    )(value.pollRequest());
+    expect(beyondBoundary.statusCode).toBe(401);
+    expect(rejectedClaim).not.toHaveBeenCalled();
+  });
+
   it('releases the exact assignment when signing produces no valid envelope', async () => {
     const value = fixture();
     const releaseAssignment = vi.fn(async () => undefined);
@@ -389,6 +412,30 @@ describe('companion exact-five lookup handler', () => {
     expect(call[2]).toBe(deriveCompanionHttpRequestReplayIdentity(call[1]));
     expect(call[5]).toBe(deriveKemerBetExactFiveLookupResultReplayIdentity(result));
     expect(call[6]).toBe(assessedAt);
+  });
+
+  it('accepts a result observation only within the bounded forward clock skew', async () => {
+    const value = fixture();
+    const assignment = await issuedAssignment(value);
+    const atBoundaryResult = value.signedResult(assignment, {
+      observedAt: '2026-09-05T12:00:40.000Z',
+    });
+    const boundaryAccept = vi.fn(async () => ({ accepted: true as const, replayed: false }));
+    const boundary = await createCompanionLookupHandler(
+      dependencies(value, { acceptResult: boundaryAccept }),
+    )(value.resultRequest(assignment, atBoundaryResult));
+    expect(boundary.statusCode).toBe(201);
+    expect(boundaryAccept).toHaveBeenCalledTimes(1);
+
+    const beyondBoundaryResult = value.signedResult(assignment, {
+      observedAt: '2026-09-05T12:00:40.001Z',
+    });
+    const rejectedAccept = vi.fn();
+    const beyondBoundary = await createCompanionLookupHandler(
+      dependencies(value, { acceptResult: rejectedAccept }),
+    )(value.resultRequest(assignment, beyondBoundaryResult));
+    expect(beyondBoundary.statusCode).toBe(401);
+    expect(rejectedAccept).not.toHaveBeenCalled();
   });
 
   it('rejects a result bound to another assignment before the state boundary', async () => {

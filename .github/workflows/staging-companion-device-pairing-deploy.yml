@@ -35,7 +35,7 @@ concurrency:
 env:
   STAGING_DROPLET_ID: '593344964'
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
-  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   COMPANION_RUNTIME_ROLE: fetanagent_companion_device_bridge_runtime
 
 jobs:
@@ -112,8 +112,9 @@ jobs:
             printf '%s' "$COMPANION_RUNTIME_MANIFEST_BASE64" | base64 --decode \
               > "$protected/companion-device-bridge-runtime-manifest.v2.json"
             printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" > "$protected/supabase-ca.crt"
-            printf '%s' \
-              "postgresql://${COMPANION_RUNTIME_ROLE}:${COMPANION_RUNTIME_PASSWORD}@${STAGING_DIRECT_DATABASE_HOST}:5432/postgres?sslmode=verify-full" \
+            printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full' \
+              "$COMPANION_RUNTIME_ROLE" "$STAGING_PROJECT_REF" \
+              "$COMPANION_RUNTIME_PASSWORD" "$STAGING_POOLER_HOST" \
               > "$protected/companion-device-bridge-database-url"
             chmod 0600 "$protected"/*
             openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null

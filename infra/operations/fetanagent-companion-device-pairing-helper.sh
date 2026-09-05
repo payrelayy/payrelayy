@@ -22,7 +22,8 @@ readonly MUTATION_LOCK="$MUTATION_LOCK_ROOT/mutation.lock"
 readonly STAGING_DROPLET_ID='593344964'
 readonly STAGING_PUBLIC_IPV4='161.35.41.232'
 readonly DATABASE_ROLE='fetanagent_companion_device_bridge_runtime'
-readonly DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
+readonly DATABASE_PROJECT_REF='spzpiyxheappsfyswewl'
+readonly DATABASE_SESSION_POOLER_HOST='aws-1-eu-west-1.pooler.supabase.com'
 
 export PATH="$SAFE_PATH"
 
@@ -53,6 +54,18 @@ require_host_identity() {
     die 'the DigitalOcean public IPv4 identity is unavailable'
   [[ "$droplet_id" == "$STAGING_DROPLET_ID" && "$public_ipv4" == "$STAGING_PUBLIC_IPV4" ]] ||
     die 'this is not the reviewed FetanAgent staging droplet'
+}
+
+require_database_route() {
+  command -v getent >/dev/null 2>&1 || die 'getent is unavailable for database route proof'
+  command -v timeout >/dev/null 2>&1 || die 'timeout is unavailable for database route proof'
+  ip -4 route show default | grep -q '^default ' ||
+    die 'the VM has no default IPv4 route'
+  getent ahostsv4 "$DATABASE_SESSION_POOLER_HOST" >/dev/null ||
+    die 'the staging session pooler has no IPv4 result'
+  timeout 5 bash -c \
+    "exec 3<>/dev/tcp/$DATABASE_SESSION_POOLER_HOST/5432; exec 3>&-; exec 3<&-" ||
+    die 'the staging session pooler is not reachable on port 5432'
 }
 
 acquire_mutation_lock() {
@@ -309,7 +322,8 @@ validate_incoming_material() {
       die 'an incoming companion release input is not a regular file'
   done <<<"$actual_files"
   if ! env -i PATH="$SAFE_PATH" python3 -I - \
-    "$incoming/companion-device-bridge-database-url" "$DATABASE_ROLE" "$DATABASE_HOST" <<'PY'
+    "$incoming/companion-device-bridge-database-url" "$DATABASE_ROLE" \
+    "$DATABASE_PROJECT_REF" "$DATABASE_SESSION_POOLER_HOST" <<'PY'
 import re, sys
 from pathlib import Path
 
@@ -319,9 +333,11 @@ if file_stat.st_size < 1 or file_stat.st_size > 512:
     raise SystemExit(1)
 raw = path.read_bytes()
 role = sys.argv[2].encode('ascii')
-host = sys.argv[3].encode('ascii')
+project_ref = sys.argv[3].encode('ascii')
+host = sys.argv[4].encode('ascii')
 pattern = (
-    rb'postgresql://' + re.escape(role) + rb':[0-9a-f]{64}@' + re.escape(host) +
+    rb'postgresql://' + re.escape(role) + rb'\.' + re.escape(project_ref) +
+    rb':[0-9a-f]{64}@' + re.escape(host) +
     rb':5432/postgres\?sslmode=verify-full'
 )
 if len(raw) != file_stat.st_size or re.fullmatch(pattern, raw) is None:
@@ -433,6 +449,7 @@ case "$command" in
       die 'the incoming companion directory is outside the approved boundary'
     acquire_mutation_lock
     require_host_identity
+    require_database_route
     validate_incoming_material "$4"
     install_commit="$2"
     installing="$RELEASE_ROOT/.installing-$install_commit"
@@ -456,6 +473,7 @@ case "$command" in
     validate_release "$2" "$3"
     acquire_mutation_lock
     require_host_identity
+    require_database_route
     previous_release="$(read_current_release || true)"
     stop_release
     if ! start_release "$2" "$3"; then
@@ -471,6 +489,7 @@ case "$command" in
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || die 'ready requires one full commit SHA'
     acquire_mutation_lock
     require_host_identity
+    require_database_route
     require_ready_release "$2" "${2:0:12}"
     printf '%s\n' 'Companion bridge ready: pairing and signed exact-five read-only lookup enabled; financial actions and money movement disabled.'
     ;;

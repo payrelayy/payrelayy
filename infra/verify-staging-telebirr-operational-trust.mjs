@@ -51,7 +51,9 @@ assert.match(trustWorkflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
 assert.match(trustWorkflow, /provision-trust-only-no-pilot/);
 assert.match(trustWorkflow, /openssl pkey -inform DER/g);
 assert.match(trustWorkflow, /cmp --silent/);
-assert.match(trustWorkflow, /private_live_reference_opening/);
+assert.match(trustWorkflow, /deposit-proof-reference-opening/);
+assert.match(trustWorkflow, /\.keyVersion == 2/);
+assert.doesNotMatch(trustWorkflow, /private_live_reference_opening/);
 assert.match(trustWorkflow, /PGSSLMODE: verify-full/);
 assert.match(trustWorkflow, /PGSSLROOTCERT:/);
 assert.match(trustWorkflow, /staging-telebirr-operational-signer-inspect\.sql/);
@@ -73,9 +75,13 @@ assert.deepEqual(
     'TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64',
     'TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64',
     'TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD',
-    'TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64',
+    'TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64',
   ],
 );
+assert.match(localProvisioner, /purpose = 'deposit-proof-reference-opening'/);
+assert.match(localProvisioner, /keyVersion = 2/);
+assert.match(localProvisioner, /TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/);
+assert.doesNotMatch(localProvisioner, /TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64/);
 
 assert.match(provisionSql, /begin transaction isolation level serializable;/);
 assert.match(provisionSql, /pg_catalog\.pg_advisory_xact_lock/);

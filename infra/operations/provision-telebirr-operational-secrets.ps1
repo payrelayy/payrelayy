@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 $secretNames = @(
   'TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64',
   'TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64',
-  'TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64',
+  'TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64',
   'TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD',
   'TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD',
   'ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64',
@@ -151,8 +151,8 @@ try {
   $openingDocument = [ordered]@{
     contractVersion = 1
     providerCode = 'telebirr'
-    purpose = 'private_live_reference_opening'
-    keyVersion = 1
+    purpose = 'deposit-proof-reference-opening'
+    keyVersion = 2
     keyId = $openingKeyId
     keyHex = [Convert]::ToHexString($openingKey).ToLowerInvariant()
   } | ConvertTo-Json -Compress
@@ -215,7 +215,7 @@ try {
   $secretValues = [ordered]@{
     TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64 = [Convert]::ToBase64String($assignment.PrivateKey)
     TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64 = [Convert]::ToBase64String($bridge.PrivateKey)
-    TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64 = [Convert]::ToBase64String($openingDocumentBytes)
+    TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64 = [Convert]::ToBase64String($openingDocumentBytes)
     TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD = [Convert]::ToHexString(
       [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
     ).ToLowerInvariant()

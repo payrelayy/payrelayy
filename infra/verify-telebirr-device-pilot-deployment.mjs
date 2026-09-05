@@ -238,6 +238,17 @@ assert.match(pilotRunbook, /Supavisor session pooler on port `5432`/u);
 assert.match(pilotRunbook, /<runtime-role>\.<staging-project-ref>/u);
 assert.match(deployWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/u);
 assert.doesNotMatch(deployWorkflow, /STAGING_DIRECT_DATABASE_HOST/u);
+assert.match(deployWorkflow, /for delay in 0 5 10 20 40/u);
+assert.match(
+  deployWorkflow,
+  /runtime_input="\$protected\/pilot-runtime-input\.json"[\s\S]*?partial_input="\$runtime_input\.partial"[\s\S]*?>"\$partial_input" 2>\/dev\/null && \[\[ -s "\$partial_input" \]\][\s\S]*?mv -- "\$partial_input" "\$runtime_input"/u,
+  'the read-only manifest query must retry into an atomic, non-empty protected output',
+);
+assert.doesNotMatch(
+  deployWorkflow,
+  /result="\$\(for delay in 0 5 10 20 40/u,
+  'only the read-only manifest query may use the connection retry schedule',
+);
 assert.match(deployWorkflow, /for delay in 10 20 40 60/u);
 assert.match(
   deployWorkflow,

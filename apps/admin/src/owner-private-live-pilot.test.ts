@@ -177,7 +177,7 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
       call += 1;
       if (call === 1) return { rows: [statusRow()] };
       if (call === 2) {
-        expect(sql).toContain('arm_private_live_deposit_pilot');
+        expect(sql).toContain('arm_companion_verified_private_live_telebirr_pilot');
         return { rows: [{}] };
       }
       return { rows: [statusRow({ pilot_status: 'armed', switch_mode: 'dry_run' })] };

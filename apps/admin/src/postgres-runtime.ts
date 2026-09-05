@@ -141,7 +141,10 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)', 'execute') as player_eligibility_decide_allowed,
     has_function_privilege(current_user, 'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)', 'execute') as private_live_pilot_prepare_allowed,
     has_function_privilege(current_user, 'app.get_current_private_live_deposit_pilot_status(uuid)', 'execute') as private_live_pilot_current_status_allowed,
-    has_function_privilege(current_user, 'app.arm_private_live_deposit_pilot(uuid,uuid)', 'execute') as private_live_pilot_arm_allowed,
+    has_function_privilege(current_user, 'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)', 'execute') as private_live_pilot_arm_allowed,
+    not has_function_privilege(current_user, 'app.prepare_approved_private_live_telebirr_pilot_unverified(uuid,uuid,text[],timestamptz,timestamptz)', 'execute') as internal_unverified_private_live_pilot_prepare_denied,
+    not has_function_privilege(current_user, 'app.arm_private_live_deposit_pilot(uuid,uuid)', 'execute') as internal_generic_private_live_pilot_arm_denied,
+    not has_function_privilege(current_user, 'app.require_companion_verified_private_live_telebirr_pilot(uuid,uuid)', 'execute') as internal_private_live_pilot_companion_assertion_denied,
     has_function_privilege(current_user, 'app.stop_private_live_deposit_pilot(uuid,uuid,text)', 'execute') as private_live_pilot_stop_allowed,
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)', 'execute') as companion_device_pairing_issue_allowed,
@@ -220,7 +223,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
           'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)'::regprocedure,
           'app.get_current_private_live_deposit_pilot_status(uuid)'::regprocedure,
-          'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
+          'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)'::regprocedure,
           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure,
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure
           ,'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)'::regprocedure

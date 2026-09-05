@@ -13,6 +13,7 @@ type BrowserFetchOverride = (
 ) => Promise<unknown> | unknown | undefined;
 
 class FakeElement {
+  readonly children: unknown[] = [];
   readonly dataset: Record<string, string> = {};
   readonly listeners = new Map<string, BrowserListener>();
   elements = Object.assign([] as FakeElement[], {}) as FakeElement[] & Record<string, FakeElement>;
@@ -33,7 +34,9 @@ class FakeElement {
     this.listeners.set(type, listener);
   }
 
-  append(..._children: unknown[]): void {}
+  append(...children: unknown[]): void {
+    this.children.push(...children);
+  }
 
   focus(): void {
     this.focused = true;
@@ -56,7 +59,9 @@ class FakeElement {
     if (name === 'href') this.href = '';
   }
 
-  replaceChildren(..._children: unknown[]): void {}
+  replaceChildren(...children: unknown[]): void {
+    this.children.splice(0, this.children.length, ...children);
+  }
 }
 
 function response(status: number, body: unknown) {
@@ -213,6 +218,10 @@ function ownerBrowserHarness(
   element('#companion-lookup-form').elements = namedElements({
     confirmation: element('#companion-lookup-confirmation'),
     submit: element('#companion-lookup-button'),
+  });
+  element('#pilot-prepare-form').elements = namedElements({
+    confirmation: element('#pilot-confirmation'),
+    submit: element('#pilot-prepare-button'),
   });
 
   const stored = new Map<string, string>();
@@ -409,6 +418,47 @@ describe('Owner dashboard browser authentication boundary', () => {
     );
     expect(browser.element('#companion-lookup-result').hidden).toBe(false);
     expect(JSON.stringify(terminal)).not.toContain('playerIds');
+  });
+
+  it('enables the quarantined dry-run pilot only for a fresh completed five-for-five lookup', async () => {
+    const browser = ownerBrowserHarness(503);
+    await browser.signIn();
+    browser.evaluate('kemerbetSecurityRecoveryRequired = true; currentPilot = undefined;');
+    const players = Array.from({ length: 5 }, (_, index) => ({
+      decision: 'eligible',
+      playerId: `PLAYER-${index + 1}`,
+      playerStatus: 'active',
+      validationStatus: 'valid',
+    }));
+
+    await browser.call('renderPilotCandidates', players);
+    let labels = browser.element('#pilot-candidate-list').children as FakeElement[];
+    expect(labels).toHaveLength(5);
+    expect(labels.every((label) => (label.children[0] as FakeElement).disabled)).toBe(true);
+    expect(browser.element('#pilot-prepare-button').disabled).toBe(true);
+
+    await browser.call('renderCompanionLookup', {
+      ...companionLookupReceipt('completed'),
+      completedAt: new Date().toISOString(),
+    });
+    labels = browser.element('#pilot-candidate-list').children as FakeElement[];
+    const checkboxes = labels.map((label) => label.children[0] as FakeElement);
+    expect(checkboxes.every((checkbox) => !checkbox.disabled)).toBe(true);
+    for (const checkbox of checkboxes) {
+      checkbox.checked = true;
+      await checkbox.listeners.get('change')?.({ preventDefault() {} });
+    }
+    browser.element('#pilot-confirmation').checked = true;
+    await browser.element('#pilot-confirmation').listeners.get('change')?.({ preventDefault() {} });
+    expect(browser.element('#pilot-prepare-button').disabled).toBe(false);
+
+    await browser.call('renderCompanionLookup', {
+      ...companionLookupReceipt('completed'),
+      completedAt: new Date(Date.now() - 15 * 60 * 1_000 - 1).toISOString(),
+    });
+    labels = browser.element('#pilot-candidate-list').children as FakeElement[];
+    expect(labels.every((label) => (label.children[0] as FakeElement).disabled)).toBe(true);
+    expect(browser.element('#pilot-prepare-button').disabled).toBe(true);
   });
 
   it('shows one canonical Android package while persisting only its idempotency key', async () => {

@@ -97,6 +97,25 @@ require_release_file() {
     die 'a sealed release file has unsafe metadata'
 }
 
+require_database_url_file() {
+  local path="$1" role="$2" value='' prefix suffix password
+  prefix="postgresql://$role:"
+  suffix="@$STAGING_DIRECT_DATABASE_HOST:5432/postgres?sslmode=verify-full"
+  IFS= read -r -d '' value <"$path" || true
+  [[ ${#value} -eq $((${#prefix} + 64 + ${#suffix})) &&
+    "$value" == "$prefix"*"$suffix" ]] || {
+    unset value
+    die 'a sealed database URL does not use the exact no-whitespace byte contract'
+  }
+  password="${value:${#prefix}:64}"
+  unset value
+  [[ "$password" =~ ^[0-9a-f]{64}$ ]] || {
+    unset password
+    die 'a sealed database URL credential is not canonical'
+  }
+  unset password
+}
+
 require_staging_secret_root() {
   [[ ! -L "$STAGING_SECRET_ROOT" && -d "$STAGING_SECRET_ROOT" &&
     "$(realpath -- "$STAGING_SECRET_ROOT")" == "$STAGING_SECRET_ROOT" &&
@@ -256,6 +275,10 @@ validate_release() {
   require_release_file "$release/assignment-signer.pkcs8.der" '10001:10001:400'
   require_release_file "$release/device-state-database-url" '10001:10001:400'
   require_release_file "$release/bridge-server-signer.pkcs8.der" '10001:10001:400'
+  require_database_url_file "$release/assignment-database-url" \
+    'fetanagent_telebirr_assignment_broker_runtime'
+  require_database_url_file "$release/device-state-database-url" \
+    'fetanagent_telebirr_device_state_runtime'
   run_pilot_compose "$release" "$commit_sha" "$image_tag" config --quiet
   run_gateway_compose "$release" "$commit_sha" "$image_tag" config --quiet
   validate_images "$commit_sha" "$image_tag"
@@ -387,6 +410,10 @@ install_release() {
     "$staging/device-state-database-url"
   install -o 10001 -g 10001 -m 0400 "$incoming/bridge-server-signer.pkcs8.der" \
     "$staging/bridge-server-signer.pkcs8.der"
+  require_database_url_file "$staging/assignment-database-url" \
+    'fetanagent_telebirr_assignment_broker_runtime'
+  require_database_url_file "$staging/device-state-database-url" \
+    'fetanagent_telebirr_device_state_runtime'
   mv -- "$staging" "$release"
   rm -f -- "$incoming"/*
   rmdir -- "$incoming"

@@ -14,6 +14,7 @@ const deployWorkflow = await readFile(
   `${repositoryRoot}.github/workflows/staging-telebirr-device-pilot.yml`,
   'utf8',
 );
+const pilotRunbook = await readFile(`${repositoryRoot}infra/telebirr-device-pilot.md`, 'utf8');
 const deployHelper = await readFile(
   `${repositoryRoot}infra/operations/fetanagent-telebirr-device-pilot-helper.sh`,
   'utf8',
@@ -206,6 +207,17 @@ assert.equal(
   'Each protected SSH step must consume the masked VM host directly.',
 );
 assert.doesNotMatch(deployWorkflow, /pull_request_target|contents: write|service.?role|KEMERBET/u);
+assert.doesNotMatch(deployWorkflow, /sslmode=verify-full\\n/u);
+assert.equal(
+  (
+    deployWorkflow.match(
+      /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full'/gu,
+    ) ?? []
+  ).length,
+  2,
+  'both runtime database URL files must be emitted without a line terminator',
+);
+assert.match(pilotRunbook, /exact URL bytes, with no line terminator or surrounding\s+whitespace/u);
 
 assert.match(deployHelper, /^set -euo pipefail$/mu);
 assert.match(deployHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
@@ -214,6 +226,8 @@ for (const command of ['start', 'ready', 'stop', 'rollback']) {
   assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
 }
 assert.match(deployHelper, /negative_public_smoke/u);
+assert.match(deployHelper, /require_database_url_file/u);
+assert.match(deployHelper, /exact no-whitespace byte contract/u);
 assert.match(
   deployHelper,
   /--project-name "\$STAGING_PROJECT" --profile staging-manual --profile public-domain/u,

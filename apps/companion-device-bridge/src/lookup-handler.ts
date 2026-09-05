@@ -6,6 +6,7 @@ import {
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
   AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+  AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS,
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
@@ -269,7 +270,8 @@ function completedAssignmentValid(
     assignment.body.certificateId === certificate.body.certificateId &&
     assignment.body.deviceId === certificate.body.deviceId &&
     assignment.body.deviceKeyId === certificate.body.deviceKeyId &&
-    Date.parse(assessedAt) >= Date.parse(assignment.body.issuedAt) &&
+    Date.parse(assignment.body.issuedAt) <=
+      Date.parse(assessedAt) + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS &&
     Date.parse(assessedAt) < Date.parse(assignment.body.expiresAt) &&
     verifySignedKemerBetExactFiveLookupAssignment(assignment, signer.publicKeySpkiDer)
   );
@@ -324,7 +326,8 @@ export function createCompanionLookupHandler(
           body.certificateId !== base.certificate.body.certificateId ||
           body.deviceId !== base.certificate.body.deviceId ||
           body.deviceKeyId !== base.certificate.body.deviceKeyId ||
-          body.issuedAt > assessedAt ||
+          Date.parse(body.issuedAt) >
+            Date.parse(assessedAt) + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
           Date.parse(body.expiresAt) <= Date.parse(assessedAt)
         ) {
           if (body) {

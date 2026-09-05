@@ -39,6 +39,7 @@ export const AGENT_PLATFORM_COMPANION_ASSIGNMENT_TRANSCRIPT_VERSION =
   'agent-platform-companion-lookup-assignment-transcript-v1' as const;
 export const AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION =
   'agent-platform-companion-lookup-result-transcript-v1' as const;
+export const AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS = 30_000 as const;
 
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
 const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -1255,7 +1256,8 @@ export function verifySignedCompanionHttpRequest(
     certificate.body.deviceKeyId !== envelope.body.deviceKeyId ||
     Date.parse(assessedAt) < Date.parse(certificate.body.validFrom) ||
     Date.parse(assessedAt) >= Date.parse(certificate.body.validUntil) ||
-    Date.parse(assessedAt) < Date.parse(envelope.body.issuedAt) ||
+    Date.parse(envelope.body.issuedAt) >
+      Date.parse(assessedAt) + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
     Date.parse(assessedAt) >= Date.parse(envelope.body.expiresAt)
   ) {
     return false;
@@ -1902,9 +1904,11 @@ export function verifyKemerBetExactFiveLookupExchange(
     if (!verifySignedKemerBetExactFiveLookupAssignment(assignment, trustedServerPublicKeySpkiDer)) {
       return exchangeResult('would_review', 'assignment_signature_invalid');
     }
+    const assignmentIssuedAtMs = Date.parse(assignment.body.issuedAt);
+    const assignmentExpiresAtMs = Date.parse(assignment.body.expiresAt);
     if (
-      assessedAtMs < Date.parse(assignment.body.issuedAt) ||
-      assessedAtMs >= Date.parse(assignment.body.expiresAt)
+      assignmentIssuedAtMs > assessedAtMs + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      assessedAtMs >= assignmentExpiresAtMs
     ) {
       return exchangeResult('would_review', 'assignment_expired');
     }
@@ -1938,9 +1942,9 @@ export function verifyKemerBetExactFiveLookupExchange(
     }
     const observedAtMs = Date.parse(result.body.observedAt);
     if (
-      observedAtMs < Date.parse(assignment.body.issuedAt) ||
-      observedAtMs >= Date.parse(assignment.body.expiresAt) ||
-      observedAtMs > assessedAtMs
+      observedAtMs + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS < assignmentIssuedAtMs ||
+      observedAtMs >= assignmentExpiresAtMs + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      observedAtMs > assessedAtMs + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS
     ) {
       return exchangeResult('would_review', 'observation_time_invalid');
     }

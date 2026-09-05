@@ -10,6 +10,7 @@ import {
   AGENT_PLATFORM_COMPANION_HTTP_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+  AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS,
   AGENT_PLATFORM_COMPANION_PAIRING_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
   AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION,
@@ -568,6 +569,54 @@ describe('agent-platform companion contracts', () => {
     ).toBe(false);
   });
 
+  it('accepts only the bounded forward clock skew for signed HTTP requests', () => {
+    const value = fixture();
+    const assessedAt = '2026-09-02T10:02:00.000Z';
+    const atBoundary = signedHttp(
+      httpBody(value.certificate.body, {
+        issuedAt: new Date(
+          Date.parse(assessedAt) + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS,
+        ).toISOString(),
+        expiresAt: '2026-09-02T10:03:30.000Z',
+      }),
+      value.device.privateKey,
+    );
+    expect(
+      verifySignedCompanionHttpRequest(
+        atBoundary,
+        value.certificate,
+        value.server.spki,
+        assessedAt,
+      ),
+    ).toBe(true);
+
+    const beyondBoundary = signedHttp(
+      httpBody(value.certificate.body, {
+        issuedAt: new Date(
+          Date.parse(assessedAt) + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS + 1,
+        ).toISOString(),
+        expiresAt: '2026-09-02T10:03:30.001Z',
+      }),
+      value.device.privateKey,
+    );
+    expect(
+      verifySignedCompanionHttpRequest(
+        beyondBoundary,
+        value.certificate,
+        value.server.spki,
+        assessedAt,
+      ),
+    ).toBe(false);
+    expect(
+      verifySignedCompanionHttpRequest(
+        atBoundary,
+        value.certificate,
+        value.server.spki,
+        atBoundary.body.expiresAt,
+      ),
+    ).toBe(false);
+  });
+
   it('rejects unsafe HTTP paths, expired requests, altered bodies, and revoked certificates', () => {
     const value = fixture();
     expect(
@@ -714,6 +763,34 @@ describe('agent-platform companion contracts', () => {
       disposition: 'would_accept_read_only_result',
       reasonCode: 'signed_read_only_result_verified',
       replayIdentity: deriveKemerBetExactFiveLookupAssignmentReplayIdentity(value.assignment),
+    });
+  });
+
+  it('accepts a result observation only within the bounded clock skew', () => {
+    const value = fixture();
+    const atBoundary = verifyKemerBetExactFiveLookupExchange(
+      {
+        assessedAt: '2026-09-02T10:03:30.000Z',
+        certificate: value.certificate,
+        signedAssignment: value.assignment,
+        signedResult: value.result,
+      },
+      value.server.spki,
+    );
+    expect(atBoundary.disposition).toBe('would_accept_read_only_result');
+
+    const beyondBoundary = verifyKemerBetExactFiveLookupExchange(
+      {
+        assessedAt: '2026-09-02T10:03:29.999Z',
+        certificate: value.certificate,
+        signedAssignment: value.assignment,
+        signedResult: value.result,
+      },
+      value.server.spki,
+    );
+    expect(beyondBoundary).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'observation_time_invalid',
     });
   });
 

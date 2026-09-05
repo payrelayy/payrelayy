@@ -496,8 +496,23 @@ export function registerCompanionExactFiveLookupSqlTests(
 
         const certificateBody = paired.certificateBody;
         const pollAssessedAt = canonicalNow();
-        const pollIssuedAt = new Date(pollAssessedAt.getTime() - 100);
-        const pollExpiresAt = new Date(pollAssessedAt.getTime() + 60_000);
+        const rejectedPollIssuedAt = new Date(pollAssessedAt.getTime() + 30_001);
+        const rejectedPoll = await client.query<LookupClaimRow>(claimSql, [
+          sha(`poll-replay-over-skew:${randomUUID()}`),
+          sha(`poll-body-over-skew:${randomUUID()}`),
+          `poll-request-over-skew-${randomUUID().replaceAll('-', '')}`,
+          String(certificateBody.certificateId),
+          String(certificateBody.deviceId),
+          String(certificateBody.deviceKeyId),
+          rejectedPollIssuedAt,
+          new Date(rejectedPollIssuedAt.getTime() + 60_000),
+          pollAssessedAt,
+          paired.signerKeyId,
+        ]);
+        expect(rejectedPoll.rows).toHaveLength(0);
+
+        const pollIssuedAt = new Date(pollAssessedAt.getTime() + 30_000);
+        const pollExpiresAt = new Date(pollIssuedAt.getTime() + 60_000);
         const claimed = await client.query<LookupClaimRow>(claimSql, [
           sha(`poll-replay:${randomUUID()}`),
           sha(`poll-body:${randomUUID()}`),
@@ -536,10 +551,10 @@ export function registerCompanionExactFiveLookupSqlTests(
         expect(completed.rows).toEqual([{ completed: true }]);
 
         const resultAssessedAt = canonicalNow();
-        const result = resultEnvelope(assignment, resultAssessedAt);
+        const result = resultEnvelope(assignment, new Date(resultAssessedAt.getTime() + 30_000));
         const resultBody = result.body as Record<string, unknown>;
-        const resultIssuedAt = new Date(resultAssessedAt.getTime() - 100);
-        const resultExpiresAt = new Date(resultAssessedAt.getTime() + 60_000);
+        const resultIssuedAt = new Date(resultAssessedAt.getTime() + 30_000);
+        const resultExpiresAt = new Date(resultIssuedAt.getTime() + 60_000);
         const baseResultValues = [
           sha(`result-http-replay:${randomUUID()}`),
           sha(`result-http-body:${randomUUID()}`),
@@ -558,6 +573,52 @@ export function registerCompanionExactFiveLookupSqlTests(
           assignment,
           result,
         ] as const;
+
+        const rejectedResultRequestIssuedAt = new Date(resultAssessedAt.getTime() + 30_001);
+        expect(
+          (
+            await client.query(acceptSql, [
+              sha(`result-http-replay-over-skew:${randomUUID()}`),
+              sha(`result-http-body-over-skew:${randomUUID()}`),
+              `result-request-over-skew-${randomUUID().replaceAll('-', '')}`,
+              sha(`result-replay-over-skew:${randomUUID()}`),
+              ...baseResultValues.slice(4, 11),
+              rejectedResultRequestIssuedAt,
+              new Date(rejectedResultRequestIssuedAt.getTime() + 60_000),
+              resultAssessedAt,
+              assignment,
+              result,
+            ])
+          ).rows,
+        ).toHaveLength(0);
+
+        const futureObservationResult = resultEnvelope(
+          assignment,
+          new Date(resultAssessedAt.getTime() + 30_001),
+        );
+        const futureObservationBody = futureObservationResult.body as Record<string, unknown>;
+        expect(
+          (
+            await client.query(acceptSql, [
+              sha(`result-http-replay-future-observation:${randomUUID()}`),
+              sha(`result-http-body-future-observation:${randomUUID()}`),
+              `result-request-future-observation-${randomUUID().replaceAll('-', '')}`,
+              sha(`result-replay-future-observation:${randomUUID()}`),
+              String(assignmentBody.assignmentId),
+              String(assignment.bodyDigest),
+              String(futureObservationBody.resultId),
+              String(futureObservationResult.bodyDigest),
+              String(certificateBody.certificateId),
+              String(certificateBody.deviceId),
+              String(certificateBody.deviceKeyId),
+              resultIssuedAt,
+              resultExpiresAt,
+              resultAssessedAt,
+              assignment,
+              futureObservationResult,
+            ])
+          ).rows,
+        ).toHaveLength(0);
 
         const replayCountBefore = await client.query<{ readonly count: number }>(
           `select count(*)::integer

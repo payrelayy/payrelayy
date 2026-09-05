@@ -10,6 +10,7 @@ const [
   stagingCompose,
   pairingMigration,
   lookupMigration,
+  clockSkewMigration,
   packageManifest,
   workflow,
   signerProvision,
@@ -41,6 +42,10 @@ const [
       'supabase/migrations/20260905010000_agent_platform_companion_exact_five_lookup.sql',
       root,
     ),
+    'utf8',
+  ),
+  readFile(
+    new URL('supabase/migrations/20260905120100_companion_http_forward_clock_skew.sql', root),
     'utf8',
   ),
   readFile(new URL('apps/companion-device-bridge/package.json', root), 'utf8'),
@@ -167,6 +172,16 @@ assert.match(lookupMigration, /p_assessed_at < now_at - interval '30 seconds'/u)
 assert.match(lookupMigration, /'financialActionAllowed', false/u);
 assert.match(lookupMigration, /'moneyMovementAllowed', false/u);
 assert.doesNotMatch(lookupMigration, /2026-09-04|interval '24 hours'/u);
+
+assert.match(clockSkewMigration, /received_at >= issued_at - interval '30 seconds'/u);
+assert.equal(
+  (clockSkewMigration.match(/p_assessed_at < p_request_issued_at - interval '30 seconds'/gu) ?? [])
+    .length,
+  2,
+);
+assert.match(clockSkewMigration, /observed_at > p_assessed_at \+ interval '30 seconds'/u);
+assert.match(clockSkewMigration, /p_assessed_at >= p_request_expires_at/u);
+assert.doesNotMatch(clockSkewMigration, /claim_agent_platform_companion_pairing/u);
 
 const parsedManifest = JSON.parse(packageManifest);
 assert.equal(parsedManifest.scripts.start, 'node dist/main.js');

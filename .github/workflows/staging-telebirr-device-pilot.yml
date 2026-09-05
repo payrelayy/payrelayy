@@ -212,7 +212,7 @@ jobs:
           install -d -m 0700 "$protected"
           printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
-          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           printf '%s' "$ASSIGNMENT_PRIVATE_BASE64" | base64 --decode >"$protected/assignment-signer.pkcs8.der"
           printf '%s' "$ASSIGNMENT_PUBLIC_BASE64" | base64 --decode >"$protected/assignment.spki.der"
           printf '%s' "$BRIDGE_PRIVATE_BASE64" | base64 --decode >"$protected/bridge-server-signer.pkcs8.der"
@@ -453,7 +453,7 @@ jobs:
           install -d -m 0700 "$protected"
           printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
-          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           chmod 0600 "$protected"/*
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
           openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null

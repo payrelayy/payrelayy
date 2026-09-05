@@ -34,7 +34,7 @@ const ids = {
 } as const;
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const receiverName = 'synthetic pilot receiver';
-const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
+const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(62)}==\n-----END CERTIFICATE-----\n`;
 const databaseUrl =
   'postgresql://fetanagent_telebirr_assignment_broker_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 
@@ -308,6 +308,24 @@ describe('private TeleBirr assignment broker configuration', () => {
         guardedDependencies({
           ...fileValues(),
           [TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE]: value,
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it.each([
+    [
+      'padding before the final data line',
+      `-----BEGIN CERTIFICATE-----\nQQ==\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`,
+    ],
+    ['an extra trailing blank line', `${caCertificate}\n`],
+  ])('rejects a CA certificate with %s', (_name, value) => {
+    expect(() =>
+      loadTelebirrAssignmentBrokerConfig(
+        enabledEnvironment,
+        guardedDependencies({
+          ...fileValues(),
+          [TELEBIRR_ASSIGNMENT_BROKER_SUPABASE_CA_FILE]: value,
         }),
       ),
     ).toThrow('configuration is unavailable');

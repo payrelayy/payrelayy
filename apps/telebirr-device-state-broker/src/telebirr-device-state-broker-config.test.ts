@@ -13,7 +13,7 @@ import {
 
 const databaseUrl =
   'postgresql://fetanagent_telebirr_device_state_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
-const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
+const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(62)}==\n-----END CERTIFICATE-----\n`;
 const enabledEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   FINANCIAL_ACTIONS_MODE: 'dry_run',
@@ -176,6 +176,24 @@ describe('private TeleBirr device-state broker configuration', () => {
         guardedDependencies({
           [TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE]: value,
           [TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE]: ca,
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it.each([
+    [
+      'padding before the final data line',
+      `-----BEGIN CERTIFICATE-----\nQQ==\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`,
+    ],
+    ['an extra trailing blank line', `${ca}\n`],
+  ])('rejects a CA certificate with %s', (_name, value) => {
+    expect(() =>
+      loadTelebirrDeviceStateBrokerConfig(
+        enabledEnvironment,
+        guardedDependencies({
+          [TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE]: databaseUrl,
+          [TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE]: value,
         }),
       ),
     ).toThrow('configuration is unavailable');

@@ -11,6 +11,7 @@
   <string name="pairing_package_hint">One-use Owner pairing package</string>
   <string name="pair_this_phone">Pair this phone</string>
   <string name="pairing_in_progress">Pairing securely…</string>
+  <string name="status_code_value">Status code: %1$s</string>
   <string name="confirm_pairing_title">Pair this verifier phone?</string>
   <string name="confirm_pairing_message">Continue only if this package was just created in the authenticated FetanAgent Owner page. The device private key will remain non-exportable in Android Keystore.</string>
   <string name="start_automatic_verification">Start automatic verification</string>

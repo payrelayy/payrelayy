@@ -81,12 +81,19 @@ class MainActivity : Activity() {
           LivePilotRuntimeStatus(LivePilotRuntimeState.ENROLLMENT_REQUIRED, "provisioning_required")
         else -> snapshot.status
       }
-    val root = statusView(VerifierLifecycle.from(displayedStatus), snapshot, enrolled)
+    val root =
+      statusView(
+        VerifierLifecycle.from(displayedStatus),
+        VerifierStatusPresentation.code(BuildConfig.VERIFIER_ENABLED, enrolled, snapshot),
+        snapshot,
+        enrolled,
+      )
     setContentView(ScrollView(this).apply { addView(root) })
   }
 
   private fun statusView(
     lifecycle: VerifierLifecycle,
+    statusCode: String,
     snapshot: VerifierOperationalSnapshot,
     enrolled: Boolean,
   ): LinearLayout = LinearLayout(this).apply {
@@ -105,6 +112,13 @@ class MainActivity : Activity() {
           text = lifecycle.label
           textSize = 20f
           setPadding(0, 48, 0, 24)
+        },
+      )
+      addView(
+        TextView(context).apply {
+          text = getString(R.string.status_code_value, statusCode)
+          textSize = 14f
+          gravity = Gravity.CENTER
         },
       )
       addView(versionView("Relay", RelayProtocol.TRANSCRIPT_VERSION))
@@ -352,6 +366,25 @@ class MainActivity : Activity() {
 
   companion object {
     private const val NOTIFICATION_PERMISSION_REQUEST = 7_001
+  }
+}
+
+/** Selects one bounded, non-sensitive status code for the operator-facing screen. */
+object VerifierStatusPresentation {
+  fun code(
+    verifierEnabled: Boolean,
+    enrolled: Boolean,
+    snapshot: VerifierOperationalSnapshot,
+  ): String {
+    val code =
+      when {
+        !verifierEnabled -> "build_disabled"
+        enrolled -> snapshot.status.code
+        snapshot.status.state == LivePilotRuntimeState.ATTENTION -> snapshot.status.code
+        else -> "provisioning_required"
+      }
+    DeviceBridgeProtocol.requireStatusCode(code)
+    return code
   }
 }
 

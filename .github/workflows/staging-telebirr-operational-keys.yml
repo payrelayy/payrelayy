@@ -96,7 +96,7 @@ jobs:
           BRIDGE_PUBLIC_BASE64: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
           BRIDGE_PUBLIC_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
           BRIDGE_MANIFEST_BASE64: ${{ vars.TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
-          REFERENCE_OPENING_BASE64: ${{ secrets.TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64 }}
+          REFERENCE_OPENING_BASE64: ${{ secrets.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64 }}
           REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
           ASSIGNMENT_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
           DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
@@ -169,14 +169,20 @@ jobs:
           jq -e \
             --arg key_id "$REFERENCE_OPENING_KEY_ID" \
             'type == "object" and
-             keys == ["contractVersion", "keyHex", "keyId", "keyVersion", "providerCode", "purpose"] and
+             keys_unsorted == ["contractVersion", "providerCode", "purpose", "keyVersion", "keyId", "keyHex"] and
              .contractVersion == 1 and
              .providerCode == "telebirr" and
-             .purpose == "private_live_reference_opening" and
-             .keyVersion == 1 and
+             .purpose == "deposit-proof-reference-opening" and
+             .keyVersion == 2 and
              .keyId == $key_id and
              (.keyHex | test("^[0-9a-f]{64}$"))' \
             "$protected/reference-opening.json" >/dev/null
+          node --input-type=module --eval '
+            import { readFileSync } from "node:fs";
+            const text = readFileSync(process.argv[1], "utf8");
+            const parsed = JSON.parse(text);
+            if (JSON.stringify(parsed) !== text || /[\0\r\n]/u.test(text)) process.exit(1);
+          ' "$protected/reference-opening.json"
           reference_key_hex="$(jq -er '.keyHex' "$protected/reference-opening.json")"
           printf '%s' "$reference_key_hex" | xxd -r -p > "$protected/reference-opening.raw"
           unset reference_key_hex

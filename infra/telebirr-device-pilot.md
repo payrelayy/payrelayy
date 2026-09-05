@@ -105,10 +105,11 @@ fields in YAML. Check every source with `lstat`, `realpath`, owner, and mode imm
 deployment helper invokes Compose.
 
 The database URL files must contain only the exact URL bytes, with no line terminator or surrounding
-whitespace. Use the direct TLS-verified staging host when the VM has the required route; use the
-separately reviewed
-session-pooler endpoint only when the deployment contract explicitly selects it. Never substitute
-the transaction pooler, an administrator URL, an API role, or `service_role`.
+whitespace. This deployment selects the TLS-verified Supavisor session pooler on port `5432`, using
+the exact `<runtime-role>.<staging-project-ref>` username required by that route. Session mode keeps
+the connection affinity required by the brokers' advisory locks while providing the VM's verified
+IPv4 path. Never substitute the transaction pooler on port `6543`, an administrator URL, an API
+role, or `service_role`.
 
 ## Fail-closed publication sequence
 

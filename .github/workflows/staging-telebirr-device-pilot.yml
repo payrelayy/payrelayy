@@ -41,7 +41,6 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '593344964'
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
-  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
   ASSIGNMENT_RUNTIME_ROLE: fetanagent_telebirr_assignment_broker_runtime
   DEVICE_STATE_RUNTIME_ROLE: fetanagent_telebirr_device_state_runtime
 
@@ -219,12 +218,12 @@ jobs:
           printf '%s' "$BRIDGE_PUBLIC_BASE64" | base64 --decode >"$protected/bridge.spki.der"
           printf '%s' "$BRIDGE_MANIFEST_BASE64" | base64 --decode >"$protected/bridge-runtime-manifest.v1.json"
           printf '%s' "$REFERENCE_OPENING_BASE64" | base64 --decode >"$protected/reference-opening-key.v1.json"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "$ASSIGNMENT_RUNTIME_ROLE" "$ASSIGNMENT_RUNTIME_PASSWORD" \
-            "$STAGING_DIRECT_DATABASE_HOST" >"$protected/assignment-database-url"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "$DEVICE_STATE_RUNTIME_ROLE" "$DEVICE_STATE_RUNTIME_PASSWORD" \
-            "$STAGING_DIRECT_DATABASE_HOST" >"$protected/device-state-database-url"
+          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$ASSIGNMENT_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$ASSIGNMENT_RUNTIME_PASSWORD" \
+            "$STAGING_POOLER_HOST" >"$protected/assignment-database-url"
+          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$DEVICE_STATE_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$DEVICE_STATE_RUNTIME_PASSWORD" \
+            "$STAGING_POOLER_HOST" >"$protected/device-state-database-url"
           chmod 0600 "$protected"/*
 
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null

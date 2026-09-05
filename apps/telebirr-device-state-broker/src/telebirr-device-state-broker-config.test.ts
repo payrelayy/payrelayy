@@ -11,8 +11,10 @@ import {
   type TelebirrDeviceStateBrokerGuardedFileStat,
 } from './telebirr-device-state-broker-config.js';
 
-const databaseUrl =
+const directDatabaseUrl =
   'postgresql://fetanagent_telebirr_device_state_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
+const databaseUrl =
+  'postgresql://fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
 const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(62)}==\n-----END CERTIFICATE-----\n`;
 const enabledEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
@@ -109,10 +111,10 @@ describe('private TeleBirr device-state broker configuration', () => {
       connection: {
         ca,
         database: 'postgres',
-        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        host: 'aws-1-eu-west-1.pooler.supabase.com',
         password: 'synthetic-password-123456',
         port: 5432,
-        user: 'fetanagent_telebirr_device_state_runtime',
+        user: 'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl',
       },
     });
     expect(dependencies.fileSystem.lstat).toHaveBeenCalledTimes(2);
@@ -129,6 +131,23 @@ describe('private TeleBirr device-state broker configuration', () => {
     expect(dependencies.returnedBuffers.every((bytes) => bytes.every((value) => value === 0))).toBe(
       true,
     );
+  });
+
+  it('also accepts only the exact staging direct route and bare runtime role', () => {
+    const config = loadTelebirrDeviceStateBrokerConfig(
+      enabledEnvironment,
+      guardedDependencies({
+        [TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE]: directDatabaseUrl,
+        [TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE]: ca,
+      }),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      connection: {
+        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        user: 'fetanagent_telebirr_device_state_runtime',
+      },
+    });
   });
 
   it.each([
@@ -164,7 +183,22 @@ describe('private TeleBirr device-state broker configuration', () => {
 
   it.each([
     ['wrong role', databaseUrl.replace('fetanagent_telebirr_device_state_runtime', 'postgres')],
-    ['wrong host', databaseUrl.replace('db.spzpiyxheappsfyswewl.supabase.co', 'localhost')],
+    ['wrong host', databaseUrl.replace('aws-1-eu-west-1.pooler.supabase.com', 'localhost')],
+    [
+      'bare role on the session pooler',
+      databaseUrl.replace(
+        'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl',
+        'fetanagent_telebirr_device_state_runtime',
+      ),
+    ],
+    [
+      'project-suffixed role on the direct route',
+      directDatabaseUrl.replace(
+        'fetanagent_telebirr_device_state_runtime:',
+        'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl:',
+      ),
+    ],
+    ['transaction pooler port', databaseUrl.replace(':5432/', ':6543/')],
     ['wrong TLS mode', databaseUrl.replace('verify-full', 'require')],
     ['extra query', `${databaseUrl}&application_name=other`],
     ['short password', databaseUrl.replace('synthetic-password-123456', 'short')],

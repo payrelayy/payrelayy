@@ -18,6 +18,10 @@ export const TELEBIRR_DEVICE_STATE_BROKER_STAGING_PROJECT_REFERENCE =
   'spzpiyxheappsfyswewl' as const;
 export const TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST =
   'db.spzpiyxheappsfyswewl.supabase.co' as const;
+export const TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST =
+  'aws-1-eu-west-1.pooler.supabase.com' as const;
+export const TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER =
+  `${TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE}.${TELEBIRR_DEVICE_STATE_BROKER_STAGING_PROJECT_REFERENCE}` as const;
 export const TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE =
   '/run/secrets/telebirr_device_state_broker_database_url' as const;
 export const TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE =
@@ -239,11 +243,16 @@ function connectionFromUrl(value: string): Omit<TelebirrDeviceStateConnectionCon
   const user = decodeUrlComponent(url.username);
   const password = decodeUrlComponent(url.password);
   const database = decodeUrlComponent(url.pathname.slice(1));
+  const directRoute =
+    url.hostname === TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST &&
+    user === TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE;
+  const sessionPoolerRoute =
+    url.hostname === TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST &&
+    user === TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
-    url.hostname !== TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST ||
+    (!directRoute && !sessionPoolerRoute) ||
     (url.port !== '' && url.port !== '5432') ||
-    user !== TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE ||
     password.length < 16 ||
     database !== 'postgres' ||
     url.hash !== '' ||
@@ -255,10 +264,14 @@ function connectionFromUrl(value: string): Omit<TelebirrDeviceStateConnectionCon
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST,
+    host: directRoute
+      ? TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST
+      : TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST,
     password,
     port: 5432 as const,
-    user: TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE,
+    user: directRoute
+      ? TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE
+      : TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER,
   });
 }
 

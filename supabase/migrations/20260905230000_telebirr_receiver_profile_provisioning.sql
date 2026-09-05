@@ -241,11 +241,11 @@ begin
    where policy_version.status = 'active'
    for share;
 
-  minimum_principal_amount_minor := pg_catalog.greatest(
+  minimum_principal_amount_minor := greatest(
     pilot.minimum_amount_minor,
     policy.minimum_amount_minor
   );
-  maximum_principal_amount_minor := pg_catalog.least(
+  maximum_principal_amount_minor := least(
     pilot.maximum_per_deposit_minor,
     policy.maximum_amount_minor
   );

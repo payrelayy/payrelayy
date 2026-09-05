@@ -4,6 +4,7 @@ import java.time.Instant
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +33,30 @@ class DeviceBridgeClientTest {
         .enroll(fixture.pairing)
     assertEquals(DeviceBridgeProtocol.PAIRING_PATH, observedPath)
     assertEquals(fixture.certificate, enrolled)
+  }
+
+  @Test
+  fun `enrollment client retries server failures and rejects client failures`() {
+    val fixture = fixture()
+    fun client(statusCode: Int) =
+      DeviceBridgeEnrollmentClient(
+        DeviceBridgeExchange { _, _, _ ->
+          DeviceBridgeRawResponse(
+            statusCode = statusCode,
+            contentType = FixedDeviceBridgeHttpsExchange.ERROR_CONTENT_TYPE,
+            body = "{\"code\":\"invalid_request\"}".toByteArray(),
+          )
+        },
+        fixture.server.keyPair.public.encoded,
+        MillisClock { instant("2026-09-04T10:00:05.000Z") },
+      )
+
+    assertThrows(DeviceBridgeRetryableException::class.java) {
+      client(503).enroll(fixture.pairing)
+    }
+    assertThrows(IllegalArgumentException::class.java) {
+      client(401).enroll(fixture.pairing)
+    }
   }
 
   @Test

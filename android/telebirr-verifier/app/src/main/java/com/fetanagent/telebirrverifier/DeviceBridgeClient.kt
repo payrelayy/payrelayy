@@ -72,6 +72,9 @@ class DeviceBridgeEnrollmentClient(
         DeviceBridgeProtocol.CONTENT_TYPE,
         DeviceBridgeJsonCodec.encodePairingRequest(pairing),
       )
+    if (response.statusCode == 409 || response.statusCode >= 500) {
+      throw DeviceBridgeRetryableException()
+    }
     require(response.statusCode == 201)
     require(response.contentType == DeviceBridgeProtocol.CONTENT_TYPE)
     val certificate =

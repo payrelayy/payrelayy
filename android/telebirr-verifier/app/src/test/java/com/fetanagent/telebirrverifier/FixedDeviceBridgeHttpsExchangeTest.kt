@@ -66,6 +66,27 @@ class FixedDeviceBridgeHttpsExchangeTest {
   }
 
   @Test
+  fun `accepts only the bridge server exact error media type for error responses`() {
+    val response =
+      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _ ->
+          DeviceBridgeHttpsResponse(
+            401,
+            listOf(FixedDeviceBridgeHttpsExchange.ERROR_CONTENT_TYPE),
+            emptyList(),
+            "{\"code\":\"invalid_request\"}".toByteArray(),
+          )
+        }
+        .post(
+          DeviceBridgeProtocol.PAIRING_PATH,
+          DeviceBridgeProtocol.CONTENT_TYPE,
+          byteArrayOf(1),
+        )
+
+    assertEquals(401, response.statusCode)
+    assertEquals(FixedDeviceBridgeHttpsExchange.ERROR_CONTENT_TYPE, response.contentType)
+  }
+
+  @Test
   fun `rejects invalid request metadata before transport`() {
     var called = false
     val exchange =
@@ -117,6 +138,12 @@ class FixedDeviceBridgeHttpsExchangeTest {
           byteArrayOf(),
         ),
         DeviceBridgeHttpsResponse(200, listOf("application/json"), emptyList(), byteArrayOf()),
+        DeviceBridgeHttpsResponse(
+          401,
+          listOf(DeviceBridgeProtocol.CONTENT_TYPE),
+          emptyList(),
+          byteArrayOf(),
+        ),
         DeviceBridgeHttpsResponse(
           200,
           listOf(DeviceBridgeProtocol.CONTENT_TYPE),

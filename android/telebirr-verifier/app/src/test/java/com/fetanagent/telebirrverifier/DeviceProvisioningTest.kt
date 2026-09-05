@@ -150,6 +150,8 @@ class DeviceProvisioningTest {
     assertEquals("pairing_retry_required", (firstFailure as DevicePairingFailure).code)
     val pending = store.load() as DeviceProvisioningState.Pending
     assertTrue(requireNotNull(firstFrame).contentEquals(DeviceBridgeJsonCodec.encodePairingRequest(pending.signedPairingRequest)))
+    assertEquals("2026-09-04T09:59:30.000Z", pending.signedPairingRequest.body.issuedAt)
+    assertEquals("2026-09-04T10:05:00.000Z", pending.signedPairingRequest.body.expiresAt)
 
     val enrolled = coordinator.pair(packageValue)
     assertEquals(2, exchangeCount)

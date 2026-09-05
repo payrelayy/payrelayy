@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Client, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -7,6 +7,29 @@ import { createAcceptedExactFiveCompanionEvidence } from './companion-exact-five
 import { createPilotPrerequisites } from './private-live-money-pilot.suite.js';
 
 type SqlValue = Date | number | readonly string[] | string | null;
+
+function expectedTelebirrReceiverNameDigest(value: string): string {
+  const normalized = value
+    .normalize('NFC')
+    .replace(/[\u0009-\u000d\u0020]+/gu, ' ')
+    .trim()
+    .replace(/[A-Z]/gu, (character) => character.toLowerCase());
+  const transcript = [
+    'fetanagent:telebirr:live-private-pilot:receiver-name:v1',
+    '2',
+    'normalizerVersion',
+    'string:telebirr-credited-party-name-normalizer-v1',
+    'normalizedName',
+    `string:${normalized}`,
+  ];
+  const chunks = transcript.flatMap((entry) => {
+    const encoded = Buffer.from(entry, 'utf8');
+    const length = Buffer.allocUnsafe(4);
+    length.writeUInt32BE(encoded.byteLength);
+    return [length, encoded];
+  });
+  return `sha256:${createHash('sha256').update(Buffer.concat(chunks)).digest('hex')}`;
+}
 
 async function queryAsOwnerControl<T extends QueryResultRow>(
   client: Client,
@@ -135,14 +158,16 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
          where namespace.nspname = 'app'
            and routine.proname in (
              'arm_private_live_deposit_pilot_by_admin_id',
+             'ensure_private_live_telebirr_receiver_profile',
              'get_private_live_deposit_pilot_status_by_admin_id',
              'prepare_approved_private_live_telebirr_pilot_unverified',
              'prepare_private_live_deposit_pilot_by_admin_id',
+             'private_live_telebirr_receiver_name_digest',
              'require_companion_verified_private_live_telebirr_pilot',
              'stop_private_live_deposit_pilot_by_admin_id'
            )
       `);
-      expect(privateImplementations.rows).toHaveLength(6);
+      expect(privateImplementations.rows).toHaveLength(8);
       expect(
         privateImplementations.rows.every(
           (row) => !row.group_execute && !row.runtime_execute && !row.public_execute,
@@ -293,7 +318,13 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
             account_reference_ciphertext,
             verification_reference_ciphertext,
             account_reference_masked,
-            instructions
+            instructions,
+            rotation_request_id,
+            rotation_reason,
+            account_reference_fingerprint,
+            protection_profile_version,
+            encryption_key_version,
+            fingerprint_key_version
           )
           select provider.id,
                  coalesce((
@@ -302,10 +333,16 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
                     where receiver.provider_id = provider.id
                  ), 1),
                  'Synthetic TeleBirr Pilot Receiver',
-                 'synthetic-telebirr-pilot-account-ciphertext',
+                 'receiver-v1.telebirr.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCC',
                  'synthetic-telebirr-pilot-verification-ciphertext',
-                 '****7001',
-                 jsonb_build_object('customer_message', 'Synthetic SQL fixture only')
+                 '***7001',
+                 jsonb_build_object('customer_message', 'Synthetic SQL fixture only'),
+                 gen_random_uuid(),
+                 'initial_configuration',
+                 repeat('a', 64),
+                 1,
+                 1,
+                 1
             from app.payment_providers provider
            where provider.code = 'telebirr'
              and provider.status = 'active'
@@ -523,6 +560,67 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         });
         expect(JSON.stringify(armed[0])).not.toContain(companionEvidence.playerIds[0]);
         expect(JSON.stringify(armed[0])).not.toContain(companionEvidence.ownerCustomerId);
+
+        const receiverProfiles = await client.query<{
+          readonly expected_receiver_name_digest: string;
+          readonly financially_inert: boolean;
+          readonly pilot_configuration_digest: string;
+          readonly receiver_configuration_digest: string;
+          readonly receiver_identity_digest: string;
+          readonly receiver_profile_digest: string;
+          readonly receiver_profile_id: string;
+        }>(
+          `select profile.id as receiver_profile_id,
+                  profile.pilot_configuration_digest,
+                  profile.receiver_profile_digest,
+                  profile.receiver_configuration_digest,
+                  profile.receiver_identity_digest,
+                  profile.expected_receiver_name_digest,
+                  profile.minimum_principal_amount_minor = 2500
+                    and profile.maximum_principal_amount_minor = 2500
+                    and profile.valid_from = pilot.active_from
+                    and profile.valid_until = pilot.expires_at
+                    and profile.receiver_match_basis = 'exact_full_name'
+                    and profile.source_profile = 'telebirr_official_receipt_v1'
+                    and profile.receiver_name_normalizer_version =
+                        'telebirr-credited-party-name-normalizer-v1'
+                    and profile.automatic_freshness_seconds = 3600
+                    and profile.maximum_future_skew_seconds = 300 as financially_inert
+             from app.private_live_telebirr_receiver_profiles profile
+             join app.private_live_deposit_pilot_revisions pilot
+               on pilot.id = profile.pilot_revision_id
+            where profile.pilot_revision_id = $1::uuid`,
+          [pilotRevisionId],
+        );
+        expect(receiverProfiles.rows).toHaveLength(1);
+        const receiverProfile = receiverProfiles.rows[0]!;
+        const expectedReceiverNameDigest = expectedTelebirrReceiverNameDigest(
+          'Synthetic TeleBirr Pilot Receiver',
+        );
+        expect(receiverProfile).toMatchObject({
+          expected_receiver_name_digest: expectedReceiverNameDigest,
+          financially_inert: true,
+          pilot_configuration_digest: armed[0]!.configuration_digest,
+          receiver_identity_digest: expectedReceiverNameDigest,
+        });
+        expect(receiverProfile.receiver_profile_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+        expect(receiverProfile.receiver_configuration_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+
+        const replayedProfile = await client.query<{ readonly receiver_profile_id: string }>(
+          `select app.ensure_private_live_telebirr_receiver_profile($1::uuid)
+                    as receiver_profile_id`,
+          [pilotRevisionId],
+        );
+        expect(replayedProfile.rows).toEqual([
+          { receiver_profile_id: receiverProfile.receiver_profile_id },
+        ]);
+        const profileCount = await client.query<{ readonly profile_count: number }>(
+          `select count(*)::integer as profile_count
+             from app.private_live_telebirr_receiver_profiles
+            where pilot_revision_id = $1::uuid`,
+          [pilotRevisionId],
+        );
+        expect(profileCount.rows).toEqual([{ profile_count: 1 }]);
 
         const armedAudits = await client.query<{
           readonly actor_admin_id: string;

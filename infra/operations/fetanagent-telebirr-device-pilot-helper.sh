@@ -220,6 +220,7 @@ require_gateway_image() {
   [[ "$(docker_local image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]] ||
     die 'the gateway image is not non-root'
   docker_local run --rm --network none --read-only --cap-drop ALL \
+    --cap-add NET_BIND_SERVICE \
     --security-opt no-new-privileges:true "$image" \
     caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 }

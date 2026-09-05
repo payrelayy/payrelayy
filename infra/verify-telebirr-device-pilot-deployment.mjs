@@ -214,6 +214,8 @@ for (const command of ['start', 'ready', 'stop', 'rollback']) {
   assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
 }
 assert.match(deployHelper, /negative_public_smoke/u);
+assert.match(deployWorkflow, /--cap-drop ALL\s*\\\s*\r?\n\s+--cap-add NET_BIND_SERVICE/u);
+assert.match(deployHelper, /--cap-drop ALL\s*\\\s*\r?\n\s+--cap-add NET_BIND_SERVICE/u);
 assert.match(deployHelper, /HostConfig\.ReadonlyRootfs/u);
 assert.match(deployHelper, /HostConfig\.PortBindings == \{\}/u);
 assert.match(deployHelper, /State\.Health\.Status == "healthy"/u);

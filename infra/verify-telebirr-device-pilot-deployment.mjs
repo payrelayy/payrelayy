@@ -273,6 +273,11 @@ assert.match(deployHelper, /less than 2 GiB free/u);
 assert.match(deployHelper, /ip -4 route show default/u);
 assert.match(deployHelper, /getent ahostsv4/u);
 assert.match(deployHelper, /query-bearing route/u);
+assert.match(
+  deployHelper,
+  /\[\[ "\$old_image" =~ \^fetanagent-gateway:\(\[0-9a-f\]\{12\}\)\$ \]\][\s\S]*?old_tag="\$\{BASH_REMATCH\[1\]\}"[\s\S]*?\[\[ "\$old_commit" =~ \^\[0-9a-f\]\{40\}\$ \]\]/u,
+  'rollback must capture the image tag before a second regular expression can overwrite BASH_REMATCH',
+);
 assert.doesNotMatch(deployHelper, /service.?role|KEMERBET|2026-09-04|shutdownAt|stopAt/u);
 assert.equal(
   deploySudoers.trim(),

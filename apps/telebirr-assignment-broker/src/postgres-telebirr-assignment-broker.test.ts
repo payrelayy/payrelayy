@@ -121,6 +121,9 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
     expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
       'defaults.defaclnamespace = 0',
     );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
+      'pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname)',
+    );
     expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).not.toContain(
       'namespace.oid = defaults.defaclnamespace',
     );

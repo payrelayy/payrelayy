@@ -303,17 +303,36 @@ jobs:
         run: |
           set -euo pipefail
           protected='${{ steps.protected.outputs.protected }}'
-          psql -X --quiet --tuples-only --no-align \
-            --set=assignment_signer_id="$TELEBIRR_ASSIGNMENT_SIGNER_ID" \
-            --set=assignment_signer_key_id="$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" \
-            --set=assignment_signer_public_spki_sha256="$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" \
-            --file=infra/sql/staging-telebirr-device-pilot-runtime-input.sql \
-            >"$protected/pilot-runtime-input.json"
-          chmod 0600 "$protected/pilot-runtime-input.json"
+          runtime_input="$protected/pilot-runtime-input.json"
+          partial_input="$runtime_input.partial"
+          runtime_input_ready=false
+          for delay in 0 5 10 20 40; do
+            if (( delay > 0 )); then
+              sleep "$delay"
+            fi
+            rm -f -- "$partial_input"
+            if psql -X --quiet --tuples-only --no-align \
+              --set=assignment_signer_id="$TELEBIRR_ASSIGNMENT_SIGNER_ID" \
+              --set=assignment_signer_key_id="$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" \
+              --set=assignment_signer_public_spki_sha256="$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" \
+              --file=infra/sql/staging-telebirr-device-pilot-runtime-input.sql \
+              >"$partial_input" 2>/dev/null && [[ -s "$partial_input" ]]
+            then
+              chmod 0600 "$partial_input"
+              mv -- "$partial_input" "$runtime_input"
+              runtime_input_ready=true
+              break
+            fi
+          done
+          if [[ "$runtime_input_ready" != true ]]; then
+            rm -f -- "$partial_input"
+            echo '::error::The read-only TeleBirr runtime input did not become reachable.'
+            exit 1
+          fi
           node infra/build-telebirr-assignment-runtime-manifest.mjs \
-            "$protected/pilot-runtime-input.json" \
+            "$runtime_input" \
             "$protected/assignment-runtime-manifest.v1.json"
-          rm -f -- "$protected/pilot-runtime-input.json"
+          rm -f -- "$runtime_input"
 
       - name: Provision only the two bounded no-money database logins
         id: provision

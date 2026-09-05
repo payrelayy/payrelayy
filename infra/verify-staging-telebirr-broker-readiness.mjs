@@ -46,7 +46,13 @@ assert.doesNotMatch(
 assert.match(inspectSql, /begin transaction isolation level serializable read only;/);
 assert.match(inspectSql, /set local search_path = pg_catalog;/);
 assert.match(inspectSql, /current_user = 'postgres' and session_user = 'postgres'/);
-assert.match(inspectSql, /count\(\*\) = 7 as financial_features_disabled/);
+assert.match(inspectSql, /\(select count\(\*\) from real_money_switches\) = 6/);
+assert.match(inspectSql, /real_money_switches\.mode = 'disabled'/);
+assert.match(inspectSql, /real_money_switches\.settings = '\{\}'::jsonb/);
+assert.match(inspectSql, /pilot_switch\.mode = 'disabled'/);
+assert.match(inspectSql, /pilot_switch\.mode = 'dry_run'/);
+assert.match(inspectSql, /'configuration_digest', armed_pilot\.configuration_digest/);
+assert.doesNotMatch(inspectSql, /pilot_switch\.mode = 'live'/);
 assert.match(inspectSql, /fetanagent_telebirr_assignment_broker_runtime/g);
 assert.match(inspectSql, /not role_state\.rolcanlogin/);
 assert.match(inspectSql, /membership_state\.inherit_option/);

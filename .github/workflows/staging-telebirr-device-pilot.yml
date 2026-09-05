@@ -1,0 +1,468 @@
+name: Staging TeleBirr Android device transport
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build only, deploy and smoke the no-money Android transport, or stop it
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - deploy-and-smoke
+          - stop
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_no_money_operation:
+        description: Type plan-no-money, deploy-telebirr-device-transport-no-money, or stop-telebirr-device-transport
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_DROPLET_ID: '593344964'
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
+  ASSIGNMENT_RUNTIME_ROLE: fetanagent_telebirr_assignment_broker_runtime
+  DEVICE_STATE_RUNTIME_ROLE: fetanagent_telebirr_device_state_runtime
+
+jobs:
+  validate-target:
+    name: Validate exact no-money staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require main, exact source, staging, and explicit no-money operation
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_no_money_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_COMMIT" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          case "$REQUESTED_MODE" in
+            plan) [[ "$CONFIRMED_OPERATION" == 'plan-no-money' ]] ;;
+            deploy-and-smoke)
+              [[ "$CONFIRMED_OPERATION" == 'deploy-telebirr-device-transport-no-money' ]]
+              ;;
+            stop) [[ "$CONFIRMED_OPERATION" == 'stop-telebirr-device-transport' ]] ;;
+            *) exit 1 ;;
+          esac
+
+  build:
+    name: Build exact TeleBirr device images
+    if: inputs.mode == 'plan' || inputs.mode == 'deploy-and-smoke'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify the source deployment and runtime-manifest contracts
+        run: |
+          node infra/verify-telebirr-device-pilot-deployment.mjs
+          node infra/verify-telebirr-device-pilot-runtime-manifest.mjs
+          bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
+
+      - name: Build and inspect exact non-root images
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          for target in \
+            telebirr-assignment-broker \
+            telebirr-device-state-broker \
+            telebirr-device-bridge \
+            gateway
+          do
+            docker build --pull=false --target "$target" \
+              --build-arg "VCS_REF=$GITHUB_SHA" \
+              --tag "fetanagent-$target:$tag" .
+            test "$(docker image inspect "fetanagent-$target:$tag" \
+              --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = \
+              "$GITHUB_SHA"
+            test "$(docker image inspect "fetanagent-$target:$tag" --format '{{.Config.User}}')" = \
+              '10001:10001'
+          done
+          for target in telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge
+          do
+            test "$(docker image inspect "fetanagent-$target:$tag" \
+              --format '{{json .Config.ExposedPorts}}')" = 'null'
+          done
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true "fetanagent-gateway:$tag" \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+
+      - name: Seal the four deployment images
+        if: inputs.mode == 'deploy-and-smoke'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          docker save --output "$RUNNER_TEMP/fetanagent-telebirr-images.tar" \
+            "fetanagent-telebirr-assignment-broker:$tag" \
+            "fetanagent-telebirr-device-state-broker:$tag" \
+            "fetanagent-telebirr-device-bridge:$tag" \
+            "fetanagent-gateway:$tag"
+
+      - name: Upload the one-run sealed image bundle
+        if: inputs.mode == 'deploy-and-smoke'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fetanagent-telebirr-device-images-${{ github.sha }}
+          path: ${{ runner.temp }}/fetanagent-telebirr-images.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    name: Deploy and smoke live no-money Android transport
+    if: inputs.mode == 'deploy-and-smoke'
+    needs: [validate-target, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: staging
+    steps:
+      - name: Check out exact deployment contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download sealed image bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fetanagent-telebirr-device-images-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+
+      - name: Validate and stage protected deployment inputs
+        id: protected
+        shell: bash
+        env:
+          ASSIGNMENT_PRIVATE_BASE64: ${{ secrets.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64 }}
+          ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
+          ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          ASSIGNMENT_PUBLIC_BASE64: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64 }}
+          ASSIGNMENT_PUBLIC_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          BRIDGE_PRIVATE_BASE64: ${{ secrets.TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64 }}
+          BRIDGE_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
+          BRIDGE_PUBLIC_BASE64: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
+          BRIDGE_PUBLIC_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          BRIDGE_MANIFEST_BASE64: ${{ vars.TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
+          REFERENCE_OPENING_BASE64: ${{ secrets.TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64 }}
+          REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          ASSIGNMENT_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
+          DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          command -v jq >/dev/null
+          command -v openssl >/dev/null
+          command -v psql >/dev/null
+          [[ "$ASSIGNMENT_SIGNER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$ASSIGNMENT_SIGNER_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
+          [[ "$BRIDGE_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
+          [[ "$ASSIGNMENT_SIGNER_KEY_ID" != "$BRIDGE_KEY_ID" ]]
+          [[ "$ASSIGNMENT_PUBLIC_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$BRIDGE_PUBLIC_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$REFERENCE_OPENING_KEY_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ASSIGNMENT_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$DEVICE_STATE_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$ASSIGNMENT_RUNTIME_PASSWORD" != "$DEVICE_STATE_RUNTIME_PASSWORD" ]]
+          [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$STAGING_VM_KNOWN_HOSTS" && -n "$STAGING_VM_SSH_PRIVATE_KEY" ]]
+
+          protected="$RUNNER_TEMP/fetanagent-telebirr-device-protected"
+          [[ ! -e "$protected" && ! -L "$protected" ]]
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$ASSIGNMENT_PRIVATE_BASE64" | base64 --decode >"$protected/assignment-signer.pkcs8.der"
+          printf '%s' "$ASSIGNMENT_PUBLIC_BASE64" | base64 --decode >"$protected/assignment.spki.der"
+          printf '%s' "$BRIDGE_PRIVATE_BASE64" | base64 --decode >"$protected/bridge-server-signer.pkcs8.der"
+          printf '%s' "$BRIDGE_PUBLIC_BASE64" | base64 --decode >"$protected/bridge.spki.der"
+          printf '%s' "$BRIDGE_MANIFEST_BASE64" | base64 --decode >"$protected/bridge-runtime-manifest.v1.json"
+          printf '%s' "$REFERENCE_OPENING_BASE64" | base64 --decode >"$protected/reference-opening-key.v1.json"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$ASSIGNMENT_RUNTIME_ROLE" "$ASSIGNMENT_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$protected/assignment-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$DEVICE_STATE_RUNTIME_ROLE" "$DEVICE_STATE_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$protected/device-state-database-url"
+          chmod 0600 "$protected"/*
+
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          [[ "$(stat -c %s "$protected/assignment.spki.der")" -eq 91 ]]
+          [[ "$(stat -c %s "$protected/bridge.spki.der")" -eq 91 ]]
+          [[ "sha256:$(sha256sum "$protected/assignment.spki.der" | cut -d ' ' -f 1)" == \
+            "$ASSIGNMENT_PUBLIC_SHA256" ]]
+          [[ "sha256:$(sha256sum "$protected/bridge.spki.der" | cut -d ' ' -f 1)" == \
+            "$BRIDGE_PUBLIC_SHA256" ]]
+          for purpose in assignment-signer bridge-server-signer; do
+            openssl pkey -inform DER -in "$protected/$purpose.pkcs8.der" -check -noout >/dev/null 2>&1
+          done
+          openssl pkey -inform DER -in "$protected/assignment-signer.pkcs8.der" -pubout \
+            -outform DER -out "$protected/assignment-derived.spki.der" >/dev/null 2>&1
+          cmp --silent "$protected/assignment.spki.der" "$protected/assignment-derived.spki.der"
+          openssl pkey -inform DER -in "$protected/bridge-server-signer.pkcs8.der" -pubout \
+            -outform DER -out "$protected/bridge-derived.spki.der" >/dev/null 2>&1
+          cmp --silent "$protected/bridge.spki.der" "$protected/bridge-derived.spki.der"
+          jq -e --arg key "$BRIDGE_KEY_ID" --arg bridge "$BRIDGE_PUBLIC_SHA256" \
+            --arg assignment "$ASSIGNMENT_PUBLIC_SHA256" '
+              type == "object" and .contractVersion == 1 and .providerCode == "telebirr" and
+              .serverSignerKeyId == $key and .serverSigningPublicKeySpkiSha256 == $bridge and
+              .assignmentSigningPublicKeySpkiSha256 == $assignment
+            ' "$protected/bridge-runtime-manifest.v1.json" >/dev/null
+          jq -e --arg key "$REFERENCE_OPENING_KEY_ID" '
+              type == "object" and .contractVersion == 1 and .providerCode == "telebirr" and
+              .purpose == "private_live_reference_opening" and .keyVersion == 1 and .keyId == $key and
+              (.keyHex | test("^[0-9a-f]{64}$"))
+            ' "$protected/reference-opening-key.v1.json" >/dev/null
+
+          helper_sha="$(sha256sum infra/operations/fetanagent-telebirr-device-pilot-helper.sh | cut -d ' ' -f 1)"
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$helper_sha" >>"$GITHUB_OUTPUT"
+
+      - name: Preflight the exact VM and installed helper before database mutation
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          incoming="/tmp/fetanagent-telebirr-device-pilot-$GITHUB_SHA"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" "install -d -m 0700 '$incoming'"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper preflight '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
+
+      - name: Build the exact armed-pilot runtime manifest without logging private values
+        shell: bash
+        env:
+          TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_telebirr_device_manifest
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          protected='${{ steps.protected.outputs.protected }}'
+          psql -X --quiet --tuples-only --no-align \
+            --set=assignment_signer_id="$TELEBIRR_ASSIGNMENT_SIGNER_ID" \
+            --set=assignment_signer_key_id="$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" \
+            --set=assignment_signer_public_spki_sha256="$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" \
+            --file=infra/sql/staging-telebirr-device-pilot-runtime-input.sql \
+            >"$protected/pilot-runtime-input.json"
+          chmod 0600 "$protected/pilot-runtime-input.json"
+          node infra/build-telebirr-assignment-runtime-manifest.mjs \
+            "$protected/pilot-runtime-input.json" \
+            "$protected/assignment-runtime-manifest.v1.json"
+          rm -f -- "$protected/pilot-runtime-input.json"
+
+      - name: Provision only the two bounded no-money database logins
+        id: provision
+        shell: bash
+        env:
+          TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
+          TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_telebirr_device_runtime_provision
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-device-pilot-provision.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "bounded_runtime_provision" and
+            .financialFeatures == "disabled" and .pilotMode == "dry_run" and
+            .assignmentBroker == "bounded_login_ready" and
+            .deviceStateBroker == "bounded_login_ready"
+          ' <<<"$result" >/dev/null
+
+      - name: Transfer and install the sealed release
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          incoming="/tmp/fetanagent-telebirr-device-pilot-$GITHUB_SHA"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          scp "${ssh_opts[@]}" \
+            "$RUNNER_TEMP/release/fetanagent-telebirr-images.tar" \
+            infra/compose.telebirr-device-pilot.yaml infra/compose.staging-beta.yaml \
+            "$PROTECTED/supabase-ca.crt" "$PROTECTED/assignment.spki.der" \
+            "$PROTECTED/bridge-runtime-manifest.v1.json" \
+            "$PROTECTED/assignment-database-url" "$PROTECTED/reference-opening-key.v1.json" \
+            "$PROTECTED/assignment-runtime-manifest.v1.json" \
+            "$PROTECTED/assignment-signer.pkcs8.der" "$PROTECTED/device-state-database-url" \
+            "$PROTECTED/bridge-server-signer.pkcs8.der" \
+            "fetanagent-admin@$VM_HOST:$incoming/"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "chmod 0600 '$incoming'/* && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
+
+      - name: Start the exact gateway and three-service Android transport
+        id: activate
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          echo 'started=true' >>"$GITHUB_OUTPUT"
+
+      - name: Record the live no-money transport outcome
+        run: |
+          echo 'The real Android-to-server transport is live. Three isolated services are healthy; HTTPS and rejection smokes passed; every money action remains disabled.' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Roll back an incomplete activation and disable both database logins
+        if: always() && (failure() || cancelled()) && steps.provision.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper rollback '$GITHUB_SHA' '${GITHUB_SHA:0:12}'" || true
+          psql -X --quiet --file=infra/sql/staging-telebirr-device-pilot-disable.sql >/dev/null
+
+      - name: Remove runner-local protected material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/fetanagent-telebirr-device-protected"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" && "$(realpath -- "$protected")" == "$protected" ]]
+            find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$protected"
+          fi
+
+  stop:
+    name: Stop only the TeleBirr device transport
+    if: inputs.mode == 'stop'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    steps:
+      - name: Check out exact stop contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stop the exact three-service stack and disable both runtime logins
+        shell: bash
+        env:
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/fetanagent-telebirr-device-stop"
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected"/*
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+          openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
+          helper_sha="$(sha256sum infra/operations/fetanagent-telebirr-device-pilot-helper.sh | cut -d ' ' -f 1)"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          remote_status=0
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper stop '$GITHUB_SHA' '${GITHUB_SHA:0:12}'" || remote_status=$?
+          psql -X --quiet --file=infra/sql/staging-telebirr-device-pilot-disable.sql >/dev/null
+          rm -f -- "$protected"/*
+          rmdir -- "$protected"
+          [[ "$remote_status" -eq 0 ]]

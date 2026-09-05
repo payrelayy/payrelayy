@@ -10,6 +10,30 @@ const pilotCompose = await readFile(
 const stagingCompose = await readFile(`${repositoryRoot}infra/compose.staging-beta.yaml`, 'utf8');
 const caddyfile = await readFile(`${repositoryRoot}infra/gateway/Caddyfile`, 'utf8');
 const qualityWorkflow = await readFile(`${repositoryRoot}.github/workflows/quality.yml`, 'utf8');
+const deployWorkflow = await readFile(
+  `${repositoryRoot}.github/workflows/staging-telebirr-device-pilot.yml`,
+  'utf8',
+);
+const deployHelper = await readFile(
+  `${repositoryRoot}infra/operations/fetanagent-telebirr-device-pilot-helper.sh`,
+  'utf8',
+);
+const deploySudoers = await readFile(
+  `${repositoryRoot}infra/operations/fetanagent-telebirr-device-pilot.sudoers`,
+  'utf8',
+);
+const provisionSql = await readFile(
+  `${repositoryRoot}infra/sql/staging-telebirr-device-pilot-provision.sql`,
+  'utf8',
+);
+const disableSql = await readFile(
+  `${repositoryRoot}infra/sql/staging-telebirr-device-pilot-disable.sql`,
+  'utf8',
+);
+const runtimeInputSql = await readFile(
+  `${repositoryRoot}infra/sql/staging-telebirr-device-pilot-runtime-input.sql`,
+  'utf8',
+);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
@@ -148,6 +172,79 @@ assert.match(
   qualityWorkflow,
   /docker compose --env-file \/dev\/null[\s\S]*?--file infra\/compose\.telebirr-device-pilot\.yaml[\s\S]*?--profile telebirr-device-pilot config --quiet/u,
 );
+
+assert.match(deployWorkflow, /^name: Staging TeleBirr Android device transport$/mu);
+assert.match(deployWorkflow, /^  workflow_dispatch:$/mu);
+assert.doesNotMatch(deployWorkflow, /^  schedule:$/mu);
+assert.match(deployWorkflow, /confirm_no_money_operation:/u);
+assert.match(deployWorkflow, /deploy-telebirr-device-transport-no-money/u);
+assert.match(deployWorkflow, /environment: staging/u);
+assert.match(deployWorkflow, /permissions:\s*\r?\n  contents: read/u);
+assert.match(deployWorkflow, /concurrency:\s*\r?\n  group: fetanagent-staging-beta-deploy/u);
+for (const target of [
+  'telebirr-assignment-broker',
+  'telebirr-device-state-broker',
+  'telebirr-device-bridge',
+  'gateway',
+]) {
+  assert.match(deployWorkflow, new RegExp(`docker build[\\s\\S]*?${target}`, 'u'));
+}
+for (const contract of [
+  'staging-telebirr-device-pilot-runtime-input.sql',
+  'build-telebirr-assignment-runtime-manifest.mjs',
+  'staging-telebirr-device-pilot-provision.sql',
+  'staging-telebirr-device-pilot-disable.sql',
+  'fetanagent-telebirr-device-pilot-helper',
+]) {
+  assert.match(deployWorkflow, new RegExp(escapeRegExp(contract), 'u'));
+}
+assert.match(deployWorkflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/u);
+assert.doesNotMatch(deployWorkflow, /echo "vm_host=.*GITHUB_OUTPUT/u);
+assert.equal(
+  (deployWorkflow.match(/^\s+VM_HOST: \$\{\{ secrets\.STAGING_VM_HOST \}\}$/gmu) ?? []).length,
+  4,
+  'Each protected SSH step must consume the masked VM host directly.',
+);
+assert.doesNotMatch(deployWorkflow, /pull_request_target|contents: write|service.?role|KEMERBET/u);
+
+assert.match(deployHelper, /^set -euo pipefail$/mu);
+assert.match(deployHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
+assert.match(deployHelper, /FINANCIAL_ACTIONS_MODE|compose\.telebirr-device-pilot\.yaml/u);
+for (const command of ['start', 'ready', 'stop', 'rollback']) {
+  assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
+}
+assert.match(deployHelper, /negative_public_smoke/u);
+assert.match(deployHelper, /HostConfig\.ReadonlyRootfs/u);
+assert.match(deployHelper, /HostConfig\.PortBindings == \{\}/u);
+assert.match(deployHelper, /State\.Health\.Status == "healthy"/u);
+assert.match(deployHelper, /700 \| 755/u);
+assert.match(deployHelper, /10001:10001:400:1/u);
+assert.match(deployHelper, /0:0:444:1/u);
+assert.match(deployHelper, /less than 2 GiB free/u);
+assert.match(deployHelper, /ip -6 address show scope global/u);
+assert.match(deployHelper, /getent ahostsv6/u);
+assert.match(deployHelper, /query-bearing route/u);
+assert.doesNotMatch(deployHelper, /service.?role|KEMERBET|2026-09-04|shutdownAt|stopAt/u);
+assert.equal(
+  deploySudoers.trim(),
+  'fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-telebirr-device-pilot-helper *',
+);
+
+for (const sql of [provisionSql, runtimeInputSql]) {
+  assert.match(sql, /payment_verification/u);
+  assert.match(sql, /deposit_execution/u);
+  assert.match(sql, /telebirr_authoritative_verification/u);
+  assert.match(sql, /private_live_deposit_pilot/u);
+  assert.match(sql, /dry_run/u);
+  assert.doesNotMatch(sql, /mode\s*=\s*'live'|service.?role|KEMERBET/u);
+}
+assert.match(provisionSql, /interval '24 hours'/u);
+assert.match(provisionSql, /fetanagent_telebirr_assignment_broker_runtime/u);
+assert.match(provisionSql, /fetanagent_telebirr_device_state_runtime/u);
+assert.match(runtimeInputSql, /receiverAccountHolderNameSnapshot/u);
+assert.match(runtimeInputSql, /expectedReceiverNameDigest/u);
+assert.match(disableSql, /password null valid until 'infinity'/u);
+assert.match(disableSql, /pg_terminate_backend/u);
 
 console.log(
   'TeleBirr device pilot deployment verified: three isolated no-money services, read-only socket consumers, database-free ingress, and exact HTTPS routes.',

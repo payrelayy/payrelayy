@@ -490,7 +490,9 @@ export interface TelebirrAssignmentBrokerConnectionConfig {
   readonly host: string;
   readonly password: string;
   readonly port: 5432;
-  readonly user: 'fetanagent_telebirr_assignment_broker_runtime';
+  readonly user:
+    | 'fetanagent_telebirr_assignment_broker_runtime'
+    | 'fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl';
 }
 
 export interface TelebirrAssignmentBrokerPostgresClient extends TelebirrAssignmentBrokerPostgresQuery {

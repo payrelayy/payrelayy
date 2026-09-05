@@ -226,13 +226,17 @@ assert.equal(
 assert.equal(
   (
     deployWorkflow.match(
-      /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full'/gu,
+      /printf 'postgresql:\/\/%s\.%s:%s@%s:5432\/postgres\?sslmode=verify-full'/gu,
     ) ?? []
   ).length,
   2,
-  'both runtime database URL files must be emitted without a line terminator',
+  'both session-pooler runtime database URL files must be emitted without a line terminator',
 );
 assert.match(pilotRunbook, /exact URL bytes, with no line terminator or surrounding\s+whitespace/u);
+assert.match(pilotRunbook, /Supavisor session pooler on port `5432`/u);
+assert.match(pilotRunbook, /<runtime-role>\.<staging-project-ref>/u);
+assert.match(deployWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/u);
+assert.doesNotMatch(deployWorkflow, /STAGING_DIRECT_DATABASE_HOST/u);
 
 assert.match(deployHelper, /^set -euo pipefail$/mu);
 assert.match(deployHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
@@ -243,6 +247,10 @@ for (const command of ['start', 'ready', 'stop', 'rollback']) {
 assert.match(deployHelper, /negative_public_smoke/u);
 assert.match(deployHelper, /require_database_url_file/u);
 assert.match(deployHelper, /exact no-whitespace byte contract/u);
+assert.match(deployHelper, /STAGING_SESSION_POOLER_HOST='aws-1-eu-west-1\.pooler\.supabase\.com'/u);
+assert.match(deployHelper, /getent ahostsv4 "\$STAGING_SESSION_POOLER_HOST"/u);
+assert.match(deployHelper, /\/dev\/tcp\/\$STAGING_SESSION_POOLER_HOST\/5432/u);
+assert.doesNotMatch(deployHelper, /STAGING_DIRECT_DATABASE_HOST|ahostsv6/u);
 assert.match(
   deployHelper,
   /--project-name "\$STAGING_PROJECT" --profile staging-manual --profile public-domain/u,
@@ -262,8 +270,8 @@ assert.match(deployHelper, /700 \| 755/u);
 assert.match(deployHelper, /10001:10001:400:1/u);
 assert.match(deployHelper, /0:0:444:1/u);
 assert.match(deployHelper, /less than 2 GiB free/u);
-assert.match(deployHelper, /ip -6 address show scope global/u);
-assert.match(deployHelper, /getent ahostsv6/u);
+assert.match(deployHelper, /ip -4 route show default/u);
+assert.match(deployHelper, /getent ahostsv4/u);
 assert.match(deployHelper, /query-bearing route/u);
 assert.doesNotMatch(deployHelper, /service.?role|KEMERBET|2026-09-04|shutdownAt|stopAt/u);
 assert.equal(

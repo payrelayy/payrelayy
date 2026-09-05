@@ -35,8 +35,10 @@ const ids = {
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const receiverName = 'synthetic pilot receiver';
 const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(62)}==\n-----END CERTIFICATE-----\n`;
-const databaseUrl =
+const directDatabaseUrl =
   'postgresql://fetanagent_telebirr_assignment_broker_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
+const databaseUrl =
+  'postgresql://fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
 
 function p256Pair() {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -212,9 +214,9 @@ describe('private TeleBirr assignment broker configuration', () => {
       deploymentTarget: 'staging',
       connection: {
         database: 'postgres',
-        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        host: 'aws-1-eu-west-1.pooler.supabase.com',
         port: 5432,
-        user: 'fetanagent_telebirr_assignment_broker_runtime',
+        user: 'fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl',
       },
       receiverManifest: {
         pilotRevisionId: ids.pilot,
@@ -251,6 +253,23 @@ describe('private TeleBirr assignment broker configuration', () => {
     expect(dependencies.returnedBuffers.every((bytes) => bytes.every((value) => value === 0))).toBe(
       true,
     );
+  });
+
+  it('also accepts only the exact staging direct route and bare runtime role', () => {
+    const config = loadTelebirrAssignmentBrokerConfig(
+      enabledEnvironment,
+      guardedDependencies({
+        ...fileValues(),
+        [TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE]: directDatabaseUrl,
+      }),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      connection: {
+        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        user: 'fetanagent_telebirr_assignment_broker_runtime',
+      },
+    });
   });
 
   it.each([
@@ -297,7 +316,22 @@ describe('private TeleBirr assignment broker configuration', () => {
       'wrong role',
       databaseUrl.replace('fetanagent_telebirr_assignment_broker_runtime', 'postgres'),
     ],
-    ['wrong host', databaseUrl.replace('db.spzpiyxheappsfyswewl.supabase.co', 'localhost')],
+    ['wrong host', databaseUrl.replace('aws-1-eu-west-1.pooler.supabase.com', 'localhost')],
+    [
+      'bare role on the session pooler',
+      databaseUrl.replace(
+        'fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl',
+        'fetanagent_telebirr_assignment_broker_runtime',
+      ),
+    ],
+    [
+      'project-suffixed role on the direct route',
+      directDatabaseUrl.replace(
+        'fetanagent_telebirr_assignment_broker_runtime:',
+        'fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl:',
+      ),
+    ],
+    ['transaction pooler port', databaseUrl.replace(':5432/', ':6543/')],
     ['wrong TLS mode', databaseUrl.replace('verify-full', 'require')],
     ['extra query', `${databaseUrl}&application_name=other`],
     ['short password', databaseUrl.replace('synthetic-password-123456', 'short')],

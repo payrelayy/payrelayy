@@ -797,7 +797,9 @@ export interface TelebirrDeviceStateConnectionConfig {
   readonly host: string;
   readonly password: string;
   readonly port: 5432;
-  readonly user: 'fetanagent_telebirr_device_state_runtime';
+  readonly user:
+    | 'fetanagent_telebirr_device_state_runtime'
+    | 'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl';
 }
 
 export interface TelebirrDeviceStatePostgresClient extends TelebirrDeviceStatePostgresQuery {

@@ -17,8 +17,7 @@ readonly MUTATION_ROOT='/run/fetanagent-telebirr-device-pilot-helper'
 readonly MUTATION_LOCK="$MUTATION_ROOT/mutation.lock"
 readonly ACTIVE_RECEIPT="$PILOT_RELEASE_ROOT/active-v1"
 readonly PUBLIC_ORIGIN='https://device.fetanagent.com'
-readonly STAGING_PROJECT_REF='spzpiyxheappsfyswewl'
-readonly STAGING_SESSION_POOLER_HOST='aws-1-eu-west-1.pooler.supabase.com'
+readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
 
 export PATH="$SAFE_PATH"
 
@@ -100,8 +99,8 @@ require_release_file() {
 
 require_database_url_file() {
   local path="$1" role="$2" value='' prefix suffix password
-  prefix="postgresql://$role.$STAGING_PROJECT_REF:"
-  suffix="@$STAGING_SESSION_POOLER_HOST:5432/postgres?sslmode=verify-full"
+  prefix="postgresql://$role:"
+  suffix="@$STAGING_DIRECT_DATABASE_HOST:5432/postgres?sslmode=verify-full"
   IFS= read -r -d '' value <"$path" || true
   [[ ${#value} -eq $((${#prefix} + 64 + ${#suffix})) &&
     "$value" == "$prefix"*"$suffix" ]] || {
@@ -508,13 +507,13 @@ case "$command" in
       die 'the pilot release filesystem has less than 2 GiB free'
     [[ "$(df --output=avail -B 1024 "$4" | tail -n 1 | tr -d '[:space:]')" -ge 2097152 ]] ||
       die 'the incoming filesystem has less than 2 GiB free'
-    ip -4 route show default | grep -q '^default ' ||
-      die 'the VM has no default IPv4 route'
-    getent ahostsv4 "$STAGING_SESSION_POOLER_HOST" >/dev/null ||
-      die 'the staging session pooler has no IPv4 result'
+    ip -6 route show default | grep -q '^default ' ||
+      die 'the VM has no default IPv6 route'
+    getent ahostsv6 "$STAGING_DIRECT_DATABASE_HOST" >/dev/null ||
+      die 'the staging direct database host has no IPv6 result'
     timeout 5 bash -c \
-      "exec 3<>/dev/tcp/$STAGING_SESSION_POOLER_HOST/5432; exec 3>&-; exec 3<&-" ||
-      die 'the staging session pooler is not reachable on port 5432'
+      "exec 3<>/dev/tcp/$STAGING_DIRECT_DATABASE_HOST/5432; exec 3>&-; exec 3<&-" ||
+      die 'the staging direct database host is not reachable on port 5432'
     docker_local network inspect "$INGRESS_NETWORK" \
       --format '{{json .Internal}}' | grep -Fx true >/dev/null ||
       die 'the fixed internal device ingress network is unavailable'

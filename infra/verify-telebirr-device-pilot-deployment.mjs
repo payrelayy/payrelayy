@@ -303,6 +303,10 @@ for (const command of ['start', 'ready', 'stop', 'rollback']) {
   assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
 }
 assert.match(deployHelper, /negative_public_smoke/u);
+assert.match(
+  deployHelper,
+  /enrollments:pair[\s\S]*?\[\[ "\$status" == '401' \]\][\s\S]*?assignments:poll[\s\S]*?\[\[ "\$status" == '400' \]\]/u,
+);
 assert.match(deployHelper, /require_database_url_file/u);
 assert.match(deployHelper, /exact no-whitespace byte contract/u);
 assert.match(

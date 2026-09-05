@@ -314,8 +314,15 @@ require_component_ready() {
 
 negative_public_smoke() {
   local status route
+
+  status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --max-time 8 --request POST \
+    --header 'Content-Type: application/vnd.fetanagent.telebirr-device-bridge+json' \
+    --data '{}' "$PUBLIC_ORIGIN/v1/telebirr/device/enrollments:pair")"
+  [[ "$status" == '401' ]] ||
+    die 'the exact public pairing route did not reject an unsigned request'
+
   for route in \
-    '/v1/telebirr/device/enrollments:pair' \
     '/v1/telebirr/device/assignments:poll' \
     '/v1/telebirr/device/heartbeat' \
     '/v1/telebirr/device/observations:upload'

@@ -73,9 +73,15 @@ class FixedDeviceBridgeHttpsExchange internal constructor(
     if (response.statusCode !in 100..599 || response.statusCode in 300..399) {
       throw DeviceBridgeRetryableException()
     }
+    val responseContentType = response.contentTypes.singleOrNull()
+    val expectedContentType =
+      if (response.statusCode >= HttpURLConnection.HTTP_BAD_REQUEST) {
+        ERROR_CONTENT_TYPE
+      } else {
+        DeviceBridgeProtocol.CONTENT_TYPE
+      }
     if (
-      response.contentTypes.size != 1 ||
-        response.contentTypes.single() != DeviceBridgeProtocol.CONTENT_TYPE ||
+      responseContentType != expectedContentType ||
         response.contentEncodings.any { !it.equals("identity", ignoreCase = true) } ||
         response.contentEncodings.size > 1 ||
         response.body.size > MAX_RESPONSE_BYTES
@@ -84,7 +90,7 @@ class FixedDeviceBridgeHttpsExchange internal constructor(
     }
     return DeviceBridgeRawResponse(
       statusCode = response.statusCode,
-      contentType = response.contentTypes.single(),
+      contentType = responseContentType,
       body = response.body.copyOf(),
     )
   }
@@ -97,6 +103,7 @@ class FixedDeviceBridgeHttpsExchange internal constructor(
     const val READ_TIMEOUT_MILLIS = 15_000
     const val MAX_REQUEST_BYTES = 256 * 1_024
     const val MAX_RESPONSE_BYTES = 256 * 1_024
+    const val ERROR_CONTENT_TYPE = "application/json; charset=utf-8"
     private const val HTTPS_PORT = 443
     private val allowedPaths =
       setOf(

@@ -42,7 +42,7 @@ begin
     end if;
   end loop;
 
-  normalized_name := pg_catalog.normalize(p_account_holder_name, NFC);
+  normalized_name := normalize(p_account_holder_name, NFC);
   normalized_name := pg_catalog.replace(normalized_name, pg_catalog.chr(9), ' ');
   normalized_name := pg_catalog.replace(normalized_name, pg_catalog.chr(10), ' ');
   normalized_name := pg_catalog.replace(normalized_name, pg_catalog.chr(11), ' ');

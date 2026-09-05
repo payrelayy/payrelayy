@@ -208,6 +208,16 @@ assert.equal(
 );
 assert.doesNotMatch(deployWorkflow, /pull_request_target|contents: write|service.?role|KEMERBET/u);
 assert.doesNotMatch(deployWorkflow, /sslmode=verify-full\\n/u);
+assert.doesNotMatch(
+  deployWorkflow,
+  /printf '%s\\n' "\$SUPABASE_CA_CERTIFICATE_PEM"/u,
+  'the workflow must not append a second line terminator to the stored PEM secret',
+);
+assert.equal(
+  (deployWorkflow.match(/printf '%s' "\$SUPABASE_CA_CERTIFICATE_PEM"/gu) ?? []).length,
+  2,
+  'deploy and stop paths must preserve the exact PEM secret bytes',
+);
 assert.equal(
   (
     deployWorkflow.match(

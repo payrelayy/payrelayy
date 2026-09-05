@@ -339,7 +339,7 @@ function guardedCa(value: unknown): string {
     value.length === 0 ||
     Buffer.byteLength(value, 'utf8') > MAX_GUARDED_FILE_BYTES ||
     value.includes('\0') ||
-    !/^(?:-----BEGIN CERTIFICATE-----\n(?:[A-Za-z0-9+/]{1,76}\n)+-----END CERTIFICATE-----\n?)+$/u.test(
+    !/^(?:-----BEGIN CERTIFICATE-----\n(?:[A-Za-z0-9+/]{1,76}\n)*[A-Za-z0-9+/]{1,76}={0,2}\n-----END CERTIFICATE-----\n?)+$/u.test(
       value,
     )
   ) {

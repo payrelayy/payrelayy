@@ -15,22 +15,62 @@ select current_user = 'postgres' and session_user = 'postgres'
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 7 as financial_features_disabled
-from app.feature_switches as feature_switch
-where feature_switch.feature_key in (
-  'payment_verification',
-  'deposit_execution',
-  'withdrawal_validation',
-  'withdrawal_collection',
-  'cbe_birr_authoritative_verification',
-  'telebirr_authoritative_verification',
-  'private_live_deposit_pilot'
+with real_money_switches as (
+  select feature_switch.feature_key,
+         feature_switch.mode,
+         feature_switch.settings
+    from app.feature_switches as feature_switch
+   where feature_switch.feature_key in (
+     'payment_verification',
+     'deposit_execution',
+     'withdrawal_validation',
+     'withdrawal_collection',
+     'cbe_birr_authoritative_verification',
+     'telebirr_authoritative_verification'
+   )
+), pilot_switch as (
+  select feature_switch.mode,
+         feature_switch.settings
+    from app.feature_switches as feature_switch
+   where feature_switch.feature_key = 'private_live_deposit_pilot'
+), armed_pilot as (
+  select pilot.id,
+         pilot.configuration_digest
+    from app.private_live_deposit_pilot_revisions as pilot
+   where pilot.status = 'armed'
+     and pilot.configuration_digest is not null
 )
-  and feature_switch.mode = 'disabled'
+select (select count(*) from real_money_switches) = 6
+   and (select pg_catalog.bool_and(
+                real_money_switches.mode = 'disabled'
+                and real_money_switches.settings = '{}'::jsonb
+              )
+          from real_money_switches)
+   and (select count(*) from pilot_switch) = 1
+   and (
+     exists (
+       select 1
+         from pilot_switch
+        where pilot_switch.mode = 'disabled'
+          and pilot_switch.settings = '{}'::jsonb
+     )
+     or exists (
+       select 1
+         from pilot_switch
+         join armed_pilot on true
+        where pilot_switch.mode = 'dry_run'
+          and (select count(*) from armed_pilot) = 1
+          and pilot_switch.settings = pg_catalog.jsonb_build_object(
+            'contract_version', 1,
+            'pilot_revision_id', armed_pilot.id,
+            'configuration_digest', armed_pilot.configuration_digest
+          )
+     )
+   ) as no_money_feature_boundary_safe
 \gset
-\if :financial_features_disabled
+\if :no_money_feature_boundary_safe
 \else
-  \warn 'Every financial and provider feature must remain disabled for this inspection.'
+  \warn 'Every real-money feature must remain disabled and the pilot switch must be disabled or the exact armed dry-run configuration.'
   select 1 / 0 as rejected;
 \endif
 

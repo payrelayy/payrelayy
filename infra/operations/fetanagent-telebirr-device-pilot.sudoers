@@ -1,0 +1,1 @@
+fetanagent-admin ALL=(root) NOPASSWD: /usr/local/sbin/fetanagent-telebirr-device-pilot-helper *

@@ -848,7 +848,7 @@ function applyKemerbetQuarantineMutationBoundary() {
   pilotArmButton.disabled = !companionLookupPilotReady() || !currentPilot ||
     currentPilot.pilotStatus !== 'draft' || currentPilot.financiallyActive ||
     Date.parse(currentPilot.expiresAt) <= Date.now();
-  pilotStopButton.disabled = true;
+  pilotStopButton.disabled = !currentPilot || currentPilot.pilotStatus === 'stopped';
   if (
     !kemerbetRecheckSpentFailedTerminal &&
     !kemerbetSecurityRecoveryCohortRequired &&
@@ -2897,7 +2897,7 @@ function renderPilotStatus(pilot, statusLoaded = true) {
   pilotArmButton.disabled = !pilotDryRunMutationAllowed() ||
     pilot.pilotStatus !== 'draft' || pilot.financiallyActive ||
     Date.parse(pilot.expiresAt) <= Date.now();
-  pilotStopButton.disabled = !ordinaryKemerbetMutationAllowed() || pilot.pilotStatus === 'stopped';
+  pilotStopButton.disabled = pilot.pilotStatus === 'stopped';
   renderPilotCandidates(eligiblePilotPlayers);
   updateKemerbetReadinessCohortAvailability();
   updateTelebirrDevicePairingAvailability();
@@ -3700,7 +3700,7 @@ async function armFixedPilot() {
 }
 
 async function stopCurrentPilot() {
-  if (!requireOrdinaryKemerbetMutation() || !currentPilot) return;
+  if (!currentPilot) return;
   const requestId = currentPilot.pilotRevisionId;
   const reasonCode = pilotStopReason.value;
   if (!['owner_stop', 'provider_incident', 'parser_drift', 'execution_uncertainty', 'cap_review', 'pilot_complete'].includes(reasonCode) ||

@@ -30,6 +30,7 @@ import {
 } from './owner-companion-exact-five-lookup.js';
 import { OwnerInviteRejectedError } from './owner-invites.js';
 import {
+  OwnerPrivateLivePilotRejectedError,
   OwnerPrivateLivePilotUnavailableError,
   type PrivateLivePilotStatus,
 } from './owner-private-live-pilot.js';
@@ -657,7 +658,11 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(
       response.body.match(/requireOrdinaryKemerbetMutation\(\)/gu)?.length,
-    ).toBeGreaterThanOrEqual(6);
+    ).toBeGreaterThanOrEqual(5);
+    expect(response.body).toContain("pilotStopButton.disabled = pilot.pilotStatus === 'stopped'");
+    expect(response.body).toContain(
+      'async function stopCurrentPilot() {\n  if (!currentPilot) return;',
+    );
     expect(response.body.match(/requirePilotDryRunMutation\(\)/gu)?.length).toBeGreaterThanOrEqual(
       3,
     );
@@ -2126,7 +2131,7 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
-  it('projects the exact recovery marker on status and blocks every session or cohort action while pending', async () => {
+  it('blocks state-expanding recovery actions while keeping the emergency pilot stop reachable', async () => {
     const profile = {
       configuredAt: '2026-08-22T19:30:00.000Z',
       configurationReason: 'initial_configuration' as const,
@@ -2215,7 +2220,11 @@ describe('Owner-control HTTP boundary', () => {
           },
           stop: async () => {
             stateMutationCalls.push('pilot-stop');
-            throw new Error('pilot stop must remain blocked');
+            return pilotStatus({
+              pilotStatus: 'stopped',
+              stopReasonCode: 'execution_uncertainty',
+              stoppedAt: '2026-08-21T20:30:00.000Z',
+            });
           },
         },
         eligibility: {
@@ -2400,16 +2409,6 @@ describe('Owner-control HTTP boundary', () => {
           requestId: pilotRevisionId,
         },
       }),
-      app.inject({
-        method: 'POST',
-        url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/stop`,
-        headers: pilotMutationHeaders(pilotRevisionId),
-        payload: {
-          confirmation: 'owner_confirmed_emergency_stop',
-          reasonCode: 'execution_uncertainty',
-          requestId: pilotRevisionId,
-        },
-      }),
     ]);
     for (const response of blocked) {
       expect(response.statusCode).toBe(409);
@@ -2419,6 +2418,27 @@ describe('Owner-control HTTP boundary', () => {
     expect(readinessDatabaseCalls).toBe(0);
     expect(pilotCalls).toBe(1);
     expect(stateMutationCalls).toEqual([]);
+
+    const emergencyStop = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/stop`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_emergency_stop',
+        reasonCode: 'execution_uncertainty',
+        requestId: pilotRevisionId,
+      },
+    });
+    expect(emergencyStop.statusCode).toBe(200);
+    expect(emergencyStop.json()).toMatchObject({
+      pilot: {
+        financiallyActive: false,
+        pilotStatus: 'stopped',
+        stopReasonCode: 'execution_uncertainty',
+        switchMode: 'disabled',
+      },
+    });
+    expect(stateMutationCalls).toEqual(['pilot-stop']);
     await app.close();
   });
 
@@ -2807,6 +2827,14 @@ describe('Owner-control HTTP boundary', () => {
             calls.push('pilot-prepare');
             return pilotStatus();
           },
+          stop: async () => {
+            calls.push('pilot-stop');
+            return pilotStatus({
+              pilotStatus: 'stopped',
+              stopReasonCode: 'execution_uncertainty',
+              stoppedAt: '2026-09-05T18:30:00.000Z',
+            });
+          },
         },
       }),
     });
@@ -2917,6 +2945,21 @@ describe('Owner-control HTTP boundary', () => {
     expect(armed.json()).toMatchObject({
       status: { financiallyActive: false, pilotStatus: 'armed', switchMode: 'dry_run' },
     });
+
+    const pilotStop = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/stop`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_emergency_stop',
+        reasonCode: 'execution_uncertainty',
+        requestId: pilotRevisionId,
+      },
+    });
+    expect(pilotStop.statusCode).toBe(200);
+    expect(pilotStop.json()).toMatchObject({
+      pilot: { financiallyActive: false, pilotStatus: 'stopped', switchMode: 'disabled' },
+    });
     expect(calls).toEqual([
       'status',
       'start',
@@ -2925,6 +2968,7 @@ describe('Owner-control HTTP boundary', () => {
       'stop',
       'pilot-prepare',
       'pilot-arm',
+      'pilot-stop',
     ]);
     await app.close();
   });
@@ -4251,6 +4295,61 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(response.json()).toEqual({ pilot: pilotStatus() });
     expect(response.body).not.toContain('PLAYER-1');
+    await app.close();
+  });
+
+  it('reports pilot readiness conflicts without discarding the authenticated Owner session', async () => {
+    const rejected = async () => {
+      throw new OwnerPrivateLivePilotRejectedError();
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        privateLivePilot: {
+          ...runtime().privateLivePilot,
+          arm: rejected,
+          prepare: rejected,
+          stop: rejected,
+        },
+      }),
+    });
+
+    const prepare = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/private-live-deposit-pilots/prepare',
+      headers: pilotMutationHeaders(),
+      payload: {
+        activeFrom: '2026-08-21T20:00:00.000Z',
+        confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
+        expiresAt: '2026-08-21T22:00:00.000Z',
+        playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
+        requestId: pilotRequestId,
+      },
+    });
+    const arm = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/arm`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_dry_run_only',
+        requestId: pilotRevisionId,
+      },
+    });
+    const stop = await app.inject({
+      method: 'POST',
+      url: `/v1/owner/private-live-deposit-pilots/${pilotRevisionId}/stop`,
+      headers: pilotMutationHeaders(pilotRevisionId),
+      payload: {
+        confirmation: 'owner_confirmed_emergency_stop',
+        reasonCode: 'execution_uncertainty',
+        requestId: pilotRevisionId,
+      },
+    });
+
+    for (const response of [prepare, arm, stop]) {
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ error: 'pilot_not_ready' });
+    }
     await app.close();
   });
 

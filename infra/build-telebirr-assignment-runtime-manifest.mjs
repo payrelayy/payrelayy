@@ -178,7 +178,7 @@ function cli() {
   const outputPath = process.argv[3];
   if (!isAbsolute(outputPath)) fail();
   const manifest = buildTelebirrAssignmentRuntimeManifest(guardedInput(inputPath));
-  const encoded = Buffer.from(`${JSON.stringify(manifest)}\n`, 'utf8');
+  const encoded = Buffer.from(JSON.stringify(manifest), 'utf8');
   try {
     writeFileSync(outputPath, encoded, { encoding: null, flag: 'wx', mode: 0o600 });
   } finally {

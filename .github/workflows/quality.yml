@@ -49,6 +49,8 @@ jobs:
         shell: bash
         run: |
           pnpm test:infra
+          bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
+          bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
           FETANAGENT_IMAGE_TAG=ci \
           FETANAGENT_VCS_REF="${GITHUB_SHA}" \
           FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE=/dev/null \

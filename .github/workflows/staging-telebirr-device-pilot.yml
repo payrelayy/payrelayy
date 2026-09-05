@@ -40,9 +40,8 @@ env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_DROPLET_ID: '593344964'
-  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
-  STAGING_ADMIN_POOLER_PORT: '6543'
-  STAGING_RUNTIME_POOLER_PORT: '5432'
+  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
+  STAGING_DATABASE_TUNNEL_PORT: '15432'
   ASSIGNMENT_RUNTIME_ROLE: fetanagent_telebirr_assignment_broker_runtime
   DEVICE_STATE_RUNTIME_ROLE: fetanagent_telebirr_device_state_runtime
 
@@ -94,6 +93,7 @@ jobs:
           node infra/verify-telebirr-device-pilot-deployment.mjs
           node infra/verify-telebirr-device-pilot-runtime-manifest.mjs
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
+          bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
 
       - name: Build and inspect exact non-root images
         shell: bash
@@ -220,12 +220,12 @@ jobs:
           printf '%s' "$BRIDGE_PUBLIC_BASE64" | base64 --decode >"$protected/bridge.spki.der"
           printf '%s' "$BRIDGE_MANIFEST_BASE64" | base64 --decode >"$protected/bridge-runtime-manifest.v1.json"
           printf '%s' "$REFERENCE_OPENING_BASE64" | base64 --decode >"$protected/reference-opening-key.v1.json"
-          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "$ASSIGNMENT_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$ASSIGNMENT_RUNTIME_PASSWORD" \
-            "$STAGING_POOLER_HOST" >"$protected/assignment-database-url"
-          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "$DEVICE_STATE_RUNTIME_ROLE" "$STAGING_PROJECT_REF" "$DEVICE_STATE_RUNTIME_PASSWORD" \
-            "$STAGING_POOLER_HOST" >"$protected/device-state-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$ASSIGNMENT_RUNTIME_ROLE" "$ASSIGNMENT_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$protected/assignment-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$DEVICE_STATE_RUNTIME_ROLE" "$DEVICE_STATE_RUNTIME_PASSWORD" \
+            "$STAGING_DIRECT_DATABASE_HOST" >"$protected/device-state-database-url"
           chmod 0600 "$protected"/*
 
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
@@ -287,15 +287,18 @@ jobs:
       - name: Build the exact armed-pilot runtime manifest without logging private values
         shell: bash
         env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
           TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
           TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
+          PGHOST: ${{ env.STAGING_DIRECT_DATABASE_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.STAGING_DATABASE_TUNNEL_PORT }}
           PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGUSER: postgres
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
           PGCONNECT_TIMEOUT: '5'
@@ -304,7 +307,11 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
-          protected='${{ steps.protected.outputs.protected }}'
+          protected="$PROTECTED"
+          source infra/operations/fetanagent-staging-direct-database-tunnel.sh
+          fetanagent_open_staging_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_staging_direct_database_tunnel EXIT
           runtime_input="$protected/pilot-runtime-input.json"
           partial_input="$runtime_input.partial"
           runtime_input_ready=false
@@ -340,13 +347,16 @@ jobs:
         id: provision
         shell: bash
         env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
+          PGHOST: ${{ env.STAGING_DIRECT_DATABASE_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.STAGING_DATABASE_TUNNEL_PORT }}
           PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGUSER: postgres
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
           PGCONNECT_TIMEOUT: '5'
@@ -355,6 +365,10 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
+          source infra/operations/fetanagent-staging-direct-database-tunnel.sh
+          fetanagent_open_staging_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_staging_direct_database_tunnel EXIT
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           result="$(psql -X --quiet --tuples-only --no-align \
             --file=infra/sql/staging-telebirr-device-pilot-provision.sql)"
@@ -368,10 +382,13 @@ jobs:
       - name: Confirm both bounded runtime logins before activating containers
         shell: bash
         env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: ${{ env.STAGING_RUNTIME_POOLER_PORT }}
+          PGHOST: ${{ env.STAGING_DIRECT_DATABASE_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.STAGING_DATABASE_TUNNEL_PORT }}
           PGDATABASE: postgres
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
@@ -380,11 +397,17 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
+          source infra/operations/fetanagent-staging-direct-database-tunnel.sh
+          fetanagent_open_staging_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_staging_direct_database_tunnel EXIT
           runtime_login_ready() {
             local role="$1" password="$2" delay
-            for delay in 10 20 40 60; do
-              sleep "$delay"
-              if PGUSER="$role.$STAGING_PROJECT_REF" PGPASSWORD="$password" \
+            for delay in 0 2 5 10; do
+              if (( delay > 0 )); then
+                sleep "$delay"
+              fi
+              if PGUSER="$role" PGPASSWORD="$password" \
                 PGAPPNAME="fetanagent_telebirr_runtime_login_preflight" \
                 psql -X --quiet --set=expected_runtime_role="$role" \
                   --file=infra/sql/staging-runtime-login-preflight.sql >/dev/null 2>&1
@@ -453,10 +476,11 @@ jobs:
           VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
+          PGHOST: ${{ env.STAGING_DIRECT_DATABASE_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.STAGING_DATABASE_TUNNEL_PORT }}
           PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGUSER: postgres
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
           PGCONNECT_TIMEOUT: '5'
@@ -468,6 +492,10 @@ jobs:
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper rollback '$GITHUB_SHA' '${GITHUB_SHA:0:12}'" || true
+          source infra/operations/fetanagent-staging-direct-database-tunnel.sh
+          fetanagent_open_staging_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_staging_direct_database_tunnel EXIT
           psql -X --quiet --file=infra/sql/staging-telebirr-device-pilot-disable.sql >/dev/null
 
       - name: Remove runner-local protected material
@@ -503,10 +531,11 @@ jobs:
           STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
-          PGPORT: ${{ env.STAGING_ADMIN_POOLER_PORT }}
+          PGHOST: ${{ env.STAGING_DIRECT_DATABASE_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.STAGING_DATABASE_TUNNEL_PORT }}
           PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGUSER: postgres
           PGSSLMODE: verify-full
           PGCONNECT_TIMEOUT: '5'
           PGSERVICEFILE: /dev/null
@@ -522,13 +551,22 @@ jobs:
           chmod 0600 "$protected"/*
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
           openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
+          source infra/operations/fetanagent-staging-direct-database-tunnel.sh
+          cleanup() {
+            fetanagent_close_staging_direct_database_tunnel
+            if [[ -d "$protected" && ! -L "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            fi
+          }
+          trap cleanup EXIT
           helper_sha="$(sha256sum infra/operations/fetanagent-telebirr-device-pilot-helper.sh | cut -d ' ' -f 1)"
           ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           remote_status=0
           ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
             "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper stop '$GITHUB_SHA' '${GITHUB_SHA:0:12}'" || remote_status=$?
+          fetanagent_open_staging_direct_database_tunnel \
+            "$protected" "$STAGING_VM_HOST" "$PGHOST" "$PGPORT"
           psql -X --quiet --file=infra/sql/staging-telebirr-device-pilot-disable.sql >/dev/null
-          rm -f -- "$protected"/*
-          rmdir -- "$protected"
           [[ "$remote_status" -eq 0 ]]

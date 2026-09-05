@@ -19,6 +19,10 @@ const deployHelper = await readFile(
   `${repositoryRoot}infra/operations/fetanagent-telebirr-device-pilot-helper.sh`,
   'utf8',
 );
+const directDatabaseTunnel = await readFile(
+  `${repositoryRoot}infra/operations/fetanagent-staging-direct-database-tunnel.sh`,
+  'utf8',
+);
 const deploySudoers = await readFile(
   `${repositoryRoot}infra/operations/fetanagent-telebirr-device-pilot.sudoers`,
   'utf8',
@@ -121,7 +125,7 @@ assert.match(
 
 assert.match(
   pilotCompose,
-  /telebirr_assignment_database_egress:[\s\S]*?internal: false[\s\S]*?telebirr_device_state_database_egress:[\s\S]*?internal: false/u,
+  /telebirr_assignment_database_egress:[\s\S]*?enable_ipv6: true[\s\S]*?internal: false[\s\S]*?telebirr_device_state_database_egress:[\s\S]*?enable_ipv6: true[\s\S]*?internal: false/u,
 );
 assert.match(
   pilotCompose,
@@ -173,6 +177,10 @@ assert.match(
   qualityWorkflow,
   /docker compose --env-file \/dev\/null[\s\S]*?--file infra\/compose\.telebirr-device-pilot\.yaml[\s\S]*?--profile telebirr-device-pilot config --quiet/u,
 );
+assert.match(
+  qualityWorkflow,
+  /bash -n infra\/operations\/fetanagent-telebirr-device-pilot-helper\.sh[\s\S]*?bash -n infra\/operations\/fetanagent-staging-direct-database-tunnel\.sh/u,
+);
 
 assert.match(deployWorkflow, /^name: Staging TeleBirr Android device transport$/mu);
 assert.match(deployWorkflow, /^  workflow_dispatch:$/mu);
@@ -202,6 +210,7 @@ for (const contract of [
   'staging-telebirr-device-pilot-disable.sql',
   'staging-runtime-login-preflight.sql',
   'fetanagent-telebirr-device-pilot-helper',
+  'fetanagent-staging-direct-database-tunnel.sh',
 ]) {
   assert.match(deployWorkflow, new RegExp(escapeRegExp(contract), 'u'));
 }
@@ -209,7 +218,7 @@ assert.match(deployWorkflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c1812
 assert.doesNotMatch(deployWorkflow, /echo "vm_host=.*GITHUB_OUTPUT/u);
 assert.equal(
   (deployWorkflow.match(/^\s+VM_HOST: \$\{\{ secrets\.STAGING_VM_HOST \}\}$/gmu) ?? []).length,
-  4,
+  7,
   'Each protected SSH step must consume the masked VM host directly.',
 );
 assert.doesNotMatch(deployWorkflow, /pull_request_target|contents: write|service.?role|KEMERBET/u);
@@ -227,30 +236,48 @@ assert.equal(
 assert.equal(
   (
     deployWorkflow.match(
-      /printf 'postgresql:\/\/%s\.%s:%s@%s:5432\/postgres\?sslmode=verify-full'/gu,
+      /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full'/gu,
     ) ?? []
   ).length,
   2,
-  'both session-pooler runtime database URL files must be emitted without a line terminator',
+  'both direct runtime database URL files must be emitted without a line terminator',
 );
 assert.match(pilotRunbook, /exact URL bytes, with no line terminator or surrounding\s+whitespace/u);
-assert.match(pilotRunbook, /Supavisor session pooler on port `5432`/u);
-assert.match(pilotRunbook, /<runtime-role>\.<staging-project-ref>/u);
-assert.match(deployWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/u);
-assert.match(deployWorkflow, /STAGING_ADMIN_POOLER_PORT: '6543'/u);
-assert.match(deployWorkflow, /STAGING_RUNTIME_POOLER_PORT: '5432'/u);
-assert.equal(
-  (deployWorkflow.match(/^\s+PGPORT: \$\{\{ env\.STAGING_ADMIN_POOLER_PORT \}\}$/gmu) ?? []).length,
-  4,
-  'all four ephemeral administrator paths must use transaction pooling',
+assert.match(pilotRunbook, /TLS-verified direct database endpoint on port `5432`/u);
+assert.match(pilotRunbook, /bare, dedicated runtime role/u);
+assert.match(pilotRunbook, /host-key-pinned SSH tunnel/u);
+assert.match(
+  deployWorkflow,
+  /STAGING_DIRECT_DATABASE_HOST: db\.spzpiyxheappsfyswewl\.supabase\.co/u,
 );
+assert.match(deployWorkflow, /STAGING_DATABASE_TUNNEL_PORT: '15432'/u);
 assert.equal(
-  (deployWorkflow.match(/^\s+PGPORT: \$\{\{ env\.STAGING_RUNTIME_POOLER_PORT \}\}$/gmu) ?? [])
+  (deployWorkflow.match(/^\s+PGPORT: \$\{\{ env\.STAGING_DATABASE_TUNNEL_PORT \}\}$/gmu) ?? [])
     .length,
-  1,
-  'only the bounded runtime-login readiness gate must use session pooling',
+  5,
+  'all five database steps must use the fixed local SSH-tunnel port',
 );
-assert.doesNotMatch(deployWorkflow, /STAGING_DIRECT_DATABASE_HOST/u);
+assert.equal(
+  (deployWorkflow.match(/^\s+PGHOSTADDR: 127\.0\.0\.1$/gmu) ?? []).length,
+  5,
+  'all five database steps must connect through the loopback end of the SSH tunnel',
+);
+assert.equal(
+  (deployWorkflow.match(/^\s+PGHOST: \$\{\{ env\.STAGING_DIRECT_DATABASE_HOST \}\}$/gmu) ?? [])
+    .length,
+  5,
+  'verify-full must retain the direct database hostname on every tunneled connection',
+);
+assert.equal(
+  (
+    deployWorkflow.match(
+      /source infra\/operations\/fetanagent-staging-direct-database-tunnel\.sh/gu,
+    ) ?? []
+  ).length,
+  5,
+  'every database step must load the reviewed tunnel lifecycle',
+);
+assert.doesNotMatch(deployWorkflow, /STAGING_POOLER_HOST|pooler\.supabase\.com/u);
 assert.match(deployWorkflow, /for delay in 0 5 10 20 40/u);
 assert.match(
   deployWorkflow,
@@ -262,11 +289,11 @@ assert.doesNotMatch(
   /result="\$\(for delay in 0 5 10 20 40/u,
   'only the read-only manifest query may use the connection retry schedule',
 );
-assert.match(deployWorkflow, /for delay in 10 20 40 60/u);
+assert.match(deployWorkflow, /for delay in 0 2 5 10/u);
 assert.match(
   deployWorkflow,
-  /PGUSER="\$role\.\$STAGING_PROJECT_REF" PGPASSWORD="\$password"[\s\S]*?--set=expected_runtime_role="\$role"/u,
-  'activation must prove each bounded runtime identity through the exact session-pooler login',
+  /PGUSER="\$role" PGPASSWORD="\$password"[\s\S]*?--set=expected_runtime_role="\$role"/u,
+  'activation must prove each bounded identity through its exact direct runtime login',
 );
 
 assert.match(deployHelper, /^set -euo pipefail$/mu);
@@ -278,10 +305,26 @@ for (const command of ['start', 'ready', 'stop', 'rollback']) {
 assert.match(deployHelper, /negative_public_smoke/u);
 assert.match(deployHelper, /require_database_url_file/u);
 assert.match(deployHelper, /exact no-whitespace byte contract/u);
-assert.match(deployHelper, /STAGING_SESSION_POOLER_HOST='aws-1-eu-west-1\.pooler\.supabase\.com'/u);
-assert.match(deployHelper, /getent ahostsv4 "\$STAGING_SESSION_POOLER_HOST"/u);
-assert.match(deployHelper, /\/dev\/tcp\/\$STAGING_SESSION_POOLER_HOST\/5432/u);
-assert.doesNotMatch(deployHelper, /STAGING_DIRECT_DATABASE_HOST|ahostsv6/u);
+assert.match(
+  deployHelper,
+  /STAGING_DIRECT_DATABASE_HOST='db\.spzpiyxheappsfyswewl\.supabase\.co'/u,
+);
+assert.match(deployHelper, /getent ahostsv6 "\$STAGING_DIRECT_DATABASE_HOST"/u);
+assert.match(deployHelper, /\/dev\/tcp\/\$STAGING_DIRECT_DATABASE_HOST\/5432/u);
+assert.doesNotMatch(deployHelper, /STAGING_SESSION_POOLER_HOST|pooler\.supabase\.com/u);
+assert.match(
+  deployHelper,
+  /prefix="postgresql:\/\/\$role:"[\s\S]*?suffix="@\$STAGING_DIRECT_DATABASE_HOST:5432\/postgres\?sslmode=verify-full"/u,
+);
+
+assert.match(directDatabaseTunnel, /^fetanagent_open_staging_direct_database_tunnel\(\) \{$/mu);
+assert.match(directDatabaseTunnel, /^fetanagent_close_staging_direct_database_tunnel\(\) \{$/mu);
+assert.match(directDatabaseTunnel, /db\.spzpiyxheappsfyswewl\.supabase\.co/u);
+assert.match(directDatabaseTunnel, /"\$local_port" == '15432'/u);
+assert.match(directDatabaseTunnel, /StrictHostKeyChecking=yes/u);
+assert.match(directDatabaseTunnel, /ExitOnForwardFailure=yes/u);
+assert.match(directDatabaseTunnel, /-L "127\.0\.0\.1:\$local_port:\$database_host:5432"/u);
+assert.doesNotMatch(directDatabaseTunnel, /PGPASSWORD|SUPABASE_DB_PASSWORD|service.?role/iu);
 assert.match(
   deployHelper,
   /--project-name "\$STAGING_PROJECT" --profile staging-manual --profile public-domain/u,
@@ -301,8 +344,8 @@ assert.match(deployHelper, /700 \| 755/u);
 assert.match(deployHelper, /10001:10001:400:1/u);
 assert.match(deployHelper, /0:0:444:1/u);
 assert.match(deployHelper, /less than 2 GiB free/u);
-assert.match(deployHelper, /ip -4 route show default/u);
-assert.match(deployHelper, /getent ahostsv4/u);
+assert.match(deployHelper, /ip -6 route show default/u);
+assert.match(deployHelper, /getent ahostsv6/u);
 assert.match(deployHelper, /query-bearing route/u);
 assert.match(
   deployHelper,

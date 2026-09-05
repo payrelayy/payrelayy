@@ -105,17 +105,17 @@ fields in YAML. Check every source with `lstat`, `realpath`, owner, and mode imm
 deployment helper invokes Compose.
 
 The database URL files must contain only the exact URL bytes, with no line terminator or surrounding
-whitespace. This deployment selects the TLS-verified Supavisor session pooler on port `5432`, using
-the exact `<runtime-role>.<staging-project-ref>` username required by that route. Session mode keeps
-the connection affinity required by the brokers' advisory locks while providing the VM's verified
-IPv4 path. Never substitute the transaction pooler on port `6543`, an administrator URL, an API
-role, or `service_role`.
+whitespace. Both brokers use the TLS-verified direct database endpoint on port `5432` with their
+bare, dedicated runtime role. Their two isolated Compose networks have IPv6 enabled and no shared
+network between them; the staging VM and each exact production network must prove direct IPv6 DNS
+and TCP reachability before deployment. Never substitute a pooler URL, administrator URL, API role,
+or `service_role`.
 
-The ephemeral GitHub control plane is intentionally different: its manifest read, bounded-role
-provision, rollback disable, and stop transactions use the TLS-verified Supavisor transaction
-pooler on port `6543`. Those short-lived `psql` calls do not require session affinity or prepared
-statements, and the administrator connection is never copied into a release artifact. Only the two
-bounded broker URLs use session mode on port `5432`.
+The ephemeral GitHub control plane reaches that same direct endpoint through a short-lived,
+host-key-pinned SSH tunnel over the staging VM. `PGHOSTADDR` selects the loopback end of the tunnel
+while `PGHOST` remains the exact direct hostname for `verify-full` certificate validation. The
+database password remains only in the runner environment, the tunnel process is closed at step
+exit, and no administrator connection is copied into a release artifact.
 
 ## Fail-closed publication sequence
 

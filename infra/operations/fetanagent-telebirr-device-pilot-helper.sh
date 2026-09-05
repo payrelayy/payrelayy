@@ -167,8 +167,11 @@ run_gateway_compose() {
   shift 3
   local -a environment
   mapfile -d '' -t environment < <(gateway_compose_environment "$commit_sha" "$image_tag")
+  # Compose validates dependencies after profile filtering. Keep the already-running
+  # Owner and customer services in the model while the explicit `up --no-deps gateway`
+  # call below remains the only operation that can recreate a base-stack service.
   env -i "${environment[@]}" docker --host "$LOCAL_DOCKER_SOCKET" compose --env-file /dev/null \
-    --project-name "$STAGING_PROJECT" --profile public-domain \
+    --project-name "$STAGING_PROJECT" --profile staging-manual --profile public-domain \
     --file "$release/compose.staging-beta.yaml" "$@"
 }
 

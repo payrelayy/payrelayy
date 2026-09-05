@@ -10,6 +10,39 @@ import org.junit.Test
 
 class VerifierEngineTest {
   @Test
+  fun `shows the redacted pairing failure while enrollment is still required`() {
+    val snapshot =
+      VerifierOperationalSnapshot(
+        operatorEnabled = false,
+        status = LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "pairing_retry_required"),
+        updatedAtMillis = 1L,
+      )
+
+    assertEquals(
+      "pairing_retry_required",
+      VerifierStatusPresentation.code(verifierEnabled = true, enrolled = false, snapshot),
+    )
+    assertEquals(
+      "provisioning_required",
+      VerifierStatusPresentation.code(
+        verifierEnabled = true,
+        enrolled = false,
+        snapshot.copy(
+          status =
+            LivePilotRuntimeStatus(
+              LivePilotRuntimeState.ENROLLMENT_REQUIRED,
+              "provisioning_required",
+            ),
+        ),
+      ),
+    )
+    assertEquals(
+      "build_disabled",
+      VerifierStatusPresentation.code(verifierEnabled = false, enrolled = false, snapshot),
+    )
+  }
+
+  @Test
   fun `binds retrieves parses and signs one advisory observation`() {
     val identity = JvmP256Identity()
     val engine =

@@ -88,6 +88,16 @@ async function requireEnabled(locator: Locator): Promise<Locator> {
   return selected;
 }
 
+async function waitForEnabledAuthenticatedControl(page: Page, locator: Locator): Promise<Locator> {
+  await waitUntil(async () => {
+    await requireAuthenticatedAgentPage(page);
+    const selected = await exactlyOneVisible(locator);
+    return selected !== undefined && (await selected.isEnabled());
+  });
+  await requireAuthenticatedAgentPage(page);
+  return requireEnabled(locator);
+}
+
 async function anyVisible(page: Page, selector: string): Promise<boolean> {
   return (await exactlyOneVisible(page.locator(selector))) !== undefined;
 }
@@ -177,13 +187,16 @@ async function openSearchSurface(page: Page): Promise<void> {
   });
   await requireAuthenticatedAgentPage(page);
   await (
-    await requireEnabled(page.getByRole('menuitem', { name: 'Deposit', exact: true }))
+    await waitForEnabledAuthenticatedControl(
+      page,
+      page.getByRole('menuitem', { name: 'Deposit', exact: true }),
+    )
   ).click({
     timeout: LOOKUP_TIMEOUT_MS,
   });
   await requireAuthenticatedAgentPage(page);
   await (
-    await requireEnabled(page.locator(selectors.toPlayerTile))
+    await waitForEnabledAuthenticatedControl(page, page.locator(selectors.toPlayerTile))
   ).click({
     timeout: LOOKUP_TIMEOUT_MS,
   });

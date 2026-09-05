@@ -132,7 +132,7 @@ export const TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL = `
       as app_schema_boundary_allowed,
     (
       select coalesce(
-        pg_catalog.array_agg(namespace.nspname order by namespace.nspname),
+        pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname),
         '{}'::text[]
       ) = array['app', 'public']::text[]
       from pg_catalog.pg_namespace namespace

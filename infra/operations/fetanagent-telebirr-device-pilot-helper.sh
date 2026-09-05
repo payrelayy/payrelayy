@@ -475,9 +475,10 @@ rollback_release() {
     die 'the rollback receipt is unavailable or unsafe'
   old_image="$(sed -n 's/^image=//p' "$receipt")"
   old_commit="$(sed -n 's/^commit=//p' "$receipt")"
-  [[ "$old_image" =~ ^fetanagent-gateway:([0-9a-f]{12})$ && "$old_commit" =~ ^[0-9a-f]{40}$ ]] ||
+  [[ "$old_image" =~ ^fetanagent-gateway:([0-9a-f]{12})$ ]] ||
     die 'the rollback receipt is not canonical'
   old_tag="${BASH_REMATCH[1]}"
+  [[ "$old_commit" =~ ^[0-9a-f]{40}$ ]] || die 'the rollback receipt is not canonical'
   [[ "$old_tag" == "${old_commit:0:12}" ]] || die 'the rollback gateway binding is inconsistent'
   run_pilot_compose "$release" "$commit_sha" "$image_tag" \
     rm --stop --force telebirr-device-bridge telebirr-device-state-broker telebirr-assignment-broker || true

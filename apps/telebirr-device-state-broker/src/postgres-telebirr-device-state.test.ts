@@ -84,6 +84,9 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
     );
     expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain('routine.pronargdefaults = 0');
     expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain('defaults.defaclnamespace = 0');
+    expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain(
+      'pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname)',
+    );
     expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).not.toContain(
       'namespace.oid = defaults.defaclnamespace',
     );

@@ -237,6 +237,19 @@ assert.match(pilotRunbook, /exact URL bytes, with no line terminator or surround
 assert.match(pilotRunbook, /Supavisor session pooler on port `5432`/u);
 assert.match(pilotRunbook, /<runtime-role>\.<staging-project-ref>/u);
 assert.match(deployWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/u);
+assert.match(deployWorkflow, /STAGING_ADMIN_POOLER_PORT: '6543'/u);
+assert.match(deployWorkflow, /STAGING_RUNTIME_POOLER_PORT: '5432'/u);
+assert.equal(
+  (deployWorkflow.match(/^\s+PGPORT: \$\{\{ env\.STAGING_ADMIN_POOLER_PORT \}\}$/gmu) ?? []).length,
+  4,
+  'all four ephemeral administrator paths must use transaction pooling',
+);
+assert.equal(
+  (deployWorkflow.match(/^\s+PGPORT: \$\{\{ env\.STAGING_RUNTIME_POOLER_PORT \}\}$/gmu) ?? [])
+    .length,
+  1,
+  'only the bounded runtime-login readiness gate must use session pooling',
+);
 assert.doesNotMatch(deployWorkflow, /STAGING_DIRECT_DATABASE_HOST/u);
 assert.match(deployWorkflow, /for delay in 0 5 10 20 40/u);
 assert.match(

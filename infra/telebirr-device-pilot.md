@@ -111,6 +111,12 @@ the connection affinity required by the brokers' advisory locks while providing 
 IPv4 path. Never substitute the transaction pooler on port `6543`, an administrator URL, an API
 role, or `service_role`.
 
+The ephemeral GitHub control plane is intentionally different: its manifest read, bounded-role
+provision, rollback disable, and stop transactions use the TLS-verified Supavisor transaction
+pooler on port `6543`. Those short-lived `psql` calls do not require session affinity or prepared
+statements, and the administrator connection is never copied into a release artifact. Only the two
+bounded broker URLs use session mode on port `5432`.
+
 ## Fail-closed publication sequence
 
 The production helper/workflow must implement this order as one locked, exact-commit operation:

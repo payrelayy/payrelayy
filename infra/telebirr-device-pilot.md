@@ -104,8 +104,9 @@ ownership and permissions remain authoritative; do not rely only on the `uid`, `
 fields in YAML. Check every source with `lstat`, `realpath`, owner, and mode immediately before the
 deployment helper invokes Compose.
 
-The database URL files must contain only the exact URL and one trailing newline. Use the direct
-TLS-verified staging host when the VM has the required route; use the separately reviewed
+The database URL files must contain only the exact URL bytes, with no line terminator or surrounding
+whitespace. Use the direct TLS-verified staging host when the VM has the required route; use the
+separately reviewed
 session-pooler endpoint only when the deployment contract explicitly selects it. Never substitute
 the transaction pooler, an administrator URL, an API role, or `service_role`.
 

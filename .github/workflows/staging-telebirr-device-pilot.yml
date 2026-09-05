@@ -219,10 +219,10 @@ jobs:
           printf '%s' "$BRIDGE_PUBLIC_BASE64" | base64 --decode >"$protected/bridge.spki.der"
           printf '%s' "$BRIDGE_MANIFEST_BASE64" | base64 --decode >"$protected/bridge-runtime-manifest.v1.json"
           printf '%s' "$REFERENCE_OPENING_BASE64" | base64 --decode >"$protected/reference-opening-key.v1.json"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
             "$ASSIGNMENT_RUNTIME_ROLE" "$ASSIGNMENT_RUNTIME_PASSWORD" \
             "$STAGING_DIRECT_DATABASE_HOST" >"$protected/assignment-database-url"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
             "$DEVICE_STATE_RUNTIME_ROLE" "$DEVICE_STATE_RUNTIME_PASSWORD" \
             "$STAGING_DIRECT_DATABASE_HOST" >"$protected/device-state-database-url"
           chmod 0600 "$protected"/*

@@ -76,6 +76,8 @@ sealed interface LivePilotUploadResult {
 
   data object Retryable : LivePilotUploadResult
 
+  data object EnrollmentRejected : LivePilotUploadResult
+
   data class Rejected(val reason: LivePilotUploadRejection) : LivePilotUploadResult
 }
 
@@ -251,6 +253,8 @@ class LivePrivatePilotRuntimeCoordinator(
   @Synchronized
   fun runOnce(): LivePilotRuntimeStatus {
     gateStatus()?.let { return it }
+    val assessedAt = now() ?: return attention("device_clock_unavailable")
+    enrollmentStatus(assessedAt)?.let { return it }
     val pending =
       runCatching { workStore.nextPending() }
         .getOrElse { return attention("work_store_unavailable") }
@@ -261,13 +265,21 @@ class LivePrivatePilotRuntimeCoordinator(
         pending.observation,
       )
     }
-    val assessedAt = now() ?: return attention("device_clock_unavailable")
     val devicePublicMaterial =
       runCatching { identity.publicMaterial() }
         .getOrElse { return enrollmentRequired("device_identity_unavailable") }
     val signedAssignment =
-      runCatching { assignmentSource.nextAssignment() }
-        .getOrElse { return attention("assignment_channel_unavailable") }
+      try {
+        assignmentSource.nextAssignment()
+      } catch (_: DeviceBridgeEnrollmentRejectedException) {
+        return enrollmentRequired("device_enrollment_rejected")
+      } catch (error: DeviceBridgeRejectedException) {
+        return assignmentRejection(error.reason)
+      } catch (_: DeviceBridgeRetryableException) {
+        return attention("assignment_channel_retryable")
+      } catch (_: Exception) {
+        return attention("assignment_response_invalid")
+      }
         ?: return ready("no_assignment")
     val assessment =
       LivePilotAssignmentVerifier.verify(
@@ -301,6 +313,28 @@ class LivePrivatePilotRuntimeCoordinator(
       !gate.providerObservationEnabled -> disabled("provider_observation_disabled")
       !gate.operatorEnabled -> disabled("operator_stopped")
       else -> null
+    }
+
+  private fun enrollmentStatus(assessedAt: String): LivePilotRuntimeStatus? =
+    when {
+      enrollment.state != "active" -> enrollmentRequired("device_revoked")
+      assessedAt < enrollment.validFrom -> enrollmentRequired("device_enrollment_not_yet_valid")
+      assessedAt >= enrollment.validUntil -> enrollmentRequired("device_enrollment_expired")
+      else -> null
+    }
+
+  private fun assignmentRejection(reason: DeviceBridgeReasonCode): LivePilotRuntimeStatus =
+    when (reason) {
+      DeviceBridgeReasonCode.BINDING_MISMATCH -> attention("binding_mismatch")
+      DeviceBridgeReasonCode.DEVICE_REVOKED -> enrollmentRequired("device_revoked")
+      DeviceBridgeReasonCode.PILOT_STOPPED -> enrollmentRequired("pilot_stopped")
+      DeviceBridgeReasonCode.PAYLOAD_INVALID -> attention("assignment_payload_invalid")
+      DeviceBridgeReasonCode.REQUEST_EXPIRED -> attention("assignment_request_expired")
+      DeviceBridgeReasonCode.REQUEST_REPLAYED -> attention("assignment_request_replayed")
+      DeviceBridgeReasonCode.TEMPORARY_UNAVAILABLE ->
+        attention("assignment_temporary_unavailable")
+      DeviceBridgeReasonCode.ASSIGNMENT_UNAVAILABLE -> attention("assignment_unavailable")
+      DeviceBridgeReasonCode.OBSERVATION_REJECTED -> attention("assignment_response_invalid")
     }
 
   private fun observeStageAndUpload(
@@ -380,6 +414,8 @@ class LivePrivatePilotRuntimeCoordinator(
     return when (result) {
       LivePilotUploadResult.Retryable ->
         uploadPending("upload_retry_scheduled", lookupOutcome)
+      LivePilotUploadResult.EnrollmentRejected ->
+        enrollmentRequired("device_enrollment_rejected")
       is LivePilotUploadResult.Acknowledged -> {
         if (result.observationBodyDigest != observation.bodyDigest) {
           attention("upload_ack_mismatch", lookupOutcome)

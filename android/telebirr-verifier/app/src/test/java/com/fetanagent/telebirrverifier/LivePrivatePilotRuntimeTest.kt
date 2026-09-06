@@ -53,6 +53,85 @@ class LivePrivatePilotRuntimeTest {
   }
 
   @Test
+  fun `expired enrollment stops before key network provider or upload work`() {
+    val fixture = RuntimeFixture()
+    var sourceCalls = 0
+    var transportCalls = 0
+    var uploadCalls = 0
+    val identity =
+      object : P256Identity {
+        override val keyId = fixture.device.keyId
+
+        override fun publicMaterial(): IdentityPublicMaterial =
+          error("expired enrollment must not open the device key")
+
+        override fun signP1363(message: ByteArray): ByteArray =
+          error("expired enrollment must not sign")
+      }
+    val enrollment =
+      livePilotEnrollment(fixture.device).copy(validUntil = "2026-08-20T18:02:59.999Z")
+    val coordinator =
+      fixture.coordinator(
+        enrollment = enrollment,
+        identity = identity,
+        assignmentSource = LivePilotAssignmentSource {
+          sourceCalls += 1
+          fixture.signedAssignment
+        },
+        transport = ProviderTransport {
+          transportCalls += 1
+          livePilotProviderFound()
+        },
+        uploader = LivePilotObservationUploader { _, _ ->
+          uploadCalls += 1
+          LivePilotUploadResult.Retryable
+        },
+      )
+
+    val status = coordinator.runOnce()
+
+    assertEquals(LivePilotRuntimeState.ENROLLMENT_REQUIRED, status.state)
+    assertEquals("device_enrollment_expired", status.code)
+    assertEquals(0, sourceCalls)
+    assertEquals(0, transportCalls)
+    assertEquals(0, uploadCalls)
+    assertNoAuthority(status)
+  }
+
+  @Test
+  fun `distinguishes enrollment rejection retryable outage and invalid channel response`() {
+    val fixture = RuntimeFixture()
+    val enrollmentRejected =
+      fixture
+        .coordinator(
+          assignmentSource = LivePilotAssignmentSource {
+            throw DeviceBridgeEnrollmentRejectedException()
+          },
+        )
+        .runOnce()
+    val retryable =
+      fixture
+        .coordinator(
+          assignmentSource = LivePilotAssignmentSource {
+            throw DeviceBridgeRetryableException()
+          },
+        )
+        .runOnce()
+    val invalid =
+      fixture
+        .coordinator(assignmentSource = LivePilotAssignmentSource { error("sensitive failure") })
+        .runOnce()
+
+    assertEquals(LivePilotRuntimeState.ENROLLMENT_REQUIRED, enrollmentRejected.state)
+    assertEquals("device_enrollment_rejected", enrollmentRejected.code)
+    assertEquals(LivePilotRuntimeState.ATTENTION, retryable.state)
+    assertEquals("assignment_channel_retryable", retryable.code)
+    assertEquals(LivePilotRuntimeState.ATTENTION, invalid.state)
+    assertEquals("assignment_response_invalid", invalid.code)
+    assertFalse(invalid.toString().contains("sensitive failure"))
+  }
+
+  @Test
   fun `verifies observes signs uploads and acknowledges one assignment exactly once`() {
     val fixture = RuntimeFixture()
     var sourceCalls = 0
@@ -215,6 +294,7 @@ class LivePrivatePilotRuntimeTest {
           operatorEnabled = true,
         ),
       identity: P256Identity = device,
+      enrollment: LivePilotDeviceEnrollment = livePilotEnrollment(device),
       assignmentSource: LivePilotAssignmentSource =
         LivePilotAssignmentSource { signedAssignment },
       transport: ProviderTransport = ProviderTransport { livePilotProviderFound() },
@@ -226,7 +306,7 @@ class LivePrivatePilotRuntimeTest {
       LivePrivatePilotRuntimeCoordinator(
         gate = gate,
         trustedSigner = livePilotTrustedSigner(signer),
-        enrollment = livePilotEnrollment(device),
+        enrollment = enrollment,
         signerPublicSpkiDer = signer.keyPair.public.encoded,
         identity = identity,
         assignmentSource = assignmentSource,

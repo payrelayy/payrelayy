@@ -108,6 +108,8 @@ class VerifierRunLoopPolicy(
         "assignment_signer_key_invalid",
         "assignment_signer_key_mismatch",
         "assignment_signer_revoked",
+        "assignment_payload_invalid",
+        "assignment_response_invalid",
         "binding_mismatch",
         "device_enrollment_expired",
         "device_key_mismatch",

@@ -40,7 +40,7 @@ class VerifierRunLoopPolicyTest {
   @Test
   fun `transient attention backs off to fifteen minutes`() {
     val policy = VerifierRunLoopPolicy { 0.0 }
-    val status = status(LivePilotRuntimeState.ATTENTION, "assignment_channel_unavailable")
+    val status = status(LivePilotRuntimeState.ATTENTION, "assignment_channel_retryable")
     val delays = (0..7).map { policy.decide(status, it.toLong()).delayMillis }
     assertEquals(
       listOf(30_000L, 60_000L, 120_000L, 300_000L, 600_000L, 900_000L, 900_000L, 900_000L),
@@ -56,6 +56,8 @@ class VerifierRunLoopPolicyTest {
         status(LivePilotRuntimeState.ENROLLMENT_REQUIRED, "provisioning_required"),
         status(LivePilotRuntimeState.ATTENTION, "device_revoked"),
         status(LivePilotRuntimeState.ATTENTION, "binding_mismatch"),
+        status(LivePilotRuntimeState.ATTENTION, "assignment_payload_invalid"),
+        status(LivePilotRuntimeState.ATTENTION, "assignment_response_invalid"),
         status(LivePilotRuntimeState.ATTENTION, "upload_pilot_stopped"),
       )
     statuses.forEach { status ->

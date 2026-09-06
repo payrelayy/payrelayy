@@ -3,12 +3,23 @@ package com.fetanagent.telebirrverifier
 import java.time.Instant
 import java.util.Base64
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeviceBridgeClientTest {
+  @Test
+  fun `app version accepts a runtime flavor at a suffix-free numeric floor only`() {
+    assertTrue(DeviceBridgeAppVersion.atLeast("0.5.0-secure-pairing", "0.5.0"))
+    assertTrue(DeviceBridgeAppVersion.atLeast("0.5.0-secure-pairing", "0.5.0-secure-pairing"))
+    assertTrue(DeviceBridgeAppVersion.atLeast("0.5.1-evidence-only", "0.5.0-secure-pairing"))
+    assertFalse(DeviceBridgeAppVersion.atLeast("0.5.0-evidence-only", "0.5.0-secure-pairing"))
+    assertFalse(DeviceBridgeAppVersion.atLeast("0.5.0", "0.5.0-secure-pairing"))
+    assertFalse(DeviceBridgeAppVersion.atLeast("0.4.9-secure-pairing", "0.5.0"))
+  }
+
   @Test
   fun `enrollment client authenticates the server certificate and one-use pairing binding`() {
     val fixture = fixture()

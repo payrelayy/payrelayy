@@ -11,6 +11,10 @@ const androidWorkflow = readFileSync(
   resolve(root, '.github/workflows/android-telebirr-operational-release.yml'),
   'utf8',
 );
+const androidEvidenceWorkflow = readFileSync(
+  resolve(root, '.github/workflows/android-telebirr-evidence-release.yml'),
+  'utf8',
+);
 const provisionSql = readFileSync(
   resolve(root, 'infra/sql/staging-telebirr-operational-signer-provision.sql'),
   'utf8',
@@ -28,7 +32,7 @@ const localProvisioner = readFileSync(
   'utf8',
 );
 
-for (const workflow of [trustWorkflow, androidWorkflow]) {
+for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]) {
   assert.match(workflow, /workflow_dispatch:/);
   assert.doesNotMatch(
     workflow,
@@ -122,6 +126,7 @@ assert.doesNotMatch(
 assert.match(androidWorkflow, /build-pairing-only-no-money/);
 assert.match(androidWorkflow, /fetanagentVerifierRuntimeMode=pairing_only/);
 assert.doesNotMatch(androidWorkflow, /fetanagentVerifierRuntimeMode=evidence_only/);
+assert.match(androidWorkflow, /VERSION_NAME = "0\.5\.1-secure-pairing"/);
 assert.match(androidWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/);
 assert.match(androidWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD/);
 assert.match(androidWorkflow, /FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD/);
@@ -136,6 +141,26 @@ assert.match(
 );
 assert.match(androidWorkflow, /retention-days: 14/);
 assert.match(androidWorkflow, /Assignment polling and money movement are disabled/);
+
+assert.match(androidEvidenceWorkflow, /build-evidence-only-no-money/);
+assert.match(androidEvidenceWorkflow, /fetanagentVerifierRuntimeMode=evidence_only/);
+assert.doesNotMatch(androidEvidenceWorkflow, /fetanagentVerifierRuntimeMode=pairing_only/);
+assert.match(androidEvidenceWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/);
+assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD/);
+assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD/);
+assert.match(androidEvidenceWorkflow, /VERIFIER_RUNTIME_MODE = \"evidence_only\"/);
+assert.match(androidEvidenceWorkflow, /VERSION_NAME = \"0\.5\.1-evidence-only\"/);
+assert.match(androidEvidenceWorkflow, /apksigner verify --verbose --print-certs/);
+assert.match(androidEvidenceWorkflow, /Verified using v1 scheme \(JAR signing\): false/);
+assert.match(androidEvidenceWorkflow, /Verified using v2 scheme .*: true/);
+assert.match(androidEvidenceWorkflow, /Number of signers: 1/);
+assert.match(androidEvidenceWorkflow, /V2 Signer: certificate SHA-256 digest/);
+assert.match(
+  androidEvidenceWorkflow,
+  /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\.0\.1/,
+);
+assert.match(androidEvidenceWorkflow, /retention-days: 14/);
+assert.match(androidEvidenceWorkflow, /Settlement, execution, and money movement remain disabled/);
 
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /fetanagentVerifierSigningStoreFile/);
@@ -158,5 +183,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'staging TeleBirr operational trust verified: manual exact-target trust-only provisioning and signed pairing-only Android release',
+  'staging TeleBirr operational trust verified: manual exact-target trust-only provisioning plus separately confirmed signed pairing-only and evidence-only Android releases',
 );

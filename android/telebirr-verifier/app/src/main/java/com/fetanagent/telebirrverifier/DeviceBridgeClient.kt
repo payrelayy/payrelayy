@@ -8,21 +8,25 @@ object DeviceBridgeAppVersion {
     DeviceBridgeProtocol.requireVersion(actual, "actualAppVersion")
     DeviceBridgeProtocol.requireVersion(minimum, "minimumAppVersion")
 
-    fun numeric(value: String): List<Int>? {
-      val match = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:[-.].*)?$").matchEntire(value)
-        ?: return null
-      return match.groupValues.drop(1).map { it.toIntOrNull() ?: return null }
+    fun parsed(value: String): Pair<List<Int>, String?>? {
+      val match =
+        Regex("^(\\d{1,6})\\.(\\d{1,6})\\.(\\d{1,6})([._-][A-Za-z0-9][A-Za-z0-9._-]{0,47})?$")
+          .matchEntire(value) ?: return null
+      val numeric = match.groupValues.slice(1..3).map { it.toIntOrNull() ?: return null }
+      return numeric to match.groups[4]?.value
     }
 
-    val actualParts = numeric(actual)
-    val minimumParts = numeric(minimum)
-    if (actualParts == null || minimumParts == null) return actual == minimum
+    val actualParsed = parsed(actual) ?: return actual == minimum
+    val minimumParsed = parsed(minimum) ?: return actual == minimum
+    val actualParts = actualParsed.first
+    val minimumParts = minimumParsed.first
+    val minimumFlavor = minimumParsed.second
     for (index in actualParts.indices) {
       if (actualParts[index] != minimumParts[index]) {
         return actualParts[index] > minimumParts[index]
       }
     }
-    return true
+    return actual == minimum || minimumFlavor == null
   }
 }
 

@@ -128,6 +128,15 @@ certificate SHA-256 is
 `1580355d60fab73b2e49867a59f73dadf96f1754ad543fa652d728ebf8c5dc82`. This is a
 controlled-install prerelease, not a public evidence-mode or real-money release.
 
+Version `0.5.1` increments the Android package version for the bounded clock-skew and visible-status
+fixes. The pairing workflow remains pairing-only. A separate protected manual workflow,
+`Android TeleBirr evidence-only release`, requires the exact current `main` commit and the literal
+`build-evidence-only-no-money` confirmation. It produces the only build that can poll a signed
+assignment and inspect the fixed official TeleBirr receipt route. The evidence-only build still has
+no database credential, claim, settlement, enqueue, KemerBet execution, or money-movement
+authority, and it must not be installed until pairing and heartbeat have passed on the physical
+device.
+
 The equivalent controlled local invocation is:
 
 ```powershell
@@ -153,7 +162,7 @@ later separately reviewed build decision after the no-money transport smoke pass
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
-versions. Version `0.5.0-secure-provisioning-inert` remains compiled with
+versions. Version `0.5.1-secure-provisioning-inert` remains compiled with
 `VERIFIER_ENABLED=false`, so its screen remains `Disabled` and exposes no activation button. An
 enabled, unenrolled operational build exposes one obscured one-use pairing-package field. After
 enrollment it exposes only `Start automatic verification` and `Stop`; it still has no URL, API key,

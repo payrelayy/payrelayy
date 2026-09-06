@@ -32,12 +32,16 @@ object DeviceBridgeAppVersion {
 
 class DeviceBridgeRetryableException : RuntimeException("Device bridge is temporarily unavailable")
 
+class DeviceBridgeEnrollmentRejectedException :
+  RuntimeException("Device bridge rejected the active enrollment")
+
 class DeviceBridgeRejectedException(val reason: DeviceBridgeReasonCode) :
   RuntimeException("Device bridge rejected the request: ${reason.wireName}")
 
 sealed interface DeviceBridgeHeartbeatResult {
   data object Acknowledged : DeviceBridgeHeartbeatResult
   data object Retryable : DeviceBridgeHeartbeatResult
+  data object EnrollmentRejected : DeviceBridgeHeartbeatResult
   data class Rejected(val reason: DeviceBridgeReasonCode) : DeviceBridgeHeartbeatResult
 }
 
@@ -184,7 +188,13 @@ class AuthenticatedDeviceBridgeClient(
             DeviceBridgeJsonCodec.encodeHeartbeatFrame(request, payload),
           )
         }
-        .getOrElse { return DeviceBridgeHeartbeatResult.Retryable }
+        .getOrElse { error ->
+          return if (error is DeviceBridgeEnrollmentRejectedException) {
+            DeviceBridgeHeartbeatResult.EnrollmentRejected
+          } else {
+            DeviceBridgeHeartbeatResult.Retryable
+          }
+        }
     return when (response.acknowledgement.body.outcome) {
       DeviceBridgeAcknowledgementOutcome.ACKNOWLEDGED ->
         DeviceBridgeHeartbeatResult.Acknowledged
@@ -213,7 +223,13 @@ class AuthenticatedDeviceBridgeClient(
             DeviceBridgeJsonCodec.encodeObservationUploadFrame(request, payload),
           )
         }
-        .getOrElse { return LivePilotUploadResult.Retryable }
+        .getOrElse { error ->
+          return if (error is DeviceBridgeEnrollmentRejectedException) {
+            LivePilotUploadResult.EnrollmentRejected
+          } else {
+            LivePilotUploadResult.Retryable
+          }
+        }
     val acknowledgement = response.acknowledgement.body
     return when (acknowledgement.outcome) {
       DeviceBridgeAcknowledgementOutcome.ACKNOWLEDGED -> {
@@ -263,6 +279,12 @@ class AuthenticatedDeviceBridgeClient(
   ): DeviceBridgeCommandResponse {
     val response =
       exchange.post(request.body.canonicalPath, DeviceBridgeProtocol.CONTENT_TYPE, frame)
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw DeviceBridgeEnrollmentRejectedException()
+    }
+    if (response.statusCode == 409 || response.statusCode >= 500) {
+      throw DeviceBridgeRetryableException()
+    }
     require(response.statusCode == 200)
     require(response.contentType == DeviceBridgeProtocol.CONTENT_TYPE)
     val decoded =

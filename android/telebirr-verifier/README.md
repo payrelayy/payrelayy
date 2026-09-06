@@ -137,6 +137,12 @@ no database credential, claim, settlement, enqueue, KemerBet execution, or money
 authority, and it must not be installed until pairing and heartbeat have passed on the physical
 device.
 
+Version `0.5.2` fails closed before opening the device key or network when the local enrollment has
+expired, distinguishes a server-side enrollment rejection from a retryable transport outage, and
+uses bounded non-sensitive status codes for invalid authenticated responses. Pairing, heartbeat,
+assignment polling, and evidence upload remain separate from claim, settlement, execution, and
+money movement.
+
 The equivalent controlled local invocation is:
 
 ```powershell
@@ -162,7 +168,7 @@ later separately reviewed build decision after the no-money transport smoke pass
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
-versions. Version `0.5.1-secure-provisioning-inert` remains compiled with
+versions. Version `0.5.2-secure-provisioning-inert` remains compiled with
 `VERIFIER_ENABLED=false`, so its screen remains `Disabled` and exposes no activation button. An
 enabled, unenrolled operational build exposes one obscured one-use pairing-package field. After
 enrollment it exposes only `Start automatic verification` and `Stop`; it still has no URL, API key,

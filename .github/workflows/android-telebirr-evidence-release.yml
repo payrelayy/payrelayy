@@ -133,7 +133,7 @@ jobs:
           test -f "$build_config"
           grep -Fq 'VERIFIER_ENABLED = true' "$build_config"
           grep -Fq 'VERIFIER_RUNTIME_MODE = "evidence_only"' "$build_config"
-          grep -Fq 'VERSION_NAME = "0.5.1-evidence-only"' "$build_config"
+          grep -Fq 'VERSION_NAME = "0.5.2-evidence-only"' "$build_config"
           grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ASSIGNMENT_SIGNER_KEY_ID = \"$ASSIGNMENT_SIGNER_KEY_ID\"" "$build_config"
 
@@ -150,7 +150,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/fetanagent-android-telebirr-evidence-artifact"
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
-          artifact_name='FetanAgent-TeleBirr-Verifier-0.5.1-evidence-only.apk'
+          artifact_name='FetanAgent-TeleBirr-Verifier-0.5.2-evidence-only.apk'
           install -m 0600 app/build/outputs/apk/release/app-release.apk "$artifact_dir/$artifact_name"
           (
             cd "$artifact_dir"

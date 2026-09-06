@@ -104,6 +104,48 @@ class DeviceBridgeClientTest {
   }
 
   @Test
+  fun `authenticated client distinguishes an enrollment rejection from a retryable outage`() {
+    val fixture = fixture()
+    fun exchange(statusCode: Int) =
+      DeviceBridgeExchange { _, _, _ ->
+        DeviceBridgeRawResponse(
+          statusCode = statusCode,
+          contentType = FixedDeviceBridgeHttpsExchange.ERROR_CONTENT_TYPE,
+          body = "{\"code\":\"invalid_request\"}".toByteArray(),
+        )
+      }
+
+    assertThrows(DeviceBridgeEnrollmentRejectedException::class.java) {
+      client(
+          fixture,
+          exchange(401),
+          fixedMaterial("bridge-request-0004", repeatedDigest('b')),
+          MillisClock { instant("2026-09-04T10:01:00.000Z") },
+        )
+        .nextAssignment()
+    }
+    assertThrows(DeviceBridgeRetryableException::class.java) {
+      client(
+          fixture,
+          exchange(503),
+          fixedMaterial("bridge-request-0005", repeatedDigest('c')),
+          MillisClock { instant("2026-09-04T10:01:00.000Z") },
+        )
+        .nextAssignment()
+    }
+    assertEquals(
+      DeviceBridgeHeartbeatResult.EnrollmentRejected,
+      client(
+          fixture,
+          exchange(401),
+          fixedMaterial("bridge-request-0006", repeatedDigest('d')),
+          MillisClock { instant("2026-09-04T10:01:00.000Z") },
+        )
+        .heartbeat(LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_assignment")),
+    )
+  }
+
+  @Test
   fun `authenticated client maps signed upload acknowledgement to the runtime idempotency digest`() {
     val fixture = fixture()
     val (authenticated, assignmentSigner, device) =

@@ -148,6 +148,14 @@ class VerifierForegroundService : Service() {
           status = attention("heartbeat_${heartbeatResult.reason.wireName}")
           now = SystemClock.elapsedRealtime()
           decision = policy.decide(status, now)
+        } else if (heartbeatResult is DeviceBridgeHeartbeatResult.EnrollmentRejected) {
+          status =
+            LivePilotRuntimeStatus(
+              LivePilotRuntimeState.ENROLLMENT_REQUIRED,
+              "device_enrollment_rejected",
+            )
+          now = SystemClock.elapsedRealtime()
+          decision = policy.decide(status, now)
         }
       }
     }

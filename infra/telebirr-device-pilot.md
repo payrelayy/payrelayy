@@ -128,34 +128,46 @@ The production helper/workflow must implement this order as one locked, exact-co
    an image whose revision label differs or whose target exposes an unexpected port.
 3. Validate both Compose files with an empty environment plus the explicit file paths, and run
    `caddy validate` against the exact release Caddyfile.
-4. Recreate only the secret-free gateway from the reviewed release. This creates and joins the
+4. Build the runtime manifest from the current armed dry-run pilot without modifying the database.
+   If an active-release receipt exists, the locked helper must validate its exact receipt, sealed
+   release, images, gateway, three healthy containers, HTTPS rejection behavior, and different
+   commit; then stop only those three transport containers and remove only that receipt. This
+   controlled quiescence occurs before opening the replacement brokers' single-connection login
+   slots. A same-commit immutable redeployment is rejected without stopping anything.
+5. Provision the two bounded no-money runtime logins and prove each exact identity can connect
+   through its dedicated slot. If quiescence was attempted and any later step fails or is cancelled,
+   set both roles to `NOLOGIN`, terminate their sessions, and leave the transport offline for
+   reconciliation. Do not automatically restart the predecessor with uncertain credentials.
+6. Install the sealed release under its full reviewed commit and reject an existing immutable
+   release directory.
+7. Recreate only the secret-free gateway from the reviewed release. This creates and joins the
    fixed `fetanagent-telebirr-device-ingress` internal network while preserving the existing Caddy
    data/config mounts and the public home/Owner routes. Do not change the private application
    containers.
-5. Start the pilot composition with the exact `telebirr-device-pilot` profile. Compose must wait
+8. Start the pilot composition with the exact `telebirr-device-pilot` profile. Compose must wait
    for both mode-`0600` Unix-socket brokers to be healthy before the bridge starts.
-6. Prove all three containers use the exact image SHA, UID/GID `10001`, read-only root filesystem,
+9. Prove all three containers use the exact image SHA, UID/GID `10001`, read-only root filesystem,
    no host port, expected networks only, no restart loop, and healthy status. Prove the bridge has
    no database/proxy environment and cannot reach the public Internet.
-7. From the VM, exercise malformed, wrong-method, wrong-content-type, query-bearing, oversized,
-   and unknown-path requests and require fixed rejection. No real assignment or device evidence is
-   needed for this pre-DNS negative smoke.
-8. Only now add the Porkbun `A` record `device` -> `161.35.41.232` with TTL `600`, preserving the
-   nameservers, MX, SPF, and all unrelated records. Do not add an AAAA record in the first cutover.
-9. Wait for public DNS, Caddy certificate issuance, and HTTPS readiness. Verify the certificate
-   hostname/chain and require HTTP/1.1 or HTTP/2 only. Re-run the negative route matrix publicly.
-10. Create a single-use Owner pairing challenge and copy its canonical short-lived package directly
+10. From the VM, exercise malformed, wrong-method, wrong-content-type, query-bearing, oversized,
+    and unknown-path requests and require fixed rejection. No real assignment or device evidence is
+    needed for this pre-DNS negative smoke.
+11. Only now add the Porkbun `A` record `device` -> `161.35.41.232` with TTL `600`, preserving the
+    nameservers, MX, SPF, and all unrelated records. Do not add an AAAA record in the first cutover.
+12. Wait for public DNS, Caddy certificate issuance, and HTTPS readiness. Verify the certificate
+    hostname/chain and require HTTP/1.1 or HTTP/2 only. Re-run the negative route matrix publicly.
+13. Create a single-use Owner pairing challenge and copy its canonical short-lived package directly
     from the authenticated Owner page into the dedicated phone. The app generates the device
     identity inside Android Keystore, encrypts the exact signed request before sending it, enrolls
     only its public key, and clears the matching clipboard entry after success. Perform the signed
     no-money pairing/heartbeat/exact-request-replay smoke in a `pairing_only` APK. Keep assignment
     polling, official-provider observation, settlement, and execution disabled.
-11. Install only the reviewed, signed operational APK on the dedicated Owner phone. Require
+14. Install only the reviewed, signed operational APK on the dedicated Owner phone. Require
     automatic network-provided date/time and timezone, grant notification visibility, allow the app
     to run in the phone vendor's background/battery settings, press Start once, and require the
     persistent redacted health notification. Do not enter an endpoint, API key, reference, receiver
     name, or other secret into the phone.
-12. With no assignment open, prove the idle backoff remains bounded; then reboot the phone and
+15. With no assignment open, prove the idle backoff remains bounded; then reboot the phone and
     require opt-in recovery. Use the notification Stop action and require that a second reboot stays
     stopped. Re-enable only for the later controlled evidence test.
 

@@ -343,6 +343,22 @@ jobs:
             "$protected/assignment-runtime-manifest.v1.json"
           rm -f -- "$runtime_input"
 
+      - name: Quiesce the exact healthy active transport before replacing its bounded logins
+        id: quiesce
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper quiesce-active-for-upgrade '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+          echo 'completed=true' >>"$GITHUB_OUTPUT"
+
       - name: Provision only the two bounded no-money database logins
         id: provision
         shell: bash
@@ -469,7 +485,7 @@ jobs:
           echo 'The real Android-to-server transport is live. Three isolated services are healthy; HTTPS and rejection smokes passed; every money action remains disabled.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Roll back an incomplete activation and disable both database logins
-        if: always() && (failure() || cancelled()) && steps.provision.outputs.attempted == 'true'
+        if: always() && (failure() || cancelled()) && (steps.quiesce.outputs.attempted == 'true' || steps.provision.outputs.attempted == 'true')
         shell: bash
         env:
           PROTECTED: ${{ steps.protected.outputs.protected }}

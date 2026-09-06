@@ -432,6 +432,8 @@ start_release() {
   local gateway old_image old_commit rollback_receipt
   validate_commit_and_tag "$commit_sha" "$image_tag"
   validate_release "$release" "$commit_sha" "$image_tag"
+  [[ ! -e "$ACTIVE_RECEIPT" && ! -L "$ACTIVE_RECEIPT" ]] ||
+    die 'another active TeleBirr device release is already recorded'
   require_staging_secret_root
   gateway="$(container_for_service "$STAGING_PROJECT" gateway)"
   old_image="$(docker_local container inspect "$gateway" --format '{{.Config.Image}}')"
@@ -451,11 +453,36 @@ start_release() {
   run_pilot_compose "$release" "$commit_sha" "$image_tag" \
     up -d --no-build --wait --wait-timeout 120
   ready "$commit_sha" "$image_tag"
-  [[ ! -e "$ACTIVE_RECEIPT" && ! -L "$ACTIVE_RECEIPT" ]] ||
-    die 'another active TeleBirr device release is already recorded'
   (umask 077; printf '%s\n' "$commit_sha" >"$ACTIVE_RECEIPT")
   chown root:root "$ACTIVE_RECEIPT"
   chmod 0600 "$ACTIVE_RECEIPT"
+}
+
+quiesce_active_for_upgrade() {
+  local next_commit_sha="$1" next_image_tag="$2"
+  local active_commit_sha active_image_tag
+  validate_commit_and_tag "$next_commit_sha" "$next_image_tag"
+  if [[ ! -e "$ACTIVE_RECEIPT" && ! -L "$ACTIVE_RECEIPT" ]]; then
+    printf 'TeleBirr Android device transport upgrade boundary ready: no active release recorded.\n'
+    return
+  fi
+  [[ ! -L "$ACTIVE_RECEIPT" && -f "$ACTIVE_RECEIPT" &&
+    "$(realpath -- "$ACTIVE_RECEIPT")" == "$ACTIVE_RECEIPT" &&
+    "$(stat --format='%U:%G:%a:%h:%s' "$ACTIVE_RECEIPT")" == 'root:root:600:1:41' ]] ||
+    die 'the active-release receipt is unsafe'
+  active_commit_sha="$(<"$ACTIVE_RECEIPT")"
+  [[ "$active_commit_sha" =~ ^[0-9a-f]{40}$ ]] ||
+    die 'the active-release receipt is not canonical'
+  [[ "$active_commit_sha" != "$next_commit_sha" ]] ||
+    die 'the immutable active release cannot be redeployed as an upgrade'
+  active_image_tag="${active_commit_sha:0:12}"
+  validate_release "$PILOT_RELEASE_ROOT/$active_commit_sha" \
+    "$active_commit_sha" "$active_image_tag"
+  ready "$active_commit_sha" "$active_image_tag"
+  stop_release "$active_commit_sha" "$active_image_tag"
+  [[ ! -e "$ACTIVE_RECEIPT" && ! -L "$ACTIVE_RECEIPT" ]] ||
+    die 'the active-release receipt remained after quiescence'
+  printf 'TeleBirr Android device transport quiesced: exact healthy predecessor stopped for upgrade.\n'
 }
 
 stop_release() {
@@ -536,6 +563,11 @@ case "$command" in
     acquire_mutation_lock
     start_release "$2" "$3"
     ;;
+  quiesce-active-for-upgrade)
+    [[ $# -eq 3 ]] || die 'quiesce-active-for-upgrade requires the next commit and image tag'
+    acquire_mutation_lock
+    quiesce_active_for_upgrade "$2" "$3"
+    ;;
   ready)
     [[ $# -eq 3 ]] || die 'ready requires commit and image tag'
     ready "$2" "$3"
@@ -551,6 +583,6 @@ case "$command" in
     rollback_release "$2" "$3"
     ;;
   *)
-    die 'expected verify, preflight, install, start, ready, stop, or rollback'
+    die 'expected verify, preflight, install, start, quiesce-active-for-upgrade, ready, stop, or rollback'
     ;;
 esac

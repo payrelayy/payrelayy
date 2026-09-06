@@ -218,7 +218,7 @@ assert.match(deployWorkflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c1812
 assert.doesNotMatch(deployWorkflow, /echo "vm_host=.*GITHUB_OUTPUT/u);
 assert.equal(
   (deployWorkflow.match(/^\s+VM_HOST: \$\{\{ secrets\.STAGING_VM_HOST \}\}$/gmu) ?? []).length,
-  7,
+  8,
   'Each protected SSH step must consume the masked VM host directly.',
 );
 assert.doesNotMatch(deployWorkflow, /pull_request_target|contents: write|service.?role|KEMERBET/u);
@@ -295,6 +295,21 @@ assert.match(
   /PGUSER="\$role" PGPASSWORD="\$password"[\s\S]*?--set=expected_runtime_role="\$role"/u,
   'activation must prove each bounded identity through its exact direct runtime login',
 );
+assert.match(
+  deployWorkflow,
+  /Build the exact armed-pilot runtime manifest[\s\S]*?Quiesce the exact healthy active transport[\s\S]*?quiesce-active-for-upgrade[\s\S]*?Provision only the two bounded no-money database logins/u,
+  'an upgrade must quiesce the exact active release after read-only inspection and before opening its single-slot runtime logins',
+);
+assert.match(
+  deployWorkflow,
+  /echo 'attempted=true' >>"\$GITHUB_OUTPUT"[\s\S]*?quiesce-active-for-upgrade[\s\S]*?echo 'completed=true' >>"\$GITHUB_OUTPUT"/u,
+  'cleanup must be able to detect every attempted quiescence',
+);
+assert.match(
+  deployWorkflow,
+  /steps\.quiesce\.outputs\.attempted == 'true' \|\| steps\.provision\.outputs\.attempted == 'true'/u,
+  'an interrupted upgrade must disable both runtime logins even before provisioning starts',
+);
 
 assert.match(deployHelper, /^set -euo pipefail$/mu);
 assert.match(deployHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
@@ -302,6 +317,17 @@ assert.match(deployHelper, /FINANCIAL_ACTIONS_MODE|compose\.telebirr-device-pilo
 for (const command of ['start', 'ready', 'stop', 'rollback']) {
   assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
 }
+assert.match(deployHelper, /^  quiesce-active-for-upgrade\)$/mu);
+assert.match(
+  deployHelper,
+  /quiesce_active_for_upgrade\(\)[\s\S]*?validate_commit_and_tag "\$next_commit_sha" "\$next_image_tag"[\s\S]*?active_commit_sha="\$\(<"\$ACTIVE_RECEIPT"\)"[\s\S]*?"\$active_commit_sha" != "\$next_commit_sha"[\s\S]*?ready "\$active_commit_sha" "\$active_image_tag"[\s\S]*?stop_release "\$active_commit_sha" "\$active_image_tag"/u,
+  'quiescence must reject same-release redeployment and stop only a validated healthy predecessor',
+);
+assert.match(
+  deployHelper,
+  /start_release\(\)[\s\S]*?\[\[ ! -e "\$ACTIVE_RECEIPT" && ! -L "\$ACTIVE_RECEIPT" \]\][\s\S]*?run_gateway_compose/u,
+  'start must reject an active receipt before mutating the gateway or pilot containers',
+);
 assert.match(deployHelper, /negative_public_smoke/u);
 assert.match(
   deployHelper,

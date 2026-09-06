@@ -319,6 +319,53 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('private TeleBirr device-state database boundary', () => {
+    it('accepts an Android runtime flavor at the same suffix-free numeric version floor', async () => {
+      const client = getClient();
+      const versions = await client.query<{
+        readonly different_flavor_rejected: boolean;
+        readonly exact_flavor_accepted: boolean;
+        readonly flavor_at_numeric_floor_accepted: boolean;
+        readonly malformed_rejected: boolean;
+        readonly newer_numeric_version_accepted: boolean;
+        readonly older_numeric_version_rejected: boolean;
+        readonly stable_at_flavor_floor_rejected: boolean;
+      }>(`
+        select
+          app.private_telebirr_device_app_version_at_least(
+            '0.5.0-secure-pairing', '0.5.0'
+          ) as flavor_at_numeric_floor_accepted,
+          app.private_telebirr_device_app_version_at_least(
+            '0.5.0-secure-pairing', '0.5.0-secure-pairing'
+          ) as exact_flavor_accepted,
+          not app.private_telebirr_device_app_version_at_least(
+            '0.5.0-evidence-only', '0.5.0-secure-pairing'
+          ) as different_flavor_rejected,
+          not app.private_telebirr_device_app_version_at_least(
+            '0.5.0', '0.5.0-secure-pairing'
+          ) as stable_at_flavor_floor_rejected,
+          app.private_telebirr_device_app_version_at_least(
+            '0.5.1-secure-pairing', '0.5.0-secure-pairing'
+          ) as newer_numeric_version_accepted,
+          not app.private_telebirr_device_app_version_at_least(
+            '0.4.9-secure-pairing', '0.5.0'
+          ) as older_numeric_version_rejected,
+          not app.private_telebirr_device_app_version_at_least(
+            'not-a-version', '0.5.0'
+          ) as malformed_rejected
+      `);
+      expect(versions.rows).toEqual([
+        {
+          different_flavor_rejected: true,
+          exact_flavor_accepted: true,
+          flavor_at_numeric_floor_accepted: true,
+          malformed_rejected: true,
+          newer_numeric_version_accepted: true,
+          older_numeric_version_rejected: true,
+          stable_at_flavor_floor_rejected: true,
+        },
+      ]);
+    });
+
     it('creates a dormant non-settable role edge with only nine device-state routines', async () => {
       const client = getClient();
       const roles = await client.query<{

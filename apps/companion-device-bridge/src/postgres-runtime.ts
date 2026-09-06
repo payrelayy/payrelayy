@@ -383,9 +383,9 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     application_name: 'fetanagent_companion_device_bridge',
     allowExitOnIdle: false,
     connectionTimeoutMillis: 5_000,
-    idleTimeoutMillis: 0,
+    idleTimeoutMillis: 30_000,
     max: 1,
-    min: 1,
+    min: 0,
     query_timeout: 20_000,
     statement_timeout: 15_000,
     ssl: { ca, rejectUnauthorized: true },
@@ -397,12 +397,12 @@ export async function createCompanionDeviceBridgePostgresRuntime(
       const { Pool } = require('pg') as PgModule;
       return new Pool(poolConfig);
     })();
-  let available = false;
   let closed = false;
-  const markUnavailable = () => {
-    available = false;
-  };
-  pool.on('error', markUnavailable);
+  // node-postgres removes an idle client that emits an error. Keep the pool itself usable so its
+  // next preflight can open a fresh TLS connection instead of latching this continuous service
+  // into a permanent unavailable state. The listener deliberately observes no error details.
+  const discardIdleClientError = () => undefined;
+  pool.on('error', discardIdleClientError);
 
   const raw: CompanionDeviceBridgePostgresQuery = {
     query: (sql, values = []) => pool.query(sql, values),
@@ -416,14 +416,13 @@ export async function createCompanionDeviceBridgePostgresRuntime(
   };
   const guarded: CompanionDeviceStateDatabase = {
     async query(sql, values) {
-      if (!available || closed) throw new CompanionDeviceBridgePostgresUnavailableError();
+      if (closed) throw new CompanionDeviceBridgePostgresUnavailableError();
       try {
         await assertCompanionDeviceBridgeCatalogPreflight(raw);
         const result = await raw.query(sql, values);
-        if (!available || closed) throw new Error();
+        if (closed) throw new Error();
         return result;
       } catch {
-        markUnavailable();
         throw new CompanionDeviceBridgePostgresUnavailableError();
       }
     },
@@ -434,7 +433,6 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     const client = await pool.connect();
     client.release();
     connected = true;
-    available = true;
     const assessment = await assessCompanionDeviceBridgeCatalogPreflight(raw);
     if (assessment.kind !== 'passed') {
       reportInitialPreflightFailure(assessment);
@@ -446,9 +444,8 @@ export async function createCompanionDeviceBridgePostgresRuntime(
         Object.freeze({ kind: 'database_connection_unavailable' as const }),
       );
     }
-    available = false;
     await pool.end().catch(() => undefined);
-    pool.removeListener('error', markUnavailable);
+    pool.removeListener('error', discardIdleClientError);
     throw new CompanionDeviceBridgePostgresUnavailableError();
   }
 
@@ -457,25 +454,23 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     state,
     database: guarded,
     async ready() {
-      if (!available || closed) return false;
+      if (closed) return false;
       try {
         await assertCompanionDeviceBridgeCatalogPreflight(raw);
-        return available && !closed;
+        return !closed;
       } catch {
-        markUnavailable();
         return false;
       }
     },
     async close() {
       if (closed) return;
       closed = true;
-      available = false;
       try {
         await pool.end();
       } catch {
         throw new CompanionDeviceBridgePostgresUnavailableError();
       } finally {
-        pool.removeListener('error', markUnavailable);
+        pool.removeListener('error', discardIdleClientError);
       }
     },
   });

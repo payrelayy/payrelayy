@@ -25,8 +25,13 @@ function passingPreflight() {
 
 function fakePool(options: { readonly badPreflight?: boolean } = {}) {
   let errorListener: ((error: Error) => void) | undefined;
+  let failNextQuery = false;
   const release = vi.fn();
   const query = vi.fn(async (sql: string, values: readonly string[] = []) => {
+    if (failNextQuery) {
+      failNextQuery = false;
+      throw new Error('transient connection failure');
+    }
     if (sql === COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL) {
       const row = passingPreflight();
       if (options.badPreflight) row.runtime_login_is_safe = false;
@@ -47,7 +52,15 @@ function fakePool(options: { readonly badPreflight?: boolean } = {}) {
     query,
     removeListener: vi.fn(),
   };
-  return { pool, release, query, emitError: () => errorListener?.(new Error('connection lost')) };
+  return {
+    pool,
+    release,
+    query,
+    emitError: () => errorListener?.(new Error('connection lost')),
+    failNextQuery: () => {
+      failNextQuery = true;
+    },
+  };
 }
 
 describe('companion device bridge PostgreSQL runtime', () => {
@@ -76,8 +89,9 @@ describe('companion device bridge PostgreSQL runtime', () => {
     );
     expect(observedConfig).toMatchObject({
       application_name: 'fetanagent_companion_device_bridge',
+      idleTimeoutMillis: 30_000,
       max: 1,
-      min: 1,
+      min: 0,
       user: 'fetanagent_companion_device_bridge_runtime',
       ssl: { ca: connection.ca, rejectUnauthorized: true },
     });
@@ -161,7 +175,7 @@ describe('companion device bridge PostgreSQL runtime', () => {
     }
   });
 
-  it('marks readiness unavailable after an idle pool error without logging its detail', async () => {
+  it('reconnects safely after an idle client error without logging its detail', async () => {
     const fake = fakePool();
     const runtime = await createCompanionDeviceBridgePostgresRuntime(
       connection,
@@ -169,10 +183,17 @@ describe('companion device bridge PostgreSQL runtime', () => {
       { createPool: () => fake.pool },
     );
     fake.emitError();
+    await expect(runtime.ready()).resolves.toBe(true);
+    fake.failNextQuery();
     await expect(runtime.ready()).resolves.toBe(false);
-    await expect(runtime.state.releasePairing(`sha256:${'a'.repeat(64)}`)).rejects.toThrow(
-      'device-state boundary is unavailable',
-    );
+    await expect(runtime.state.releasePairing(`sha256:${'a'.repeat(64)}`)).resolves.toBeUndefined();
+    expect(fake.query.mock.calls.map(([sql]) => sql)).toEqual([
+      COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
+      COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
+      COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
+      COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
+      RELEASE_COMPANION_PAIRING_SQL,
+    ]);
     await runtime.close();
   });
 });

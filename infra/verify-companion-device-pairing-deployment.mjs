@@ -377,6 +377,10 @@ assert.doesNotMatch(databasePreflight, /listen\(8085|money|transfer/iu);
 assert.match(postgresRuntime, /owner\.rolname = 'postgres' and defaults\.defaclnamespace = 0/u);
 assert.doesNotMatch(postgresRuntime, /namespace\.oid = defaults\.defaclnamespace/u);
 assert.match(postgresRuntime, /select count\(\*\) = 7/u);
+assert.match(postgresRuntime, /idleTimeoutMillis: 30_000/u);
+assert.match(postgresRuntime, /min: 0/u);
+assert.match(postgresRuntime, /discardIdleClientError/u);
+assert.doesNotMatch(postgresRuntime, /let available = false/u);
 
 assert.match(lookupHandler, /verifyKemerBetExactFiveLookupExchange/u);
 assert.match(lookupHandler, /AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH/u);

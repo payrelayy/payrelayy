@@ -61,3 +61,96 @@ jobs:
             ${{ runner.temp }}\fetanagent-companion-output\*.sha256
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: Publish immutable and stable download assets
+    if: startsWith(github.ref, 'refs/tags/windows-companion-v')
+    needs: package
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: FetanAgent-Windows-Companion-${{ github.sha }}
+          path: ${{ runner.temp }}\fetanagent-companion-release
+
+      - name: Verify and prepare stable download aliases
+        shell: pwsh
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDirectory = Join-Path $env:RUNNER_TEMP 'fetanagent-companion-release'
+          $releaseSha = $env:RELEASE_SHA
+          if ($releaseSha -notmatch '^[0-9a-f]{40}$') {
+            throw 'The release SHA is invalid.'
+          }
+
+          $shortSha = $releaseSha.Substring(0, 12)
+          $immutableName = "FetanAgent-Windows-Companion-$shortSha.zip"
+          $immutableZip = Join-Path $releaseDirectory $immutableName
+          $immutableChecksum = "$immutableZip.sha256"
+          if (-not (Test-Path -LiteralPath $immutableZip -PathType Leaf)) {
+            throw "The immutable companion archive is missing: $immutableName"
+          }
+          if (-not (Test-Path -LiteralPath $immutableChecksum -PathType Leaf)) {
+            throw "The immutable companion checksum is missing: $immutableName.sha256"
+          }
+          if (@(Get-ChildItem -LiteralPath $releaseDirectory -File).Count -ne 2) {
+            throw 'The downloaded artifact must contain exactly one archive and one checksum.'
+          }
+
+          $checksumLine = (Get-Content -LiteralPath $immutableChecksum -Raw).Trim()
+          if ($checksumLine -notmatch '^([0-9a-f]{64})  (.+)$') {
+            throw 'The immutable checksum file has an invalid format.'
+          }
+          if ($Matches[2] -ne $immutableName) {
+            throw 'The immutable checksum names a different archive.'
+          }
+          $actualHash = (Get-FileHash -LiteralPath $immutableZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $Matches[1]) {
+            throw 'The immutable companion archive failed SHA-256 verification.'
+          }
+
+          $stableName = 'FetanAgent-Windows-Companion.zip'
+          $stableZip = Join-Path $releaseDirectory $stableName
+          $stableChecksum = "$stableZip.sha256"
+          Copy-Item -LiteralPath $immutableZip -Destination $stableZip
+          Set-Content -LiteralPath $stableChecksum -Value "$actualHash  $stableName" -Encoding ascii
+
+      - name: Publish the GitHub release and download assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseDirectory = Join-Path $env:RUNNER_TEMP 'fetanagent-companion-release'
+          $tag = $env:GITHUB_REF_NAME
+          $repository = $env:GITHUB_REPOSITORY
+
+          gh release view $tag --repo $repository *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag `
+              --repo $repository `
+              --verify-tag `
+              --title "FetanAgent Windows Companion $tag" `
+              --notes 'Portable, local Windows companion. This release cannot execute provider payments or move money.'
+            if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }
+          }
+
+          $assets = @(
+            Get-ChildItem -LiteralPath $releaseDirectory -File |
+              Where-Object { $_.Name -match '^FetanAgent-Windows-Companion-(?:[0-9a-f]{12})?\.zip(?:\.sha256)?$' -or $_.Name -match '^FetanAgent-Windows-Companion\.zip(?:\.sha256)?$' } |
+              Sort-Object Name |
+              ForEach-Object FullName
+          )
+          if ($assets.Count -ne 4) {
+            throw 'Expected exactly four immutable and stable release assets.'
+          }
+          gh release upload $tag @assets --repo $repository --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release asset upload failed.' }
+          gh release edit $tag --repo $repository --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not mark the companion release as latest.' }

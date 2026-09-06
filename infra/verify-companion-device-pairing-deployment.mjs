@@ -29,6 +29,7 @@ const [
   windowsLauncher,
   windowsPairingDialog,
   windowsPackageBuilder,
+  windowsPackageWorkflow,
 ] = await Promise.all([
   readFile(new URL('infra/compose.companion-device-pairing.yaml', root), 'utf8'),
   readFile(new URL('Dockerfile', root), 'utf8'),
@@ -76,6 +77,7 @@ const [
     'utf8',
   ),
   readFile(new URL('scripts/build-windows-companion-package.ps1', root), 'utf8'),
+  readFile(new URL('.github/workflows/windows-companion-package.yml', root), 'utf8'),
 ]);
 
 assert.match(compose, /^name: fetanagent-companion-device-pairing$/mu);
@@ -392,5 +394,15 @@ assert.match(windowsLauncher, /This is not your password/u);
 assert.match(windowsPairingDialog, /fetanagent-companion-pairing-v1\./u);
 assert.match(windowsPairingDialog, /Player lookup, Amount, Notes, Transfer, settlement/u);
 assert.match(windowsPackageBuilder, /Enter FetanAgent Pairing Package\.ps1/u);
+assert.match(windowsPackageWorkflow, /tags:\s*\r?\n\s+- 'windows-companion-v\*'/u);
+assert.match(windowsPackageWorkflow, /permissions:\s*\r?\n\s+contents: write/u);
+assert.match(windowsPackageWorkflow, /actions\/download-artifact@[0-9a-f]{40}/u);
+assert.match(windowsPackageWorkflow, /Get-FileHash[^\r\n]+-Algorithm SHA256/u);
+assert.match(windowsPackageWorkflow, /FetanAgent-Windows-Companion\.zip/u);
+assert.match(
+  windowsPackageWorkflow,
+  /gh release upload \$tag @assets --repo \$repository --clobber/u,
+);
+assert.match(windowsPackageWorkflow, /gh release edit \$tag --repo \$repository --latest/u);
 
 console.log('Companion pairing and signed read-only lookup deployment contract verified.');

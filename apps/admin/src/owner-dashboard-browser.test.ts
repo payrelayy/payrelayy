@@ -199,10 +199,10 @@ function ownerBrowserHarness(
   element('#login-form').elements = namedElements({ email, password });
   element('#invite-form').elements = namedElements({ expiry: new FakeElement() });
   element('#receiver-form').elements = namedElements({
-    accountHolderName: new FakeElement(),
-    accountReference: new FakeElement(),
-    providerCode: new FakeElement(),
-    rotationReason: new FakeElement(),
+    accountHolderName: element('#receiver-holder-name'),
+    accountReference: element('#receiver-account-reference'),
+    providerCode: element('#receiver-provider'),
+    rotationReason: element('#receiver-rotation-reason'),
   });
   element('#kemerbet-agent-profile-form').elements = namedElements({
     configurationReason: new FakeElement(),
@@ -319,6 +319,72 @@ function ownerBrowserHarness(
 }
 
 describe('Owner dashboard browser authentication boundary', () => {
+  it.each([201, 503])(
+    'keeps receiver save feedback beside the form after a %s response and refreshes without a second mutation',
+    async (saveStatus) => {
+      const receiver = {
+        accountHolderName: 'FetanAgent Receiver',
+        accountReferenceMasked: '***3456',
+        activeFrom: '2026-09-08T00:00:00.000Z',
+        protectedReference: true,
+        providerCode: 'telebirr',
+        providerDisplayName: 'TeleBirr',
+        receiverRevisionId: '33333333-3333-4333-8333-333333333333',
+        receiverStatus: 'active',
+        revision: 1,
+        rotationReason: 'initial_configuration',
+      };
+      let activeTest = false;
+      let mutations = 0;
+      let reads = 0;
+      const browser = ownerBrowserHarness(503, {
+        confirm: true,
+        fetchOverride: (url) => {
+          if (!activeTest) return undefined;
+          if (url === '/v1/owner/receiver-accounts/rotate') {
+            mutations += 1;
+            return response(
+              saveStatus,
+              saveStatus === 201 ? { receiver } : { error: 'unavailable' },
+            );
+          }
+          if (url === '/v1/owner/receiver-accounts') {
+            reads += 1;
+            return response(200, { receivers: [receiver] });
+          }
+          return undefined;
+        },
+      });
+      await browser.signIn();
+      activeTest = true;
+      browser.element('#receiver-holder-name').value = 'FetanAgent Receiver';
+      browser.element('#receiver-account-reference').value = '0000003456';
+      browser.element('#receiver-provider').value = 'telebirr';
+      browser.element('#receiver-rotation-reason').value = 'initial_configuration';
+      browser.element('#receiver-confirmation').checked = true;
+      await browser.call('rotateReceiver');
+      const feedback = browser.element('#receiver-feedback');
+      expect(feedback.hidden).toBe(false);
+      expect(feedback.textContent).toContain(
+        saveStatus === 201
+          ? 'TeleBirr receiver revision 1 is active.'
+          : 'It may already have been applied.',
+      );
+      expect(feedback.textContent).not.toContain('0000003456');
+      expect(feedback.textContent).not.toContain('FetanAgent Receiver');
+      expect(browser.element('#receiver-account-reference').value).toBe('');
+      expect(browser.element('#receiver-list').children).toHaveLength(1);
+      expect(mutations).toBe(1);
+      expect(reads).toBe(1);
+      const savedFeedback = feedback.textContent;
+      await browser.call('setNotice', 'A different section updated its status.');
+      expect(feedback.textContent).toBe(savedFeedback);
+      await browser.call('clearReceivers');
+      expect(feedback.textContent).toBe('');
+      expect(feedback.hidden).toBe(true);
+    },
+  );
+
   it('shows one canonical Windows package while persisting only its idempotency key', async () => {
     const expiresAt = '2099-09-04T12:10:00.000Z';
     const receipt = companionPairingReceipt(expiresAt);

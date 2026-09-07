@@ -220,6 +220,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </label>
             <button id="receiver-submit-button" type="submit">Save new active receiver</button>
           </form>
+          <p class="request-meta" id="receiver-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
         </section>
 
         <section class="review-section" aria-labelledby="kemerbet-companion-title">
@@ -574,6 +575,7 @@ const kemerbetReadinessCohortButton = document.querySelector('#kemerbet-readines
 const kemerbetReadinessCohortStatus = document.querySelector('#kemerbet-readiness-cohort-status');
 const receiverList = document.querySelector('#receiver-list');
 const receiverForm = document.querySelector('#receiver-form');
+const receiverFeedback = document.querySelector('#receiver-feedback');
 const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
 const receiverAccountReference = document.querySelector('#receiver-account-reference');
 const receiverConfirmation = document.querySelector('#receiver-confirmation');
@@ -967,6 +969,7 @@ function clearReceivers() {
   receiverList.replaceChildren();
   receiverAccountReference.value = '';
   receiverConfirmation.checked = false;
+  setReceiverFeedback('');
 }
 
 function clearKemerbetAgentProfiles() {
@@ -1560,6 +1563,11 @@ function validReceiver(value) {
     revision: value.revision, rotationReason: value.rotationReason };
 }
 
+function setReceiverFeedback(message) {
+  receiverFeedback.textContent = message;
+  receiverFeedback.hidden = !message;
+}
+
 function renderReceivers(receivers) {
   receiverList.replaceChildren();
   if (receivers.length === 0) {
@@ -1596,9 +1604,16 @@ async function loadReceivers() {
     const receivers = payload.receivers.map(validReceiver);
     if (receivers.some((receiver) => !receiver)) throw new Error('receivers');
     renderReceivers(receivers);
+    const activeCount = receivers.filter((receiver) => receiver.receiverStatus === 'active').length;
+    setReceiverFeedback('Receiving-account history refreshed. ' + activeCount +
+      (activeCount === 1 ? ' active receiving account.' : ' active receiving accounts.'));
   } catch (error) {
     receiverList.replaceChildren();
-    if (!isSignedOutError(error)) setNotice('Receiver-account history is unavailable. Do not rotate an account.');
+    if (!isSignedOutError(error)) {
+      const message = 'Receiver-account history is unavailable. Do not save another revision until it can be checked.';
+      setReceiverFeedback(message);
+      setNotice(message);
+    }
   } finally {
     receiverRefreshButton.disabled = false;
   }
@@ -1627,6 +1642,7 @@ async function rotateReceiver() {
   )) return;
   const requestId = crypto.randomUUID();
   setBusy(receiverForm, true);
+  setReceiverFeedback('Protecting and saving the receiver account…');
   setNotice('Protecting and rotating the receiver account…');
   try {
     const response = await ownerRequest('/v1/owner/receiver-accounts/rotate', {
@@ -1643,14 +1659,19 @@ async function rotateReceiver() {
       throw new Error('receiver_rotation');
     }
     receiverConfirmation.checked = false;
-    setNotice(receiver.providerDisplayName + ' receiver revision ' + receiver.revision +
+    const message = receiver.providerDisplayName + ' receiver revision ' + receiver.revision +
       (receiver.receiverStatus === 'active' ? ' is active.' : ' was already applied and has since been superseded.') +
-      ' Money remains disabled until later readiness gates pass.');
+      ' The full account number is not displayed. Money remains disabled until later readiness gates pass.';
     await loadReceivers();
+    setReceiverFeedback(message);
+    setNotice(message);
   } catch (error) {
     receiverAccountReference.value = '';
     if (!isSignedOutError(error)) {
-      setNotice('Receiver rotation was rejected or unavailable. No account number was retained in this page. Refresh before retrying.');
+      await loadReceivers();
+      const message = 'The save could not be confirmed. It may already have been applied. Check the refreshed receiving-account history before saving again. No account number was retained in this page.';
+      setReceiverFeedback(message);
+      setNotice(message);
     }
   } finally {
     setBusy(receiverForm, false);

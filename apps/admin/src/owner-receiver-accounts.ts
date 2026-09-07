@@ -111,7 +111,10 @@ function isoDate(value: unknown): string {
   return value.toISOString();
 }
 
-function receiverFromRow(rowValue: unknown): OwnerReceiverAccount | undefined {
+function receiverFromRow(
+  rowValue: unknown,
+  projection: 'history' | 'rotation',
+): OwnerReceiverAccount | undefined {
   const row = rowObject(rowValue);
   if (row.receiver_revision_id === null) return undefined;
   const providerCode: OwnerReceiverProvider | undefined =
@@ -123,7 +126,7 @@ function receiverFromRow(rowValue: unknown): OwnerReceiverAccount | undefined {
   if (
     providerCode === undefined ||
     expectedProviderDisplayName === undefined ||
-    row.provider_display_name !== expectedProviderDisplayName ||
+    (projection === 'history' && row.provider_display_name !== expectedProviderDisplayName) ||
     typeof row.receiver_revision_id !== 'string' ||
     !UUID_PATTERN.test(row.receiver_revision_id) ||
     !Number.isSafeInteger(row.revision) ||
@@ -189,7 +192,9 @@ export class PostgresOwnerReceiverAccounts {
     if (!UUID_PATTERN.test(authUserId)) throw new OwnerReceiverAccountRejectedError();
     try {
       const result = await this.database.query(LIST_SQL, [authUserId]);
-      const receivers = result.rows.map(receiverFromRow).filter((value) => value !== undefined);
+      const receivers = result.rows
+        .map((value) => receiverFromRow(value, 'history'))
+        .filter((value) => value !== undefined);
       if (
         receivers.length > 100 ||
         new Set(receivers.map((receiver) => receiver.receiverRevisionId)).size !==
@@ -236,7 +241,10 @@ export class PostgresOwnerReceiverAccounts {
         1,
         request.rotationReason,
       ]);
-      const receiver = result.rows.length === 1 ? receiverFromRow(result.rows[0]) : undefined;
+      // The rotation function returns the provider code, not the display-name column in history.
+      // Derive its public label from the validated provider code without misreporting a committed save.
+      const receiver =
+        result.rows.length === 1 ? receiverFromRow(result.rows[0], 'rotation') : undefined;
       if (
         !receiver ||
         receiver.providerCode !== request.providerCode ||

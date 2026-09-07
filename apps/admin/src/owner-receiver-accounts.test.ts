@@ -29,6 +29,12 @@ function row(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function rotationRow(overrides: Record<string, unknown> = {}) {
+  return Object.fromEntries(
+    Object.entries(row(overrides)).filter(([key]) => key !== 'provider_display_name'),
+  );
+}
+
 describe('Owner receiver-account PostgreSQL adapter', () => {
   it('protects the exact account before PostgreSQL and returns only the safe revision projection', async () => {
     const query = vi.fn<OwnerReceiverDatabase['query']>(async (sql, values) => {
@@ -46,7 +52,7 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
       expect(values[6]).toBe('***3456');
       expect(values.slice(7)).toEqual([1, 1, 1, 'account_rotation']);
       expect(JSON.stringify(values)).not.toContain('0000003456');
-      return { rows: [row()] };
+      return { rows: [rotationRow()] };
     });
     const control = new PostgresOwnerReceiverAccounts({ query }, secrets);
 
@@ -70,6 +76,41 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
       revision: 2,
       rotationReason: 'account_rotation',
     });
+  });
+
+  it.each([
+    ['telebirr', 'TeleBirr'],
+    ['cbe_birr', 'CBE Birr'],
+  ] as const)(
+    'accepts the actual rotation return contract for %s without a display-name column',
+    async (providerCode, providerDisplayName) => {
+      const query = vi.fn<OwnerReceiverDatabase['query']>(async () => ({
+        rows: [rotationRow({ provider_code: providerCode })],
+      }));
+      const control = new PostgresOwnerReceiverAccounts({ query }, secrets);
+      const result = await control.rotate(authUserId, {
+        accountHolderName: 'FetanAgent Receiver',
+        accountReference: '0000003456',
+        providerCode,
+        requestId,
+        rotationReason: 'account_rotation',
+      });
+      expect(result).toMatchObject({ providerCode, providerDisplayName, receiverStatus: 'active' });
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(result)).not.toMatch(/cipher|fingerprint|0000003456/iu);
+    },
+  );
+
+  it('still rejects missing or mismatched provider display names in history', async () => {
+    for (const value of [rotationRow(), row({ provider_display_name: 'Other provider' })]) {
+      const control = new PostgresOwnerReceiverAccounts(
+        { query: async () => ({ rows: [value] }) },
+        secrets,
+      );
+      await expect(control.list(authUserId)).rejects.toBeInstanceOf(
+        OwnerReceiverAccountUnavailableError,
+      );
+    }
   });
 
   it('lists active and retired history without protected material', async () => {

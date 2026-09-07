@@ -11,12 +11,26 @@ select current_user = 'postgres' and session_user = 'postgres'
 \gset
 \if :administrator_session_ready
 \else
-  \warn 'The staging administrator session identity is not exact.'
+  \warn 'The target administrator session identity is not exact.'
+  select 1 / 0 as rejected;
+\endif
+
+select :'deployment_target' in ('staging', 'production')
+    and :'assignment_signer_key_id'
+      = 'telebirr-assignment-' || :'deployment_target' || '-v1'
+  as deployment_target_canonical
+\gset
+\if :deployment_target_canonical
+\else
+  \warn 'The assignment signer is not bound to the exact deployment target.'
   select 1 / 0 as rejected;
 \endif
 
 select pg_catalog.pg_advisory_xact_lock(
-  pg_catalog.hashtextextended('fetanagent:staging:telebirr-operational-signer', 0)
+  pg_catalog.hashtextextended(
+    'fetanagent:' || :'deployment_target' || ':telebirr-operational-signer',
+    0
+  )
 );
 
 with locked_feature_switches as materialized (
@@ -177,6 +191,7 @@ where signer.id = :'assignment_signer_id'::uuid
 select pg_catalog.jsonb_build_object(
   'schemaVersion', 1,
   'operation', 'trust_only',
+  'deploymentTarget', :'deployment_target',
   'assignmentSigner', 'active_unrevoked',
   'financialFeatures', 'disabled',
   'openPilot', 'absent'

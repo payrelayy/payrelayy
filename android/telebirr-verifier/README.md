@@ -213,9 +213,9 @@ the official `transactioninfo.ethiotelecom.et/receipt/{reference}` route, the ob
 one-at-a-time work, and visible health states. The encrypted durable queue, encrypted exact-request
 provisioning state, pinned operational public trust, bounded backoff, persistent notification,
 explicit stop control, and opt-in reboot recovery are now implemented. The Owner challenge issuer
-and protected trust-only signer provisioner are implemented. The provisioner refuses to insert the
-immutable assignment signer unless all financial switches remain disabled and no draft or armed
-pilot exists. Deployment of the three database-free bridge services, phone installation/pairing,
+and protected exact-target trust-only signer provisioner are implemented for both staging and
+production. The provisioner refuses to insert the immutable assignment signer unless all financial
+switches remain disabled and no draft or armed pilot exists. Deployment of the three database-free bridge services, phone installation/pairing,
 and real-device validation remain separate gates, so this source change cannot turn an inert review
 artifact into a live verifier by itself.
 The parser tests now cover those observed label and amount variants.

@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const trustWorkflow = readFileSync(
-  resolve(root, '.github/workflows/staging-telebirr-operational-keys.yml'),
+  resolve(root, '.github/workflows/telebirr-operational-trust.yml'),
   'utf8',
 );
 const androidWorkflow = readFileSync(
@@ -16,11 +16,11 @@ const androidEvidenceWorkflow = readFileSync(
   'utf8',
 );
 const provisionSql = readFileSync(
-  resolve(root, 'infra/sql/staging-telebirr-operational-signer-provision.sql'),
+  resolve(root, 'infra/sql/telebirr-operational-signer-provision.sql'),
   'utf8',
 );
 const inspectSql = readFileSync(
-  resolve(root, 'infra/sql/staging-telebirr-operational-signer-inspect.sql'),
+  resolve(root, 'infra/sql/telebirr-operational-signer-inspect.sql'),
   'utf8',
 );
 const androidBuild = readFileSync(
@@ -49,9 +49,7 @@ for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]
   );
 }
 
-assert.match(trustWorkflow, /environment: staging/);
-
-for (const workflow of [androidWorkflow, androidEvidenceWorkflow]) {
+for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]) {
   assert.match(workflow, /deployment_target:/);
   assert.match(workflow, /options:\s*\r?\n\s+- staging\s*\r?\n\s+- production/);
   assert.match(workflow, /confirm_deployment_target:/);
@@ -59,6 +57,9 @@ for (const workflow of [androidWorkflow, androidEvidenceWorkflow]) {
   assert.match(workflow, /CONFIRMED_DEPLOYMENT_TARGET.*DEPLOYMENT_TARGET/s);
   assert.match(workflow, /telebirr-assignment-\$DEPLOYMENT_TARGET-v1/);
   assert.match(workflow, /telebirr-bridge-\$DEPLOYMENT_TARGET-v1/);
+}
+
+for (const workflow of [androidWorkflow, androidEvidenceWorkflow]) {
   assert.match(
     workflow,
     /-PfetanagentVerifierDeploymentTarget='\$\{\{ inputs\.deployment_target \}\}'/,
@@ -68,6 +69,12 @@ for (const workflow of [androidWorkflow, androidEvidenceWorkflow]) {
 
 assert.match(trustWorkflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(trustWorkflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
+assert.match(trustWorkflow, /STAGING_POOLER_HOST: aws-1-eu-west-1\.pooler\.supabase\.com/);
+assert.match(trustWorkflow, /PRODUCTION_POOLER_HOST: aws-0-eu-west-1\.pooler\.supabase\.com/);
+assert.match(trustWorkflow, /confirm_project_ref:/);
+assert.match(trustWorkflow, /CONFIRMED_PROJECT_REF.*STAGING_PROJECT_REF/s);
+assert.match(trustWorkflow, /CONFIRMED_PROJECT_REF.*PRODUCTION_PROJECT_REF/s);
+assert.match(trustWorkflow, /--set=deployment_target="\$DEPLOYMENT_TARGET"/);
 assert.match(trustWorkflow, /provision-trust-only-no-pilot/);
 assert.match(trustWorkflow, /openssl pkey -inform DER/g);
 assert.match(trustWorkflow, /cmp --silent/);
@@ -76,10 +83,11 @@ assert.match(trustWorkflow, /\.keyVersion == 2/);
 assert.doesNotMatch(trustWorkflow, /private_live_reference_opening/);
 assert.match(trustWorkflow, /PGSSLMODE: verify-full/);
 assert.match(trustWorkflow, /PGSSLROOTCERT:/);
-assert.match(trustWorkflow, /staging-telebirr-operational-signer-inspect\.sql/);
-assert.match(trustWorkflow, /staging-telebirr-operational-signer-provision\.sql/);
+assert.match(trustWorkflow, /telebirr-operational-signer-inspect\.sql/);
+assert.match(trustWorkflow, /telebirr-operational-signer-provision\.sql/);
 assert.match(trustWorkflow, /\.financialFeatures == "disabled"/);
 assert.match(trustWorkflow, /\.openPilot == "absent"/);
+assert.match(trustWorkflow, /\.deploymentTarget == \$deployment_target/);
 assert.deepEqual(
   [
     ...new Set(
@@ -104,6 +112,12 @@ assert.match(localProvisioner, /TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/);
 assert.doesNotMatch(localProvisioner, /TELEBIRR_REFERENCE_OPENING_KEY_V1_BASE64/);
 
 assert.match(provisionSql, /begin transaction isolation level serializable;/);
+assert.match(provisionSql, /:'deployment_target' in \('staging', 'production'\)/);
+assert.match(provisionSql, /'telebirr-assignment-' \|\| :'deployment_target' \|\| '-v1'/);
+assert.match(
+  provisionSql,
+  /'fetanagent:' \|\| :'deployment_target' \|\| ':telebirr-operational-signer'/,
+);
 assert.match(provisionSql, /pg_catalog\.pg_advisory_xact_lock/);
 assert.match(provisionSql, /for update/);
 assert.match(provisionSql, /count\(\*\) = 7/);
@@ -116,6 +130,7 @@ assert.match(provisionSql, /exact_safe_replay/);
 assert.match(provisionSql, /revocation\.assignment_signer_id is null/);
 assert.match(provisionSql, /'financialFeatures', 'disabled'/);
 assert.match(provisionSql, /'openPilot', 'absent'/);
+assert.match(provisionSql, /'deploymentTarget', :'deployment_target'/);
 assert.match(provisionSql, /commit;/);
 assert.equal(
   (provisionSql.match(/^\s*insert into /gim) ?? []).length,
@@ -130,6 +145,9 @@ assert.doesNotMatch(provisionSql, /insert into app\.private_live_deposit_pilot/i
 assert.doesNotMatch(provisionSql, /insert into app\.feature_switches/i);
 
 assert.match(inspectSql, /begin transaction isolation level serializable read only;/);
+assert.match(inspectSql, /:'deployment_target' in \('staging', 'production'\)/);
+assert.match(inspectSql, /'telebirr-assignment-' \|\| :'deployment_target' \|\| '-v1'/);
+assert.match(inspectSql, /'deploymentTarget', :'deployment_target'/);
 assert.match(inspectSql, /count\(\*\) = 7/);
 assert.match(inspectSql, /pilot\.status in \('draft', 'armed'\)/);
 assert.match(inspectSql, /revocation\.assignment_signer_id is null/);
@@ -210,5 +228,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'TeleBirr operational trust verified: manual staging trust-only provisioning plus exact-target signed staging or production pairing-only and evidence-only Android releases',
+  'TeleBirr operational trust verified: exact-target staging or production trust-only provisioning plus separately confirmed signed pairing-only and evidence-only Android releases',
 );

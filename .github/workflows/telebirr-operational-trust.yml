@@ -1,8 +1,20 @@
-name: Staging TeleBirr operational trust
+name: TeleBirr operational trust
 
 on:
   workflow_dispatch:
     inputs:
+      deployment_target:
+        description: Select the exact protected environment and database trust target
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+      confirm_deployment_target:
+        description: Type the selected deployment target again
+        required: true
+        type: string
       mode:
         description: Inspect or idempotently provision only the disabled TeleBirr trust binding
         required: true
@@ -11,8 +23,8 @@ on:
         options:
           - inspect
           - provision
-      confirm_staging_project_ref:
-        description: Type the exact staging project ref
+      confirm_project_ref:
+        description: Type the exact project ref for the selected deployment target
         required: true
         type: string
       confirm_main_commit_sha:
@@ -28,36 +40,46 @@ permissions:
   contents: read
 
 concurrency:
-  group: staging-telebirr-operational-trust
+  group: telebirr-operational-trust-${{ inputs.deployment_target }}
   cancel-in-progress: false
 
 env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  PRODUCTION_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
 
 jobs:
   validate-target:
-    name: Validate exact disabled staging target
+    name: Validate exact disabled trust target
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
     env:
+      DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
+      CONFIRMED_DEPLOYMENT_TARGET: ${{ inputs.confirm_deployment_target }}
       REQUESTED_MODE: ${{ inputs.mode }}
-      CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_PROJECT_REF: ${{ inputs.confirm_project_ref }}
       CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
       CONFIRMED_NO_MONEY_OPERATION: ${{ inputs.confirm_no_money_operation }}
     steps:
-      - name: Require main, exact source, staging, and trust-only confirmation
+      - name: Require main, exact source, target, and trust-only confirmation
         shell: bash
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$DEPLOYMENT_TARGET" == 'staging' || "$DEPLOYMENT_TARGET" == 'production' ]]
+          [[ "$CONFIRMED_DEPLOYMENT_TARGET" == "$DEPLOYMENT_TARGET" ]]
           [[ "$REQUESTED_MODE" == 'inspect' || "$REQUESTED_MODE" == 'provision' ]]
           [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
-          [[ "$CONFIRMED_STAGING_PROJECT_REF" == "$STAGING_PROJECT_REF" ]]
-          [[ "$CONFIRMED_STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          if [[ "$DEPLOYMENT_TARGET" == 'staging' ]]; then
+            [[ "$CONFIRMED_PROJECT_REF" == "$STAGING_PROJECT_REF" ]]
+            [[ "$CONFIRMED_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          else
+            [[ "$CONFIRMED_PROJECT_REF" == "$PRODUCTION_PROJECT_REF" ]]
+            [[ "$CONFIRMED_PROJECT_REF" != "$STAGING_PROJECT_REF" ]]
+          fi
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
           if [[ "$REQUESTED_MODE" == 'inspect' ]]; then
@@ -71,7 +93,7 @@ jobs:
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: staging
+    environment: ${{ inputs.deployment_target }}
     permissions:
       contents: read
     steps:
@@ -84,6 +106,7 @@ jobs:
         id: protected-inputs
         shell: bash
         env:
+          DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
           ASSIGNMENT_PRIVATE_BASE64: ${{ secrets.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64 }}
           ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
           ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
@@ -113,6 +136,8 @@ jobs:
           [[ "$ASSIGNMENT_SIGNER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           [[ "$ASSIGNMENT_SIGNER_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
           [[ "$BRIDGE_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
+          [[ "$ASSIGNMENT_SIGNER_KEY_ID" == "telebirr-assignment-$DEPLOYMENT_TARGET-v1" ]]
+          [[ "$BRIDGE_KEY_ID" == "telebirr-bridge-$DEPLOYMENT_TARGET-v1" ]]
           [[ "$ASSIGNMENT_SIGNER_KEY_ID" != "$BRIDGE_KEY_ID" ]]
           [[ "$ASSIGNMENT_PUBLIC_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$BRIDGE_PUBLIC_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -193,6 +218,7 @@ jobs:
       - name: Inspect or idempotently provision only the assignment trust row
         shell: bash
         env:
+          DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
           REQUESTED_MODE: ${{ inputs.mode }}
           ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
           ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
@@ -200,10 +226,8 @@ jobs:
           ASSIGNMENT_VALID_FROM: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_VALID_FROM }}
           ASSIGNMENT_VALID_UNTIL: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_VALID_UNTIL }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGHOST: ${{ env.STAGING_POOLER_HOST }}
           PGPORT: '5432'
           PGDATABASE: postgres
-          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
           PGSSLMODE: verify-full
           PGSSLROOTCERT: ${{ steps.protected-inputs.outputs.protected }}/supabase-ca.crt
           PGCONNECT_TIMEOUT: '5'
@@ -212,14 +236,27 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
-          sql_file='infra/sql/staging-telebirr-operational-signer-inspect.sql'
+          if [[ "$DEPLOYMENT_TARGET" == 'staging' ]]; then
+            target_project_ref="$STAGING_PROJECT_REF"
+            target_pooler_host="$STAGING_POOLER_HOST"
+          elif [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
+            target_project_ref="$PRODUCTION_PROJECT_REF"
+            target_pooler_host="$PRODUCTION_POOLER_HOST"
+          else
+            exit 1
+          fi
+          export PGHOST="$target_pooler_host"
+          export PGUSER="postgres.$target_project_ref"
+
+          sql_file='infra/sql/telebirr-operational-signer-inspect.sql'
           expected_operation='inspect_only'
           if [[ "$REQUESTED_MODE" == 'provision' ]]; then
-            sql_file='infra/sql/staging-telebirr-operational-signer-provision.sql'
+            sql_file='infra/sql/telebirr-operational-signer-provision.sql'
             expected_operation='trust_only'
           fi
 
           result="$(psql -X --quiet --tuples-only --no-align \
+            --set=deployment_target="$DEPLOYMENT_TARGET" \
             --set=assignment_signer_id="$ASSIGNMENT_SIGNER_ID" \
             --set=assignment_signer_key_id="$ASSIGNMENT_SIGNER_KEY_ID" \
             --set=assignment_signer_public_spki_sha256="$ASSIGNMENT_PUBLIC_SHA256" \
@@ -228,9 +265,11 @@ jobs:
             --file="$sql_file")"
           jq -e \
             --arg operation "$expected_operation" \
+            --arg deployment_target "$DEPLOYMENT_TARGET" \
             'type == "object" and
              .schemaVersion == 1 and
              .operation == $operation and
+             .deploymentTarget == $deployment_target and
              .assignmentSigner == "active_unrevoked" and
              .financialFeatures == "disabled" and
              .openPilot == "absent"' <<<"$result" >/dev/null

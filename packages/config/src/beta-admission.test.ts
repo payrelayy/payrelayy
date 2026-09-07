@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BETA_ADMISSION_DATABASE_DIRECT_HOST,
+  BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST,
   loadBetaAdmissionConfig,
+  FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
   FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
   redactedBetaAdmissionConfigForLog,
 } from './beta-admission.js';
@@ -13,6 +15,7 @@ function enabledEnvironment(databaseUrl = directDatabaseUrl): NodeJS.ProcessEnv 
   return {
     NODE_ENV: 'test',
     INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true',
+    BETA_ADMISSION_DEPLOYMENT_TARGET: 'staging',
     BETA_ADMISSION_DATABASE_URL: databaseUrl,
     BOT_TO_BETA_ADMISSION_HMAC_SECRET: 'a'.repeat(64),
     BETA_ADMISSION_PAYLOAD_HMAC_SECRET: 'b'.repeat(64),
@@ -56,9 +59,29 @@ describe('beta-admission runtime configuration', () => {
     });
   });
 
-  it('rejects production, broad roles, transaction pooling, and weak or ambiguous TLS URLs', () => {
+  it('accepts the exact production target without allowing a staging/production crossover', () => {
+    const productionDatabaseUrl = `postgresql://fetanagent_beta_admission_runtime:db-password@${BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST}:5432/postgres?sslmode=verify-full`;
+    expect(
+      loadBetaAdmissionConfig({
+        ...enabledEnvironment(productionDatabaseUrl),
+        BETA_ADMISSION_DEPLOYMENT_TARGET: 'production',
+      }).runtime,
+    ).toMatchObject({
+      enabled: true,
+      stage: 'production',
+      projectReference: FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
+      connection: { host: BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST },
+    });
+    expect(() =>
+      loadBetaAdmissionConfig({
+        ...enabledEnvironment(),
+        BETA_ADMISSION_DEPLOYMENT_TARGET: 'production',
+      }),
+    ).toThrow('exact deployment-target database endpoint');
+  });
+
+  it('rejects broad roles, transaction pooling, and weak or ambiguous TLS URLs', () => {
     const invalidUrls = [
-      'postgresql://fetanagent_beta_admission_runtime:pw@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
       `postgresql://postgres:pw@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
       `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
       `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
@@ -97,6 +120,7 @@ describe('beta-admission runtime configuration', () => {
       {
         NODE_ENV: 'test',
         INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true',
+        BETA_ADMISSION_DEPLOYMENT_TARGET: 'staging',
         BETA_ADMISSION_DATABASE_URL_FILE: '/run/secrets/database-url',
         BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: '/run/secrets/transport-hmac',
         BETA_ADMISSION_PAYLOAD_HMAC_SECRET_FILE: '/run/secrets/payload-hmac',
@@ -113,7 +137,7 @@ describe('beta-admission runtime configuration', () => {
     ).toThrow('must not both be configured');
   });
 
-  it('requires the exact private secret-file mounts in the production staging container', () => {
+  it('requires the exact private secret-file mounts in the production container', () => {
     expect(() =>
       loadBetaAdmissionConfig({
         ...enabledEnvironment(),
@@ -125,6 +149,7 @@ describe('beta-admission runtime configuration', () => {
         {
           NODE_ENV: 'production',
           INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true',
+          BETA_ADMISSION_DEPLOYMENT_TARGET: 'staging',
           BETA_ADMISSION_DATABASE_URL_FILE: '/tmp/database-url',
           BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: '/run/secrets/beta_admission_bot_transport_hmac',
           BETA_ADMISSION_PAYLOAD_HMAC_SECRET_FILE: '/run/secrets/beta_admission_payload_hmac',

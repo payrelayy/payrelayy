@@ -1,0 +1,502 @@
+name: fetanagent-production
+
+# Long-lived production control and customer services. Financial execution is deliberately absent:
+# this stack can authenticate real users, manage production configuration, admit Telegram users,
+# and execute scoped Player-ID actions, but it cannot move money.
+x-runtime-defaults: &runtime-defaults
+  profiles: [production]
+  platform: linux/amd64
+  pull_policy: never
+  init: true
+  user: '10001:10001'
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  mem_limit: 256m
+  cpus: 0.50
+  stop_grace_period: 20s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+
+services:
+  owner-control:
+    <<: *runtime-defaults
+    image: fetanagent-owner-control:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      OWNER_CONTROL_HOST: 0.0.0.0
+      OWNER_CONTROL_PORT: '3002'
+      OWNER_CONTROL_DEPLOYMENT_TARGET: production
+      OWNER_CONTROL_SUPABASE_URL: https://xzztugbgtulptnbpoelr.supabase.co
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'
+      OWNER_CONTROL_DATABASE_URL_FILE: /run/secrets/owner_control_database_url
+      OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/owner_control_supabase_publishable_key
+      OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master
+      OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
+      OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+      OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:?set the reviewed production assignment signer key ID}
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: owner_control_database_url
+        target: owner_control_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: production_supabase_publishable_key
+        target: owner_control_supabase_publishable_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_encryption_master
+        target: owner_receiver_reference_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: owner_receiver_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: deposit_proof_reference_profile
+        target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - public_application
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3002/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 4
+
+  customer-web:
+    <<: *runtime-defaults
+    image: fetanagent-customer-web:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      CUSTOMER_WEB_HOST: 0.0.0.0
+      CUSTOMER_WEB_PORT: '3003'
+      CUSTOMER_WEB_DEPLOYMENT_TARGET: production
+      CUSTOMER_WEB_SUPABASE_URL: https://xzztugbgtulptnbpoelr.supabase.co
+      CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/customer_web_supabase_publishable_key
+      CUSTOMER_WEB_DATABASE_URL_FILE: /run/secrets/customer_web_database_url
+      CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET_FILE: /run/secrets/customer_web_rate_limit_hmac
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true'
+      INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true'
+      INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true'
+      INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'
+      INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: customer_web_database_url
+        target: customer_web_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: production_supabase_publishable_key
+        target: customer_web_supabase_publishable_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: customer_web_rate_limit_hmac
+        target: customer_web_rate_limit_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - public_application
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3003/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 4
+
+  api:
+    <<: *runtime-defaults
+    image: fetanagent-api:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      API_HOST: 0.0.0.0
+      API_PORT: '3000'
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'
+      PLAYER_ACTION_DEPLOYMENT_TARGET: production
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'
+      PLAYER_ACTION_DATABASE_URL_FILE: /run/secrets/player_action_database_url
+      BOT_TO_API_ACTION_HMAC_SECRET_FILE: /run/secrets/api_player_action_transport_hmac
+      API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/api_player_action_payload_hmac
+      API_TELEGRAM_CAPABILITY_HMAC_SECRET_FILE: /run/secrets/api_player_action_capability_hmac
+      API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET_FILE: /run/secrets/api_player_action_semantic_hmac
+      CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE: /run/secrets/cbe_deposit_reference_encryption_key
+      CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE: /run/secrets/cbe_deposit_reference_fingerprint_key
+      CBE_DEPOSIT_REFERENCE_KEY_PROFILE_FILE: /etc/fetanagent/cbe-deposit-reference-key-profile.v1.json
+      DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE: /run/secrets/deposit_proof_reference_encryption_master
+      DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE: /run/secrets/deposit_proof_reference_fingerprint_master
+      DEPOSIT_PROOF_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: player_action_database_url
+        target: player_action_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_transport_hmac
+        target: api_player_action_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_payload_hmac
+        target: api_player_action_payload_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_capability_hmac
+        target: api_player_action_capability_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: api_player_action_semantic_hmac
+        target: api_player_action_semantic_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: cbe_deposit_reference_encryption_key
+        target: cbe_deposit_reference_encryption_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: cbe_deposit_reference_fingerprint_key
+        target: cbe_deposit_reference_fingerprint_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_encryption_master
+        target: deposit_proof_reference_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: deposit_proof_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: cbe_deposit_reference_key_profile
+        target: /etc/fetanagent/cbe-deposit-reference-key-profile.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: deposit_proof_reference_profile
+        target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - private_application
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 4
+
+  beta-admission:
+    <<: *runtime-defaults
+    image: fetanagent-beta-admission:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      BETA_ADMISSION_HOST: 0.0.0.0
+      BETA_ADMISSION_PORT: '3001'
+      BETA_ADMISSION_DEPLOYMENT_TARGET: production
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'
+      BETA_ADMISSION_DATABASE_URL_FILE: /run/secrets/beta_admission_database_url
+      BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/beta_admission_bot_transport_hmac
+      BETA_ADMISSION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/beta_admission_payload_hmac
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: beta_admission_database_url
+        target: beta_admission_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: beta_admission_bot_transport_hmac
+        target: beta_admission_bot_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: beta_admission_payload_hmac
+        target: beta_admission_payload_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - private_application
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 4
+
+  bot:
+    <<: *runtime-defaults
+    image: fetanagent-bot:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      TELEGRAM_BOT_ENABLED: 'true'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'true'
+      BOT_TO_BETA_ADMISSION_BASE_URL: http://beta-admission:3001/
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
+      BOT_TO_API_ACTION_BASE_URL: http://api:3000/
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/bot_beta_admission_transport_hmac
+      BOT_TO_API_ACTION_HMAC_SECRET_FILE: /run/secrets/bot_player_action_transport_hmac
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: telegram_bot_token
+        target: telegram_bot_token
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: bot_beta_admission_transport_hmac
+        target: bot_beta_admission_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: bot_player_action_transport_hmac
+        target: bot_player_action_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    networks:
+      - private_application
+    depends_on:
+      api:
+        condition: service_healthy
+        restart: true
+      beta-admission:
+        condition: service_healthy
+        restart: true
+
+  gateway:
+    <<: *runtime-defaults
+    image: fetanagent-gateway:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    mem_limit: 128m
+    cpus: 0.25
+    cap_add:
+      - NET_BIND_SERVICE
+    ports:
+      - '80:80/tcp'
+      - '443:443/tcp'
+    volumes:
+      - type: bind
+        source: /var/lib/fetanagent-gateway/data
+        target: /data
+      - type: bind
+        source: /var/lib/fetanagent-gateway/config
+        target: /config
+    networks:
+      - public_application
+      - companion_device_ingress
+      - telebirr_device_ingress
+    depends_on:
+      customer-web:
+        condition: service_healthy
+        restart: true
+      owner-control:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: [CMD, caddy, validate, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+      interval: 15s
+      timeout: 3s
+      start_period: 15s
+      retries: 4
+
+networks:
+  public_application:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
+  private_application:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
+  companion_device_ingress:
+    external: true
+    name: fetanagent-companion-device-ingress
+  telebirr_device_ingress:
+    external: true
+    name: fetanagent-telebirr-device-ingress
+
+configs:
+  supabase_ca_certificate:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/supabase-ca.crt
+  cbe_deposit_reference_key_profile:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/cbe-deposit-reference-key-profile.v1.json
+  deposit_proof_reference_profile:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-profile.v2.json
+
+secrets:
+  owner_control_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-database-url
+  production_supabase_publishable_key:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/publishable-key
+  customer_web_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/customer-web-database-url
+  customer_web_rate_limit_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/customer-web-rate-limit-hmac
+  beta_admission_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/beta-database-url
+  beta_admission_bot_transport_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/beta-transport-hmac
+  beta_admission_payload_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/beta-payload-hmac
+  player_action_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/player-action-database-url
+  api_player_action_transport_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/api-action-transport-hmac
+  api_player_action_payload_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/api-action-payload-hmac
+  api_player_action_capability_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/api-action-capability-hmac
+  api_player_action_semantic_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/api-action-semantic-hmac
+  cbe_deposit_reference_encryption_key:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/cbe-deposit-reference-encryption-key
+  cbe_deposit_reference_fingerprint_key:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/cbe-deposit-reference-fingerprint-key
+  deposit_proof_reference_encryption_master:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-encryption-master
+  deposit_proof_reference_fingerprint_master:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-fingerprint-master
+  telegram_bot_token:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-token
+  bot_beta_admission_transport_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-transport-hmac
+  bot_player_action_transport_hmac:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-action-transport-hmac

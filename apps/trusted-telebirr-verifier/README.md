@@ -32,6 +32,10 @@ generic-worker roles cannot call either verifier function. The migration does no
 feature switch and does not create credentials, signer keys, device enrollments, receiver
 profiles, pilots, proofs, or other runtime seeds.
 
+The executable configuration requires an explicit `staging` or `production` deployment target and
+binds each value to its exact Supabase direct database host and the dedicated verifier runtime role.
+A missing, differently cased, or cross-wired target fails closed before the verifier can connect.
+
 The catalog contract audits the reachable schema, relation, column, sequence, and routine surface,
 not only `app`: the runtime may use only `app` and the empty `public` schema, cannot create in a
 non-system schema, cannot reach any user relation, column, or sequence, and can execute exactly the

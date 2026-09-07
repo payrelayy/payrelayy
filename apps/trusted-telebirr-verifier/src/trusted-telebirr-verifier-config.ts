@@ -22,6 +22,10 @@ export const TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE =
 export const TRUSTED_TELEBIRR_VERIFIER_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const TRUSTED_TELEBIRR_VERIFIER_STAGING_DATABASE_HOST =
   'db.spzpiyxheappsfyswewl.supabase.co' as const;
+export const TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_PROJECT_REFERENCE =
+  'xzztugbgtulptnbpoelr' as const;
+export const TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_DATABASE_HOST =
+  'db.xzztugbgtulptnbpoelr.supabase.co' as const;
 export const TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE =
   '/run/secrets/trusted_telebirr_verifier_database_url' as const;
 export const TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE =
@@ -31,12 +35,25 @@ export const TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE =
 
 const MAX_CONFIG_BYTES = 16_384;
 
+const TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS = {
+  staging: {
+    projectReference: TRUSTED_TELEBIRR_VERIFIER_STAGING_PROJECT_REFERENCE,
+    host: TRUSTED_TELEBIRR_VERIFIER_STAGING_DATABASE_HOST,
+  },
+  production: {
+    projectReference: TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_PROJECT_REFERENCE,
+    host: TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_DATABASE_HOST,
+  },
+} as const;
+type TrustedTelebirrVerifierDeploymentTarget =
+  keyof typeof TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS;
+
 export type TrustedTelebirrVerifierConfig =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
-      readonly deploymentTarget: 'staging';
-      readonly projectReference: typeof TRUSTED_TELEBIRR_VERIFIER_STAGING_PROJECT_REFERENCE;
+      readonly deploymentTarget: TrustedTelebirrVerifierDeploymentTarget;
+      readonly projectReference: (typeof TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS)[TrustedTelebirrVerifierDeploymentTarget]['projectReference'];
       readonly connection: TrustedTelebirrVerifierConnectionConfig;
       readonly pinnedKeys: TrustedTelebirrPinnedKeys;
     };
@@ -221,7 +238,10 @@ function decodedComponent(value: string): string {
   }
 }
 
-function connectionFromUrl(value: string): Omit<TrustedTelebirrVerifierConnectionConfig, 'ca'> {
+function connectionFromUrl(
+  value: string,
+  deploymentTarget: TrustedTelebirrVerifierDeploymentTarget,
+): Omit<TrustedTelebirrVerifierConnectionConfig, 'ca'> {
   let url: URL;
   try {
     url = new URL(value);
@@ -232,9 +252,10 @@ function connectionFromUrl(value: string): Omit<TrustedTelebirrVerifierConnectio
   const user = decodedComponent(url.username);
   const password = decodedComponent(url.password);
   const database = decodedComponent(url.pathname.slice(1));
+  const expectedTarget = TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS[deploymentTarget];
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
-    url.hostname !== TRUSTED_TELEBIRR_VERIFIER_STAGING_DATABASE_HOST ||
+    url.hostname !== expectedTarget.host ||
     (url.port !== '' && url.port !== '5432') ||
     user !== TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE ||
     password.length < 16 ||
@@ -248,7 +269,7 @@ function connectionFromUrl(value: string): Omit<TrustedTelebirrVerifierConnectio
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: TRUSTED_TELEBIRR_VERIFIER_STAGING_DATABASE_HOST,
+    host: expectedTarget.host,
     password,
     port: 5432 as const,
     user: TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE,
@@ -353,6 +374,7 @@ export function loadTrustedTelebirrVerifierConfig(
     'INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED',
   );
   if (!enabled) return Object.freeze({ enabled: false });
+  const deploymentTarget = environment.TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET;
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'live' ||
@@ -360,11 +382,12 @@ export function loadTrustedTelebirrVerifierConfig(
       environment.TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED,
       'TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED',
     ) ||
-    environment.TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET !== 'staging' ||
+    (deploymentTarget !== 'staging' && deploymentTarget !== 'production') ||
     environment.NODE_EXTRA_CA_CERTS !== TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE
   ) {
     return unavailable();
   }
+  const databaseTarget = TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS[deploymentTarget];
   const databaseFile = environment.TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE;
   const pinFile = environment.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE;
   if (
@@ -379,6 +402,7 @@ export function loadTrustedTelebirrVerifierConfig(
   }
   const connectionWithoutCa = connectionFromUrl(
     guardedText(readGuarded(databaseFile, dependencies, 'secret')),
+    deploymentTarget,
   );
   const pinnedKeys = pinsFromManifest(
     guardedText(readGuarded(pinFile, dependencies, 'public_config')),
@@ -389,8 +413,8 @@ export function loadTrustedTelebirrVerifierConfig(
   const connection = Object.freeze({ ...connectionWithoutCa, ca });
   return Object.freeze({
     enabled: true,
-    deploymentTarget: 'staging' as const,
-    projectReference: TRUSTED_TELEBIRR_VERIFIER_STAGING_PROJECT_REFERENCE,
+    deploymentTarget,
+    projectReference: databaseTarget.projectReference,
     connection,
     pinnedKeys,
   });

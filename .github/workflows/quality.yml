@@ -112,7 +112,9 @@ jobs:
             cbe-deposit-reference-key-profile.v1.json customer-web-database-url \
             customer-web-rate-limit-hmac deposit-proof-reference-encryption-master \
             deposit-proof-reference-fingerprint-master deposit-proof-reference-profile.v2.json \
-            owner-database-url player-action-database-url publishable-key supabase-ca.crt; do
+            owner-database-url player-action-database-url publishable-key supabase-ca.crt \
+            telebirr-assignment.spki.der telebirr-bridge-runtime-manifest.v1.json \
+            telebirr-bridge-server-signer.pkcs8.der telebirr-device-state-database-url; do
             install -m 0600 /dev/null "$production_contract_dir/$file"
           done
           FETANAGENT_IMAGE_TAG=ci \

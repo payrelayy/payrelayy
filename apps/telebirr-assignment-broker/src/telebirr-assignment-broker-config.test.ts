@@ -214,6 +214,7 @@ describe('private TeleBirr assignment broker configuration', () => {
     const config = loadTelebirrAssignmentBrokerConfig(enabledEnvironment, dependencies);
     expect(config).toMatchObject({
       enabled: true,
+      mode: 'operational',
       deploymentTarget: 'staging',
       connection: {
         database: 'postgres',
@@ -227,7 +228,9 @@ describe('private TeleBirr assignment broker configuration', () => {
         receiverProfileId: ids.profile,
       },
     });
-    if (!config.enabled) throw new Error('expected enabled synthetic config');
+    if (!config.enabled || config.mode !== 'operational') {
+      throw new Error('expected enabled operational synthetic config');
+    }
     expect(dependencies.fileSystem.lstat).toHaveBeenCalledTimes(5);
     for (const path of [
       TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE,
@@ -256,6 +259,60 @@ describe('private TeleBirr assignment broker configuration', () => {
     expect(dependencies.returnedBuffers.every((bytes) => bytes.every((value) => value === 0))).toBe(
       true,
     );
+  });
+
+  it('loads a production enrollment-only broker without reading or accepting assignment authority', () => {
+    const dependencies = guardedDependencies();
+    const config = loadTelebirrAssignmentBrokerConfig(
+      {
+        NODE_ENV: 'production',
+        FINANCIAL_ACTIONS_MODE: 'dry_run',
+        INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED: 'true',
+        TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true',
+        TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true',
+        TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'production',
+      },
+      dependencies,
+    );
+    expect(config).toEqual({
+      enabled: true,
+      mode: 'enrollment_only',
+      deploymentTarget: 'production',
+      projectReference: TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.projectReference,
+    });
+    expect(dependencies.fileSystem.lstat).not.toHaveBeenCalled();
+    expect(redactedTelebirrAssignmentBrokerConfigForLog(config)).toEqual({
+      enabled: true,
+      mode: 'enrollment_only',
+      deploymentTarget: 'production',
+      connectionConfigured: false,
+      openingKeyConfigured: false,
+      receiverManifestConfigured: false,
+      signerConfigured: false,
+    });
+  });
+
+  it.each([
+    ['database URL', 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE'],
+    ['opening key', 'TELEBIRR_ASSIGNMENT_BROKER_REFERENCE_OPENING_KEY_FILE'],
+    ['runtime manifest', 'TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_MANIFEST_FILE'],
+    ['signer', 'TELEBIRR_ASSIGNMENT_BROKER_SIGNER_PRIVATE_KEY_FILE'],
+    ['CA', 'NODE_EXTRA_CA_CERTS'],
+  ])('rejects %s authority in enrollment-only mode', (_name, variable) => {
+    expect(() =>
+      loadTelebirrAssignmentBrokerConfig(
+        {
+          NODE_ENV: 'production',
+          FINANCIAL_ACTIONS_MODE: 'dry_run',
+          INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED: 'true',
+          TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true',
+          TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true',
+          TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'production',
+          [variable]: 'forbidden',
+        },
+        guardedDependencies(),
+      ),
+    ).toThrow('configuration is unavailable');
   });
 
   it('also accepts only the exact staging direct route and bare runtime role', () => {
@@ -513,6 +570,7 @@ describe('private TeleBirr assignment broker configuration', () => {
     const projection = redactedTelebirrAssignmentBrokerConfigForLog(config);
     expect(projection).toEqual({
       enabled: true,
+      mode: 'operational',
       deploymentTarget: 'staging',
       connectionConfigured: true,
       openingKeyConfigured: true,

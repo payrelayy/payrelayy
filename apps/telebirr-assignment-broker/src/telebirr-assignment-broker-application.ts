@@ -11,7 +11,10 @@ import {
 import type { TelebirrAssignmentBrokerConfig } from './telebirr-assignment-broker-config.js';
 import { createTelebirrAssignmentBroker } from './telebirr-assignment-broker.js';
 
-type EnabledConfig = Extract<TelebirrAssignmentBrokerConfig, { readonly enabled: true }>;
+type OperationalConfig = Extract<
+  TelebirrAssignmentBrokerConfig,
+  { readonly enabled: true; readonly mode: 'operational' }
+>;
 
 export interface TelebirrAssignmentBrokerLocalServerRuntime {
   readonly server: Pick<Server, 'listening'>;
@@ -21,7 +24,7 @@ export interface TelebirrAssignmentBrokerLocalServerRuntime {
 
 export interface TelebirrAssignmentBrokerApplicationDependencies {
   readonly createPostgresRuntime?: (
-    connection: EnabledConfig['connection'],
+    connection: OperationalConfig['connection'],
   ) => Promise<TelebirrAssignmentBrokerPostgresRuntime>;
   readonly createLocalServer?: (
     poll: TelebirrAssignmentBrokerPoll,
@@ -74,6 +77,26 @@ export async function startTelebirrAssignmentBrokerApplication(
   let postgres: TelebirrAssignmentBrokerPostgresRuntime | undefined;
   let localServer: TelebirrAssignmentBrokerLocalServerRuntime | undefined;
   try {
+    if (config.mode === 'enrollment_only') {
+      localServer = createLocalServer(async () =>
+        Object.freeze({ kind: 'no_assignment' as const }),
+      );
+      await localServer.listen();
+      if (!localServer.server.listening) throw new Error();
+      const activeLocalServer = localServer;
+      let closePromise: Promise<void> | undefined;
+      let closed = false;
+      return Object.freeze({
+        ready: async () => !closed && activeLocalServer.server.listening,
+        close: () => {
+          closePromise ??= (async () => {
+            closed = true;
+            await closeRuntimes(activeLocalServer, undefined);
+          })();
+          return closePromise;
+        },
+      });
+    }
     postgres = await createPostgresRuntime(config.connection);
     if (!(await postgres.ready())) throw new Error();
     const poll = createTelebirrAssignmentBroker({

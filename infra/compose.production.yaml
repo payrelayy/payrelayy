@@ -2,7 +2,8 @@ name: fetanagent-production
 
 # Long-lived production control and customer services. Financial execution is deliberately absent:
 # this stack can authenticate real users, manage production configuration, admit Telegram users,
-# and execute scoped Player-ID actions, but it cannot move money.
+# execute scoped Player-ID actions, and pair the dedicated TeleBirr Android verifier, but it cannot
+# deliver a financial assignment or move money.
 x-runtime-defaults: &runtime-defaults
   profiles: [production]
   platform: linux/amd64
@@ -400,6 +401,165 @@ services:
         condition: service_healthy
         restart: true
 
+  telebirr-assignment-broker:
+    <<: *runtime-defaults
+    image: fetanagent-telebirr-assignment-broker:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    pids_limit: 96
+    mem_limit: 192m
+    environment:
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    network_mode: none
+    volumes:
+      - type: volume
+        source: telebirr_assignment_socket
+        target: /run/fetanagent-telebirr-assignment-broker
+        volume:
+          nocopy: false
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - "import{lstatSync,realpathSync}from'node:fs';import{connect}from'node:net';const r='/run/fetanagent-telebirr-assignment-broker',p=r+'/assignment.sock',d=lstatSync(r),s=lstatSync(p);if(!d.isDirectory()||d.isSymbolicLink()||d.uid!==10001||(d.mode&0o7777)!==0o700||realpathSync(r)!==r||!s.isSocket()||s.isSymbolicLink()||s.uid!==10001||(s.mode&0o7777)!==0o600||realpathSync(p)!==p)process.exit(1);const c=connect({path:p}),f=()=>process.exit(1);c.setTimeout(1000,f);c.once('error',f);c.once('connect',()=>{c.destroy();process.exit(0)})"
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 4
+
+  telebirr-device-state-broker:
+    <<: *runtime-defaults
+    image: fetanagent-telebirr-device-state-broker:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    pids_limit: 96
+    mem_limit: 192m
+    environment:
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_TELEBIRR_DEVICE_STATE_BROKER_ENABLED: 'true'
+      TELEBIRR_DEVICE_STATE_BROKER_NO_MONEY_PILOT_ENABLED: 'true'
+      TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production
+      TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE: /run/secrets/telebirr_device_state_broker_database_url
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    volumes:
+      - type: volume
+        source: telebirr_device_state_socket
+        target: /run/fetanagent-telebirr-device-state
+        volume:
+          nocopy: false
+    secrets:
+      - source: telebirr_device_state_broker_database_url
+        target: telebirr_device_state_broker_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - telebirr_device_state_database_egress
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - "import{lstatSync,realpathSync}from'node:fs';import{connect}from'node:net';const r='/run/fetanagent-telebirr-device-state',p=r+'/state.sock',d=lstatSync(r),s=lstatSync(p);if(!d.isDirectory()||d.isSymbolicLink()||d.uid!==10001||(d.mode&0o7777)!==0o700||realpathSync(r)!==r||!s.isSocket()||s.isSymbolicLink()||s.uid!==10001||(s.mode&0o7777)!==0o600||realpathSync(p)!==p)process.exit(1);const c=connect({path:p}),f=()=>process.exit(1);c.setTimeout(1000,f);c.once('error',f);c.once('connect',()=>{c.destroy();process.exit(0)})"
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 4
+
+  telebirr-device-bridge:
+    <<: *runtime-defaults
+    image: fetanagent-telebirr-device-bridge:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    pids_limit: 96
+    mem_limit: 192m
+    environment:
+      NODE_ENV: production
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_TELEBIRR_DEVICE_BRIDGE_ENABLED: 'true'
+      TELEBIRR_DEVICE_BRIDGE_NO_MONEY_PILOT_ENABLED: 'true'
+      TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production
+      TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST: 0.0.0.0
+      TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT: '8084'
+      TELEBIRR_DEVICE_BRIDGE_SERVER_SIGNER_PRIVATE_KEY_FILE: /run/secrets/telebirr_device_bridge_server_signer.pkcs8.der
+      TELEBIRR_DEVICE_BRIDGE_ASSIGNMENT_SIGNER_PUBLIC_KEY_FILE: /run/configs/telebirr_device_bridge_assignment_signer.spki.der
+      TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE: /run/configs/telebirr_device_bridge_runtime_manifest.v1.json
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    volumes:
+      - type: volume
+        source: telebirr_assignment_socket
+        target: /run/fetanagent-telebirr-assignment-broker
+        read_only: true
+        volume:
+          nocopy: false
+      - type: volume
+        source: telebirr_device_state_socket
+        target: /run/fetanagent-telebirr-device-state
+        read_only: true
+        volume:
+          nocopy: false
+    secrets:
+      - source: telebirr_device_bridge_server_signer
+        target: telebirr_device_bridge_server_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: telebirr_device_bridge_assignment_signer
+        target: /run/configs/telebirr_device_bridge_assignment_signer.spki.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: telebirr_device_bridge_runtime_manifest
+        target: /run/configs/telebirr_device_bridge_runtime_manifest.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      telebirr_device_ingress:
+        aliases:
+          - telebirr-device-bridge
+    depends_on:
+      telebirr-assignment-broker:
+        condition: service_healthy
+        restart: true
+      telebirr-device-state-broker:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - "import{lstatSync,realpathSync}from'node:fs';import{connect}from'node:net';for(const[r,n]of[['/run/fetanagent-telebirr-assignment-broker','assignment.sock'],['/run/fetanagent-telebirr-device-state','state.sock']]){const p=r+'/'+n,d=lstatSync(r),s=lstatSync(p);if(!d.isDirectory()||d.isSymbolicLink()||d.uid!==10001||(d.mode&0o7777)!==0o700||realpathSync(r)!==r||!s.isSocket()||s.isSymbolicLink()||s.uid!==10001||(s.mode&0o7777)!==0o600||realpathSync(p)!==p)process.exit(1)}const c=connect({host:'127.0.0.1',port:8084}),f=()=>process.exit(1);c.setTimeout(1000,f);c.once('error',f);c.once('connect',()=>{c.destroy();process.exit(0)})"
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 4
+
   gateway:
     <<: *runtime-defaults
     image: fetanagent-gateway:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
@@ -428,6 +588,9 @@ services:
       owner-control:
         condition: service_healthy
         restart: true
+      telebirr-device-bridge:
+        condition: service_healthy
+        restart: true
     healthcheck:
       test: [CMD, caddy, validate, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
       interval: 15s
@@ -446,6 +609,11 @@ networks:
     enable_ipv6: true
     internal: false
     attachable: false
+  telebirr_device_state_database_egress:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
   companion_device_ingress:
     external: true
     name: fetanagent-companion-device-ingress
@@ -460,6 +628,10 @@ configs:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/cbe-deposit-reference-key-profile.v1.json
   deposit_proof_reference_profile:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-profile.v2.json
+  telebirr_device_bridge_assignment_signer:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment.spki.der
+  telebirr_device_bridge_runtime_manifest:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-bridge-runtime-manifest.v1.json
 
 secrets:
   owner_control_database_url:
@@ -500,3 +672,11 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-transport-hmac
   bot_player_action_transport_hmac:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-action-transport-hmac
+  telebirr_device_state_broker_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-device-state-database-url
+  telebirr_device_bridge_server_signer:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-bridge-server-signer.pkcs8.der
+
+volumes:
+  telebirr_assignment_socket:
+  telebirr_device_state_socket:

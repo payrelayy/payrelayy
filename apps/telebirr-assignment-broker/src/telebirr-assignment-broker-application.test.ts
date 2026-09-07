@@ -34,6 +34,7 @@ function config(): Extract<TelebirrAssignmentBrokerConfig, { enabled: true }> {
   const receiverName = 'synthetic pilot receiver';
   return {
     enabled: true,
+    mode: 'operational',
     deploymentTarget: 'staging',
     projectReference: 'spzpiyxheappsfyswewl',
     connection: {
@@ -173,6 +174,33 @@ describe('private TeleBirr assignment broker application', () => {
     expect(fixture.server.close).toHaveBeenCalledOnce();
     expect(fixture.postgres.close).toHaveBeenCalledOnce();
     await expect(application.ready()).resolves.toBe(false);
+  });
+
+  it('serves enrollment-only no-assignment responses without creating a database runtime', async () => {
+    const fixture = runtimeFixture();
+    const application = await startTelebirrAssignmentBrokerApplication(
+      {
+        enabled: true,
+        mode: 'enrollment_only',
+        deploymentTarget: 'production',
+        projectReference: 'xzztugbgtulptnbpoelr',
+      },
+      fixture.dependencies,
+    );
+    expect(fixture.events).toEqual(['server.create', 'server.listen']);
+    expect(fixture.dependencies.createPostgresRuntime).not.toHaveBeenCalled();
+    const createLocalServer = vi.mocked(fixture.dependencies.createLocalServer!);
+    const poll = createLocalServer.mock.calls[0]?.[0];
+    await expect(
+      poll?.({
+        certificate: {} as never,
+        bridgeRequestBodyDigest: sha('1'),
+        requestedLeaseSeconds: 30,
+      }),
+    ).resolves.toEqual({ kind: 'no_assignment' });
+    await expect(application.ready()).resolves.toBe(true);
+    await application.close();
+    expect(fixture.events).toEqual(['server.create', 'server.listen', 'server.close']);
   });
 
   it('closes PostgreSQL without creating a socket when the catalog preflight is not ready', async () => {

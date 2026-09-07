@@ -832,6 +832,9 @@ describe('customer web SSR and PWA boundary', () => {
     expect(response.body).not.toContain('private-person@example.com');
     expect(response.body).not.toContain('private-password-value');
     expect(response.body).not.toContain('customer_auth_request_failed');
+    expect(response.body).toContain('Sign-in failed. Check your email and password.');
+    expect(response.body).toContain('action="/sign-in"');
+    expect(response.body).toContain('href="/forgot-password"');
     await app.close();
   });
 
@@ -854,6 +857,8 @@ describe('customer web SSR and PWA boundary', () => {
     expect(receipt.body).toContain(
       'If the account can use that address, recovery instructions are on the way.',
     );
+    expect(receipt.body).toContain('in this same browser and on this same device');
+    expect(receipt.body).toContain('Email limits can temporarily block recovery emails');
     await app.close();
   });
 
@@ -971,6 +976,10 @@ describe('customer web SSR and PWA boundary', () => {
       payload: form({ _csrf: csrfToken, password: 'a-new-long-password' }),
     });
     expect(failedResponse.statusCode).toBe(400);
+    expect(failedResponse.body).toContain('We could not confirm that your password was changed.');
+    expect(failedResponse.body).toContain('action="/forgot-password"');
+    expect(failedResponse.body).not.toContain(recoveryCode);
+    expect(failedResponse.body).not.toContain('a-new-long-password');
     expect(
       setCookies(failedResponse).some((cookie) =>
         cookie.startsWith('__Host-fetanagent-recovery=;'),

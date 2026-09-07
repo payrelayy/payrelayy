@@ -1014,8 +1014,18 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
     const form = exactForm(request.body, ['_csrf', 'email', 'password']);
     const email = normalizedEmail(form?.email);
     const password = form?.password;
+    const signInFailure = () =>
+      html(
+        reply,
+        400,
+        signInPage(issueCsrfCookie(request, reply, options.csrfTokenFactory), {
+          kind: 'error',
+          message:
+            'Sign-in failed. Check your email and password. If you requested a password reset, complete it using the latest recovery email in the same browser first.',
+        }),
+      );
     if (!form || !email || !validPassword(password)) {
-      return html(reply, 400, genericErrorPage(400));
+      return signInFailure();
     }
 
     try {
@@ -1023,7 +1033,7 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
         email,
         password,
       });
-      return result.ok ? redirect(reply, '/workspace') : html(reply, 400, genericErrorPage(400));
+      return result.ok ? redirect(reply, '/workspace') : signInFailure();
     } catch {
       return html(reply, 503, genericErrorPage(503));
     }
@@ -1081,9 +1091,19 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
     const form = exactForm(request.body, ['_csrf', 'password']);
     const password = form?.password;
     const code = recoveryCodeFromCookies(request);
+    const recoveryFailure = () =>
+      html(
+        reply,
+        400,
+        forgotPasswordPage(issueCsrfCookie(request, reply, options.csrfTokenFactory), {
+          kind: 'error',
+          message:
+            'We could not confirm that your password was changed. Recovery links work once and must be opened in the same browser that requested them. Request a fresh link below if your latest link no longer works.',
+        }),
+      );
     if (!form || !validPassword(password) || !code) {
       clearRecoveryCookie(reply);
-      return html(reply, 400, genericErrorPage(400));
+      return recoveryFailure();
     }
 
     try {
@@ -1092,7 +1112,7 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
         password,
       });
       clearRecoveryCookie(reply);
-      return result.ok ? redirect(reply, '/workspace') : html(reply, 400, genericErrorPage(400));
+      return result.ok ? redirect(reply, '/workspace') : recoveryFailure();
     } catch {
       clearRecoveryCookie(reply);
       return html(reply, 503, genericErrorPage(503));

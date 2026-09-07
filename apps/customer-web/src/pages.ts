@@ -137,6 +137,8 @@ export function forgotPasswordPage(csrfToken: string, notice?: PageNotice): stri
         <p class="eyebrow">Account recovery</p>
         <h2 id="recovery-title">Reset your password</h2>
         <p class="supporting">Enter your email address. We will send recovery instructions when the account can use that address.</p>
+        <p class="quiet">Open only the latest recovery email, once, in this same browser and on this same device. Do not open it on your phone first if you requested it on a computer.</p>
+        <p class="quiet">If no email arrives, check spam and wait before requesting another. Email limits can temporarily block recovery emails; submitting again does not bypass them.</p>
         ${noticeMarkup(notice)}
         <form method="post" action="/forgot-password" accept-charset="utf-8">
           ${csrfField(csrfToken)}
@@ -159,6 +161,7 @@ export function updatePasswordPage(csrfToken: string, notice?: PageNotice): stri
         <p class="eyebrow">Account recovery</p>
         <h2 id="update-title">Choose a new password</h2>
         <p class="supporting">Use at least 12 characters for your new password.</p>
+        <p class="quiet">Finish this step promptly in the browser that requested the email. Reopening a used recovery link will not reset your password.</p>
         ${noticeMarkup(notice)}
         <form method="post" action="/update-password" accept-charset="utf-8">
           ${csrfField(csrfToken)}

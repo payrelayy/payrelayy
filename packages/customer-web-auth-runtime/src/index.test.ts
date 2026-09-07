@@ -442,12 +442,34 @@ describe('customer web Auth port', () => {
     ).resolves.toEqual(expected);
 
     expect(existingState.appendedCookies).toHaveLength(1);
-    expect(missingState.appendedCookies).toHaveLength(1);
-    expect(networkState.appendedCookies).toHaveLength(1);
-    expect(missingState.appendedHeaders).toEqual([
-      ['pragma', 'no-cache'],
-      ['cache-control', 'private, no-store'],
-    ]);
+    expect(missingState.appendedCookies).toEqual([]);
+    expect(networkState.appendedCookies).toEqual([]);
+    expect(missingState.appendedHeaders).toEqual([]);
+    expect(networkState.appendedHeaders).toEqual([]);
+  });
+
+  it('preserves the previous verifier when a failed resend writes and deletes PKCE cookies', async () => {
+    const previousCookies = [{ name: 'sb-pkce', value: 'previous-working-verifier' }];
+    const state = createContext(previousCookies);
+    auth.resetPasswordForEmail.mockImplementationOnce(async () => {
+      const cookies = latestSsrOptions().cookies;
+      expect(cookies.getAll()).toEqual(previousCookies);
+      cookies.setAll([{ name: 'sb-pkce', options: {}, value: 'new-but-rejected-verifier' }], {
+        'Cache-Control': 'private, no-store',
+      });
+      cookies.setAll([{ name: 'sb-pkce', options: { maxAge: 0 }, value: '' }], {
+        'Cache-Control': 'private, no-store',
+      });
+      return { data: null, error: { status: 429, code: 'over_email_send_rate_limit' } };
+    });
+    await expect(
+      createCustomerWebAuthPort(config).requestPasswordRecovery(state.context, {
+        email: 'known@example.com',
+      }),
+    ).resolves.toEqual({ ok: true, status: 'recovery_request_accepted' });
+    expect(state.appendedCookies).toEqual([]);
+    expect(state.appendedHeaders).toEqual([]);
+    expect(state.context.cookies.readAll()).toEqual(previousCookies);
   });
 
   it('completes recovery atomically with one client and commits only after password update', async () => {

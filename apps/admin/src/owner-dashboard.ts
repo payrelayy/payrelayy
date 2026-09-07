@@ -1,22 +1,42 @@
 import {
+  OWNER_CONTROL_DATABASE_TARGETS,
   OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
   type OwnerControlRuntimeConfig,
 } from '@fetanagent/config/owner-control';
 
-const STAGING_SUPABASE_ORIGIN = 'https://spzpiyxheappsfyswewl.supabase.co';
+const OWNER_DASHBOARD_SUPABASE_ORIGINS = {
+  production: OWNER_CONTROL_DATABASE_TARGETS.production.supabaseUrl,
+  staging: OWNER_CONTROL_DATABASE_TARGETS.staging.supabaseUrl,
+} as const;
 
-export const OWNER_DASHBOARD_CONTENT_SECURITY_POLICY = [
-  "default-src 'none'",
-  "base-uri 'none'",
-  `connect-src 'self' ${STAGING_SUPABASE_ORIGIN}`,
-  "form-action 'none'",
-  "frame-ancestors 'none'",
-  "img-src 'none'",
-  "script-src 'self'",
-  "style-src 'self'",
-].join('; ');
+export function ownerDashboardContentSecurityPolicy(
+  runtime: Extract<OwnerControlRuntimeConfig, { enabled: true }>,
+) {
+  return [
+    "default-src 'none'",
+    "base-uri 'none'",
+    `connect-src 'self' ${runtime.supabaseUrl}`,
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "img-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+  ].join('; ');
+}
 
-export const OWNER_DASHBOARD_HTML = `<!doctype html>
+export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, { enabled: true }>) {
+  const deploymentLabel = runtime.deploymentTarget === 'production' ? 'Production' : 'Staging';
+  const deploymentLabelLower = deploymentLabel.toLowerCase();
+  const lede =
+    runtime.deploymentTarget === 'production'
+      ? 'Operate the authenticated FetanAgent production control plane.'
+      : 'Issue one-time Telegram beta invitations from this SSH-only workspace.';
+  const footer =
+    runtime.deploymentTarget === 'production'
+      ? 'Production control. Financial actions remain governed by explicit audited switches.'
+      : 'Staging only. Payments and KemerBet actions are disabled.';
+
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -28,9 +48,9 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
   <body>
     <main class="shell">
       <header>
-        <p class="eyebrow">Private staging control</p>
+        <p class="eyebrow">Private ${deploymentLabelLower} control</p>
         <h1>FetanAgent Owner</h1>
-        <p class="lede">Issue one-time Telegram beta invitations from this SSH-only workspace.</p>
+        <p class="lede">${lede}</p>
       </header>
 
       <section class="panel" id="login-panel" aria-labelledby="login-title">
@@ -52,7 +72,7 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
       <section class="panel" id="invite-panel" aria-labelledby="invite-title" hidden>
         <div class="panel-heading">
           <div>
-            <p class="status-ok">Authenticated staging Owner</p>
+            <p class="status-ok">Authenticated ${deploymentLabelLower} Owner</p>
             <h2 id="invite-title">Telegram beta invite</h2>
           </div>
           <button class="secondary" id="logout-button" type="button">Sign out</button>
@@ -459,12 +479,13 @@ export const OWNER_DASHBOARD_HTML = `<!doctype html>
       </section>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
-      <footer>Staging only. Payments and KemerBet actions are disabled.</footer>
+      <footer>${footer}</footer>
     </main>
     <script type="module" src="/owner/app.js"></script>
   </body>
 </html>
 `;
+}
 
 export const OWNER_DASHBOARD_CSS = `:root {
   color: #f8fafc;
@@ -641,7 +662,7 @@ let kemerbetInputLane = Promise.resolve();
 let kemerbetPendingText = '';
 let kemerbetTextFlushTimer;
 const selectedPilotPlayerIds = new Set();
-const expectedSupabaseUrl = '${STAGING_SUPABASE_ORIGIN}';
+const expectedSupabaseUrls = Object.freeze(${JSON.stringify(OWNER_DASHBOARD_SUPABASE_ORIGINS)});
 const OWNER_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 60 * 1_000;
 const OWNER_SESSION_STORAGE_KEY = 'fetanagent.owner.session.v1';
@@ -1293,7 +1314,8 @@ async function loadOwnerAuthConfig() {
   );
   if (!response.ok) throw new Error('config');
   const config = await response.json();
-  if (config.supabaseUrl !== expectedSupabaseUrl ||
+  if ((config.deploymentTarget !== 'staging' && config.deploymentTarget !== 'production') ||
+      config.supabaseUrl !== expectedSupabaseUrls[config.deploymentTarget] ||
       typeof config.companionDevicePairingConfigured !== 'boolean' ||
       typeof config.telebirrDevicePairingConfigured !== 'boolean' ||
       typeof config.publishableKey !== 'string' ||
@@ -4062,6 +4084,7 @@ export function ownerDashboardPublicConfig(
 ) {
   return {
     companionDevicePairingConfigured: runtime.companionDevicePairing.configured,
+    deploymentTarget: runtime.deploymentTarget,
     publishableKey: runtime.publishableKey,
     supabaseUrl: runtime.supabaseUrl,
     telebirrDevicePairingConfigured: runtime.devicePairing.configured,

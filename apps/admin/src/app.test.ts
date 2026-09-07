@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import {
+  OWNER_CONTROL_DATABASE_TARGETS,
+  OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE,
   OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
+  type OwnerControlDeploymentTarget,
   loadOwnerControlConfig,
 } from '@fetanagent/config/owner-control';
 import { describe, expect, it } from 'vitest';
@@ -294,15 +297,20 @@ function readinessEligiblePlayers() {
   }));
 }
 
-function config(devicePairingConfigured = false, companionDevicePairingConfigured = false) {
+function config(
+  devicePairingConfigured = false,
+  companionDevicePairingConfigured = false,
+  deploymentTarget: OwnerControlDeploymentTarget = 'staging',
+) {
+  const target = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
   return loadOwnerControlConfig({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true',
-    OWNER_CONTROL_DEPLOYMENT_TARGET: 'staging',
-    OWNER_CONTROL_DATABASE_URL: `postgresql://fetanagent_owner_control_runtime:password@db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
-    OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
-    OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_for_staging_only',
+    OWNER_CONTROL_DEPLOYMENT_TARGET: deploymentTarget,
+    OWNER_CONTROL_DATABASE_URL: `postgresql://fetanagent_owner_control_runtime:password@${target.directHost}:5432/postgres?sslmode=verify-full`,
+    OWNER_CONTROL_SUPABASE_URL: target.supabaseUrl,
+    OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: `sb_publishable_test_key_for_${deploymentTarget}_only`,
     OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverEncryptionMaster,
     OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverFingerprintMaster,
     OWNER_RECEIVER_REFERENCE_PROFILE: receiverMasterProfile,
@@ -310,7 +318,7 @@ function config(devicePairingConfigured = false, companionDevicePairingConfigure
       ? { OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'telebirr_assignment_signer_2026_01' }
       : {}),
     ...(companionDevicePairingConfigured
-      ? { OWNER_COMPANION_SERVER_SIGNER_KEY_ID: 'companion-server-staging-v1' }
+      ? { OWNER_COMPANION_SERVER_SIGNER_KEY_ID: `companion-server-${deploymentTarget}-v1` }
       : {}),
   });
 }
@@ -532,6 +540,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       companionDevicePairingConfigured: false,
+      deploymentTarget: 'staging',
       publishableKey: 'sb_publishable_test_key_for_staging_only',
       supabaseUrl: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
       telebirrDevicePairingConfigured: false,
@@ -722,6 +731,37 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain("url.pathname !== '/fetanagentbot'");
     expect(response.body).not.toContain('/FetanAgentBot');
     expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
+    await app.close();
+  });
+
+  it('binds the production Owner page, Auth config, and browser policy to production only', async () => {
+    const app = buildOwnerControlApp(config(false, false, 'production'), { runtime: runtime() });
+    const [page, publicConfig] = await Promise.all([
+      app.inject({ method: 'GET', url: '/owner' }),
+      app.inject({ method: 'GET', url: '/owner/config.json' }),
+    ]);
+
+    expect(page.statusCode).toBe(200);
+    expect(page.headers['content-security-policy']).toContain(
+      `connect-src 'self' https://${OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,
+    );
+    expect(page.headers['content-security-policy']).not.toContain(
+      `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
+    );
+    expect(page.body).toContain('Private production control');
+    expect(page.body).toContain('Authenticated production Owner');
+    expect(page.body).toContain('FetanAgent production control plane');
+    expect(page.body).toContain(
+      'Production control. Financial actions remain governed by explicit audited switches.',
+    );
+    expect(page.body).not.toContain('Private staging control');
+    expect(publicConfig.json()).toEqual({
+      companionDevicePairingConfigured: false,
+      deploymentTarget: 'production',
+      publishableKey: 'sb_publishable_test_key_for_production_only',
+      supabaseUrl: `https://${OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,
+      telebirrDevicePairingConfigured: false,
+    });
     await app.close();
   });
 

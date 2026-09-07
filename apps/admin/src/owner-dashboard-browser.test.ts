@@ -251,6 +251,7 @@ function ownerBrowserHarness(
     if (url === '/owner/config.json') {
       return response(200, {
         companionDevicePairingConfigured: options.companionDevicePairingConfigured ?? false,
+        deploymentTarget: 'staging',
         publishableKey: `sb_publishable_${'a'.repeat(32)}`,
         supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',
         telebirrDevicePairingConfigured: options.devicePairingConfigured ?? false,

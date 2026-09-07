@@ -86,10 +86,10 @@ import {
 } from './owner-telebirr-device-pairing.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 import {
-  OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
   OWNER_DASHBOARD_CSS,
-  OWNER_DASHBOARD_HTML,
   OWNER_DASHBOARD_JAVASCRIPT,
+  ownerDashboardContentSecurityPolicy,
+  ownerDashboardHtml,
   ownerDashboardPublicConfig,
 } from './owner-dashboard.js';
 
@@ -383,7 +383,7 @@ export function buildOwnerControlApp(
   });
 
   const browserHeaders = {
-    'content-security-policy': OWNER_DASHBOARD_CONTENT_SECURITY_POLICY,
+    'content-security-policy': ownerDashboardContentSecurityPolicy(runtimeConfig),
     'cross-origin-opener-policy': 'same-origin',
     'cross-origin-resource-policy': 'same-origin',
     'permissions-policy':
@@ -394,7 +394,10 @@ export function buildOwnerControlApp(
   } as const;
 
   app.get('/owner', async (_request, reply) =>
-    reply.headers(browserHeaders).type('text/html; charset=utf-8').send(OWNER_DASHBOARD_HTML),
+    reply
+      .headers(browserHeaders)
+      .type('text/html; charset=utf-8')
+      .send(ownerDashboardHtml(runtimeConfig)),
   );
   app.get('/owner/app.js', async (_request, reply) =>
     reply

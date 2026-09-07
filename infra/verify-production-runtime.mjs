@@ -227,6 +227,14 @@ for (const protectedName of [
 ]) {
   assert.match(workflow, new RegExp(escapeRegExp(protectedName), 'u'));
 }
+assert.match(
+  workflow,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*'fetanagent_telebirr_device_state_runtime'/u,
+);
+assert.doesNotMatch(
+  workflow,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*'fetanagent_telebirr_device_state_runtime'/u,
+);
 assert.doesNotMatch(
   workflow,
   /secrets\.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64|secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u,

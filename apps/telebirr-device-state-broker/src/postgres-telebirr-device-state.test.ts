@@ -61,6 +61,15 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
       query: vi.fn(async () => ({ rows: [preflightRow()] })),
     };
     await expect(assertTelebirrDeviceStateCatalogPreflight(safe)).resolves.toBeUndefined();
+    await expect(
+      assertTelebirrDeviceStateCatalogPreflight(safe, 'continuous'),
+    ).resolves.toBeUndefined();
+    expect(safe.query).toHaveBeenNthCalledWith(1, TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL, [
+      'bounded_24h',
+    ]);
+    expect(safe.query).toHaveBeenNthCalledWith(2, TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL, [
+      'continuous',
+    ]);
 
     const unsafe: TelebirrDeviceStatePostgresQuery = {
       query: vi.fn(async () => ({
@@ -87,6 +96,10 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
     expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain(
       'pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname)',
     );
+    expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain(
+      "role.rolvaliduntil = 'infinity'::timestamptz",
+    );
+    expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).toContain("$1::text = 'bounded_24h'");
     expect(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL).not.toContain(
       'namespace.oid = defaults.defaclnamespace',
     );
@@ -464,6 +477,7 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
         host: 'db.example.test',
         password: 'synthetic-password-value',
         port: 5432,
+        runtimeCredentialValidity: 'continuous',
         user: 'fetanagent_telebirr_device_state_runtime',
       },
       { createClient },
@@ -477,6 +491,9 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
         ssl: { ca: 'synthetic-ca', rejectUnauthorized: true },
       }),
     );
+    expect(client.query).toHaveBeenCalledWith(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL, [
+      'continuous',
+    ]);
     await expect(runtime.ready()).resolves.toBe(true);
     await expect(runtime.close()).resolves.toBeUndefined();
     expect(client.end).toHaveBeenCalledOnce();
@@ -500,6 +517,7 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
             host: 'db.example.test',
             password: 'synthetic-password-value',
             port: 5432,
+            runtimeCredentialValidity: 'bounded_24h',
             user: 'fetanagent_telebirr_device_state_runtime',
           },
           { createClient: () => client },
@@ -543,6 +561,7 @@ describe('TeleBirr device-state PostgreSQL adapter', () => {
         host: 'db.example.test',
         password: 'synthetic-password-value',
         port: 5432,
+        runtimeCredentialValidity: 'bounded_24h',
         user: 'fetanagent_telebirr_device_state_runtime',
       },
       { createClient: () => client },

@@ -260,7 +260,7 @@ function decodeUrlComponent(value: string): string {
 function connectionFromUrl(
   value: string,
   deploymentTarget: TelebirrDeviceStateBrokerDeploymentTarget,
-): Omit<TelebirrDeviceStateConnectionConfig, 'ca'> {
+): Omit<TelebirrDeviceStateConnectionConfig, 'ca' | 'runtimeCredentialValidity'> {
   let url: URL;
   try {
     url = new URL(value);
@@ -377,7 +377,12 @@ export function loadTelebirrDeviceStateBrokerConfig(
     enabled: true,
     deploymentTarget,
     projectReference: databaseTarget.projectReference,
-    connection: Object.freeze({ ...connectionWithoutCa, ca }),
+    connection: Object.freeze({
+      ...connectionWithoutCa,
+      ca,
+      runtimeCredentialValidity:
+        deploymentTarget === 'production' ? ('continuous' as const) : ('bounded_24h' as const),
+    }),
   });
 }
 

@@ -279,7 +279,7 @@ jobs:
             "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/beta-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/player-action-database-url"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
             'fetanagent_telebirr_device_state_runtime' "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/telebirr-device-state-database-url"
           printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
           printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"

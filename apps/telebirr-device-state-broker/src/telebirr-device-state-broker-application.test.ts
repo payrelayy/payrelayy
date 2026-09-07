@@ -23,6 +23,7 @@ function config(): Extract<TelebirrDeviceStateBrokerConfig, { enabled: true }> {
       host: 'db.spzpiyxheappsfyswewl.supabase.co',
       password: 'synthetic-password-123456',
       port: 5432,
+      runtimeCredentialValidity: 'bounded_24h',
       user: 'fetanagent_telebirr_device_state_runtime',
     },
   };

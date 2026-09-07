@@ -708,6 +708,7 @@ services:
       API_PORT: '3000'
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
       INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'
+      PLAYER_ACTION_DEPLOYMENT_TARGET: staging
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
       INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'
       PLAYER_ACTION_DATABASE_URL_FILE: /run/secrets/player_action_database_url

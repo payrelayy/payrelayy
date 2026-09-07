@@ -123,6 +123,16 @@ verify_release_files() {
   for name in "${required[@]}"; do
     [[ ! -L "$release/secrets/$name" && -f "$release/secrets/$name" && -s "$release/secrets/$name" ]] ||
       die "the production release is missing $name"
+    case "$name" in
+      supabase-ca.crt|cbe-deposit-reference-key-profile.v1.json|deposit-proof-reference-profile.v2.json)
+        [[ "$(stat --format='%u:%g:%a' "$release/secrets/$name")" == '0:0:444' ]] ||
+          die "the production config metadata is wrong for $name"
+        ;;
+      *)
+        [[ "$(stat --format='%u:%g:%a' "$release/secrets/$name")" == '10001:10001:400' ]] ||
+          die "the production secret metadata is wrong for $name"
+        ;;
+    esac
   done
   [[ "$(find -P "$release/secrets" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq "${#required[@]}" ]] ||
     die 'the production secret directory contains an unexpected file'
@@ -248,7 +258,16 @@ case "${1:-}" in
     printf '%s\n' "$tag" >"$incoming/.image-tag"
     chown -R root:root "$incoming"
     chmod 0700 "$incoming" "$incoming/secrets"
+    chown 10001:10001 "$incoming/secrets"/*
     chmod 0400 "$incoming/secrets"/*
+    chown root:root \
+      "$incoming/secrets/supabase-ca.crt" \
+      "$incoming/secrets/cbe-deposit-reference-key-profile.v1.json" \
+      "$incoming/secrets/deposit-proof-reference-profile.v2.json"
+    chmod 0444 \
+      "$incoming/secrets/supabase-ca.crt" \
+      "$incoming/secrets/cbe-deposit-reference-key-profile.v1.json" \
+      "$incoming/secrets/deposit-proof-reference-profile.v2.json"
     chmod 0444 "$incoming/compose.production.yaml" "$incoming/telebirr-assignment-signer-key-id" \
       "$incoming/.release-sha" "$incoming/.image-tag"
     mv -- "$incoming" "$release"

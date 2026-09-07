@@ -1,1 +1,1 @@
-fetanagent-admin ALL=(root) NOPASSWD: sha256:48c021e371445e9621dd595539c1609975ad152014abeaf0cf55b1e749f8db76 /usr/local/sbin/fetanagent-production-deploy-helper *
+fetanagent-admin ALL=(root) NOPASSWD: sha256:0491c87f50dea747c87fb798893c5c7a60083af6f047650e7006700904207626 /usr/local/sbin/fetanagent-production-deploy-helper *

@@ -136,6 +136,9 @@ jobs:
             --tag fetanagent-gateway:ci \
             .
           docker run --rm --read-only fetanagent-gateway:ci caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm --read-only \
+            --env FETANAGENT_COMPANION_BRIDGE_UPSTREAM=production-companion-device-bridge:8085 \
+            fetanagent-gateway:ci caddy validate --config /etc/caddy/Caddyfile
 
       - name: Build and test
         run: pnpm test

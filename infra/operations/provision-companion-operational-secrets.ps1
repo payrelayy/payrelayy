@@ -71,7 +71,8 @@ function Get-Sha256Identifier {
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
   throw 'GitHub CLI is unavailable.'
 }
-if ((Invoke-Gh -Arguments @('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner')) -ne 'payrelayy/payrelayy') {
+# Bind to the immutable repository identity, including after a repository rename.
+if ((Invoke-Gh -Arguments @('repo', 'view', '--json', 'id', '--jq', '.id')) -ne 'R_kgDOTyrLjQ') {
   throw 'The exact FetanAgent GitHub repository is required.'
 }
 

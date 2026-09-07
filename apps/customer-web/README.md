@@ -53,13 +53,16 @@ public route until those deployment controls are reviewed.
 
 Runtime composition requires:
 
+- `CUSTOMER_WEB_DEPLOYMENT_TARGET` set exactly to `staging` or `production`; both Auth and workspace
+  startup derive their project binding from this same value and reject missing, mixed-case,
+  unknown, or cross-project settings;
 - `INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED=true`;
-- `CUSTOMER_WEB_SUPABASE_URL=https://spzpiyxheappsfyswewl.supabase.co` exactly;
+- `CUSTOMER_WEB_SUPABASE_URL` set to the selected target's exact approved Supabase origin;
 - `CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY` set through the existing secret-delivery boundary; and
 - `INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED=true`;
 - `CUSTOMER_WEB_DATABASE_URL_FILE=/run/secrets/customer_web_database_url` in production, containing
-  only the dedicated `fetanagent_customer_web_runtime` direct-Postgres URL for the exact staging
-  host with `sslmode=verify-full`; and
+  only the dedicated `fetanagent_customer_web_runtime` direct-Postgres URL for the same selected
+  target with `sslmode=verify-full`; and
 - `INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED=true` plus
   `CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE`,
   `CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE`, and

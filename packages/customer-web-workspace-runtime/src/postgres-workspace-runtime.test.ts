@@ -1,4 +1,7 @@
-import type { CustomerWebWorkspaceConfig } from '@fetanagent/config/customer-web';
+import {
+  CUSTOMER_WEB_DEPLOYMENT_TARGETS,
+  type CustomerWebWorkspaceConfig,
+} from '@fetanagent/config/customer-web';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -34,6 +37,7 @@ const config = {
     port: 5432,
     user: 'fetanagent_customer_web_runtime',
   },
+  deploymentTarget: 'staging',
   enabled: true,
   projectReference: 'spzpiyxheappsfyswewl',
   stage: 'staging',
@@ -206,6 +210,33 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
         ...config,
         connection: { ...config.connection, user: 'postgres' },
       } as unknown as typeof config),
+    ).toThrow(CustomerWorkspaceRuntimeUnavailableError);
+  });
+
+  it('accepts only a target-consistent production database binding', () => {
+    const production = CUSTOMER_WEB_DEPLOYMENT_TARGETS.production;
+    const productionConfig: Extract<CustomerWebWorkspaceConfig, { readonly enabled: true }> = {
+      ...config,
+      connection: { ...config.connection, host: production.databaseDirectHost },
+      deploymentTarget: 'production',
+      projectReference: production.projectReference,
+      stage: 'production',
+    };
+    expect(createCustomerWorkspacePoolConfig(productionConfig)).toMatchObject({
+      host: production.databaseDirectHost,
+      user: 'fetanagent_customer_web_runtime',
+    });
+    expect(() =>
+      createCustomerWorkspacePoolConfig({
+        ...productionConfig,
+        connection: { ...productionConfig.connection, host: config.connection.host },
+      } as CustomerWebWorkspaceConfig & { readonly enabled: true }),
+    ).toThrow(CustomerWorkspaceRuntimeUnavailableError);
+    expect(() =>
+      createCustomerWorkspacePoolConfig({
+        ...productionConfig,
+        deploymentTarget: 'prod',
+      } as unknown as typeof productionConfig),
     ).toThrow(CustomerWorkspaceRuntimeUnavailableError);
   });
 

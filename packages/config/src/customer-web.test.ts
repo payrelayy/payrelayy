@@ -14,6 +14,7 @@ import {
 } from './deposit-proof-reference-profile.js';
 
 import {
+  CUSTOMER_WEB_DEPLOYMENT_TARGETS,
   CUSTOMER_WEB_DATABASE_DIRECT_HOST,
   CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
@@ -78,8 +79,10 @@ describe('customer web auth configuration', () => {
     ) as NodeJS.ProcessEnv;
 
     expect(loadCustomerWebAuthConfig(environment)).toEqual({
+      deploymentTarget: undefined,
       enabled: false,
       passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
+      projectReference: undefined,
       supabasePublishableKey: undefined,
       supabaseUrl: undefined,
     });
@@ -87,20 +90,25 @@ describe('customer web auth configuration', () => {
 
   it('loads only the exact staging origin and a current publishable key', () => {
     const config = loadCustomerWebAuthConfig({
+      CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
       CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: publishableKey,
       CUSTOMER_WEB_SUPABASE_URL: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
       INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
     });
 
     expect(config).toEqual({
+      deploymentTarget: 'staging',
       enabled: true,
       passwordRecoveryRedirectUrl: 'https://fetanagent.com/auth/recovery',
+      projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
       supabasePublishableKey: publishableKey,
       supabaseUrl: 'https://spzpiyxheappsfyswewl.supabase.co',
     });
     expect(redactedCustomerWebAuthConfigForLog(config)).toEqual({
+      deploymentTarget: 'staging',
       enabled: true,
       passwordRecoveryRedirectUrl: 'https://fetanagent.com/auth/recovery',
+      projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
       publishableKeyConfigured: true,
       supabaseOriginConfigured: true,
     });
@@ -113,6 +121,7 @@ describe('customer web auth configuration', () => {
     const readSecretFile = vi.fn(() => `${publishableKey}\n`);
     const config = loadCustomerWebAuthConfig(
       {
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE:
           CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE,
         CUSTOMER_WEB_SUPABASE_URL: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
@@ -133,6 +142,7 @@ describe('customer web auth configuration', () => {
 
   it('rejects direct, wrong, dual, relative, unreadable, and multiline production key inputs', () => {
     const enabled = {
+      CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
       CUSTOMER_WEB_SUPABASE_URL: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
       INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
     } as const;
@@ -184,13 +194,14 @@ describe('customer web auth configuration', () => {
   it('rejects alternate origins, secret keys, service-role material, and malformed keys', () => {
     const loadWith = (url: string, key: string) =>
       loadCustomerWebAuthConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: key,
         CUSTOMER_WEB_SUPABASE_URL: url,
         INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
       });
 
     expect(() => loadWith('https://example.test', publishableKey)).toThrow(
-      'exact approved customer-web staging Supabase origin',
+      'match the explicit customer-web deployment target',
     );
     expect(() =>
       loadWith(CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN, `sb_secret_${'a'.repeat(32)}`),
@@ -213,6 +224,41 @@ describe('customer web auth configuration', () => {
     expect(() =>
       loadWith(CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN, `sb_publishable_${'a'.repeat(257)}`),
     ).toThrow('current Supabase publishable key');
+  });
+
+  it('binds Auth to production only when the exact production target and origin agree', () => {
+    const production = CUSTOMER_WEB_DEPLOYMENT_TARGETS.production;
+    expect(
+      loadCustomerWebAuthConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'production',
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+        CUSTOMER_WEB_SUPABASE_URL: production.supabaseOrigin,
+        INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
+      }),
+    ).toMatchObject({
+      deploymentTarget: 'production',
+      enabled: true,
+      projectReference: production.projectReference,
+      supabaseUrl: production.supabaseOrigin,
+    });
+    expect(() =>
+      loadCustomerWebAuthConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'production',
+        CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+        CUSTOMER_WEB_SUPABASE_URL: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+        INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
+      }),
+    ).toThrow('match the explicit customer-web deployment target');
+    for (const target of [undefined, 'Production', 'prod']) {
+      expect(() =>
+        loadCustomerWebAuthConfig({
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: target,
+          CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY: publishableKey,
+          CUSTOMER_WEB_SUPABASE_URL: production.supabaseOrigin,
+          INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true',
+        }),
+      ).toThrow('CUSTOMER_WEB_DEPLOYMENT_TARGET must be explicitly set');
+    }
   });
 });
 
@@ -681,6 +727,7 @@ describe('customer web workspace configuration', () => {
 
     expect(loadCustomerWebWorkspaceConfig(environment)).toEqual({
       connection: undefined,
+      deploymentTarget: undefined,
       enabled: false,
       projectReference: undefined,
       stage: undefined,
@@ -690,6 +737,7 @@ describe('customer web workspace configuration', () => {
 
   it('loads only the exact staging direct host, role, database, port, and verify-full mode', () => {
     const config = loadCustomerWebWorkspaceConfig({
+      CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
       CUSTOMER_WEB_DATABASE_URL: databaseUrl,
       INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
     });
@@ -702,6 +750,7 @@ describe('customer web workspace configuration', () => {
         port: 5432,
         user: 'fetanagent_customer_web_runtime',
       },
+      deploymentTarget: 'staging',
       enabled: true,
       projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
       stage: 'staging',
@@ -710,6 +759,7 @@ describe('customer web workspace configuration', () => {
     const redacted = redactedCustomerWebWorkspaceConfigForLog(config);
     expect(redacted).toEqual({
       connectionConfigured: true,
+      deploymentTarget: 'staging',
       enabled: true,
       projectReference: 'spzpiyxheappsfyswewl',
       stage: 'staging',
@@ -719,10 +769,52 @@ describe('customer web workspace configuration', () => {
     expect(JSON.stringify(redacted)).not.toContain(CUSTOMER_WEB_DATABASE_RUNTIME_ROLE);
   });
 
+  it('binds the workspace to production only when the production target and host agree', () => {
+    const production = CUSTOMER_WEB_DEPLOYMENT_TARGETS.production;
+    const productionDatabaseUrl = `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}:db-password@${production.databaseDirectHost}:5432/postgres?sslmode=verify-full`;
+    expect(
+      loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'production',
+        CUSTOMER_WEB_DATABASE_URL: productionDatabaseUrl,
+        INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
+      }),
+    ).toMatchObject({
+      connection: { host: production.databaseDirectHost },
+      deploymentTarget: 'production',
+      enabled: true,
+      projectReference: production.projectReference,
+      stage: 'production',
+    });
+    expect(() =>
+      loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'production',
+        CUSTOMER_WEB_DATABASE_URL: databaseUrl,
+        INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
+      }),
+    ).toThrow('must match the explicit deployment target');
+    expect(() =>
+      loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
+        CUSTOMER_WEB_DATABASE_URL: productionDatabaseUrl,
+        INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
+      }),
+    ).toThrow('must match the explicit deployment target');
+    for (const target of [undefined, 'Production', 'prod']) {
+      expect(() =>
+        loadCustomerWebWorkspaceConfig({
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: target,
+          CUSTOMER_WEB_DATABASE_URL: productionDatabaseUrl,
+          INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
+        }),
+      ).toThrow('CUSTOMER_WEB_DEPLOYMENT_TARGET must be explicitly set');
+    }
+  });
+
   it('accepts one absolute secret file and trims only one terminal newline', () => {
     const readSecretFile = vi.fn(() => `${databaseUrl}\n`);
     const config = loadCustomerWebWorkspaceConfig(
       {
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_DATABASE_URL_FILE: 'C:\\runtime-secrets\\customer-web-database-url',
         INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
       },
@@ -738,6 +830,7 @@ describe('customer web workspace configuration', () => {
     expect(
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL_FILE: CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE,
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
           NODE_ENV: 'production',
@@ -747,6 +840,7 @@ describe('customer web workspace configuration', () => {
     ).toMatchObject({ enabled: true });
     expect(() =>
       loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_DATABASE_URL: databaseUrl,
         INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
         NODE_ENV: 'production',
@@ -755,6 +849,7 @@ describe('customer web workspace configuration', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL: '',
           CUSTOMER_WEB_DATABASE_URL_FILE: CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE,
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
@@ -766,6 +861,7 @@ describe('customer web workspace configuration', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL_FILE: '/tmp/customer-web-database-url',
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
           NODE_ENV: 'production',
@@ -778,6 +874,7 @@ describe('customer web workspace configuration', () => {
   it('rejects ambiguous, relative, unreadable, empty, and multiline secret inputs', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_DATABASE_URL: databaseUrl,
         CUSTOMER_WEB_DATABASE_URL_FILE: 'C:\\secret',
         INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
@@ -785,6 +882,7 @@ describe('customer web workspace configuration', () => {
     ).toThrow('must not both be configured');
     expect(() =>
       loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_DATABASE_URL_FILE: 'relative-secret',
         INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
       }),
@@ -792,6 +890,7 @@ describe('customer web workspace configuration', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL_FILE: 'C:\\secret',
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
         },
@@ -801,6 +900,7 @@ describe('customer web workspace configuration', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL_FILE: 'C:\\secret',
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
         },
@@ -810,6 +910,7 @@ describe('customer web workspace configuration', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL_FILE: 'C:\\secret',
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
         },
@@ -819,6 +920,7 @@ describe('customer web workspace configuration', () => {
     expect(() =>
       loadCustomerWebWorkspaceConfig(
         {
+          CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
           CUSTOMER_WEB_DATABASE_URL_FILE: 'C:\\secret',
           INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
         },
@@ -843,6 +945,7 @@ describe('customer web workspace configuration', () => {
     let thrown: unknown;
     try {
       loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
         CUSTOMER_WEB_DATABASE_URL: unsafeUrl,
         INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
       });

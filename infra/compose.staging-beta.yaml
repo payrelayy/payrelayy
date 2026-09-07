@@ -529,6 +529,7 @@ services:
       FINANCIAL_ACTIONS_MODE: dry_run
       CUSTOMER_WEB_HOST: 0.0.0.0
       CUSTOMER_WEB_PORT: '3003'
+      CUSTOMER_WEB_DEPLOYMENT_TARGET: staging
       CUSTOMER_WEB_SUPABASE_URL: https://spzpiyxheappsfyswewl.supabase.co
       CUSTOMER_WEB_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/customer_web_supabase_publishable_key
       CUSTOMER_WEB_DATABASE_URL_FILE: /run/secrets/customer_web_database_url

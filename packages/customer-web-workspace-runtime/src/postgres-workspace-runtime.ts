@@ -1,9 +1,8 @@
 import { types as nodeUtilTypes } from 'node:util';
 
 import {
-  CUSTOMER_WEB_DATABASE_DIRECT_HOST,
+  CUSTOMER_WEB_DEPLOYMENT_TARGETS,
   CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
-  CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   type CustomerWebWorkspaceConfig,
 } from '@fetanagent/config/customer-web';
 import { projectCustomerDepositStatus } from '@fetanagent/contracts';
@@ -296,12 +295,18 @@ function registrationFromRow(row: DataRecord): CustomerWorkspaceRegistration {
 }
 
 function validateEnabledConfig(config: EnabledCustomerWebWorkspaceConfig): void {
+  const deploymentTarget = config.deploymentTarget;
+  const target =
+    deploymentTarget === 'staging' || deploymentTarget === 'production'
+      ? CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget]
+      : undefined;
   if (
-    config.stage !== 'staging' ||
-    config.projectReference !== CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE ||
+    target === undefined ||
+    config.stage !== deploymentTarget ||
+    config.projectReference !== target.projectReference ||
     config.tlsMode !== 'verify-full' ||
     config.connection.database !== 'postgres' ||
-    config.connection.host !== CUSTOMER_WEB_DATABASE_DIRECT_HOST ||
+    config.connection.host !== target.databaseDirectHost ||
     config.connection.port !== 5432 ||
     config.connection.user !== CUSTOMER_WEB_DATABASE_RUNTIME_ROLE ||
     typeof config.connection.password !== 'string' ||

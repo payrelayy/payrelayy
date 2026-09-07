@@ -275,8 +275,10 @@ describe('customer web SSR and PWA boundary', () => {
     const network = vi.fn<typeof fetch>();
     vi.stubGlobal('fetch', network);
     const auth = createCustomerWebAuthPort({
+      deploymentTarget: 'staging',
       enabled: true,
       passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
+      projectReference: 'spzpiyxheappsfyswewl',
       supabasePublishableKey: `sb_publishable_${'A'.repeat(32)}`,
       supabaseUrl: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
     });
@@ -1374,6 +1376,7 @@ describe('customer web SSR and PWA boundary', () => {
           port: 5432,
           user: 'fetanagent_customer_web_runtime',
         },
+        deploymentTarget: 'staging',
         enabled: true,
         projectReference: 'spzpiyxheappsfyswewl',
         stage: 'staging',

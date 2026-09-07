@@ -1,6 +1,6 @@
 import {
+  CUSTOMER_WEB_DEPLOYMENT_TARGETS,
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
-  CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   type CustomerWebAuthConfig,
 } from '@fetanagent/config/customer-web';
 import { isAuthSessionMissingError } from '@supabase/supabase-js';
@@ -126,11 +126,18 @@ function readPasswordRecovery(input: unknown): {
 
 function validateEnabledConfig(config: CustomerWebAuthConfig): EnabledCustomerWebAuthConfig {
   const record = readDataRecord(config);
+  const deploymentTarget = record.deploymentTarget;
+  const target =
+    deploymentTarget === 'staging' || deploymentTarget === 'production'
+      ? CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget]
+      : undefined;
   if (
     Object.keys(record).sort().join(',') !==
-      'enabled,passwordRecoveryRedirectUrl,supabasePublishableKey,supabaseUrl' ||
+      'deploymentTarget,enabled,passwordRecoveryRedirectUrl,projectReference,supabasePublishableKey,supabaseUrl' ||
+    target === undefined ||
     record.enabled !== true ||
-    record.supabaseUrl !== CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN ||
+    record.projectReference !== target.projectReference ||
+    record.supabaseUrl !== target.supabaseOrigin ||
     record.passwordRecoveryRedirectUrl !== CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL ||
     typeof record.supabasePublishableKey !== 'string' ||
     !/^sb_publishable_[A-Za-z0-9_-]{20,256}$/u.test(record.supabasePublishableKey)
@@ -138,10 +145,12 @@ function validateEnabledConfig(config: CustomerWebAuthConfig): EnabledCustomerWe
     throw new Error('Customer web Auth runtime configuration is invalid.');
   }
   return Object.freeze({
+    deploymentTarget,
     enabled: true,
     passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
+    projectReference: target.projectReference,
     supabasePublishableKey: record.supabasePublishableKey,
-    supabaseUrl: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+    supabaseUrl: target.supabaseOrigin,
   }) as EnabledCustomerWebAuthConfig;
 }
 

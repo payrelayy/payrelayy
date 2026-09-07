@@ -32,6 +32,27 @@ includes seed data, targets production, deploys an application, starts Telegram,
 payment flow. Review the staging project's security and performance advisors separately after the
 first successful apply.
 
+## Production database release
+
+The manually dispatched
+[`Supabase production release`](../.github/workflows/supabase-production-release.yml) workflow is
+the only repository automation allowed to apply canonical migrations to the production database.
+It runs only from `main`, uses the GitHub `production` environment, and has no staging, plan, or
+dry-run mode. Before the protected job can read credentials, the caller must enter the exact
+production project reference in `confirm_production_project_ref`, the exact full reviewed workflow
+commit in `confirm_main_commit_sha`, and the phrase `APPLY PRODUCTION MIGRATIONS`.
+
+Configure exactly these GitHub `production` environment secrets with production-only values:
+
+- `SUPABASE_ACCESS_TOKEN`
+- `SUPABASE_DB_PASSWORD`
+
+The workflow pins the Supabase CLI, verifies the checked-out commit, links only the production
+project, independently checks the CLI linked-project state, lists the migration ledger, applies the
+canonical migrations, and lists the resulting ledger. It does not seed customers, deploy a runtime,
+or start Telegram. It does not enable financial execution. Financial activation remains a separate,
+explicitly authorized production operation after the database and runtimes are verified.
+
 ### Hosted migration-ledger reconciliation
 
 The staging project contains two 2026-08-29 migration entries created by guarded operational

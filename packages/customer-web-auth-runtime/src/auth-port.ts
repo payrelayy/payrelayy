@@ -235,22 +235,19 @@ export function createCustomerWebAuthPort(config: CustomerWebAuthConfig): Custom
       context: CustomerWebAuthRequestContext,
       input: CustomerWebEmailInput,
     ): Promise<CustomerWebAuthActionResult<'recovery_request_accepted'>> {
-      let transaction: ReturnType<typeof createCustomerWebResponseEffectTransaction> | undefined;
       try {
         const email = normalizeEmail(input);
-        transaction = createCustomerWebResponseEffectTransaction(context);
+        const transaction = createCustomerWebResponseEffectTransaction(context);
         const client = createCustomerWebServerClient(enabledConfig, transaction.context);
-        await client.auth.resetPasswordForEmail(email, {
+        const { error } = await client.auth.resetPasswordForEmail(email, {
           redirectTo: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
         });
+        // The SDK writes a new PKCE verifier before sending the email and can
+        // delete it on failure. Neither effect may replace a previous working
+        // verifier when a resend is rate-limited or the email service fails.
+        if (error === null) transaction.commit();
       } catch {
         // The response remains indistinguishable to prevent account enumeration.
-      } finally {
-        try {
-          transaction?.commit();
-        } catch {
-          // The response remains indistinguishable when the response adapter fails.
-        }
       }
       return RECOVERY_REQUEST_ACCEPTED;
     },

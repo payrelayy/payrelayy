@@ -122,6 +122,7 @@ class MainActivity : Activity() {
         },
       )
       addView(versionView("Relay", RelayProtocol.TRANSCRIPT_VERSION))
+      addView(versionView("Target", BuildConfig.VERIFIER_DEPLOYMENT_TARGET))
       addView(versionView("Pilot", LivePrivatePilotProtocol.OBSERVATION_TRANSCRIPT_VERSION))
       addView(versionView("Bridge", DeviceBridgeProtocol.REQUEST_TRANSCRIPT_VERSION))
       addView(versionView("Provider", LivePrivatePilotProtocol.SOURCE_PROFILE))

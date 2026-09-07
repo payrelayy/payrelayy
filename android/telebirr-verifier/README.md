@@ -147,11 +147,17 @@ Version `0.5.3` preserves the exact bounded enrollment failure across process re
 operator UI, so expiry, server rejection, unsupported app versions, and invalid trust bindings do
 not collapse into an ambiguous provisioning status.
 
+Operational builds also require an exact `staging` or `production` deployment target. The APK
+embeds and displays that target and accepts only the target-specific bridge and assignment signer
+identities. An omitted, mixed, unknown, or cross-target identity fails the release build before an
+APK is produced.
+
 The equivalent controlled local invocation is:
 
 ```powershell
 gradle --offline assembleRelease `
   -PfetanagentVerifierRuntimeMode=pairing_only `
+  -PfetanagentVerifierDeploymentTarget=staging `
   -PfetanagentVerifierServerSignerKeyId=<manifest-server-key-id> `
   -PfetanagentVerifierServerSignerSpkiFile=<public-server-spki-der-file> `
   -PfetanagentVerifierAssignmentSignerKeyId=<manifest-assignment-key-id> `

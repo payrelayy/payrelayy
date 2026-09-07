@@ -17,6 +17,7 @@ plugins {
 }
 
 data class OperationalVerifierTrust(
+  val deploymentTarget: String,
   val runtimeMode: String,
   val serverSignerKeyId: String,
   val serverSignerPublicKeySpki: String,
@@ -65,6 +66,17 @@ val requestedRuntimeMode =
 require(requestedRuntimeMode in setOf("inert", "pairing_only", "evidence_only")) {
   "fetanagentVerifierRuntimeMode must be inert, pairing_only, or evidence_only."
 }
+val requestedDeploymentTarget =
+  providers.gradleProperty("fetanagentVerifierDeploymentTarget").orNull ?: "inert"
+if (requestedRuntimeMode == "inert") {
+  require(requestedDeploymentTarget == "inert") {
+    "Inert verifier builds cannot select a deployment target."
+  }
+} else {
+  require(requestedDeploymentTarget in setOf("staging", "production")) {
+    "Operational verifier builds require an exact staging or production deployment target."
+  }
+}
 
 val operationalTrust =
   if (requestedRuntimeMode == "inert") {
@@ -84,12 +96,21 @@ val operationalTrust =
     require(serverKey.second != assignmentKey.second) {
       "The bridge server signer and assignment signer must be independent keys."
     }
+    val serverSignerKeyId = keyId("fetanagentVerifierServerSignerKeyId")
+    val assignmentSignerKeyId = keyId("fetanagentVerifierAssignmentSignerKeyId")
+    require(serverSignerKeyId == "telebirr-bridge-$requestedDeploymentTarget-v1") {
+      "The bridge server signer is not bound to the selected deployment target."
+    }
+    require(assignmentSignerKeyId == "telebirr-assignment-$requestedDeploymentTarget-v1") {
+      "The assignment signer is not bound to the selected deployment target."
+    }
     OperationalVerifierTrust(
+      deploymentTarget = requestedDeploymentTarget,
       runtimeMode = requestedRuntimeMode,
-      serverSignerKeyId = keyId("fetanagentVerifierServerSignerKeyId"),
+      serverSignerKeyId = serverSignerKeyId,
       serverSignerPublicKeySpki = serverKey.first,
       serverSignerPublicKeySpkiSha256 = serverKey.second,
-      assignmentSignerKeyId = keyId("fetanagentVerifierAssignmentSignerKeyId"),
+      assignmentSignerKeyId = assignmentSignerKeyId,
       assignmentSignerPublicKeySpki = assignmentKey.first,
       assignmentSignerPublicKeySpkiSha256 = assignmentKey.second,
     )
@@ -220,6 +241,7 @@ android {
     versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
+    buildConfigField("String", "VERIFIER_DEPLOYMENT_TARGET", quotedBuildConfig("inert"))
     buildConfigField("String", "VERIFIER_RUNTIME_MODE", quotedBuildConfig("inert"))
     buildConfigField("String", "SERVER_SIGNER_KEY_ID", quotedBuildConfig(""))
     buildConfigField("String", "SERVER_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
@@ -255,6 +277,11 @@ android {
       }
       operationalTrust?.let { trust ->
         buildConfigField("boolean", "VERIFIER_ENABLED", "true")
+        buildConfigField(
+          "String",
+          "VERIFIER_DEPLOYMENT_TARGET",
+          quotedBuildConfig(trust.deploymentTarget),
+        )
         buildConfigField("String", "VERIFIER_RUNTIME_MODE", quotedBuildConfig(trust.runtimeMode))
         buildConfigField("String", "SERVER_SIGNER_KEY_ID", quotedBuildConfig(trust.serverSignerKeyId))
         buildConfigField(

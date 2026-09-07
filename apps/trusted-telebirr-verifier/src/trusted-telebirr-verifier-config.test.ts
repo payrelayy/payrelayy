@@ -14,6 +14,8 @@ import {
 
 const databaseUrl =
   'postgresql://fetanagent_trusted_telebirr_verifier_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
+const productionDatabaseUrl =
+  'postgresql://fetanagent_trusted_telebirr_verifier_runtime:synthetic-password-123456@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full';
 const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
 
 function publicKeySpki(namedCurve: string): Buffer {
@@ -118,7 +120,7 @@ describe('trusted TeleBirr verifier configuration', () => {
     expect(dependencies.fileSystem.lstat).not.toHaveBeenCalled();
   });
 
-  it('loads only the fixed staging role, pins, and CA through O_NOFOLLOW descriptors', () => {
+  it('loads only the fixed target role, pins, and CA through O_NOFOLLOW descriptors', () => {
     const dependencies = guardedDependencies();
     const config = loadTrustedTelebirrVerifierConfig(enabledEnvironment, dependencies);
     expect(config).toMatchObject({
@@ -144,6 +146,38 @@ describe('trusted TeleBirr verifier configuration', () => {
       TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
     );
+  });
+
+  it('accepts the exact production database target and rejects cross-target URLs', () => {
+    const productionEnvironment = {
+      ...enabledEnvironment,
+      TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: 'production',
+    };
+    const productionValues = {
+      [TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE]: productionDatabaseUrl,
+      [TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE]: manifest(),
+      [TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE]: caCertificate,
+    };
+    expect(
+      loadTrustedTelebirrVerifierConfig(
+        productionEnvironment,
+        guardedDependencies(productionValues),
+      ),
+    ).toMatchObject({
+      enabled: true,
+      deploymentTarget: 'production',
+      projectReference: 'xzztugbgtulptnbpoelr',
+      connection: {
+        host: 'db.xzztugbgtulptnbpoelr.supabase.co',
+        user: 'fetanagent_trusted_telebirr_verifier_runtime',
+      },
+    });
+    expect(() =>
+      loadTrustedTelebirrVerifierConfig(productionEnvironment, guardedDependencies()),
+    ).toThrow('configuration is unavailable');
+    expect(() =>
+      loadTrustedTelebirrVerifierConfig(enabledEnvironment, guardedDependencies(productionValues)),
+    ).toThrow('configuration is unavailable');
   });
 
   it('requires a root/effective-user-owned owner-readable-only database secret', () => {
@@ -255,7 +289,7 @@ describe('trusted TeleBirr verifier configuration', () => {
       { ...enabledEnvironment, NODE_ENV: 'test' },
       { ...enabledEnvironment, FINANCIAL_ACTIONS_MODE: 'dry_run' },
       { ...enabledEnvironment, TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false' },
-      { ...enabledEnvironment, TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: 'production' },
+      { ...enabledEnvironment, TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: 'Production' },
       { ...enabledEnvironment, NODE_EXTRA_CA_CERTS: '/tmp/ca' },
       { ...enabledEnvironment, TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE: '/tmp/db' },
     ]) {

@@ -66,8 +66,10 @@ method and reduces every transport detail to one non-sensitive local-unavailable
 The package now has a fail-closed executable lifecycle and a dedicated non-root container target.
 Startup is disabled by default. Enabled startup requires production Node mode,
 `FINANCIAL_ACTIONS_MODE=dry_run`, the internal bridge gate, the bridge-specific no-money gate, and
-the staging target. It imports neither `pg` nor a Supabase client and accepts no `service_role`,
-database password, wallet, settlement, or executor dependency.
+an explicit `staging` or `production` target. The server signer key ID must name that exact target,
+so a staging manifest cannot start a production bridge and a production manifest cannot start a
+staging bridge. It imports neither `pg` nor a Supabase client and accepts no `service_role`, database
+password, wallet, settlement, or executor dependency.
 
 Before it opens the internal listener, the lifecycle verifies both fixed local broker directories
 are owned by its non-root UID at mode `0700` and both Unix sockets are owned by that UID at mode

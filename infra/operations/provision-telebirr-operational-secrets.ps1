@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [Parameter()]
-  [ValidatePattern('^[A-Za-z0-9_-]{1,64}$')]
+  [ValidateSet('staging', 'production')]
   [string]$EnvironmentName = 'staging',
 
   [Parameter()]
@@ -196,8 +196,8 @@ try {
   $buffers.Add($androidKeystore)
   $buffers.Add($androidCertificate)
 
-  $assignmentKeyId = 'telebirr-assignment-staging-v1'
-  $bridgeKeyId = 'telebirr-bridge-staging-v1'
+  $assignmentKeyId = "telebirr-assignment-$EnvironmentName-v1"
+  $bridgeKeyId = "telebirr-bridge-$EnvironmentName-v1"
   $assignmentDigest = Get-Sha256Identifier -Bytes $assignment.PublicKey
   $bridgeDigest = Get-Sha256Identifier -Bytes $bridge.PublicKey
   $androidCertificateDigest = Get-Sha256Identifier -Bytes $androidCertificate

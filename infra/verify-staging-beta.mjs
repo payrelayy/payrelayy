@@ -732,6 +732,7 @@ assert.match(apiService, /target: api/);
 assert.match(apiService, /API_HOST: 0\.0\.0\.0/);
 assert.match(apiService, /API_PORT: '3000'/);
 assert.match(apiService, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/);
+assert.match(apiService, /PLAYER_ACTION_DEPLOYMENT_TARGET: staging/);
 assert.match(apiService, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/);
 assert.match(apiService, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'/);
 assert.match(

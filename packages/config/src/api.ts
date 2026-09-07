@@ -79,6 +79,8 @@ export type ApiTelegramActionChannelConfig =
 export type ApiTelegramPlayerActionRuntimeConfig =
   | {
       readonly enabled: false;
+      readonly deploymentTarget: undefined;
+      readonly projectReference: undefined;
       readonly connection: undefined;
       readonly payloadHmacSecret: undefined;
       readonly depositReferenceEncryptionSecret: undefined;
@@ -91,6 +93,8 @@ export type ApiTelegramPlayerActionRuntimeConfig =
     }
   | {
       readonly enabled: true;
+      readonly deploymentTarget: PlayerActionDeploymentTarget;
+      readonly projectReference: (typeof PLAYER_ACTION_DATABASE_TARGETS)[PlayerActionDeploymentTarget]['projectReference'];
       readonly connection: {
         readonly database: 'postgres';
         readonly host: string;
@@ -161,7 +165,18 @@ const API_DATABASE_SESSION_POOLER_HOST = 'aws-0-eu-west-1.pooler.supabase.com';
 const API_DATABASE_SESSION_POOLER_USER = `${API_DATABASE_RUNTIME_ROLE}.${FETANAGENT_SUPABASE_PROJECT_REFERENCE}`;
 const PLAYER_ACTION_DATABASE_RUNTIME_ROLE = 'fetanagent_player_actions_runtime';
 const PLAYER_ACTION_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
-const PLAYER_ACTION_DATABASE_DIRECT_HOST = `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`;
+const PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE = FETANAGENT_SUPABASE_PROJECT_REFERENCE;
+const PLAYER_ACTION_DATABASE_TARGETS = {
+  staging: {
+    projectReference: PLAYER_ACTION_STAGING_PROJECT_REFERENCE,
+    host: `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`,
+  },
+  production: {
+    projectReference: PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE,
+    host: `db.${PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,
+  },
+} as const;
+type PlayerActionDeploymentTarget = keyof typeof PLAYER_ACTION_DATABASE_TARGETS;
 
 function secretFromEnvironmentOrFile(
   value: string | undefined,
@@ -426,16 +441,32 @@ function loadApiTelegramActionChannelConfig(
   };
 }
 
-function resolvePlayerActionDatabaseRuntimeUser(connectionUrl: URL): string {
+function loadPlayerActionDeploymentTarget(
+  environment: NodeJS.ProcessEnv,
+): PlayerActionDeploymentTarget {
+  const target = environment.PLAYER_ACTION_DEPLOYMENT_TARGET;
+  if (target !== 'staging' && target !== 'production') {
+    throw new Error(
+      'PLAYER_ACTION_DEPLOYMENT_TARGET must be explicitly set to staging or production.',
+    );
+  }
+  return target;
+}
+
+function resolvePlayerActionDatabaseRuntimeUser(
+  connectionUrl: URL,
+  deploymentTarget: PlayerActionDeploymentTarget,
+): string {
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
+  const expectedTarget = PLAYER_ACTION_DATABASE_TARGETS[deploymentTarget];
   if (
-    connectionUrl.hostname === PLAYER_ACTION_DATABASE_DIRECT_HOST &&
+    connectionUrl.hostname === expectedTarget.host &&
     user === PLAYER_ACTION_DATABASE_RUNTIME_ROLE
   ) {
     return user;
   }
   throw new Error(
-    'PLAYER_ACTION_DATABASE_URL must use the dedicated staging Player-ID action runtime login through the exact IPv6 direct database endpoint.',
+    'PLAYER_ACTION_DATABASE_URL must match the explicit deployment target and use the dedicated Player-ID action runtime login through its exact IPv6 direct database endpoint.',
   );
 }
 
@@ -453,6 +484,8 @@ function loadApiTelegramPlayerActionRuntimeConfig(
   if (!enabled) {
     return {
       enabled: false,
+      deploymentTarget: undefined,
+      projectReference: undefined,
       connection: undefined,
       payloadHmacSecret: undefined,
       depositReferenceEncryptionSecret: undefined,
@@ -469,6 +502,9 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       'INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED requires the action channel and capability contract gates.',
     );
   }
+
+  const deploymentTarget = loadPlayerActionDeploymentTarget(environment);
+  const databaseTarget = PLAYER_ACTION_DATABASE_TARGETS[deploymentTarget];
 
   const connectionString = secretFromEnvironmentOrFile(
     environment.PLAYER_ACTION_DATABASE_URL,
@@ -587,12 +623,14 @@ function loadApiTelegramPlayerActionRuntimeConfig(
 
   return {
     enabled: true,
+    deploymentTarget,
+    projectReference: databaseTarget.projectReference,
     connection: {
       database: 'postgres',
       host: connectionUrl.hostname,
       password: decodeDatabaseUrlComponent(connectionUrl.password),
       port: 5432,
-      user: resolvePlayerActionDatabaseRuntimeUser(connectionUrl),
+      user: resolvePlayerActionDatabaseRuntimeUser(connectionUrl, deploymentTarget),
     },
     payloadHmacSecret: requiredHexHmacSecret(
       secretFromEnvironmentOrFile(
@@ -755,6 +793,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
   };
   readonly telegramPlayerActionRuntime: {
     readonly enabled: boolean;
+    readonly deploymentTarget: PlayerActionDeploymentTarget | undefined;
     readonly connectionConfigured: boolean;
     readonly depositReferenceKeysConfigured: boolean;
     readonly depositReferenceKeyProfileVersion: 1 | undefined;
@@ -791,6 +830,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     },
     telegramPlayerActionRuntime: {
       enabled: config.telegramPlayerActionRuntime.enabled,
+      deploymentTarget: config.telegramPlayerActionRuntime.deploymentTarget,
       connectionConfigured: config.telegramPlayerActionRuntime.enabled,
       depositReferenceKeysConfigured: config.telegramPlayerActionRuntime.enabled,
       depositReferenceKeyProfileVersion:

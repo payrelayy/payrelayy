@@ -948,7 +948,7 @@ describe('customer web SSR and PWA boundary', () => {
       payload: form({ _csrf: csrfToken, password: 'a-new-long-password' }),
     });
     expect(response.statusCode).toBe(303);
-    expect(response.headers.location).toBe('/workspace');
+    expect(response.headers.location).toBe('/password-updated');
     expect(completePasswordRecovery).toHaveBeenCalledTimes(1);
     expect(completePasswordRecovery.mock.calls[0]?.[1]).toEqual({
       code: recoveryCode,
@@ -976,6 +976,8 @@ describe('customer web SSR and PWA boundary', () => {
       payload: form({ _csrf: csrfToken, password: 'a-new-long-password' }),
     });
     expect(failedResponse.statusCode).toBe(400);
+    expect(failedResponse.headers.location).toBeUndefined();
+    expect(failedResponse.body).not.toContain('Your new password is saved.');
     expect(failedResponse.body).toContain('We could not confirm that your password was changed.');
     expect(failedResponse.body).toContain('action="/forgot-password"');
     expect(failedResponse.body).not.toContain(recoveryCode);
@@ -986,6 +988,85 @@ describe('customer web SSR and PWA boundary', () => {
       ),
     ).toBe(true);
     await failed.close();
+  });
+
+  it('keeps successful staff recovery independent of customer-only workspace access', async () => {
+    const ensureAccount = vi.fn<CustomerWorkspaceRuntime['ensureAccount']>(async () => ({
+      error: 'customer_workspace_unavailable',
+      ok: false,
+    }));
+    const app = buildCustomerWebApp({
+      auth: fakeAuth({
+        getCurrentCustomer: async () => ({
+          account: { authUserId, email: 'staff@example.com' },
+          ok: true,
+          status: 'authenticated',
+        }),
+      }),
+      workspace: fakeWorkspace({ ensureAccount }),
+    });
+    try {
+      const updated = await app.inject({
+        method: 'POST',
+        url: '/update-password',
+        headers: mutationHeaders(
+          `__Host-fetanagent-csrf=${csrfToken}; __Host-fetanagent-recovery=${recoveryCode}`,
+        ),
+        payload: form({ _csrf: csrfToken, password: 'a-new-long-password' }),
+      });
+      expect(updated.statusCode).toBe(303);
+      expect(updated.headers.location).toBe('/password-updated');
+
+      const completion = await app.inject({ method: 'GET', url: '/password-updated' });
+      expect(completion.statusCode).toBe(200);
+      expect(completion.body).toContain('Your new password is saved.');
+      expect(completion.body).toContain('href="https://owner.fetanagent.com/owner"');
+      expect(completion.body).toContain('href="/workspace"');
+      expect(completion.body).toContain('Owner accounts cannot open the customer workspace.');
+      expect(completion.body).not.toContain('staff@example.com');
+      expect(completion.body).not.toContain(recoveryCode);
+      expect(completion.body).not.toContain('a-new-long-password');
+      expect(completion.body).not.toContain('<form');
+      expect(completion.headers['cache-control']).toContain('no-store');
+      expect(completion.headers.vary).toContain('Cookie');
+      expect(completion.headers['content-security-policy']).toContain("form-action 'self'");
+      expect(ensureAccount).not.toHaveBeenCalled();
+
+      // Showing the completion page never bypasses the existing customer restriction.
+      const workspace = await app.inject({ method: 'GET', url: '/workspace' });
+      expect(workspace.statusCode).toBe(503);
+      expect(ensureAccount).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('requires an authenticated session for the password completion page', async () => {
+    for (const mode of ['anonymous', 'unavailable', 'throw'] as const) {
+      const ensureAccount = vi.fn<CustomerWorkspaceRuntime['ensureAccount']>();
+      const app = buildCustomerWebApp({
+        auth: fakeAuth({
+          getCurrentCustomer: async () => {
+            if (mode === 'throw') throw new Error('private Auth failure');
+            return mode === 'anonymous'
+              ? { ok: true, status: 'anonymous' }
+              : { error: 'customer_auth_request_failed', ok: false };
+          },
+        }),
+        workspace: fakeWorkspace({ ensureAccount }),
+      });
+      try {
+        const response = await app.inject({ method: 'GET', url: '/password-updated' });
+        expect(response.statusCode).toBe(mode === 'anonymous' ? 303 : 503);
+        if (mode === 'anonymous') expect(response.headers.location).toBe('/sign-in');
+        expect(response.body).not.toContain('Your new password is saved.');
+        expect(response.body).not.toContain('private Auth failure');
+        expect(response.headers['cache-control']).toContain('no-store');
+        expect(ensureAccount).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    }
   });
 
   it('passes ordered request cookies and preserves every Auth cookie mutation', async () => {

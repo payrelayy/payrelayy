@@ -53,6 +53,25 @@ canonical migrations, and lists the resulting ledger. It does not seed customers
 or start Telegram. It does not enable financial execution. Financial activation remains a separate,
 explicitly authorized production operation after the database and runtimes are verified.
 
+### Production TeleBirr trust binding
+
+After the production migrations are current, create the production-only operational material once
+with `infra/operations/provision-telebirr-operational-secrets.ps1 -EnvironmentName production`.
+The provisioner writes encrypted private material and passwords plus the corresponding public
+identifiers directly to the protected GitHub `production` environment. It refuses to overwrite or
+rotate any existing name and removes its bounded local temporary directory.
+
+The manually dispatched
+[`TeleBirr operational trust`](../.github/workflows/telebirr-operational-trust.yml) workflow then
+selects the exact `production` environment, requires the caller to repeat the target, production
+project ref, reviewed `main` SHA, and trust-only phrase, and validates every private/public key pair
+before opening the database connection. The SQL independently binds the assignment signer key ID to
+the selected target. Its serializable operation may insert only the one immutable assignment-signer
+trust row while all seven financial/provider switches are disabled and no draft or armed pilot
+exists. The returned postcondition includes the exact deployment target. Production trust setup is
+a real cryptographic prerequisite for the bridge and Android verifier; it is not financial
+activation and cannot claim, settle, transfer, or move money.
+
 ### Hosted migration-ledger reconciliation
 
 The staging project contains two 2026-08-29 migration entries created by guarded operational

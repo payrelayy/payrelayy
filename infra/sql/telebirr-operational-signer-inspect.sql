@@ -11,7 +11,18 @@ select current_user = 'postgres' and session_user = 'postgres'
 \gset
 \if :administrator_session_ready
 \else
-  \warn 'The staging administrator session identity is not exact.'
+  \warn 'The target administrator session identity is not exact.'
+  select 1 / 0 as rejected;
+\endif
+
+select :'deployment_target' in ('staging', 'production')
+    and :'assignment_signer_key_id'
+      = 'telebirr-assignment-' || :'deployment_target' || '-v1'
+  as deployment_target_canonical
+\gset
+\if :deployment_target_canonical
+\else
+  \warn 'The assignment signer is not bound to the exact deployment target.'
   select 1 / 0 as rejected;
 \endif
 
@@ -77,6 +88,7 @@ where signer.id = :'assignment_signer_id'::uuid
 select pg_catalog.jsonb_build_object(
   'schemaVersion', 1,
   'operation', 'inspect_only',
+  'deploymentTarget', :'deployment_target',
   'assignmentSigner', 'active_unrevoked',
   'financialFeatures', 'disabled',
   'openPilot', 'absent'

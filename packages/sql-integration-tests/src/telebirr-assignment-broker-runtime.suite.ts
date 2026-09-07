@@ -272,6 +272,80 @@ export function registerTelebirrAssignmentBrokerRuntimeSqlTests(
       expect(forbidden.rows).toEqual([{ executable: false }]);
     });
 
+    it('returns no assignment and creates no lease while the exact pilot is dry-run', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await prepareTelebirrPilot(client, getOwnerAdminId());
+        const proof = await createLiveProof(client, pilot);
+        const staged = await stageProof(client, proof.id);
+
+        const reset = await client.query<{ readonly feature_key: string }>(
+          `update app.feature_switches
+              set mode = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then 'dry_run'::app.feature_mode
+                    else 'disabled'::app.feature_mode
+                  end,
+                  settings = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then jsonb_build_object(
+                        'contract_version', 1,
+                        'pilot_revision_id', $1::uuid,
+                        'configuration_digest', $2::text
+                      )
+                    else '{}'::jsonb
+                  end
+            where feature_key in (
+              'private_live_deposit_pilot',
+              'payment_verification',
+              'deposit_execution',
+              'withdrawal_validation',
+              'withdrawal_collection',
+              'cbe_birr_authoritative_verification',
+              'telebirr_authoritative_verification'
+            )
+            returning feature_key`,
+          [pilot.pilotRevisionId, pilot.configurationDigest],
+        );
+        expect(reset.rows).toHaveLength(7);
+
+        const before = await client.query<{ readonly count: string }>(
+          `select count(*)::text as count
+             from app.private_live_telebirr_verification_attempts
+            where verification_job_id = $1::uuid`,
+          [staged.row.verification_job_id],
+        );
+        expect(before.rows).toEqual([{ count: '0' }]);
+
+        await expectFailure(
+          client,
+          `select *
+             from app.lease_private_live_telebirr_assignment_broker(
+               $1::uuid, $2::text, $3::uuid, 120
+             )`,
+          [pilot.deviceEnrollmentId, 'invalid whitespace', randomUUID()],
+          /assignment request is invalid/iu,
+        );
+
+        const polled = await client.query<BrokerLeaseRow>(
+          `select *
+             from app.lease_private_live_telebirr_assignment_broker(
+               $1::uuid, $2::text, $3::uuid, 120
+             )`,
+          [pilot.deviceEnrollmentId, 'sql-telebirr-dry-run-poll-01', randomUUID()],
+        );
+        expect(polled.rows).toEqual([]);
+
+        const after = await client.query<{ readonly count: string }>(
+          `select count(*)::text as count
+             from app.private_live_telebirr_verification_attempts
+            where verification_job_id = $1::uuid`,
+          [staged.row.verification_job_id],
+        );
+        expect(after.rows).toEqual([{ count: '0' }]);
+      });
+    });
+
     it('leases one protected assignment and durably replays the first public signature', async () => {
       const client = getClient();
       await withRollback(client, async () => {

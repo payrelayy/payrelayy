@@ -380,7 +380,8 @@ object VerifierStatusPresentation {
       when {
         !verifierEnabled -> "build_disabled"
         enrolled -> snapshot.status.code
-        snapshot.status.state == LivePilotRuntimeState.ATTENTION -> snapshot.status.code
+        snapshot.status.state == LivePilotRuntimeState.ATTENTION ||
+          snapshot.status.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED -> snapshot.status.code
         else -> "provisioning_required"
       }
     DeviceBridgeProtocol.requireStatusCode(code)

@@ -24,6 +24,28 @@ export const COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST =
   'aws-1-eu-west-1.pooler.supabase.com' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER =
   `${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE}` as const;
+export const COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr' as const;
+export const COMPANION_DEVICE_BRIDGE_PRODUCTION_DATABASE_HOST =
+  'db.xzztugbgtulptnbpoelr.supabase.co' as const;
+export const COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com' as const;
+export const COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER =
+  `${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE}` as const;
+type DeploymentTarget = 'staging' | 'production';
+const databaseTargets = {
+  staging: {
+    projectReference: COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE,
+    directHost: COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST,
+    poolerHost: COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST,
+    poolerUser: COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER,
+  },
+  production: {
+    projectReference: COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE,
+    directHost: COMPANION_DEVICE_BRIDGE_PRODUCTION_DATABASE_HOST,
+    poolerHost: COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST,
+    poolerUser: COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER,
+  },
+} as const;
 export const COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE =
   '/run/secrets/companion_device_bridge_database_url' as const;
 export const COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE =
@@ -43,20 +65,25 @@ export interface CompanionDeviceBridgeConnectionConfig {
   readonly database: 'postgres';
   readonly host:
     | typeof COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST
-    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST;
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_DATABASE_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST;
   readonly password: string;
   readonly port: 5432;
   readonly user:
     | typeof COMPANION_DEVICE_BRIDGE_DATABASE_ROLE
-    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER;
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER;
 }
 
 export type CompanionDeviceBridgeConfig =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
-      readonly deploymentTarget: 'staging';
-      readonly projectReference: typeof COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE;
+      readonly deploymentTarget: DeploymentTarget;
+      readonly projectReference:
+        | typeof COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE
+        | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE;
       readonly connection: CompanionDeviceBridgeConnectionConfig;
       readonly serverSignerId: string;
       readonly signer: CompanionBridgeSigner;
@@ -282,7 +309,10 @@ interface CompanionDeviceBridgeRuntimeManifest {
   readonly serverSignerPublicKeySpkiSha256: string;
 }
 
-function runtimeManifestFrom(value: string): CompanionDeviceBridgeRuntimeManifest {
+function runtimeManifestFrom(
+  value: string,
+  deploymentTarget: DeploymentTarget,
+): CompanionDeviceBridgeRuntimeManifest {
   const record = plainCanonicalRecord(value, [
     'contractVersion',
     'deploymentTarget',
@@ -296,7 +326,7 @@ function runtimeManifestFrom(value: string): CompanionDeviceBridgeRuntimeManifes
   ]);
   if (
     record.contractVersion !== 2 ||
-    record.deploymentTarget !== 'staging' ||
+    record.deploymentTarget !== deploymentTarget ||
     record.pairingAllowed !== true ||
     record.exactFiveReadOnlyLookupAllowed !== true ||
     record.financialActionAllowed !== false ||
@@ -305,6 +335,8 @@ function runtimeManifestFrom(value: string): CompanionDeviceBridgeRuntimeManifes
     !UUID_V4_PATTERN.test(record.serverSignerId) ||
     typeof record.serverSignerKeyId !== 'string' ||
     !KEY_ID_PATTERN.test(record.serverSignerKeyId) ||
+    (deploymentTarget === 'production' &&
+      record.serverSignerKeyId !== 'companion-server-production-v1') ||
     typeof record.serverSignerPublicKeySpkiSha256 !== 'string' ||
     !SHA256_PATTERN.test(record.serverSignerPublicKeySpkiSha256)
   ) {
@@ -325,7 +357,10 @@ function decodeUrlComponent(value: string): string {
   }
 }
 
-function connectionFromUrl(value: string): Omit<CompanionDeviceBridgeConnectionConfig, 'ca'> {
+function connectionFromUrl(
+  value: string,
+  deploymentTarget: DeploymentTarget,
+): Omit<CompanionDeviceBridgeConnectionConfig, 'ca'> {
   let url: URL;
   try {
     url = new URL(value);
@@ -336,12 +371,10 @@ function connectionFromUrl(value: string): Omit<CompanionDeviceBridgeConnectionC
   const user = decodeUrlComponent(url.username);
   const password = decodeUrlComponent(url.password);
   const database = decodeUrlComponent(url.pathname.slice(1));
+  const target = databaseTargets[deploymentTarget];
   const directRoute =
-    url.hostname === COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST &&
-    user === COMPANION_DEVICE_BRIDGE_DATABASE_ROLE;
-  const sessionPoolerRoute =
-    url.hostname === COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST &&
-    user === COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER;
+    url.hostname === target.directHost && user === COMPANION_DEVICE_BRIDGE_DATABASE_ROLE;
+  const sessionPoolerRoute = url.hostname === target.poolerHost && user === target.poolerUser;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
     (!directRoute && !sessionPoolerRoute) ||
@@ -357,14 +390,10 @@ function connectionFromUrl(value: string): Omit<CompanionDeviceBridgeConnectionC
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: directRoute
-      ? COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST
-      : COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST,
+    host: directRoute ? target.directHost : target.poolerHost,
     password,
     port: 5432 as const,
-    user: directRoute
-      ? COMPANION_DEVICE_BRIDGE_DATABASE_ROLE
-      : COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER,
+    user: directRoute ? COMPANION_DEVICE_BRIDGE_DATABASE_ROLE : target.poolerUser,
   });
 }
 
@@ -498,11 +527,12 @@ export function loadCompanionDeviceBridgeConfig(
 ): CompanionDeviceBridgeConfig {
   const enabled = exactBoolean(environment.INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
+  const deploymentTarget = environment.COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET;
+  if (deploymentTarget !== 'staging' && deploymentTarget !== 'production') return unavailable();
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     !exactBoolean(environment.COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED) ||
-    environment.COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET !== 'staging' ||
     environment.NODE_EXTRA_CA_CERTS !== COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE
   ) {
     return unavailable();
@@ -514,6 +544,7 @@ export function loadCompanionDeviceBridgeConfig(
     guardedCanonicalJson(
       readGuardedText(COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE, dependencies, 'public_config'),
     ),
+    deploymentTarget,
   );
   const privateKeyBytes = readGuardedBytes(
     COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
@@ -530,14 +561,15 @@ export function loadCompanionDeviceBridgeConfig(
     guardedSingleLine(
       readGuardedText(COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE, dependencies, 'secret'),
     ),
+    deploymentTarget,
   );
   const ca = guardedCa(
     readGuardedText(COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE, dependencies, 'public_config'),
   );
   return Object.freeze({
     enabled: true,
-    deploymentTarget: 'staging' as const,
-    projectReference: COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE,
+    deploymentTarget,
+    projectReference: databaseTargets[deploymentTarget].projectReference,
     connection: Object.freeze({ ...connectionWithoutCa, ca }),
     serverSignerId: manifest.serverSignerId,
     signer,
@@ -549,7 +581,7 @@ export function redactedCompanionDeviceBridgeConfigForLog(
   config: CompanionDeviceBridgeConfig,
 ): Readonly<{
   enabled: boolean;
-  deploymentTarget: 'staging' | undefined;
+  deploymentTarget: DeploymentTarget | undefined;
   connectionConfigured: boolean;
   signerConfigured: boolean;
   pairingAllowed: true;

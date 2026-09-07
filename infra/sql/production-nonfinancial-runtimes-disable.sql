@@ -23,13 +23,15 @@ alter role fetanagent_owner_control_runtime nologin password null;
 alter role fetanagent_player_actions_runtime nologin password null;
 alter role fetanagent_telebirr_assignment_broker_runtime nologin password null;
 alter role fetanagent_telebirr_device_state_runtime nologin password null;
+alter role fetanagent_companion_device_bridge_runtime nologin password null;
 
-select count(*) = 6 and pg_catalog.bool_and(not rolcanlogin) as runtime_postcondition
+select count(*) = 7 and pg_catalog.bool_and(not rolcanlogin) as runtime_postcondition
 from pg_catalog.pg_roles
 where rolname in (
   'fetanagent_beta_admission_runtime', 'fetanagent_customer_web_runtime',
   'fetanagent_owner_control_runtime', 'fetanagent_player_actions_runtime',
-  'fetanagent_telebirr_assignment_broker_runtime', 'fetanagent_telebirr_device_state_runtime'
+  'fetanagent_telebirr_assignment_broker_runtime', 'fetanagent_telebirr_device_state_runtime',
+  'fetanagent_companion_device_bridge_runtime'
 )
 \gset
 \if :runtime_postcondition
@@ -39,4 +41,4 @@ where rolname in (
 \endif
 
 commit;
-\echo 'All six production non-financial runtime logins are disabled.'
+\echo 'All seven production non-financial runtime logins are disabled.'

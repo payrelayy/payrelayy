@@ -48,6 +48,7 @@ services:
       OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
       OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
       OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:?set the reviewed production assignment signer key ID}
+      OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
@@ -560,11 +561,75 @@ services:
       start_period: 30s
       retries: 4
 
+  production-companion-device-bridge:
+    <<: *runtime-defaults
+    image: fetanagent-companion-device-bridge:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    pids_limit: 96
+    mem_limit: 192m
+    environment:
+      NODE_ENV: production
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED: 'true'
+      COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED: 'true'
+      COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production
+      COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE: /run/secrets/companion_device_bridge_database_url
+      COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE: /run/secrets/companion_device_bridge_server_signer.pkcs8.der
+      COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE: /run/configs/companion_device_bridge_runtime_manifest.v2.json
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: companion_device_bridge_database_url
+        target: companion_device_bridge_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: companion_device_bridge_server_signer
+        target: companion_device_bridge_server_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: companion_device_bridge_runtime_manifest
+        target: /run/configs/companion_device_bridge_runtime_manifest.v2.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - companion_device_ingress
+      - companion_device_database_egress
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - "import{connect}from'node:net';const c=connect({host:'127.0.0.1',port:8085}),f=()=>process.exit(1);c.setTimeout(1000,f);c.once('error',f);c.once('connect',()=>{c.destroy();process.exit(0)})"
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 4
+
   gateway:
     <<: *runtime-defaults
     image: fetanagent-gateway:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
     mem_limit: 128m
     cpus: 0.25
+    environment:
+      FETANAGENT_COMPANION_BRIDGE_UPSTREAM: production-companion-device-bridge:8085
     cap_add:
       - NET_BIND_SERVICE
     ports:
@@ -589,6 +654,9 @@ services:
         condition: service_healthy
         restart: true
       telebirr-device-bridge:
+        condition: service_healthy
+        restart: true
+      production-companion-device-bridge:
         condition: service_healthy
         restart: true
     healthcheck:
@@ -617,6 +685,11 @@ networks:
   companion_device_ingress:
     external: true
     name: fetanagent-companion-device-ingress
+  companion_device_database_egress:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
   telebirr_device_ingress:
     external: true
     name: fetanagent-telebirr-device-ingress
@@ -632,6 +705,8 @@ configs:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment.spki.der
   telebirr_device_bridge_runtime_manifest:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-bridge-runtime-manifest.v1.json
+  companion_device_bridge_runtime_manifest:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/companion-bridge-runtime-manifest.v2.json
 
 secrets:
   owner_control_database_url:
@@ -676,6 +751,10 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-device-state-database-url
   telebirr_device_bridge_server_signer:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-bridge-server-signer.pkcs8.der
+  companion_device_bridge_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/companion-device-database-url
+  companion_device_bridge_server_signer:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/companion-bridge-server-signer.pkcs8.der
 
 volumes:
   telebirr_assignment_socket:

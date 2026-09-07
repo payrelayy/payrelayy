@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [Parameter()]
-  [ValidatePattern('^[A-Za-z0-9_-]{1,64}$')]
+  [ValidateSet('staging', 'production')]
   [string]$EnvironmentName = 'staging'
 )
 
@@ -71,6 +71,9 @@ function Get-Sha256Identifier {
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
   throw 'GitHub CLI is unavailable.'
 }
+if ((Invoke-Gh -Arguments @('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner')) -ne 'payrelayy/payrelayy') {
+  throw 'The exact FetanAgent GitHub repository is required.'
+}
 
 $existingSecrets = @(
   (Invoke-Gh -Arguments @('secret', 'list', '--env', $EnvironmentName, '--json', 'name')) |
@@ -112,13 +115,13 @@ try {
   $runtimePasswordBytes = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
   $buffers.Add($runtimePasswordBytes)
   $signerId = [Guid]::NewGuid().ToString()
-  $signerKeyId = 'companion-server-staging-v1'
+  $signerKeyId = "companion-server-$EnvironmentName-v1"
   $publicKeyDigest = Get-Sha256Identifier -Bytes $publicKey
   $validFrom = [DateTimeOffset]::UtcNow.AddMinutes(-5).ToString('yyyy-MM-ddTHH:mm:ssZ')
   $validUntil = [DateTimeOffset]::UtcNow.AddYears(2).ToString('yyyy-MM-ddTHH:mm:ssZ')
   $manifest = [ordered]@{
     contractVersion = 2
-    deploymentTarget = 'staging'
+    deploymentTarget = $EnvironmentName
     pairingAllowed = $true
     exactFiveReadOnlyLookupAllowed = $true
     financialActionAllowed = $false

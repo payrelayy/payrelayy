@@ -18,6 +18,13 @@ const directDatabaseUrl =
   'postgresql://fetanagent_companion_device_bridge_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const databaseUrl =
   'postgresql://fetanagent_companion_device_bridge_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+const productionDatabaseUrl = databaseUrl
+  .replace('spzpiyxheappsfyswewl', 'xzztugbgtulptnbpoelr')
+  .replace('aws-1-', 'aws-0-');
+const productionDirectDatabaseUrl = directDatabaseUrl.replace(
+  'spzpiyxheappsfyswewl',
+  'xzztugbgtulptnbpoelr',
+);
 const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
 const paddedCa = '-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n';
 const keyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -47,6 +54,23 @@ const enabledEnvironment: NodeJS.ProcessEnv = {
   COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
   NODE_EXTRA_CA_CERTS: COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE,
 };
+
+const productionEnvironment = {
+  ...enabledEnvironment,
+  COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production',
+};
+const productionManifest = manifest
+  .replace('staging', 'production')
+  .replace('companion_server_signer_2026_01', 'companion-server-production-v1');
+
+function productionFiles(url = productionDatabaseUrl, runtimeManifest = productionManifest) {
+  return {
+    [COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE]: url,
+    [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: runtimeManifest,
+    [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
+    [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
+  };
+}
 
 interface FileOverrides {
   readonly before?: Partial<CompanionDeviceBridgeGuardedFileStat>;
@@ -203,7 +227,8 @@ describe('companion device bridge configuration', () => {
       'missing no-money lookup gate',
       { COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED: 'false' },
     ],
-    ['wrong target', { COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production' }],
+    ['cross-environment manifest', { COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production' }],
+    ['unknown target', { COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'preview' }],
     ['wrong CA path', { NODE_EXTRA_CA_CERTS: '/tmp/ca' }],
     ['wrong database file', { COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE: '/tmp/database' }],
     ['wrong signer file', { COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE: '/tmp/key' }],
@@ -214,6 +239,72 @@ describe('companion device bridge configuration', () => {
         { ...enabledEnvironment, ...(override as NodeJS.ProcessEnv) },
         guardedDependencies(),
       ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it.each([productionDatabaseUrl, productionDirectDatabaseUrl])(
+    'loads a production-bound bridge from the exact production route %s',
+    (url) => {
+      const dependencies = guardedDependencies(productionFiles(url));
+      const config = loadCompanionDeviceBridgeConfig(productionEnvironment, dependencies);
+      expect(config).toMatchObject({
+        enabled: true,
+        deploymentTarget: 'production',
+        projectReference: 'xzztugbgtulptnbpoelr',
+        signer: { keyId: 'companion-server-production-v1' },
+      });
+      expect(redactedCompanionDeviceBridgeConfigForLog(config)).toMatchObject({
+        deploymentTarget: 'production',
+        pairingAllowed: true,
+        exactFiveReadOnlyLookupAllowed: true,
+        financialActionAllowed: false,
+        moneyMovementAllowed: false,
+      });
+      expect(
+        dependencies.returnedBuffers.every((bytes) => bytes.every((value) => value === 0)),
+      ).toBe(true);
+    },
+  );
+
+  it.each([
+    ['staging session route', databaseUrl, productionManifest],
+    ['staging direct route', directDatabaseUrl, productionManifest],
+    [
+      'staging pooler login',
+      productionDatabaseUrl.replace('xzztugbgtulptnbpoelr', 'spzpiyxheappsfyswewl'),
+      productionManifest,
+    ],
+    ['staging pooler host', productionDatabaseUrl.replace('aws-0-', 'aws-1-'), productionManifest],
+    ['transaction pooling', productionDatabaseUrl.replace(':5432/', ':6543/'), productionManifest],
+    ['unverified TLS', productionDatabaseUrl.replace('verify-full', 'require'), productionManifest],
+    ['staging manifest', productionDatabaseUrl, manifest],
+    [
+      'staging signer identity',
+      productionDatabaseUrl,
+      productionManifest.replace('companion-server-production-v1', 'companion-server-staging-v1'),
+    ],
+    [
+      'financial authority',
+      productionDatabaseUrl,
+      productionManifest.replace('"financialActionAllowed":false', '"financialActionAllowed":true'),
+    ],
+    [
+      'money movement',
+      productionDatabaseUrl,
+      productionManifest.replace('"moneyMovementAllowed":false', '"moneyMovementAllowed":true'),
+    ],
+  ])('rejects production with %s', (_name, url, runtimeManifest) => {
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        productionEnvironment,
+        guardedDependencies(productionFiles(url, runtimeManifest)),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it('rejects production files in a staging runtime', () => {
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(enabledEnvironment, guardedDependencies(productionFiles())),
     ).toThrow('configuration is unavailable');
   });
 

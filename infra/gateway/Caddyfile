@@ -58,7 +58,7 @@ device.fetanagent.com {
 		request_body {
 			max_size 64KiB
 		}
-		reverse_proxy companion-device-bridge:8085 {
+		reverse_proxy {$FETANAGENT_COMPANION_BRIDGE_UPSTREAM:companion-device-bridge:8085} {
 			transport http {
 				dial_timeout 3s
 				response_header_timeout 15s

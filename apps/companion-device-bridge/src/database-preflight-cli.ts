@@ -9,7 +9,7 @@ const config = loadCompanionDeviceBridgeConfig();
 
 if (!config.enabled) {
   console.error(
-    'FetanAgent companion device bridge database preflight is disabled. Enable only the dedicated staging pairing runtime.',
+    'FetanAgent companion device bridge database preflight is disabled. Enable only the dedicated target-bound pairing runtime.',
   );
   process.exitCode = 1;
 } else {
@@ -38,7 +38,7 @@ if (!config.enabled) {
         ? `${initialFailure.kind}:${initialFailure.checks.join(',')}`
         : (initialFailure?.kind ?? 'application_unavailable');
     console.error(
-      `FetanAgent companion device bridge database preflight did not complete. Check the function-only staging runtime configuration. Safe diagnostic: ${diagnostic}.`,
+      `FetanAgent companion device bridge database preflight did not complete. Check the function-only target-bound runtime configuration. Safe diagnostic: ${diagnostic}.`,
     );
     process.exitCode = 1;
   }

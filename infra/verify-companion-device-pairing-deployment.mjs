@@ -139,7 +139,10 @@ assert.match(
 );
 assert.doesNotMatch(companionMatcher, /amount|transfer|settlement|execute/iu);
 assert.match(caddyfile, /max_size 64KiB/u);
-assert.match(caddyfile, /reverse_proxy companion-device-bridge:8085/u);
+assert.match(
+  caddyfile,
+  /reverse_proxy \{\$FETANAGENT_COMPANION_BRIDGE_UPSTREAM:companion-device-bridge:8085\}/u,
+);
 assert.match(stagingCompose, /- companion_device_ingress/u);
 assert.match(
   stagingCompose,
@@ -372,7 +375,7 @@ assert.match(deploymentInstaller, /visudo -cf \/etc\/sudoers/u);
 
 assert.match(databasePreflight, /loadCompanionDeviceBridgeConfig/u);
 assert.match(databasePreflight, /startCompanionDeviceBridgeApplication/u);
-assert.match(databasePreflight, /function-only staging runtime configuration/u);
+assert.match(databasePreflight, /function-only target-bound runtime configuration/u);
 assert.doesNotMatch(databasePreflight, /listen\(8085|money|transfer/iu);
 assert.match(postgresRuntime, /owner\.rolname = 'postgres' and defaults\.defaclnamespace = 0/u);
 assert.doesNotMatch(postgresRuntime, /namespace\.oid = defaults\.defaclnamespace/u);

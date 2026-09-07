@@ -31,6 +31,12 @@ const workspaceConfig = loadCustomerWebWorkspaceConfig();
 if (!workspaceConfig.enabled) {
   throw new Error('The customer workspace runtime gate is disabled.');
 }
+if (
+  config.deploymentTarget !== workspaceConfig.deploymentTarget ||
+  config.projectReference !== workspaceConfig.projectReference
+) {
+  throw new Error('The customer Auth and workspace runtimes must use the same deployment target.');
+}
 const depositProofConfig = loadCustomerWebDryRunDepositProofConfig();
 const rateLimitConfig = loadCustomerWebRateLimitConfig();
 if (!rateLimitConfig.enabled) {

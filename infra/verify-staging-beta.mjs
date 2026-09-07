@@ -687,6 +687,7 @@ assert.doesNotMatch(
 assert.match(customerWebService, /target: customer-web/);
 assert.match(customerWebService, /CUSTOMER_WEB_HOST: 0\.0\.0\.0/);
 assert.match(customerWebService, /CUSTOMER_WEB_PORT: '3003'/);
+assert.match(customerWebService, /CUSTOMER_WEB_DEPLOYMENT_TARGET: staging/);
 assert.match(
   customerWebService,
   /CUSTOMER_WEB_SUPABASE_URL: https:\/\/spzpiyxheappsfyswewl\.supabase\.co/,

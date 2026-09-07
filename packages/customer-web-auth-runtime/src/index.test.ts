@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthSessionMissingError } from '@supabase/supabase-js';
 
 import {
+  CUSTOMER_WEB_DEPLOYMENT_TARGETS,
+  CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
   CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   type CustomerWebAuthConfig,
@@ -29,8 +31,10 @@ const authUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const password = 'correct horse battery staple';
 const recoveryCode = 'a_secure_recovery_code_1234567890';
 const config: Extract<CustomerWebAuthConfig, { readonly enabled: true }> = {
+  deploymentTarget: 'staging',
   enabled: true,
   passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
+  projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
   supabasePublishableKey: publishableKey,
   supabaseUrl: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
 };
@@ -115,6 +119,28 @@ beforeEach(() => {
 describe('customer web Auth port', () => {
   it('pins the server-only runtime export surface', () => {
     expect(Object.keys(runtime).sort()).toEqual(['createCustomerWebAuthPort']);
+  });
+
+  it('accepts only a target-consistent production Auth binding', async () => {
+    const production = CUSTOMER_WEB_DEPLOYMENT_TARGETS.production;
+    const productionConfig: Extract<CustomerWebAuthConfig, { readonly enabled: true }> = {
+      ...config,
+      deploymentTarget: 'production',
+      projectReference: production.projectReference,
+      supabaseUrl: production.supabaseOrigin,
+    };
+    await createCustomerWebAuthPort(productionConfig).getCurrentCustomer(createContext().context);
+    expect(sdk.createServerClient).toHaveBeenCalledWith(
+      production.supabaseOrigin,
+      publishableKey,
+      expect.any(Object),
+    );
+    expect(() =>
+      createCustomerWebAuthPort({
+        ...productionConfig,
+        supabaseUrl: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+      } as CustomerWebAuthConfig),
+    ).toThrow('Customer web Auth runtime configuration is invalid');
   });
 
   it('creates one server-only Supabase client per operation with strict cookie defaults', async () => {

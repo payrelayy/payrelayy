@@ -14,13 +14,34 @@ import {
 } from './deposit-proof-reference-profile.js';
 
 export const CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
+export const CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr' as const;
 export const CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN =
   `https://${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
+export const CUSTOMER_WEB_PRODUCTION_SUPABASE_ORIGIN =
+  `https://${CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
 export const CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL =
   'https://fetanagent.com/auth/recovery' as const;
 export const CUSTOMER_WEB_DATABASE_RUNTIME_ROLE = 'fetanagent_customer_web_runtime' as const;
-export const CUSTOMER_WEB_DATABASE_DIRECT_HOST =
+export const CUSTOMER_WEB_STAGING_DATABASE_DIRECT_HOST =
   `db.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
+export const CUSTOMER_WEB_PRODUCTION_DATABASE_DIRECT_HOST =
+  `db.${CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
+export const CUSTOMER_WEB_DEPLOYMENT_TARGETS = {
+  staging: {
+    databaseDirectHost: CUSTOMER_WEB_STAGING_DATABASE_DIRECT_HOST,
+    projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
+    supabaseOrigin: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+  },
+  production: {
+    databaseDirectHost: CUSTOMER_WEB_PRODUCTION_DATABASE_DIRECT_HOST,
+    projectReference: CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
+    supabaseOrigin: CUSTOMER_WEB_PRODUCTION_SUPABASE_ORIGIN,
+  },
+} as const;
+export type CustomerWebDeploymentTarget = keyof typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS;
+
+// Retain the staging alias used by the current staging composition.
+export const CUSTOMER_WEB_DATABASE_DIRECT_HOST = CUSTOMER_WEB_STAGING_DATABASE_DIRECT_HOST;
 export const CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE =
   '/run/secrets/customer_web_database_url' as const;
 export const CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE =
@@ -30,28 +51,36 @@ export const CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE =
 
 export type CustomerWebAuthConfig =
   | {
+      readonly deploymentTarget: undefined;
       readonly enabled: false;
       readonly passwordRecoveryRedirectUrl: typeof CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL;
+      readonly projectReference: undefined;
       readonly supabasePublishableKey: undefined;
       readonly supabaseUrl: undefined;
     }
   | {
+      readonly deploymentTarget: CustomerWebDeploymentTarget;
       readonly enabled: true;
       readonly passwordRecoveryRedirectUrl: typeof CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL;
+      readonly projectReference: (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['projectReference'];
       readonly supabasePublishableKey: string;
-      readonly supabaseUrl: typeof CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN;
+      readonly supabaseUrl: (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['supabaseOrigin'];
     };
 
 export type RedactedCustomerWebAuthConfig = {
+  readonly deploymentTarget: CustomerWebDeploymentTarget | undefined;
   readonly enabled: boolean;
   readonly passwordRecoveryRedirectUrl: typeof CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL;
+  readonly projectReference:
+    | (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['projectReference']
+    | undefined;
   readonly publishableKeyConfigured: boolean;
   readonly supabaseOriginConfigured: boolean;
 };
 
 export interface CustomerWebDatabaseConnection {
   readonly database: 'postgres';
-  readonly host: typeof CUSTOMER_WEB_DATABASE_DIRECT_HOST;
+  readonly host: (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['databaseDirectHost'];
   readonly password: string;
   readonly port: 5432;
   readonly user: typeof CUSTOMER_WEB_DATABASE_RUNTIME_ROLE;
@@ -60,6 +89,7 @@ export interface CustomerWebDatabaseConnection {
 export type CustomerWebWorkspaceConfig =
   | {
       readonly connection: undefined;
+      readonly deploymentTarget: undefined;
       readonly enabled: false;
       readonly projectReference: undefined;
       readonly stage: undefined;
@@ -67,9 +97,10 @@ export type CustomerWebWorkspaceConfig =
     }
   | {
       readonly connection: CustomerWebDatabaseConnection;
+      readonly deploymentTarget: CustomerWebDeploymentTarget;
       readonly enabled: true;
-      readonly projectReference: typeof CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE;
-      readonly stage: 'staging';
+      readonly projectReference: (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['projectReference'];
+      readonly stage: CustomerWebDeploymentTarget;
       readonly tlsMode: 'verify-full';
     };
 
@@ -148,9 +179,12 @@ export interface CustomerWebWorkspaceConfigDependencies {
 
 export type RedactedCustomerWebWorkspaceConfig = {
   readonly connectionConfigured: boolean;
+  readonly deploymentTarget: CustomerWebDeploymentTarget | undefined;
   readonly enabled: boolean;
-  readonly projectReference: typeof CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE | undefined;
-  readonly stage: 'staging' | undefined;
+  readonly projectReference:
+    | (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['projectReference']
+    | undefined;
+  readonly stage: CustomerWebDeploymentTarget | undefined;
   readonly tlsMode: 'verify-full' | undefined;
 };
 
@@ -161,6 +195,18 @@ function requiredPublishableKey(value: string | undefined): string {
     );
   }
   return value;
+}
+
+function loadCustomerWebDeploymentTarget(
+  environment: NodeJS.ProcessEnv,
+): CustomerWebDeploymentTarget {
+  const target = environment.CUSTOMER_WEB_DEPLOYMENT_TARGET;
+  if (target !== 'staging' && target !== 'production') {
+    throw new Error(
+      'CUSTOMER_WEB_DEPLOYMENT_TARGET must be explicitly set to staging or production.',
+    );
+  }
+  return target;
 }
 
 function publishableKeyFromEnvironmentOrFile(
@@ -357,6 +403,7 @@ function decodeDatabaseUrlComponent(value: string): string {
 
 function parseCustomerWebDatabaseConnection(
   connectionString: string,
+  deploymentTarget: CustomerWebDeploymentTarget,
 ): CustomerWebDatabaseConnection {
   if (
     connectionString !== connectionString.trim() ||
@@ -374,13 +421,14 @@ function parseCustomerWebDatabaseConnection(
   if (connectionUrl.protocol !== 'postgres:' && connectionUrl.protocol !== 'postgresql:') {
     throw new Error('CUSTOMER_WEB_DATABASE_URL must use the postgres or postgresql protocol.');
   }
+  const expectedTarget = CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget];
   if (
-    connectionUrl.hostname !== CUSTOMER_WEB_DATABASE_DIRECT_HOST ||
+    connectionUrl.hostname !== expectedTarget.databaseDirectHost ||
     connectionUrl.username === '' ||
     connectionUrl.password === ''
   ) {
     throw new Error(
-      'CUSTOMER_WEB_DATABASE_URL must use the exact staging direct database endpoint and dedicated runtime login.',
+      'CUSTOMER_WEB_DATABASE_URL must match the explicit deployment target and use its exact direct database endpoint and dedicated runtime login.',
     );
   }
   if (connectionUrl.port !== '' && connectionUrl.port !== '5432') {
@@ -399,7 +447,7 @@ function parseCustomerWebDatabaseConnection(
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
   if (user !== CUSTOMER_WEB_DATABASE_RUNTIME_ROLE) {
     throw new Error(
-      'CUSTOMER_WEB_DATABASE_URL must use the exact staging direct database endpoint and dedicated runtime login.',
+      'CUSTOMER_WEB_DATABASE_URL must match the explicit deployment target and use its exact direct database endpoint and dedicated runtime login.',
     );
   }
   const database = decodeDatabaseUrlComponent(connectionUrl.pathname.slice(1));
@@ -409,7 +457,7 @@ function parseCustomerWebDatabaseConnection(
 
   return {
     database: 'postgres',
-    host: CUSTOMER_WEB_DATABASE_DIRECT_HOST,
+    host: expectedTarget.databaseDirectHost,
     password: decodeDatabaseUrlComponent(connectionUrl.password),
     port: 5432,
     user: CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
@@ -428,26 +476,32 @@ export function loadCustomerWebAuthConfig(
 
   if (!enabled) {
     return {
+      deploymentTarget: undefined,
       enabled: false,
       passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
+      projectReference: undefined,
       supabasePublishableKey: undefined,
       supabaseUrl: undefined,
     };
   }
 
-  if (environment.CUSTOMER_WEB_SUPABASE_URL !== CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN) {
+  const deploymentTarget = loadCustomerWebDeploymentTarget(environment);
+  const target = CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget];
+  if (environment.CUSTOMER_WEB_SUPABASE_URL !== target.supabaseOrigin) {
     throw new Error(
-      'CUSTOMER_WEB_SUPABASE_URL must be the exact approved customer-web staging Supabase origin.',
+      'CUSTOMER_WEB_SUPABASE_URL must match the explicit customer-web deployment target.',
     );
   }
 
   return {
+    deploymentTarget,
     enabled: true,
     passwordRecoveryRedirectUrl: CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
+    projectReference: target.projectReference,
     supabasePublishableKey: requiredPublishableKey(
       publishableKeyFromEnvironmentOrFile(environment, dependencies),
     ),
-    supabaseUrl: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
+    supabaseUrl: target.supabaseOrigin,
   };
 }
 
@@ -455,8 +509,10 @@ export function redactedCustomerWebAuthConfigForLog(
   config: CustomerWebAuthConfig,
 ): RedactedCustomerWebAuthConfig {
   return {
+    deploymentTarget: config.deploymentTarget,
     enabled: config.enabled,
     passwordRecoveryRedirectUrl: config.passwordRecoveryRedirectUrl,
+    projectReference: config.projectReference,
     publishableKeyConfigured: config.enabled,
     supabaseOriginConfigured: config.enabled,
   };
@@ -642,7 +698,8 @@ export function redactedCustomerWebDryRunDepositProofConfigForLog(
 
 /**
  * Loads the server-only customer workspace database capability. The production service accepts the
- * URL only from its fixed private secret mount, and the URL cannot be repointed away from staging.
+ * URL only from its fixed private secret mount, and the URL cannot be repointed away from the
+ * explicitly selected deployment target.
  */
 export function loadCustomerWebWorkspaceConfig(
   environment: NodeJS.ProcessEnv = process.env,
@@ -656,6 +713,7 @@ export function loadCustomerWebWorkspaceConfig(
   if (!enabled) {
     return {
       connection: undefined,
+      deploymentTarget: undefined,
       enabled: false,
       projectReference: undefined,
       stage: undefined,
@@ -663,6 +721,8 @@ export function loadCustomerWebWorkspaceConfig(
     };
   }
 
+  const deploymentTarget = loadCustomerWebDeploymentTarget(environment);
+  const target = CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget];
   const databaseUrl = databaseUrlFromEnvironmentOrFile(environment, dependencies);
   if (!databaseUrl) {
     throw new Error(
@@ -670,10 +730,11 @@ export function loadCustomerWebWorkspaceConfig(
     );
   }
   return {
-    connection: parseCustomerWebDatabaseConnection(databaseUrl),
+    connection: parseCustomerWebDatabaseConnection(databaseUrl, deploymentTarget),
+    deploymentTarget,
     enabled: true,
-    projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
-    stage: 'staging',
+    projectReference: target.projectReference,
+    stage: deploymentTarget,
     tlsMode: 'verify-full',
   };
 }
@@ -683,6 +744,7 @@ export function redactedCustomerWebWorkspaceConfigForLog(
 ): RedactedCustomerWebWorkspaceConfig {
   return {
     connectionConfigured: config.enabled,
+    deploymentTarget: config.deploymentTarget,
     enabled: config.enabled,
     projectReference: config.projectReference,
     stage: config.stage,

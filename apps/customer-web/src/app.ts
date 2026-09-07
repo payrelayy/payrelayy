@@ -38,6 +38,7 @@ import {
   genericErrorPage,
   homePage,
   offlinePage,
+  passwordUpdatedPage,
   signInPage,
   updatePasswordPage,
   workspacePage,
@@ -85,6 +86,7 @@ const NO_STORE_PATHS = new Set([
   '/forgot-password',
   '/auth/recovery',
   '/update-password',
+  '/password-updated',
   '/workspace',
   '/player-ids',
   '/deposits',
@@ -1112,9 +1114,22 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
         password,
       });
       clearRecoveryCookie(reply);
-      return result.ok ? redirect(reply, '/workspace') : recoveryFailure();
+      return result.ok ? redirect(reply, '/password-updated') : recoveryFailure();
     } catch {
       clearRecoveryCookie(reply);
+      return html(reply, 503, genericErrorPage(503));
+    }
+  });
+
+  // Recovery is shared by customer and staff identities. Do not provision or
+  // authorize a customer workspace as a side effect of a successful reset.
+  app.get('/password-updated', async (request, reply) => {
+    try {
+      const account = await options.auth.getCurrentCustomer(authContext(request, reply));
+      if (!account.ok) return html(reply, 503, genericErrorPage(503));
+      if (account.status === 'anonymous') return redirect(reply, '/sign-in');
+      return html(reply, 200, passwordUpdatedPage());
+    } catch {
       return html(reply, 503, genericErrorPage(503));
     }
   });

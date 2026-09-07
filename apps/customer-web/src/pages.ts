@@ -175,6 +175,24 @@ export function updatePasswordPage(csrfToken: string, notice?: PageNotice): stri
   );
 }
 
+export function passwordUpdatedPage(): string {
+  return layout(
+    'Password updated',
+    `<main class="auth-layout">
+      <section class="card" aria-labelledby="password-updated-title">
+        <p class="eyebrow">Account recovery complete</p>
+        <h2 id="password-updated-title">Your new password is saved.</h2>
+        <p class="supporting">Choose the correct area for your account. You do not need another recovery email.</p>
+        <div class="actions">
+          <a class="button" href="https://owner.fetanagent.com/owner" rel="noreferrer">Open Owner portal</a>
+          <a class="button secondary" href="/workspace">Continue to customer workspace</a>
+        </div>
+        <p class="quiet">Owners and staff must use the Owner portal and sign in there with their new password. Owner accounts cannot open the customer workspace.</p>
+      </section>
+    </main>`,
+  );
+}
+
 function statusLabel(status: CustomerWorkspaceRegistration['status']): string {
   switch (status) {
     case 'checking':

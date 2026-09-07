@@ -174,7 +174,7 @@ describe('customer web SSR and PWA boundary', () => {
     expect(response.headers['content-security-policy']).toContain("worker-src 'self'");
     expect(response.headers['strict-transport-security']).toContain('includeSubDomains');
     expect(response.headers['x-frame-options']).toBe('DENY');
-    expect(response.headers['referrer-policy']).toBe('no-referrer');
+    expect(response.headers['referrer-policy']).toBe('same-origin');
     expect(response.headers['cache-control']).toContain('private');
     expect(response.headers['cache-control']).toContain('no-store');
     expect(response.headers.vary).toContain('Cookie');
@@ -185,6 +185,30 @@ describe('customer web SSR and PWA boundary', () => {
     const forbidden = ['own' + 'er', 'ad' + 'min', 'manual ' + 'verification'];
     for (const term of forbidden) expect(response.body.toLowerCase()).not.toContain(term);
     await app.close();
+  });
+
+  it('preserves native form origins on account pages while hiding recovery codes', async () => {
+    const app = buildCustomerWebApp({ auth: fakeAuth(), csrfTokenFactory: () => csrfToken });
+    try {
+      for (const url of ['/create-account', '/sign-in', '/forgot-password', '/update-password']) {
+        const response = await app.inject({
+          method: 'GET',
+          url,
+          headers: { cookie: `__Host-fetanagent-recovery=${recoveryCode}` },
+        });
+        expect(response.statusCode, url).toBe(200);
+        expect(response.body, url).toContain('<form method="post"');
+        expect(response.headers['referrer-policy'], url).toBe('same-origin');
+      }
+      for (const url of ['/auth/recovery?code=' + recoveryCode, '/auth/recovery?code=invalid']) {
+        const callback = await app.inject({ method: 'GET', url });
+        expect(callback.statusCode).toBe(303);
+        expect(callback.headers['referrer-policy']).toBe('no-referrer');
+        expect(callback.headers.location).not.toContain('code=');
+      }
+    } finally {
+      await app.close();
+    }
   });
 
   it('uses a plain own-data cookie port for every Auth operation', async () => {
@@ -528,6 +552,7 @@ describe('customer web SSR and PWA boundary', () => {
 
   it.each([
     ['missing origin', { origin: undefined }],
+    ['opaque origin', { origin: 'null' }],
     ['wrong origin', { origin: 'https://example.test' }],
     ['cross-site fetch', { 'sec-fetch-site': 'cross-site' }],
     ['missing fetch metadata', { 'sec-fetch-site': undefined }],

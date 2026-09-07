@@ -69,7 +69,9 @@ const SECURITY_HEADERS = {
   'origin-agent-cluster': '?1',
   'permissions-policy':
     'accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()',
-  'referrer-policy': 'no-referrer',
+  // Native HTML form POSTs use Origin: null under no-referrer. Preserve the
+  // same-origin value required by CSRF validation without sending referrers off-site.
+  'referrer-policy': 'same-origin',
   'strict-transport-security': 'max-age=31536000; includeSubDomains',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
@@ -796,6 +798,9 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   app.addHook('onSend', async (request, reply, payload) => {
     reply.headers(securityHeaders);
     const path = responsePath(request);
+    // The recovery callback carries a one-use code; suppress its URL even on
+    // same-origin redirects before rendering the clean password-update page.
+    if (path === '/auth/recovery') reply.header('referrer-policy', 'no-referrer');
     if (request.method !== 'GET' || isNoStorePath(path)) {
       reply.header('cache-control', NO_STORE).header('pragma', 'no-cache').header('expires', '0');
       appendVaryCookie(reply);

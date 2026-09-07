@@ -93,6 +93,13 @@ export type TelebirrAssignmentBrokerConfig =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
+      readonly mode: 'enrollment_only';
+      readonly deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget;
+      readonly projectReference: (typeof TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS)[TelebirrAssignmentBrokerDeploymentTarget]['projectReference'];
+    }
+  | {
+      readonly enabled: true;
+      readonly mode: 'operational';
       readonly deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget;
       readonly projectReference: (typeof TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS)[TelebirrAssignmentBrokerDeploymentTarget]['projectReference'];
       readonly connection: TelebirrAssignmentBrokerConnectionConfig;
@@ -619,6 +626,17 @@ function rejectInlineOrRootSecrets(environment: NodeJS.ProcessEnv): void {
   if (forbidden.some((name) => environment[name] !== undefined)) unavailable();
 }
 
+function rejectEnrollmentOnlyAuthority(environment: NodeJS.ProcessEnv): void {
+  const forbidden = [
+    'NODE_EXTRA_CA_CERTS',
+    'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE',
+    'TELEBIRR_ASSIGNMENT_BROKER_REFERENCE_OPENING_KEY_FILE',
+    'TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_MANIFEST_FILE',
+    'TELEBIRR_ASSIGNMENT_BROKER_SIGNER_PRIVATE_KEY_FILE',
+  ] as const;
+  if (forbidden.some((name) => environment[name] !== undefined)) unavailable();
+}
+
 export function loadTelebirrAssignmentBrokerConfig(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: TelebirrAssignmentBrokerConfigDependencies = {},
@@ -626,18 +644,33 @@ export function loadTelebirrAssignmentBrokerConfig(
   const enabled = exactBoolean(environment.INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
   const deploymentTarget = environment.TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET;
+  const enrollmentOnlyValue = environment.TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED;
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     !exactBoolean(environment.TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED) ||
     (deploymentTarget !== 'staging' && deploymentTarget !== 'production') ||
-    environment.NODE_EXTRA_CA_CERTS !== TELEBIRR_ASSIGNMENT_BROKER_SUPABASE_CA_FILE
+    (enrollmentOnlyValue !== undefined &&
+      enrollmentOnlyValue !== 'true' &&
+      enrollmentOnlyValue !== 'false')
   ) {
     return unavailable();
   }
   rejectInlineOrRootSecrets(environment);
-  requireFixedFiles(environment);
   const databaseTarget = TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS[deploymentTarget];
+  if (enrollmentOnlyValue === 'true') {
+    rejectEnrollmentOnlyAuthority(environment);
+    return Object.freeze({
+      enabled: true,
+      mode: 'enrollment_only',
+      deploymentTarget,
+      projectReference: databaseTarget.projectReference,
+    });
+  }
+  if (environment.NODE_EXTRA_CA_CERTS !== TELEBIRR_ASSIGNMENT_BROKER_SUPABASE_CA_FILE) {
+    return unavailable();
+  }
+  requireFixedFiles(environment);
 
   const manifest = runtimeManifestFrom(
     guardedCanonicalJson(
@@ -678,6 +711,7 @@ export function loadTelebirrAssignmentBrokerConfig(
   );
   return Object.freeze({
     enabled: true,
+    mode: 'operational',
     deploymentTarget,
     projectReference: databaseTarget.projectReference,
     connection: Object.freeze({ ...connectionWithoutCa, ca }),
@@ -692,6 +726,7 @@ export function redactedTelebirrAssignmentBrokerConfigForLog(
   config: TelebirrAssignmentBrokerConfig,
 ): Readonly<{
   enabled: boolean;
+  mode: 'disabled' | 'enrollment_only' | 'operational';
   deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget | undefined;
   connectionConfigured: boolean;
   openingKeyConfigured: boolean;
@@ -700,10 +735,11 @@ export function redactedTelebirrAssignmentBrokerConfigForLog(
 }> {
   return Object.freeze({
     enabled: config.enabled,
+    mode: config.enabled ? config.mode : 'disabled',
     deploymentTarget: config.enabled ? config.deploymentTarget : undefined,
-    connectionConfigured: config.enabled,
-    openingKeyConfigured: config.enabled,
-    receiverManifestConfigured: config.enabled,
-    signerConfigured: config.enabled,
+    connectionConfigured: config.enabled && config.mode === 'operational',
+    openingKeyConfigured: config.enabled && config.mode === 'operational',
+    receiverManifestConfigured: config.enabled && config.mode === 'operational',
+    signerConfigured: config.enabled && config.mode === 'operational',
   });
 }

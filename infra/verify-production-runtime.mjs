@@ -26,7 +26,7 @@ function topLevelSection(source, name) {
   const header = new RegExp(`^${escapeRegExp(name)}:\\s*$`, 'mu').exec(source);
   assert.ok(header, `missing top-level ${name} section`);
   const remainder = source.slice(header.index + header[0].length);
-  const next = /^\\S[^\r\n]*:\s*$/mu.exec(remainder);
+  const next = /^\S[^\r\n]*:\s*$/mu.exec(remainder);
   return remainder.slice(0, next?.index ?? remainder.length);
 }
 
@@ -52,6 +52,9 @@ assert.deepEqual(serviceNames, [
   'api',
   'beta-admission',
   'bot',
+  'telebirr-assignment-broker',
+  'telebirr-device-state-broker',
+  'telebirr-device-bridge',
   'gateway',
 ]);
 
@@ -118,16 +121,46 @@ assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/u);
 assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(bot, /condition: service_healthy/u);
 
+const telebirrAssignment = childBlock(services, 'telebirr-assignment-broker');
+const telebirrDeviceState = childBlock(services, 'telebirr-device-state-broker');
+const telebirrBridge = childBlock(services, 'telebirr-device-bridge');
+for (const [name, service] of [
+  ['TeleBirr assignment broker', telebirrAssignment],
+  ['TeleBirr device-state broker', telebirrDeviceState],
+  ['TeleBirr device bridge', telebirrBridge],
+]) {
+  assert.match(service, /image: fetanagent-telebirr-[a-z-]+:\$\{FETANAGENT_IMAGE_TAG:\?/u, name);
+  assert.match(service, /<<: \*runtime-defaults/u, name);
+  assert.match(service, /NODE_ENV: production/u, name);
+  assert.match(service, /FINANCIAL_ACTIONS_MODE: dry_run/u, name);
+  assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/u, name);
+  assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u, name);
+}
+assert.match(telebirrAssignment, /TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'/u);
+assert.match(telebirrAssignment, /TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production/u);
+assert.match(telebirrAssignment, /network_mode: none/u);
+assert.doesNotMatch(
+  telebirrAssignment,
+  /DATABASE_URL|REFERENCE_OPENING|RUNTIME_MANIFEST|SIGNER_PRIVATE|NODE_EXTRA_CA_CERTS|secrets:/u,
+);
+assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
+assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
+assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
+assert.match(telebirrBridge, /aliases:\s*\r?\n\s*- telebirr-device-bridge/u);
+assert.match(telebirrBridge, /telebirr-assignment-broker:[\s\S]*?service_healthy/u);
+assert.match(telebirrBridge, /telebirr-device-state-broker:[\s\S]*?service_healthy/u);
+
 assert.match(gateway, /ports:\s*\r?\n      - '80:80\/tcp'\s*\r?\n      - '443:443\/tcp'/u);
 assert.match(gateway, /cap_add:\s*\r?\n      - NET_BIND_SERVICE/u);
 assert.match(gateway, /- companion_device_ingress\s*\r?\n      - telebirr_device_ingress/u);
+assert.match(gateway, /telebirr-device-bridge:[\s\S]*?condition: service_healthy/u);
 assert.doesNotMatch(gateway, /secrets:|docker\.sock/u);
 
 assert.match(compose, /^name: fetanagent-production$/mu);
 assert.doesNotMatch(compose, /fetanagent-staging|2026-09-0|shutdown|expires|systemd|timer/iu);
 assert.doesNotMatch(compose, /deposit-executor|trusted-telebirr-verifier|target: executor/iu);
-assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 5);
-assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 5);
+assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 8);
+assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 8);
 assert.equal(count(compose, /restart: unless-stopped/gu), 1);
 
 const networks = topLevelSection(compose, 'networks');
@@ -139,9 +172,16 @@ assert.match(
   networks,
   /telebirr_device_ingress:\s*\r?\n    external: true\s*\r?\n    name: fetanagent-telebirr-device-ingress/u,
 );
+assert.match(
+  networks,
+  /telebirr_device_state_database_egress:\s*\r?\n    driver: bridge\s*\r?\n    enable_ipv6: true/u,
+);
+const configs = topLevelSection(compose, 'configs');
+assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 5);
+assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 5);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 19);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 19);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 21);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 21);
 assert.doesNotMatch(secrets, /sb_publishable_|postgresql:\/\/|[0-9a-f]{64}/u);
 
 assert.match(workflow, /^name: Production application runtime$/mu);
@@ -171,6 +211,26 @@ assert.match(workflow, /cleanup-incoming/u);
 assert.match(workflow, /production-nonfinancial-runtimes-disable\.sql/u);
 assert.doesNotMatch(workflow, /^  schedule:|2026-09-0|systemctl|service[_-]?role/imu);
 assert.doesNotMatch(workflow, /echo[^\r\n]*(?:PASSWORD|TOKEN|PRIVATE_KEY)/u);
+for (const target of [
+  'telebirr-assignment-broker',
+  'telebirr-device-state-broker',
+  'telebirr-device-bridge',
+]) {
+  assert.match(workflow, new RegExp(`docker build[\\s\\S]*?${target}`, 'u'));
+  assert.match(workflow, new RegExp(`fetanagent-${target}:\\$tag`, 'u'));
+}
+for (const protectedName of [
+  'TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64',
+  'TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64',
+  'TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64',
+  'telebirr-device-state-database-url',
+]) {
+  assert.match(workflow, new RegExp(escapeRegExp(protectedName), 'u'));
+}
+assert.doesNotMatch(
+  workflow,
+  /secrets\.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64|secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u,
+);
 
 for (const action of [
   'actions/checkout',
@@ -207,6 +267,10 @@ assert.match(helper, /'10001:10001:400'/u);
 assert.match(helper, /'0:0:444'/u);
 assert.match(helper, /compose_release "\$release" up --detach --no-build --wait/u);
 assert.match(helper, /Private production control/u);
+assert.match(helper, /quiesce_legacy_telebirr_bridge/u);
+assert.match(helper, /restore_legacy_telebirr_bridge/u);
+assert.match(helper, /negative_telebirr_public_smoke/u);
+assert.match(helper, /LEGACY_TELEBIRR_PROJECT='fetanagent-telebirr-device-pilot'/u);
 assert.match(helper, /finalize\)/u);
 assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0/u);
 
@@ -244,5 +308,5 @@ assert.match(quality, /--file infra\/compose\.production\.yaml/u);
 assert.match(quality, /--profile production config --quiet/u);
 
 console.log(
-  'Production runtime verified: production-only target binding, permanent least-privilege logins, sealed secrets, non-root services, fail-closed financial authority, atomic public cutover, and rollback.',
+  'Production runtime verified: production-only target binding, permanent least-privilege logins, sealed secrets, non-root web and Android enrollment services, fail-closed financial authority, atomic public cutover, and rollback.',
 );

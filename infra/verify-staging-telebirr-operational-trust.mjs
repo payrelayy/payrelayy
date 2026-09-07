@@ -39,7 +39,6 @@ for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]
     /pull_request:|pull_request_target:|push:|schedule:|workflow_call:/,
   );
   assert.match(workflow, /permissions:\s*\r?\n\s+contents: read/);
-  assert.match(workflow, /environment: staging/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\.0\.1/);
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
@@ -48,6 +47,23 @@ for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]
     workflow,
     /SUPABASE_ACCESS_TOKEN|SUPABASE_SERVICE_ROLE|service_role|repository_dispatch/i,
   );
+}
+
+assert.match(trustWorkflow, /environment: staging/);
+
+for (const workflow of [androidWorkflow, androidEvidenceWorkflow]) {
+  assert.match(workflow, /deployment_target:/);
+  assert.match(workflow, /options:\s*\r?\n\s+- staging\s*\r?\n\s+- production/);
+  assert.match(workflow, /confirm_deployment_target:/);
+  assert.match(workflow, /environment: \$\{\{ inputs\.deployment_target \}\}/);
+  assert.match(workflow, /CONFIRMED_DEPLOYMENT_TARGET.*DEPLOYMENT_TARGET/s);
+  assert.match(workflow, /telebirr-assignment-\$DEPLOYMENT_TARGET-v1/);
+  assert.match(workflow, /telebirr-bridge-\$DEPLOYMENT_TARGET-v1/);
+  assert.match(
+    workflow,
+    /-PfetanagentVerifierDeploymentTarget='\$\{\{ inputs\.deployment_target \}\}'/,
+  );
+  assert.match(workflow, /VERIFIER_DEPLOYMENT_TARGET/);
 }
 
 assert.match(trustWorkflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
@@ -163,6 +179,14 @@ assert.match(androidEvidenceWorkflow, /retention-days: 14/);
 assert.match(androidEvidenceWorkflow, /Settlement, execution, and money movement remain disabled/);
 
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
+assert.match(androidBuild, /fetanagentVerifierDeploymentTarget"\)\.orNull \?: "inert"/);
+assert.match(androidBuild, /requestedDeploymentTarget in setOf\("staging", "production"\)/);
+assert.match(androidBuild, /serverSignerKeyId == "telebirr-bridge-\$requestedDeploymentTarget-v1"/);
+assert.match(
+  androidBuild,
+  /assignmentSignerKeyId == "telebirr-assignment-\$requestedDeploymentTarget-v1"/,
+);
+assert.match(androidBuild, /VERIFIER_DEPLOYMENT_TARGET/);
 assert.match(androidBuild, /fetanagentVerifierSigningStoreFile/);
 assert.match(androidBuild, /fetanagentVerifierSigningCertSha256/);
 assert.match(androidBuild, /KeyStore\.getInstance\("PKCS12"\)/);
@@ -186,5 +210,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'staging TeleBirr operational trust verified: manual exact-target trust-only provisioning plus separately confirmed signed pairing-only and evidence-only Android releases',
+  'TeleBirr operational trust verified: manual staging trust-only provisioning plus exact-target signed staging or production pairing-only and evidence-only Android releases',
 );

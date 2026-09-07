@@ -15,6 +15,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS,
   TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE,
   TELEBIRR_ASSIGNMENT_BROKER_REFERENCE_OPENING_KEY_FILE,
   TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_MANIFEST_FILE,
@@ -39,6 +40,8 @@ const directDatabaseUrl =
   'postgresql://fetanagent_telebirr_assignment_broker_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const databaseUrl =
   'postgresql://fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+const productionDirectDatabaseUrl = `postgresql://fetanagent_telebirr_assignment_broker_runtime:synthetic-password-123456@${TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.directHost}:5432/postgres?sslmode=verify-full`;
+const productionDatabaseUrl = `postgresql://${TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.sessionPoolerUser}:synthetic-password-123456@${TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.sessionPoolerHost}:5432/postgres?sslmode=verify-full`;
 
 function p256Pair() {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -273,10 +276,69 @@ describe('private TeleBirr assignment broker configuration', () => {
   });
 
   it.each([
+    [
+      'session pooler',
+      productionDatabaseUrl,
+      TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.sessionPoolerHost,
+      TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.sessionPoolerUser,
+    ],
+    [
+      'direct route',
+      productionDirectDatabaseUrl,
+      TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.directHost,
+      'fetanagent_telebirr_assignment_broker_runtime',
+    ],
+  ])('loads the exact production %s', (_route, value, host, user) => {
+    const config = loadTelebirrAssignmentBrokerConfig(
+      {
+        ...enabledEnvironment,
+        TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'production',
+      },
+      guardedDependencies({
+        ...fileValues(),
+        [TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE]: value,
+      }),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      deploymentTarget: 'production',
+      projectReference: TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.projectReference,
+      connection: { host, user },
+    });
+  });
+
+  it.each([
+    ['staging target with production pooler', enabledEnvironment, productionDatabaseUrl],
+    [
+      'production target with staging pooler',
+      {
+        ...enabledEnvironment,
+        TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'production',
+      },
+      databaseUrl,
+    ],
+  ])('rejects a cross-target database route: %s', (_name, environment, value) => {
+    expect(() =>
+      loadTelebirrAssignmentBrokerConfig(
+        environment,
+        guardedDependencies({
+          ...fileValues(),
+          [TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE]: value,
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it.each([
     ['non-production', { NODE_ENV: 'test' }],
     ['live financial mode', { FINANCIAL_ACTIONS_MODE: 'live' }],
     ['missing no-money pilot gate', { TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'false' }],
-    ['wrong deployment target', { TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'production' }],
+    ['missing deployment target', { TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: undefined }],
+    [
+      'mixed-case deployment target',
+      { TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'Production' },
+    ],
+    ['unknown deployment target', { TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: 'preview' }],
     ['wrong CA path', { NODE_EXTRA_CA_CERTS: '/tmp/ca' }],
     [
       'wrong database secret path',

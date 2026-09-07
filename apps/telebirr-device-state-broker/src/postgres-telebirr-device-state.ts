@@ -799,7 +799,8 @@ export interface TelebirrDeviceStateConnectionConfig {
   readonly port: 5432;
   readonly user:
     | 'fetanagent_telebirr_device_state_runtime'
-    | 'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl';
+    | 'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl'
+    | 'fetanagent_telebirr_device_state_runtime.xzztugbgtulptnbpoelr';
 }
 
 export interface TelebirrDeviceStatePostgresClient extends TelebirrDeviceStatePostgresQuery {

@@ -46,6 +46,14 @@ export const TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_HOST =
   'aws-1-eu-west-1.pooler.supabase.com' as const;
 export const TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_USER =
   `${TELEBIRR_ASSIGNMENT_BROKER_DATABASE_ROLE}.${TELEBIRR_ASSIGNMENT_BROKER_STAGING_PROJECT_REFERENCE}` as const;
+export const TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_PROJECT_REFERENCE =
+  'xzztugbgtulptnbpoelr' as const;
+export const TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_DATABASE_HOST =
+  'db.xzztugbgtulptnbpoelr.supabase.co' as const;
+export const TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_SESSION_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com' as const;
+export const TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_SESSION_POOLER_USER =
+  `${TELEBIRR_ASSIGNMENT_BROKER_DATABASE_ROLE}.${TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_PROJECT_REFERENCE}` as const;
 export const TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE =
   '/run/secrets/telebirr_assignment_broker_database_url' as const;
 export const TELEBIRR_ASSIGNMENT_BROKER_REFERENCE_OPENING_KEY_FILE =
@@ -64,12 +72,29 @@ const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
 const KEY_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
+export const TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS = {
+  staging: {
+    projectReference: TELEBIRR_ASSIGNMENT_BROKER_STAGING_PROJECT_REFERENCE,
+    directHost: TELEBIRR_ASSIGNMENT_BROKER_STAGING_DATABASE_HOST,
+    sessionPoolerHost: TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_HOST,
+    sessionPoolerUser: TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_USER,
+  },
+  production: {
+    projectReference: TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_PROJECT_REFERENCE,
+    directHost: TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_DATABASE_HOST,
+    sessionPoolerHost: TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_SESSION_POOLER_HOST,
+    sessionPoolerUser: TELEBIRR_ASSIGNMENT_BROKER_PRODUCTION_SESSION_POOLER_USER,
+  },
+} as const;
+export type TelebirrAssignmentBrokerDeploymentTarget =
+  keyof typeof TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS;
+
 export type TelebirrAssignmentBrokerConfig =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
-      readonly deploymentTarget: 'staging';
-      readonly projectReference: typeof TELEBIRR_ASSIGNMENT_BROKER_STAGING_PROJECT_REFERENCE;
+      readonly deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget;
+      readonly projectReference: (typeof TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS)[TelebirrAssignmentBrokerDeploymentTarget]['projectReference'];
       readonly connection: TelebirrAssignmentBrokerConnectionConfig;
       readonly openingKey: TelebirrScopedReferenceOpeningKey;
       readonly receiverManifest: TelebirrAssignmentReceiverManifest;
@@ -303,7 +328,10 @@ function decodeUrlComponent(value: string): string {
   }
 }
 
-function connectionFromUrl(value: string): Omit<TelebirrAssignmentBrokerConnectionConfig, 'ca'> {
+function connectionFromUrl(
+  value: string,
+  deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget,
+): Omit<TelebirrAssignmentBrokerConnectionConfig, 'ca'> {
   let url: URL;
   try {
     url = new URL(value);
@@ -314,12 +342,11 @@ function connectionFromUrl(value: string): Omit<TelebirrAssignmentBrokerConnecti
   const user = decodeUrlComponent(url.username);
   const password = decodeUrlComponent(url.password);
   const database = decodeUrlComponent(url.pathname.slice(1));
+  const expectedTarget = TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS[deploymentTarget];
   const directRoute =
-    url.hostname === TELEBIRR_ASSIGNMENT_BROKER_STAGING_DATABASE_HOST &&
-    user === TELEBIRR_ASSIGNMENT_BROKER_DATABASE_ROLE;
+    url.hostname === expectedTarget.directHost && user === TELEBIRR_ASSIGNMENT_BROKER_DATABASE_ROLE;
   const sessionPoolerRoute =
-    url.hostname === TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_HOST &&
-    user === TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_USER;
+    url.hostname === expectedTarget.sessionPoolerHost && user === expectedTarget.sessionPoolerUser;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
     (!directRoute && !sessionPoolerRoute) ||
@@ -335,14 +362,10 @@ function connectionFromUrl(value: string): Omit<TelebirrAssignmentBrokerConnecti
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: directRoute
-      ? TELEBIRR_ASSIGNMENT_BROKER_STAGING_DATABASE_HOST
-      : TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_HOST,
+    host: directRoute ? expectedTarget.directHost : expectedTarget.sessionPoolerHost,
     password,
     port: 5432 as const,
-    user: directRoute
-      ? TELEBIRR_ASSIGNMENT_BROKER_DATABASE_ROLE
-      : TELEBIRR_ASSIGNMENT_BROKER_STAGING_SESSION_POOLER_USER,
+    user: directRoute ? TELEBIRR_ASSIGNMENT_BROKER_DATABASE_ROLE : expectedTarget.sessionPoolerUser,
   });
 }
 
@@ -602,17 +625,19 @@ export function loadTelebirrAssignmentBrokerConfig(
 ): TelebirrAssignmentBrokerConfig {
   const enabled = exactBoolean(environment.INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
+  const deploymentTarget = environment.TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET;
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     !exactBoolean(environment.TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED) ||
-    environment.TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET !== 'staging' ||
+    (deploymentTarget !== 'staging' && deploymentTarget !== 'production') ||
     environment.NODE_EXTRA_CA_CERTS !== TELEBIRR_ASSIGNMENT_BROKER_SUPABASE_CA_FILE
   ) {
     return unavailable();
   }
   rejectInlineOrRootSecrets(environment);
   requireFixedFiles(environment);
+  const databaseTarget = TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS[deploymentTarget];
 
   const manifest = runtimeManifestFrom(
     guardedCanonicalJson(
@@ -646,14 +671,15 @@ export function loadTelebirrAssignmentBrokerConfig(
     guardedSingleLine(
       readGuardedText(TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE, dependencies, 'secret'),
     ),
+    deploymentTarget,
   );
   const ca = guardedCa(
     readGuardedText(TELEBIRR_ASSIGNMENT_BROKER_SUPABASE_CA_FILE, dependencies, 'public_config'),
   );
   return Object.freeze({
     enabled: true,
-    deploymentTarget: 'staging' as const,
-    projectReference: TELEBIRR_ASSIGNMENT_BROKER_STAGING_PROJECT_REFERENCE,
+    deploymentTarget,
+    projectReference: databaseTarget.projectReference,
     connection: Object.freeze({ ...connectionWithoutCa, ca }),
     openingKey,
     receiverManifest: manifest.receiverManifest,
@@ -666,7 +692,7 @@ export function redactedTelebirrAssignmentBrokerConfigForLog(
   config: TelebirrAssignmentBrokerConfig,
 ): Readonly<{
   enabled: boolean;
-  deploymentTarget: 'staging' | undefined;
+  deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget | undefined;
   connectionConfigured: boolean;
   openingKeyConfigured: boolean;
   receiverManifestConfigured: boolean;

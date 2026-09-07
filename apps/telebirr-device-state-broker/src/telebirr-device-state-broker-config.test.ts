@@ -117,6 +117,7 @@ describe('private TeleBirr device-state broker configuration', () => {
         host: 'aws-1-eu-west-1.pooler.supabase.com',
         password: 'synthetic-password-123456',
         port: 5432,
+        runtimeCredentialValidity: 'bounded_24h',
         user: 'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl',
       },
     });
@@ -148,6 +149,7 @@ describe('private TeleBirr device-state broker configuration', () => {
       enabled: true,
       connection: {
         host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        runtimeCredentialValidity: 'bounded_24h',
         user: 'fetanagent_telebirr_device_state_runtime',
       },
     });
@@ -187,6 +189,7 @@ describe('private TeleBirr device-state broker configuration', () => {
         host,
         password: 'synthetic-password-123456',
         port: 5432,
+        runtimeCredentialValidity: 'continuous',
         user,
       },
     });

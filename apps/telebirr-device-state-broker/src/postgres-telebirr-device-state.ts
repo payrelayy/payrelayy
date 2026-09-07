@@ -76,6 +76,8 @@ export const TELEBIRR_DEVICE_STATE_PREFLIGHT_KEYS = [
   'default_function_execution_private',
 ] as const;
 
+export type TelebirrDeviceStateRuntimeCredentialValidity = 'bounded_24h' | 'continuous';
+
 export const TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL = `
   select
     current_user = '${DEVICE_STATE_RUNTIME_ROLE}' and session_user = current_user
@@ -87,8 +89,16 @@ export const TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL = `
         and not role.rolcreatedb and not role.rolcreaterole
         and not role.rolreplication and not role.rolbypassrls
         and role.rolconnlimit = 1 and role.rolvaliduntil is not null
-        and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
-        and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+        and (
+          (
+            $1::text = 'bounded_24h'
+            and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
+            and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+          ) or (
+            $1::text = 'continuous'
+            and role.rolvaliduntil = 'infinity'::timestamptz
+          )
+        )
     ) as runtime_login_is_safe,
     (
       select count(*) = 1 and pg_catalog.bool_and(
@@ -467,9 +477,12 @@ function pairingBodyMatchesRequest(
 
 export async function assertTelebirrDeviceStateCatalogPreflight(
   database: TelebirrDeviceStatePostgresQuery,
+  runtimeCredentialValidity: TelebirrDeviceStateRuntimeCredentialValidity = 'bounded_24h',
 ): Promise<void> {
   try {
-    const result = await database.query(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL, []);
+    const result = await database.query(TELEBIRR_DEVICE_STATE_CATALOG_PREFLIGHT_SQL, [
+      runtimeCredentialValidity,
+    ]);
     if (result.rows.length !== 1 || !exactTrueRow(result.rows[0])) throw new Error();
   } catch {
     throw new TelebirrDeviceStatePostgresUnavailableError();
@@ -477,7 +490,10 @@ export async function assertTelebirrDeviceStateCatalogPreflight(
 }
 
 export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateDatabase {
-  constructor(private readonly database: TelebirrDeviceStatePostgresQuery) {}
+  constructor(
+    private readonly database: TelebirrDeviceStatePostgresQuery,
+    private readonly runtimeCredentialValidity: TelebirrDeviceStateRuntimeCredentialValidity = 'bounded_24h',
+  ) {}
 
   async claimPairingChallenge(
     requestCandidate: Parameters<TelebirrDeviceStateDatabase['claimPairingChallenge']>[0],
@@ -488,7 +504,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
       const assessedAt = canonicalTimestamp(assessedAtCandidate);
       if (!request || !assessedAt) throw new Error();
       if (!uuidV4(request.body.pairingId)) return undefined;
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(CLAIM_TELEBIRR_DEVICE_PAIRING_SQL, [
         request.body.pairingId,
         request.body.pairingNonceDigest,
@@ -547,7 +566,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
       ) {
         throw new Error();
       }
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(COMPLETE_TELEBIRR_DEVICE_PAIRING_SQL, [
         pairingRequestBodyDigest,
         certificate.bodyDigest,
@@ -574,7 +596,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
   ): Promise<ReturnType<typeof decodeSignedTelebirrDeviceBridgeEnrollmentCertificate>> {
     try {
       if (!uuidV4(enrollmentId)) return undefined;
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(LOAD_TELEBIRR_DEVICE_ENROLLMENT_SQL, [enrollmentId]);
       const row = exactRecord(result.rows[0], ['certificate']);
       if (result.rows.length !== 1 || !row) throw new Error();
@@ -596,7 +621,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
       if (!sha256Digest(replayIdentity) || !canonicalTimestamp(requestExpiresAt)) {
         throw new Error();
       }
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(CLAIM_TELEBIRR_DEVICE_REPLAY_SQL, [
         replayIdentity,
         requestExpiresAt,
@@ -628,7 +656,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
       if (!sha256Digest(replayIdentity) || !response || !canonicalTimestamp(requestExpiresAt)) {
         throw new Error();
       }
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(COMPLETE_TELEBIRR_DEVICE_REPLAY_SQL, [
         replayIdentity,
         response,
@@ -670,7 +701,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
       ) {
         throw new Error();
       }
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(RECORD_TELEBIRR_DEVICE_HEARTBEAT_SQL, [
         certificate.enrollmentId,
         request.bodyDigest,
@@ -738,7 +772,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
       ) {
         throw new Error();
       }
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(STAGE_TELEBIRR_DEVICE_EVIDENCE_SQL, [
         certificate.enrollmentId,
         request.bodyDigest,
@@ -779,7 +816,10 @@ export class PostgresTelebirrDeviceStateDatabase implements TelebirrDeviceStateD
   private async release(query: string, identity: string): Promise<void> {
     try {
       if (!sha256Digest(identity)) throw new Error();
-      await assertTelebirrDeviceStateCatalogPreflight(this.database);
+      await assertTelebirrDeviceStateCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(query, [identity]);
       if (result.rows.length !== 1 || !exactNullRow(result.rows[0], 'released')) {
         throw new Error();
@@ -797,6 +837,7 @@ export interface TelebirrDeviceStateConnectionConfig {
   readonly host: string;
   readonly password: string;
   readonly port: 5432;
+  readonly runtimeCredentialValidity: TelebirrDeviceStateRuntimeCredentialValidity;
   readonly user:
     | 'fetanagent_telebirr_device_state_runtime'
     | 'fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl'
@@ -832,7 +873,7 @@ export async function createTelebirrDeviceStatePostgresRuntime(
   connection: TelebirrDeviceStateConnectionConfig,
   dependencies: TelebirrDeviceStatePostgresRuntimeDependencies = {},
 ): Promise<TelebirrDeviceStatePostgresRuntime> {
-  const { ca, ...postgresConnection } = connection;
+  const { ca, runtimeCredentialValidity, ...postgresConnection } = connection;
   const clientConfig = Object.freeze({
     ...postgresConnection,
     application_name: 'fetanagent_telebirr_device_state',
@@ -882,7 +923,7 @@ export async function createTelebirrDeviceStatePostgresRuntime(
       throw new Error();
     }
     lockHeld = true;
-    await assertTelebirrDeviceStateCatalogPreflight(guarded);
+    await assertTelebirrDeviceStateCatalogPreflight(guarded, runtimeCredentialValidity);
   } catch {
     available = false;
     lockHeld = false;
@@ -893,7 +934,7 @@ export async function createTelebirrDeviceStatePostgresRuntime(
   }
 
   return Object.freeze({
-    database: new PostgresTelebirrDeviceStateDatabase(guarded),
+    database: new PostgresTelebirrDeviceStateDatabase(guarded, runtimeCredentialValidity),
     async ready() {
       if (!available || closed || !lockHeld) return false;
       try {
@@ -904,7 +945,7 @@ export async function createTelebirrDeviceStatePostgresRuntime(
           markUnavailable();
           return false;
         }
-        await assertTelebirrDeviceStateCatalogPreflight(guarded);
+        await assertTelebirrDeviceStateCatalogPreflight(guarded, runtimeCredentialValidity);
         return available && !closed && lockHeld;
       } catch {
         markUnavailable();
